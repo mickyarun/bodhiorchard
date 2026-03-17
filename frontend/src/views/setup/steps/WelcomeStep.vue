@@ -1,0 +1,75 @@
+<template>
+  <div class="d-flex flex-column align-center text-center">
+    <v-icon
+      icon="mdi-hand-wave-outline"
+      size="48"
+      color="primary"
+      class="mb-4"
+    />
+    <h1 class="text-h4 font-weight-bold mb-2">
+      Welcome to FlowDev
+    </h1>
+    <p class="text-body-1 text-medium-emphasis mb-8" style="max-width: 520px;">
+      End-to-end AI-powered SDLC — where AI agents and humans collaborate
+      through every phase of software development
+    </p>
+
+    <v-row class="mb-8" justify="center">
+      <v-col v-for="feature in features" :key="feature.title" cols="12" sm="4">
+        <v-card
+          class="pa-6 text-center card-border-dark h-100"
+          color="surface"
+        >
+          <v-icon
+            :icon="feature.icon"
+            size="48"
+            :color="feature.color"
+            class="mb-4"
+          />
+          <div class="text-h6 font-weight-medium mb-2">
+            {{ feature.title }}
+          </div>
+          <div class="text-body-2 text-medium-emphasis">
+            {{ feature.description }}
+          </div>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <v-btn
+      color="primary"
+      size="large"
+      append-icon="mdi-arrow-right"
+      @click="emit('getStarted')"
+    >
+      Get Started
+    </v-btn>
+  </div>
+</template>
+
+<script setup lang="ts">
+const emit = defineEmits<{
+  getStarted: []
+}>()
+
+const features = [
+  {
+    icon: 'mdi-account-group-outline',
+    color: 'primary',
+    title: 'Human + AI Loop',
+    description: 'AI agents handle the heavy lifting while humans stay in control of every decision',
+  },
+  {
+    icon: 'mdi-infinity',
+    color: 'secondary',
+    title: 'Full SDLC',
+    description: 'Requirements to deployment — AI assists across the entire development lifecycle',
+  },
+  {
+    icon: 'mdi-source-branch',
+    color: 'success',
+    title: 'Code-Native',
+    description: 'Deep codebase understanding via Claude Code running on your own infrastructure',
+  },
+]
+</script>

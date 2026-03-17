@@ -1,0 +1,4 @@
+@use 'vuetify/settings' with (
+  $body-font-family: ('Inter', sans-serif),
+  $border-radius-root: 8px,
+);
