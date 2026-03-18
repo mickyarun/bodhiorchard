@@ -1,53 +1,108 @@
 <template>
-  <v-app>
-    <v-main class="setup-gradient d-flex align-center justify-center">
-      <v-container class="d-flex flex-column align-center text-center" style="max-width: 600px;">
-        <FlowDevLogo class="mb-8" />
+  <div class="pa-6">
+    <div class="text-h5 font-weight-bold mb-1">Dashboard</div>
+    <div class="text-body-2 text-medium-emphasis mb-6">Overview of your development operations</div>
 
-        <v-card class="pa-8 card-border-dark w-100" color="surface">
-          <v-icon icon="mdi-view-dashboard-outline" size="64" color="primary" class="mb-4" />
-          <div class="text-h4 font-weight-bold mb-2">Dashboard Coming Soon</div>
-          <div class="text-body-1 text-medium-emphasis mb-6">
-            Your AI-powered SDLC is configured. The full dashboard is under development.
+    <v-row>
+      <!-- PRD summary -->
+      <v-col cols="12" md="4">
+        <v-card color="surface" class="pa-5">
+          <div class="d-flex align-center ga-3 mb-3">
+            <v-avatar size="40" color="primary" variant="tonal" rounded="lg">
+              <v-icon icon="mdi-file-document-outline" />
+            </v-avatar>
+            <div>
+              <div class="text-h5 font-weight-bold">{{ prdStore.prds.length }}</div>
+              <div class="text-caption text-medium-emphasis">PRDs</div>
+            </div>
           </div>
-
-          <v-chip color="primary" variant="tonal" prepend-icon="mdi-domain" class="mb-4">
-            {{ orgName || 'Your Organization' }}
-          </v-chip>
-
-          <v-divider class="my-4" />
-
-          <div class="text-body-2 text-medium-emphasis">
-            Your AI agents are initializing. Check the backend logs for status.
-          </div>
+          <v-btn
+            variant="tonal"
+            color="primary"
+            size="small"
+            block
+            to="/prds"
+          >
+            View Board
+          </v-btn>
         </v-card>
+      </v-col>
 
-        <v-btn
-          variant="text"
-          class="mt-6"
-          prepend-icon="mdi-arrow-left"
-          @click="backToSetup"
+      <!-- Agents -->
+      <v-col cols="12" md="4">
+        <v-card color="surface" class="pa-5">
+          <div class="d-flex align-center ga-3 mb-3">
+            <v-avatar size="40" color="secondary" variant="tonal" rounded="lg">
+              <v-icon icon="mdi-robot-outline" />
+            </v-avatar>
+            <div>
+              <div class="text-h5 font-weight-bold">11</div>
+              <div class="text-caption text-medium-emphasis">AI Agents</div>
+            </div>
+          </div>
+          <v-chip variant="tonal" size="small" color="grey">Coming soon</v-chip>
+        </v-card>
+      </v-col>
+
+      <!-- Team -->
+      <v-col cols="12" md="4">
+        <v-card color="surface" class="pa-5">
+          <div class="d-flex align-center ga-3 mb-3">
+            <v-avatar size="40" color="success" variant="tonal" rounded="lg">
+              <v-icon icon="mdi-account-group-outline" />
+            </v-avatar>
+            <div>
+              <div class="text-h5 font-weight-bold">-</div>
+              <div class="text-caption text-medium-emphasis">Team Members</div>
+            </div>
+          </div>
+          <v-chip variant="tonal" size="small" color="grey">Coming soon</v-chip>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- Recent PRDs -->
+    <div class="text-body-1 font-weight-medium mt-8 mb-3">Recent PRDs</div>
+    <v-card v-if="prdStore.prds.length === 0" color="surface" class="pa-6 text-center">
+      <div class="text-body-2 text-medium-emphasis">No PRDs yet. Create one from the PRD Board.</div>
+      <v-btn color="primary" variant="tonal" size="small" class="mt-3" to="/prds">
+        Go to PRD Board
+      </v-btn>
+    </v-card>
+    <v-card v-else color="surface">
+      <v-list density="compact">
+        <v-list-item
+          v-for="prd in recentPRDs"
+          :key="prd.id"
+          :to="`/prds/${prd.id}`"
         >
-          Back to Setup
-        </v-btn>
-      </v-container>
-    </v-main>
-  </v-app>
+          <template #prepend>
+            <span class="text-caption text-medium-emphasis mr-3" style="min-width: 56px;">
+              PRD-{{ String(prd.prd_number).padStart(3, '0') }}
+            </span>
+          </template>
+          <v-list-item-title class="text-body-2">{{ prd.title }}</v-list-item-title>
+          <template #append>
+            <v-chip :color="PRD_STATUS_COLORS[prd.status]" size="x-small" variant="tonal" label>
+              {{ PRD_STATUS_LABELS[prd.status] }}
+            </v-chip>
+          </template>
+        </v-list-item>
+      </v-list>
+    </v-card>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useSetupStore } from '@/stores/setup'
-import FlowDevLogo from '@/components/common/FlowDevLogo.vue'
+import { computed, onMounted } from 'vue'
+import { usePRDStore } from '@/stores/prd'
+import { PRD_STATUS_LABELS, PRD_STATUS_COLORS } from '@/types'
 
-const setupStore = useSetupStore()
-const orgName = computed(() => setupStore.state.organization.name)
+const prdStore = usePRDStore()
 
-function backToSetup(): void {
-  // Clear setup state so the router guard allows navigation
-  localStorage.removeItem('flowdev_setup_complete')
-  localStorage.removeItem('flowdev_token')
-  // Force full page reload to reset the in-memory guard cache
-  window.location.href = '/setup'
-}
+const recentPRDs = computed(() => prdStore.prds.slice(0, 5))
+
+onMounted(() => {
+  prdStore.fetchPRDs()
+})
 </script>

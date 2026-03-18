@@ -46,9 +46,25 @@ const router = createRouter({
       ],
     },
     {
-      path: '/dashboard',
-      name: 'dashboard',
-      component: () => import('@/views/DashboardPlaceholder.vue'),
+      path: '/',
+      component: () => import('@/layouts/AppLayout.vue'),
+      children: [
+        {
+          path: 'dashboard',
+          name: 'dashboard',
+          component: () => import('@/views/DashboardPlaceholder.vue'),
+        },
+        {
+          path: 'prds',
+          name: 'prds',
+          component: () => import('@/views/prds/PRDBoard.vue'),
+        },
+        {
+          path: 'prds/:id',
+          name: 'prd-detail',
+          component: () => import('@/views/prds/PRDDetail.vue'),
+        },
+      ],
     },
   ],
 })
