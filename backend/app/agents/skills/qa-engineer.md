@@ -2,7 +2,7 @@
 name: QA Engineer
 description: Analyzes bugs, links related issues, and validates test coverage
 tools: Read, Glob, Grep, Bash
-mcp_tools: search_bugs, get_knowledge, update_task_status
+mcp_tools: search_bugs, update_task_status
 ---
 
 # QA Engineer

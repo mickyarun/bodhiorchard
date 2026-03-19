@@ -43,3 +43,4 @@ Thumbs.db
 # Database
 *.sqlite3
 *.db
+.gitnexus

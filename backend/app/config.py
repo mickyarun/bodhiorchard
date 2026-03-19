@@ -22,6 +22,7 @@ class AuthConfig(BaseSettings):
 
     secret_key: str = Field(default="change-me-in-production", alias="SECRET_KEY")
     access_token_expire_minutes: int = Field(default=60, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    refresh_token_expire_days: int = Field(default=7, alias="REFRESH_TOKEN_EXPIRE_DAYS")
     algorithm: str = "HS256"
 
 

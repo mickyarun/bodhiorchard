@@ -57,6 +57,8 @@ class EmbeddingService:
     async def _embed_ollama(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings via the Ollama REST API.
 
+        Uses the /api/embed endpoint (Ollama 0.1.26+) which supports batch input natively.
+
         Args:
             texts: List of texts to embed.
 
@@ -64,20 +66,17 @@ class EmbeddingService:
             A list of embedding vectors.
         """
         base_url = settings.llm.base_url.rstrip("/")
-        results: list[list[float]] = []
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            for text in texts:
-                response = await client.post(
-                    f"{base_url}/api/embeddings",
-                    json={"model": self._model, "prompt": text},
-                )
-                response.raise_for_status()
-                data: dict[str, Any] = response.json()
-                results.append(data["embedding"])
+            response = await client.post(
+                f"{base_url}/api/embed",
+                json={"model": self._model, "input": texts},
+            )
+            response.raise_for_status()
+            data: dict[str, Any] = response.json()
 
         logger.info("embed_ollama", count=len(texts), model=self._model)
-        return results
+        return data["embeddings"]
 
     async def _embed_openai(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings via the OpenAI embeddings API.

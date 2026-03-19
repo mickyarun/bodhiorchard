@@ -3,12 +3,12 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.models.organization import Organization
 from app.models.user import User
+from app.repositories.organization import OrganizationRepository
 from app.schemas.organization import OrganizationCreate, OrganizationRead
 
 router = APIRouter(tags=["organizations"])
@@ -28,8 +28,9 @@ async def list_organizations(
     Returns:
         A list of organizations.
     """
-    result = await db.execute(select(Organization).where(Organization.id == current_user.org_id))
-    return list(result.scalars().all())
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_by_id(current_user.org_id)
+    return [org] if org else []
 
 
 @router.post("/", response_model=OrganizationRead, status_code=status.HTTP_201_CREATED)
@@ -51,8 +52,8 @@ async def create_organization(
     Raises:
         HTTPException: If the slug is already taken.
     """
-    result = await db.execute(select(Organization).where(Organization.slug == body.slug))
-    if result.scalar_one_or_none() is not None:
+    org_repo = OrganizationRepository(db)
+    if await org_repo.get_by_slug(body.slug) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Organization slug already exists",
@@ -63,11 +64,7 @@ async def create_organization(
         slug=body.slug,
         config=body.config,
     )
-    db.add(org)
-    await db.flush()
-    await db.refresh(org)
-
-    return org
+    return await org_repo.create(org)
 
 
 @router.get("/{org_id}", response_model=OrganizationRead)
@@ -89,8 +86,8 @@ async def get_organization(
     Raises:
         HTTPException: If the organization is not found.
     """
-    result = await db.execute(select(Organization).where(Organization.id == org_id))
-    org = result.scalar_one_or_none()
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_by_id(org_id)
     if org is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

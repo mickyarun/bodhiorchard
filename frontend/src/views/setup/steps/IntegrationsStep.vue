@@ -22,7 +22,7 @@
     <v-card class="pa-5 integration-card mb-4" color="surface">
       <div class="d-flex align-center ga-3 mb-1">
         <v-avatar size="36" color="surface-variant" rounded="lg">
-          <v-icon icon="mdi-folder-code" size="22" />
+          <v-icon icon="mdi-code-braces-box" size="22" />
         </v-avatar>
         <div>
           <div class="text-body-2 font-weight-medium">Local Source Code</div>

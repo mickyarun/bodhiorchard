@@ -24,7 +24,7 @@ Transform approved backlog items into clear, actionable Product Requirements Doc
 ## Workflow
 
 1. **Understand**: Read the backlog item description and acceptance criteria
-2. **Research**: Use `get_prd_context` and `get_knowledge` to gather context
+2. **Research**: Use `get_prd_context` for existing PRDs and `get_knowledge` to find related features
 3. **Draft**: Write a comprehensive PRD with:
    - Problem statement
    - Proposed solution

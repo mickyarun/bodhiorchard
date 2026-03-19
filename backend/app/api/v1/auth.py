@@ -1,15 +1,24 @@
 """Authentication endpoints: login, register, and current user retrieval."""
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import get_current_user, get_db, get_user_permissions
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    hash_password,
+    verify_password,
+    verify_token,
+)
 from app.models.organization import Organization
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.repositories.organization import OrganizationRepository
+from app.repositories.user import UserRepository
+from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse
 from app.schemas.user import UserRead
 
 router = APIRouter(tags=["auth"])
@@ -33,8 +42,8 @@ async def login(
         HTTPException: If credentials are invalid.
     """
     # Resolve organization
-    result = await db.execute(select(Organization).where(Organization.slug == body.org_slug))
-    org = result.scalar_one_or_none()
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_by_slug(body.org_slug)
     if org is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -42,17 +51,71 @@ async def login(
         )
 
     # Resolve user
-    result = await db.execute(select(User).where(User.org_id == org.id, User.email == body.email))
-    user = result.scalar_one_or_none()
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_email_in_org(org.id, body.email)
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
         )
 
-    token = create_access_token(data={"sub": str(user.id), "org_id": str(org.id)})
+    token_data = {"sub": str(user.id), "org_id": str(org.id)}
+    access_token = create_access_token(data=token_data)
+    refresh_token = create_refresh_token(data=token_data)
     return TokenResponse(
-        access_token=token,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=settings.auth.access_token_expire_minutes * 60,
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(
+    body: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    """Exchange a valid refresh token for a new access + refresh token pair.
+
+    Args:
+        body: The refresh token to validate.
+        db: The async database session.
+
+    Returns:
+        A new TokenResponse with fresh tokens.
+
+    Raises:
+        HTTPException: If the refresh token is invalid or expired.
+    """
+    payload = verify_token(body.refresh_token)
+    if payload is None or payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+
+    # Verify user still exists and is active
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(uuid.UUID(user_id))
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+
+    token_data = {"sub": str(user.id), "org_id": str(user.org_id)}
+    access_token = create_access_token(data=token_data)
+    refresh_token = create_refresh_token(data=token_data)
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
         expires_in=settings.auth.access_token_expire_minutes * 60,
     )
 
@@ -77,14 +140,13 @@ async def register(
         HTTPException: If the organization is not found or email is taken.
     """
     # Resolve or create organization
-    result = await db.execute(select(Organization).where(Organization.slug == body.org_slug))
-    org = result.scalar_one_or_none()
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_by_slug(body.org_slug)
 
     if org is None:
         if body.org_name:
             org = Organization(name=body.org_name, slug=body.org_slug)
-            db.add(org)
-            await db.flush()
+            await org_repo.create(org)
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -92,8 +154,8 @@ async def register(
             )
 
     # Check for duplicate email
-    result = await db.execute(select(User).where(User.org_id == org.id, User.email == body.email))
-    if result.scalar_one_or_none() is not None:
+    user_repo = UserRepository(db)
+    if await user_repo.get_by_email_in_org(org.id, body.email) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered in this organization",
@@ -105,11 +167,7 @@ async def register(
         name=body.name,
         password_hash=hash_password(body.password),
     )
-    db.add(user)
-    await db.flush()
-    await db.refresh(user)
-
-    return user
+    return await user_repo.create(user)
 
 
 @router.get("/me", response_model=UserRead)

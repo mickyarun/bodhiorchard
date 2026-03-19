@@ -4,12 +4,12 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.prd import PRDDocument, PRDStatus
 from app.models.user import User
+from app.repositories.prd import PRDRepository
 from app.schemas.prd import PRDCreate, PRDListItem, PRDRead, PRDUpdate
 
 logger = structlog.get_logger(__name__)
@@ -37,12 +37,6 @@ async def list_prds(
     Returns:
         A list of PRD summary items.
     """
-    query = (
-        select(PRDDocument)
-        .where(PRDDocument.org_id == current_user.org_id)
-        .order_by(PRDDocument.prd_number.desc())
-    )
-
     if status_filter:
         try:
             PRDStatus(status_filter)
@@ -51,10 +45,9 @@ async def list_prds(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid status: {status_filter}",
             ) from None
-        query = query.where(PRDDocument.status == status_filter)
 
-    result = await db.execute(query)
-    return list(result.scalars().all())
+    prd_repo = PRDRepository(db, org_id=current_user.org_id)
+    return await prd_repo.list_prds(status_filter=status_filter)
 
 
 @router.post(
@@ -78,12 +71,8 @@ async def create_prd(
     Returns:
         The newly created PRD document.
     """
-    max_result = await db.execute(
-        select(func.coalesce(func.max(PRDDocument.prd_number), 0)).where(
-            PRDDocument.org_id == current_user.org_id
-        )
-    )
-    next_number = max_result.scalar_one() + 1
+    prd_repo = PRDRepository(db, org_id=current_user.org_id)
+    next_number = await prd_repo.next_prd_number()
 
     prd = PRDDocument(
         org_id=current_user.org_id,
@@ -93,9 +82,18 @@ async def create_prd(
         content_md=body.content_md,
         metadata_=body.metadata_,
     )
-    db.add(prd)
-    await db.flush()
-    await db.refresh(prd)
+    await prd_repo.create(prd)
+
+    # Create a PLANNED feature_registry entry for immediate discoverability
+    from app.services.feature_lifecycle import create_planned_feature
+
+    await create_planned_feature(
+        db,
+        current_user.org_id,
+        next_number,
+        body.title,
+        body.content_md or "",
+    )
 
     logger.info("prd_created", prd_id=str(prd.id), prd_number=next_number, org_id=str(prd.org_id))
 
@@ -125,13 +123,8 @@ async def get_prd(
     Raises:
         HTTPException: If the PRD is not found or belongs to another org.
     """
-    result = await db.execute(
-        select(PRDDocument).where(
-            PRDDocument.id == prd_id,
-            PRDDocument.org_id == current_user.org_id,
-        )
-    )
-    prd = result.scalar_one_or_none()
+    prd_repo = PRDRepository(db, org_id=current_user.org_id)
+    prd = await prd_repo.get_by_id(prd_id)
     if prd is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PRD not found")
     return prd
@@ -162,13 +155,8 @@ async def update_prd(
     Raises:
         HTTPException: If the PRD is not found or status is invalid.
     """
-    result = await db.execute(
-        select(PRDDocument).where(
-            PRDDocument.id == prd_id,
-            PRDDocument.org_id == current_user.org_id,
-        )
-    )
-    prd = result.scalar_one_or_none()
+    prd_repo = PRDRepository(db, org_id=current_user.org_id)
+    prd = await prd_repo.get_by_id(prd_id)
     if prd is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PRD not found")
 
@@ -182,6 +170,17 @@ async def update_prd(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid status: {update_data['status']}",
             ) from None
+
+    # Transition linked feature_registry item if status changed
+    if "status" in update_data:
+        from app.services.feature_lifecycle import transition_feature_for_prd
+
+        await transition_feature_for_prd(
+            db,
+            current_user.org_id,
+            prd.prd_number,
+            update_data["status"],
+        )
 
     for field, value in update_data.items():
         setattr(prd, field, value)
@@ -214,15 +213,20 @@ async def delete_prd(
     Raises:
         HTTPException: If the PRD is not found.
     """
-    result = await db.execute(
-        select(PRDDocument).where(
-            PRDDocument.id == prd_id,
-            PRDDocument.org_id == current_user.org_id,
-        )
-    )
-    prd = result.scalar_one_or_none()
+    prd_repo = PRDRepository(db, org_id=current_user.org_id)
+    prd = await prd_repo.get_by_id(prd_id)
     if prd is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PRD not found")
 
-    await db.delete(prd)
+    # Deactivate linked feature_registry item
+    from app.services.feature_lifecycle import transition_feature_for_prd
+
+    await transition_feature_for_prd(
+        db,
+        current_user.org_id,
+        prd.prd_number,
+        PRDStatus.CANCELLED,
+    )
+
+    await prd_repo.delete(prd)
     logger.info("prd_deleted", prd_id=str(prd.id))

@@ -2,7 +2,7 @@
 name: Code Reviewer
 description: Reviews code changes for quality, correctness, and adherence to patterns
 tools: Read, Glob, Grep, Bash
-mcp_tools: get_knowledge, update_task_status
+mcp_tools: update_task_status
 ---
 
 # Code Reviewer
@@ -24,7 +24,7 @@ Review code changes for correctness, security, performance, and adherence to pro
 ## Workflow
 
 1. **Read changes**: Review the diff or modified files
-2. **Context**: Query `get_knowledge` for relevant coding standards
+2. **Context**: Read CLAUDE.md and nearby code for relevant coding standards
 3. **Analyze**: Check for bugs, security issues, style violations, and missing tests
 4. **Report**: Provide structured feedback with severity levels
 5. **Status**: Update task status via `update_task_status`

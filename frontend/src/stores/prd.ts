@@ -29,7 +29,7 @@ export const usePRDStore = defineStore('prd', () => {
     try {
       const params: Record<string, string> = {}
       if (statusFilter) params.status = statusFilter
-      const { data } = await api.get('/prds', { params })
+      const { data } = await api.get('/v1/prds/', { params })
       prds.value = data
     } catch {
       error.value = 'Failed to load PRDs'
@@ -42,7 +42,7 @@ export const usePRDStore = defineStore('prd', () => {
     loading.value = true
     error.value = ''
     try {
-      const { data } = await api.get(`/prds/${id}`)
+      const { data } = await api.get(`/v1/prds/${id}`)
       currentPRD.value = data
       return data
     } catch {
@@ -56,7 +56,7 @@ export const usePRDStore = defineStore('prd', () => {
   async function createPRD(title: string, content_md?: string): Promise<PRDDocument | null> {
     error.value = ''
     try {
-      const { data } = await api.post('/prds', { title, content_md })
+      const { data } = await api.post('/v1/prds/', { title, content_md })
       prds.value.unshift(data)
       return data
     } catch {
@@ -68,7 +68,7 @@ export const usePRDStore = defineStore('prd', () => {
   async function updatePRD(id: string, updates: Partial<PRDDocument>): Promise<PRDDocument | null> {
     error.value = ''
     try {
-      const { data } = await api.patch(`/prds/${id}`, updates)
+      const { data } = await api.patch(`/v1/prds/${id}`, updates)
       const idx = prds.value.findIndex(p => p.id === id)
       if (idx !== -1) prds.value[idx] = data
       if (currentPRD.value?.id === id) currentPRD.value = data
@@ -82,7 +82,7 @@ export const usePRDStore = defineStore('prd', () => {
   async function deletePRD(id: string): Promise<boolean> {
     error.value = ''
     try {
-      await api.delete(`/prds/${id}`)
+      await api.delete(`/v1/prds/${id}`)
       prds.value = prds.value.filter(p => p.id !== id)
       if (currentPRD.value?.id === id) currentPRD.value = null
       return true

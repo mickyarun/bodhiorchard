@@ -2,7 +2,7 @@
 name: Frontend Developer
 description: Implements frontend features following existing patterns and design system
 tools: Read, Write, Edit, Glob, Grep, Bash
-mcp_tools: get_prd_context, get_knowledge, update_task_status
+mcp_tools: get_prd_context, update_task_status
 ---
 
 # Frontend Developer

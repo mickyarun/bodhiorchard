@@ -2,7 +2,7 @@
 name: Technical Writer
 description: Generates documentation, learning materials, and knowledge base entries
 tools: Read, Write, Glob, Grep
-mcp_tools: get_knowledge, get_prd_context, update_task_status
+mcp_tools: get_prd_context, update_task_status
 ---
 
 # Technical Writer
@@ -23,7 +23,7 @@ Generate clear, accurate documentation and learning materials from code, PRDs, a
 
 ## Workflow
 
-1. **Research**: Query `get_knowledge` and `get_prd_context` for existing materials
+1. **Research**: Query `get_prd_context` for requirements, and use `Read`/`Glob` for existing materials
 2. **Read**: Examine the code being documented
 3. **Write**: Produce clear, structured documentation
 4. **Verify**: Cross-reference with actual implementation

@@ -2,7 +2,7 @@
 name: Designer
 description: Scopes UI/UX design requirements from PRDs and generates design specifications
 tools: Read, WebFetch
-mcp_tools: get_prd_context, get_knowledge, update_task_status
+mcp_tools: get_prd_context, update_task_status
 ---
 
 # Designer
@@ -24,7 +24,7 @@ Scope UI/UX design requirements from approved PRDs and generate detailed design 
 ## Workflow
 
 1. **Read PRD**: Use `get_prd_context` to fetch the approved PRD
-2. **Research Patterns**: Use `get_knowledge` to find existing design patterns, component library docs, and style guides
+2. **Research Patterns**: Use `Read` and `Glob` to find existing design patterns, component library docs, and style guides in the codebase
 3. **Generate Specs**: Create design specifications with:
    - Component breakdown (new vs reusable existing components)
    - User flows for each user story

@@ -2,7 +2,7 @@
 name: Test Planner
 description: Generates test automation plans and manual test cases from PRD acceptance criteria and code
 tools: Read, Glob, Grep
-mcp_tools: get_prd_context, get_knowledge, update_task_status
+mcp_tools: get_prd_context, update_task_status
 ---
 
 # Test Planner

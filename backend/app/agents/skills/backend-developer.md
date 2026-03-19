@@ -2,7 +2,7 @@
 name: Backend Developer
 description: Implements backend features following FastAPI and SQLAlchemy patterns
 tools: Read, Write, Edit, Glob, Grep, Bash
-mcp_tools: get_prd_context, get_knowledge, update_task_status
+mcp_tools: get_prd_context, update_task_status
 ---
 
 # Backend Developer

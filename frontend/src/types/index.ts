@@ -32,7 +32,7 @@ export interface ApiError {
   details?: Record<string, string[]>
 }
 
-export type PRDStatus = 'draft' | 'design' | 'tech-spec' | 'in-dev' | 'in-qa' | 'in-uat' | 'deployed'
+export type PRDStatus = 'draft' | 'design' | 'tech-spec' | 'in-dev' | 'in-qa' | 'in-uat' | 'deployed' | 'cancelled'
 
 export interface PRDListItem {
   id: string
@@ -52,7 +52,7 @@ export interface PRDDocument extends PRDListItem {
 }
 
 export const PRD_STATUS_ORDER: PRDStatus[] = [
-  'draft', 'design', 'tech-spec', 'in-dev', 'in-qa', 'in-uat', 'deployed',
+  'draft', 'design', 'tech-spec', 'in-dev', 'in-qa', 'in-uat', 'deployed', 'cancelled',
 ]
 
 export const PRD_STATUS_LABELS: Record<PRDStatus, string> = {
@@ -63,6 +63,7 @@ export const PRD_STATUS_LABELS: Record<PRDStatus, string> = {
   'in-qa': 'In QA',
   'in-uat': 'In UAT',
   'deployed': 'Deployed',
+  'cancelled': 'Cancelled',
 }
 
 export const PRD_STATUS_COLORS: Record<PRDStatus, string> = {
@@ -73,4 +74,5 @@ export const PRD_STATUS_COLORS: Record<PRDStatus, string> = {
   'in-qa': 'warning',
   'in-uat': 'orange',
   'deployed': 'success',
+  'cancelled': 'error',
 }

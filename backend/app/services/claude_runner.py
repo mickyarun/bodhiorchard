@@ -7,12 +7,20 @@ FlowDev backend via local subprocess execution.
 import asyncio
 import json
 import shutil
-from dataclasses import dataclass
+import sys
+import tempfile
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+# Well-known location for the MCP token file, refreshed each scan.
+MCP_TOKEN_DIR = Path.home() / ".flowdev"
+MCP_TOKEN_FILE = MCP_TOKEN_DIR / "mcp_token"
+_BRIDGE_PATH = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridge.py")
 
 
 @dataclass
@@ -28,13 +36,27 @@ class ClaudeRunResult:
 
 
 @dataclass
+class MCPServerConfig:
+    """Configuration for an MCP server to expose to the Claude CLI.
+
+    Generates a stdio-based MCP config that spawns the FlowDev bridge script,
+    which translates MCP JSON-RPC calls into REST API calls back to the
+    running FlowDev backend.
+    """
+
+    backend_url: str
+    mcp_token: str
+    tool_names: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ClaudeRunnerConfig:
     """Configuration for the Claude Code runner."""
 
     max_turns: int = 20
-    max_budget_usd: float = 2.0
     timeout_seconds: int = 300
     output_format: str = "json"
+    mcp: MCPServerConfig | None = None
 
 
 def is_claude_cli_available() -> bool:
@@ -60,7 +82,7 @@ async def run_claude_code(
     Args:
         prompt: The prompt/instruction to send to Claude Code.
         working_dir: Directory to run in (for codebase context). Defaults to cwd.
-        config: Runner configuration (turns, budget, timeout).
+        config: Runner configuration (turns, timeout).
 
     Returns:
         ClaudeRunResult with output or error details.
@@ -80,16 +102,43 @@ async def run_claude_code(
     cwd = str(working_dir) if working_dir else "."
 
     # Build command as a list — safe from shell injection
+    # (uses asyncio.create_subprocess_exec, NOT shell=True)
     cmd = [
         "claude",
         "-p",
         prompt,
         "--output-format",
         config.output_format,
-        "--max-turns",
-        str(config.max_turns),
         "--dangerously-skip-permissions",
     ]
+
+    # 0 means unlimited — omit the flag so Claude uses its default (no cap)
+    if config.max_turns > 0:
+        cmd.extend(["--max-turns", str(config.max_turns)])
+
+    # Write temporary MCP config if tools are needed
+    mcp_config_file = None
+    if config.mcp:
+        bridge_path = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridge.py")
+        mcp_json = {
+            "mcpServers": {
+                "flowdev": {
+                    "command": sys.executable,
+                    "args": [bridge_path],
+                    "env": {
+                        "FLOWDEV_BACKEND_URL": config.mcp.backend_url,
+                        "FLOWDEV_MCP_TOKEN": config.mcp.mcp_token,
+                        "FLOWDEV_MCP_TOOLS": ",".join(config.mcp.tool_names),
+                    },
+                },
+            },
+        }
+        mcp_config_path = Path(
+            tempfile.mktemp(suffix=".json", prefix="flowdev_mcp_"),
+        )
+        mcp_config_path.write_text(json.dumps(mcp_json))
+        mcp_config_file = mcp_config_path
+        cmd.extend(["--mcp-config", str(mcp_config_file)])
 
     logger.info(
         "claude_run_start",
@@ -99,8 +148,10 @@ async def run_claude_code(
         max_turns=config.max_turns,
         timeout_seconds=config.timeout_seconds,
         output_format=config.output_format,
+        mcp_enabled=config.mcp is not None,
     )
 
+    proc: asyncio.subprocess.Process | None = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -176,6 +227,15 @@ async def run_claude_code(
         )
 
     except TimeoutError:
+        # Kill the subprocess so it stops making MCP tool calls
+        # before the caller revokes the token
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+                logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
+            except ProcessLookupError:
+                pass  # Already exited
         logger.error("claude_run_timeout", timeout=config.timeout_seconds)
         return ClaudeRunResult(
             success=False,
@@ -188,6 +248,76 @@ async def run_claude_code(
             output="",
             error="Claude CLI binary not found",
         )
+    finally:
+        if mcp_config_file is not None:
+            mcp_config_file.unlink(missing_ok=True)
+
+
+async def ensure_flowdev_mcp(
+    org_id: uuid.UUID,
+    backend_url: str,
+) -> str:
+    """Ensure the FlowDev MCP server is registered with Claude CLI.
+
+    Follows the ``claude mcp add`` pattern (like GitNexus). Registers once,
+    then refreshes the token file on each call so the bridge picks up a
+    valid token without re-registration.
+
+    Args:
+        org_id: Organization UUID for token scoping.
+        backend_url: FlowDev backend base URL.
+
+    Returns:
+        The internal MCP token (caller should revoke when done).
+    """
+    from app.mcp.auth import create_internal_mcp_token
+
+    # Create token and write to file (bridge re-reads on every request)
+    token = create_internal_mcp_token(org_id)
+    MCP_TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    MCP_TOKEN_FILE.write_text(token)
+
+    # Check if flowdev MCP is already registered
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "claude",
+            "mcp",
+            "list",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        already_registered = "flowdev" in stdout.decode()
+    except (TimeoutError, FileNotFoundError, OSError):
+        already_registered = False
+
+    if not already_registered:
+        # Register: claude mcp add flowdev -s user -e ... -- python bridge.py
+        proc = await asyncio.create_subprocess_exec(
+            "claude",
+            "mcp",
+            "add",
+            "flowdev",
+            "-s",
+            "user",
+            "-e",
+            f"FLOWDEV_BACKEND_URL={backend_url}",
+            "-e",
+            f"FLOWDEV_MCP_TOKEN_FILE={MCP_TOKEN_FILE}",
+            "--",
+            sys.executable,
+            _BRIDGE_PATH,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=10)
+        logger.info(
+            "flowdev_mcp_registered",
+            backend_url=backend_url,
+            bridge=_BRIDGE_PATH,
+        )
+
+    return token
 
 
 async def _get_claude_version() -> str | None:
@@ -247,7 +377,7 @@ async def test_claude_connection() -> dict:
 
     test_result = await run_claude_code(
         prompt="Reply with exactly: FLOWDEV_CONNECTION_OK",
-        config=ClaudeRunnerConfig(max_turns=1, max_budget_usd=0.10, timeout_seconds=90),
+        config=ClaudeRunnerConfig(max_turns=1, timeout_seconds=90),
     )
 
     result["test_passed"] = test_result.success

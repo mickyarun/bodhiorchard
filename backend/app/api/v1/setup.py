@@ -1,17 +1,18 @@
 """First-time setup endpoint: creates org, admin user, and stores config."""
 
+import secrets
 from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
 from app.core.security import create_access_token, hash_password
 from app.models.organization import Organization
-from app.models.permission import Role
 from app.models.user import User, UserRole
+from app.repositories.organization import OrganizationRepository
+from app.repositories.role import RoleRepository
 from app.schemas.setup import (
     BrowseDirectoriesResponse,
     DirectoryEntry,
@@ -33,9 +34,11 @@ async def setup_status(db: AsyncSession = Depends(get_db)) -> dict:
     Returns:
         A dict with `is_setup_complete` boolean.
     """
-    result = await db.execute(select(func.count()).select_from(Organization))
-    count = result.scalar_one()
-    return {"is_setup_complete": count > 0}
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.check_setup_exists()
+    if org is None:
+        return {"is_setup_complete": False, "org_slug": None}
+    return {"is_setup_complete": True, "org_slug": org.slug}
 
 
 @router.get("/browse-directories", response_model=BrowseDirectoriesResponse)
@@ -121,22 +124,27 @@ async def initialize_setup(
         HTTPException 409: If the organization slug is already taken.
     """
     # Check if org slug is already taken
-    existing = await db.execute(
-        select(Organization).where(Organization.slug == body.organization.slug)
-    )
-    if existing.scalar_one_or_none() is not None:
+    org_repo = OrganizationRepository(db)
+    if await org_repo.get_by_slug(body.organization.slug) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Organization slug already exists. Setup may have been completed already.",
         )
 
-    # Build org config from LLM + integration + source code settings
+    # Build org config from AI config, source code, and integration settings
     org_config = {
         "source_code": {
             "local_path": body.source_code.local_path,
             "type": body.source_code.type,
         },
         "llm": {
+            "preset": body.ai_config.preset,
+            "ollama_url": body.ai_config.ollama_url,
+            "ollama_model": body.ai_config.ollama_model,
+            "cloud_provider": body.ai_config.cloud_provider,
+            "cloud_api_key": body.ai_config.cloud_api_key,
+            "cloud_model": body.ai_config.cloud_model,
+            # Legacy fields from LLM config
             "provider": body.llm.provider,
             "model": body.llm.model,
             "base_url": body.llm.base_url,
@@ -155,6 +163,9 @@ async def initialize_setup(
         },
     }
 
+    # Generate MCP token for Claude Code integration
+    mcp_token = secrets.token_urlsafe(32)
+
     # Create organization
     org = Organization(
         name=body.organization.name,
@@ -163,6 +174,7 @@ async def initialize_setup(
         github_pat=body.integrations.github.pat or None,
         slack_bot_token=body.integrations.slack.bot_token or None,
         slack_signing_secret=body.integrations.slack.signing_secret or None,
+        mcp_token_hash=hash_password(mcp_token),
     )
     db.add(org)
     await db.flush()
@@ -180,10 +192,8 @@ async def initialize_setup(
 
     # Seed permissions and assign org_owner role to admin
     await seed_permissions(db)
-    owner_result = await db.execute(
-        select(Role).where(Role.name == "org_owner", Role.org_id.is_(None))
-    )
-    owner_role = owner_result.scalar_one_or_none()
+    role_repo = RoleRepository(db)
+    owner_role = await role_repo.get_by_name_system("org_owner")
     if owner_role is not None:
         user.role_id = owner_role.id
         await db.flush()
@@ -202,4 +212,5 @@ async def initialize_setup(
         organization_id=str(org.id),
         user_id=str(user.id),
         access_token=token,
+        mcp_token=mcp_token,
     )

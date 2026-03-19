@@ -68,6 +68,19 @@ class SetupLLM(BaseModel):
     embedding_model: str = Field(default="nomic-embed-text", alias="embeddingModel")
 
 
+class SetupAIConfig(BaseModel):
+    """AI configuration selected in the setup wizard."""
+
+    model_config = {"populate_by_name": True}
+
+    preset: str = "hybrid"
+    ollama_url: str = Field(default="http://localhost:11434", alias="ollamaUrl")
+    ollama_model: str = Field(default="llama3:8b", alias="ollamaModel")
+    cloud_provider: str = Field(default="anthropic", alias="cloudProvider")
+    cloud_api_key: str = Field(default="", alias="cloudApiKey")
+    cloud_model: str = Field(default="claude-sonnet-4-5-20250514", alias="cloudModel")
+
+
 class SetupRequest(BaseModel):
     """Complete setup payload sent by the frontend wizard."""
 
@@ -78,6 +91,7 @@ class SetupRequest(BaseModel):
     source_code: SetupSourceCode = Field(default_factory=SetupSourceCode, alias="sourceCode")
     integrations: SetupIntegrations = SetupIntegrations()
     llm: SetupLLM = SetupLLM()
+    ai_config: SetupAIConfig = Field(default_factory=SetupAIConfig, alias="aiConfig")
 
 
 class SetupResponse(BaseModel):
@@ -88,6 +102,7 @@ class SetupResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     message: str = "Setup complete"
+    mcp_token: str | None = None
 
 
 class DirectoryEntry(BaseModel):

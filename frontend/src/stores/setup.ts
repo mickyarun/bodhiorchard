@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SetupState } from '@/types/setup'
 import api from '@/services/api'
+import { resetSetupCache } from '@/router'
 
 export const useSetupStore = defineStore('setup', () => {
   const currentStep = ref(0)
@@ -141,6 +142,7 @@ export const useSetupStore = defineStore('setup', () => {
       const payload = {
         organization: state.value.organization,
         admin: state.value.admin,
+        sourceCode: state.value.sourceCode,
         integrations: state.value.integrations,
         llm: state.value.llm,
         aiConfig: state.value.aiConfig,
@@ -151,10 +153,17 @@ export const useSetupStore = defineStore('setup', () => {
       if (data.access_token) {
         localStorage.setItem('flowdev_token', data.access_token)
       }
+      resetSetupCache()
       return true
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string; message?: string } } }
+        const axiosErr = err as { response?: { status?: number; data?: { detail?: string; message?: string } } }
+        // 409 = org slug already exists → setup was already completed
+        if (axiosErr.response?.status === 409) {
+          localStorage.setItem('flowdev_setup_complete', 'true')
+          resetSetupCache()
+          return true
+        }
         submitError.value =
           axiosErr.response?.data?.detail
           || axiosErr.response?.data?.message

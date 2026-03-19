@@ -4,6 +4,12 @@ import api from '@/services/api'
 let setupChecked = false
 let isSetupComplete = false
 
+/** Call after setup completes so the next navigation re-checks the backend. */
+export function resetSetupCache(): void {
+  setupChecked = false
+  isSetupComplete = false
+}
+
 async function checkSetupStatus(): Promise<boolean> {
   // Return cached result for subsequent in-session navigations
   if (setupChecked) return isSetupComplete
@@ -27,12 +33,20 @@ async function checkSetupStatus(): Promise<boolean> {
   return isSetupComplete
 }
 
+/** Public routes that don't require authentication. */
+const PUBLIC_ROUTES = new Set(['setup', 'login'])
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
       path: '/',
       redirect: '/dashboard',
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
     },
     {
       path: '/setup',
@@ -64,6 +78,11 @@ const router = createRouter({
           name: 'prd-detail',
           component: () => import('@/views/prds/PRDDetail.vue'),
         },
+        {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('@/views/settings/SettingsConnections.vue'),
+        },
       ],
     },
   ],
@@ -72,11 +91,26 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const done = await checkSetupStatus()
 
+  // Setup not done — force to setup wizard
   if (!done && to.name !== 'setup') {
     return { name: 'setup' }
   }
 
+  // Setup done — don't allow going back to setup
   if (done && to.name === 'setup') {
+    return { name: 'dashboard' }
+  }
+
+  // Auth guard — require token for protected routes
+  if (done && !PUBLIC_ROUTES.has(to.name as string)) {
+    const hasToken = !!localStorage.getItem('flowdev_token')
+    if (!hasToken) {
+      return { name: 'login' }
+    }
+  }
+
+  // Already logged in — redirect away from login
+  if (to.name === 'login' && localStorage.getItem('flowdev_token')) {
     return { name: 'dashboard' }
   }
 })

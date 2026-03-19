@@ -9,6 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
 
+FEATURE_STATUSES = {"planned", "in_progress", "implemented"}
+
 
 class KnowledgeItem(BaseModel):
     """A piece of organizational knowledge indexed for semantic retrieval."""
@@ -26,6 +28,7 @@ class KnowledgeItem(BaseModel):
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     embedding = mapped_column(Vector(768), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    feature_status: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )

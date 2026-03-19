@@ -46,7 +46,7 @@
     <div v-else class="board-container">
       <div class="board-scroll">
         <div
-          v-for="status in PRD_STATUS_ORDER"
+          v-for="status in PRD_STATUS_ORDER.filter(s => s !== 'cancelled')"
           :key="status"
           class="board-column"
         >

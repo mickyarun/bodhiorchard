@@ -34,6 +34,7 @@ app = FastAPI(
     version="0.1.0",
     description="AI-powered software development platform",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 app.add_middleware(RequestLoggingMiddleware)

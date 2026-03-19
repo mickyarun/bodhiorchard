@@ -21,6 +21,7 @@ class PRDStatus(StrEnum):
     IN_QA = "in-qa"
     IN_UAT = "in-uat"
     DEPLOYED = "deployed"
+    CANCELLED = "cancelled"
 
 
 class PRDDocument(BaseModel):

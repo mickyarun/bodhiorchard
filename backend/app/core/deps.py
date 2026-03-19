@@ -6,13 +6,14 @@ from typing import Literal
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import verify_token
 from app.database import AsyncSessionLocal
-from app.models.permission import Permission, Role, RolePermission
 from app.models.user import User
+from app.repositories.permission import PermissionRepository
+from app.repositories.role import RoleRepository
+from app.repositories.user import UserRepository
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -68,8 +69,8 @@ async def get_current_user(
     except ValueError:
         raise credentials_exception from None
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
 
     if user is None:
         raise credentials_exception
@@ -90,12 +91,8 @@ async def get_user_permissions(user: User, db: AsyncSession) -> set[str]:
     if user.role_id is None:
         return set()
 
-    result = await db.execute(
-        select(Permission.resource_id)
-        .join(RolePermission, RolePermission.permission_id == Permission.id)
-        .where(RolePermission.role_id == user.role_id)
-    )
-    return set(result.scalars().all())
+    perm_repo = PermissionRepository(db)
+    return await perm_repo.get_user_permission_ids(user.role_id)
 
 
 def require_permissions(
@@ -123,10 +120,8 @@ def require_permissions(
     ) -> User:
         # org_owner bypasses all permission checks
         if current_user.role_id is not None:
-            role_result = await db.execute(
-                select(Role.name).where(Role.id == current_user.role_id)
-            )
-            role_name = role_result.scalar_one_or_none()
+            role_repo = RoleRepository(db)
+            role_name = await role_repo.get_role_name(current_user.role_id)
             if role_name == "org_owner":
                 return current_user
 

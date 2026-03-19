@@ -16,6 +16,8 @@ engine = create_async_engine(
     pool_size=20,
     max_overflow=10,
     pool_pre_ping=True,
+    pool_recycle=1800,  # Recycle connections every 30 min (avoids stale TCP after PG restart)
+    pool_timeout=30,  # Fail fast if no connection available within 30s (default is 30 already)
 )
 
 AsyncSessionLocal = async_sessionmaker(

@@ -1,7 +1,6 @@
 """Idempotent seeder for permission categories, permissions, system roles, and mappings."""
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import DEFAULT_SYSTEM_ROLES, PERMISSION_CATEGORIES
@@ -12,6 +11,8 @@ from app.models.permission import (
     RolePermission,
     RoleScopeType,
 )
+from app.repositories.permission import PermissionRepository
+from app.repositories.role import RoleRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -25,13 +26,13 @@ async def seed_permissions(db: AsyncSession) -> None:
     Args:
         db: An active async database session. The caller is responsible for committing.
     """
+    perm_repo = PermissionRepository(db)
+    role_repo = RoleRepository(db)
+
     # 1. Seed permission categories
     category_map: dict[str, PermissionCategory] = {}
     for order, cat_def in enumerate(PERMISSION_CATEGORIES):
-        result = await db.execute(
-            select(PermissionCategory).where(PermissionCategory.key == cat_def.key)
-        )
-        category = result.scalar_one_or_none()
+        category = await perm_repo.get_category_by_key(cat_def.key)
         if category is None:
             category = PermissionCategory(
                 name=cat_def.name,
@@ -49,10 +50,7 @@ async def seed_permissions(db: AsyncSession) -> None:
     for cat_def in PERMISSION_CATEGORIES:
         category = category_map[cat_def.key]
         for order, perm_def in enumerate(cat_def.permissions):
-            result = await db.execute(
-                select(Permission).where(Permission.resource_id == perm_def.resource_id)
-            )
-            perm = result.scalar_one_or_none()
+            perm = await perm_repo.get_by_resource_id(perm_def.resource_id)
             if perm is None:
                 perm = Permission(
                     name=perm_def.name,
@@ -68,10 +66,7 @@ async def seed_permissions(db: AsyncSession) -> None:
 
     # 3. Seed system roles and role-permission mappings
     for role_def in DEFAULT_SYSTEM_ROLES:
-        result = await db.execute(
-            select(Role).where(Role.name == role_def.name, Role.org_id.is_(None))
-        )
-        role = result.scalar_one_or_none()
+        role = await role_repo.get_by_name_system(role_def.name)
         if role is None:
             role = Role(
                 name=role_def.name,
@@ -85,10 +80,7 @@ async def seed_permissions(db: AsyncSession) -> None:
             logger.info("seeded_role", name=role_def.name)
 
         # Sync role-permission mappings
-        existing_result = await db.execute(
-            select(RolePermission.permission_id).where(RolePermission.role_id == role.id)
-        )
-        existing_perm_ids = set(existing_result.scalars().all())
+        existing_perm_ids = await role_repo.get_existing_permission_ids(role.id)
 
         for resource_id in role_def.permission_ids:
             perm = permission_map.get(resource_id)

@@ -40,7 +40,7 @@ class PRDRead(BaseModel):
     content_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
-    metadata_: dict | None = Field(None, alias="metadata")
+    metadata: dict | None = Field(None, validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
 

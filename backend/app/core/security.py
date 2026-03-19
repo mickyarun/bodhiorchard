@@ -60,6 +60,25 @@ def create_access_token(
     )
 
 
+def create_refresh_token(data: dict) -> str:
+    """Create a signed JWT refresh token with a longer expiry.
+
+    Args:
+        data: Claims to encode (must include 'sub').
+
+    Returns:
+        The encoded JWT string with 'refresh' type claim.
+    """
+    to_encode = data.copy()
+    expire = datetime.now(UTC) + timedelta(days=settings.auth.refresh_token_expire_days)
+    to_encode.update({"exp": expire, "type": "refresh"})
+    return jwt.encode(
+        to_encode,
+        settings.auth.secret_key,
+        algorithm=settings.auth.algorithm,
+    )
+
+
 def verify_token(token: str) -> dict | None:
     """Decode and validate a JWT access token.
 
