@@ -97,27 +97,6 @@ export const FEATURE_STATUS_COLORS: Record<string, string> = {
   implemented: 'success',
 }
 
-// Team types
-export interface Team {
-  id: string
-  name: string
-  description: string | null
-  memberCount: number
-  createdAt: string
-}
-
-export interface TeamMember {
-  id: string
-  userId: string
-  userName: string
-  email: string
-  role: 'lead' | 'member'
-}
-
-export interface TeamDetail extends Team {
-  members: TeamMember[]
-}
-
 // Repo types
 export interface RepoInfo {
   path: string

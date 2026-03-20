@@ -33,8 +33,8 @@
         />
         <v-list-item
           prepend-icon="mdi-account-group-outline"
-          title="Team"
-          to="/teams"
+          title="Members"
+          to="/members"
           rounded="lg"
         />
       </v-list>
