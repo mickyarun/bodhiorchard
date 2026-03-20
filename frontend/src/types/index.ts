@@ -66,6 +66,68 @@ export const PRD_STATUS_LABELS: Record<PRDStatus, string> = {
   'cancelled': 'Cancelled',
 }
 
+// Knowledge / Features types
+export interface KnowledgeItem {
+  id: string
+  title: string
+  content: string | null
+  category: string
+  tags: string[] | null
+  source: string | null
+  sourceRef: string | null
+  featureStatus: string | null
+}
+
+export interface KnowledgeSearchResult extends KnowledgeItem {
+  score: number
+}
+
+export const KNOWLEDGE_CATEGORIES = [
+  { value: '', label: 'All' },
+  { value: 'feature_registry', label: 'Features' },
+  { value: 'code_doc', label: 'Code Docs' },
+  { value: 'api_pattern', label: 'API Patterns' },
+  { value: 'architecture', label: 'Architecture' },
+  { value: 'convention', label: 'Conventions' },
+] as const
+
+export const FEATURE_STATUS_COLORS: Record<string, string> = {
+  planned: 'info',
+  in_progress: 'warning',
+  implemented: 'success',
+}
+
+// Team types
+export interface Team {
+  id: string
+  name: string
+  description: string | null
+  memberCount: number
+  createdAt: string
+}
+
+export interface TeamMember {
+  id: string
+  userId: string
+  userName: string
+  email: string
+  role: 'lead' | 'member'
+}
+
+export interface TeamDetail extends Team {
+  members: TeamMember[]
+}
+
+// Repo types
+export interface RepoInfo {
+  path: string
+  name: string
+  lastScanned: string | null
+  sha: string | null
+  knowledgeCount: number
+  featureCount: number
+}
+
 export const PRD_STATUS_COLORS: Record<PRDStatus, string> = {
   'draft': 'grey',
   'design': 'purple',

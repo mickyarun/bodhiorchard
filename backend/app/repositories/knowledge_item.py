@@ -31,6 +31,26 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         """
         super().__init__(KnowledgeItem, db, org_id=org_id)
 
+    # --- Single-item lookup ---
+
+    async def get_active_by_id(self, item_id: uuid.UUID) -> KnowledgeItem | None:
+        """Fetch a single active knowledge item by ID within the org.
+
+        Args:
+            item_id: The item UUID.
+
+        Returns:
+            The matching KnowledgeItem or None.
+        """
+        result = await self._db.execute(
+            select(KnowledgeItem).where(
+                KnowledgeItem.id == item_id,
+                KnowledgeItem.org_id == self._org_id,
+                KnowledgeItem.is_active.is_(True),
+            )
+        )
+        return result.scalar_one_or_none()
+
     # --- Listing & filtering ---
 
     async def list_active(

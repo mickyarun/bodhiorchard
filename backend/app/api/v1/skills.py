@@ -177,6 +177,43 @@ async def list_profiles(
     return list(profiles_map.values())
 
 
+@router.get("/knowledge/{item_id}", response_model=KnowledgeItemRead)
+async def get_knowledge_item(
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeItemRead:
+    """Fetch a single knowledge item by ID.
+
+    Args:
+        item_id: UUID of the knowledge item.
+        current_user: The authenticated user.
+        db: The async database session.
+
+    Returns:
+        KnowledgeItemRead for the requested item.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    ki_repo = KnowledgeItemRepository(db, org_id=org.id)
+    item = await ki_repo.get_active_by_id(item_id)
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Knowledge item not found.",
+        )
+    return KnowledgeItemRead(
+        id=item.id,
+        title=item.title,
+        content=item.content,
+        category=item.category,
+        tags=item.tags,
+        source=item.source,
+        sourceRef=item.source_ref,
+        featureStatus=item.feature_status,
+    )
+
+
 @router.get("/knowledge", response_model=list[KnowledgeItemRead])
 async def list_knowledge(
     category: str | None = Query(None, description="Filter by category"),

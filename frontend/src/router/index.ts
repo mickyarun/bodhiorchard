@@ -79,6 +79,16 @@ const router = createRouter({
           component: () => import('@/views/prds/PRDDetail.vue'),
         },
         {
+          path: 'features',
+          name: 'features',
+          component: () => import('@/views/features/FeaturesView.vue'),
+        },
+        {
+          path: 'teams',
+          name: 'teams',
+          component: () => import('@/views/teams/TeamsView.vue'),
+        },
+        {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/settings/SettingsConnections.vue'),

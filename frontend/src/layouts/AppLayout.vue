@@ -20,6 +20,12 @@
           rounded="lg"
         />
         <v-list-item
+          prepend-icon="mdi-lightbulb-outline"
+          title="Features"
+          to="/features"
+          rounded="lg"
+        />
+        <v-list-item
           prepend-icon="mdi-bug-outline"
           title="Bugs"
           rounded="lg"
@@ -28,8 +34,8 @@
         <v-list-item
           prepend-icon="mdi-account-group-outline"
           title="Team"
+          to="/teams"
           rounded="lg"
-          disabled
         />
       </v-list>
 
