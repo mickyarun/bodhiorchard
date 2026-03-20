@@ -8,6 +8,7 @@ from app.repositories.permission import PermissionRepository
 from app.repositories.prd import PRDRepository
 from app.repositories.role import RoleRepository
 from app.repositories.skill_profile import SkillProfileRepository
+from app.repositories.team import TeamRepository
 from app.repositories.user import UserRepository
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "PRDRepository",
     "RoleRepository",
     "SkillProfileRepository",
+    "TeamRepository",
     "UserRepository",
 ]

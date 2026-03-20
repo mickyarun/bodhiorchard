@@ -84,6 +84,7 @@ PERMISSION_CATEGORIES: list[CategoryDef] = [
             PermissionDef("team:invite", "Invite Team Members"),
             PermissionDef("team:remove", "Remove Team Members"),
             PermissionDef("team:assign_roles", "Assign Roles"),
+            PermissionDef("team:manage", "Manage Teams"),
         ],
     ),
     CategoryDef(
