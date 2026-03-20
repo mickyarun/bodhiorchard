@@ -1,7 +1,7 @@
 """Add composite indexes for optimized query patterns.
 
 Revision ID: b2c3d4e5f6a7
-Revises: f7d2e5a8b9c0
+Revises: a1b2c3d4e5f6
 Create Date: 2026-03-20 00:00:00.000000
 
 """
@@ -12,7 +12,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b2c3d4e5f6a7"
-down_revision: str = "f7d2e5a8b9c0"
+down_revision: str = "a1b2c3d4e5f6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
