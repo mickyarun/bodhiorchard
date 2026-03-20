@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import String, Text
+from sqlalchemy import Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,6 +16,13 @@ class Organization(BaseModel):
     """Represents a tenant organization in the platform."""
 
     __tablename__ = "organizations"
+    __table_args__ = (
+        Index(
+            "ix_org_mcp_token_hash",
+            "mcp_token_hash",
+            postgresql_where=text("mcp_token_hash IS NOT NULL"),
+        ),
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)

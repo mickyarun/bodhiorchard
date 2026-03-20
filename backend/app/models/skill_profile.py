@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -23,6 +24,7 @@ class SkillProfile(BaseModel):
     __tablename__ = "skill_profiles"
     __table_args__ = (
         UniqueConstraint("user_id", "org_id", "module", name="uq_skill_user_org_module"),
+        Index("ix_sp_org_score", "org_id", "skill_score"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(

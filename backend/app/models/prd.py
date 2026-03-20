@@ -4,7 +4,7 @@ import uuid
 from enum import StrEnum
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,7 +28,10 @@ class PRDDocument(BaseModel):
     """Product Requirements Document with embedded vector representation."""
 
     __tablename__ = "prd_documents"
-    __table_args__ = (UniqueConstraint("org_id", "prd_number", name="uq_prd_org_number"),)
+    __table_args__ = (
+        UniqueConstraint("org_id", "prd_number", name="uq_prd_org_number"),
+        Index("ix_prd_org_status", "org_id", "status"),
+    )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True

@@ -3,7 +3,7 @@
 import uuid
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,6 +16,13 @@ class KnowledgeItem(BaseModel):
     """A piece of organizational knowledge indexed for semantic retrieval."""
 
     __tablename__ = "knowledge_items"
+    __table_args__ = (
+        Index("ix_ki_org_cat_active", "org_id", "category", "is_active"),
+        Index("ix_ki_org_cat_active_title", "org_id", "category", "is_active", "title"),
+        Index("ix_ki_org_cat_active_source", "org_id", "category", "is_active", "source"),
+        Index("ix_ki_org_cat_active_fstatus", "org_id", "category", "is_active", "feature_status"),
+        Index("ix_ki_org_srcref_cat", "org_id", "source_ref", "category"),
+    )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True

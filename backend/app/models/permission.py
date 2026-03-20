@@ -3,7 +3,7 @@
 import uuid
 from enum import StrEnum
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -92,6 +92,7 @@ class RolePermission(BaseModel):
     __tablename__ = "role_permissions"
     __table_args__ = (
         UniqueConstraint("role_id", "permission_id", name="uq_role_permissions_role_perm"),
+        Index("ix_role_perms_role_id", "role_id"),
     )
 
     role_id: Mapped[uuid.UUID] = mapped_column(

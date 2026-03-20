@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +35,7 @@ class Bug(BaseModel):
     """Bug report linked to an organization and optionally to a PRD."""
 
     __tablename__ = "bugs"
+    __table_args__ = (Index("ix_bugs_org_status_created", "org_id", "status", "created_at"),)
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
