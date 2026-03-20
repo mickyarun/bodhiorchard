@@ -20,9 +20,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Create composite indexes matching repository query patterns."""
     # knowledge_items
-    op.create_index(
-        "ix_ki_org_cat_active", "knowledge_items", ["org_id", "category", "is_active"]
-    )
+    op.create_index("ix_ki_org_cat_active", "knowledge_items", ["org_id", "category", "is_active"])
     op.create_index(
         "ix_ki_org_cat_active_title",
         "knowledge_items",
@@ -43,9 +41,7 @@ def upgrade() -> None:
     )
 
     # bugs
-    op.create_index(
-        "ix_bugs_org_status_created", "bugs", ["org_id", "status", "created_at"]
-    )
+    op.create_index("ix_bugs_org_status_created", "bugs", ["org_id", "status", "created_at"])
 
     # prd_documents
     op.create_index("ix_prd_org_status", "prd_documents", ["org_id", "status"])
