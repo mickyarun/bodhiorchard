@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/services/api'
+import type { RepoInfo } from '@/types'
 
 export interface ConnectionsState {
   sourceCode: {
@@ -85,6 +86,47 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  // Repo management
+  const repos = ref<RepoInfo[]>([])
+  const reposLoading = ref(false)
+
+  async function fetchRepos(): Promise<void> {
+    reposLoading.value = true
+    try {
+      const { data } = await api.get('/v1/settings/repos')
+      repos.value = data
+    } catch {
+      error.value = 'Failed to load repositories.'
+    } finally {
+      reposLoading.value = false
+    }
+  }
+
+  async function addRepo(path: string): Promise<boolean> {
+    try {
+      await api.post('/v1/settings/repos', { path })
+      await fetchRepos()
+      return true
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { data?: { detail?: string } } }
+        error.value = axiosErr.response?.data?.detail || 'Failed to add repository.'
+      }
+      return false
+    }
+  }
+
+  async function removeRepo(path: string): Promise<boolean> {
+    try {
+      await api.delete('/v1/settings/repos', { data: { path } })
+      await fetchRepos()
+      return true
+    } catch {
+      error.value = 'Failed to remove repository.'
+      return false
+    }
+  }
+
   return {
     connections,
     loading,
@@ -93,5 +135,10 @@ export const useSettingsStore = defineStore('settings', () => {
     saveSuccess,
     fetchConnections,
     saveConnections,
+    repos,
+    reposLoading,
+    fetchRepos,
+    addRepo,
+    removeRepo,
   }
 })

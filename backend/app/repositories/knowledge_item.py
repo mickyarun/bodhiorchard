@@ -413,6 +413,45 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
         return list(result.scalars().all())
 
+    # --- Repo-level counts ---
+
+    async def count_by_title_prefix(self, prefix: str) -> int:
+        """Count active items whose title starts with a given prefix.
+
+        Args:
+            prefix: Title prefix to match (e.g. ``'[my-repo]'``).
+
+        Returns:
+            Number of matching active items.
+        """
+        result = await self._db.execute(
+            select(func.count(KnowledgeItem.id)).where(
+                KnowledgeItem.org_id == self._org_id,
+                KnowledgeItem.is_active.is_(True),
+                KnowledgeItem.title.like(f"{prefix}%"),
+            )
+        )
+        return result.scalar() or 0
+
+    async def count_features_by_title_prefix(self, prefix: str) -> int:
+        """Count active feature_registry items whose title starts with a prefix.
+
+        Args:
+            prefix: Title prefix to match.
+
+        Returns:
+            Number of matching feature_registry items.
+        """
+        result = await self._db.execute(
+            select(func.count(KnowledgeItem.id)).where(
+                KnowledgeItem.org_id == self._org_id,
+                KnowledgeItem.is_active.is_(True),
+                KnowledgeItem.category == "feature_registry",
+                KnowledgeItem.title.like(f"{prefix}%"),
+            )
+        )
+        return result.scalar() or 0
+
     # --- Deduplication ---
 
     async def find_duplicate_titles(self, category: str) -> list[tuple[str, int]]:

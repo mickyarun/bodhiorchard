@@ -326,6 +326,100 @@
         </v-dialog>
       </v-card>
 
+      <!-- ─── TRACKED REPOSITORIES ──────────────────────────────── -->
+      <div class="section-header mb-3">
+        <v-icon icon="mdi-source-repository-multiple" size="18" color="primary" />
+        <span class="text-body-2 font-weight-medium">Tracked Repositories</span>
+      </div>
+
+      <v-card class="pa-5 settings-card mb-6" color="surface">
+        <div v-if="settingsStore.reposLoading" class="d-flex justify-center py-4">
+          <v-progress-circular indeterminate size="24" />
+        </div>
+
+        <template v-else>
+          <v-table v-if="settingsStore.repos.length > 0" density="compact" class="mb-4">
+            <thead>
+              <tr>
+                <th>Repository</th>
+                <th>Path</th>
+                <th class="text-center">Knowledge</th>
+                <th class="text-center">Features</th>
+                <th class="text-center">Last SHA</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="repo in settingsStore.repos" :key="repo.path">
+                <td class="font-weight-medium">{{ repo.name }}</td>
+                <td class="text-caption text-medium-emphasis">{{ repo.path }}</td>
+                <td class="text-center">{{ repo.knowledgeCount }}</td>
+                <td class="text-center">{{ repo.featureCount }}</td>
+                <td class="text-center">
+                  <v-chip v-if="repo.sha" size="x-small" variant="tonal">
+                    {{ repo.sha?.substring(0, 7) }}
+                  </v-chip>
+                  <span v-else class="text-caption text-medium-emphasis">-</span>
+                </td>
+                <td class="text-right">
+                  <v-btn
+                    icon="mdi-close"
+                    size="x-small"
+                    variant="text"
+                    color="error"
+                    @click="settingsStore.removeRepo(repo.path)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+
+          <div
+            v-else
+            class="text-body-2 text-medium-emphasis text-center py-4"
+          >
+            No repositories tracked yet. Run a scan to detect repos, or add one manually.
+          </div>
+
+          <div class="d-flex ga-2">
+            <v-btn
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-plus"
+              @click="showAddRepoDialog = true"
+            >
+              Add Repository
+            </v-btn>
+          </div>
+        </template>
+      </v-card>
+
+      <!-- Add Repo Dialog -->
+      <v-dialog v-model="showAddRepoDialog" max-width="480">
+        <v-card color="surface" class="pa-6">
+          <div class="text-h6 font-weight-bold mb-4">Add Repository</div>
+          <v-text-field
+            v-model="newRepoPath"
+            label="Absolute path"
+            placeholder="/path/to/repo"
+            autofocus
+            @keyup.enter="addRepo"
+          />
+          <v-card-actions class="pa-0 mt-2">
+            <v-spacer />
+            <v-btn variant="text" @click="showAddRepoDialog = false">Cancel</v-btn>
+            <v-btn
+              color="primary"
+              variant="flat"
+              :disabled="!newRepoPath.trim()"
+              @click="addRepo"
+            >
+              Add
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
       <!-- ─── MCP INTEGRATION ─────────────────────────────────── -->
       <div class="section-header mb-3">
         <v-icon icon="mdi-api" size="18" color="primary" />
@@ -832,6 +926,19 @@ const indexStats = ref<{
   reposTracked: number
 } | null>(null)
 
+// Repo management
+const showAddRepoDialog = ref(false)
+const newRepoPath = ref('')
+
+async function addRepo(): Promise<void> {
+  if (!newRepoPath.value.trim()) return
+  const ok = await settingsStore.addRepo(newRepoPath.value.trim())
+  if (ok) {
+    showAddRepoDialog.value = false
+    newRepoPath.value = ''
+  }
+}
+
 // Rescan confirmation
 const showRescanDialog = ref(false)
 const pendingFullRescan = ref(false)
@@ -866,6 +973,7 @@ onMounted(async () => {
   await settingsStore.fetchConnections()
   checkMcpTokenStatus()
   fetchIndexStats()
+  settingsStore.fetchRepos()
 })
 
 onUnmounted(() => {

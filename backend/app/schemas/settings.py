@@ -65,6 +65,25 @@ class ConnectionsRead(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class RepoInfo(BaseModel):
+    """Information about a tracked repository."""
+
+    path: str
+    name: str
+    last_scanned: str | None = Field(None, alias="lastScanned")
+    sha: str | None = None
+    knowledge_count: int = Field(0, alias="knowledgeCount")
+    feature_count: int = Field(0, alias="featureCount")
+
+    model_config = {"populate_by_name": True}
+
+
+class AddRepoRequest(BaseModel):
+    """Request to add a repository path."""
+
+    path: str
+
+
 class ConnectionsUpdate(BaseModel):
     """Request schema for PATCH /settings/connections.
 
