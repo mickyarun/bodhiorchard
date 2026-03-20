@@ -4,7 +4,7 @@ import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -46,6 +46,10 @@ class User(BaseModel):
         nullable=False,
         default=UserRole.DEVELOPER,
     )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     slack_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     github_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
     role_id: Mapped[uuid.UUID | None] = mapped_column(

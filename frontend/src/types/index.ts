@@ -76,6 +76,7 @@ export interface KnowledgeItem {
   source: string | null
   sourceRef: string | null
   featureStatus: string | null
+  repoId: string | null
 }
 
 export interface KnowledgeSearchResult extends KnowledgeItem {
@@ -99,8 +100,10 @@ export const FEATURE_STATUS_COLORS: Record<string, string> = {
 
 // Repo types
 export interface RepoInfo {
+  id: string
   path: string
   name: string
+  status: 'active' | 'ignored' | 'removed'
   lastScanned: string | null
   sha: string | null
   knowledgeCount: number

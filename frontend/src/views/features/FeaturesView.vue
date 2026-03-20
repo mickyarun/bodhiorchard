@@ -10,7 +10,7 @@
       </div>
     </div>
 
-    <!-- Category chips + Search -->
+    <!-- Category chips + Repo filter + Search -->
     <div class="d-flex align-center ga-3 mb-5 flex-wrap">
       <v-chip-group v-model="selectedCategoryIdx" mandatory>
         <v-chip
@@ -24,6 +24,19 @@
       </v-chip-group>
 
       <v-spacer />
+
+      <v-select
+        v-if="repos.length > 1"
+        v-model="selectedRepoId"
+        :items="repoOptions"
+        item-title="label"
+        item-value="value"
+        variant="outlined"
+        density="compact"
+        hide-details
+        style="max-width: 200px;"
+        label="Repository"
+      />
 
       <v-text-field
         v-model="searchQuery"
@@ -144,19 +157,32 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useSettingsStore } from '@/stores/settings'
 import {
   KNOWLEDGE_CATEGORIES,
   FEATURE_STATUS_COLORS,
   type KnowledgeSearchResult,
+  type RepoInfo,
 } from '@/types'
 
 const store = useKnowledgeStore()
+const settingsStore = useSettingsStore()
 
 const selectedCategoryIdx = ref(0)
+const selectedRepoId = ref('')
 const searchQuery = ref('')
 const expandedId = ref<string | null>(null)
 
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
+
+const repos = computed<RepoInfo[]>(() =>
+  settingsStore.repos.filter((r) => r.status !== 'removed'),
+)
+
+const repoOptions = computed(() => [
+  { label: 'All repos', value: '' },
+  ...repos.value.map((r) => ({ label: r.name, value: r.id })),
+])
 
 const selectedCategory = computed(
   () => KNOWLEDGE_CATEGORIES[selectedCategoryIdx.value]?.value || '',
@@ -166,20 +192,27 @@ const displayItems = computed(() =>
   searchQuery.value.trim() ? store.searchResults : store.items,
 )
 
+function reloadItems(): void {
+  store.fetchItems(
+    selectedCategory.value || undefined,
+    selectedRepoId.value || undefined,
+  )
+}
+
 function toggleExpand(id: string): void {
   expandedId.value = expandedId.value === id ? null : id
 }
 
 function onClearSearch(): void {
   searchQuery.value = ''
-  store.fetchItems(selectedCategory.value || undefined)
+  reloadItems()
 }
 
 // Debounced search
 watch(searchQuery, (q) => {
   if (searchTimeout) clearTimeout(searchTimeout)
   if (!q?.trim()) {
-    store.fetchItems(selectedCategory.value || undefined)
+    reloadItems()
     return
   }
   searchTimeout = setTimeout(() => {
@@ -187,13 +220,14 @@ watch(searchQuery, (q) => {
   }, 400)
 })
 
-// Category change
-watch(selectedCategoryIdx, () => {
+// Category or repo change
+watch([selectedCategoryIdx, selectedRepoId], () => {
   searchQuery.value = ''
-  store.fetchItems(selectedCategory.value || undefined)
+  reloadItems()
 })
 
 onMounted(() => {
+  settingsStore.fetchRepos()
   store.fetchItems()
 })
 </script>

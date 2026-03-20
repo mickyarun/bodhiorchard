@@ -23,6 +23,7 @@ from app.models.permission import (
 from app.models.prd import PRDDocument, PRDStatus
 from app.models.skill_profile import SkillProfile
 from app.models.standup import StandupReport
+from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.models.user import OrgToUser, User, UserRole
 
 __all__ = [
@@ -46,8 +47,10 @@ __all__ = [
     "OrgToUser",
     "PRDDocument",
     "PRDStatus",
+    "RepoStatus",
     "SkillProfile",
     "StandupReport",
+    "TrackedRepository",
     "User",
     "UserRole",
 ]

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
+from app.core.encryption import encrypt_secret
 from app.core.security import create_access_token, hash_password
 from app.models.organization import Organization
 from app.models.user import User, UserRole
@@ -142,7 +143,9 @@ async def initialize_setup(
             "ollama_url": body.ai_config.ollama_url,
             "ollama_model": body.ai_config.ollama_model,
             "cloud_provider": body.ai_config.cloud_provider,
-            "cloud_api_key": body.ai_config.cloud_api_key,
+            "cloud_api_key": encrypt_secret(body.ai_config.cloud_api_key)
+            if body.ai_config.cloud_api_key
+            else "",
             "cloud_model": body.ai_config.cloud_model,
             # Legacy fields from LLM config
             "provider": body.llm.provider,
@@ -171,9 +174,15 @@ async def initialize_setup(
         name=body.organization.name,
         slug=body.organization.slug,
         config=org_config,
-        github_pat=body.integrations.github.pat or None,
-        slack_bot_token=body.integrations.slack.bot_token or None,
-        slack_signing_secret=body.integrations.slack.signing_secret or None,
+        github_pat=encrypt_secret(body.integrations.github.pat)
+        if body.integrations.github.pat
+        else None,
+        slack_bot_token=encrypt_secret(body.integrations.slack.bot_token)
+        if body.integrations.slack.bot_token
+        else None,
+        slack_signing_secret=encrypt_secret(body.integrations.slack.signing_secret)
+        if body.integrations.slack.signing_secret
+        else None,
         mcp_token_hash=hash_password(mcp_token),
     )
     db.add(org)

@@ -94,5 +94,6 @@ class KnowledgeItemRead(BaseModel):
     source: str | None = None
     source_ref: str | None = Field(None, alias="sourceRef")
     feature_status: str | None = Field(None, alias="featureStatus")
+    repo_id: uuid.UUID | None = Field(None, alias="repoId")
 
     model_config = {"populate_by_name": True, "from_attributes": True}

@@ -8,7 +8,7 @@ export interface ConnectionsState {
     localPath: string
     type: 'workspace' | 'single-repo'
   }
-  github: { enabled: boolean; pat: string }
+  github: { enabled: boolean; pat: string; org: string }
   slack: { enabled: boolean; botToken: string; signingSecret: string }
   aiConfig: {
     preset: string
@@ -21,13 +21,14 @@ export interface ConnectionsState {
   scan: {
     timeoutSeconds: number
     maxTurns: number
+    autoCreateMembers: boolean
   }
 }
 
 function emptyState(): ConnectionsState {
   return {
     sourceCode: { localPath: '', type: 'single-repo' },
-    github: { enabled: false, pat: '' },
+    github: { enabled: false, pat: '', org: '' },
     slack: { enabled: false, botToken: '', signingSecret: '' },
     aiConfig: {
       preset: 'hybrid',
@@ -40,6 +41,7 @@ function emptyState(): ConnectionsState {
     scan: {
       timeoutSeconds: 300,
       maxTurns: 40,
+      autoCreateMembers: true,
     },
   }
 }
@@ -127,6 +129,17 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function setRepoStatus(repoId: string, status: 'active' | 'ignored'): Promise<boolean> {
+    try {
+      await api.patch(`/v1/settings/repos/${repoId}/status`, { status })
+      await fetchRepos()
+      return true
+    } catch {
+      error.value = 'Failed to update repository status.'
+      return false
+    }
+  }
+
   return {
     connections,
     loading,
@@ -140,5 +153,6 @@ export const useSettingsStore = defineStore('settings', () => {
     fetchRepos,
     addRepo,
     removeRepo,
+    setRepoStatus,
   }
 })

@@ -11,12 +11,13 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   const searching = ref(false)
   const error = ref<string | null>(null)
 
-  async function fetchItems(category?: string): Promise<void> {
+  async function fetchItems(category?: string, repoId?: string): Promise<void> {
     loading.value = true
     error.value = null
     try {
       const params: Record<string, string | number> = { limit: 200 }
       if (category) params.category = category
+      if (repoId) params.repoId = repoId
       const { data } = await api.get('/v1/skills/knowledge', { params })
       items.value = data
       searchResults.value = []

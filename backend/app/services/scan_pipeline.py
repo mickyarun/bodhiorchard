@@ -12,7 +12,9 @@ from pathlib import Path
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import hash_password
 from app.models.skill_profile import SkillProfile
+from app.models.user import User
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.skill_profile import SkillProfileRepository
@@ -228,6 +230,11 @@ async def run_scan_pipeline(
             user_repo = UserRepository(db)
             email_to_user = await user_repo.get_email_map(org_id)
 
+            # Load tracked repo records for SHA lookup and post-scan updates
+            from app.repositories.tracked_repository import TrackedRepoRepository
+
+            tracked_repo_repo = TrackedRepoRepository(db, org_id=org_id)
+
             # On full scan, delete old scan-sourced feature items up front
             # (PRD-sourced items are preserved — they represent user intent)
             ki_repo = KnowledgeItemRepository(db, org_id=org_id)
@@ -262,9 +269,15 @@ async def run_scan_pipeline(
                 scan_status.status = "analyzing_changes"
                 scan_status.progress_pct = base_pct
 
-                knowledge_cfg = config.get("knowledge") or {}
-                repo_shas = knowledge_cfg.get("repo_shas", {})
-                last_sha = repo_shas.get(repo_path) or knowledge_cfg.get("last_commit_sha")
+                # Look up last SHA from tracked_repositories table
+                tracked_repo = await tracked_repo_repo.get_by_path(repo_path)
+                last_sha = tracked_repo.head_sha if tracked_repo else None
+                # Fallback to legacy config for repos not yet in the table
+                if not last_sha:
+                    knowledge_cfg = config.get("knowledge") or {}
+                    last_sha = knowledge_cfg.get("repo_shas", {}).get(
+                        repo_path
+                    ) or knowledge_cfg.get("last_commit_sha")
                 is_incremental = False
                 deleted_files: list[str] = []
 
@@ -381,6 +394,28 @@ async def run_scan_pipeline(
                 scan_status.progress_pct = base_pct + int(repo_pct_range * 0.6)
 
                 skill_entries = await analyze_repo_skills(repo_path)
+
+                # Auto-create members from git authors if enabled
+                auto_create = scan_cfg.get("auto_create_members", True)
+                if auto_create and skill_entries:
+                    # Refresh map to catch users created by earlier repos
+                    email_to_user = await user_repo.get_email_map(org_id)
+                    seen_emails: set[str] = set()
+                    for entry in skill_entries:
+                        email_lower = entry.email.lower()
+                        if email_lower in email_to_user or email_lower in seen_emails:
+                            continue
+                        seen_emails.add(email_lower)
+                        new_user = User(
+                            org_id=org_id,
+                            email=entry.email,
+                            name=entry.author_name,
+                            password_hash=hash_password("changeme123"),
+                            is_active=True,
+                        )
+                        db.add(new_user)
+                    await db.flush()
+                    email_to_user = await user_repo.get_email_map(org_id)
 
                 sp_repo = SkillProfileRepository(db, org_id=org_id)
                 for entry in skill_entries:
@@ -629,9 +664,19 @@ async def run_scan_pipeline(
             actual_features = await ki_repo.count_active(category="feature_registry")
 
             # --- Phase G: Save last commit SHAs + scan results ---
+            # Update tracked_repositories with new SHAs and counts (via repo_id FK)
+            for rp, sha in new_shas.items():
+                tracked = await tracked_repo_repo.get_by_path(rp)
+                if tracked:
+                    k_count = await ki_repo.count_by_repo_id(tracked.id)
+                    f_count = await ki_repo.count_by_repo_id(
+                        tracked.id, category="feature_registry"
+                    )
+                    await tracked_repo_repo.update_after_scan(rp, sha, k_count, f_count)
+
+            # Legacy config compat
             config.setdefault("knowledge", {})
             config["knowledge"]["repo_shas"] = new_shas
-            # Keep backward compat for single-repo mode
             if len(repo_paths) == 1 and new_shas:
                 config["knowledge"]["last_commit_sha"] = next(iter(new_shas.values()))
             # Persist last scan results for the stats endpoint

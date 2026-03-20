@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
+from app.core.encryption import decrypt_secret
 from app.mcp.auth import verify_mcp_token
 from app.models.knowledge_item import KnowledgeItem
 from app.models.organization import Organization
@@ -531,7 +532,8 @@ async def handle_post_slack_message(
     message = params.get("message", "")
     thread_ts = params.get("thread_ts")
 
-    if not org.slack_bot_token:
+    bot_token = decrypt_secret(org.slack_bot_token or "")
+    if not bot_token:
         return {"success": False, "error": "Slack bot token not configured for this organization"}
 
     payload: dict[str, str] = {
@@ -546,7 +548,7 @@ async def handle_post_slack_message(
             resp = await client.post(
                 "https://slack.com/api/chat.postMessage",
                 json=payload,
-                headers={"Authorization": f"Bearer {org.slack_bot_token}"},
+                headers={"Authorization": f"Bearer {bot_token}"},
             )
             data = resp.json()
             if not data.get("ok"):
@@ -681,6 +683,16 @@ async def handle_write_feature_registry(
         feature_status="implemented",
     )
 
+    # Resolve repo_id from repo_name for FK link
+    repo_id = None
+    if repo_name:
+        from app.repositories.tracked_repository import TrackedRepoRepository
+
+        tr_repo = TrackedRepoRepository(db, org_id=org.id)
+        tracked = await tr_repo.get_by_name(repo_name)
+        if tracked:
+            repo_id = tracked.id
+
     # 1. Try exact-title upsert
     ki_repo = KnowledgeItemRepository(db, org_id=org.id)
     item = await ki_repo.get_by_title_and_category(title, "feature_registry")
@@ -693,6 +705,8 @@ async def handle_write_feature_registry(
         item.embedding = None  # Reset for re-embedding
         item.is_active = True
         item.feature_status = "implemented"
+        if repo_id:
+            item.repo_id = repo_id
     else:
         # 2. Check for PLANNED/IN_PROGRESS items to upgrade via semantic match
         try:
@@ -716,6 +730,8 @@ async def handle_write_feature_registry(
                     matched_item.embedding = None  # Reset for re-embedding
                     matched_item.is_active = True
                     matched_item.feature_status = "implemented"
+                    if repo_id:
+                        matched_item.repo_id = repo_id
                     item = matched_item
                     logger.info(
                         "feature_upgraded_from_planned",
@@ -737,6 +753,7 @@ async def handle_write_feature_registry(
                 tags=params["tags"],
                 is_active=True,
                 feature_status="implemented",
+                repo_id=repo_id,
             )
             await ki_repo.add(item)
 

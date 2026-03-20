@@ -3,7 +3,16 @@
     <v-card color="surface">
       <v-card-title class="d-flex align-center ga-2 py-3">
         <v-icon icon="mdi-folder-open-outline" size="20" />
-        <span class="text-body-1 font-weight-medium">Select Directory</span>
+        <span class="text-body-1 font-weight-medium">Select Repositories</span>
+        <v-spacer />
+        <v-chip
+          v-if="selectedPaths.size > 0"
+          size="small"
+          variant="tonal"
+          color="primary"
+        >
+          {{ selectedPaths.size }} selected
+        </v-chip>
       </v-card-title>
 
       <!-- Breadcrumb path bar -->
@@ -28,6 +37,25 @@
               {{ segment.name }}
             </v-btn>
           </template>
+        </div>
+      </div>
+
+      <!-- Selected repos chips -->
+      <div v-if="selectedPaths.size > 0" class="px-4 pb-2">
+        <div class="d-flex ga-1 flex-wrap">
+          <v-chip
+            v-for="p in selectedPaths"
+            :key="p"
+            closable
+            size="small"
+            variant="tonal"
+            color="primary"
+            @click:close="selectedPaths.delete(p); triggerReactivity()"
+          >
+            <v-icon icon="mdi-source-repository" size="14" start />
+            {{ p.split('/').pop() }}
+            <v-tooltip activator="parent" location="top" :text="p" />
+          </v-chip>
         </div>
       </div>
 
@@ -57,8 +85,8 @@
           <v-list-item
             v-if="parentPath !== null"
             :value="parentPath"
-            @click="navigateTo(parentPath!)"
             class="dir-item"
+            @click="navigateTo(parentPath!)"
           >
             <template #prepend>
               <v-icon icon="mdi-arrow-up" size="20" class="text-medium-emphasis" />
@@ -70,14 +98,31 @@
             v-for="dir in directories"
             :key="dir.path"
             :value="dir.path"
-            @click="navigateTo(dir.path)"
             class="dir-item"
+            @click="navigateTo(dir.path)"
           >
             <template #prepend>
+              <!-- Checkbox for git repos -->
+              <v-checkbox-btn
+                v-if="dir.is_git_repo"
+                :model-value="selectedPaths.has(dir.path)"
+                color="primary"
+                density="compact"
+                class="me-1"
+                @click.stop
+                @update:model-value="toggleRepo(dir.path)"
+              />
               <v-icon
-                :icon="dir.is_git_repo ? 'mdi-source-repository' : 'mdi-folder-outline'"
+                v-else
+                icon="mdi-folder-outline"
+                size="20"
+                class="me-1"
+              />
+              <v-icon
+                :icon="dir.is_git_repo ? 'mdi-source-repository' : ''"
                 :color="dir.is_git_repo ? 'primary' : undefined"
                 size="20"
+                :class="{ 'invisible': !dir.is_git_repo }"
               />
             </template>
             <v-list-item-title class="text-body-2">{{ dir.name }}</v-list-item-title>
@@ -91,13 +136,10 @@
               >
                 git
               </v-chip>
-              <v-btn
-                icon="mdi-check"
-                size="x-small"
-                variant="text"
-                color="primary"
-                density="compact"
-                @click.stop="selectDirectory(dir.path)"
+              <v-icon
+                icon="mdi-chevron-right"
+                size="18"
+                class="text-medium-emphasis ml-1"
               />
             </template>
           </v-list-item>
@@ -113,12 +155,23 @@
         </div>
         <v-btn variant="text" size="small" @click="dialogOpen = false">Cancel</v-btn>
         <v-btn
+          v-if="!multiSelect"
           variant="flat"
           color="primary"
           size="small"
-          @click="selectDirectory(currentPath)"
+          @click="selectSingleAndClose(currentPath)"
         >
           Select This Folder
+        </v-btn>
+        <v-btn
+          v-else
+          variant="flat"
+          color="primary"
+          size="small"
+          :disabled="selectedPaths.size === 0"
+          @click="confirmMultiSelect"
+        >
+          Add {{ selectedPaths.size }} Repo{{ selectedPaths.size !== 1 ? 's' : '' }}
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -137,11 +190,15 @@ interface DirectoryEntry {
 
 const emit = defineEmits<{
   select: [path: string]
+  'select-multiple': [paths: string[]]
 }>()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   initialPath?: string
-}>()
+  multiSelect?: boolean
+}>(), {
+  multiSelect: false,
+})
 
 const dialogOpen = ref(false)
 const loading = ref(false)
@@ -149,6 +206,9 @@ const error = ref('')
 const currentPath = ref('')
 const parentPath = ref<string | null>(null)
 const directories = ref<DirectoryEntry[]>([])
+const selectedPaths = ref<Set<string>>(new Set())
+// Reactive trigger for Set mutations
+const reactivityKey = ref(0)
 
 const pathSegments = computed(() => {
   if (!currentPath.value) return []
@@ -161,9 +221,14 @@ const pathSegments = computed(() => {
 
 watch(dialogOpen, (open) => {
   if (open) {
+    selectedPaths.value = new Set()
     navigateTo(props.initialPath || '')
   }
 })
+
+function triggerReactivity(): void {
+  reactivityKey.value++
+}
 
 function open(): void {
   dialogOpen.value = true
@@ -188,8 +253,27 @@ async function navigateTo(path: string): Promise<void> {
   }
 }
 
-function selectDirectory(path: string): void {
+function toggleRepo(path: string): void {
+  if (selectedPaths.value.has(path)) {
+    selectedPaths.value.delete(path)
+  } else {
+    selectedPaths.value.add(path)
+  }
+  triggerReactivity()
+}
+
+function selectSingleAndClose(path: string): void {
   emit('select', path)
+  dialogOpen.value = false
+}
+
+function confirmMultiSelect(): void {
+  const paths = [...selectedPaths.value]
+  if (paths.length === 1) {
+    emit('select', paths[0])
+  } else {
+    emit('select-multiple', paths)
+  }
   dialogOpen.value = false
 }
 
@@ -211,5 +295,11 @@ defineExpose({ open })
 
 .dir-item:hover {
   background: rgba(255, 255, 255, 0.04);
+}
+
+.invisible {
+  visibility: hidden;
+  width: 0;
+  margin: 0;
 }
 </style>

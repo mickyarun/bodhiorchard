@@ -36,6 +36,12 @@ class KnowledgeItem(BaseModel):
     embedding = mapped_column(Vector(768), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     feature_status: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    repo_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tracked_repositories.id"),
+        nullable=True,
+        index=True,
+    )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )

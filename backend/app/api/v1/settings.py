@@ -1,18 +1,24 @@
 """Settings management endpoints for the authenticated user's organization."""
 
 import secrets
+import uuid
 from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.deps import get_current_user, get_db
+from app.core.encryption import decrypt_secret, encrypt_secret
 from app.core.security import hash_password
+from app.models.tracked_repository import RepoStatus
 from app.models.user import User
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.organization import OrganizationRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
+from app.repositories.user import UserRepository
 from app.schemas.settings import (
     AddRepoRequest,
     AIConfigSettings,
@@ -20,6 +26,7 @@ from app.schemas.settings import (
     ConnectionsUpdate,
     GitHubSettings,
     RepoInfo,
+    RepoStatusRequest,
     ScanSettings,
     SlackSettings,
     SourceCodeSettings,
@@ -64,24 +71,26 @@ async def get_connections(
         ),
         github=GitHubSettings(
             enabled=github_cfg.get("enabled", False),
-            pat=_mask_secret(org.github_pat),
+            pat=_mask_secret(decrypt_secret(org.github_pat or "")),
+            org=github_cfg.get("org", ""),
         ),
         slack=SlackSettings(
             enabled=slack_cfg.get("enabled", False),
-            botToken=_mask_secret(org.slack_bot_token),
-            signingSecret=_mask_secret(org.slack_signing_secret),
+            botToken=_mask_secret(decrypt_secret(org.slack_bot_token or "")),
+            signingSecret=_mask_secret(decrypt_secret(org.slack_signing_secret or "")),
         ),
         aiConfig=AIConfigSettings(
             preset=llm_cfg.get("preset", "hybrid"),
             ollamaUrl=llm_cfg.get("ollama_url", "http://localhost:11434"),
             ollamaModel=llm_cfg.get("ollama_model", "llama3:8b"),
             cloudProvider=llm_cfg.get("cloud_provider", "anthropic"),
-            cloudApiKey=_mask_secret(llm_cfg.get("cloud_api_key")),
+            cloudApiKey=_mask_secret(decrypt_secret(llm_cfg.get("cloud_api_key", ""))),
             cloudModel=llm_cfg.get("cloud_model", "claude-sonnet-4-5-20250514"),
         ),
         scan=ScanSettings(
             timeoutSeconds=scan_cfg.get("timeout_seconds", 300),
             maxTurns=scan_cfg.get("max_turns", 40),
+            autoCreateMembers=scan_cfg.get("auto_create_members", True),
         ),
     )
 
@@ -119,18 +128,25 @@ async def update_connections(
     # GitHub
     if body.github is not None:
         config.setdefault("integrations", {})
-        config["integrations"]["github"] = {"enabled": body.github.enabled}
-        if body.github.pat and not body.github.pat.endswith("****"):
-            org.github_pat = body.github.pat or None
+        is_new_pat = bool(body.github.pat and not body.github.pat.endswith("****"))
+        # Auto-enable when a real PAT is provided
+        enabled = body.github.enabled or is_new_pat
+        config["integrations"]["github"] = {"enabled": enabled, "org": body.github.org}
+        if is_new_pat:
+            org.github_pat = encrypt_secret(body.github.pat) if body.github.pat else None
 
     # Slack
     if body.slack is not None:
         config.setdefault("integrations", {})
         config["integrations"]["slack"] = {"enabled": body.slack.enabled}
         if body.slack.bot_token and not body.slack.bot_token.endswith("****"):
-            org.slack_bot_token = body.slack.bot_token or None
+            org.slack_bot_token = (
+                encrypt_secret(body.slack.bot_token) if body.slack.bot_token else None
+            )
         if body.slack.signing_secret and not body.slack.signing_secret.endswith("****"):
-            org.slack_signing_secret = body.slack.signing_secret or None
+            org.slack_signing_secret = (
+                encrypt_secret(body.slack.signing_secret) if body.slack.signing_secret else None
+            )
 
     # AI config
     if body.ai_config is not None:
@@ -141,7 +157,7 @@ async def update_connections(
         llm["cloud_provider"] = body.ai_config.cloud_provider
         llm["cloud_model"] = body.ai_config.cloud_model
         if body.ai_config.cloud_api_key and not body.ai_config.cloud_api_key.endswith("****"):
-            llm["cloud_api_key"] = body.ai_config.cloud_api_key
+            llm["cloud_api_key"] = encrypt_secret(body.ai_config.cloud_api_key)
         config["llm"] = llm
 
     # Scan settings
@@ -149,9 +165,11 @@ async def update_connections(
         config["scan"] = {
             "timeout_seconds": body.scan.timeout_seconds,
             "max_turns": body.scan.max_turns,
+            "auto_create_members": body.scan.auto_create_members,
         }
 
     org.config = config
+    flag_modified(org, "config")
     await db.flush()
     await db.refresh(org)
 
@@ -217,56 +235,33 @@ async def list_repos(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[RepoInfo]:
-    """List tracked repositories with knowledge item counts.
+    """List tracked repositories from the database.
 
     Args:
         current_user: The authenticated user.
         db: The async database session.
 
     Returns:
-        List of RepoInfo with per-repo stats.
+        List of RepoInfo (active and ignored repos).
     """
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
-    config = org.config or {}
-    source_code = config.get("source_code", {})
-    knowledge_cfg = config.get("knowledge", {})
-    repo_shas: dict[str, str] = knowledge_cfg.get("repo_shas", {})
-    last_scan = knowledge_cfg.get("last_scan")
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    repos = await repo_repo.list_visible()
 
-    # Discover repo paths
-    repo_root = source_code.get("local_path", "")
-    source_type = source_code.get("type", "single-repo")
-    repo_paths: list[str] = []
-
-    if repo_root:
-        root = Path(repo_root)
-        if source_type == "workspace" and root.exists():
-            for child in sorted(root.iterdir()):
-                if child.is_dir() and (child / ".git").exists():
-                    repo_paths.append(str(child))
-        elif root.exists() and (root / ".git").exists():
-            repo_paths.append(str(root))
-
-    ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-    result: list[RepoInfo] = []
-    for rp in repo_paths:
-        name = Path(rp).name
-        prefix = f"[{name}]"
-        k_count = await ki_repo.count_by_title_prefix(prefix)
-        f_count = await ki_repo.count_features_by_title_prefix(prefix)
-        result.append(
-            RepoInfo(
-                path=rp,
-                name=name,
-                lastScanned=last_scan,
-                sha=repo_shas.get(name),
-                knowledgeCount=k_count,
-                featureCount=f_count,
-            )
+    return [
+        RepoInfo(
+            id=str(r.id),
+            path=r.path,
+            name=r.name,
+            status=r.status.value,
+            lastScanned=(r.last_scanned_at.isoformat() if r.last_scanned_at else None),
+            sha=r.head_sha,
+            knowledgeCount=r.knowledge_count,
+            featureCount=r.feature_count,
         )
-
-    return result
+        for r in repos
+    ]
 
 
 @router.post("/repos", response_model=RepoInfo)
@@ -275,7 +270,7 @@ async def add_repo(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RepoInfo:
-    """Add a repository path to the workspace.
+    """Add a repository path. Any valid git repo path is accepted.
 
     Args:
         body: Request with the absolute path.
@@ -299,37 +294,18 @@ async def add_repo(
 
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
-    config = dict(org.config or {})
-    source_code = config.get("source_code", {})
-    current_root = source_code.get("local_path", "")
-    source_type = source_code.get("type", "single-repo")
-
-    # If we're in workspace mode, check the repo is under the workspace root
-    if source_type == "workspace" and current_root:
-        workspace = Path(current_root).resolve()
-        if repo_path.parent != workspace:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Repository must be under workspace root: {current_root}",
-            )
-    elif source_type == "single-repo":
-        # Switch to workspace mode using the parent as workspace root
-        config["source_code"] = {
-            "local_path": str(repo_path.parent),
-            "type": "workspace",
-        }
-
-    org.config = config
-    await db.flush()
-    await db.refresh(org)
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    repo = await repo_repo.upsert(str(repo_path), repo_path.name)
 
     return RepoInfo(
-        path=str(repo_path),
-        name=repo_path.name,
+        id=str(repo.id),
+        path=repo.path,
+        name=repo.name,
+        status=repo.status.value,
         lastScanned=None,
-        sha=None,
-        knowledgeCount=0,
-        featureCount=0,
+        sha=repo.head_sha,
+        knowledgeCount=repo.knowledge_count,
+        featureCount=repo.feature_count,
     )
 
 
@@ -339,7 +315,7 @@ async def remove_repo(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Remove a tracked repository and deactivate its knowledge items.
+    """Remove a tracked repository (soft delete) and deactivate its knowledge.
 
     Args:
         body: Request with the path to remove.
@@ -351,26 +327,223 @@ async def remove_repo(
     """
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
-    config = dict(org.config or {})
-    knowledge_cfg = config.get("knowledge", {})
-    repo_shas: dict[str, str] = dict(knowledge_cfg.get("repo_shas", {}))
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    repo = await repo_repo.get_by_path(body.path)
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found.",
+        )
 
-    repo_name = Path(body.path).name
-    repo_shas.pop(repo_name, None)
-    knowledge_cfg["repo_shas"] = repo_shas
-    config["knowledge"] = knowledge_cfg
-    org.config = config
-    await db.flush()
+    await repo_repo.set_status(repo.id, RepoStatus.REMOVED)
 
     # Deactivate knowledge items for this repo
     ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-    prefix = f"[{repo_name}]"
+    prefix = f"[{repo.name}]"
     deactivated = await ki_repo.bulk_deactivate_by_titles(
         await ki_repo.list_titles_with_prefix(f"{prefix}%"),
         category="feature_registry",
     )
 
     return {"removed": body.path, "deactivated": deactivated}
+
+
+@router.patch("/repos/{repo_id}/status", response_model=RepoInfo)
+async def update_repo_status(
+    repo_id: uuid.UUID,
+    body: RepoStatusRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RepoInfo:
+    """Change a repo's status (active/ignored).
+
+    Args:
+        repo_id: The tracked repository UUID.
+        body: New status.
+        current_user: The authenticated user.
+        db: The async database session.
+
+    Returns:
+        Updated RepoInfo.
+    """
+    if body.status not in ("active", "ignored"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be 'active' or 'ignored'.",
+        )
+
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    repo = await repo_repo.set_status(repo_id, RepoStatus(body.status))
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found.",
+        )
+
+    return RepoInfo(
+        id=str(repo.id),
+        path=repo.path,
+        name=repo.name,
+        status=repo.status.value,
+        lastScanned=(repo.last_scanned_at.isoformat() if repo.last_scanned_at else None),
+        sha=repo.head_sha,
+        knowledgeCount=repo.knowledge_count,
+        featureCount=repo.feature_count,
+    )
+
+
+@router.get("/github/org-members")
+async def list_github_org_members(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """List members of the configured GitHub organization.
+
+    Args:
+        current_user: The authenticated user.
+        db: The async database session.
+
+    Returns:
+        List of GitHub org member dicts (login, name, avatar_url, email).
+    """
+    import httpx
+
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    if not org.github_pat:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub is not connected. Add a PAT in Settings.",
+        )
+
+    # Decrypt the stored PAT
+    pat = decrypt_secret(org.github_pat)
+    if not pat:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub PAT could not be decrypted. Please re-enter it in Settings.",
+        )
+
+    # Debug: log PAT details to diagnose auth issues
+    pat_preview = f"{pat[:4]}...{pat[-4:]}" if len(pat) > 8 else "***short***"
+    logger.info(
+        "github_pat_debug",
+        pat_length=len(pat),
+        pat_preview=pat_preview,
+        starts_with_github=pat.startswith("github_pat_"),
+    )
+
+    config = org.config or {}
+    github_cfg = config.get("integrations", {}).get("github", {})
+    github_org = github_cfg.get("org", "")
+    if not github_org:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub organization name is not configured in Settings.",
+        )
+
+    # Fetch org members (paginated, up to 100)
+    gh_headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with httpx.AsyncClient() as client:
+        # Try Bearer first (fine-grained PATs), fall back to token (classic)
+        for auth_prefix in ("Bearer", "token"):
+            gh_headers["Authorization"] = f"{auth_prefix} {pat}"
+            resp = await client.get(
+                f"https://api.github.com/orgs/{github_org}/members",
+                params={"per_page": 100},
+                headers=gh_headers,
+                timeout=15,
+            )
+            logger.info(
+                "github_api_attempt",
+                auth_prefix=auth_prefix,
+                status=resp.status_code,
+                body=resp.text[:300] if resp.text else "",
+            )
+            if resp.status_code != 401:
+                break
+
+        if resp.status_code == 401:
+            gh_msg = resp.json().get("message", "") if resp.text else ""
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=(
+                    f"GitHub PAT is unauthorized: {gh_msg}. "
+                    "Ensure the token has 'Members: Read' under "
+                    "Organization permissions."
+                ),
+            )
+        if resp.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "GitHub PAT lacks required permissions. Go to GitHub → Settings → "
+                    "Developer settings → Fine-grained tokens → edit your token and "
+                    "add 'Members: Read' under Organization permissions."
+                ),
+            )
+        if resp.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"GitHub organization '{github_org}' not found. "
+                "Check the org name in Settings.",
+            )
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"GitHub API error ({resp.status_code}): {resp.text[:200]}",
+            )
+        members = resp.json()
+
+    # Fetch real profile data (name + public email) for each member
+    import asyncio
+
+    async def _fetch_profile(client: httpx.AsyncClient, login: str) -> dict[str, str | None]:
+        try:
+            r = await client.get(
+                f"https://api.github.com/users/{login}",
+                headers=gh_headers,
+                timeout=10,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                return {
+                    "name": data.get("name") or login,
+                    "email": data.get("email"),
+                }
+        except Exception:
+            pass
+        return {"name": login, "email": None}
+
+    async with httpx.AsyncClient() as profile_client:
+        gh_headers["Authorization"] = f"Bearer {pat}"
+        profiles = await asyncio.gather(
+            *[_fetch_profile(profile_client, m.get("login", "")) for m in members]
+        )
+
+    # Filter out members already added to FlowDev
+    user_repo = UserRepository(db, org_id=org.id)
+    existing_users = await user_repo.list_by_org(org.id)
+    existing_github = {u.github_username.lower() for u in existing_users if u.github_username}
+
+    results = []
+    for m, profile in zip(members, profiles, strict=True):
+        login = m.get("login", "")
+        results.append(
+            {
+                "login": login,
+                "name": profile["name"],
+                "avatar_url": m.get("avatar_url", ""),
+                "email": profile["email"],
+                "already_added": login.lower() in existing_github,
+            }
+        )
+    return results
 
 
 def _mask_secret(value: str | None) -> str:

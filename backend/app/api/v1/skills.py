@@ -13,6 +13,7 @@ from app.models.user import User
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.skill_profile import SkillProfileRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.skills import (
     KnowledgeItemRead,
     KnowledgeSearchRequest,
@@ -54,46 +55,31 @@ async def trigger_scan(
     """
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
-    config = org.config or {}
-    source_code = config.get("source_code", {})
-    repo_path = source_code.get("local_path", "")
 
-    if not repo_path:
+    # Read active repos from the tracked_repositories table
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    repo_paths = await repo_repo.get_active_paths()
+
+    if not repo_paths:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No source code path configured. Set it in Settings > Connections.",
+            detail="No repositories tracked. Add repos in Settings.",
         )
 
-    source_type = source_code.get("type", "single-repo")
-    root = Path(repo_path)
+    # Validate paths still exist on disk
+    valid_paths: list[str] = []
+    for rp in repo_paths:
+        if Path(rp).exists() and (Path(rp) / ".git").exists():
+            valid_paths.append(rp)
+        else:
+            logger.warning("scan_skip_missing_repo", path=rp)
 
-    if not root.exists():
+    if not valid_paths:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Path does not exist: {repo_path}",
+            detail="None of the tracked repositories exist on disk.",
         )
-
-    # Discover repo paths based on source type
-    repo_paths: list[str] = []
-    if source_type == "workspace":
-        # Workspace mode: find git repos in immediate subdirectories
-        for child in sorted(root.iterdir()):
-            if child.is_dir() and (child / ".git").exists():
-                repo_paths.append(str(child))
-        if not repo_paths:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No git repositories found under workspace: {repo_path}",
-            )
-        logger.info("workspace_repos_found", path=repo_path, count=len(repo_paths))
-    else:
-        # Single repo mode: expect .git at root
-        if not (root / ".git").exists():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a valid git repository: {repo_path}",
-            )
-        repo_paths = [repo_path]
+    repo_paths = valid_paths
 
     scan_id = str(uuid.uuid4())
     scan_status = ScanStatus(scanId=scan_id, status="started", progressPct=0)
@@ -211,12 +197,16 @@ async def get_knowledge_item(
         source=item.source,
         sourceRef=item.source_ref,
         featureStatus=item.feature_status,
+        repoId=item.repo_id,
     )
 
 
 @router.get("/knowledge", response_model=list[KnowledgeItemRead])
 async def list_knowledge(
     category: str | None = Query(None, description="Filter by category"),
+    repo_id: uuid.UUID | None = Query(
+        None, description="Filter by tracked repository", alias="repoId"
+    ),
     limit: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -225,6 +215,7 @@ async def list_knowledge(
 
     Args:
         category: Optional category filter.
+        repo_id: Optional tracked repository filter.
         limit: Maximum number of items to return.
         current_user: The authenticated user.
         db: The async database session.
@@ -235,7 +226,7 @@ async def list_knowledge(
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-    items = await ki_repo.list_active(category=category, limit=limit)
+    items = await ki_repo.list_active(category=category, repo_id=repo_id, limit=limit)
 
     return [
         KnowledgeItemRead(
@@ -247,6 +238,7 @@ async def list_knowledge(
             source=item.source,
             sourceRef=item.source_ref,
             featureStatus=item.feature_status,
+            repoId=item.repo_id,
         )
         for item in items
     ]

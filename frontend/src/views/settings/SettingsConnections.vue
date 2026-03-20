@@ -1,125 +1,107 @@
 <template>
-  <div class="pa-6">
-    <div class="d-flex align-center justify-space-between mb-6">
-      <div>
-        <div class="text-h5 font-weight-bold">Settings</div>
-        <div class="text-body-2 text-medium-emphasis">
-          Manage connections, integrations, and AI configuration
+  <div class="settings-page">
+    <!-- Fixed header -->
+    <div class="settings-header pa-6 pb-4">
+      <div class="d-flex align-center justify-space-between">
+        <div>
+          <div class="text-h5 font-weight-bold">Settings</div>
+          <div class="text-body-2 text-medium-emphasis">
+            Manage connections, integrations, and AI configuration
+          </div>
         </div>
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-content-save-outline"
+          :loading="settingsStore.saving"
+          @click="save"
+        >
+          Save Changes
+        </v-btn>
       </div>
-      <v-btn
-        color="primary"
-        prepend-icon="mdi-content-save-outline"
-        :loading="settingsStore.saving"
-        @click="save"
+
+      <!-- Alerts in header area -->
+      <v-alert v-if="settingsStore.error" type="error" variant="tonal" class="mt-4" closable>
+        {{ settingsStore.error }}
+      </v-alert>
+      <v-alert
+        v-if="settingsStore.saveSuccess"
+        type="success"
+        variant="tonal"
+        class="mt-4"
+        closable
+        @click:close="settingsStore.saveSuccess = false"
       >
-        Save Changes
-      </v-btn>
+        Settings saved successfully.
+      </v-alert>
     </div>
 
-    <!-- Loading -->
-    <div v-if="settingsStore.loading" class="d-flex justify-center py-12">
-      <v-progress-circular indeterminate color="primary" />
-    </div>
+    <!-- Scrollable content -->
+    <div class="settings-content px-6 pb-6">
+      <!-- Loading -->
+      <div v-if="settingsStore.loading" class="d-flex justify-center py-12">
+        <v-progress-circular indeterminate color="primary" />
+      </div>
 
-    <!-- Error -->
-    <v-alert v-if="settingsStore.error" type="error" variant="tonal" class="mb-4" closable>
-      {{ settingsStore.error }}
-    </v-alert>
-
-    <!-- Success -->
-    <v-alert
-      v-if="settingsStore.saveSuccess"
-      type="success"
-      variant="tonal"
-      class="mb-4"
-      closable
-      @click:close="settingsStore.saveSuccess = false"
-    >
-      Settings saved successfully.
-    </v-alert>
-
-    <template v-if="!settingsStore.loading">
-      <!-- ─── SOURCE CODE ─────────────────────────────────────── -->
+      <template v-if="!settingsStore.loading">
+      <!-- ─── REPOSITORIES ───────────────────────────────────── -->
       <div class="section-header mb-3">
-        <v-icon icon="mdi-source-branch" size="18" color="primary" />
-        <span class="text-body-2 font-weight-medium">Source Code</span>
+        <v-icon icon="mdi-source-repository-multiple" size="18" color="primary" />
+        <span class="text-body-2 font-weight-medium">Repositories</span>
       </div>
 
       <v-card class="pa-5 settings-card mb-6" color="surface">
-        <div class="d-flex align-center ga-3 mb-4">
-          <v-avatar size="36" color="primary" variant="tonal" rounded="lg">
-            <v-icon icon="mdi-code-braces-box" size="22" />
-          </v-avatar>
-          <div>
-            <div class="text-body-2 font-weight-medium">Local Source Code</div>
-            <div class="text-caption text-medium-emphasis">
-              Filesystem path for agent access to your codebase
+        <!-- Scan controls + stats header -->
+        <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-4">
+          <div class="d-flex align-center ga-3">
+            <v-avatar size="36" color="primary" variant="tonal" rounded="lg">
+              <v-icon icon="mdi-magnify-scan" size="22" />
+            </v-avatar>
+            <div>
+              <div class="text-body-2 font-weight-medium">Code Index</div>
+              <div class="text-caption text-medium-emphasis">
+                Scan repositories to index features and skill profiles
+              </div>
             </div>
+          </div>
+          <div class="d-flex align-center ga-2">
+            <v-tooltip content-class="scan-tooltip" location="bottom" max-width="280">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  color="primary"
+                  variant="tonal"
+                  prepend-icon="mdi-magnify-scan"
+                  :loading="scanStatus === 'running'"
+                  :disabled="settingsStore.repos.length === 0"
+                  @click="confirmAndScan(false)"
+                >
+                  Scan
+                </v-btn>
+              </template>
+              Incremental scan — only indexes changes since the last scan. Fast and safe; existing items are kept.
+            </v-tooltip>
+            <v-tooltip content-class="scan-tooltip" location="bottom" max-width="280">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  v-if="scanStatus !== 'running'"
+                  variant="outlined"
+                  size="small"
+                  prepend-icon="mdi-refresh"
+                  :disabled="settingsStore.repos.length === 0"
+                  @click="confirmAndScan(true)"
+                >
+                  Full Rescan
+                </v-btn>
+              </template>
+              Rebuilds the entire index from scratch. Use when the index seems out of sync or after major refactors.
+            </v-tooltip>
           </div>
         </div>
 
-        <v-btn-toggle
-          v-model="settingsStore.connections.sourceCode.type"
-          mandatory
-          density="compact"
-          color="primary"
-          variant="outlined"
-          class="mb-3"
-        >
-          <v-btn value="single-repo" size="small" prepend-icon="mdi-source-repository">
-            Single Repo
-          </v-btn>
-          <v-btn value="workspace" size="small" prepend-icon="mdi-folder-multiple-outline">
-            Workspace
-          </v-btn>
-        </v-btn-toggle>
-
-        <v-text-field
-          v-model="settingsStore.connections.sourceCode.localPath"
-          :label="settingsStore.connections.sourceCode.type === 'workspace'
-            ? 'Workspace root (contains multiple repos)'
-            : 'Repository path'"
-          :placeholder="settingsStore.connections.sourceCode.type === 'workspace'
-            ? '/home/user/projects'
-            : '/home/user/projects/my-app'"
-          density="compact"
-          variant="outlined"
-          :hint="settingsStore.connections.sourceCode.type === 'workspace'
-            ? 'FlowDev will scan all repos under this directory'
-            : 'Absolute path to the git repository root'"
-          persistent-hint
-        >
-          <template #prepend-inner>
-            <v-icon
-              icon="mdi-folder-outline"
-              class="cursor-pointer"
-              @click="directoryPicker?.open()"
-            />
-          </template>
-          <template #append-inner>
-            <v-btn
-              variant="text"
-              density="compact"
-              size="small"
-              color="primary"
-              class="text-none"
-              @click="directoryPicker?.open()"
-            >
-              Browse
-            </v-btn>
-          </template>
-        </v-text-field>
-
-        <DirectoryPicker
-          ref="directoryPicker"
-          :initial-path="settingsStore.connections.sourceCode.localPath"
-          @select="(path: string) => settingsStore.connections.sourceCode.localPath = path"
-        />
-
-        <!-- Index Stats -->
+        <!-- Index stats -->
         <v-expand-transition>
-          <div v-if="indexStats && indexStats.knowledgeItems.total > 0" class="mt-4 pt-4" style="border-top: 1px solid rgba(255,255,255,0.06)">
+          <div v-if="indexStats && indexStats.knowledgeItems.total > 0" class="mb-4">
             <div class="d-flex align-center ga-2 mb-3">
               <v-icon icon="mdi-database-check-outline" size="16" color="success" />
               <span class="text-body-2 font-weight-medium">Indexed</span>
@@ -127,7 +109,7 @@
                 {{ formatRelativeTime(indexStats.lastScan.completed_at) }}
               </v-chip>
             </div>
-            <div class="d-flex flex-wrap ga-3 mb-3">
+            <div class="d-flex flex-wrap ga-3">
               <div class="index-stat">
                 <div class="text-h6 font-weight-bold">{{ indexStats.knowledgeItems.byCategory.feature_registry || 0 }}</div>
                 <div class="text-caption text-medium-emphasis">Features</div>
@@ -141,110 +123,179 @@
                 <div class="text-caption text-medium-emphasis">Profiles</div>
               </div>
               <div class="index-stat">
-                <div class="text-h6 font-weight-bold">{{ indexStats.reposTracked }}</div>
+                <div class="text-h6 font-weight-bold">{{ settingsStore.repos.length }}</div>
                 <div class="text-caption text-medium-emphasis">Repos</div>
               </div>
             </div>
           </div>
         </v-expand-transition>
 
-        <!-- Scan Repository -->
-        <div class="mt-4 pt-4" style="border-top: 1px solid rgba(255,255,255,0.06)">
-          <div class="text-caption text-medium-emphasis mb-3">
-            Index codebase features and developer skill profiles.
-          </div>
-          <div class="d-flex align-center ga-2">
-            <v-btn
+        <!-- Scan progress / results -->
+        <v-expand-transition>
+          <div v-if="scanStatus === 'running' && scanProgress > 0" class="mb-4">
+            <v-progress-linear
+              :model-value="scanProgress"
               color="primary"
-              variant="tonal"
-              prepend-icon="mdi-magnify-scan"
-              :loading="scanStatus === 'running'"
-              :disabled="!settingsStore.connections.sourceCode.localPath"
-              @click="confirmAndScan(false)"
-            >
-              Scan Repository
-            </v-btn>
-            <v-btn
-              v-if="scanStatus !== 'running'"
-              variant="outlined"
-              size="small"
-              prepend-icon="mdi-refresh"
-              :disabled="!settingsStore.connections.sourceCode.localPath"
-              @click="confirmAndScan(true)"
-            >
-              Full Rescan
-            </v-btn>
+              class="mb-2"
+              rounded
+              height="6"
+            />
+            <div class="d-flex align-center ga-2">
+              <div class="text-caption text-medium-emphasis">
+                {{ scanStatusLabel }}... {{ scanProgress }}%
+              </div>
+              <v-btn
+                variant="text"
+                density="compact"
+                size="x-small"
+                icon="mdi-refresh"
+                @click="refreshScanStatus"
+              />
+            </div>
+          </div>
+        </v-expand-transition>
+
+        <v-expand-transition>
+          <v-alert
+            v-if="scanStatus === 'completed'"
+            type="success"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+          >
+            <span class="font-weight-medium">
+              {{ scanResult.scanMode === 'incremental' ? 'Incremental scan' : 'Full scan' }} complete:
+            </span>
+            {{ scanResult.featuresIndexed }} features indexed,
+            {{ scanResult.profilesFound }} skill profiles found.
+            <template v-if="scanResult.staleCleaned > 0">
+              {{ scanResult.staleCleaned }} stale references cleaned.
+            </template>
+            <template v-if="scanResult.unmatchedAuthors.length > 0">
+              <br>Unmatched git authors: {{ scanResult.unmatchedAuthors.join(', ') }}
+            </template>
+          </v-alert>
+        </v-expand-transition>
+
+        <v-expand-transition>
+          <v-alert
+            v-if="scanStatus === 'completed' && scanResult.synthesisWarning"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+          >
+            {{ scanResult.synthesisWarning }}
+          </v-alert>
+        </v-expand-transition>
+
+        <v-expand-transition>
+          <v-alert
+            v-if="scanStatus === 'failed'"
+            type="error"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+          >
+            Scan failed: {{ scanError }}
+          </v-alert>
+        </v-expand-transition>
+
+        <!-- Repository table -->
+        <div class="pt-4" style="border-top: 1px solid rgba(255,255,255,0.06)">
+          <div v-if="settingsStore.reposLoading" class="d-flex justify-center py-4">
+            <v-progress-circular indeterminate size="24" />
           </div>
 
-          <v-expand-transition>
-            <div v-if="scanStatus === 'running' && scanProgress > 0">
-              <v-progress-linear
-                :model-value="scanProgress"
-                color="primary"
-                class="mb-2 mt-3"
-                rounded
-                height="6"
-              />
-              <div class="d-flex align-center ga-2">
-                <div class="text-caption text-medium-emphasis">
-                  {{ scanStatusLabel }}... {{ scanProgress }}%
-                </div>
-                <v-btn
-                  variant="text"
-                  density="compact"
-                  size="x-small"
-                  icon="mdi-refresh"
-                  @click="refreshScanStatus"
-                />
-              </div>
+          <template v-else>
+            <v-table v-if="settingsStore.repos.length > 0" density="compact" class="mb-4">
+              <thead>
+                <tr>
+                  <th>Repository</th>
+                  <th>Path</th>
+                  <th class="text-center">Status</th>
+                  <th class="text-center">Knowledge</th>
+                  <th class="text-center">Features</th>
+                  <th class="text-center">Last SHA</th>
+                  <th style="width: 100px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="repo in settingsStore.repos"
+                  :key="repo.id"
+                  :class="{ 'opacity-50': repo.status === 'ignored' }"
+                >
+                  <td class="font-weight-medium">{{ repo.name }}</td>
+                  <td class="text-caption text-medium-emphasis">{{ repo.path }}</td>
+                  <td class="text-center">
+                    <v-chip
+                      :color="repo.status === 'active' ? 'success' : 'warning'"
+                      size="x-small"
+                      variant="tonal"
+                    >
+                      {{ repo.status }}
+                    </v-chip>
+                  </td>
+                  <td class="text-center">{{ repo.knowledgeCount }}</td>
+                  <td class="text-center">{{ repo.featureCount }}</td>
+                  <td class="text-center">
+                    <v-chip v-if="repo.sha" size="x-small" variant="tonal">
+                      {{ repo.sha?.substring(0, 7) }}
+                    </v-chip>
+                    <span v-else class="text-caption text-medium-emphasis">-</span>
+                  </td>
+                  <td class="text-right">
+                    <v-tooltip
+                      :text="repo.status === 'active' ? 'Ignore (skip in scans)' : 'Activate'"
+                      location="top"
+                      content-class="text-white bg-grey-darken-3"
+                    >
+                      <template #activator="{ props }">
+                        <v-btn
+                          v-bind="props"
+                          :icon="repo.status === 'active' ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                          size="x-small"
+                          variant="text"
+                          :color="repo.status === 'active' ? 'warning' : 'success'"
+                          @click="settingsStore.setRepoStatus(repo.id, repo.status === 'active' ? 'ignored' : 'active')"
+                        />
+                      </template>
+                    </v-tooltip>
+                    <v-tooltip text="Remove" location="top" content-class="text-white bg-grey-darken-3">
+                      <template #activator="{ props }">
+                        <v-btn
+                          v-bind="props"
+                          icon="mdi-close"
+                          size="x-small"
+                          variant="text"
+                          color="error"
+                          @click="settingsStore.removeRepo(repo.path)"
+                        />
+                      </template>
+                    </v-tooltip>
+                  </td>
+                </tr>
+              </tbody>
+            </v-table>
+
+            <div
+              v-else
+              class="text-body-2 text-medium-emphasis text-center py-6"
+            >
+              <v-icon icon="mdi-source-repository" size="40" class="mb-2 d-block mx-auto" />
+              No repositories added yet. Add a repository to start indexing.
             </div>
-          </v-expand-transition>
 
-          <v-expand-transition>
-            <v-alert
-              v-if="scanStatus === 'completed'"
-              type="success"
+            <v-btn
               variant="tonal"
-              density="compact"
-              class="mt-2"
+              size="small"
+              prepend-icon="mdi-plus"
+              @click="showAddRepoDialog = true"
             >
-              <span class="font-weight-medium">
-                {{ scanResult.scanMode === 'incremental' ? 'Incremental scan' : 'Full scan' }} complete:
-              </span>
-              {{ scanResult.featuresIndexed }} features indexed,
-              {{ scanResult.profilesFound }} skill profiles found.
-              <template v-if="scanResult.staleCleaned > 0">
-                {{ scanResult.staleCleaned }} stale references cleaned.
-              </template>
-              <template v-if="scanResult.unmatchedAuthors.length > 0">
-                <br>Unmatched git authors: {{ scanResult.unmatchedAuthors.join(', ') }}
-              </template>
-            </v-alert>
-          </v-expand-transition>
-
-          <v-expand-transition>
-            <v-alert
-              v-if="scanStatus === 'completed' && scanResult.synthesisWarning"
-              type="warning"
-              variant="tonal"
-              density="compact"
-              class="mt-2"
-            >
-              {{ scanResult.synthesisWarning }}
-            </v-alert>
-          </v-expand-transition>
-
-          <v-expand-transition>
-            <v-alert
-              v-if="scanStatus === 'failed'"
-              type="error"
-              variant="tonal"
-              density="compact"
-              class="mt-2"
-            >
-              Scan failed: {{ scanError }}
-            </v-alert>
-          </v-expand-transition>
+              Add Repository
+            </v-btn>
+          </template>
         </div>
 
         <!-- Scan Settings -->
@@ -295,130 +346,140 @@
               </v-select>
             </v-col>
           </v-row>
-        </div>
-
-        <!-- Rescan confirmation dialog -->
-        <v-dialog v-model="showRescanDialog" max-width="420">
-          <v-card>
-            <v-card-title class="text-body-1 font-weight-bold pa-4 pb-2">
-              {{ pendingFullRescan ? 'Full Rescan' : 'Re-scan Repository' }}?
-            </v-card-title>
-            <v-card-text class="text-body-2 pb-2">
-              <template v-if="pendingFullRescan">
-                This will rebuild the entire index from scratch. Existing knowledge items will be replaced.
-              </template>
-              <template v-else>
-                This will scan for changes since the last index. Unchanged items are kept.
-              </template>
-              <div v-if="indexStats && indexStats.knowledgeItems.total > 0" class="mt-2 text-caption text-medium-emphasis">
-                Current index: {{ indexStats.knowledgeItems.total }} knowledge items,
-                {{ indexStats.skillProfiles }} skill profiles.
-              </div>
-            </v-card-text>
-            <v-card-actions class="pa-4 pt-2">
-              <v-spacer />
-              <v-btn variant="text" @click="showRescanDialog = false">Cancel</v-btn>
-              <v-btn color="primary" variant="tonal" @click="proceedWithScan">
-                {{ pendingFullRescan ? 'Full Rescan' : 'Scan' }}
-              </v-btn>
-            </v-card-actions>
-          </v-card>
-        </v-dialog>
-      </v-card>
-
-      <!-- ─── TRACKED REPOSITORIES ──────────────────────────────── -->
-      <div class="section-header mb-3">
-        <v-icon icon="mdi-source-repository-multiple" size="18" color="primary" />
-        <span class="text-body-2 font-weight-medium">Tracked Repositories</span>
-      </div>
-
-      <v-card class="pa-5 settings-card mb-6" color="surface">
-        <div v-if="settingsStore.reposLoading" class="d-flex justify-center py-4">
-          <v-progress-circular indeterminate size="24" />
-        </div>
-
-        <template v-else>
-          <v-table v-if="settingsStore.repos.length > 0" density="compact" class="mb-4">
-            <thead>
-              <tr>
-                <th>Repository</th>
-                <th>Path</th>
-                <th class="text-center">Knowledge</th>
-                <th class="text-center">Features</th>
-                <th class="text-center">Last SHA</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="repo in settingsStore.repos" :key="repo.path">
-                <td class="font-weight-medium">{{ repo.name }}</td>
-                <td class="text-caption text-medium-emphasis">{{ repo.path }}</td>
-                <td class="text-center">{{ repo.knowledgeCount }}</td>
-                <td class="text-center">{{ repo.featureCount }}</td>
-                <td class="text-center">
-                  <v-chip v-if="repo.sha" size="x-small" variant="tonal">
-                    {{ repo.sha?.substring(0, 7) }}
-                  </v-chip>
-                  <span v-else class="text-caption text-medium-emphasis">-</span>
-                </td>
-                <td class="text-right">
-                  <v-btn
-                    icon="mdi-close"
-                    size="x-small"
-                    variant="text"
-                    color="error"
-                    @click="settingsStore.removeRepo(repo.path)"
-                  />
-                </td>
-              </tr>
-            </tbody>
-          </v-table>
-
-          <div
-            v-else
-            class="text-body-2 text-medium-emphasis text-center py-4"
+          <v-switch
+            v-model="settingsStore.connections.scan.autoCreateMembers"
+            label="Auto-create members from git authors"
+            color="primary"
+            density="compact"
+            hide-details
+            class="mt-1"
           >
-            No repositories tracked yet. Run a scan to detect repos, or add one manually.
-          </div>
-
-          <div class="d-flex ga-2">
-            <v-btn
-              variant="tonal"
-              size="small"
-              prepend-icon="mdi-plus"
-              @click="showAddRepoDialog = true"
-            >
-              Add Repository
-            </v-btn>
-          </div>
-        </template>
+            <template #append>
+              <v-tooltip content-class="scan-tooltip" location="top" max-width="280">
+                <template #activator="{ props }">
+                  <v-icon v-bind="props" icon="mdi-help-circle-outline" size="18" color="grey" />
+                </template>
+                When enabled, scanning a repo will automatically create org members from
+                git commit authors (email + name). They get a default password and can be
+                deactivated later from the Members page.
+              </v-tooltip>
+            </template>
+          </v-switch>
+        </div>
       </v-card>
+
+      <!-- Rescan confirmation dialog -->
+      <v-dialog v-model="showRescanDialog" max-width="420">
+        <v-card>
+          <v-card-title class="text-body-1 font-weight-bold pa-4 pb-2">
+            {{ pendingFullRescan ? 'Full Rescan' : 'Re-scan Repository' }}?
+          </v-card-title>
+          <v-card-text class="text-body-2 pb-2">
+            <template v-if="pendingFullRescan">
+              This will rebuild the entire index from scratch. Existing knowledge items will be replaced.
+            </template>
+            <template v-else>
+              This will scan for changes since the last index. Unchanged items are kept.
+            </template>
+            <div v-if="indexStats && indexStats.knowledgeItems.total > 0" class="mt-2 text-caption text-medium-emphasis">
+              Current index: {{ indexStats.knowledgeItems.total }} knowledge items,
+              {{ indexStats.skillProfiles }} skill profiles.
+            </div>
+          </v-card-text>
+          <v-card-actions class="pa-4 pt-2">
+            <v-spacer />
+            <v-btn variant="text" @click="showRescanDialog = false">Cancel</v-btn>
+            <v-btn color="primary" variant="tonal" @click="proceedWithScan">
+              {{ pendingFullRescan ? 'Full Rescan' : 'Scan' }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
 
       <!-- Add Repo Dialog -->
-      <v-dialog v-model="showAddRepoDialog" max-width="480">
+      <v-dialog v-model="showAddRepoDialog" max-width="520">
         <v-card color="surface" class="pa-6">
-          <div class="text-h6 font-weight-bold mb-4">Add Repository</div>
+          <div class="text-h6 font-weight-bold mb-4">Add Repositories</div>
+
+          <!-- Selected paths list -->
+          <div v-if="newRepoPaths.length" class="mb-3">
+            <v-chip
+              v-for="(p, idx) in newRepoPaths"
+              :key="p"
+              closable
+              variant="tonal"
+              size="small"
+              class="ma-1"
+              @click:close="newRepoPaths.splice(idx, 1)"
+            >
+              <v-icon icon="mdi-source-repository" size="14" start />
+              {{ p.split('/').pop() }}
+              <v-tooltip activator="parent" location="top" :text="p" />
+            </v-chip>
+          </div>
+
+          <!-- Path input + browse -->
           <v-text-field
             v-model="newRepoPath"
-            label="Absolute path"
+            label="Absolute path to git repository"
             placeholder="/path/to/repo"
-            autofocus
-            @keyup.enter="addRepo"
+            variant="outlined"
+            density="compact"
+            hint="Add multiple repos — type or browse, then press Enter or click +"
+            persistent-hint
+            @keyup.enter="addPathToList"
+          >
+            <template #prepend-inner>
+              <v-icon icon="mdi-folder-outline" size="20" class="text-medium-emphasis me-1" />
+            </template>
+            <template #append-inner>
+              <v-btn
+                icon="mdi-plus"
+                size="small"
+                variant="text"
+                density="compact"
+                :disabled="!newRepoPath.trim()"
+                @click="addPathToList"
+              />
+              <v-btn
+                icon="mdi-folder-search-outline"
+                size="small"
+                variant="text"
+                density="compact"
+                @click="directoryPicker?.open()"
+              />
+            </template>
+          </v-text-field>
+          <v-checkbox
+            v-model="scanAfterAdd"
+            label="Scan after adding"
+            density="compact"
+            hide-details
+            class="mt-2"
           />
-          <v-card-actions class="pa-0 mt-2">
+          <v-card-actions class="pa-0 mt-3">
             <v-spacer />
             <v-btn variant="text" @click="showAddRepoDialog = false">Cancel</v-btn>
             <v-btn
               color="primary"
               variant="flat"
-              :disabled="!newRepoPath.trim()"
-              @click="addRepo"
+              :disabled="newRepoPaths.length === 0 && !newRepoPath.trim()"
+              @click="addReposAndScan"
             >
-              Add
+              Add {{ newRepoPaths.length > 1 ? `(${newRepoPaths.length})` : '' }}
             </v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
+
+      <!-- Directory Picker (reusable component, multi-select mode) -->
+      <DirectoryPicker
+        ref="directoryPicker"
+        :initial-path="newRepoPath || undefined"
+        multi-select
+        @select="onDirectorySelected"
+        @select-multiple="onMultipleDirectoriesSelected"
+      />
 
       <!-- ─── MCP INTEGRATION ─────────────────────────────────── -->
       <div class="section-header mb-3">
@@ -540,6 +601,17 @@
             <v-expand-transition>
               <div v-if="settingsStore.connections.github.enabled" class="mt-4">
                 <v-text-field
+                  v-model="settingsStore.connections.github.org"
+                  label="Organization name (optional)"
+                  placeholder="my-company"
+                  prepend-inner-icon="mdi-domain"
+                  density="compact"
+                  variant="outlined"
+                  class="mb-3"
+                  hint="Find it at github.com/orgs/<org-name>. Leave empty for personal accounts — you can still add members manually."
+                  persistent-hint
+                />
+                <v-text-field
                   v-model="settingsStore.connections.github.pat"
                   label="Personal Access Token"
                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
@@ -550,6 +622,19 @@
                   hint="Leave unchanged to keep existing token"
                   persistent-hint
                 />
+                <div class="text-caption text-medium-emphasis mt-2">
+                  <v-icon icon="mdi-help-circle-outline" size="14" class="mr-1" />
+                  Go to
+                  <a
+                    href="https://github.com/settings/tokens?type=beta"
+                    target="_blank"
+                    rel="noopener"
+                    class="text-primary"
+                  >GitHub &rarr; Settings &rarr; Developer settings &rarr; Personal access tokens</a>.
+                  Create a fine-grained token with: <strong>Organization permissions</strong> &rarr;
+                  <em>Members: Read</em>, and <strong>Repository permissions</strong> &rarr;
+                  <em>Contents: Read</em>.
+                </div>
               </div>
             </v-expand-transition>
           </v-card>
@@ -883,18 +968,17 @@
         </v-btn>
       </div>
     </template>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
-import api from '@/services/api'
 import DirectoryPicker from '@/components/setup/DirectoryPicker.vue'
+import api from '@/services/api'
 
 const settingsStore = useSettingsStore()
-
-const directoryPicker = ref<InstanceType<typeof DirectoryPicker> | null>(null)
 
 // Claude Code connection state
 const claudeStatus = ref<'idle' | 'checking' | 'passed' | 'failed'>('idle')
@@ -929,13 +1013,49 @@ const indexStats = ref<{
 // Repo management
 const showAddRepoDialog = ref(false)
 const newRepoPath = ref('')
+const newRepoPaths = ref<string[]>([])
+const scanAfterAdd = ref(true)
+const directoryPicker = ref<InstanceType<typeof DirectoryPicker> | null>(null)
 
-async function addRepo(): Promise<void> {
-  if (!newRepoPath.value.trim()) return
-  const ok = await settingsStore.addRepo(newRepoPath.value.trim())
-  if (ok) {
+function onDirectorySelected(path: string) {
+  if (path && !newRepoPaths.value.includes(path)) {
+    newRepoPaths.value.push(path)
+  }
+}
+
+function onMultipleDirectoriesSelected(paths: string[]) {
+  for (const p of paths) {
+    if (!newRepoPaths.value.includes(p)) {
+      newRepoPaths.value.push(p)
+    }
+  }
+}
+
+function addPathToList(): void {
+  const p = newRepoPath.value.trim()
+  if (p && !newRepoPaths.value.includes(p)) {
+    newRepoPaths.value.push(p)
+  }
+  newRepoPath.value = ''
+}
+
+async function addReposAndScan(): Promise<void> {
+  // If there's text in the input, add it to the list first
+  addPathToList()
+  if (newRepoPaths.value.length === 0) return
+
+  let anyOk = false
+  for (const p of newRepoPaths.value) {
+    const ok = await settingsStore.addRepo(p)
+    if (ok) anyOk = true
+  }
+  if (anyOk) {
     showAddRepoDialog.value = false
+    newRepoPaths.value = []
     newRepoPath.value = ''
+    if (scanAfterAdd.value) {
+      triggerScan(false)
+    }
   }
 }
 
@@ -1271,6 +1391,27 @@ const activePresetHint = computed(() => {
 </script>
 
 <style scoped>
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  /* Account for Vuetify v-main top padding (if app-bar present) */
+  max-height: 100vh;
+}
+
+.settings-header {
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgb(var(--v-theme-background));
+  z-index: 1;
+}
+
+.settings-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-top: 24px;
+}
+
 .section-header {
   display: flex;
   align-items: center;

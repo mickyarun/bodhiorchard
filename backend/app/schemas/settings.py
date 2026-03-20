@@ -17,6 +17,7 @@ class GitHubSettings(BaseModel):
 
     enabled: bool = False
     pat: str = ""
+    org: str = ""
 
     model_config = {"populate_by_name": True}
 
@@ -49,6 +50,11 @@ class ScanSettings(BaseModel):
 
     timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=60, le=1800)
     max_turns: int = Field(default=40, alias="maxTurns", ge=0, le=100)
+    auto_create_members: bool = Field(
+        default=True,
+        alias="autoCreateMembers",
+        description="Auto-create org members from git commit authors during scan.",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -68,8 +74,10 @@ class ConnectionsRead(BaseModel):
 class RepoInfo(BaseModel):
     """Information about a tracked repository."""
 
+    id: str
     path: str
     name: str
+    status: str = "active"
     last_scanned: str | None = Field(None, alias="lastScanned")
     sha: str | None = None
     knowledge_count: int = Field(0, alias="knowledgeCount")
@@ -82,6 +90,12 @@ class AddRepoRequest(BaseModel):
     """Request to add a repository path."""
 
     path: str
+
+
+class RepoStatusRequest(BaseModel):
+    """Request to change a tracked repository's status."""
+
+    status: str
 
 
 class ConnectionsUpdate(BaseModel):

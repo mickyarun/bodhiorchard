@@ -57,12 +57,14 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         self,
         *,
         category: str | None = None,
+        repo_id: uuid.UUID | None = None,
         limit: int = 50,
     ) -> list[KnowledgeItem]:
-        """List active knowledge items, optionally filtered by category.
+        """List active knowledge items, optionally filtered by category and repo.
 
         Args:
             category: Optional category filter.
+            repo_id: Optional tracked repository filter.
             limit: Maximum number of results.
 
         Returns:
@@ -76,6 +78,8 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
         if category:
             stmt = stmt.where(KnowledgeItem.category == category)
+        if repo_id:
+            stmt = stmt.where(KnowledgeItem.repo_id == repo_id)
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
@@ -450,6 +454,33 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
                 KnowledgeItem.title.like(f"{prefix}%"),
             )
         )
+        return result.scalar() or 0
+
+    # --- Repo-linked counts ---
+
+    async def count_by_repo_id(
+        self,
+        repo_id: uuid.UUID,
+        *,
+        category: str | None = None,
+    ) -> int:
+        """Count active items linked to a specific tracked repository.
+
+        Args:
+            repo_id: The tracked repository UUID.
+            category: Optional category filter.
+
+        Returns:
+            Count of matching active items.
+        """
+        stmt = select(func.count(KnowledgeItem.id)).where(
+            KnowledgeItem.org_id == self._org_id,
+            KnowledgeItem.is_active.is_(True),
+            KnowledgeItem.repo_id == repo_id,
+        )
+        if category:
+            stmt = stmt.where(KnowledgeItem.category == category)
+        result = await self._db.execute(stmt)
         return result.scalar() or 0
 
     # --- Deduplication ---
