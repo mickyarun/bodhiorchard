@@ -124,10 +124,14 @@ async def score_developers(
     exclude_ids = set(exclude_user_ids or [])
 
     # Find active developers
+    from app.models.user import OrgToUser
+
     result = await db.execute(
-        select(User).where(
-            User.org_id == org_id,
-            User.role == UserRole.DEVELOPER,
+        select(User)
+        .join(OrgToUser, OrgToUser.user_id == User.id)
+        .where(
+            OrgToUser.org_id == org_id,
+            OrgToUser.role == UserRole.DEVELOPER,
             User.is_active == true(),
         )
     )

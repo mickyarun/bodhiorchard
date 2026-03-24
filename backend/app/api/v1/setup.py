@@ -11,7 +11,7 @@ from app.core.deps import get_db
 from app.core.encryption import encrypt_secret
 from app.core.security import create_access_token, hash_password
 from app.models.organization import Organization
-from app.models.user import User, UserRole
+from app.models.user import OrgToUser, User, UserRole
 from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
 from app.schemas.setup import (
@@ -190,11 +190,9 @@ async def initialize_setup(
 
     # Create admin user
     user = User(
-        org_id=org.id,
         email=body.admin.email,
         name=body.admin.name,
         password_hash=hash_password(body.admin.password),
-        role=UserRole.ORG_OWNER,
     )
     db.add(user)
     await db.flush()
@@ -203,9 +201,16 @@ async def initialize_setup(
     await seed_permissions(db)
     role_repo = RoleRepository(db)
     owner_role = await role_repo.get_by_name_system("org_owner")
-    if owner_role is not None:
-        user.role_id = owner_role.id
-        await db.flush()
+
+    # Create org membership with owner role
+    membership = OrgToUser(
+        user_id=user.id,
+        org_id=org.id,
+        role=UserRole.ORG_OWNER,
+        role_id=owner_role.id if owner_role else None,
+    )
+    db.add(membership)
+    await db.flush()
 
     # Issue JWT token
     token = create_access_token(data={"sub": str(user.id), "org_id": str(org.id)})

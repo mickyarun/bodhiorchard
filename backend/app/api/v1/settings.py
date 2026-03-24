@@ -851,7 +851,7 @@ async def link_slack_members(
             continue
 
         user = await user_repo.get_by_id(uid)
-        if user and user.org_id == org.id:
+        if user:
             user.slack_id = slack_id
             linked += 1
 
@@ -893,7 +893,13 @@ async def unlink_slack_member(
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
 
-    result = await db.execute(select(User).where(User.org_id == org.id, User.slack_id == slack_id))
+    from app.models.user import OrgToUser
+
+    result = await db.execute(
+        select(User)
+        .join(OrgToUser, OrgToUser.user_id == User.id)
+        .where(OrgToUser.org_id == org.id, User.slack_id == slack_id)
+    )
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(

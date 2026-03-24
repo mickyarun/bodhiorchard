@@ -15,7 +15,7 @@ from app.core.security import (
     verify_token,
 )
 from app.models.organization import Organization
-from app.models.user import User
+from app.models.user import OrgToUser, User, UserRole
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse
@@ -109,7 +109,30 @@ async def refresh(
             detail="User not found",
         )
 
-    token_data = {"sub": str(user.id), "org_id": str(user.org_id)}
+    # Preserve org_id from the refresh token (not from User — User has no org_id column)
+    org_id = payload.get("org_id")
+    if not org_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token: missing org_id",
+        )
+
+    # Validate membership still exists
+    from sqlalchemy import select as sa_select
+
+    membership = await db.execute(
+        sa_select(OrgToUser).where(
+            OrgToUser.user_id == user.id,
+            OrgToUser.org_id == uuid.UUID(org_id),
+        )
+    )
+    if membership.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User is no longer a member of this organization",
+        )
+
+    token_data = {"sub": str(user.id), "org_id": org_id}
     access_token = create_access_token(data=token_data)
     refresh_token = create_refresh_token(data=token_data)
 
@@ -162,12 +185,24 @@ async def register(
         )
 
     user = User(
-        org_id=org.id,
         email=body.email,
         name=body.name,
         password_hash=hash_password(body.password),
     )
-    return await user_repo.create(user)
+    created = await user_repo.create(user)
+
+    # Create org membership
+    membership = OrgToUser(user_id=created.id, org_id=org.id, role=UserRole.DEVELOPER)
+    db.add(membership)
+    await db.flush()
+
+    # Set transient org context for the response serialization
+    created.org_id = org.id  # type: ignore[attr-defined]
+    created.role = UserRole.DEVELOPER  # type: ignore[attr-defined]
+    created.role_id = None  # type: ignore[attr-defined]
+    created.role_ref = None  # type: ignore[attr-defined]
+
+    return created
 
 
 @router.get("/me", response_model=UserRead)

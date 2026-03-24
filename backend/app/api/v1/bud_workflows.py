@@ -63,11 +63,14 @@ async def approve_tech_arch(
     if approver_role == UserRole.TECH_LEAD:
         from sqlalchemy import select as sa_select
 
+        from app.models.user import OrgToUser
+
         manager_result = await db.execute(
             sa_select(User)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
             .where(
-                User.org_id == current_user.org_id,
-                User.role == UserRole.MANAGER,
+                OrgToUser.org_id == current_user.org_id,
+                OrgToUser.role == UserRole.MANAGER,
                 User.is_active == True,  # noqa: E712
             )
             .limit(1)

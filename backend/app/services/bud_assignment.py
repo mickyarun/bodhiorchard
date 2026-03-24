@@ -95,10 +95,14 @@ async def auto_assign_for_phase(
         # Fall through to round-robin if smart assignment returns None
 
     # Find active users with the target role
+    from app.models.user import OrgToUser
+
     result = await db.execute(
-        select(User).where(
-            User.org_id == org_id,
-            User.role == role_name,
+        select(User)
+        .join(OrgToUser, OrgToUser.user_id == User.id)
+        .where(
+            OrgToUser.org_id == org_id,
+            OrgToUser.role == role_name,
             User.is_active == true(),
         )
     )

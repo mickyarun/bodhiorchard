@@ -97,9 +97,15 @@ async def _resolve_slack_names(
 
     from sqlalchemy import select
 
-    stmt = select(User.slack_id, User.name).where(
-        User.org_id == org_id,
-        User.slack_id.in_(slack_ids),
+    from app.models.user import OrgToUser
+
+    stmt = (
+        select(User.slack_id, User.name)
+        .join(OrgToUser, OrgToUser.user_id == User.id)
+        .where(
+            OrgToUser.org_id == org_id,
+            User.slack_id.in_(slack_ids),
+        )
     )
     result = await db.execute(stmt)
     return {row.slack_id: row.name for row in result.all() if row.slack_id and row.name}

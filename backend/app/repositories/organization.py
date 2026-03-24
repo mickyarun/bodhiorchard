@@ -32,16 +32,19 @@ class OrganizationRepository(BaseRepository[Organization]):
         return result.scalar_one_or_none()
 
     async def get_for_user(self, user: User) -> Organization:
-        """Load the organization for the given user.
+        """Load the active organization for an authenticated user.
+
+        The user must have been loaded via get_current_user so that the
+        transient org_id attribute is set from the JWT.
 
         Args:
-            user: The user whose organization to fetch.
+            user: The authenticated user with org_id set.
 
         Returns:
-            The user's Organization.
+            The user's active Organization.
 
         Raises:
-            NoResultFound: If no organization matches the user's org_id.
+            NoResultFound: If no organization matches.
         """
         result = await self._db.execute(select(Organization).where(Organization.id == user.org_id))
         return result.scalar_one()

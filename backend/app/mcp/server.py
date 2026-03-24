@@ -644,7 +644,7 @@ async def handle_get_team_context(
             team[key] = {
                 "user_name": user.name if user else "Unknown",
                 "email": user.email if user else "",
-                "role": user.role.value if user else "",
+                "role": getattr(user, "role", "").value if getattr(user, "role", None) else "",
                 "modules": [],
             }
         team[key]["modules"].append(

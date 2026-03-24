@@ -2,15 +2,19 @@
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User, UserEmailAlias
+from app.models.user import OrgToUser, User, UserEmailAlias
 from app.repositories.base import BaseRepository
 
 
 class UserRepository(BaseRepository[User]):
-    """Repository for User queries, optionally scoped to an organization."""
+    """Repository for User queries, optionally scoped to an organization.
+
+    When org_id is provided, queries join through OrgToUser to filter
+    by organization membership.
+    """
 
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID | None = None) -> None:
         """Initialize the repository.
@@ -20,6 +24,14 @@ class UserRepository(BaseRepository[User]):
             org_id: Optional organization UUID for scoping queries.
         """
         super().__init__(User, db, org_id=org_id)
+
+    def _scoped(self, stmt: Select[tuple[User, ...]]) -> Select[tuple[User, ...]]:
+        """Apply tenant scope by joining OrgToUser when org_id is set."""
+        if self._org_id is not None:
+            stmt = stmt.join(OrgToUser, OrgToUser.user_id == User.id).where(
+                OrgToUser.org_id == self._org_id
+            )
+        return stmt
 
     async def get_by_email(self, email: str) -> User | None:
         """Fetch a user by email within the scoped organization.
@@ -35,7 +47,7 @@ class UserRepository(BaseRepository[User]):
         return result.scalar_one_or_none()
 
     async def get_by_email_in_org(self, org_id: uuid.UUID, email: str) -> User | None:
-        """Fetch a user by email in a specific organization (ignoring scope).
+        """Fetch a user by email in a specific organization.
 
         Args:
             org_id: The organization UUID to search within.
@@ -45,7 +57,26 @@ class UserRepository(BaseRepository[User]):
             The matching User or None.
         """
         result = await self._db.execute(
-            select(User).where(User.org_id == org_id, User.email == email)
+            select(User)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(OrgToUser.org_id == org_id, User.email == email)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_id_in_org(self, user_id: uuid.UUID, org_id: uuid.UUID) -> User | None:
+        """Fetch a user by ID if they are a member of the given organization.
+
+        Args:
+            user_id: The user UUID.
+            org_id: The organization UUID.
+
+        Returns:
+            The matching User or None if not found or not a member.
+        """
+        result = await self._db.execute(
+            select(User)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(User.id == user_id, OrgToUser.org_id == org_id)
         )
         return result.scalar_one_or_none()
 
@@ -58,8 +89,62 @@ class UserRepository(BaseRepository[User]):
         Returns:
             List of User instances belonging to the organization.
         """
-        result = await self._db.execute(select(User).where(User.org_id == org_id))
+        result = await self._db.execute(
+            select(User)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(OrgToUser.org_id == org_id)
+        )
         return list(result.scalars().all())
+
+    async def get_by_id_with_membership(
+        self, user_id: uuid.UUID, org_id: uuid.UUID
+    ) -> User | None:
+        """Load a user and set transient org/role attrs from OrgToUser.
+
+        Args:
+            user_id: The user UUID.
+            org_id: The organization UUID.
+
+        Returns:
+            User with org_id, role, role_id, role_ref set, or None.
+        """
+        result = await self._db.execute(
+            select(User, OrgToUser)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(User.id == user_id, OrgToUser.org_id == org_id)
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        user, membership = row
+        user.org_id = membership.org_id  # type: ignore[attr-defined]
+        user.role = membership.role  # type: ignore[attr-defined]
+        user.role_id = membership.role_id  # type: ignore[attr-defined]
+        user.role_ref = membership.role_ref  # type: ignore[attr-defined]
+        return user
+
+    async def list_with_membership(self, org_id: uuid.UUID) -> list[User]:
+        """List users in an org with transient role attrs set from OrgToUser.
+
+        Args:
+            org_id: The organization UUID.
+
+        Returns:
+            List of User instances with org_id, role, role_id, role_ref set.
+        """
+        result = await self._db.execute(
+            select(User, OrgToUser)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(OrgToUser.org_id == org_id)
+        )
+        users = []
+        for user, membership in result.all():
+            user.org_id = membership.org_id  # type: ignore[attr-defined]
+            user.role = membership.role  # type: ignore[attr-defined]
+            user.role_id = membership.role_id  # type: ignore[attr-defined]
+            user.role_ref = membership.role_ref  # type: ignore[attr-defined]
+            users.append(user)
+        return users
 
     async def get_email_map(self, org_id: uuid.UUID) -> dict[str, User]:
         """Build a lowercase-email to User mapping for an organization.

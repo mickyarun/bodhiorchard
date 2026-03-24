@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.core.security import hash_password
-from app.models.user import User
+from app.models.user import OrgToUser, User, UserRole
 from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
 from app.repositories.skill_profile import SkillProfileRepository
@@ -88,16 +88,31 @@ async def add_member(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")
 
     new_user = User(
-        org_id=org.id,
         email=body.email,
         name=body.name,
         password_hash=hash_password(body.password),
-        role_id=body.role_id,
         avatar_url=body.avatar_url,
         github_username=body.github_username,
     )
     created = await user_repo.create(new_user)
+
+    # Create org membership
+    membership = OrgToUser(
+        user_id=created.id,
+        org_id=org.id,
+        role=UserRole.DEVELOPER,
+        role_id=body.role_id,
+    )
+    db.add(membership)
+    await db.flush()
     await db.refresh(created)
+    await db.refresh(membership)
+
+    # Set transient org/role attrs for _user_to_member serialization
+    created.org_id = org.id  # type: ignore[attr-defined]
+    created.role = membership.role  # type: ignore[attr-defined]
+    created.role_id = membership.role_id  # type: ignore[attr-defined]
+    created.role_ref = membership.role_ref  # type: ignore[attr-defined]
 
     logger.info(
         "member_added",
@@ -124,7 +139,7 @@ async def list_members(
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     user_repo = UserRepository(db, org_id=org.id)
-    users = await user_repo.list_by_org(org.id)
+    users = await user_repo.list_with_membership(org.id)
 
     # Load aliases for all users in one query
     alias_map = await user_repo.get_alias_map_for_org(org.id)
@@ -153,8 +168,8 @@ async def assign_role(
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     user_repo = UserRepository(db, org_id=org.id)
-    user = await user_repo.get_by_id(user_id)
-    if user is None or user.org_id != org.id:
+    user = await user_repo.get_by_id_with_membership(user_id, org.id)
+    if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     role_repo = RoleRepository(db)
@@ -162,9 +177,25 @@ async def assign_role(
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")
 
-    user.role_id = body.role_id
+    # Update role on the OrgToUser membership
+    from sqlalchemy import select as sa_select
+
+    result = await db.execute(
+        sa_select(OrgToUser).where(
+            OrgToUser.user_id == user_id,
+            OrgToUser.org_id == org.id,
+        )
+    )
+    membership = result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found.")
+    membership.role_id = body.role_id
     await db.flush()
-    await db.refresh(user)
+    await db.refresh(membership)
+
+    # Re-set transient attrs so _user_to_member sees the updated role
+    user.role_id = membership.role_id  # type: ignore[attr-defined]
+    user.role_ref = membership.role_ref  # type: ignore[attr-defined]
 
     logger.info(
         "role_assigned",
@@ -201,8 +232,8 @@ async def toggle_member_status(
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     user_repo = UserRepository(db, org_id=org.id)
-    user = await user_repo.get_by_id(user_id)
-    if user is None or user.org_id != org.id:
+    user = await user_repo.get_by_id_with_membership(user_id, org.id)
+    if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     user.is_active = not user.is_active
@@ -241,12 +272,15 @@ async def update_character(
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     user_repo = UserRepository(db, org_id=org.id)
-    user = await user_repo.get_by_id(user_id)
-    if user is None or user.org_id != org.id:
+    user = await user_repo.get_by_id_with_membership(user_id, org.id)
+    if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     # Only the user themselves or admins can update character preference
-    if user_id != current_user.id and current_user.role not in ("org_owner", "admin"):
+    if user_id != current_user.id and getattr(current_user, "role", None) not in (
+        UserRole.ORG_OWNER,
+        UserRole.ADMIN,
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the user or an admin can update character preference.",
@@ -301,12 +335,12 @@ async def merge_members(
     org = await org_repo.get_for_user(current_user)
     user_repo = UserRepository(db, org_id=org.id)
 
-    target = await user_repo.get_by_id(target_id)
-    if target is None or target.org_id != org.id:
+    target = await user_repo.get_by_id_with_membership(target_id, org.id)
+    if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found.")
 
-    source = await user_repo.get_by_id(body.source_id)
-    if source is None or source.org_id != org.id:
+    source = await user_repo.get_by_id_with_membership(body.source_id, org.id)
+    if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source user not found.")
 
     # 1. Transfer skill profiles: re-point source's profiles to target

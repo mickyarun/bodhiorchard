@@ -181,15 +181,21 @@ async def handle_pm_approval(
         return  # Session not in approval state
 
     # Verify the approver is a PM or org owner
+    from app.models.user import OrgToUser
+
     result = await db.execute(
-        select(User).where(
-            User.org_id == org.id,
+        select(User, OrgToUser.role)
+        .join(OrgToUser, OrgToUser.user_id == User.id)
+        .where(
+            OrgToUser.org_id == org.id,
             User.slack_id == approver_slack_id,
         )
     )
-    approver = result.scalar_one_or_none()
+    row = result.one_or_none()
+    approver = row[0] if row else None
+    approver_role_val = row[1] if row else None
 
-    if approver is None or approver.role not in _PM_ROLES:
+    if approver is None or approver_role_val not in _PM_ROLES:
         await slack_client.chat_post_message(
             bot_token,
             channel,

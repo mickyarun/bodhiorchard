@@ -13,7 +13,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
-from app.models.user import User
+from app.models.user import OrgToUser, User, UserRole
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.user import UserRepository
 from app.schemas.skills import ScanStatus
@@ -246,13 +246,16 @@ async def phase_e_skills(
                 continue
             seen_emails.add(email_lower)
             new_user = User(
-                org_id=org_id,
                 email=entry.email,
                 name=entry.author_name,
                 password_hash=hash_password("changeme123"),
                 is_active=True,
             )
             db.add(new_user)
+            await db.flush()
+            # Create org membership for the auto-created user
+            membership = OrgToUser(user_id=new_user.id, org_id=org_id, role=UserRole.DEVELOPER)
+            db.add(membership)
         await db.flush()
         email_to_user = await user_repo.get_email_map(org_id)
 

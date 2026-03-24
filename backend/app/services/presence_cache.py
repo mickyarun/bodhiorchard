@@ -143,9 +143,13 @@ async def refresh_all_presence(db: AsyncSession) -> None:
             bot_user=auth_info.get("user"),
         )
 
+        from app.models.user import OrgToUser
+
         user_result = await db.execute(
-            select(User.slack_id).where(
-                User.org_id == org_id,
+            select(User.slack_id)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(
+                OrgToUser.org_id == org_id,
                 User.slack_id.isnot(None),
                 User.is_active.is_(True),
             )
