@@ -145,179 +145,29 @@
             Created {{ formatDate(bud.created_at) }} &middot; Updated {{ formatDate(bud.updated_at) }}
           </div>
 
-          <!-- Tech Arch Generating Banner -->
+          <!-- Workflow banners, code review panel, approval/reject/reassign dialogs -->
+          <BUDWorkflowActions
+            ref="workflowRef"
+            :bud="bud"
+            :can-approve="canApprove"
+            :is-current-assignee="isCurrentAssignee"
+            @status-change="updateStatus"
+            @reload-timeline="loadTimeline"
+          />
+
+          <!-- PRD generating banner -->
           <v-alert
-            v-if="bud.status === 'tech_arch' && techArchGenerating"
+            v-if="workflowRef?.prdGenerating"
             type="info"
             variant="tonal"
+            density="compact"
             class="mx-12 mb-3"
           >
             <div class="d-flex align-center ga-2">
-              <v-progress-circular indeterminate size="18" width="2" class="mr-2" />
-              <div class="flex-grow-1">
-                <strong>Generating Tech Architecture...</strong>
-                <div class="text-caption text-medium-emphasis">{{ techArchStatusMessage || 'Claude is analyzing your requirements and designing the implementation plan...' }}</div>
-              </div>
+              <v-progress-circular indeterminate size="16" width="2" />
+              <span>{{ workflowRef?.prdStatusMessage || 'PRD agent is enriching requirements...' }}</span>
             </div>
           </v-alert>
-
-          <!-- Tech Architecture Approval Bar -->
-          <v-alert
-            v-if="bud.status === 'tech_arch' && canApprove && !!bud.tech_spec_md && !techArchGenerating"
-            type="info"
-            variant="tonal"
-            class="mx-12 mb-3"
-          >
-            <div class="d-flex align-center ga-2">
-              <div class="flex-grow-1">
-                <strong>Tech Architecture Review</strong>
-                <span v-if="awaitingManagerApproval"> — Awaiting manager approval</span>
-                <span v-else> — Review the tech spec and approve or reject</span>
-              </div>
-              <v-btn
-                color="success"
-                variant="flat"
-                size="small"
-                :loading="approvingTechArch"
-                :disabled="approvingTechArch"
-                @click="handleApproveTechArch"
-              >
-                <v-icon start size="16">mdi-check</v-icon>
-                Approve
-              </v-btn>
-              <v-btn
-                color="error"
-                variant="tonal"
-                size="small"
-                :disabled="approvingTechArch"
-                @click="showRejectDialog = true"
-              >
-                <v-icon start size="16">mdi-close</v-icon>
-                Reject
-              </v-btn>
-            </div>
-          </v-alert>
-
-          <!-- Reassignment Button (development phase, current assignee only) -->
-          <v-alert
-            v-if="bud.status === 'development' && isCurrentAssignee"
-            type="warning"
-            variant="tonal"
-            class="mx-12 mb-3"
-          >
-            <div class="d-flex align-center ga-2">
-              <div class="flex-grow-1">
-                Need to hand this off? Request reassignment to another developer.
-              </div>
-              <v-btn variant="tonal" size="small" @click="showReassignDialog = true">
-                <v-icon start size="16">mdi-swap-horizontal</v-icon>
-                Request Reassignment
-              </v-btn>
-            </div>
-          </v-alert>
-
-          <!-- Code Review Generating Banner -->
-          <v-alert
-            v-if="bud.status === 'code_review' && codeReviewGenerating"
-            type="info"
-            variant="tonal"
-            class="mx-12 mb-3"
-          >
-            <div class="d-flex align-center ga-2">
-              <v-progress-circular indeterminate size="18" width="2" class="mr-2" />
-              <div class="flex-grow-1">
-                <strong>Running Code Review...</strong>
-                <div class="text-caption text-medium-emphasis">{{ codeReviewStatusMessage || 'Claude is reviewing your code changes...' }}</div>
-              </div>
-            </div>
-          </v-alert>
-
-          <!-- Code Review Comments Panel -->
-          <v-card
-            v-if="bud.status === 'code_review' && codeReviewComments.length > 0 && !codeReviewGenerating"
-            variant="outlined"
-            class="mx-12 mb-3"
-          >
-            <v-card-title class="text-subtitle-1 d-flex align-center">
-              <v-icon start size="18">mdi-comment-check-outline</v-icon>
-              Code Review Comments ({{ codeReviewComments.length }})
-            </v-card-title>
-            <v-divider />
-            <v-list density="compact">
-              <v-list-item
-                v-for="(c, idx) in codeReviewComments"
-                :key="idx"
-                :class="{ 'bg-green-lighten-5': c.status === 'accepted', 'bg-grey-lighten-4': c.status === 'skipped' }"
-              >
-                <template #prepend>
-                  <v-icon
-                    :color="c.severity === 'error' ? 'error' : c.severity === 'warning' ? 'warning' : 'info'"
-                    size="18"
-                  >
-                    {{ c.severity === 'error' ? 'mdi-alert-circle' : c.severity === 'warning' ? 'mdi-alert' : 'mdi-information' }}
-                  </v-icon>
-                </template>
-                <v-list-item-title class="text-body-2">
-                  <code class="text-caption">{{ c.repo }}/{{ c.file }}:{{ c.line }}</code>
-                  <v-chip v-if="c.deviates_from_spec" size="x-small" color="error" variant="tonal" class="ml-2">Spec Deviation</v-chip>
-                </v-list-item-title>
-                <v-list-item-subtitle class="text-body-2 mt-1">{{ c.comment }}</v-list-item-subtitle>
-                <template #append>
-                  <div v-if="!c.status || c.status === 'pending'" class="d-flex ga-1">
-                    <v-btn size="x-small" variant="tonal" color="success" @click="handleReviewComment(idx, 'accepted')">
-                      Accept
-                    </v-btn>
-                    <v-btn size="x-small" variant="tonal" color="grey" @click="handleReviewComment(idx, 'skipped', 'Not applicable')">
-                      Skip
-                    </v-btn>
-                  </div>
-                  <v-chip v-else size="x-small" :color="c.status === 'accepted' ? 'success' : 'grey'" variant="tonal">
-                    {{ c.status }}
-                  </v-chip>
-                </template>
-              </v-list-item>
-            </v-list>
-            <v-divider />
-            <v-card-actions>
-              <v-spacer />
-              <v-btn
-                color="primary"
-                variant="flat"
-                size="small"
-                :disabled="codeReviewComments.some(c => !c.status || c.status === 'pending')"
-                @click="updateStatus('testing')"
-              >
-                Move to QA
-                <v-icon end size="16">mdi-arrow-right</v-icon>
-              </v-btn>
-            </v-card-actions>
-          </v-card>
-
-          <!-- Test Plans (code_review phase) -->
-          <v-expansion-panels
-            v-if="bud.status === 'code_review' && (automationTestPlan || manualTestPlan) && !codeReviewGenerating"
-            variant="accordion"
-            class="mx-12 mb-3"
-          >
-            <v-expansion-panel v-if="automationTestPlan">
-              <v-expansion-panel-title>
-                <v-icon start size="18">mdi-test-tube</v-icon>
-                Automation Test Plan
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <div class="markdown-body" v-html="renderMarkdown(automationTestPlan)" />
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-            <v-expansion-panel v-if="manualTestPlan">
-              <v-expansion-panel-title>
-                <v-icon start size="18">mdi-clipboard-check-outline</v-icon>
-                Manual Test Plan
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <div class="markdown-body" v-html="renderMarkdown(manualTestPlan)" />
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-          </v-expansion-panels>
 
           <!-- Tabs + Toolbar row -->
           <div class="tabs-toolbar-row">
@@ -365,19 +215,6 @@
             <v-tabs-window v-model="activeTab">
               <!-- Requirements -->
               <v-tabs-window-item value="requirements">
-                <!-- PRD generating banner -->
-                <v-alert
-                  v-if="prdGenerating"
-                  type="info"
-                  variant="tonal"
-                  density="compact"
-                  class="mb-3"
-                >
-                  <div class="d-flex align-center ga-2">
-                    <v-progress-circular indeterminate size="16" width="2" />
-                    <span>{{ prdStatusMessage || 'PRD agent is enriching requirements...' }}</span>
-                  </div>
-                </v-alert>
                 <textarea
                   v-if="editingContent"
                   v-model="editContent"
@@ -402,127 +239,13 @@
 
               <!-- Design -->
               <v-tabs-window-item value="design">
-                <!-- Multi-design sub-tabs when designs exist -->
-                <div v-if="designs.length > 0" class="design-multi-panel">
-                  <div class="design-sub-tabs-row">
-                    <v-tabs v-model="activeDesignTab" density="compact" color="teal" class="design-sub-tabs">
-                      <v-tab v-for="d in designs" :key="d.id" :value="d.id">
-                        {{ d.repo_name || 'Default' }}
-                        <v-icon
-                          v-if="d.status === 'generating'"
-                          icon="mdi-loading"
-                          size="14"
-                          class="ml-1 mdi-spin"
-                        />
-                        <v-icon
-                          v-else-if="d.status === 'failed'"
-                          icon="mdi-alert-circle-outline"
-                          size="14"
-                          class="ml-1"
-                          color="error"
-                        />
-                      </v-tab>
-                    </v-tabs>
-                    <div class="d-flex align-center ga-1">
-                      <v-btn
-                        v-if="activeDesignObj?.status === 'ready'"
-                        variant="text"
-                        size="small"
-                        title="Open in new tab"
-                        @click="openDesignInTab(activeDesignTab)"
-                      >
-                        <v-icon size="15">mdi-open-in-new</v-icon>
-                      </v-btn>
-                      <v-btn
-                        v-if="activeDesignObj?.status === 'ready'"
-                        variant="text"
-                        size="small"
-                        title="Refresh preview"
-                        @click="refreshDesignPreview()"
-                      >
-                        <v-icon size="15">mdi-refresh</v-icon>
-                      </v-btn>
-                      <v-btn
-                        variant="text"
-                        size="small"
-                        @click="triggerDesignGeneration"
-                      >
-                        <v-icon size="15" class="mr-1">mdi-plus</v-icon>
-                        Add
-                      </v-btn>
-                    </div>
-                  </div>
-
-                  <v-tabs-window v-model="activeDesignTab">
-                    <v-tabs-window-item v-for="d in designs" :key="d.id" :value="d.id">
-                      <!-- Generating -->
-                      <div v-if="d.status === 'generating'" class="section-empty">
-                        <v-progress-circular indeterminate color="secondary" size="40" class="mb-3" />
-                        <div>{{ designJobProgress.get(d.id) || 'Generating wireframe...' }}</div>
-                        <div class="text-caption text-medium-emphasis mt-1">
-                          Using {{ d.repo_name || 'default' }} design system
-                        </div>
-                      </div>
-                      <!-- Failed -->
-                      <div v-else-if="d.status === 'failed'" class="section-empty">
-                        <v-icon icon="mdi-alert-circle-outline" size="40" class="mb-3" color="error" />
-                        <div>Design generation failed</div>
-                        <v-btn variant="tonal" size="small" class="mt-3" @click="handleRegenerate(d.id)">
-                          <v-icon start size="15">mdi-refresh</v-icon>
-                          Retry
-                        </v-btn>
-                      </div>
-                      <!-- Edit mode -->
-                      <template v-else-if="editingDesignId === d.id">
-                        <textarea
-                          v-model="editDesign"
-                          class="section-editor"
-                          placeholder="HTML wireframe content..."
-                          @blur="saveDesignById(d.id)"
-                        />
-                      </template>
-                      <!-- Ready with HTML — use blob URL for full interactivity -->
-                      <template v-else-if="d.design_html">
-                        <iframe
-                          :key="d.id + '-' + designPreviewKey"
-                          :src="designPreviewUrl(d.id)"
-                          class="design-iframe"
-                        />
-                        <!-- Notes / Figma links -->
-                        <div class="design-notes-row">
-                          <v-text-field
-                            :model-value="d.notes || ''"
-                            variant="outlined"
-                            density="compact"
-                            placeholder="Add notes, Figma link, or design references..."
-                            hide-details
-                            prepend-inner-icon="mdi-link-variant"
-                            class="design-notes-input"
-                            @update:model-value="(v: string) => debouncedSaveNotes(d.id, v)"
-                          />
-                        </div>
-                      </template>
-                      <!-- Pending (no HTML yet) -->
-                      <div v-else class="section-empty">
-                        <v-icon icon="mdi-palette-outline" size="40" class="mb-3" />
-                        <div>Waiting for generation...</div>
-                      </div>
-                    </v-tabs-window-item>
-                  </v-tabs-window>
-                </div>
-
-                <!-- Empty state: generate -->
-                <div v-else class="section-empty">
-                  <v-icon icon="mdi-palette-outline" size="40" class="mb-3" />
-                  <div>No design yet</div>
-                  <div class="text-caption text-medium-emphasis mt-1 mb-3">
-                    Generate wireframes using your repos' design systems
-                  </div>
-                  <v-btn variant="tonal" size="small" @click="triggerDesignGeneration">
-                    <v-icon start size="15">mdi-creation-outline</v-icon>
-                    Generate Wireframes
-                  </v-btn>
-                </div>
+                <BUDDesignPanel
+                  ref="designPanelRef"
+                  :bud-id="bud.id"
+                  @chat-message="msg => chatMessages.push(msg)"
+                  @switch-to-design="activeTab = 'design'"
+                  @design-tab-change="loadChatHistory"
+                />
               </v-tabs-window-item>
 
               <!-- Tech Spec -->
@@ -604,134 +327,6 @@
         </v-card>
       </v-dialog>
 
-      <!-- Repo selection dialog for design generation -->
-      <v-dialog v-model="showRepoDialog" max-width="480">
-        <v-card color="surface" class="pa-6">
-          <div class="text-h6 mb-1">Select Repository</div>
-          <div class="text-body-2 text-medium-emphasis mb-4">
-            Select which repository to generate a design wireframe for.
-          </div>
-          <div v-if="availableReposLoading" class="d-flex justify-center py-4">
-            <v-progress-circular indeterminate size="24" />
-          </div>
-          <div v-else-if="availableRepos.length > 0" style="max-height: 300px; overflow-y: auto;" class="mx-n2 px-2">
-            <v-checkbox
-              v-for="repo in availableRepos"
-              :key="repo.id"
-              v-model="selectedRepoIds"
-              :value="repo.id"
-              density="compact"
-              hide-details
-              class="mb-2"
-            >
-              <template #label>
-                <div>
-                  <div class="text-body-2 font-weight-medium">{{ repo.name }}</div>
-                  <div class="text-caption text-medium-emphasis" style="word-break: break-all;">{{ repo.path }}</div>
-                </div>
-              </template>
-            </v-checkbox>
-          </div>
-          <div v-else class="text-body-2 text-medium-emphasis py-2">
-            No tracked repositories found. Add repositories in Settings.
-          </div>
-          <v-card-actions class="pa-0 mt-4">
-            <v-spacer />
-            <v-btn variant="text" @click="showRepoDialog = false">Cancel</v-btn>
-            <v-btn color="primary" variant="flat" @click="confirmDesignGeneration">
-              Generate
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-
-      <!-- Reject Tech Arch dialog -->
-      <v-dialog v-model="showRejectDialog" max-width="440">
-        <v-card color="surface" class="pa-6">
-          <div class="text-h6 mb-2">Reject Tech Plan</div>
-          <div class="text-body-2 text-medium-emphasis mb-4">
-            Provide a reason so the team can revise the plan.
-          </div>
-          <v-textarea
-            v-model="rejectReason"
-            variant="outlined"
-            label="Reason"
-            rows="3"
-            counter="5000"
-            :rules="[v => !!v?.trim() || 'Reason is required']"
-          />
-          <v-card-actions class="pa-0">
-            <v-spacer />
-            <v-btn variant="text" @click="showRejectDialog = false">Cancel</v-btn>
-            <v-btn color="error" variant="flat" :disabled="!rejectReason?.trim()" @click="handleRejectTechArch">
-              Reject
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-
-      <!-- Reassignment dialog -->
-      <v-dialog v-model="showReassignDialog" max-width="440">
-        <v-card color="surface" class="pa-6">
-          <div class="text-h6 mb-2">Request Reassignment</div>
-          <div class="text-body-2 text-medium-emphasis mb-4">
-            Explain why you'd like to hand off this BUD to another developer.
-          </div>
-          <v-textarea
-            v-model="reassignReason"
-            variant="outlined"
-            label="Reason"
-            rows="3"
-            counter="5000"
-            :rules="[v => !!v?.trim() || 'Reason is required']"
-          />
-          <v-card-actions class="pa-0">
-            <v-spacer />
-            <v-btn variant="text" @click="showReassignDialog = false">Cancel</v-btn>
-            <v-btn color="warning" variant="flat" :disabled="!reassignReason?.trim()" @click="handleReassignment">
-              Request Reassignment
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-
-      <!-- Repo Confirmation Dialog (for code_review transition) -->
-      <v-dialog v-model="showRepoConfirmDialog" max-width="520">
-        <v-card>
-          <v-card-title>Confirm Repos for Code Review</v-card-title>
-          <v-card-text>
-            <p class="text-body-2 mb-3">Select which repositories should be included in the code review:</p>
-            <v-list density="compact">
-              <v-list-item v-for="repo in commitRepos" :key="repo.repoPath">
-                <template #prepend>
-                  <v-checkbox-btn v-model="repo.checked" density="compact" />
-                </template>
-                <v-list-item-title class="text-body-2">{{ repo.repoName }}</v-list-item-title>
-                <v-list-item-subtitle class="text-caption">{{ repo.commitCount }} commit{{ repo.commitCount !== 1 ? 's' : '' }}</v-list-item-subtitle>
-              </v-list-item>
-            </v-list>
-            <v-alert v-if="commitRepos.length === 0" type="warning" variant="tonal" density="compact" class="mt-2">
-              No commits found for this BUD. You can still proceed but the review will have no code changes to analyze.
-            </v-alert>
-            <v-text-field
-              v-if="commitRepos.some(r => !r.checked)"
-              v-model="excludeReason"
-              label="Reason for excluding repos"
-              variant="outlined"
-              density="compact"
-              class="mt-3"
-            />
-          </v-card-text>
-          <v-card-actions>
-            <v-btn variant="text" @click="showRepoConfirmDialog = false">Cancel</v-btn>
-            <v-spacer />
-            <v-btn color="primary" variant="flat" @click="confirmCodeReviewTransition">
-              Start Code Review
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-
       <!-- Hidden file input -->
       <input
         ref="fileInput"
@@ -759,18 +354,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
-import { useSettingsStore } from '@/stores/settings'
 import { useJobSocket } from '@/composables/useJobSocket'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
-import type { BUDDesign, RepoInfo, BUDSectionKey, TimelineEvent } from '@/types'
+import type { BUDSectionKey, TimelineEvent } from '@/types'
 import ChatPanel from '@/components/buds/ChatPanel.vue'
 import BUDTimeline from '@/components/buds/BUDTimeline.vue'
+import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
+import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -779,19 +375,15 @@ const router = useRouter()
 const budStore = useBUDStore()
 const authStore = useAuthStore()
 const membersStore = useMembersStore()
-const settingsStore = useSettingsStore()
 
 const bud = computed(() => budStore.currentBUD)
 
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)
 
-// Tech architecture approval / reassignment state
-const showRejectDialog = ref(false)
-const showReassignDialog = ref(false)
-const rejectReason = ref('')
-const reassignReason = ref('')
-const approvingTechArch = ref(false)
+// Child component refs
+const designPanelRef = ref<InstanceType<typeof BUDDesignPanel> | null>(null)
+const workflowRef = ref<InstanceType<typeof BUDWorkflowActions> | null>(null)
 
 const canApprove = computed(() => {
   const role = authStore.user?.role
@@ -801,36 +393,6 @@ const canApprove = computed(() => {
 const isCurrentAssignee = computed(() =>
   bud.value?.assignee_id != null && authStore.user?.id === bud.value.assignee_id,
 )
-
-const awaitingManagerApproval = computed(() => {
-  const meta = bud.value?.metadata as Record<string, unknown> | null
-  const approval = meta?.tech_arch_approval as Record<string, unknown> | undefined
-  return approval?.awaiting_manager === true
-})
-
-async function handleApproveTechArch(): Promise<void> {
-  if (!bud.value) return
-  approvingTechArch.value = true
-  try {
-    await budStore.approveTechArch(bud.value.id)
-  } finally {
-    approvingTechArch.value = false
-  }
-}
-
-async function handleRejectTechArch(): Promise<void> {
-  if (!bud.value || !rejectReason.value.trim()) return
-  await budStore.rejectTechArch(bud.value.id, rejectReason.value)
-  showRejectDialog.value = false
-  rejectReason.value = ''
-}
-
-async function handleReassignment(): Promise<void> {
-  if (!bud.value || !reassignReason.value.trim()) return
-  await budStore.requestReassignment(bud.value.id, reassignReason.value)
-  showReassignDialog.value = false
-  reassignReason.value = ''
-}
 
 // Timeline + assignee state
 const timelineEvents = ref<TimelineEvent[]>([])
@@ -842,117 +404,13 @@ const assigneeSearch = ref('')
 const editingTitle = ref(false)
 const editTitle = ref('')
 
-// Markdown section editing via composable (replaces manual toggle/save per section)
+// Markdown section editing via composable
 const { editing: editingContent, editValue: editContent, toggle: toggleContentEdit, save: saveContent } =
   useMarkdownSection('requirements_md', bud)
 const { editing: editingTechSpec, editValue: editTechSpec, toggle: toggleTechSpecEdit, save: saveTechSpec } =
   useMarkdownSection('tech_spec_md', bud)
 const { editing: editingTestPlan, editValue: editTestPlan, toggle: toggleTestPlanEdit, save: saveTestPlan } =
   useMarkdownSection('test_plan_md', bud)
-const editDesign = ref('')
-
-// Multi-design state
-const designs = ref<BUDDesign[]>([])
-const activeDesignTab = ref<string>('')
-const editingDesignId = ref<string | null>(null)
-const showRepoDialog = ref(false)
-const availableRepos = ref<RepoInfo[]>([])
-const availableReposLoading = ref(false)
-const selectedRepoIds = ref<string[]>([])
-const designJobProgress = reactive(new Map<string, string>())
-const designPreviewKey = ref(0) // bump to force iframe reload
-let notesSaveTimer: ReturnType<typeof setTimeout> | null = null
-
-const activeDesignObj = computed(() =>
-  designs.value.find(d => d.id === activeDesignTab.value) || null,
-)
-
-// Blob URLs for iframe rendering (no auth required)
-const designBlobUrls = reactive(new Map<string, string>())
-
-function updateBlobUrls(): void {
-  // Revoke old URLs
-  for (const url of designBlobUrls.values()) {
-    URL.revokeObjectURL(url)
-  }
-  designBlobUrls.clear()
-  for (const d of designs.value) {
-    if (d.design_html) {
-      const blob = new Blob([d.design_html], { type: 'text/html' })
-      designBlobUrls.set(d.id, URL.createObjectURL(blob))
-    }
-  }
-}
-
-function designPreviewUrl(designId: string): string {
-  return designBlobUrls.get(designId) || ''
-}
-
-function openDesignInTab(designId: string): void {
-  const d = designs.value.find(dd => dd.id === designId)
-  if (!d?.design_html) return
-  const blob = new Blob([d.design_html], { type: 'text/html' })
-  const url = URL.createObjectURL(blob)
-  window.open(url, '_blank')
-  // Revoke after 60s — browser keeps the tab content after opening
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
-}
-
-function refreshDesignPreview(): void {
-  updateBlobUrls()
-  designPreviewKey.value++
-}
-
-function debouncedSaveNotes(designId: string, value: string): void {
-  if (notesSaveTimer) clearTimeout(notesSaveTimer)
-  notesSaveTimer = setTimeout(async () => {
-    if (!bud.value) return
-    await budStore.updateDesignNotes(bud.value.id, designId, value)
-    const idx = designs.value.findIndex(d => d.id === designId)
-    if (idx !== -1) designs.value[idx] = { ...designs.value[idx], notes: value }
-  }, 800)
-}
-
-// PRD generation tracking
-const prdGenerating = ref(false)
-const prdStatusMessage = ref('')
-
-// Tech arch generation tracking
-const techArchGenerating = ref(false)
-const techArchStatusMessage = ref('')
-
-// Code review tracking
-const codeReviewGenerating = ref(false)
-const codeReviewStatusMessage = ref('')
-const showRepoConfirmDialog = ref(false)
-const commitRepos = ref<{ repoPath: string; repoName: string; commitCount: number; checked: boolean }[]>([])
-const excludeReason = ref('')
-
-interface CodeReviewComment {
-  repo: string
-  file: string
-  line: number
-  severity: 'error' | 'warning' | 'suggestion'
-  comment: string
-  deviates_from_spec: boolean
-  status?: 'pending' | 'accepted' | 'skipped'
-  skip_reason?: string
-}
-
-const codeReviewComments = computed<CodeReviewComment[]>(() => {
-  const meta = bud.value?.metadata as Record<string, unknown> | null
-  return (meta?.code_review_comments as CodeReviewComment[] | undefined) ?? []
-})
-
-const automationTestPlan = computed(() => {
-  const meta = bud.value?.metadata as Record<string, unknown> | null
-  return (meta?.automation_test_plan_md as string | undefined) ?? ''
-})
-
-const manualTestPlan = computed(() => {
-  const meta = bud.value?.metadata as Record<string, unknown> | null
-  return (meta?.manual_test_plan_md as string | undefined) ?? ''
-})
 
 // Chat state
 const chatOpen = ref(false)
@@ -987,7 +445,7 @@ const currentSectionLabel = computed(() =>
 const isEditing = computed(() => {
   if (activeTab.value === 'tech-spec') return editingTechSpec.value
   if (activeTab.value === 'test-plan') return editingTestPlan.value
-  if (activeTab.value === 'design') return editingDesignId.value !== null
+  if (activeTab.value === 'design') return designPanelRef.value?.editingDesignId !== null
   return editingContent.value
 })
 
@@ -999,8 +457,6 @@ function renderMarkdown(md: string | null): string {
 }
 
 onMounted(async () => {
-  // Apply deep-link tab BEFORE data fetches so loadChatHistory()
-  // targets the correct section and avoids a visual flash + double load.
   const tabParam = route.query.tab as string | undefined
   if (tabParam && VALID_BUD_TABS.has(tabParam)) {
     activeTab.value = tabParam
@@ -1008,50 +464,40 @@ onMounted(async () => {
 
   const id = route.params.id as string
   await budStore.fetchBUD(id)
-  await loadDesigns()
+  await designPanelRef.value?.loadDesigns()
   await loadChatHistory()
-  trackPrdJobIfActive()
-  trackTechArchJobIfActive()
-  trackCodeReviewJobIfActive()
+  workflowRef.value?.trackPrdJobIfActive()
+  workflowRef.value?.trackTechArchJobIfActive()
+  workflowRef.value?.trackCodeReviewJobIfActive()
   membersStore.fetchMembers()
   loadTimeline()
 })
 
-onBeforeUnmount(() => {
-  // Clean up blob URLs
-  for (const url of designBlobUrls.values()) {
-    URL.revokeObjectURL(url)
-  }
-})
-
-// Resume tech arch job tracking when metadata changes (e.g. after status update re-fetch)
+// Resume tech arch job tracking when metadata changes
 watch(() => bud.value?.metadata?.tech_arch_job_id, (newJobId) => {
-  if (newJobId && !techArchGenerating.value) {
-    trackTechArchJobIfActive()
+  if (newJobId && !workflowRef.value?.techArchGenerating) {
+    workflowRef.value?.trackTechArchJobIfActive()
   }
 })
 
 // Resume code review job tracking when metadata changes
 watch(() => (bud.value?.metadata as Record<string, unknown> | null)?.code_review_job_id, (newJobId) => {
-  if (newJobId && !codeReviewGenerating.value) {
-    trackCodeReviewJobIfActive()
+  if (newJobId && !workflowRef.value?.codeReviewGenerating) {
+    workflowRef.value?.trackCodeReviewJobIfActive()
   }
 })
 
-// Load chat history when switching tabs or design sub-tabs
+// Load chat history when switching tabs
 watch(activeTab, () => {
   currentSessionId.value = undefined
   loadChatHistory()
-})
-watch(activeDesignTab, () => {
-  if (activeTab.value === 'design') loadChatHistory()
 })
 
 async function loadChatHistory(): Promise<void> {
   if (!bud.value) return
   const section = currentSection.value
-  const designId = section === 'design' && activeDesignTab.value
-    ? activeDesignTab.value
+  const designId = section === 'design' && designPanelRef.value?.activeDesignTab
+    ? designPanelRef.value.activeDesignTab
     : undefined
   const history = await budStore.fetchChatHistory(bud.value.id, section, designId, currentSessionId.value)
   chatMessages.value = history.map(m => ({ role: m.role, text: m.message, userName: m.user_name }))
@@ -1083,7 +529,7 @@ async function updateStatus(newStatus: string): Promise<void> {
 
   // Intercept code_review transition to show repo confirmation
   if (newStatus === 'code_review') {
-    await showCodeReviewConfirmation()
+    await workflowRef.value?.showCodeReviewConfirmation()
     return
   }
 
@@ -1092,272 +538,19 @@ async function updateStatus(newStatus: string): Promise<void> {
   // If entering design phase, trigger design generation flow
   if (budStore.designAvailable) {
     budStore.designAvailable = false
-    await triggerDesignGeneration()
+    // Trigger via the design panel ref
+    activeTab.value = 'design'
   }
 
   await loadTimeline()
-}
-
-async function showCodeReviewConfirmation(): Promise<void> {
-  if (!bud.value) return
-  try {
-    const resp = await fetch(`/api/v1/buds/${bud.value.id}/commits/repos`, {
-      headers: { 'Authorization': `Bearer ${useAuthStore().token}` },
-    })
-    if (resp.ok) {
-      const repos = await resp.json()
-      commitRepos.value = repos.map((r: { repo_path: string; repo_name: string; commit_count: number }) => ({
-        repoPath: r.repo_path,
-        repoName: r.repo_name,
-        commitCount: r.commit_count,
-        checked: true,
-      }))
-    } else {
-      commitRepos.value = []
-    }
-  } catch {
-    commitRepos.value = []
-  }
-  showRepoConfirmDialog.value = true
-}
-
-async function confirmCodeReviewTransition(): Promise<void> {
-  if (!bud.value) return
-  showRepoConfirmDialog.value = false
-
-  const confirmedRepos = commitRepos.value
-    .filter(r => r.checked)
-    .map(r => ({
-      repo_path: r.repoPath,
-      repo_name: r.repoName,
-    }))
-  const excludedRepos = commitRepos.value
-    .filter(r => !r.checked)
-    .map(r => ({
-      repo_path: r.repoPath,
-      repo_name: r.repoName,
-      reason: excludeReason.value || 'Excluded by user',
-    }))
-
-  // Set confirmed repos in metadata before transition
-  const meta = { ...(bud.value.metadata || {}), confirmed_repos: confirmedRepos, excluded_repos: excludedRepos }
-  await budStore.updateBUD(bud.value.id, { metadata: meta, status: 'code_review' } as never)
-
-  // Track the code review job
-  const refreshed = budStore.currentBUD
-  const crJobId = (refreshed?.metadata as Record<string, unknown> | null)?.code_review_job_id as string | undefined
-  if (crJobId) {
-    trackCodeReviewJob(crJobId)
-  }
-
-  await loadTimeline()
-}
-
-function trackCodeReviewJob(jobId: string): void {
-  codeReviewGenerating.value = true
-  codeReviewStatusMessage.value = 'Starting code review...'
-  startTracking(jobId, {
-    onProgress(s) {
-      codeReviewStatusMessage.value = s.statusMessage || 'Reviewing code...'
-    },
-    async onComplete() {
-      codeReviewGenerating.value = false
-      codeReviewStatusMessage.value = ''
-      await budStore.fetchBUD(bud.value!.id)
-    },
-    onError(err) {
-      codeReviewGenerating.value = false
-      codeReviewStatusMessage.value = `Failed: ${err}`
-    },
-  })
-}
-
-async function handleReviewComment(idx: number, action: 'accepted' | 'skipped', reason?: string): Promise<void> {
-  if (!bud.value) return
-  const meta = { ...(bud.value.metadata || {}) } as Record<string, unknown>
-  const comments = [...(meta.code_review_comments as CodeReviewComment[] || [])]
-  if (comments[idx]) {
-    comments[idx] = { ...comments[idx], status: action }
-    if (reason) comments[idx].skip_reason = reason
-    meta.code_review_comments = comments
-    await budStore.updateBUD(bud.value.id, { metadata: meta } as never)
-  }
-}
-
-// ── Multi-design functions ────────────────────────────
-
-async function loadDesigns(): Promise<void> {
-  if (!bud.value) return
-  designs.value = await budStore.fetchDesigns(bud.value.id)
-  updateBlobUrls()
-  designPreviewKey.value++ // Force iframe reload with new blob URLs
-  if (designs.value.length > 0 && !activeDesignTab.value) {
-    activeDesignTab.value = designs.value[0].id
-  }
-  // Resume tracking for any in-progress designs
-  for (const d of designs.value) {
-    if (d.status === 'generating' && d.job_id) {
-      trackDesignJob(d.id, d.job_id)
-    }
-  }
-}
-
-async function triggerDesignGeneration(): Promise<void> {
-  if (!bud.value) return
-  availableReposLoading.value = true
-  await settingsStore.fetchRepos()
-  const activeRepos = settingsStore.repos.filter(r => r.status === 'active')
-  availableRepos.value = activeRepos
-  availableReposLoading.value = false
-
-  if (activeRepos.length === 0) {
-    await startDesignJobs([])
-  } else if (activeRepos.length === 1) {
-    await startDesignJobs([activeRepos[0].id])
-  } else {
-    selectedRepoIds.value = []
-    showRepoDialog.value = true
-  }
-}
-
-async function confirmDesignGeneration(): Promise<void> {
-  showRepoDialog.value = false
-  await startDesignJobs(selectedRepoIds.value)
-}
-
-async function startDesignJobs(repoIds: string[]): Promise<void> {
-  if (!bud.value) return
-  const jobs = await budStore.generateDesigns(bud.value.id, repoIds)
-
-  // Reload designs to get the created rows
-  await loadDesigns()
-  activeTab.value = 'design'
-
-  // Track each job
-  for (const job of jobs) {
-    trackDesignJob(job.designId, job.jobId)
-  }
-}
-
-function trackDesignJob(designId: string, jobId: string): void {
-  startTracking(jobId, {
-    onProgress(s) {
-      designJobProgress.set(designId, s.statusMessage || 'Generating wireframe...')
-    },
-    async onComplete(data) {
-      designJobProgress.delete(designId)
-      // Re-fetch designs from DB to get persisted HTML (too large for WebSocket)
-      await loadDesigns()
-      const result = data as { reply?: string } | null
-      if (result?.reply) {
-        chatMessages.value.push({ role: 'ai', text: result.reply })
-      }
-    },
-    async onError(err) {
-      designJobProgress.delete(designId)
-      const idx = designs.value.findIndex(d => d.id === designId)
-      if (idx !== -1) {
-        designs.value[idx] = { ...designs.value[idx], status: 'failed' }
-      }
-      chatMessages.value.push({ role: 'ai', text: `Design generation failed: ${err}` })
-      // Re-fetch from DB to sync sibling designs that may have also failed
-      // (their WS subscriptions can be lost during rapid re-renders)
-      await loadDesigns()
-    },
-  })
-}
-
-function trackPrdJobIfActive(): void {
-  const jobId = bud.value?.metadata?.prd_job_id as string | undefined
-  if (!jobId) return
-  prdGenerating.value = true
-  startTracking(jobId, {
-    onProgress(s) {
-      prdStatusMessage.value = s.statusMessage || 'PRD agent is enriching requirements...'
-    },
-    async onComplete() {
-      prdGenerating.value = false
-      prdStatusMessage.value = ''
-      // Refresh BUD to show the enriched content
-      if (bud.value) await budStore.fetchBUD(bud.value.id)
-    },
-    onError() {
-      prdGenerating.value = false
-      prdStatusMessage.value = ''
-    },
-  })
-}
-
-function trackTechArchJobIfActive(): void {
-  const jobId = bud.value?.metadata?.tech_arch_job_id as string | undefined
-  if (!jobId) return
-  techArchGenerating.value = true
-  startTracking(jobId, {
-    onProgress(s) {
-      techArchStatusMessage.value = s.statusMessage || 'Generating tech architecture...'
-    },
-    async onComplete() {
-      techArchGenerating.value = false
-      techArchStatusMessage.value = ''
-      if (bud.value) await budStore.fetchBUD(bud.value.id)
-    },
-    onError() {
-      techArchGenerating.value = false
-      techArchStatusMessage.value = ''
-    },
-  })
-}
-
-function trackCodeReviewJobIfActive(): void {
-  const meta = bud.value?.metadata as Record<string, unknown> | null
-  const jobId = meta?.code_review_job_id as string | undefined
-  if (!jobId) return
-  trackCodeReviewJob(jobId)
-}
-
-async function handleRegenerate(designId: string): Promise<void> {
-  if (!bud.value) return
-  const result = await budStore.regenerateDesign(bud.value.id, designId)
-  if (result) {
-    const idx = designs.value.findIndex(d => d.id === designId)
-    if (idx !== -1) {
-      designs.value[idx] = { ...designs.value[idx], status: 'generating', job_id: result.jobId }
-    }
-    trackDesignJob(designId, result.jobId)
-  }
-}
-
-async function saveDesignById(designId: string): Promise<void> {
-  if (!bud.value) return
-  const d = designs.value.find(d => d.id === designId)
-  if (d && editDesign.value !== (d.design_html || '')) {
-    await budStore.updateDesignHtml(bud.value.id, designId, editDesign.value)
-    const idx = designs.value.findIndex(dd => dd.id === designId)
-    if (idx !== -1) designs.value[idx] = { ...designs.value[idx], design_html: editDesign.value }
-  }
-  editingDesignId.value = null
 }
 
 // Unified toggle for whichever tab is active
 function toggleEdit(): void {
   if (activeTab.value === 'tech-spec') toggleTechSpecEdit()
   else if (activeTab.value === 'test-plan') toggleTestPlanEdit()
-  else if (activeTab.value === 'design') toggleDesignEdit()
+  else if (activeTab.value === 'design') designPanelRef.value?.toggleDesignEdit()
   else toggleContentEdit()
-}
-
-function toggleDesignEdit(): void {
-  // Multi-design mode: edit active tab's design
-  if (designs.value.length > 0 && activeDesignTab.value) {
-    if (editingDesignId.value === activeDesignTab.value) {
-      saveDesignById(activeDesignTab.value)
-    } else {
-      const d = designs.value.find(d => d.id === activeDesignTab.value)
-      editDesign.value = d?.design_html || ''
-      editingDesignId.value = activeDesignTab.value
-    }
-    return
-  }
 }
 
 async function handleDelete(): Promise<void> {
@@ -1375,8 +568,8 @@ async function handleChatSend(msg: string, images: string[] = []): Promise<void>
   chatLoading.value = true
   chatStatusMessage.value = ''
 
-  const chatDesignId = currentSection.value === 'design' && activeDesignTab.value
-    ? activeDesignTab.value
+  const chatDesignId = currentSection.value === 'design' && designPanelRef.value?.activeDesignTab
+    ? designPanelRef.value.activeDesignTab
     : undefined
   const result = await budStore.chatBUD(bud.value.id, msg, currentSection.value, chatDesignId, currentSessionId.value, images)
   if (!result) {
@@ -1404,8 +597,8 @@ async function handleChatSend(msg: string, images: string[] = []): Promise<void>
         } else if (currentSection.value === 'test_plan_md' && editingTestPlan.value) {
           editTestPlan.value = updated_content
         } else if (currentSection.value === 'design') {
-          if (bud.value) await loadDesigns()
-          refreshDesignPreview()
+          if (bud.value) await designPanelRef.value?.loadDesigns()
+          designPanelRef.value?.refreshDesignPreview()
         }
       }
     },
@@ -1424,9 +617,9 @@ function downloadSection(section: string): void {
 
   // Design tab exports the active design's HTML
   if (section === 'design') {
-    const html = activeDesignObj.value?.design_html
+    const html = designPanelRef.value?.activeDesignObj?.design_html
     if (!html) return
-    const repoName = activeDesignObj.value?.repo_name || 'default'
+    const repoName = designPanelRef.value?.activeDesignObj?.repo_name || 'default'
     const blob = new Blob([html], { type: 'text/html' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -1688,42 +881,6 @@ function formatDate(dateStr: string): string {
 
 .rendered-markdown :deep(a:hover) {
   text-decoration: underline;
-}
-
-/* ── Multi-design sub-tabs ─────────────────────── */
-.design-multi-panel {
-  display: flex;
-  flex-direction: column;
-}
-
-.design-sub-tabs-row {
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  padding: 0 8px;
-}
-
-.design-sub-tabs {
-  flex: 1;
-}
-
-/* ── Design notes ──────────────────────────────── */
-.design-notes-row {
-  padding: 8px 12px;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.06);
-  background: rgba(var(--v-theme-on-surface), 0.02);
-}
-
-.design-notes-input {
-  font-size: 13px;
-}
-
-/* ── Design iframe ─────────────────────────────── */
-.design-iframe {
-  width: 100%;
-  min-height: 600px;
-  border: none;
-  background: #0f1117;
 }
 
 /* ── Empty state ───────────────────────────────── */

@@ -25,10 +25,8 @@ from app.services.claude_runner import (
 )
 from app.services.feature_merger import (
     build_targeted_merge_prompt,
-    deactivate_superseded_repo_features,
     dedup_merged_features,
     find_semantic_duplicates,
-    merge_same_name_features,
 )
 from app.services.git_analyzer import analyze_repo_skills, get_diff_since
 from app.services.scan_helpers import (
@@ -467,24 +465,10 @@ async def phase_b3_merge(
     """
     from app.repositories.organization import OrganizationRepository
 
-    # --- Phase B3a: Programmatic same-name merge (workspace only) ---
-    if is_workspace and total_features_synthesized > 0:
-        scan_status.status = "merging_features"
-        scan_status.progress_pct = 85
-        name_merged = await merge_same_name_features(db, org_id)
-        if name_merged:
-            logger.info("same_name_merge_done", deactivated=name_merged)
-
     # --- Phase F: Embed missing items (once, across all repos) ---
     scan_status.status = "embedding"
     scan_status.progress_pct = 88
     await embed_missing_items(db, org_id)
-
-    # --- Phase B3a2: Deactivate superseded repo-specific features ---
-    if is_workspace and total_features_synthesized > 0:
-        superseded = await deactivate_superseded_repo_features(db, org_id)
-        if superseded:
-            logger.info("superseded_cleanup_done", deactivated=superseded)
 
     # --- Phase B3b: Semantic dedup (any scan with 2+ features) ---
     config: dict = {}

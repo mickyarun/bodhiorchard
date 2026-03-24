@@ -1,8 +1,8 @@
 """Feature deduplication and merge logic for scan pipeline.
 
-Handles same-name cross-repo merges, semantic duplicate detection via
-pgvector cosine similarity, targeted merge prompt building, and
-post-merge deduplication of concurrent MCP retries.
+Handles semantic duplicate detection via pgvector cosine similarity,
+targeted merge prompt building, and post-merge deduplication of
+concurrent MCP retries.
 """
 
 import re
@@ -17,23 +17,6 @@ from app.repositories.knowledge_item import KnowledgeItemRepository
 logger = structlog.get_logger(__name__)
 
 REPO_PREFIX_RE = re.compile(r"^\[([^\]]+)\]\s*Feature:\s*(.+)$")
-
-
-async def merge_same_name_features(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-) -> int:
-    """No-op: repo-prefix merge is superseded by upsert-time merging.
-
-    Titles no longer carry ``[Repo]`` prefixes, so prefix-based grouping
-    cannot find anything. The MCP ``write_feature_registry`` handler now
-    merges code_locations and tags on upsert, making this function
-    unnecessary.
-
-    Returns:
-        Always 0.
-    """
-    return 0
 
 
 async def find_semantic_duplicates(
@@ -115,23 +98,6 @@ async def find_semantic_duplicates(
         )
 
     return result
-
-
-async def deactivate_superseded_repo_features(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    threshold: float = 0.80,
-) -> int:
-    """No-op: repo-prefix supersedence is no longer needed.
-
-    Titles no longer carry ``[Repo]`` prefixes, so the SQL query that
-    distinguished repo-specific from cross-repo items cannot match.
-    The MCP handler now merges code_locations on upsert instead.
-
-    Returns:
-        Always 0.
-    """
-    return 0
 
 
 def build_targeted_merge_prompt(
