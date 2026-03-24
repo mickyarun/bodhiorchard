@@ -144,6 +144,9 @@
       :position="tooltipPosition"
       @close="tooltipData = null"
     />
+
+    <!-- Setup checklist widget -->
+    <SetupChecklist />
   </div>
 </template>
 
@@ -157,6 +160,7 @@ import PlayCanvasCanvas from '@/components/tree/PlayCanvasCanvas.vue'
 import TreeDetailPanel from '@/components/tree/TreeDetailPanel.vue'
 import DeveloperDetailPanel from '@/components/tree/DeveloperDetailPanel.vue'
 import HouseDetailPanel from '@/components/tree/HouseDetailPanel.vue'
+import SetupChecklist from '@/components/SetupChecklist.vue'
 import TreeLegend from '@/components/tree/TreeLegend.vue'
 import TreeTooltip from '@/components/tree/TreeTooltip.vue'
 

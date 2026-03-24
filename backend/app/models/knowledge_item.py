@@ -62,7 +62,7 @@ class KnowledgeItem(BaseModel):
     source: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
-    embedding = mapped_column(Vector(768), nullable=True)
+    embedding = mapped_column(Vector(384), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     feature_status: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     code_locations: Mapped[dict | None] = mapped_column(JSON, nullable=True)

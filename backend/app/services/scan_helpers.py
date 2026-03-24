@@ -163,7 +163,7 @@ async def embed_missing_items(db: AsyncSession, org_id: uuid.UUID) -> int:
     if not items:
         return 0
 
-    batch_size = 20
+    batch_size = 50
     total_embedded = 0
 
     for i in range(0, len(items), batch_size):

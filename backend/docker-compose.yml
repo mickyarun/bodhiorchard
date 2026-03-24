@@ -24,8 +24,7 @@ services:
     entrypoint: >
       sh -c "
         sleep 5 &&
-        ollama pull llama3:8b &&
-        ollama pull nomic-embed-text
+        ollama pull llama3:8b
       "
     environment:
       OLLAMA_HOST: http://ollama:11434

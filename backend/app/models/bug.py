@@ -63,7 +63,7 @@ class Bug(BaseModel):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     linked_pr: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    embedding = mapped_column(Vector(768), nullable=True)
+    embedding = mapped_column(Vector(384), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:

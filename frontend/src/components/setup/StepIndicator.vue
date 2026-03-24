@@ -49,11 +49,11 @@ const emit = defineEmits<{
 }>()
 
 const steps: StepDefinition[] = [
-  { title: 'Method', icon: 'mdi-book-open-page-variant-outline', key: 'methodology' },
   { title: 'Welcome', icon: 'mdi-hand-wave-outline', key: 'welcome' },
   { title: 'Org', icon: 'mdi-domain', key: 'organization' },
   { title: 'Admin', icon: 'mdi-account-key-outline', key: 'admin' },
-  { title: 'Connections', icon: 'mdi-connection', key: 'connections' },
-  { title: 'Review', icon: 'mdi-rocket-launch-outline', key: 'review' },
+  { title: 'AI Engine', icon: 'mdi-robot-outline', key: 'ai-config' },
+  { title: 'Repo', icon: 'mdi-source-repository', key: 'source-code' },
+  { title: 'Launch', icon: 'mdi-rocket-launch-outline', key: 'review' },
 ]
 </script>

@@ -198,7 +198,7 @@ Bodhigrove uses [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code
 |---|---|---|
 | **Ollama** | llama3, nomic-embed-text, and any GGUF model | Free (your hardware) |
 | **Anthropic** | Claude Opus, Sonnet, Haiku via Claude Code + API | Pay-per-use |
-| **OpenAI** | GPT-4o, GPT-4, GPT-3.5 via litellm | Pay-per-use |
+| **OpenAI** | GPT-4o, GPT-4, GPT-3.5 via fastembed | Pay-per-use |
 | **OpenAI Codex** | Code-specialized models | Under development |
 
 Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cloud APIs when you need them.
@@ -238,7 +238,7 @@ Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cl
 - Python 3.12+ / FastAPI / SQLAlchemy 2.0 (async)
 - PostgreSQL 16 with pgvector for vector search
 - Redis for caching and job queues
-- litellm for multi-provider LLM access (Ollama, OpenAI, Anthropic)
+- fastembed for multi-provider LLM access (Ollama, OpenAI, Anthropic)
 - Alembic for database migrations
 - structlog for structured JSON logging
 
@@ -252,7 +252,7 @@ Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cl
 **AI & Infrastructure**
 - Claude Code as the core AI engine for codebase-aware agents (via MCP)
 - Ollama for local LLM inference (no API keys needed to start)
-- litellm for multi-provider LLM access (Anthropic, OpenAI, Ollama)
+- fastembed for multi-provider LLM access (Anthropic, OpenAI, Ollama)
 - Docker + Docker Compose on a local machine or Mac Mini
 - Cloudflare Tunnel for exposing webhooks to Slack / GitHub / internet
 
@@ -392,8 +392,8 @@ When the backend is running, interactive API documentation is available at:
 |---|---|---|
 | **Claude Code** | Core | AI backbone — runs codebase-aware agents locally via MCP (10 tools) |
 | **Ollama** | Supported | Local LLM inference — free, private, no API keys needed |
-| **Anthropic API** | Supported | Cloud LLM for non-codebase agents via litellm |
-| **OpenAI API** | Supported | Alternative cloud LLM provider via litellm |
+| **Anthropic API** | Supported | Cloud LLM for non-codebase agents via fastembed |
+| **OpenAI API** | Supported | Alternative cloud LLM provider via fastembed |
 | **Slack** | Supported | Feature intake, triage conversations, notifications (via Cloudflare Tunnel) |
 | **GitHub** | Supported | PR merge detection, branch status, code scanning |
 | **OpenAI Codex** | In Development | Code-specialized agent tasks |

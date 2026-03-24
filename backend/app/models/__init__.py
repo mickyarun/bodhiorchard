@@ -18,7 +18,6 @@ from app.models.bud import (
 )
 from app.models.bud_commit import BUDCommit
 from app.models.bug import Bug, BugSeverity, BugStatus
-from app.models.code_embedding import CodeEmbedding
 from app.models.design_system import DesignSystemRef
 from app.models.enterprise_rule import EnterpriseRule
 from app.models.feature_learning import FeatureLearning
@@ -55,7 +54,6 @@ __all__ = [
     "Bug",
     "BugSeverity",
     "BugStatus",
-    "CodeEmbedding",
     "DesignSystemRef",
     "EnterpriseRule",
     "FeatureLearning",

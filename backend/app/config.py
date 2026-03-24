@@ -48,9 +48,9 @@ class EmbeddingConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="EMBEDDING_", env_file=".env", extra="ignore")
 
-    provider: str = Field(default="ollama")
-    model: str = Field(default="nomic-embed-text")
-    dimensions: int = Field(default=768)
+    provider: str = Field(default="fastembed")
+    model: str = Field(default="BAAI/bge-small-en-v1.5")
+    dimensions: int = Field(default=384)
 
 
 class RedisConfig(BaseSettings):

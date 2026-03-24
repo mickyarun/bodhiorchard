@@ -7,23 +7,23 @@
 
     <v-window v-model="setupStore.currentStep" class="mb-6">
       <v-window-item :value="0">
-        <MethodologyStep @start-building="setupStore.nextStep()" />
-      </v-window-item>
-
-      <v-window-item :value="1">
         <WelcomeStep @get-started="setupStore.nextStep()" />
       </v-window-item>
 
-      <v-window-item :value="2">
+      <v-window-item :value="1">
         <OrganizationStep />
       </v-window-item>
 
-      <v-window-item :value="3">
+      <v-window-item :value="2">
         <AdminAccountStep />
       </v-window-item>
 
+      <v-window-item :value="3">
+        <AIConfigStep />
+      </v-window-item>
+
       <v-window-item :value="4">
-        <IntegrationsStep />
+        <SourceCodeStep />
       </v-window-item>
 
       <v-window-item :value="5">
@@ -53,7 +53,7 @@
     </v-alert>
 
     <div
-      v-if="setupStore.currentStep > 1"
+      v-if="setupStore.currentStep > 0"
       class="d-flex justify-space-between align-center"
     >
       <v-btn
@@ -82,11 +82,11 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSetupStore } from '@/stores/setup'
 import StepIndicator from '@/components/setup/StepIndicator.vue'
-import MethodologyStep from './steps/MethodologyStep.vue'
 import WelcomeStep from './steps/WelcomeStep.vue'
 import OrganizationStep from './steps/OrganizationStep.vue'
 import AdminAccountStep from './steps/AdminAccountStep.vue'
-import IntegrationsStep from './steps/IntegrationsStep.vue'
+import AIConfigStep from './steps/AIConfigStep.vue'
+import SourceCodeStep from './steps/SourceCodeStep.vue'
 import ReviewStep from './steps/ReviewStep.vue'
 
 const setupStore = useSetupStore()
@@ -94,9 +94,9 @@ const router = useRouter()
 const validationError = ref('')
 
 const validationMessages: Record<number, string> = {
-  2: 'Please fill in the organization name and slug.',
-  3: 'Please complete all admin account fields with valid values.',
-  4: 'Please complete the configuration for enabled integrations and AI settings.',
+  1: 'Please fill in the organization name and slug.',
+  2: 'Please complete all admin account fields with valid values.',
+  4: 'Add at least one repository and map both main and develop branches.',
 }
 
 function handleNext(): void {

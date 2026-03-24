@@ -7,7 +7,7 @@
 - **PostgreSQL 16** with pgvector extension
 - **Alembic** for database migrations (async)
 - **Pydantic v2** for DTOs and settings
-- **litellm** for multi-provider LLM access
+- **fastembed** for local ONNX-based text embeddings (BAAI/bge-small-en-v1.5, 384d)
 - **structlog** for structured logging
 - **Redis** for caching
 

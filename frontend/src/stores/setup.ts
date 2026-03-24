@@ -8,6 +8,8 @@ export const useSetupStore = defineStore('setup', () => {
   const currentStep = ref(0)
   const isSubmitting = ref(false)
   const submitError = ref<string | null>(null)
+  const scanId = ref<string | null>(null)
+
   const state = ref<SetupState>({
     currentStep: 0,
     organization: {
@@ -20,30 +22,11 @@ export const useSetupStore = defineStore('setup', () => {
       password: '',
     },
     sourceCode: {
-      localPath: '',
-      type: 'single-repo' as const,
+      repos: [],
     },
-    integrations: {
-      github: { enabled: false, pat: '' },
-      slack: { enabled: false, botToken: '', signingSecret: '' },
-    },
-    llm: {
-      provider: 'ollama',
-      model: 'llama3:8b',
-      baseUrl: 'http://localhost:11434',
-      apiKey: '',
-      premiumProvider: 'anthropic',
-      premiumModel: 'claude-opus-4',
-      embeddingProvider: 'ollama',
-      embeddingModel: 'nomic-embed-text',
-    },
-    aiConfig: {
-      preset: 'hybrid',
-      ollamaUrl: 'http://localhost:11434',
-      ollamaModel: 'llama3:8b',
-      cloudProvider: 'anthropic',
-      cloudApiKey: '',
-      cloudModel: 'claude-sonnet-4-5-20250514',
+    scan: {
+      timeoutSeconds: 300,
+      maxTurns: 40,
     },
   })
 
@@ -78,35 +61,21 @@ export const useSetupStore = defineStore('setup', () => {
     return true
   }
 
-  function validateIntegrations(): boolean {
-    const { github, slack } = state.value.integrations
-    if (github.enabled && !github.pat.trim()) return false
-    if (slack.enabled && (!slack.botToken.trim() || !slack.signingSecret.trim())) return false
-    return true
-  }
-
-  function validateAIConfig(): boolean {
-    const ai = state.value.aiConfig
-    if (ai.preset === 'local') {
-      if (!ai.ollamaUrl.trim()) return false
-    } else if (ai.preset === 'cloud') {
-      if (!ai.cloudApiKey.trim()) return false
-    } else if (ai.preset === 'hybrid') {
-      if (!ai.cloudApiKey.trim()) return false
-    } else if (ai.preset === 'claude-ollama') {
-      if (!ai.ollamaUrl.trim()) return false
-    }
-    return true
+  function validateSourceCode(): boolean {
+    const repos = state.value.sourceCode.repos
+    if (repos.length === 0) return false
+    // All repos must have branches mapped
+    return repos.every(r => r.mainBranch && r.developBranch)
   }
 
   function validateCurrentStep(): boolean {
     switch (currentStep.value) {
-      case 0: return true // Methodology — always valid
-      case 1: return true // Welcome — always valid
-      case 2: return validateOrganization()
-      case 3: return validateAdmin()
-      case 4: return validateIntegrations() && validateAIConfig() // Connections
-      case 5: return true // Review — always valid
+      case 0: return true // Welcome
+      case 1: return validateOrganization()
+      case 2: return validateAdmin()
+      case 3: return true // AI Config — no blocking validation
+      case 4: return validateSourceCode()
+      case 5: return true // Review
       default: return false
     }
   }
@@ -143,9 +112,7 @@ export const useSetupStore = defineStore('setup', () => {
         organization: state.value.organization,
         admin: state.value.admin,
         sourceCode: state.value.sourceCode,
-        integrations: state.value.integrations,
-        llm: state.value.llm,
-        aiConfig: state.value.aiConfig,
+        scan: state.value.scan,
       }
 
       const { data } = await api.post('/setup/initialize', payload)
@@ -153,12 +120,15 @@ export const useSetupStore = defineStore('setup', () => {
       if (data.access_token) {
         localStorage.setItem('flowdev_token', data.access_token)
       }
+      if (data.scanId) {
+        scanId.value = data.scanId
+        localStorage.setItem('flowdev_scan_id', data.scanId)
+      }
       resetSetupCache()
       return true
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'response' in err) {
         const axiosErr = err as { response?: { status?: number; data?: { detail?: string; message?: string } } }
-        // 409 = org slug already exists → setup was already completed
         if (axiosErr.response?.status === 409) {
           localStorage.setItem('flowdev_setup_complete', 'true')
           resetSetupCache()
@@ -182,6 +152,7 @@ export const useSetupStore = defineStore('setup', () => {
     state,
     isSubmitting,
     submitError,
+    scanId,
     totalSteps,
     isFirstStep,
     isLastStep,

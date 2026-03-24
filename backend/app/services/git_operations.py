@@ -6,6 +6,7 @@ internally so there is a single subprocess implementation.
 """
 
 import asyncio
+from pathlib import Path
 
 import structlog
 
@@ -130,8 +131,17 @@ async def stash_and_checkout_main(repo_path: str, main_branch: str) -> tuple[str
 
     if orig_branch != main_branch:
         _, stderr, rc = await run_git(["checkout", main_branch], cwd=repo_path)
+        if rc != 0 and "already used by worktree" in stderr:
+            # Stale worktree locks the branch — remove it and retry
+            worktree_dir = Path(repo_path) / ".bodhigrove" / main_branch
+            if worktree_dir.exists():
+                await run_git(
+                    ["worktree", "remove", str(worktree_dir), "--force"],
+                    cwd=repo_path,
+                )
+                logger.info("scan_removed_stale_worktree", repo=repo_path, path=str(worktree_dir))
+            _, stderr, rc = await run_git(["checkout", main_branch], cwd=repo_path)
         if rc != 0:
-            # Restore stash before raising
             if had_stash:
                 await run_git(["stash", "pop"], cwd=repo_path)
             raise RuntimeError(f"Failed to checkout {main_branch}: {stderr[:200]}")

@@ -50,80 +50,29 @@
       </v-table>
     </v-card>
 
-    <!-- Source Code & Integrations -->
+    <!-- Repositories -->
     <v-card class="pa-5 card-border-dark mb-4" color="surface">
       <div class="d-flex align-center ga-3 mb-3">
-        <v-icon icon="mdi-connection" color="primary" size="20" />
-        <div class="text-body-1 font-weight-medium">Connections</div>
+        <v-icon icon="mdi-source-repository" color="primary" size="20" />
+        <div class="text-body-1 font-weight-medium">
+          Repositories ({{ setupStore.state.sourceCode.repos.length }})
+        </div>
       </div>
       <v-table density="compact" class="bg-transparent mb-3">
         <tbody>
-          <tr v-if="setupStore.state.sourceCode.localPath">
-            <td class="text-medium-emphasis" style="width: 140px;">Source Code</td>
+          <tr v-for="r in setupStore.state.sourceCode.repos" :key="r.path">
+            <td class="text-medium-emphasis" style="width: 180px;">
+              <v-icon icon="mdi-source-repository" size="14" class="mr-1" />
+              {{ r.path.split('/').pop() }}
+            </td>
             <td>
-              <code class="text-primary">{{ setupStore.state.sourceCode.localPath }}</code>
-              <v-chip size="x-small" variant="tonal" class="ml-2">
-                {{ setupStore.state.sourceCode.type === 'workspace' ? 'Workspace' : 'Single Repo' }}
-              </v-chip>
+              <v-chip size="x-small" variant="tonal" class="mr-1">{{ r.mainBranch || '?' }}</v-chip>
+              <v-chip size="x-small" variant="tonal">{{ r.developBranch || '?' }}</v-chip>
             </td>
           </tr>
-        </tbody>
-      </v-table>
-      <div class="d-flex ga-4 flex-wrap">
-        <v-chip
-          :color="setupStore.state.integrations.github.enabled ? 'success' : 'default'"
-          :variant="setupStore.state.integrations.github.enabled ? 'flat' : 'tonal'"
-          prepend-icon="mdi-github"
-        >
-          GitHub: {{ setupStore.state.integrations.github.enabled ? 'Connected' : 'Skipped' }}
-        </v-chip>
-        <v-chip
-          :color="setupStore.state.integrations.slack.enabled ? 'success' : 'default'"
-          :variant="setupStore.state.integrations.slack.enabled ? 'flat' : 'tonal'"
-          prepend-icon="mdi-slack"
-        >
-          Slack: {{ setupStore.state.integrations.slack.enabled ? 'Connected' : 'Skipped' }}
-        </v-chip>
-      </div>
-    </v-card>
-
-    <!-- AI Configuration -->
-    <v-card class="pa-5 card-border-dark mb-4" color="surface">
-      <div class="d-flex align-center ga-3 mb-3">
-        <v-icon icon="mdi-robot-outline" color="primary" size="20" />
-        <div class="text-body-1 font-weight-medium">AI Configuration</div>
-      </div>
-      <v-table density="compact" class="bg-transparent">
-        <tbody>
           <tr>
-            <td class="text-medium-emphasis" style="width: 140px;">Preset</td>
-            <td class="text-capitalize">{{ presetLabel }}</td>
-          </tr>
-          <tr v-if="setupStore.state.aiConfig.preset === 'hybrid' || setupStore.state.aiConfig.preset === 'claude-ollama'">
-            <td class="text-medium-emphasis">Claude Code</td>
-            <td>Codebase agents</td>
-          </tr>
-          <tr v-if="setupStore.state.aiConfig.preset === 'cloud' || setupStore.state.aiConfig.preset === 'hybrid'">
-            <td class="text-medium-emphasis">Cloud Provider</td>
-            <td class="text-capitalize">{{ setupStore.state.aiConfig.cloudProvider }}</td>
-          </tr>
-          <tr v-if="setupStore.state.aiConfig.preset === 'cloud' || setupStore.state.aiConfig.preset === 'hybrid'">
-            <td class="text-medium-emphasis">Cloud Model</td>
-            <td>
-              <code class="text-primary">{{ setupStore.state.aiConfig.cloudModel }}</code>
-            </td>
-          </tr>
-          <tr v-if="setupStore.state.aiConfig.preset === 'local' || setupStore.state.aiConfig.preset === 'claude-ollama'">
-            <td class="text-medium-emphasis">Ollama URL</td>
-            <td>
-              <code class="text-primary">{{ setupStore.state.aiConfig.ollamaUrl }}</code>
-            </td>
-          </tr>
-          <tr v-if="setupStore.state.aiConfig.preset === 'local' || setupStore.state.aiConfig.preset === 'claude-ollama'">
-            <td class="text-medium-emphasis">Ollama Model</td>
-            <td>
-              <code class="text-primary">{{ setupStore.state.aiConfig.ollamaModel }}</code>
-            </td>
+            <td class="text-medium-emphasis">AI Engine</td>
+            <td>Claude Code</td>
           </tr>
         </tbody>
       </v-table>
@@ -133,10 +82,12 @@
       type="info"
       variant="tonal"
       density="compact"
-      icon="mdi-cog-outline"
+      icon="mdi-information-outline"
       class="mb-6"
     >
-      You can change all settings later in the admin panel.
+      After launch, a scan will start automatically. This usually takes
+      15–30 minutes depending on repo size. You can configure GitHub, Slack,
+      and other integrations from the Settings page while it runs.
     </v-alert>
 
     <div class="d-flex justify-center">
@@ -154,22 +105,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useSetupStore } from '@/stores/setup'
-import type { AIPreset } from '@/types/setup'
 
 const setupStore = useSetupStore()
 
 const emit = defineEmits<{
   launch: []
 }>()
-
-const presetLabels: Record<AIPreset, string> = {
-  hybrid: 'Hybrid (Recommended)',
-  'claude-ollama': 'Claude Code + Ollama',
-  cloud: 'Cloud API',
-  local: 'Local (Ollama)',
-}
-
-const presetLabel = computed(() => presetLabels[setupStore.state.aiConfig.preset])
 </script>

@@ -21,7 +21,7 @@ class EnterpriseRule(BaseModel):
     category: Mapped[str] = mapped_column(String(255), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     content_md: Mapped[str | None] = mapped_column(Text, nullable=True)
-    embedding = mapped_column(Vector(768), nullable=True)
+    embedding = mapped_column(Vector(384), nullable=True)
 
     def __repr__(self) -> str:
         return f"<EnterpriseRule(id={self.id}, title={self.title!r})>"

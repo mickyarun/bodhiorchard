@@ -18,80 +18,42 @@ class SetupAdmin(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
 
 
-class SetupGitHub(BaseModel):
-    """GitHub integration settings."""
+class SetupRepo(BaseModel):
+    """A single repo with branch mapping."""
 
     model_config = {"populate_by_name": True}
 
-    enabled: bool = False
-    pat: str = Field(default="", alias="pat")
-
-
-class SetupSlack(BaseModel):
-    """Slack integration settings."""
-
-    model_config = {"populate_by_name": True}
-
-    enabled: bool = False
-    bot_token: str = Field(default="", alias="botToken")
-    signing_secret: str = Field(default="", alias="signingSecret")
+    path: str
+    main_branch: str | None = Field(None, alias="mainBranch")
+    develop_branch: str | None = Field(None, alias="developBranch")
 
 
 class SetupSourceCode(BaseModel):
-    """Local source code path configuration."""
+    """Local source code repositories with branch mappings."""
 
     model_config = {"populate_by_name": True}
 
-    local_path: str = Field(default="", alias="localPath")
-    type: str = "single-repo"  # "single-repo" or "workspace"
+    repos: list[SetupRepo] = Field(..., min_length=1)
 
 
-class SetupIntegrations(BaseModel):
-    """Integration settings for initial setup."""
-
-    github: SetupGitHub = SetupGitHub()
-    slack: SetupSlack = SetupSlack()
-
-
-class SetupLLM(BaseModel):
-    """LLM configuration for initial setup."""
+class SetupScan(BaseModel):
+    """Scan pipeline tuning settings for setup."""
 
     model_config = {"populate_by_name": True}
 
-    provider: str = "ollama"
-    model: str = "llama3:8b"
-    base_url: str = Field(default="http://localhost:11434", alias="baseUrl")
-    api_key: str = Field(default="", alias="apiKey")
-    premium_provider: str = Field(default="ollama", alias="premiumProvider")
-    premium_model: str = Field(default="llama3:70b", alias="premiumModel")
-    embedding_provider: str = Field(default="ollama", alias="embeddingProvider")
-    embedding_model: str = Field(default="nomic-embed-text", alias="embeddingModel")
-
-
-class SetupAIConfig(BaseModel):
-    """AI configuration selected in the setup wizard."""
-
-    model_config = {"populate_by_name": True}
-
-    preset: str = "hybrid"
-    ollama_url: str = Field(default="http://localhost:11434", alias="ollamaUrl")
-    ollama_model: str = Field(default="llama3:8b", alias="ollamaModel")
-    cloud_provider: str = Field(default="anthropic", alias="cloudProvider")
-    cloud_api_key: str = Field(default="", alias="cloudApiKey")
-    cloud_model: str = Field(default="claude-sonnet-4-5-20250514", alias="cloudModel")
+    timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=60, le=1800)
+    max_turns: int = Field(default=40, alias="maxTurns", ge=0, le=100)
 
 
 class SetupRequest(BaseModel):
-    """Complete setup payload sent by the frontend wizard."""
+    """Setup payload: org, admin, repos with branches, and scan settings."""
 
     model_config = {"populate_by_name": True}
 
     organization: SetupOrganization
     admin: SetupAdmin
-    source_code: SetupSourceCode = Field(default_factory=SetupSourceCode, alias="sourceCode")
-    integrations: SetupIntegrations = SetupIntegrations()
-    llm: SetupLLM = SetupLLM()
-    ai_config: SetupAIConfig = Field(default_factory=SetupAIConfig, alias="aiConfig")
+    source_code: SetupSourceCode = Field(alias="sourceCode")
+    scan: SetupScan = Field(default_factory=SetupScan)
 
 
 class SetupResponse(BaseModel):
@@ -103,6 +65,10 @@ class SetupResponse(BaseModel):
     token_type: str = "bearer"
     message: str = "Setup complete"
     mcp_token: str | None = None
+    scan_id: str | None = Field(None, alias="scanId")
+    embedding_warning: str | None = Field(None, alias="embeddingWarning")
+
+    model_config = {"populate_by_name": True}
 
 
 class DirectoryEntry(BaseModel):
@@ -119,3 +85,21 @@ class BrowseDirectoriesResponse(BaseModel):
     current_path: str
     parent_path: str | None = None
     directories: list[DirectoryEntry] = []
+
+
+class SetupStatusResponse(BaseModel):
+    """Response for the setup checklist status endpoint."""
+
+    model_config = {"populate_by_name": True}
+
+    org_created: bool = Field(alias="orgCreated")
+    claude_code_tested: bool = Field(alias="claudeCodeTested")
+    repo_added: bool = Field(alias="repoAdded")
+    scan_complete: bool = Field(alias="scanComplete")
+    scan_in_progress: bool = Field(alias="scanInProgress")
+    scan_id: str | None = Field(None, alias="scanId")
+    scan_progress: int = Field(0, alias="scanProgress")
+    github_connected: bool = Field(alias="githubConnected")
+    slack_connected: bool = Field(alias="slackConnected")
+    branches_mapped: bool = Field(alias="branchesMapped")
+    members_imported: bool = Field(alias="membersImported")

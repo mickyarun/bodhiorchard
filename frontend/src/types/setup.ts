@@ -1,15 +1,8 @@
-export type AIPreset = 'local' | 'cloud' | 'hybrid' | 'claude-ollama'
-
-export interface AIConfigState {
-  preset: AIPreset
-  ollamaUrl: string
-  cloudProvider: 'anthropic' | 'openai'
-  cloudApiKey: string
-  cloudModel: string
-  ollamaModel: string
+export interface SetupRepoConfig {
+  path: string
+  mainBranch: string | null
+  developBranch: string | null
 }
-
-export type SourceCodeType = 'workspace' | 'single-repo'
 
 export interface SetupState {
   currentStep: number
@@ -23,28 +16,30 @@ export interface SetupState {
     password: string
   }
   sourceCode: {
-    localPath: string
-    type: SourceCodeType
+    repos: SetupRepoConfig[]
   }
-  integrations: {
-    github: { enabled: boolean; pat: string }
-    slack: { enabled: boolean; botToken: string; signingSecret: string }
+  scan: {
+    timeoutSeconds: number
+    maxTurns: number
   }
-  llm: {
-    provider: 'ollama' | 'openai' | 'anthropic'
-    model: string
-    baseUrl: string
-    apiKey: string
-    premiumProvider: 'ollama' | 'openai' | 'anthropic'
-    premiumModel: string
-    embeddingProvider: 'ollama' | 'openai' | 'sentence-transformers'
-    embeddingModel: string
-  }
-  aiConfig: AIConfigState
 }
 
 export interface StepDefinition {
   title: string
   icon: string
   key: string
+}
+
+export interface SetupChecklistStatus {
+  orgCreated: boolean
+  claudeCodeTested: boolean
+  repoAdded: boolean
+  scanComplete: boolean
+  scanInProgress: boolean
+  scanId: string | null
+  scanProgress: number
+  githubConnected: boolean
+  slackConnected: boolean
+  branchesMapped: boolean
+  membersImported: boolean
 }

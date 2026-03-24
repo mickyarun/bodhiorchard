@@ -1,24 +1,27 @@
-"""First-time setup endpoint: creates org, admin user, and stores config."""
+"""First-time setup endpoint: creates org, admin user, auto-adds repo, triggers scan."""
 
 import secrets
+import uuid
 from pathlib import Path
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db
-from app.core.encryption import encrypt_secret
+from app.core.deps import get_current_user, get_db
 from app.core.security import create_access_token, hash_password
 from app.models.organization import Organization
 from app.models.user import OrgToUser, User, UserRole
 from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
+from app.repositories.user import UserRepository
 from app.schemas.setup import (
     BrowseDirectoriesResponse,
     DirectoryEntry,
     SetupRequest,
     SetupResponse,
+    SetupStatusResponse,
 )
 from app.services.claude_runner import test_claude_connection
 from app.services.permission_seeder import seed_permissions
@@ -93,6 +96,39 @@ async def browse_directories(
     )
 
 
+@router.get("/repo-branches")
+async def get_repo_branches(
+    path: str = Query(..., description="Absolute path to a git repository"),
+) -> dict:
+    """List branches for a repo by path (no auth — used during setup).
+
+    Args:
+        path: Absolute path to the git repository.
+
+    Returns:
+        Dict with branches list and auto-detected main/develop.
+    """
+    repo_path = Path(path).resolve()
+    if not repo_path.exists() or not (repo_path / ".git").exists():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Not a git repository: {path}",
+        )
+
+    from app.services.git_operations import list_remote_branches
+    from app.services.repo_scanner import _detect_develop_branch, _detect_main_branch
+
+    branches = await list_remote_branches(str(repo_path))
+    detected_main = await _detect_main_branch(str(repo_path))
+    detected_dev = await _detect_develop_branch(str(repo_path))
+
+    return {
+        "branches": branches,
+        "detectedMain": detected_main,
+        "detectedDevelop": detected_dev,
+    }
+
+
 @router.get("/check-claude")
 async def check_claude() -> dict:
     """Test Claude Code CLI availability during setup (no auth required).
@@ -106,25 +142,26 @@ async def check_claude() -> dict:
 @router.post("/initialize", response_model=SetupResponse, status_code=status.HTTP_201_CREATED)
 async def initialize_setup(
     body: SetupRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> SetupResponse:
     """Run first-time platform setup.
 
-    Creates the organization, admin user, and stores LLM/integration config.
-    This endpoint is idempotent — it will reject if an org with the same slug
-    already exists.
+    Creates the organization, admin user, auto-adds the repo, and
+    triggers a background scan. Integrations (GitHub, Slack) are
+    configured later via Settings.
 
     Args:
-        body: The complete setup payload from the frontend wizard.
+        body: Setup payload with org, admin, and repo path.
+        background_tasks: FastAPI background task manager.
         db: The async database session.
 
     Returns:
-        SetupResponse with org ID, user ID, and JWT access token.
+        SetupResponse with org ID, user ID, JWT, and scan ID.
 
     Raises:
         HTTPException 409: If the organization slug is already taken.
     """
-    # Check if org slug is already taken
     org_repo = OrganizationRepository(db)
     if await org_repo.get_by_slug(body.organization.slug) is not None:
         raise HTTPException(
@@ -132,57 +169,32 @@ async def initialize_setup(
             detail="Organization slug already exists. Setup may have been completed already.",
         )
 
-    # Build org config from AI config, source code, and integration settings
-    org_config = {
+    # Build org config — clean, no legacy fields
+    org_config: dict = {
         "source_code": {
-            "local_path": body.source_code.local_path,
-            "type": body.source_code.type,
+            "repos": [r.path for r in body.source_code.repos],
         },
         "llm": {
-            "preset": body.ai_config.preset,
-            "ollama_url": body.ai_config.ollama_url,
-            "ollama_model": body.ai_config.ollama_model,
-            "cloud_provider": body.ai_config.cloud_provider,
-            "cloud_api_key": encrypt_secret(body.ai_config.cloud_api_key)
-            if body.ai_config.cloud_api_key
-            else "",
-            "cloud_model": body.ai_config.cloud_model,
-            # Legacy fields from LLM config
-            "provider": body.llm.provider,
-            "model": body.llm.model,
-            "base_url": body.llm.base_url,
-            "premium_provider": body.llm.premium_provider,
-            "premium_model": body.llm.premium_model,
-            "embedding_provider": body.llm.embedding_provider,
-            "embedding_model": body.llm.embedding_model,
+            "preset": "claude-code",
         },
         "integrations": {
-            "github": {
-                "enabled": body.integrations.github.enabled,
-            },
-            "slack": {
-                "enabled": body.integrations.slack.enabled,
-            },
+            "github": {"enabled": False},
+            "slack": {"enabled": False},
+        },
+        "scan": {
+            "timeout_seconds": body.scan.timeout_seconds,
+            "max_turns": body.scan.max_turns,
+            "auto_create_members": True,
         },
     }
 
     # Generate MCP token for Claude Code integration
     mcp_token = secrets.token_urlsafe(32)
 
-    # Create organization
     org = Organization(
         name=body.organization.name,
         slug=body.organization.slug,
         config=org_config,
-        github_pat=encrypt_secret(body.integrations.github.pat)
-        if body.integrations.github.pat
-        else None,
-        slack_bot_token=encrypt_secret(body.integrations.slack.bot_token)
-        if body.integrations.slack.bot_token
-        else None,
-        slack_signing_secret=encrypt_secret(body.integrations.slack.signing_secret)
-        if body.integrations.slack.signing_secret
-        else None,
         mcp_token_hash=hash_password(mcp_token),
     )
     db.add(org)
@@ -197,12 +209,11 @@ async def initialize_setup(
     db.add(user)
     await db.flush()
 
-    # Seed permissions and assign org_owner role to admin
+    # Seed permissions and assign org_owner role
     await seed_permissions(db)
     role_repo = RoleRepository(db)
     owner_role = await role_repo.get_by_name_system("org_owner")
 
-    # Create org membership with owner role
     membership = OrgToUser(
         user_id=user.id,
         org_id=org.id,
@@ -212,6 +223,62 @@ async def initialize_setup(
     db.add(membership)
     await db.flush()
 
+    # Auto-add repos from source_code with branch mappings
+    scan_id: str | None = None
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    valid_paths: list[str] = []
+
+    for repo_cfg in body.source_code.repos:
+        repo_path = Path(repo_cfg.path).resolve()
+        if not repo_path.exists() or not (repo_path / ".git").exists():
+            logger.warning("setup_skip_invalid_repo", path=str(repo_path))
+            continue
+
+        tracked = await repo_repo.upsert(str(repo_path), repo_path.name)
+        valid_paths.append(str(repo_path))
+
+        # Use branch mappings from setup (user-selected)
+        if repo_cfg.main_branch:
+            tracked.main_branch = repo_cfg.main_branch
+        if repo_cfg.develop_branch:
+            tracked.develop_branch = repo_cfg.develop_branch
+
+    await db.flush()
+
+    # Auto-trigger scan only if embedding service is healthy
+    embedding_warning: str | None = None
+    if valid_paths:
+        from app.services.embedding_service import embedding_service
+
+        embed_ok, embed_err = await embedding_service.check()
+        if embed_ok:
+            from app.schemas.skills import ScanStatus
+            from app.services.scan_pipeline import run_scan_pipeline, scan_statuses
+
+            scan_id = str(uuid.uuid4())
+            scan_statuses[scan_id] = ScanStatus(scanId=scan_id, status="started", progressPct=0)
+
+            background_tasks.add_task(
+                run_scan_pipeline,
+                scan_id=scan_id,
+                org_id=org.id,
+                repo_paths=valid_paths,
+                full_rescan=True,
+                user_id=str(user.id),
+            )
+
+            logger.info(
+                "setup_auto_scan_triggered",
+                scan_id=scan_id,
+                repos=len(valid_paths),
+            )
+        else:
+            embedding_warning = (
+                f"Embedding service unavailable ({embed_err}). "
+                "Scan skipped — trigger it manually from Settings after fixing."
+            )
+            logger.warning("setup_embedding_check_failed", error=embed_err)
+
     # Issue JWT token
     token = create_access_token(data={"sub": str(user.id), "org_id": str(org.id)})
 
@@ -220,6 +287,7 @@ async def initialize_setup(
         org_id=str(org.id),
         org_slug=org.slug,
         admin_email=user.email,
+        scan_id=scan_id,
     )
 
     return SetupResponse(
@@ -227,4 +295,59 @@ async def initialize_setup(
         user_id=str(user.id),
         access_token=token,
         mcp_token=mcp_token,
+        scanId=scan_id,
+        embeddingWarning=embedding_warning,
+    )
+
+
+@router.get("/checklist-status", response_model=SetupStatusResponse)
+async def get_checklist_status(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SetupStatusResponse:
+    """Return setup checklist status for the dashboard widget.
+
+    Args:
+        current_user: The authenticated user.
+        db: The async database session.
+
+    Returns:
+        SetupStatusResponse with completion status for each checklist item.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    active_repos = await repo_repo.list_active()
+
+    user_repo = UserRepository(db, org_id=org.id)
+    users = await user_repo.list_by_org(org.id)
+
+    # Check scan status
+    from app.services.scan_pipeline import scan_statuses
+
+    scan_in_progress = False
+    scan_id: str | None = None
+    scan_progress = 0
+    scan_complete = any(r.last_scanned_at is not None for r in active_repos)
+
+    for sid, ss in scan_statuses.items():
+        if ss.status not in ("completed", "failed"):
+            scan_in_progress = True
+            scan_id = sid
+            scan_progress = ss.progress_pct
+            break
+
+    return SetupStatusResponse(
+        orgCreated=True,
+        claudeCodeTested=True,  # If they got past setup, Claude was tested
+        repoAdded=len(active_repos) > 0,
+        scanComplete=scan_complete,
+        scanInProgress=scan_in_progress,
+        scanId=scan_id,
+        scanProgress=scan_progress,
+        githubConnected=bool(org.github_pat),
+        slackConnected=bool(org.slack_bot_token),
+        branchesMapped=all(r.main_branch for r in active_repos) if active_repos else False,
+        membersImported=len(users) > 1,
     )

@@ -29,7 +29,7 @@ class FeatureLearning(BaseModel):
     )
     bug_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     retrospective_md: Mapped[str | None] = mapped_column(Text, nullable=True)
-    embedding = mapped_column(Vector(768), nullable=True)
+    embedding = mapped_column(Vector(384), nullable=True)
 
     def __repr__(self) -> str:
         return f"<FeatureLearning(id={self.id}, bud_id={self.bud_id})>"

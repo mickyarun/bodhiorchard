@@ -1,25 +1,39 @@
-"""Embedding service for generating vector representations of text."""
+"""Embedding service using fastembed for local, zero-dependency vector generation."""
 
-from typing import Any
+from __future__ import annotations
 
-import httpx
+import asyncio
+from typing import TYPE_CHECKING
+
 import structlog
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from fastembed import TextEmbedding
 
 logger = structlog.get_logger(__name__)
 
 
 class EmbeddingService:
-    """Text embedding service supporting multiple providers.
+    """Text embedding service using fastembed (ONNX-based, no external service).
 
-    Supported providers: ollama, openai, sentence-transformers.
+    Model is downloaded on first use (~90MB) and cached locally.
+    CPU-bound inference is offloaded to a thread pool to avoid blocking asyncio.
     """
 
     def __init__(self) -> None:
-        self._provider = settings.embedding.provider
-        self._model = settings.embedding.model
-        self._dimensions = settings.embedding.dimensions
+        self._model_name: str = settings.embedding.model
+        self._model: TextEmbedding | None = None
+
+    def _get_model(self) -> TextEmbedding:
+        """Lazy-load the fastembed TextEmbedding model."""
+        if self._model is None:
+            from fastembed import TextEmbedding
+
+            self._model = TextEmbedding(self._model_name)
+            logger.info("embedding_model_loaded", model=self._model_name)
+        return self._model
 
     async def embed(self, text: str) -> list[float]:
         """Generate an embedding vector for a single text input.
@@ -36,88 +50,35 @@ class EmbeddingService:
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embedding vectors for a batch of texts.
 
+        Offloaded to a thread pool so ONNX inference doesn't block the event loop.
+
         Args:
             texts: List of texts to embed.
 
         Returns:
             A list of embedding vectors, one per input text.
-
-        Raises:
-            ValueError: If the configured provider is unsupported.
         """
-        if self._provider == "ollama":
-            return await self._embed_ollama(texts)
-        elif self._provider == "openai":
-            return await self._embed_openai(texts)
-        elif self._provider == "sentence-transformers":
-            return await self._embed_sentence_transformers(texts)
-        else:
-            raise ValueError(f"Unsupported embedding provider: {self._provider}")
-
-    async def _embed_ollama(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings via the Ollama REST API.
-
-        Uses the /api/embed endpoint (Ollama 0.1.26+) which supports batch input natively.
-
-        Args:
-            texts: List of texts to embed.
-
-        Returns:
-            A list of embedding vectors.
-        """
-        base_url = settings.llm.base_url.rstrip("/")
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{base_url}/api/embed",
-                json={"model": self._model, "input": texts},
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
-
-        logger.info("embed_ollama", count=len(texts), model=self._model)
-        return data["embeddings"]
-
-    async def _embed_openai(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings via the OpenAI embeddings API.
-
-        Args:
-            texts: List of texts to embed.
-
-        Returns:
-            A list of embedding vectors.
-        """
-        import litellm
-
-        response = await litellm.aembedding(
-            model=self._model,
-            input=texts,
+        model = self._get_model()
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None, lambda: [v.tolist() for v in model.embed(texts)]
         )
-
-        results: list[list[float]] = [item["embedding"] for item in response.data]  # type: ignore[union-attr]
-        logger.info("embed_openai", count=len(texts), model=self._model)
+        logger.info("embed_fastembed", count=len(texts), model=self._model_name)
         return results
 
-    async def _embed_sentence_transformers(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings using a local sentence-transformers model.
-
-        Loads the model lazily on first call.
-
-        Args:
-            texts: List of texts to embed.
+    async def check(self) -> tuple[bool, str]:
+        """Test embedding service with a trivial input.
 
         Returns:
-            A list of embedding vectors.
+            Tuple of (success, error_message). Error is empty on success.
         """
-        from sentence_transformers import SentenceTransformer
-
-        if not hasattr(self, "_st_model"):
-            self._st_model = SentenceTransformer(self._model)
-
-        embeddings = self._st_model.encode(texts, normalize_embeddings=True)
-        results = [embedding.tolist() for embedding in embeddings]
-        logger.info("embed_sentence_transformers", count=len(texts), model=self._model)
-        return results
+        try:
+            result = await self.embed("test")
+            if len(result) > 0:
+                return True, ""
+            return False, "Empty embedding returned"
+        except Exception as e:
+            return False, str(e)
 
 
 embedding_service = EmbeddingService()

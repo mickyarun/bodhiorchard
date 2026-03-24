@@ -53,6 +53,16 @@ async def trigger_scan(
     Returns:
         ScanResponse with a scan_id to poll for status.
     """
+    # Gate: verify embedding service is healthy before scanning
+    from app.services.embedding_service import embedding_service
+
+    embed_ok, embed_err = await embedding_service.check()
+    if not embed_ok:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Embedding service unavailable: {embed_err}. Cannot scan.",
+        )
+
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
 
