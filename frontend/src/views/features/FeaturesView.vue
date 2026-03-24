@@ -97,7 +97,7 @@
           color="surface"
           @click="toggleExpand(item.id)"
         >
-          <div class="d-flex align-center ga-2 mb-2">
+          <div class="d-flex align-center ga-2 mb-2 flex-wrap">
             <v-chip size="x-small" variant="tonal" color="primary" label>
               {{ item.category }}
             </v-chip>
@@ -117,6 +117,17 @@
               color="success"
             >
               {{ ((item as KnowledgeSearchResult).score * 100).toFixed(0) }}%
+            </v-chip>
+            <v-chip
+              v-for="name in getRepoNames(item)"
+              :key="name"
+              size="x-small"
+              variant="tonal"
+              color="cyan"
+              label
+              prepend-icon="mdi-source-repository"
+            >
+              {{ name }}
             </v-chip>
           </div>
 
@@ -143,7 +154,7 @@
 
           <!-- Expanded content -->
           <v-expand-transition>
-            <div v-if="expandedId === item.id" class="mt-3">
+            <div v-if="expandedRow === getRowIndex(item.id)" class="mt-3">
               <v-divider class="mb-3" />
               <pre class="text-body-2 content-block">{{ item.content || 'No content' }}</pre>
             </div>
@@ -155,12 +166,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useSettingsStore } from '@/stores/settings'
 import {
   KNOWLEDGE_CATEGORIES,
   FEATURE_STATUS_COLORS,
+  type KnowledgeItem,
   type KnowledgeSearchResult,
   type RepoInfo,
 } from '@/types'
@@ -171,7 +183,8 @@ const settingsStore = useSettingsStore()
 const selectedCategoryIdx = ref(0)
 const selectedRepoId = ref('')
 const searchQuery = ref('')
-const expandedId = ref<string | null>(null)
+const expandedRow = ref<number | null>(null)
+const columnsPerRow = ref(3)
 
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -199,9 +212,38 @@ function reloadItems(): void {
   )
 }
 
-function toggleExpand(id: string): void {
-  expandedId.value = expandedId.value === id ? null : id
+// ─── Repo name resolution ─────────────────────
+const repoMap = computed(() => {
+  const map = new Map<string, string>()
+  for (const r of repos.value) map.set(r.id, r.name)
+  return map
+})
+
+function getRepoNames(item: KnowledgeItem): string[] {
+  if (!item.repoIds?.length) return []
+  return item.repoIds.map(id => repoMap.value.get(id) ?? '').filter(Boolean)
 }
+
+// ─── Row-expand logic ─────────────────────────
+function getRowIndex(id: string): number {
+  const idx = displayItems.value.findIndex(i => i.id === id)
+  return Math.floor(idx / columnsPerRow.value)
+}
+
+function toggleExpand(id: string): void {
+  const row = getRowIndex(id)
+  expandedRow.value = expandedRow.value === row ? null : row
+}
+
+function updateColumns(): void {
+  const grid = document.querySelector('.knowledge-grid') as HTMLElement | null
+  if (grid) {
+    columnsPerRow.value = getComputedStyle(grid)
+      .gridTemplateColumns.split(' ').length
+  }
+}
+
+let resizeObserver: ResizeObserver | null = null
 
 function onClearSearch(): void {
   searchQuery.value = ''
@@ -220,15 +262,30 @@ watch(searchQuery, (q) => {
   }, 400)
 })
 
-// Category or repo change
+// Category or repo change — collapse expanded row
 watch([selectedCategoryIdx, selectedRepoId], () => {
   searchQuery.value = ''
+  expandedRow.value = null
   reloadItems()
 })
 
 onMounted(() => {
   settingsStore.fetchRepos()
   store.fetchItems()
+
+  // Track actual CSS grid column count for row-expand
+  requestAnimationFrame(() => {
+    const grid = document.querySelector('.knowledge-grid') as HTMLElement | null
+    if (grid) {
+      updateColumns()
+      resizeObserver = new ResizeObserver(updateColumns)
+      resizeObserver.observe(grid)
+    }
+  })
+})
+
+onUnmounted(() => {
+  resizeObserver?.disconnect()
 })
 </script>
 

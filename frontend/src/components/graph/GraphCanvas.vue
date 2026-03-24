@@ -200,6 +200,16 @@ onUnmounted(() => {
     engine = null
   }
 })
+
+/** Expose engine methods to parent for camera control. */
+defineExpose({
+  focusOnRepo(repoName: string) {
+    engine?.focusOnNode(`repo_${repoName}`)
+  },
+  resetView() {
+    engine?.resetView()
+  },
+})
 </script>
 
 <style scoped>

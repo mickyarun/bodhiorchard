@@ -40,7 +40,6 @@ class SkillProfile(BaseModel):
         nullable=True,
         index=True,
     )
-    repo: Mapped[str | None] = mapped_column(String(500), nullable=True)
     languages: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     skill_score: Mapped[float] = mapped_column(
         Numeric(precision=3, scale=2), nullable=False, default=0.0

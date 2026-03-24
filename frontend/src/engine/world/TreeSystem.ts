@@ -15,9 +15,12 @@ import { AssetLoader } from '../assets/AssetLoader'
 import { WorldLayout } from './WorldLayout'
 import { TreeBuilder, type TreeResult } from './TreeBuilder'
 import { TreeDecorator } from './TreeDecorator'
+import { LabelRenderer } from '../rendering/LabelRenderer'
+import type { RepoVisualization } from './RepoVisualization'
 import type { ExclusionZone } from '../utils/MathUtils'
 
-export class TreeSystem {
+export class TreeSystem implements RepoVisualization {
+  private app: Application | null = null
   private root: pc.Entity | null = null
   private builder: TreeBuilder
   private decorator: TreeDecorator
@@ -34,6 +37,7 @@ export class TreeSystem {
     data: EngineData,
     layout: WorldLayout,
   ): Promise<ExclusionZone[]> {
+    this.app = app
     this.root = new pc.Entity('TreeSystem')
     this.trees = []
     this.treeMap.clear()
@@ -64,11 +68,11 @@ export class TreeSystem {
       if (arr) arr.push(t); else threatsByBranch.set(key, [t])
     }
 
-    // Build all trees
+    // Build all trees (each tree includes its own name label as a child)
     for (let i = 0; i < data.repos.length; i++) {
       const repo = data.repos[i]
       const pos = positions[i]
-      const result = await this.builder.build(repo, pos.x, pos.z)
+      const result = await this.builder.build(app, repo, pos.x, pos.z)
       this.root.addChild(result.entity)
       this.trees.push(result)
       this.treeMap.set(repo.repo_name, result.entity)
@@ -121,11 +125,19 @@ export class TreeSystem {
   }
 
   destroy(): void {
+    // Unregister billboard labels + free GPU resources before root.destroy() handles entities
+    if (this.app) {
+      for (const tree of this.trees) {
+        LabelRenderer.cleanup(this.app, tree.label)
+      }
+    }
+
     if (this.root) {
       this.root.destroy()
       this.root = null
     }
     this.trees = []
     this.treeMap.clear()
+    this.app = null
   }
 }

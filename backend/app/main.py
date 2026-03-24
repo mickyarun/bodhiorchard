@@ -46,8 +46,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
 
-    # 4. Periodic Slack presence polling
+    # 4. Sync system roles & permissions (idempotent — seeds new roles added to code)
     from app.database import AsyncSessionLocal
+    from app.services.permission_seeder import seed_permissions
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await seed_permissions(session)
+            await session.commit()
+        logger.info("permission_seed_synced")
+    except Exception:
+        logger.warning("permission_seed_failed_at_startup")
+
+    # 5. Periodic Slack presence polling
     from app.services.presence_cache import refresh_all_presence
 
     async def _presence_poll_loop() -> None:

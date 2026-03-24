@@ -1,6 +1,5 @@
 """Skill scanning, knowledge search, and developer profile endpoints."""
 
-import re
 import uuid
 from pathlib import Path
 
@@ -335,17 +334,10 @@ async def get_index_stats(
     sp_repo = SkillProfileRepository(db, org_id=org.id)
     profile_count = await sp_repo.count_profiles()
 
-    # Count distinct repos from knowledge item titles ([RepoName] prefix)
-    titles = await ki_repo.list_titles_with_prefix("[%]%")
-    repo_names: set[str] = set()
-    for title in titles:
-        m = re.match(r"^\[([^\]]+)\]", title)
-        if m:
-            repo_names.add(m.group(1))
-    if repo_names:
-        repos_tracked = len(repo_names)
-    else:
-        repos_tracked = min(len(knowledge_cfg.get("repo_shas", {})), 1)
+    # Count repos from tracked_repositories table (not title parsing)
+    tr_repo = TrackedRepoRepository(db, org_id=org.id)
+    active_repos = await tr_repo.list_active()
+    repos_tracked = len(active_repos)
 
     return {
         "lastScan": last_scan,

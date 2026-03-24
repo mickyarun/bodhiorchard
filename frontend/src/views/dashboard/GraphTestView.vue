@@ -2,14 +2,23 @@
   <div class="graph-test-view fill-height">
     <!-- Header -->
     <div class="graph-header d-flex align-center ga-3 px-4 py-2">
-      <div class="text-h6">Repo Graph</div>
-      <v-chip v-if="treeData" size="small" variant="tonal" color="primary">
+      <v-btn
+        v-if="selectedRepo"
+        icon="mdi-arrow-left"
+        variant="text"
+        size="small"
+        @click="backToOverview"
+      />
+      <div class="text-h6">
+        {{ selectedRepo ? selectedRepo.repoName : 'Repo Graph' }}
+      </div>
+      <v-chip v-if="treeData && !selectedRepo" size="small" variant="tonal" color="primary">
         {{ treeData.repos.length }} repos
       </v-chip>
-      <v-chip v-if="treeData" size="small" variant="tonal" color="info">
+      <v-chip v-if="treeData && !selectedRepo" size="small" variant="tonal" color="info">
         {{ treeData.features.length }} features
       </v-chip>
-      <v-chip v-if="treeData" size="small" variant="tonal" color="secondary">
+      <v-chip v-if="treeData && !selectedRepo" size="small" variant="tonal" color="secondary">
         {{ treeData.members.length }} members
       </v-chip>
       <v-spacer />
@@ -38,13 +47,14 @@
     <div v-else class="graph-body position-relative">
       <GraphCanvas
         v-if="treeData"
+        ref="graphCanvasRef"
         :tree-data="treeData"
         @repo-click="onRepoClick"
         @feature-click="onFeatureClick"
       />
 
-      <!-- Legend -->
-      <div class="graph-legend">
+      <!-- Legend (hidden when repo is focused) -->
+      <div v-if="!selectedRepo" class="graph-legend">
         <v-card variant="tonal" class="pa-3" density="compact">
           <div class="text-caption font-weight-bold mb-2">Legend</div>
           <div class="d-flex flex-column ga-1">
@@ -71,7 +81,7 @@
           :repo="selectedRepo"
           :feature="selectedFeature"
           :tree-data="treeData"
-          @close="clearSelection"
+          @close="backToOverview"
         />
       </Transition>
     </div>
@@ -87,6 +97,7 @@ import type { GraphRepoInfo, GraphFeatureInfo } from '@/engine/graph'
 
 const dashboardStore = useDashboardStore()
 
+const graphCanvasRef = ref<InstanceType<typeof GraphCanvas> | null>(null)
 const selectedRepo = ref<GraphRepoInfo | null>(null)
 const selectedFeature = ref<GraphFeatureInfo | null>(null)
 
@@ -95,6 +106,8 @@ const treeData = computed(() => dashboardStore.treeData)
 function onRepoClick(info: GraphRepoInfo): void {
   selectedRepo.value = info
   selectedFeature.value = null
+  // Focus camera on the clicked repo
+  graphCanvasRef.value?.focusOnRepo(info.repoName)
 }
 
 function onFeatureClick(info: GraphFeatureInfo): void {
@@ -102,9 +115,10 @@ function onFeatureClick(info: GraphFeatureInfo): void {
   selectedRepo.value = null
 }
 
-function clearSelection(): void {
+function backToOverview(): void {
   selectedRepo.value = null
   selectedFeature.value = null
+  graphCanvasRef.value?.resetView()
 }
 
 async function refresh(): Promise<void> {

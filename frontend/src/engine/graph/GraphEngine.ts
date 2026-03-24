@@ -111,6 +111,16 @@ export class GraphEngine {
   // Rotation animation
   private rotationSpeed = 5;
 
+  // Camera animation (smooth focus transitions)
+  private animating = false;
+  private animProgress = 0;
+  private animDuration = 0.6; // seconds
+  private animFrom = { targetX: 0, targetY: 0, targetZ: 0, distance: 60, pitch: 10 };
+  private animTo = { targetX: 0, targetY: 0, targetZ: 0, distance: 30, pitch: 20 };
+  // Saved full-graph camera state for resetView()
+  private fullViewDistance = 60;
+  private fullViewPitch = 10;
+
   // IBL cubemap reference for cleanup
   private iblCubemap: pc.Texture | null = null;
 
@@ -387,6 +397,10 @@ export class GraphEngine {
     this.camPitch = 10;
     this.camYaw = 0;
     this.updateCameraOrbit();
+
+    // Save full-view state for resetView()
+    this.fullViewDistance = this.camDistance;
+    this.fullViewPitch = this.camPitch;
   }
 
   // ─── Camera ─────────────────────────────────────
@@ -408,11 +422,35 @@ export class GraphEngine {
 
   // ─── Frame Loop ─────────────────────────────────
 
+  /** Ease-out cubic for smooth camera transitions. */
+  private easeOut(t: number): number {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
   private onUpdate(dt: number): void {
     let cameraChanged = false;
 
-    // Auto-rotation: rotate camera yaw (not graphRoot — avoids coordinate mismatch for picking)
-    if (this.rotationSpeed > 0) {
+    // Camera animation (smooth focus/reset transitions)
+    if (this.animating) {
+      this.animProgress += dt / this.animDuration;
+      const t = this.easeOut(Math.min(this.animProgress, 1));
+
+      this.camTarget.set(
+        this.animFrom.targetX + (this.animTo.targetX - this.animFrom.targetX) * t,
+        this.animFrom.targetY + (this.animTo.targetY - this.animFrom.targetY) * t,
+        this.animFrom.targetZ + (this.animTo.targetZ - this.animFrom.targetZ) * t,
+      );
+      this.camDistance = this.animFrom.distance + (this.animTo.distance - this.animFrom.distance) * t;
+      this.camPitch = this.animFrom.pitch + (this.animTo.pitch - this.animFrom.pitch) * t;
+      cameraChanged = true;
+
+      if (this.animProgress >= 1) {
+        this.animating = false;
+      }
+    }
+
+    // Auto-rotation: rotate camera yaw (paused during animation)
+    if (this.rotationSpeed > 0 && !this.animating) {
       this.camYaw += this.rotationSpeed * dt;
       cameraChanged = true;
     }
@@ -647,13 +685,40 @@ export class GraphEngine {
 
   // ─── Public API ───────────────────────────────
 
+  /** Smoothly animate camera to focus on a specific node. */
   focusOnNode(nodeId: string): void {
     const entity = this.nodeEntities.get(nodeId);
-    if (entity) {
-      this.camTarget.copy(entity.getPosition());
-      this.camDistance = 30;
-      this.updateCameraOrbit();
-    }
+    if (!entity) return;
+
+    const pos = entity.getPosition();
+
+    // Compute ideal distance based on feature count for this repo
+    const offsets = this.featureOffsets.get(nodeId);
+    const featureCount = offsets?.length ?? 0;
+    const idealDist = featureSphereRadius(featureCount) * 3.5;
+
+    this.startCameraAnimation(pos.x, pos.y, pos.z, idealDist, 20);
+  }
+
+  /** Smoothly animate camera back to the full graph overview. */
+  resetView(): void {
+    this.startCameraAnimation(0, 0, 0, this.fullViewDistance, this.fullViewPitch);
+  }
+
+  private startCameraAnimation(
+    targetX: number, targetY: number, targetZ: number,
+    distance: number, pitch: number,
+  ): void {
+    this.animFrom = {
+      targetX: this.camTarget.x,
+      targetY: this.camTarget.y,
+      targetZ: this.camTarget.z,
+      distance: this.camDistance,
+      pitch: this.camPitch,
+    };
+    this.animTo = { targetX, targetY, targetZ, distance, pitch };
+    this.animProgress = 0;
+    this.animating = true;
   }
 
   resize(width: number, height: number): void {

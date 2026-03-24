@@ -35,6 +35,7 @@ class ScanStatus(BaseModel):
     stale_cleaned: int = Field(default=0, alias="staleCleaned")
     unmatched_authors: list[str] = Field(default_factory=list, alias="unmatchedAuthors")
     synthesis_warning: str | None = Field(default=None, alias="synthesisWarning")
+    setup_pr_message: str | None = Field(default=None, alias="setupPrMessage")
     error: str | None = None
 
     model_config = {"populate_by_name": True}

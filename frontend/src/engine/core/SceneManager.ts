@@ -24,6 +24,7 @@ import {
   getEnvironmentGLBs, getBuildingGLBs, getMiscGLBs,
 } from '../assets/AssetManifest'
 import { WorldLayout } from '../world/WorldLayout'
+import type { RepoVisualization } from '../world/RepoVisualization'
 import { TreeSystem } from '../world/TreeSystem'
 import { RelationshipArcs } from '../world/RelationshipArcs'
 import { PathSystem } from '../world/PathSystem'
@@ -55,7 +56,7 @@ export class SceneManager {
   private sky: SkySystem | null = null
   private ground: GroundSystem | null = null
   private clouds: CloudSystem | null = null
-  private treeSystem: TreeSystem | null = null
+  private repoVis: RepoVisualization | null = null
   private arcs: RelationshipArcs | null = null
   private grass: GrassSystem | null = null
   private rocks: RockSystem | null = null
@@ -105,9 +106,9 @@ export class SceneManager {
     this.clouds = new CloudSystem()
     this.clouds.build(this.app, this.materials)
 
-    // 3. Trees (includes decoration)
-    this.treeSystem = new TreeSystem(this.loader)
-    const treeZones = await this.treeSystem.build(this.app, data, this.layout)
+    // 3. Repo visualization (default: trees with decoration)
+    this.repoVis = this.createRepoVisualization()
+    const treeZones = await this.repoVis.build(this.app, data, this.layout)
     if (this.buildId !== currentBuild) return
     this.layout.addExclusionZones(treeZones)
 
@@ -219,7 +220,7 @@ export class SceneManager {
     this.arcs = new RelationshipArcs()
     const treePositions = new Map<string, pc.Vec3>()
     for (const repo of data.repos) {
-      const pos = this.treeSystem.getTreePosition(repo.repo_name)
+      const pos = this.repoVis.getTreePosition(repo.repo_name)
       if (pos) treePositions.set(repo.repo_name, pos)
     }
     const arcsEntity = this.arcs.build(this.materials, data.relationships, treePositions)
@@ -244,18 +245,29 @@ export class SceneManager {
 
   // ─── Public Accessors ─────────────────────────
 
-  get treeSystemRef(): TreeSystem | null { return this.treeSystem }
+  get repoVisualization(): RepoVisualization | null { return this.repoVis }
   get arcsRef(): RelationshipArcs | null { return this.arcs }
   get memberHouseMap(): Map<string, HouseResult> { return this._memberHouseMap }
   get characterSystemRef(): CharacterSystem | null { return this.characterSystem }
   get worldLayout(): WorldLayout { return this.layout }
 
   getTreePosition(repoName: string): pc.Vec3 | null {
-    return this.treeSystem?.getTreePosition(repoName) ?? null
+    return this.repoVis?.getTreePosition(repoName) ?? null
   }
 
   toggleArcs(): boolean {
     return this.arcs?.toggle() ?? false
+  }
+
+  // ─── Repo Visualization Factory ─────────────────
+
+  /**
+   * Create the repo visualization implementation.
+   * Override this method to swap in an alternative visualization
+   * (e.g. crystals, planets, buildings) without touching the rest of SceneManager.
+   */
+  protected createRepoVisualization(): RepoVisualization {
+    return new TreeSystem(this.loader)
   }
 
   // ─── Cleanup ──────────────────────────────────
@@ -288,8 +300,8 @@ export class SceneManager {
     this.buildingEntities = []
     this._memberHouseMap.clear()
 
-    this.treeSystem?.destroy()
-    this.treeSystem = null
+    this.repoVis?.destroy()
+    this.repoVis = null
 
     this.clouds?.destroy()
     this.clouds = null

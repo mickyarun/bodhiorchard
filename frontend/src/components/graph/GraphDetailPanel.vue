@@ -2,8 +2,9 @@
   <v-card
     class="graph-detail-panel"
     elevation="8"
+    @wheel.stop
   >
-    <v-card-title class="d-flex align-center justify-space-between pa-4">
+    <v-card-title class="d-flex align-center justify-space-between pa-4 pb-2">
       <span class="text-h6 text-truncate">
         {{ panelTitle }}
       </span>
@@ -14,8 +15,8 @@
 
     <!-- Repo detail -->
     <template v-if="repo">
-      <v-card-text class="pa-4">
-        <div class="d-flex align-center ga-2 mb-3">
+      <div class="pa-4 pb-2">
+        <div class="d-flex align-center ga-2 mb-2">
           <v-chip :color="healthColor(repo.health)" size="small" label>
             {{ repo.health }}
           </v-chip>
@@ -24,7 +25,7 @@
           </v-chip>
         </div>
 
-        <div class="text-body-2 mb-3">
+        <div class="text-body-2 mb-2">
           <div class="d-flex justify-space-between mb-1">
             <span class="text-medium-emphasis">Files</span>
             <span>{{ repo.totalFiles.toLocaleString() }}</span>
@@ -34,22 +35,70 @@
             <span>{{ repo.totalCommits.toLocaleString() }}</span>
           </div>
         </div>
+      </div>
 
-        <template v-if="repoFeatureCounts">
-          <div class="text-subtitle-2 mb-2">Features</div>
-          <div class="d-flex ga-2 flex-wrap">
+      <v-divider />
+
+      <!-- Features section with search -->
+      <div class="pa-4 pt-3">
+        <div class="d-flex align-center justify-space-between mb-2">
+          <div class="text-subtitle-2">Features ({{ repoFeatures.length }})</div>
+          <div v-if="repoFeatureCounts" class="d-flex ga-1">
             <v-chip
               v-for="(count, status) in repoFeatureCounts"
               :key="status"
               :color="statusColor(status as string)"
-              size="small"
+              size="x-small"
               label
+              variant="tonal"
             >
-              {{ status }}: {{ count }}
+              {{ count }}
             </v-chip>
           </div>
-        </template>
-      </v-card-text>
+        </div>
+
+        <!-- Search -->
+        <v-text-field
+          v-if="repoFeatures.length > 3"
+          v-model="featureSearch"
+          placeholder="Search features..."
+          density="compact"
+          variant="outlined"
+          hide-details
+          prepend-inner-icon="mdi-magnify"
+          clearable
+          class="mb-2"
+        />
+
+        <!-- Feature list -->
+        <div class="feature-scroll">
+          <div
+            v-for="feat in filteredFeatures"
+            :key="feat.title"
+            class="feature-row d-flex align-center ga-2 py-2 px-2"
+          >
+            <div
+              class="feature-dot"
+              :style="{ background: statusDotColor(feat.status) }"
+            />
+            <div class="flex-grow-1 text-body-2 text-truncate">
+              {{ feat.title }}
+            </div>
+            <v-chip
+              :color="statusColor(feat.status)"
+              size="x-small"
+              label
+              variant="tonal"
+              class="flex-shrink-0"
+            >
+              {{ formatStatus(feat.status) }}
+            </v-chip>
+          </div>
+          <div v-if="filteredFeatures.length === 0" class="text-body-2 text-medium-emphasis pa-2">
+            {{ featureSearch ? 'No matching features.' : 'No features found.' }}
+          </div>
+        </div>
+      </div>
     </template>
 
     <!-- Feature detail -->
@@ -57,7 +106,7 @@
       <v-card-text class="pa-4">
         <div class="d-flex align-center ga-2 mb-3">
           <v-chip :color="statusColor(feature.status)" size="small" label>
-            {{ feature.status.replace('_', ' ') }}
+            {{ formatStatus(feature.status) }}
           </v-chip>
           <span v-if="feature.repoName" class="text-body-2 text-medium-emphasis">
             {{ feature.repoName }}
@@ -111,9 +160,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { GraphRepoInfo, GraphFeatureInfo } from '@/engine/graph'
-import type { TreeData } from '@/types/dashboard'
+import type { TreeData, FeatureItem } from '@/types/dashboard'
 
 interface SkilledMember {
   user_id: string
@@ -130,6 +179,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+
+const featureSearch = ref('')
 
 const panelTitle = computed(() => {
   if (props.repo) return props.repo.repoName
@@ -151,18 +202,44 @@ function statusColor(status: string): string {
   return map[status] ?? 'grey'
 }
 
+function statusDotColor(status: string): string {
+  const map: Record<string, string> = {
+    planned: '#42A5F5', in_progress: '#FFA726', implemented: '#66BB6A',
+  }
+  return map[status] ?? '#9E9E9E'
+}
+
+function formatStatus(status: string): string {
+  return status.replace(/_/g, ' ')
+}
+
 function initials(name: string): string {
   if (!name.trim()) return '?'
   return name.split(' ').filter(w => w.length > 0).map(w => w[0]).join('').toUpperCase().slice(0, 2)
 }
 
+/** All features belonging to the selected repo. */
+const repoFeatures = computed<FeatureItem[]>(() => {
+  if (!props.repo || !props.treeData) return []
+  return props.treeData.features.filter(f => f.repo_name === props.repo!.repoName)
+})
+
+/** Features filtered by search. */
+const filteredFeatures = computed<FeatureItem[]>(() => {
+  const q = featureSearch.value?.toLowerCase().trim()
+  if (!q) return repoFeatures.value
+  return repoFeatures.value.filter(f =>
+    f.title.toLowerCase().includes(q) ||
+    f.status.toLowerCase().includes(q) ||
+    (f.branch_name?.toLowerCase().includes(q) ?? false)
+  )
+})
+
 const repoFeatureCounts = computed(() => {
   if (!props.repo || !props.treeData) return null
   const counts: Record<string, number> = {}
-  for (const f of props.treeData.features) {
-    if (f.repo_name === props.repo.repoName) {
-      counts[f.status] = (counts[f.status] || 0) + 1
-    }
+  for (const f of repoFeatures.value) {
+    counts[f.status] = (counts[f.status] || 0) + 1
   }
   return Object.keys(counts).length > 0 ? counts : null
 })
@@ -211,11 +288,33 @@ const members = computed<SkilledMember[]>(() => {
   position: absolute;
   top: 16px;
   right: 16px;
-  width: 340px;
+  width: 360px;
   max-height: calc(100% - 32px);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   z-index: 20;
   background: rgba(var(--v-theme-surface), 0.95);
   backdrop-filter: blur(8px);
+}
+
+.feature-scroll {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.feature-row {
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.feature-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.feature-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 </style>

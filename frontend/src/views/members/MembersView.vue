@@ -8,15 +8,15 @@
           <span class="text-body-2 text-medium-emphasis">
             {{ visibleMembers.length }} member{{ visibleMembers.length !== 1 ? 's' : '' }}
           </span>
-          <v-switch
-            v-if="inactiveCount > 0"
-            v-model="showInactive"
-            :label="`Show inactive (${inactiveCount})`"
+          <v-select
+            v-model="statusFilter"
+            :items="statusOptions"
+            item-title="label"
+            item-value="value"
             density="compact"
             hide-details
-            color="primary"
-            class="ml-2"
-            style="flex: none;"
+            variant="outlined"
+            style="max-width: 180px; flex: none;"
           />
         </div>
       </div>
@@ -575,11 +575,19 @@ const store = useMembersStore()
 const settingsStore = useSettingsStore()
 
 // ─── Visibility filter ────────────────────────
-const showInactive = ref(false)
-const visibleMembers = computed(() =>
-  showInactive.value ? store.members : store.members.filter(m => m.isActive)
-)
+const statusFilter = ref<'active' | 'inactive' | 'all'>('active')
+const activeCount = computed(() => store.members.filter(m => m.isActive).length)
 const inactiveCount = computed(() => store.members.filter(m => !m.isActive).length)
+const statusOptions = computed(() => [
+  { label: `Active (${activeCount.value})`, value: 'active' },
+  { label: `Inactive (${inactiveCount.value})`, value: 'inactive' },
+  { label: `All (${store.members.length})`, value: 'all' },
+])
+const visibleMembers = computed(() => {
+  if (statusFilter.value === 'all') return store.members
+  if (statusFilter.value === 'inactive') return store.members.filter(m => !m.isActive)
+  return store.members.filter(m => m.isActive)
+})
 
 // ─── Add Member ───────────────────────────────
 const addMemberDialog = ref(false)

@@ -226,7 +226,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 },
                 "repo_name": {
                     "type": "string",
-                    "description": "Repository name (for workspace title prefix)",
+                    "description": "Repository name (links feature to tracked repo)",
                 },
                 "merge_source_titles": {
                     "type": "array",
@@ -723,6 +723,25 @@ async def handle_get_pending_features(
     }
 
 
+def _merge_code_locations(
+    existing: dict[str, Any] | None, incoming: dict[str, Any] | None
+) -> dict[str, list[str]]:
+    """Merge two code_locations dicts, unioning paths per layer (O(n) per layer)."""
+    merged: dict[str, list[str]] = {}
+    all_layers = set((existing or {}).keys()) | set((incoming or {}).keys())
+    for layer in sorted(all_layers):
+        existing_paths = (existing or {}).get(layer, [])
+        incoming_paths = (incoming or {}).get(layer, [])
+        seen: set[str] = set(existing_paths)
+        result = list(existing_paths)
+        for p in incoming_paths:
+            if p not in seen:
+                seen.add(p)
+                result.append(p)
+        merged[layer] = result
+    return merged
+
+
 async def handle_write_feature_registry(
     db: AsyncSession,
     org: Organization,
@@ -737,8 +756,7 @@ async def handle_write_feature_registry(
     feature_name = params["feature_name"]
     repo_name = params.get("repo_name")
     source_clusters = params.get("source_clusters", [])
-    title_prefix = f"[{repo_name}] " if repo_name else ""
-    title = f"{title_prefix}Feature: {feature_name}"
+    title = f"Feature: {feature_name}"
 
     content = format_feature_content(
         description=params["description"],
@@ -766,11 +784,13 @@ async def handle_write_feature_registry(
     if item:
         item.content = content
         item.source = "scan"
-        item.tags = params["tags"]
+        item.tags = sorted(set(item.tags or []) | set(params["tags"]))[:10]
         item.embedding = None  # Reset for re-embedding
         item.is_active = True
         item.feature_status = "implemented"
-        item.code_locations = params.get("code_locations") or None
+        item.code_locations = _merge_code_locations(
+            item.code_locations, params.get("code_locations")
+        )
     else:
         # 2. Check for PLANNED/IN_PROGRESS items to upgrade via semantic match
         try:
@@ -790,11 +810,15 @@ async def handle_write_feature_registry(
                     matched_item.title = title
                     matched_item.content = content
                     matched_item.source = "scan"
-                    matched_item.tags = params["tags"]
+                    matched_item.tags = sorted(set(matched_item.tags or []) | set(params["tags"]))[
+                        :10
+                    ]
                     matched_item.embedding = None  # Reset for re-embedding
                     matched_item.is_active = True
                     matched_item.feature_status = "implemented"
-                    matched_item.code_locations = params.get("code_locations") or None
+                    matched_item.code_locations = _merge_code_locations(
+                        matched_item.code_locations, params.get("code_locations")
+                    )
                     item = matched_item
                     logger.info(
                         "feature_upgraded_from_planned",
@@ -816,7 +840,7 @@ async def handle_write_feature_registry(
                 tags=params["tags"],
                 is_active=True,
                 feature_status="implemented",
-                code_locations=params.get("code_locations") or None,
+                code_locations=params.get("code_locations") or {},
             )
             await ki_repo.add(item)
 
