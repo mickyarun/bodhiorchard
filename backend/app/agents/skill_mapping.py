@@ -1,12 +1,12 @@
-"""Mapping from FlowDev agent names to skill definition files.
+"""Mapping from Bodhigrove agent names to skill definition files.
 
-Each FlowDev agent (triage, prd, status, etc.) maps to a skill markdown
+Each Bodhigrove agent (triage, bud, status, etc.) maps to a skill markdown
 file in backend/app/agents/skills/ that defines its persona, tools, and workflow.
 """
 
 AGENT_SKILL_MAP: dict[str, str] = {
     "triage": "triage-analyst",
-    "prd": "product-manager",
+    "bud": "product-manager",
     "status": "devops",
     "standup": "product-manager",
     "learning": "technical-writer",
@@ -16,14 +16,24 @@ AGENT_SKILL_MAP: dict[str, str] = {
     "techPlan": "tech-planner",
     "testPlan": "test-planner",
     "design": "designer",
+    "slackTriage": "slack-triage",
+}
+
+# Maps BUD section keys to the skill that handles chat for that section.
+# Used by the chat job handler to read skill-level config (e.g. max_turns).
+SECTION_SKILL_MAP: dict[str, str] = {
+    "requirements_md": "product-manager",
+    "tech_spec_md": "tech-planner",
+    "test_plan_md": "test-planner",
+    "design": "designer",
 }
 
 
 def get_skill_for_agent(agent_name: str) -> str | None:
-    """Look up the skill name for a given FlowDev agent.
+    """Look up the skill name for a given Bodhigrove agent.
 
     Args:
-        agent_name: The agent key (e.g., 'triage', 'prd').
+        agent_name: The agent key (e.g., 'triage', 'bud').
 
     Returns:
         The skill filename (without .md) or None if no mapping exists.

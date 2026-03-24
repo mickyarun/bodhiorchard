@@ -37,7 +37,7 @@
       density="compact"
       icon="mdi-information-outline"
     >
-      FlowDev supports multi-org setups. You can add more organizations later.
+      Bodhigrove supports multi-org setups. You can add more organizations later.
     </v-alert>
   </v-card>
 </template>

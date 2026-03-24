@@ -2,8 +2,9 @@
   <v-app>
     <!-- Sidebar -->
     <v-navigation-drawer permanent color="surface" width="240" class="app-sidebar">
-      <div class="pa-4 pb-2">
+      <div class="pa-4 pb-2 d-flex align-center justify-space-between">
         <FlowDevLogo :size="28" />
+        <NotificationBell v-if="authStore.user?.id" :user-id="authStore.user.id" />
       </div>
 
       <v-list density="compact" nav class="px-2">
@@ -14,9 +15,9 @@
           rounded="lg"
         />
         <v-list-item
-          prepend-icon="mdi-file-document-outline"
-          title="PRDs"
-          to="/prds"
+          prepend-icon="mdi-seed-outline"
+          title="BUDs"
+          to="/buds"
           rounded="lg"
         />
         <v-list-item
@@ -32,6 +33,19 @@
           disabled
         />
         <v-list-item
+          prepend-icon="mdi-account-cog-outline"
+          title="Skills"
+          to="/skills"
+          rounded="lg"
+        />
+        <v-list-item
+          v-if="canApprove"
+          prepend-icon="mdi-clipboard-check-outline"
+          title="Approvals"
+          to="/triage"
+          rounded="lg"
+        />
+        <v-list-item
           prepend-icon="mdi-account-group-outline"
           title="Members"
           to="/members"
@@ -42,12 +56,34 @@
       <template #append>
         <v-divider class="mb-2" />
         <v-list density="compact" nav class="px-2 pb-2">
-          <v-list-item
-            prepend-icon="mdi-cog-outline"
-            title="Settings"
-            to="/settings"
-            rounded="lg"
-          />
+          <v-list-group value="settings">
+            <template #activator="{ props }">
+              <v-list-item
+                v-bind="props"
+                prepend-icon="mdi-cog-outline"
+                title="Settings"
+                rounded="lg"
+              />
+            </template>
+            <v-list-item
+              title="Connections"
+              to="/settings"
+              rounded="lg"
+              class="pl-10"
+            />
+            <v-list-item
+              title="Design Systems"
+              to="/settings/design-systems"
+              rounded="lg"
+              class="pl-10"
+            />
+            <v-list-item
+              title="Agent Prompts"
+              to="/settings/agent-prompts"
+              rounded="lg"
+              class="pl-10"
+            />
+          </v-list-group>
         </v-list>
 
         <!-- User menu -->
@@ -86,8 +122,10 @@
     </v-navigation-drawer>
 
     <!-- Main content -->
-    <v-main>
-      <router-view />
+    <v-main class="app-main">
+      <div class="app-scroll">
+        <router-view />
+      </div>
     </v-main>
   </v-app>
 </template>
@@ -97,9 +135,19 @@ import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import FlowDevLogo from '@/components/common/FlowDevLogo.vue'
+import NotificationBell from '@/components/common/NotificationBell.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+// Roles that have the backlog:approve permission by default
+const APPROVER_ROLES = new Set(['org_owner', 'admin', 'pm', 'tech_lead'])
+
+const canApprove = computed(() => {
+  const role = authStore.user?.role
+  if (!role) return false
+  return APPROVER_ROLES.has(role)
+})
 
 const userInitials = computed(() => {
   const name = authStore.user?.name || ''
@@ -126,6 +174,16 @@ function handleLogout(): void {
 <style scoped>
 .app-sidebar {
   border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.app-main {
+  height: 100vh;
+  max-height: 100vh;
+}
+
+.app-scroll {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .user-menu {

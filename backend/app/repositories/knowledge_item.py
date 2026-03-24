@@ -11,7 +11,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.knowledge_item import KnowledgeItem
+from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
 from app.repositories.base import BaseRepository
 
 
@@ -64,7 +64,7 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
 
         Args:
             category: Optional category filter.
-            repo_id: Optional tracked repository filter.
+            repo_id: Optional tracked repository filter (via junction table).
             limit: Maximum number of results.
 
         Returns:
@@ -79,7 +79,13 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         if category:
             stmt = stmt.where(KnowledgeItem.category == category)
         if repo_id:
-            stmt = stmt.where(KnowledgeItem.repo_id == repo_id)
+            stmt = stmt.where(
+                KnowledgeItem.id.in_(
+                    select(KnowledgeRepoLink.knowledge_id).where(
+                        KnowledgeRepoLink.repo_id == repo_id
+                    )
+                )
+            )
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
@@ -456,7 +462,7 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
         return result.scalar() or 0
 
-    # --- Repo-linked counts ---
+    # --- Repo-linked counts (via junction table) ---
 
     async def count_by_repo_id(
         self,
@@ -464,7 +470,7 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         *,
         category: str | None = None,
     ) -> int:
-        """Count active items linked to a specific tracked repository.
+        """Count active items linked to a tracked repository via junction table.
 
         Args:
             repo_id: The tracked repository UUID.
@@ -473,15 +479,74 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         Returns:
             Count of matching active items.
         """
+        linked_ids = select(KnowledgeRepoLink.knowledge_id).where(
+            KnowledgeRepoLink.repo_id == repo_id
+        )
         stmt = select(func.count(KnowledgeItem.id)).where(
             KnowledgeItem.org_id == self._org_id,
             KnowledgeItem.is_active.is_(True),
-            KnowledgeItem.repo_id == repo_id,
+            KnowledgeItem.id.in_(linked_ids),
         )
         if category:
             stmt = stmt.where(KnowledgeItem.category == category)
         result = await self._db.execute(stmt)
         return result.scalar() or 0
+
+    async def link_to_repo(
+        self,
+        knowledge_id: uuid.UUID,
+        repo_id: uuid.UUID,
+    ) -> None:
+        """Create a link between a knowledge item and a tracked repository.
+
+        Idempotent — skips if link already exists.
+
+        Args:
+            knowledge_id: The knowledge item UUID.
+            repo_id: The tracked repository UUID.
+        """
+        existing = await self._db.execute(
+            select(KnowledgeRepoLink.id).where(
+                KnowledgeRepoLink.knowledge_id == knowledge_id,
+                KnowledgeRepoLink.repo_id == repo_id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            return
+        self._db.add(
+            KnowledgeRepoLink(
+                knowledge_id=knowledge_id,
+                repo_id=repo_id,
+            )
+        )
+
+    async def link_to_repos(
+        self,
+        knowledge_id: uuid.UUID,
+        repo_ids: list[uuid.UUID],
+    ) -> None:
+        """Link a knowledge item to multiple repos.
+
+        Args:
+            knowledge_id: The knowledge item UUID.
+            repo_ids: List of tracked repository UUIDs.
+        """
+        for rid in repo_ids:
+            await self.link_to_repo(knowledge_id, rid)
+
+    async def get_repo_ids(self, knowledge_id: uuid.UUID) -> list[uuid.UUID]:
+        """Get repo IDs linked to a knowledge item.
+
+        Args:
+            knowledge_id: The knowledge item UUID.
+
+        Returns:
+            List of tracked repository UUIDs.
+        """
+        result = await self._db.execute(
+            select(KnowledgeRepoLink.repo_id).where(KnowledgeRepoLink.knowledge_id == knowledge_id)
+        )
+        return list(result.scalars().all())
 
     # --- Deduplication ---
 
@@ -538,7 +603,7 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
     async def find_semantic_duplicates(
         self,
         category: str,
-        threshold: float = 0.92,
+        threshold: float = 0.85,
     ) -> list[tuple[uuid.UUID, uuid.UUID, float]]:
         """Find pairs of items with high cosine similarity.
 
@@ -574,6 +639,49 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
             )
         ).all()
         return [(a_id, b_id, sim) for a_id, b_id, sim in rows]
+
+    async def find_superseded_repo_features(
+        self,
+        threshold: float = 0.80,
+    ) -> list[tuple[uuid.UUID, uuid.UUID, float]]:
+        """Find repo-specific features superseded by cross-repo merged features.
+
+        Cross-joins ``[Repo] Feature: X`` items against ``Feature: X`` items
+        using pgvector cosine similarity.
+
+        Args:
+            threshold: Minimum cosine similarity to consider a match.
+
+        Returns:
+            List of (repo_specific_id, cross_repo_id, similarity) tuples.
+        """
+        stmt = text("""
+            SELECT r.id AS repo_id, c.id AS cross_id,
+                   1 - (r.embedding <=> c.embedding) AS similarity
+            FROM knowledge_items r
+            JOIN knowledge_items c
+              ON r.org_id = c.org_id
+             AND r.id != c.id
+            WHERE r.org_id = :org_id
+              AND r.category = 'feature_registry'
+              AND c.category = 'feature_registry'
+              AND r.is_active = true AND c.is_active = true
+              AND r.embedding IS NOT NULL AND c.embedding IS NOT NULL
+              AND r.title LIKE '[%%] Feature:%%'
+              AND c.title LIKE 'Feature:%%'
+              AND c.title NOT LIKE '[%%] Feature:%%'
+              AND (r.embedding <=> c.embedding) < :max_distance
+        """)
+        rows = (
+            await self._db.execute(
+                stmt,
+                {
+                    "org_id": str(self._org_id),
+                    "max_distance": 1.0 - threshold,
+                },
+            )
+        ).all()
+        return [(repo_id, cross_id, sim) for repo_id, cross_id, sim in rows]
 
     async def get_by_ids(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, KnowledgeItem]:
         """Fetch multiple items by their IDs.

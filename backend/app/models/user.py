@@ -25,6 +25,7 @@ class UserRole(StrEnum):
     DEVELOPER = "developer"
     DESIGNER = "designer"
     QA = "qa"
+    MANAGER = "manager"
     SUPPORT = "support"
     VIEWER = "viewer"
 
@@ -52,6 +53,7 @@ class User(BaseModel):
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     slack_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     github_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    character_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     role_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("roles.id"), nullable=True
     )
@@ -64,6 +66,28 @@ class User(BaseModel):
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email!r})>"
+
+
+class UserEmailAlias(BaseModel):
+    """Alternate email addresses for a user (e.g., personal, GitHub noreply).
+
+    During git scans, commits authored with any alias email are attributed
+    to the primary user.
+    """
+
+    __tablename__ = "user_email_aliases"
+    __table_args__ = (UniqueConstraint("org_id", "email", name="uq_alias_org_email"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
+    )
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<UserEmailAlias(user_id={self.user_id}, email={self.email!r})>"
 
 
 class OrgToUser(BaseModel):

@@ -60,6 +60,8 @@ class TrackedRepository(BaseModel):
     feature_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    main_branch: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    develop_branch: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     def __repr__(self) -> str:
         return f"<TrackedRepository(name={self.name!r}, status={self.status})>"

@@ -10,6 +10,7 @@ import uuid
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.knowledge_item import KnowledgeItem
 from app.repositories.knowledge_item import KnowledgeItemRepository
@@ -58,6 +59,7 @@ async def merge_same_name_features(
         all_capabilities: list[str] = []
         best_description = ""
         all_tags: set[str] = set()
+        merged_code_locations: dict[str, list[str]] = {}
 
         for _repo, item in entries:
             content = item.content or ""
@@ -82,6 +84,12 @@ async def merge_same_name_features(
                 best_description = desc
             if item.tags:
                 all_tags.update(item.tags)
+            if item.code_locations:
+                for layer, paths in item.code_locations.items():
+                    existing = merged_code_locations.setdefault(layer, [])
+                    for p in paths:
+                        if p not in existing:
+                            existing.append(p)
 
         # Use original casing from first entry
         first_match = REPO_PREFIX_RE.match(entries[0][1].title)
@@ -96,6 +104,12 @@ async def merge_same_name_features(
             feature_status="implemented",
         )
 
+        # Collect repo links from all source items before deactivation
+        all_repo_ids: set[uuid.UUID] = set()
+        for _, item in entries:
+            for link in item.repo_links:
+                all_repo_ids.add(link.repo_id)
+
         # Upsert merged item
         merged_item = await ki_repo.get_by_title_and_category(merged_title, "feature_registry")
 
@@ -106,6 +120,8 @@ async def merge_same_name_features(
             merged_item.is_active = True
             merged_item.feature_status = "implemented"
             merged_item.source = "scan"
+            merged_item.code_locations = merged_code_locations or None
+            flag_modified(merged_item, "code_locations")
         else:
             merged_item = KnowledgeItem(
                 org_id=org_id,
@@ -116,8 +132,15 @@ async def merge_same_name_features(
                 tags=sorted(all_tags)[:5],
                 is_active=True,
                 feature_status="implemented",
+                code_locations=merged_code_locations or None,
             )
             await ki_repo.add(merged_item)
+
+        await db.flush()
+
+        # Link merged item to all source repos
+        if all_repo_ids:
+            await ki_repo.link_to_repos(merged_item.id, list(all_repo_ids))
 
         # Deactivate originals
         for _, item in entries:
@@ -139,7 +162,7 @@ async def merge_same_name_features(
 async def find_semantic_duplicates(
     db: AsyncSession,
     org_id: uuid.UUID,
-    threshold: float = 0.92,
+    threshold: float = 0.85,
     max_group_size: int = 4,
 ) -> list[list[KnowledgeItem]]:
     """Find features with different names but overlapping content.
@@ -215,6 +238,78 @@ async def find_semantic_duplicates(
         )
 
     return result
+
+
+async def deactivate_superseded_repo_features(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    threshold: float = 0.80,
+) -> int:
+    """Deactivate repo-specific features superseded by cross-repo merged versions.
+
+    Finds ``[Repo] Feature: X`` items that are semantically similar to a
+    ``Feature: X`` cross-repo item, transfers unique repo_links to the
+    cross-repo item, then deactivates the repo-specific ones.
+
+    Args:
+        db: The async database session.
+        org_id: Organization UUID.
+        threshold: Minimum cosine similarity for supersedence.
+
+    Returns:
+        Number of repo-specific features deactivated.
+    """
+    ki_repo = KnowledgeItemRepository(db, org_id=org_id)
+    rows = await ki_repo.find_superseded_repo_features(threshold)
+    if not rows:
+        return 0
+
+    # Collect repo-specific IDs and their cross-repo targets
+    repo_to_cross: dict[uuid.UUID, uuid.UUID] = {}
+    for repo_id, cross_id, _sim in rows:
+        # First match wins (highest similarity due to ORDER BY in SQL)
+        if repo_id not in repo_to_cross:
+            repo_to_cross[repo_id] = cross_id
+
+    # Load all involved items
+    all_ids = set(repo_to_cross.keys()) | set(repo_to_cross.values())
+    item_map = await ki_repo.get_by_ids(all_ids)
+
+    deactivated = 0
+    for repo_id, cross_id in repo_to_cross.items():
+        repo_item = item_map.get(repo_id)
+        cross_item = item_map.get(cross_id)
+        if not repo_item or not cross_item:
+            continue
+
+        # Transfer repo_links from repo-specific to cross-repo item
+        for link in repo_item.repo_links:
+            await ki_repo.link_to_repo(cross_item.id, link.repo_id)
+
+        # Union code_locations
+        if repo_item.code_locations and cross_item.code_locations is not None:
+            for layer, paths in repo_item.code_locations.items():
+                existing = cross_item.code_locations.setdefault(layer, [])
+                for p in paths:
+                    if p not in existing:
+                        existing.append(p)
+            flag_modified(cross_item, "code_locations")
+        elif repo_item.code_locations:
+            cross_item.code_locations = dict(repo_item.code_locations)
+
+        repo_item.is_active = False
+        repo_item.embedding = None
+        deactivated += 1
+
+    if deactivated:
+        await db.flush()
+        logger.info(
+            "superseded_repo_features_deactivated",
+            org_id=str(org_id),
+            count=deactivated,
+        )
+
+    return deactivated
 
 
 def build_targeted_merge_prompt(

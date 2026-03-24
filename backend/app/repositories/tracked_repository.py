@@ -163,3 +163,18 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
             )
         )
         return list(result.scalars().all())
+
+    async def get_active_path_name_pairs(self) -> list[tuple[str, str]]:
+        """Return (path, name) pairs of active repos.
+
+        Returns:
+            List of (path, name) tuples.
+        """
+        result = await self._db.execute(
+            self._scoped(
+                select(TrackedRepository.path, TrackedRepository.name).where(
+                    TrackedRepository.status == RepoStatus.ACTIVE
+                )
+            ).order_by(TrackedRepository.name)
+        )
+        return list(result.all())

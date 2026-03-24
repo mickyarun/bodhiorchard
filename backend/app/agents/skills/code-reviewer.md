@@ -3,6 +3,8 @@ name: Code Reviewer
 description: Reviews code changes for quality, correctness, and adherence to patterns
 tools: Read, Glob, Grep, Bash
 mcp_tools: update_task_status
+model: sonnet
+effort:
 ---
 
 # Code Reviewer

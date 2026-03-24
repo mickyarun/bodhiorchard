@@ -32,7 +32,7 @@ class BugStatus(StrEnum):
 
 
 class Bug(BaseModel):
-    """Bug report linked to an organization and optionally to a PRD."""
+    """Bug report linked to an organization and optionally to a BUD."""
 
     __tablename__ = "bugs"
     __table_args__ = (Index("ix_bugs_org_status_created", "org_id", "status", "created_at"),)
@@ -40,8 +40,8 @@ class Bug(BaseModel):
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
-    prd_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("prd_documents.id"), nullable=True
+    bud_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("bud_documents.id"), nullable=True
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

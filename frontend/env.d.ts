@@ -6,6 +6,16 @@ declare module '*.vue' {
   export default component
 }
 
+// Shader file imports (Vite ?raw)
+declare module '*.vert?raw' {
+  const content: string
+  export default content
+}
+declare module '*.frag?raw' {
+  const content: string
+  export default content
+}
+
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL: string
 }

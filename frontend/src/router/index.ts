@@ -34,14 +34,14 @@ async function checkSetupStatus(): Promise<boolean> {
 }
 
 /** Public routes that don't require authentication. */
-const PUBLIC_ROUTES = new Set(['setup', 'login'])
+const PUBLIC_ROUTES = new Set(['setup', 'login', 'methodology'])
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
       path: '/',
-      redirect: '/dashboard',
+      redirect: '/methodology',
     },
     {
       path: '/login',
@@ -60,28 +60,43 @@ const router = createRouter({
       ],
     },
     {
+      path: '/methodology',
+      name: 'methodology',
+      component: () => import('@/views/methodology/MethodologyView.vue'),
+    },
+    {
       path: '/',
       component: () => import('@/layouts/AppLayout.vue'),
       children: [
         {
           path: 'dashboard',
           name: 'dashboard',
-          component: () => import('@/views/DashboardPlaceholder.vue'),
+          component: () => import('@/views/dashboard/TreeDashboard.vue'),
         },
         {
-          path: 'prds',
-          name: 'prds',
-          component: () => import('@/views/prds/PRDBoard.vue'),
+          path: 'buds',
+          name: 'buds',
+          component: () => import('@/views/buds/BUDBoard.vue'),
         },
         {
-          path: 'prds/:id',
-          name: 'prd-detail',
-          component: () => import('@/views/prds/PRDDetail.vue'),
+          path: 'buds/:id',
+          name: 'bud-detail',
+          component: () => import('@/views/buds/BUDDetail.vue'),
         },
         {
           path: 'features',
           name: 'features',
           component: () => import('@/views/features/FeaturesView.vue'),
+        },
+        {
+          path: 'skills',
+          name: 'skills',
+          component: () => import('@/views/skills/SkillProfilesView.vue'),
+        },
+        {
+          path: 'triage',
+          name: 'triage',
+          component: () => import('@/views/triage/TriageQueueView.vue'),
         },
         {
           path: 'members',
@@ -92,6 +107,16 @@ const router = createRouter({
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/settings/SettingsConnections.vue'),
+        },
+        {
+          path: 'settings/design-systems',
+          name: 'settings-design-systems',
+          component: () => import('@/views/settings/SettingsDesignSystems.vue'),
+        },
+        {
+          path: 'settings/agent-prompts',
+          name: 'settings-agent-prompts',
+          component: () => import('@/views/settings/SettingsAgentPrompts.vue'),
         },
       ],
     },
@@ -108,7 +133,7 @@ router.beforeEach(async (to) => {
 
   // Setup done — don't allow going back to setup
   if (done && to.name === 'setup') {
-    return { name: 'dashboard' }
+    return { name: 'methodology' }
   }
 
   // Auth guard — require token for protected routes
@@ -121,7 +146,7 @@ router.beforeEach(async (to) => {
 
   // Already logged in — redirect away from login
   if (to.name === 'login' && localStorage.getItem('flowdev_token')) {
-    return { name: 'dashboard' }
+    return { name: 'methodology' }
   }
 })
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.models.knowledge_item import KnowledgeItem
 from app.models.user import User
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.organization import OrganizationRepository
@@ -58,6 +59,18 @@ async def trigger_scan(
 
     # Read active repos from the tracked_repositories table
     repo_repo = TrackedRepoRepository(db, org_id=org.id)
+
+    # Gate: require both main and develop branches mapped for all active repos
+    active_repos = await repo_repo.list_active()
+    unmapped_main = [r.name for r in active_repos if not r.main_branch]
+    unmapped_dev = [r.name for r in active_repos if not r.develop_branch]
+    unmapped = sorted(set(unmapped_main + unmapped_dev))
+    if unmapped:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Map branches before scanning. Unmapped: {', '.join(unmapped)}",
+        )
+
     repo_paths = await repo_repo.get_active_paths()
 
     if not repo_paths:
@@ -91,6 +104,7 @@ async def trigger_scan(
         org_id=org.id,
         repo_paths=repo_paths,
         full_rescan=body.full_rescan,
+        user_id=str(current_user.id),
     )
 
     return ScanResponse(scanId=scan_id, status="started")
@@ -197,7 +211,22 @@ async def get_knowledge_item(
         source=item.source,
         sourceRef=item.source_ref,
         featureStatus=item.feature_status,
-        repoId=item.repo_id,
+        repoIds=[link.repo_id for link in item.repo_links],
+    )
+
+
+def _item_to_read(item: KnowledgeItem) -> KnowledgeItemRead:
+    """Convert a KnowledgeItem ORM instance to API response schema."""
+    return KnowledgeItemRead(
+        id=item.id,
+        title=item.title,
+        content=item.content,
+        category=item.category,
+        tags=item.tags,
+        source=item.source,
+        sourceRef=item.source_ref,
+        featureStatus=item.feature_status,
+        repoIds=[link.repo_id for link in item.repo_links],
     )
 
 
@@ -215,7 +244,7 @@ async def list_knowledge(
 
     Args:
         category: Optional category filter.
-        repo_id: Optional tracked repository filter.
+        repo_id: Optional tracked repository filter (via junction table).
         limit: Maximum number of items to return.
         current_user: The authenticated user.
         db: The async database session.
@@ -228,20 +257,7 @@ async def list_knowledge(
     ki_repo = KnowledgeItemRepository(db, org_id=org.id)
     items = await ki_repo.list_active(category=category, repo_id=repo_id, limit=limit)
 
-    return [
-        KnowledgeItemRead(
-            id=item.id,
-            title=item.title,
-            content=item.content,
-            category=item.category,
-            tags=item.tags,
-            source=item.source,
-            sourceRef=item.source_ref,
-            featureStatus=item.feature_status,
-            repoId=item.repo_id,
-        )
-        for item in items
-    ]
+    return [_item_to_read(item) for item in items]
 
 
 @router.post("/knowledge/search", response_model=list[KnowledgeSearchResult])

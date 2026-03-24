@@ -6,11 +6,17 @@ knowledge graph for communities (feature clusters) and execution flows.
 
 import asyncio
 import json
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import structlog
+
+from app.services.gitnexus_utils import find_npx as _find_npx  # noqa: I001
+from app.services.gitnexus_utils import parse_cypher_community_list as _parse_cypher_community_list
+from app.services.gitnexus_utils import parse_markdown_table as _parse_markdown_table
+from app.services.gitnexus_utils import parse_single_column as _parse_single_column
+from app.services.gitnexus_utils import run_cypher as _run_cypher
+from app.services.gitnexus_utils import run_npx as _run_npx
 
 logger = structlog.get_logger(__name__)
 
@@ -58,71 +64,14 @@ class GitNexusNotInstalledError(Exception):
     """Raised when npx/Node.js is not available to run GitNexus."""
 
 
-def _find_npx() -> str | None:
-    """Find the npx binary, checking common Node.js install locations."""
-    npx = shutil.which("npx")
-    if npx:
-        return npx
-    for candidate in [
-        Path.home() / ".nvm" / "current" / "bin" / "npx",
-        Path("/usr/local/bin/npx"),
-        Path("/opt/homebrew/bin/npx"),
-    ]:
-        if candidate.exists():
-            return str(candidate)
-    return None
+## _find_npx, _run_npx_sync, _run_npx, _run_cypher are imported from gitnexus_utils
 
 
-def _run_npx_sync(
-    npx: str,
-    args: list[str],
-    cwd: str,
-    timeout: int = 60,
-) -> tuple[str, str, int]:
-    """Run a gitnexus command via npx synchronously (for use in a thread)."""
-    import subprocess
-
-    result = subprocess.run(
-        [npx, "--yes", "gitnexus", *args],
-        capture_output=True,
-        text=True,
-        cwd=cwd,
-        timeout=timeout,
-    )
-    return (result.stdout, result.stderr, result.returncode)
-
-
-async def _run_npx(
-    npx: str,
-    args: list[str],
-    cwd: str,
-    timeout: int = 60,
-) -> tuple[str, str, int]:
-    """Run a gitnexus command via npx and return (stdout, stderr, returncode).
-
-    Uses subprocess.run in a thread to avoid asyncio pipe buffer truncation
-    with large outputs (>8KB).
-    """
-    return await asyncio.to_thread(_run_npx_sync, npx, args, cwd, timeout)
-
-
-async def _run_cypher(
-    npx: str,
-    query: str,
-    cwd: str,
-    repo_name: str,
-    timeout: int = 30,
-) -> tuple[str, str, int]:
-    """Run a gitnexus cypher query with --repo flag for multi-repo disambiguation."""
-    return await _run_npx(
-        npx,
-        ["cypher", "--repo", repo_name, query],
-        cwd=cwd,
-        timeout=timeout,
-    )
-
-
-async def index_repo_with_gitnexus(repo_path: str) -> GitNexusResult:
+async def index_repo_with_gitnexus(
+    repo_path: str,
+    *,
+    force: bool = True,
+) -> GitNexusResult:
     """Run GitNexus analyze then query the knowledge graph for features.
 
     Steps:
@@ -134,6 +83,9 @@ async def index_repo_with_gitnexus(repo_path: str) -> GitNexusResult:
 
     Args:
         repo_path: Absolute path to the git repository root.
+        force: If True, pass ``--force`` to re-index even if unchanged.
+            Incremental scans pass False so GitNexus skips if the source
+            hash is unchanged (fast no-op).
 
     Returns:
         GitNexusResult with communities as features and execution flows.
@@ -153,15 +105,19 @@ async def index_repo_with_gitnexus(repo_path: str) -> GitNexusResult:
     if not npx:
         raise GitNexusNotInstalledError(
             "Node.js (npx) is required for codebase indexing. "
-            "Install Node.js from https://nodejs.org/ and restart FlowDev."
+            "Install Node.js from https://nodejs.org/ and restart Bodhigrove."
         )
 
     # Step 1: Run gitnexus analyze
     try:
-        logger.info("gitnexus_starting", repo=repo_path)
+        logger.info("gitnexus_starting", repo=repo_path, force=force)
+        analyze_args = ["analyze"]
+        if force:
+            analyze_args.append("--force")
+        analyze_args.append(str(repo))
         stdout, stderr, returncode = await _run_npx(
             npx,
-            ["analyze", "--force", str(repo)],
+            analyze_args,
             cwd=str(repo),
             timeout=300,
         )
@@ -180,6 +136,30 @@ async def index_repo_with_gitnexus(repo_path: str) -> GitNexusResult:
             f"Failed to run GitNexus via npx: {exc}. "
             "Ensure Node.js is installed and npx is on your PATH."
         ) from exc
+
+    # Step 1b: Run gitnexus setup (generates CLAUDE.md integration for the repo)
+    try:
+        setup_stdout, setup_stderr, setup_rc = await _run_npx(
+            npx,
+            ["setup"],
+            cwd=str(repo),
+            timeout=60,
+        )
+        if setup_rc != 0:
+            logger.warning(
+                "gitnexus_setup_nonzero", returncode=setup_rc, stderr=setup_stderr[:300]
+            )
+        else:
+            logger.info("gitnexus_setup_complete", repo=repo_path)
+    except TimeoutError:
+        logger.warning("gitnexus_setup_timeout", repo=repo_path)
+    except (FileNotFoundError, OSError):
+        logger.warning("gitnexus_setup_failed", repo=repo_path)
+
+    # Step 1c: Register gitnexus MCP server so Claude Code can use it
+    from app.services.claude_runner import ensure_gitnexus_mcp
+
+    await ensure_gitnexus_mcp()
 
     # Brief pause to let LadybugDB release the write lock before querying
     await asyncio.sleep(2)
@@ -335,71 +315,8 @@ async def index_repo_with_gitnexus(repo_path: str) -> GitNexusResult:
     return result
 
 
-def _parse_markdown_table(markdown: str) -> list[list[str]]:
-    """Parse a markdown table into a list of rows (each row is a list of cell values).
-
-    Skips the header row and separator row. Returns only data rows.
-
-    Args:
-        markdown: Markdown table string.
-
-    Returns:
-        List of rows, where each row is a list of stripped cell strings.
-    """
-    lines = markdown.strip().split("\n")
-    data_lines = [ln for ln in lines if ln.strip() and not ln.strip().startswith("| ---")]
-    if len(data_lines) < 2:
-        return []
-    rows: list[list[str]] = []
-    for line in data_lines[1:]:
-        cells = [c.strip() for c in line.split("|") if c.strip()]
-        if cells:
-            rows.append(cells)
-    return rows
-
-
-def _parse_cypher_community_list(markdown: str) -> list[tuple[str, int]]:
-    """Parse community list query: community, symbols.
-
-    Deduplicates by name, summing symbol counts for communities with the same label.
-
-    Args:
-        markdown: Markdown table from cypher output.
-
-    Returns:
-        List of (name, total_symbols) tuples, deduplicated and sorted by symbols desc.
-    """
-    rows = _parse_markdown_table(markdown)
-    totals: dict[str, int] = {}
-    for row in rows:
-        if len(row) < 2:
-            continue
-        name = row[0]
-        try:
-            symbols = int(row[1])
-        except ValueError:
-            symbols = 0
-        totals[name] = totals.get(name, 0) + symbols
-
-    return sorted(totals.items(), key=lambda x: x[1], reverse=True)
-
-
-def _parse_single_column(markdown: str) -> list[str]:
-    """Parse a single-column markdown table into a list of values.
-
-    Args:
-        markdown: Markdown table with one column.
-
-    Returns:
-        Deduplicated list of values.
-    """
-    seen: set[str] = set()
-    result: list[str] = []
-    for row in _parse_markdown_table(markdown):
-        if row and row[0] and row[0] not in seen:
-            seen.add(row[0])
-            result.append(row[0])
-    return result
+## _parse_markdown_table, _parse_cypher_community_list, _parse_single_column
+## are imported from gitnexus_utils
 
 
 def _build_features(
@@ -501,3 +418,557 @@ async def extract_repo_docs(repo_path: str) -> list[DocEntry]:
 
     logger.info("extract_repo_docs", repo=repo_path, doc_count=len(docs))
     return docs
+
+
+# ── Worktree management ────────────────────────────────────────────
+
+
+async def run_git(args: list[str], cwd: str, timeout: int = 60) -> tuple[str, str, int]:
+    """Run a git command asynchronously.
+
+    Args:
+        args: Git subcommand and arguments.
+        cwd: Working directory for the command.
+        timeout: Maximum seconds to wait.
+
+    Returns:
+        Tuple of (stdout, stderr, returncode).
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        *args,
+        cwd=cwd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    return (
+        stdout.decode(errors="replace").strip(),
+        stderr.decode(errors="replace").strip(),
+        proc.returncode or 0,
+    )
+
+
+async def _detect_main_branch(repo_path: str) -> str | None:
+    """Detect whether the repo uses 'main' or 'master' as its primary branch.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+
+    Returns:
+        Branch name ('main' or 'master'), or None if neither found.
+    """
+    stdout, _, _ = await run_git(["branch", "-r"], cwd=repo_path)
+    for candidate in ("origin/main", "origin/master"):
+        if candidate in stdout:
+            return candidate.split("/", 1)[1]
+    return None
+
+
+async def _detect_develop_branch(repo_path: str) -> str | None:
+    """Detect whether the repo uses 'develop' or 'dev' as its development branch.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+
+    Returns:
+        Branch name ('develop' or 'dev'), or None if neither found.
+    """
+    stdout, _, _ = await run_git(["branch", "-r"], cwd=repo_path)
+    for candidate in ("origin/develop", "origin/dev"):
+        if candidate in stdout:
+            return candidate.split("/", 1)[1]
+    return None
+
+
+async def detect_uncommitted_changes(repo_path: str) -> bool:
+    """Run git status --porcelain. Returns True if working tree is dirty.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+
+    Returns:
+        True if there are uncommitted changes.
+    """
+    stdout, _, _ = await run_git(["status", "--porcelain"], cwd=repo_path)
+    return bool(stdout.strip())
+
+
+async def list_remote_branches(repo_path: str) -> list[str]:
+    """List all remote branch names (origin/main → 'main').
+
+    Args:
+        repo_path: Absolute path to the git repository.
+
+    Returns:
+        Sorted list of unique branch names.
+    """
+    stdout, _, _ = await run_git(["branch", "-r"], cwd=repo_path)
+    branches = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if "->" in line or not line:
+            continue
+        if "/" in line:
+            branches.append(line.split("/", 1)[1])
+    return sorted(set(branches))
+
+
+_FRONTEND_DEPS = frozenset(
+    {
+        "vue",
+        "react",
+        "react-dom",
+        "next",
+        "nuxt",
+        "@angular/core",
+        "svelte",
+        "@sveltejs/kit",
+        "vuetify",
+        "@mui/material",
+        "tailwindcss",
+    }
+)
+
+
+def detect_repo_type(repo_path: str) -> str | None:
+    """Detect if repo is 'frontend' or 'backend' by checking package.json deps.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+
+    Returns:
+        'frontend', 'backend', or None if detection fails.
+    """
+    pkg_path = Path(repo_path) / "package.json"
+    if not pkg_path.exists():
+        return "backend"
+    try:
+        pkg = json.loads(pkg_path.read_text())
+        all_deps = set(pkg.get("dependencies", {})) | set(pkg.get("devDependencies", {}))
+        return "frontend" if all_deps & _FRONTEND_DEPS else "backend"
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]:
+    """Create main + develop worktrees for a repo.
+
+    Creates worktrees under ``<repo>/.bodhigrove/main/`` and
+    ``<repo>/.bodhigrove/develop/``. Pulls both to latest.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+
+    Returns:
+        Tuple of (main_worktree_path, develop_worktree_path).
+        Either may be None if the branch doesn't exist.
+    """
+    repo = Path(repo_path)
+    worktree_dir = repo / ".bodhigrove"
+    worktree_dir.mkdir(exist_ok=True)
+
+    main_branch = await _detect_main_branch(repo_path)
+    develop_branch = await _detect_develop_branch(repo_path)
+
+    results: list[str | None] = [None, None]
+
+    for idx, (branch, dirname) in enumerate([(main_branch, "main"), (develop_branch, "develop")]):
+        if branch is None:
+            continue
+
+        wt_path = worktree_dir / dirname
+        if not wt_path.exists():
+            _, stderr, rc = await run_git(["worktree", "add", str(wt_path), branch], cwd=repo_path)
+            if rc != 0:
+                logger.warning(
+                    "worktree_add_failed",
+                    branch=branch,
+                    error=stderr[:200],
+                )
+                continue
+        else:
+            # Pull latest
+            _, stderr, rc = await run_git(["pull"], cwd=str(wt_path))
+            if rc != 0:
+                logger.warning("worktree_pull_failed", branch=branch, error=stderr[:200])
+
+        results[idx] = str(wt_path)
+
+    logger.info(
+        "worktrees_ensured",
+        repo=repo_path,
+        main=results[0] is not None,
+        develop=results[1] is not None,
+    )
+    return results[0], results[1]
+
+
+# ── Bodhigrove MCP server init ─────────────────────────────────────
+
+
+async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str, mcp_token: str) -> bool:
+    """Write .claude/settings.json with Bodhigrove MCP server config.
+
+    Idempotent: skips if the bodhigrove entry already exists with the
+    correct backend URL. Only updates when config is missing or stale.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+        backend_url: URL of the Bodhigrove backend (e.g. http://localhost:8000).
+        mcp_token: Long-lived org-scoped MCP token.
+
+    Returns:
+        True if the file was written (changed), False if already up to date.
+    """
+    import contextlib
+
+    repo = Path(repo_path)
+    claude_dir = repo / ".claude"
+    claude_dir.mkdir(exist_ok=True)
+    settings_path = claude_dir / "settings.json"
+
+    bridge_script = str(Path(__file__).resolve().parents[1] / "mcp" / "stdio_bridge.py")
+
+    settings: dict = {}
+    if settings_path.exists():
+        with contextlib.suppress(json.JSONDecodeError, OSError):
+            settings = json.loads(settings_path.read_text())
+
+    # Check if already configured with correct URL
+    existing_mcp = settings.get("mcpServers", {}).get("bodhigrove", {})
+    existing_env = existing_mcp.get("env", {})
+    if (
+        existing_env.get("BODHIGROVE_BACKEND_URL") == backend_url
+        and existing_env.get("BODHIGROVE_MCP_TOKEN") == mcp_token
+    ):
+        logger.debug("bodhigrove_mcp_already_configured", repo=repo_path)
+        return False
+
+    settings.setdefault("mcpServers", {})
+    settings["mcpServers"]["bodhigrove"] = {
+        "command": "python3",
+        "args": [bridge_script],
+        "env": {
+            "BODHIGROVE_BACKEND_URL": backend_url,
+            "BODHIGROVE_MCP_TOKEN": mcp_token,
+        },
+    }
+
+    settings_path.write_text(json.dumps(settings, indent=2))
+    logger.info("bodhigrove_mcp_written", repo=repo_path)
+    return True
+
+
+# ── Git hook installation ──────────────────────────────────────────
+
+_HOOK_MARKER = "# installed-by-bodhigrove"
+
+
+def _build_pre_commit_hook(backend_url: str, org_id: str) -> str:
+    """Build the pre-commit hook script content.
+
+    The hook validates that BUD branches (bud-NNN/...) reference a BUD
+    that exists in Bodhigrove. Non-BUD branches are allowed through.
+
+    Args:
+        backend_url: Public URL of the Bodhigrove backend.
+        org_id: Organization UUID string (baked into hook for org scoping).
+
+    Returns:
+        Shell script string.
+    """
+    return (
+        f"{_HOOK_MARKER} (pre-commit)\n"
+        "BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)\n"
+        "BUD_NUM=$(echo \"$BRANCH\" | sed -n 's/^bud-\\([0-9]*\\)\\/.*/\\1/p')\n"
+        '[ -z "$BUD_NUM" ] && exit 0\n'
+        "\n"
+        'STATUS=$(curl -s -o /dev/null -w "%{http_code}" \\\n'
+        f'  "{backend_url}/api/v1/public/{org_id}/bud-check/$BUD_NUM" 2>/dev/null)\n'
+        'if [ "$STATUS" = "404" ]; then\n'
+        '  echo "BUD-$BUD_NUM not found in Bodhigrove. Commit blocked."\n'
+        "  exit 1\n"
+        "fi\n"
+    )
+
+
+def _build_post_commit_hook(backend_url: str, org_id: str) -> str:
+    """Build the post-commit hook script content.
+
+    Reports each commit to Bodhigrove for tracking. Fire-and-forget
+    (backgrounded, never blocks the commit). Uses printf for safe JSON
+    construction to avoid shell injection from commit messages.
+
+    Args:
+        backend_url: Public URL of the Bodhigrove backend.
+        org_id: Organization UUID string (baked into hook for org scoping).
+
+    Returns:
+        Shell script string.
+    """
+    # Uses a heredoc-style JSON body via printf to avoid shell injection.
+    # The commit message is truncated and special chars are escaped via sed.
+    return (
+        f"{_HOOK_MARKER} (post-commit)\n"
+        "BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)\n"
+        "BUD_NUM=$(echo \"$BRANCH\" | sed -n 's/^bud-\\([0-9]*\\)\\/.*/\\1/p')\n"
+        '[ -z "$BUD_NUM" ] && exit 0\n'
+        "\n"
+        "SHA=$(git rev-parse HEAD)\n"
+        "# Escape special JSON chars in commit message to prevent injection\n"
+        "MSG=$(git log -1 --format=%s | head -c 400 | "
+        "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
+        "FILES=$(git diff-tree --no-commit-id --name-only -r HEAD | tr '\\n' ',')\n"
+        "REPO_PATH=$(git rev-parse --show-toplevel)\n"
+        "\n"
+        "# Build JSON safely with printf\n"
+        'JSON=$(printf \'{"bud_number":%s,"sha":"%s","message":"%s",'
+        '"files":"%s","repo_path":"%s","branch":"%s"}\''
+        ' "$BUD_NUM" "$SHA" "$MSG" "$FILES" "$REPO_PATH" "$BRANCH")\n'
+        "\n"
+        f'curl -s -X POST "{backend_url}/api/v1/public/{org_id}/bud-commit" \\\n'
+        '  -H "Content-Type: application/json" \\\n'
+        '  -d "$JSON" \\\n'
+        "  >/dev/null 2>&1 &\n"
+    )
+
+
+async def install_hooks(repo_path: str, backend_url: str, org_id: str) -> bool:
+    """Install pre-commit and post-commit hooks in a repository.
+
+    Writes hooks to ``.githooks/`` (committed to git) instead of
+    ``.git/hooks/`` (local-only). Then sets ``core.hooksPath`` so git
+    uses the committed directory. This way all devs pulling the repo
+    get the hook scripts; they just need ``core.hooksPath`` configured
+    once (done automatically by the Bodhigrove MCP server on init).
+
+    Idempotent: checks for the marker string before writing.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+        backend_url: Public URL of the Bodhigrove backend.
+        org_id: Organization UUID string (baked into hook URLs for scoping).
+
+    Returns:
+        True if hook files were written (changed), False if already up to date.
+    """
+    repo = Path(repo_path)
+    hooks_dir = repo / ".githooks"
+    hooks_dir.mkdir(exist_ok=True)
+
+    changed = False
+    for hook_name, builder in [
+        ("pre-commit", _build_pre_commit_hook),
+        ("post-commit", _build_post_commit_hook),
+    ]:
+        hook_path = hooks_dir / hook_name
+        hook_content = builder(backend_url, org_id)
+
+        if hook_path.exists():
+            existing = hook_path.read_text()
+            if _HOOK_MARKER in existing:
+                continue  # Already installed
+            # Append to existing hook
+            with hook_path.open("a") as f:
+                f.write(f"\n{hook_content}")
+        else:
+            hook_path.write_text(f"#!/bin/sh\n{hook_content}")
+
+        hook_path.chmod(0o755)
+        changed = True
+
+    # Point git at the committed hooks directory (local config, per-clone)
+    await run_git(["config", "core.hooksPath", ".githooks"], cwd=repo_path)
+
+    logger.info("hooks_installed", repo=repo_path, changed=changed)
+    return changed
+
+
+# ── .gitignore management ──────────────────────────────────────────
+
+
+def add_bodhigrove_gitignore(repo_path: str) -> bool:
+    """Append .bodhigrove/ to .gitignore if not already present.
+
+    Idempotent.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+
+    Returns:
+        True if the file was changed, False if already up to date.
+    """
+    gitignore = Path(repo_path) / ".gitignore"
+    entry = ".bodhigrove/"
+
+    if gitignore.exists():
+        content = gitignore.read_text()
+        if entry in content:
+            return False
+        if not content.endswith("\n"):
+            content += "\n"
+        content += f"{entry}\n"
+        gitignore.write_text(content)
+    else:
+        gitignore.write_text(f"{entry}\n")
+
+    logger.info("gitignore_updated", repo=repo_path)
+    return True
+
+
+# ── package.json prepare script ───────────────────────────────────
+
+_PREPARE_CMD = "git config core.hooksPath .githooks"
+
+
+def add_prepare_script(repo_path: str) -> bool:
+    """Add a ``prepare`` script to package.json that sets core.hooksPath.
+
+    This runs automatically on every ``npm install`` / ``yarn install``,
+    ensuring all developers get Bodhigrove's git hooks without manual
+    setup — the same pattern used by Husky.
+
+    If the repo has no package.json, creates a minimal one.
+    Idempotent: skips if prepare script already contains the command.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+
+    Returns:
+        True if package.json was changed, False if already up to date.
+    """
+    import contextlib
+
+    pkg_path = Path(repo_path) / "package.json"
+
+    pkg: dict = {}
+    if pkg_path.exists():
+        with contextlib.suppress(json.JSONDecodeError, OSError):
+            pkg = json.loads(pkg_path.read_text())
+
+    scripts = pkg.get("scripts", {})
+    existing_prepare = scripts.get("prepare", "")
+
+    # Already has our command
+    if _PREPARE_CMD in existing_prepare:
+        return False
+
+    # Append to existing prepare script, or create new one
+    if existing_prepare:
+        scripts["prepare"] = f"{existing_prepare} && {_PREPARE_CMD}"
+    else:
+        scripts["prepare"] = _PREPARE_CMD
+
+    pkg["scripts"] = scripts
+
+    # For repos without package.json, create a minimal one
+    if not pkg_path.exists():
+        pkg.setdefault("private", True)
+
+    pkg_path.write_text(json.dumps(pkg, indent=2) + "\n")
+    logger.info("prepare_script_added", repo=repo_path)
+    return True
+
+
+# ── Commit Bodhigrove setup files ─────────────────────────────────
+
+
+_SETUP_BRANCH = "bodhigrove/init-setup"
+
+_SETUP_FILES = [
+    ".claude/settings.json",
+    ".gitignore",
+    ".githooks/pre-commit",
+    ".githooks/post-commit",
+    "package.json",
+]
+
+
+async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> str | None:
+    """Create a branch, commit Bodhigrove setup files, and push to origin.
+
+    Creates ``bodhigrove/init-setup`` from the base branch, stages only
+    the files Bodhigrove modifies, commits, and pushes. The team can
+    then review via PR in their hosting platform.
+
+    Idempotent: if the branch already exists on the remote, skips.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+        base_branch: Branch to create from (e.g. "main" or "master").
+
+    Returns:
+        The pushed branch name, or None if nothing to commit or push failed.
+    """
+    # Check if setup branch already exists on remote (already pushed before)
+    stdout, _, _ = await run_git(["ls-remote", "--heads", "origin", _SETUP_BRANCH], cwd=repo_path)
+    if _SETUP_BRANCH in stdout:
+        logger.debug("bodhigrove_setup_branch_exists", repo=repo_path)
+        return None
+
+    # Remember current branch to switch back
+    orig_branch, _, _ = await run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path)
+    orig_branch = orig_branch.strip()
+
+    # Create setup branch from base
+    _, stderr, rc = await run_git(["checkout", "-b", _SETUP_BRANCH, base_branch], cwd=repo_path)
+    if rc != 0:
+        logger.warning("bodhigrove_setup_branch_failed", error=stderr[:200])
+        return None
+
+    try:
+        # Stage only files that have changes
+        staged_any = False
+        for filepath in _SETUP_FILES:
+            full = Path(repo_path) / filepath
+            if not full.exists():
+                continue
+            # Check untracked
+            _, _, ls_rc = await run_git(["ls-files", "--error-unmatch", filepath], cwd=repo_path)
+            is_untracked = ls_rc != 0
+            # Check modified
+            _, _, diff_rc = await run_git(["diff", "--quiet", "--", filepath], cwd=repo_path)
+            is_modified = diff_rc != 0
+
+            if is_modified or is_untracked:
+                await run_git(["add", filepath], cwd=repo_path)
+                staged_any = True
+
+        if not staged_any:
+            logger.debug("bodhigrove_setup_nothing_to_commit", repo=repo_path)
+            return None
+
+        # Commit
+        _, stderr, rc = await run_git(
+            [
+                "commit",
+                "-m",
+                "chore(bodhigrove): add MCP tools, git hooks, and gitignore\n\n"
+                "Auto-committed by Bodhigrove scan pipeline.\n"
+                "- .claude/settings.json: Bodhigrove MCP server config\n"
+                "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
+                "- package.json: prepare script sets core.hooksPath on npm install\n"
+                "- .gitignore: exclude .bodhigrove/ worktrees",
+            ],
+            cwd=repo_path,
+        )
+        if rc != 0:
+            logger.warning("bodhigrove_setup_commit_failed", error=stderr[:200])
+            return None
+
+        # Push to origin
+        _, stderr, rc = await run_git(["push", "-u", "origin", _SETUP_BRANCH], cwd=repo_path)
+        if rc != 0:
+            logger.warning("bodhigrove_setup_push_failed", error=stderr[:200])
+            return None
+
+        logger.info(
+            "bodhigrove_setup_pushed",
+            repo=repo_path,
+            branch=_SETUP_BRANCH,
+        )
+        return _SETUP_BRANCH
+    finally:
+        # Always switch to main branch (not the original feature branch)
+        await run_git(["checkout", base_branch], cwd=repo_path)

@@ -7,7 +7,7 @@
       class="mb-4"
     />
     <h1 class="text-h4 font-weight-bold mb-2">
-      Welcome to FlowDev
+      Welcome to Bodhigrove
     </h1>
     <p class="text-body-1 text-medium-emphasis mb-8" style="max-width: 520px;">
       End-to-end AI-powered SDLC — where AI agents and humans collaborate

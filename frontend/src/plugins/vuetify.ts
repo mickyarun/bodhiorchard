@@ -2,7 +2,7 @@ import 'vuetify/styles'
 import { createVuetify, type ThemeDefinition } from 'vuetify'
 import { aliases, mdi } from 'vuetify/iconsets/mdi'
 
-const flowdevDark: ThemeDefinition = {
+const bodhigroveDark: ThemeDefinition = {
   dark: true,
   colors: {
     background: '#0f1117',
@@ -21,7 +21,7 @@ const flowdevDark: ThemeDefinition = {
   },
 }
 
-const flowdevLight: ThemeDefinition = {
+const bodhigroveLight: ThemeDefinition = {
   dark: false,
   colors: {
     background: '#f8fafc',
@@ -47,10 +47,10 @@ export default createVuetify({
     sets: { mdi },
   },
   theme: {
-    defaultTheme: 'flowdevDark',
+    defaultTheme: 'bodhigroveDark',
     themes: {
-      flowdevDark,
-      flowdevLight,
+      bodhigroveDark,
+      bodhigroveLight,
     },
   },
   defaults: {

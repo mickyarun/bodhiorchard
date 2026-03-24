@@ -2,6 +2,7 @@
 
 import uuid
 
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +60,67 @@ class SkillProfileRepository(BaseRepository[SkillProfile]):
             )
         )
         return result.scalar_one_or_none()
+
+    async def delete_all_for_org(self) -> int:
+        """Delete all skill profiles for the org (full rescan rebuild).
+
+        Returns:
+            Number of rows deleted.
+        """
+        result = await self._db.execute(
+            sql_delete(SkillProfile).where(SkillProfile.org_id == self._org_id)
+        )
+        return result.rowcount
+
+    async def transfer_profiles(
+        self,
+        source_user_id: uuid.UUID,
+        target_user_id: uuid.UUID,
+    ) -> int:
+        """Transfer skill profiles from one user to another.
+
+        For each source profile, if the target already has a profile for
+        the same module, the source profile is deleted (target's is kept).
+        Otherwise, the source profile is re-pointed to the target.
+
+        Args:
+            source_user_id: The user being merged away.
+            target_user_id: The user to receive profiles.
+
+        Returns:
+            Number of profiles transferred.
+        """
+        # Find modules the target already has
+        target_result = await self._db.execute(
+            select(SkillProfile.module).where(
+                SkillProfile.user_id == target_user_id,
+                SkillProfile.org_id == self._org_id,
+            )
+        )
+        target_modules = {row[0] for row in target_result.all()}
+
+        # Get all source profiles
+        source_result = await self._db.execute(
+            select(SkillProfile).where(
+                SkillProfile.user_id == source_user_id,
+                SkillProfile.org_id == self._org_id,
+            )
+        )
+        source_profiles = list(source_result.scalars().all())
+
+        transferred = 0
+        for profile in source_profiles:
+            if profile.module in target_modules:
+                # Target already has this module — delete the source duplicate
+                await self._db.delete(profile)
+            else:
+                # Transfer to target
+                profile.user_id = target_user_id
+                target_modules.add(profile.module)
+                transferred += 1
+
+        await self._db.flush()
+        return transferred
 
     async def count_profiles(self) -> int:
         """Count total skill profiles for the organization.

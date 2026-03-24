@@ -5,6 +5,7 @@ export type UserRoleName =
   | 'admin'
   | 'pm'
   | 'tech_lead'
+  | 'manager'
   | 'developer'
   | 'designer'
   | 'qa'
@@ -32,38 +33,110 @@ export interface ApiError {
   details?: Record<string, string[]>
 }
 
-export type PRDStatus = 'draft' | 'design' | 'tech-spec' | 'in-dev' | 'in-qa' | 'in-uat' | 'deployed' | 'cancelled'
+export type BUDStatus = 'bud' | 'design' | 'tech_arch' | 'development' | 'code_review' | 'testing' | 'uat' | 'prod' | 'closed' | 'discarded'
 
-export interface PRDListItem {
+// Canonical BUD section config: DB field → { tab slug, label, exportable }
+// Backend has a mirror in backend/app/schemas/bud.py → BUD_SECTIONS.
+export const BUD_SECTIONS = {
+  requirements_md: { tab: 'requirements', label: 'Requirements', exportable: true },
+  tech_spec_md: { tab: 'tech-spec', label: 'Tech Spec', exportable: true },
+  test_plan_md: { tab: 'test-plan', label: 'Test Plan', exportable: true },
+  design: { tab: 'design', label: 'Design', exportable: false },
+} as const
+
+export type BUDSectionKey = keyof typeof BUD_SECTIONS
+export type BUDTabValue = (typeof BUD_SECTIONS)[BUDSectionKey]['tab']
+
+// Derived helpers
+export const VALID_BUD_TABS = new Set(
+  Object.values(BUD_SECTIONS).map(s => s.tab),
+) as ReadonlySet<string>
+
+export const TAB_TO_SECTION: Record<string, BUDSectionKey> = Object.fromEntries(
+  Object.entries(BUD_SECTIONS).map(([k, v]) => [v.tab, k]),
+) as Record<string, BUDSectionKey>
+
+export interface BUDListItem {
   id: string
-  prd_number: number
+  bud_number: number
   title: string
-  status: PRDStatus
+  status: BUDStatus
+  assignee_id: string | null
+  assignee_name: string | null
   created_at: string
   updated_at: string
 }
 
-export interface PRDDocument extends PRDListItem {
+export interface BUDDocument extends BUDListItem {
   org_id: string
-  content_md: string | null
+  requirements_md: string | null
   tech_spec_md: string | null
   test_plan_md: string | null
+  designs: BUDDesign[]
   metadata: Record<string, unknown> | null
 }
 
-export const PRD_STATUS_ORDER: PRDStatus[] = [
-  'draft', 'design', 'tech-spec', 'in-dev', 'in-qa', 'in-uat', 'deployed', 'cancelled',
+// ── Timeline Types ──────────────────────────────────────────
+export interface TimelineEvent {
+  id: string
+  event_type: string
+  actor_name: string | null
+  detail: Record<string, unknown> | null
+  created_at: string
+}
+
+// ── BUD Design Types ─────────────────────────────────────────────
+export type BUDDesignStatus = 'pending' | 'generating' | 'ready' | 'failed'
+
+export interface BUDDesign {
+  id: string
+  bud_id: string
+  repo_id: string | null
+  repo_name: string | null
+  design_html: string | null
+  design_path: string | null
+  notes: string | null
+  status: BUDDesignStatus
+  job_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DesignJobCreated {
+  designId: string
+  repoId: string | null
+  jobId: string
+}
+
+// ── Design System Types ──────────────────────────────────────────
+export interface DesignSystemRead {
+  id: string
+  orgId: string
+  repoId: string
+  repoName: string | null
+  isDefault: boolean
+  content: string
+  sourceHash: string | null
+  extractedAt: string
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export const BUD_STATUS_ORDER: BUDStatus[] = [
+  'bud', 'design', 'tech_arch', 'development', 'code_review', 'testing', 'uat', 'prod', 'closed', 'discarded',
 ]
 
-export const PRD_STATUS_LABELS: Record<PRDStatus, string> = {
-  'draft': 'Draft',
+export const BUD_STATUS_LABELS: Record<BUDStatus, string> = {
+  'bud': 'BUD',
   'design': 'Design',
-  'tech-spec': 'Tech Spec',
-  'in-dev': 'In Dev',
-  'in-qa': 'In QA',
-  'in-uat': 'In UAT',
-  'deployed': 'Deployed',
-  'cancelled': 'Cancelled',
+  'tech_arch': 'Tech Architecture',
+  'development': 'Development',
+  'code_review': 'Code Review',
+  'testing': 'Testing',
+  'uat': 'UAT',
+  'prod': 'Prod',
+  'closed': 'Closed',
+  'discarded': 'Discarded',
 }
 
 // Knowledge / Features types
@@ -76,7 +149,7 @@ export interface KnowledgeItem {
   source: string | null
   sourceRef: string | null
   featureStatus: string | null
-  repoId: string | null
+  repoIds: string[]
 }
 
 export interface KnowledgeSearchResult extends KnowledgeItem {
@@ -98,6 +171,21 @@ export const FEATURE_STATUS_COLORS: Record<string, string> = {
   implemented: 'success',
 }
 
+// Skill Profile types
+export interface ModuleSkill {
+  name: string
+  score: number
+  languages: string[]
+  touchCount: number
+}
+
+export interface SkillProfile {
+  userId: string | null
+  userName: string
+  email: string
+  modules: ModuleSkill[]
+}
+
 // Repo types
 export interface RepoInfo {
   id: string
@@ -108,15 +196,78 @@ export interface RepoInfo {
   sha: string | null
   knowledgeCount: number
   featureCount: number
+  mainBranch: string | null
+  developBranch: string | null
+  hasUncommittedChanges: boolean
+  repoType: string | null
 }
 
-export const PRD_STATUS_COLORS: Record<PRDStatus, string> = {
-  'draft': 'grey',
-  'design': 'purple',
-  'tech-spec': 'info',
-  'in-dev': 'primary',
-  'in-qa': 'warning',
-  'in-uat': 'orange',
-  'deployed': 'success',
-  'cancelled': 'error',
+export interface RepoBranchList {
+  branches: string[]
+  currentMain: string | null
+  currentDevelop: string | null
+}
+
+export const BUD_STATUS_COLORS: Record<BUDStatus, string> = {
+  'bud': 'brown',
+  'design': 'teal',
+  'tech_arch': 'deep-purple',
+  'development': 'primary',
+  'code_review': 'indigo',
+  'testing': 'purple',
+  'uat': 'orange',
+  'prod': 'success',
+  'closed': 'blue-grey',
+  'discarded': 'grey',
+}
+
+// ── Job Queue Types ───────────────────────────────────────────────
+export type JobState = 'queued' | 'running' | 'completed' | 'failed'
+
+export interface JobStatusRead {
+  jobId: string
+  jobType: string
+  state: JobState
+  statusMessage: string
+  progressPct: number
+  result: unknown
+  error: string | null
+}
+
+export interface JobCreatedResponse {
+  jobId: string
+}
+
+// ── Chat Message Types ──────────────────────────────────────────
+export interface ChatMessageRead {
+  id: string
+  role: 'user' | 'ai'
+  message: string
+  user_id: string | null
+  session_id: string | null
+  user_name: string | null
+  created_at: string
+}
+
+// ── Notification Types ──────────────────────────────────────────
+export type NotificationType =
+  | 'job_completed'
+  | 'job_failed'
+  | 'approval_requested'
+  | 'approval_granted'
+  | 'approval_rejected'
+  | 'developer_assigned'
+  | 'reassignment_done'
+
+export interface AppNotification {
+  id: string
+  type: NotificationType
+  jobId: string | null
+  jobType: string | null
+  title: string
+  message: string | null
+  deepLink: string | null
+  isRead: boolean
+  isDismissed: boolean
+  createdAt: string
 }

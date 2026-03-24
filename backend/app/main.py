@@ -1,5 +1,6 @@
-"""FlowDev API application entry point."""
+"""Bodhigrove API application entry point."""
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -24,13 +25,52 @@ logger = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
-    logger.info("flowdev_startup", version="0.1.0")
+    logger.info("bodhigrove_startup", version="0.1.0")
+
+    from app.services.job_handlers import setup_job_handlers
+    from app.services.job_queue import cleanup_completed_jobs, start_workers, stop_workers
+
+    # 1. Register all job types (handlers + worker counts)
+    setup_job_handlers()
+
+    # 2. Spawn workers for registered types
+    await start_workers()
+
+    # 3. Periodic cleanup of expired jobs
+    async def _cleanup_loop() -> None:
+        while True:
+            await asyncio.sleep(60)
+            removed = cleanup_completed_jobs()
+            if removed:
+                logger.debug("job_cleanup", removed=removed)
+
+    cleanup_task = asyncio.create_task(_cleanup_loop())
+
+    # 4. Periodic Slack presence polling
+    from app.database import AsyncSessionLocal
+    from app.services.presence_cache import refresh_all_presence
+
+    async def _presence_poll_loop() -> None:
+        while True:
+            try:
+                async with AsyncSessionLocal() as session:
+                    await refresh_all_presence(session)
+            except Exception:
+                logger.warning("presence_poll_failed")
+            await asyncio.sleep(180)  # 3 minutes
+
+    presence_task = asyncio.create_task(_presence_poll_loop())
+
     yield
-    logger.info("flowdev_shutdown")
+
+    cleanup_task.cancel()
+    presence_task.cancel()
+    await stop_workers()
+    logger.info("bodhigrove_shutdown")
 
 
 app = FastAPI(
-    title="FlowDev API",
+    title="Bodhigrove API",
     version="0.1.0",
     description="AI-powered software development platform",
     lifespan=lifespan,
@@ -44,6 +84,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Design-Job-Id"],
 )
 
 app.include_router(api_router)
@@ -52,4 +93,4 @@ app.include_router(api_router)
 @app.get("/")
 async def root() -> dict:
     """Root endpoint returning API identity and version."""
-    return {"name": "FlowDev", "version": "0.1.0"}
+    return {"name": "Bodhigrove", "version": "0.1.0"}

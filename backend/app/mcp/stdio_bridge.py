@@ -1,49 +1,69 @@
 #!/usr/bin/env python3
-"""MCP stdio bridge — translates MCP JSON-RPC (stdio) to FlowDev REST API calls.
+"""MCP stdio bridge — translates MCP JSON-RPC (stdio) to Bodhigrove REST API calls.
 
 Claude Code spawns this script as a subprocess. It reads JSON-RPC requests
-from stdin, forwards tool calls to the FlowDev backend via HTTP, and writes
+from stdin, forwards tool calls to the Bodhigrove backend via HTTP, and writes
 JSON-RPC responses to stdout.
 
 Register with Claude Code CLI:
-    claude mcp add flowdev -s user \\
-        -e FLOWDEV_BACKEND_URL=http://localhost:8000 \\
-        -e FLOWDEV_MCP_TOKEN_FILE=~/.flowdev/mcp_token \\
+    claude mcp add bodhigrove -s user \\
+        -e BODHIGROVE_BACKEND_URL=http://localhost:8000 \\
+        -e BODHIGROVE_MCP_TOKEN_FILE=~/.bodhigrove/mcp_token \\
         -- python /path/to/stdio_bridge.py
 
 Environment variables:
-    FLOWDEV_BACKEND_URL: Backend base URL (e.g. http://localhost:8000)
-    FLOWDEV_MCP_TOKEN: Bearer token for MCP authentication (direct)
-    FLOWDEV_MCP_TOKEN_FILE: Path to file containing the token (preferred, refreshable)
-    FLOWDEV_MCP_TOOLS: Comma-separated tool names to expose (optional, all if empty)
+    BODHIGROVE_BACKEND_URL: Backend base URL (e.g. http://localhost:8000)
+    BODHIGROVE_MCP_TOKEN: Bearer token for MCP authentication (preferred, direct)
+    BODHIGROVE_MCP_TOKEN_FILE: Path to file containing the token (fallback for global registration)
+    BODHIGROVE_MCP_TOOLS: Comma-separated tool names to expose (optional, all if empty)
 """
 
+import contextlib
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
-BACKEND_URL = os.environ.get("FLOWDEV_BACKEND_URL", "http://localhost:8000")
-MCP_TOOLS_FILTER = os.environ.get("FLOWDEV_MCP_TOOLS", "")
+BACKEND_URL = os.environ.get("BODHIGROVE_BACKEND_URL", "http://localhost:8000")
+MCP_TOOLS_FILTER = os.environ.get("BODHIGROVE_MCP_TOOLS", "")
+
+
+def _log(msg: str) -> None:
+    """Write a diagnostic line to stderr (visible in Claude CLI logs)."""
+    print(f"[bodhigrove-bridge] {msg}", file=sys.stderr, flush=True)
 
 
 def _get_token() -> str:
-    """Read MCP token from file (preferred) or env var.
+    """Read MCP token from env var (preferred) or file fallback.
 
-    Token file is re-read on every call so the scan pipeline can
-    refresh it without re-registering the MCP server.
+    Direct token takes precedence because per-subprocess configs pass
+    it explicitly.  File-based tokens are a fallback for global
+    ``claude mcp add`` registrations where the token refreshes on disk.
     """
-    token_file = os.environ.get("FLOWDEV_MCP_TOKEN_FILE", "")
+    direct = os.environ.get("BODHIGROVE_MCP_TOKEN", "")
+    if direct:
+        _log(f"token_source=env token_prefix={direct[:8]}")
+        return direct
+    token_file = os.environ.get("BODHIGROVE_MCP_TOKEN_FILE", "")
     if token_file:
         expanded = os.path.expanduser(token_file)
         if os.path.isfile(expanded):
             with open(expanded) as f:
-                return f.read().strip()
-    return os.environ.get("FLOWDEV_MCP_TOKEN", "")
+                token = f.read().strip()
+            _log(f"token_source=file path={expanded} token_prefix={token[:8]}")
+            return token
+        _log(f"token_source=file path={expanded} (file not found)")
+    _log("token_source=none (no token available)")
+    return ""
 
 
 def _api_request(method: str, path: str, body: dict | None = None) -> dict:
-    """Make an HTTP request to the FlowDev backend."""
+    """Make an HTTP request to the Bodhigrove backend.
+
+    Returns a structured error dict on HTTP failures (e.g. 401) so that
+    Claude sees a clean MCP error instead of a raw exception traceback.
+    """
     url = f"{BACKEND_URL}{path}"
     data = json.dumps(body).encode() if body else None
     token = _get_token()
@@ -56,12 +76,20 @@ def _api_request(method: str, path: str, body: dict | None = None) -> dict:
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        with contextlib.suppress(Exception):
+            detail = exc.read().decode()[:200]
+        _log(f"http_error status={exc.code} url={url} detail={detail[:120]}")
+        return {"error": f"Backend returned HTTP {exc.code}", "status": exc.code, "detail": detail}
 
 
 def _get_tools() -> list[dict]:
-    """Fetch tool definitions from the FlowDev backend."""
+    """Fetch tool definitions from the Bodhigrove backend."""
+    _log("tools/list requested")
     tools = _api_request("GET", "/mcp/tools")
     allowed = (
         {t.strip() for t in MCP_TOOLS_FILTER.split(",") if t.strip()} if MCP_TOOLS_FILTER else None
@@ -81,7 +109,8 @@ def _get_tools() -> list[dict]:
 
 
 def _call_tool(name: str, arguments: dict) -> dict:
-    """Execute a tool call via the FlowDev backend."""
+    """Execute a tool call via the Bodhigrove backend."""
+    _log(f"tools/call name={name}")
     return _api_request("POST", f"/mcp/tools/{name}", {"params": arguments})
 
 
@@ -125,7 +154,7 @@ def main() -> None:
                     {
                         "protocolVersion": "2024-11-05",
                         "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": "flowdev-mcp", "version": "1.0.0"},
+                        "serverInfo": {"name": "bodhigrove-mcp", "version": "1.0.0"},
                     },
                 )
             elif method == "notifications/initialized":

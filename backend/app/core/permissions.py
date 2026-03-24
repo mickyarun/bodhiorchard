@@ -1,4 +1,4 @@
-"""Permission definitions and default role mappings — the source of truth for FlowDev RBAC.
+"""Permission definitions and default role mappings — the source of truth for Bodhigrove RBAC.
 
 This module defines every permission category, permission, and the default
 system-role-to-permission mapping.  The seeder reads this config to populate the
@@ -66,13 +66,14 @@ PERMISSION_CATEGORIES: list[CategoryDef] = [
         ],
     ),
     CategoryDef(
-        key="PRDS",
-        name="PRD Documents",
-        description="Permissions related to product requirement documents",
+        key="BUDS",
+        name="BUD Documents",
+        description="Permissions related to Business Understanding Documents",
         permissions=[
-            PermissionDef("prds:view", "View PRDs"),
-            PermissionDef("prds:create", "Create PRDs"),
-            PermissionDef("prds:edit", "Edit PRDs"),
+            PermissionDef("buds:view", "View BUDs"),
+            PermissionDef("buds:create", "Create BUDs"),
+            PermissionDef("buds:edit", "Edit BUDs"),
+            PermissionDef("buds:approve", "Approve BUD Phase Gates"),
         ],
     ),
     CategoryDef(
@@ -188,7 +189,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
             "backlog:*",
             "agents:*",
             "nodes:*",
-            "prds:*",
+            "buds:*",
             "team:*",
             "org:view_settings",
             "integrations:*",
@@ -201,7 +202,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         description="Project manager",
         permission_specs=[
             "backlog:*",
-            "prds:*",
+            "buds:*",
             "agents:view/trigger",
             "team:view",
             "knowledge:*",
@@ -213,12 +214,23 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         name="tech_lead",
         description="Technical lead",
         permission_specs=[
-            "backlog:view/edit",
+            "backlog:view/edit/approve",
             "agents:*",
             "nodes:*",
-            "prds:view",
+            "buds:view/approve",
             "team:view",
             "knowledge:*",
+            "reports:*",
+        ],
+    ),
+    RoleDef(
+        name="manager",
+        description="Engineering manager",
+        permission_specs=[
+            "backlog:view/edit/approve",
+            "buds:view/edit/approve",
+            "team:view",
+            "knowledge:view",
             "reports:*",
         ],
     ),
@@ -227,7 +239,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         description="Software developer",
         permission_specs=[
             "backlog:view",
-            "prds:view",
+            "buds:view",
             "knowledge:view/contribute",
             "reports:view",
         ],
@@ -237,7 +249,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         description="Product designer",
         permission_specs=[
             "backlog:view",
-            "prds:view",
+            "buds:view",
             "knowledge:view/contribute",
         ],
     ),
@@ -246,7 +258,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         description="Quality assurance engineer",
         permission_specs=[
             "backlog:view/edit",
-            "prds:view",
+            "buds:view",
             "knowledge:view/contribute",
             "reports:view",
         ],
@@ -264,7 +276,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         description="Read-only access",
         permission_specs=[
             "backlog:view",
-            "prds:view",
+            "buds:view",
             "knowledge:view",
             "reports:view",
         ],

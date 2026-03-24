@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import api from '@/services/api'
-import type { RepoInfo } from '@/types'
+import type { RepoBranchList, RepoInfo } from '@/types'
 
 export interface ConnectionsState {
   sourceCode: {
@@ -9,7 +9,7 @@ export interface ConnectionsState {
     type: 'workspace' | 'single-repo'
   }
   github: { enabled: boolean; pat: string; org: string }
-  slack: { enabled: boolean; botToken: string; signingSecret: string }
+  slack: { enabled: boolean; botToken: string; signingSecret: string; teamId: string }
   aiConfig: {
     preset: string
     ollamaUrl: string
@@ -29,7 +29,7 @@ function emptyState(): ConnectionsState {
   return {
     sourceCode: { localPath: '', type: 'single-repo' },
     github: { enabled: false, pat: '', org: '' },
-    slack: { enabled: false, botToken: '', signingSecret: '' },
+    slack: { enabled: false, botToken: '', signingSecret: '', teamId: '' },
     aiConfig: {
       preset: 'hybrid',
       ollamaUrl: 'http://localhost:11434',
@@ -140,6 +140,41 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function fetchRepoBranches(repoId: string): Promise<RepoBranchList | null> {
+    try {
+      const { data } = await api.get(`/v1/settings/repos/${repoId}/branches`)
+      return data
+    } catch {
+      error.value = 'Failed to load branches.'
+      return null
+    }
+  }
+
+  async function updateRepoBranches(
+    repoId: string,
+    mainBranch: string | null,
+    developBranch: string | null,
+  ): Promise<boolean> {
+    try {
+      await api.patch(`/v1/settings/repos/${repoId}/branches`, {
+        mainBranch,
+        developBranch,
+      })
+      await fetchRepos()
+      return true
+    } catch {
+      error.value = 'Failed to update branch mapping.'
+      return false
+    }
+  }
+
+  const allReposMapped = computed(() =>
+    repos.value.length > 0 &&
+    repos.value
+      .filter(r => r.status === 'active')
+      .every(r => r.mainBranch !== null && r.developBranch !== null),
+  )
+
   return {
     connections,
     loading,
@@ -154,5 +189,8 @@ export const useSettingsStore = defineStore('settings', () => {
     addRepo,
     removeRepo,
     setRepoStatus,
+    fetchRepoBranches,
+    updateRepoBranches,
+    allReposMapped,
   }
 })

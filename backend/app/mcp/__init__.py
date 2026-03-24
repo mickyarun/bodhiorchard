@@ -1,5 +1,5 @@
-"""Model Context Protocol (MCP) server integration for FlowDev.
+"""Model Context Protocol (MCP) server integration for Bodhigrove.
 
 Provides tools that Claude Code on execution nodes can call to interact
-with FlowDev data: PRDs, knowledge base, bugs, task status, and Slack.
+with Bodhigrove data: BUDs, knowledge base, bugs, task status, and Slack.
 """

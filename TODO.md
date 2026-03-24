@@ -409,6 +409,84 @@
 
 ---
 
+## Garden Engine Rewrite (3D Visualization)
+
+> **Architecture:** See `frontend/src/engine/ARCHITECTURE.md`
+> **Assets:** Kenney Nature Kit + Furniture Kit + Blocky Characters (all GLB)
+> **Runtime:** PlayCanvas v2.17.2 (PBR pipeline, IBL, ACES tone mapping)
+
+### Phase 1: Skeleton Project (Foundation)
+- [x] Rename old engine → `engine_bkup/`, create new directory structure
+- [x] `core/Application.ts` — PlayCanvas bootstrap with proper PBR lighting (IBL, tone mapping, gamma)
+- [x] `core/EventBus.ts` — Type-safe generic pub/sub
+- [x] `core/Clock.ts` — Delta time, elapsed, frame tracking
+- [x] `input/InputManager.ts` — Keyboard, mouse, touch input
+- [x] `camera/CameraController.ts` — Orbit camera with follow mode + safety fallbacks
+- [x] `rendering/MaterialFactory.ts` — PBR material cache with LRU eviction (256 max)
+- [x] `index.ts` — GardenEngine public API (only Vue import)
+- [x] `utils/MathUtils.ts` + `utils/EntityUtils.ts` — Math + cleanup helpers
+- [x] `types.ts` — Extended data contracts with EngineEvents
+- [x] `ARCHITECTURE.md` — Comprehensive architecture reference
+- [x] Copy shaders from old engine
+- [x] Replace old Quaternius characters (100MB) with Kenney Blocky Characters (2MB, 18 models × 27 anims)
+- [x] Replace old garden assets with Kenney Nature Kit (50 GLBs)
+- [x] Add Kenney Furniture Kit (43 GLBs) for buildings
+
+### Phase 2: World Building
+- [ ] `environment/SkySystem.ts` — Preetham atmospheric sky shader
+- [ ] `environment/GroundSystem.ts` — Textured terrain with grass/dirt blend
+- [ ] `environment/GrassSystem.ts` — Instanced grass + GLB flowers
+- [ ] `environment/RockSystem.ts` — GLB rocks scattered with exclusion zones
+- [ ] `environment/CloudSystem.ts` — Cloud billboard planes
+- [ ] `world/WorldLayout.ts` — Zone placement + exclusion zones
+- [ ] `world/TreeBuilder.ts` — GLB tree loading from Nature Kit
+- [ ] `world/TreeDecorator.ts` — Fruits, flowers, bugs on trees
+- [ ] `world/TreeSystem.ts` — Orchestrator for all trees
+- [ ] `world/RelationshipArcs.ts` — Bezier arcs between trees
+- [ ] `buildings/BuildingFactory.ts` — Shared primitives helper
+- [ ] `buildings/HouseBuilder.ts` — Single house from Furniture Kit
+- [ ] `buildings/HousingVillage.ts` — Grid of houses
+- [ ] `buildings/CoffeeBarBuilder.ts` — Coffee bar + seats
+- [ ] `buildings/CafeteriaBuilder.ts` — Lunch building + seats
+- [ ] `buildings/StandupPavilion.ts` — Meeting area
+- [ ] `buildings/PoolResortBuilder.ts` — Pool + chairs + floats
+- [ ] `effects/WaterSurface.ts` — Shader-based pool water
+- [ ] `effects/StringLightEffect.ts` — Decorative lights
+- [ ] `core/SceneManager.ts` — Orchestrates full scene build from data
+
+### Phase 3: Player Character
+- [ ] `assets/AssetLoader.ts` — GLTF/GLB load + cache + dedup
+- [ ] `assets/CharacterCatalog.ts` — Model lists, hash-based assignment
+- [ ] `characters/CharacterFactory.ts` — Load, clone, proper PBR materials
+- [ ] `characters/AnimationController.ts` — State machine (idle/walk/sprint/swim/sit)
+- [ ] `characters/CharacterEntity.ts` — Mesh + animator + name label
+- [ ] `characters/PlayerController.ts` — WASD movement + swimming
+- [ ] `rendering/LabelRenderer.ts` — Billboard name labels
+- [ ] `characters/PropAttachment.ts` — Watering can, fertilizer, agent gear
+
+### Phase 4: NPC AI & Time-Based Behaviors
+- [ ] `ai/BehaviorTree.ts` + `ai/BehaviorNodes.ts` — Generic BT evaluator
+- [ ] `ai/behaviors/*.ts` — Idle, wander, walk-to, sit, swim, sleep, care-tree, coffee, eat, home
+- [ ] `time/TimeScheduler.ts` — Day/hour → activity mapping
+- [ ] `time/ActivityRules.ts` — Presence + time → behavior
+- [ ] `ai/NPCDirector.ts` — Assigns behaviors based on time + presence
+
+### Phase 5: Interaction & Tooltips
+- [ ] `interaction/PickerSystem.ts` — Ray-sphere picking
+- [ ] `interaction/TooltipManager.ts` — Tooltip content generation
+- [ ] `interaction/FocusSystem.ts` — Camera focus on click
+
+### Phase 6: Effects & Polish
+- [ ] `effects/ParticleEmitter.ts` — Generic particle system
+- [ ] `effects/SplashEffect.ts` — Pool splashes
+- [ ] `effects/ZzzEffect.ts` — Sleep particles
+- [ ] `effects/SteamEffect.ts` — Coffee/cooking steam
+- [ ] `vehicles/VehicleBuilder.ts` — Procedural meshes
+- [ ] `vehicles/VehicleSystem.ts` — Arrival animations
+- [ ] Performance pass: instancing, LOD, material sharing
+
+---
+
 ## Tech Debt & Improvements (Backlog)
 
 - [ ] Add cursor-based pagination helper (reusable across all list endpoints)

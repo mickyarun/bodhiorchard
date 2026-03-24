@@ -1,7 +1,7 @@
-"""MCP (Model Context Protocol) server for FlowDev.
+"""MCP (Model Context Protocol) server for Bodhigrove.
 
-Exposes tools that Claude Code can call to read/write FlowDev data:
-PRDs, knowledge base, bugs, task status, team context.
+Exposes tools that Claude Code can call to read/write Bodhigrove data:
+BUDs, knowledge base, bugs, task status, team context.
 
 Mounted at /mcp/ on the main FastAPI app.
 """
@@ -17,12 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db
 from app.core.encryption import decrypt_secret
 from app.mcp.auth import verify_mcp_token
+from app.models.bud import BUDDocument, BUDStatus
 from app.models.knowledge_item import KnowledgeItem
 from app.models.organization import Organization
-from app.models.prd import PRDDocument, PRDStatus
+from app.repositories.bud import BUDRepository
 from app.repositories.bug import BugRepository
 from app.repositories.knowledge_item import KnowledgeItemRepository
-from app.repositories.prd import PRDRepository
 from app.repositories.skill_profile import SkillProfileRepository
 from app.services.embedding_service import embedding_service
 
@@ -121,24 +121,31 @@ class MCPToolCallRequest(BaseModel):
 
 MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
-        name="get_prd_context",
-        description="Retrieve existing PRDs for context when generating new ones",
+        name="get_bud_context",
+        description="Retrieve existing BUDs for context when generating new ones",
         input_schema={
             "type": "object",
             "properties": {
-                "project_id": {"type": "string", "description": "Project ID to fetch PRDs for"},
-                "limit": {"type": "integer", "description": "Max PRDs to return", "default": 5},
+                "project_id": {"type": "string", "description": "Project ID to fetch BUDs for"},
+                "limit": {"type": "integer", "description": "Max BUDs to return", "default": 5},
             },
         },
     ),
     MCPToolDefinition(
-        name="write_prd",
-        description="Save a generated PRD document to the FlowDev database",
+        name="write_bud",
+        description=(
+            "Save or update a BUD document. If bud_number is provided, updates "
+            "that existing BUD. Otherwise creates a new one."
+        ),
         input_schema={
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
                 "content": {"type": "string"},
+                "bud_number": {
+                    "type": "integer",
+                    "description": "Existing BUD number to update (omit to create new)",
+                },
                 "backlog_item_id": {"type": "string"},
             },
             "required": ["title", "content"],
@@ -245,7 +252,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "Check if a feature already exists in the codebase. "
             "Returns matching features with descriptions, lifecycle status "
             "(planned/in_progress/implemented), and code locations. "
-            "Use this before creating new features/PRDs to avoid duplication."
+            "Use this before creating new features/BUDs to avoid duplication."
         ),
         input_schema={
             "type": "object",
@@ -278,7 +285,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     ),
     MCPToolDefinition(
         name="update_task_status",
-        description="Report task progress back to FlowDev",
+        description="Report task progress back to Bodhigrove",
         input_schema={
             "type": "object",
             "properties": {
@@ -314,6 +321,40 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 "team_id": {
                     "type": "string",
                     "description": "Team ID (optional, defaults to all)",
+                },
+            },
+        },
+    ),
+    MCPToolDefinition(
+        name="list_design_systems",
+        description=(
+            "List all extracted design systems for the organization. "
+            "Returns repo names, IDs, and which is the default — without "
+            "the full content. Call get_design_system with a specific "
+            "repo_id to fetch the full content."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    MCPToolDefinition(
+        name="get_design_system",
+        description=(
+            "Retrieve the full extracted design system (colors, typography, "
+            "components, CDN boilerplate) for a specific repository or the "
+            "organization default. Call list_design_systems first to see "
+            "what's available."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "Repository UUID to get the design system for. "
+                        "Omit to get the organization default."
+                    ),
                 },
             },
         },
@@ -371,66 +412,90 @@ async def call_tool(
 # --- Tool Handlers ---
 
 
-async def handle_get_prd_context(
+async def handle_get_bud_context(
     db: AsyncSession,
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Retrieve existing PRDs for context."""
+    """Retrieve existing BUDs for context."""
     limit = min(params.get("limit", 5), 20)
 
-    prd_repo = PRDRepository(db, org_id=org.id)
-    prds = await prd_repo.list_prds(limit=limit)
+    bud_repo = BUDRepository(db, org_id=org.id)
+    buds = await bud_repo.list_buds(limit=limit)
 
     return {
-        "prds": [
+        "buds": [
             {
-                "id": str(prd.id),
-                "prd_number": prd.prd_number,
-                "title": prd.title,
-                "status": prd.status.value if prd.status else "draft",
-                "content_md": (prd.content_md or "")[:5000],
+                "id": str(bud.id),
+                "bud_number": bud.bud_number,
+                "title": bud.title,
+                "status": bud.status.value if bud.status else "bud",
+                "requirements_md": (bud.requirements_md or "")[:5000],
             }
-            for prd in prds
+            for bud in buds
         ],
     }
 
 
-async def handle_write_prd(
+async def handle_write_bud(
     db: AsyncSession,
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Save a generated PRD to the database."""
+    """Save or update a BUD document."""
     title = params.get("title", "")
     content = params.get("content", "")
+    bud_number = params.get("bud_number")
 
     if not title:
         return {"success": False, "error": "title is required"}
 
-    # Auto-increment prd_number
-    prd_repo = PRDRepository(db, org_id=org.id)
-    next_number = await prd_repo.next_prd_number()
+    bud_repo = BUDRepository(db, org_id=org.id)
 
-    prd = PRDDocument(
+    # Update existing BUD if bud_number is provided
+    if bud_number is not None:
+        existing = await bud_repo.get_by_number(int(bud_number))
+        if existing is None:
+            return {"success": False, "error": f"BUD-{bud_number:03d} not found"}
+
+        existing.title = title
+        existing.requirements_md = content
+        logger.info(
+            "mcp_update_bud",
+            org_id=str(org.id),
+            bud_number=bud_number,
+            title=title,
+        )
+        return {
+            "success": True,
+            "id": str(existing.id),
+            "bud_number": bud_number,
+            "title": title,
+            "updated": True,
+        }
+
+    # Create new BUD
+    next_number = await bud_repo.next_bud_number()
+
+    bud = BUDDocument(
         org_id=org.id,
-        prd_number=next_number,
+        bud_number=next_number,
         title=title,
-        status=PRDStatus.DRAFT,
-        content_md=content,
+        status=BUDStatus.BUD,
+        requirements_md=content,
     )
-    await prd_repo.create(prd)
+    await bud_repo.create(bud)
 
     # Create a PLANNED feature_registry entry for immediate discoverability
     from app.services.feature_lifecycle import create_planned_feature
 
     feature_item = await create_planned_feature(db, org.id, next_number, title, content)
 
-    logger.info("mcp_write_prd", org_id=str(org.id), prd_number=next_number, title=title)
+    logger.info("mcp_write_bud", org_id=str(org.id), bud_number=next_number, title=title)
     return {
         "success": True,
-        "id": str(prd.id),
-        "prd_number": next_number,
+        "id": str(bud.id),
+        "bud_number": next_number,
         "title": title,
         "feature_created": True,
         "feature_title": feature_item.title,
@@ -619,7 +684,7 @@ def format_feature_content(
         code_locations: Map of layer → file paths (kept for signature compat).
         source_clusters: Cluster names (kept for signature compat).
         feature_status: Optional lifecycle status (planned/in_progress/implemented).
-        source_ref: Optional PRD reference (e.g. "PRD-042").
+        source_ref: Optional BUD reference (e.g. "BUD-042").
 
     Returns:
         Formatted plain-text content string.
@@ -705,8 +770,7 @@ async def handle_write_feature_registry(
         item.embedding = None  # Reset for re-embedding
         item.is_active = True
         item.feature_status = "implemented"
-        if repo_id:
-            item.repo_id = repo_id
+        item.code_locations = params.get("code_locations") or None
     else:
         # 2. Check for PLANNED/IN_PROGRESS items to upgrade via semantic match
         try:
@@ -730,8 +794,7 @@ async def handle_write_feature_registry(
                     matched_item.embedding = None  # Reset for re-embedding
                     matched_item.is_active = True
                     matched_item.feature_status = "implemented"
-                    if repo_id:
-                        matched_item.repo_id = repo_id
+                    matched_item.code_locations = params.get("code_locations") or None
                     item = matched_item
                     logger.info(
                         "feature_upgraded_from_planned",
@@ -753,11 +816,16 @@ async def handle_write_feature_registry(
                 tags=params["tags"],
                 is_active=True,
                 feature_status="implemented",
-                repo_id=repo_id,
+                code_locations=params.get("code_locations") or None,
             )
             await ki_repo.add(item)
 
     await ki_repo.flush()
+
+    # Link to repo via junction table
+    if repo_id and item:
+        await ki_repo.link_to_repo(item.id, repo_id)
+        await ki_repo.flush()
 
     # Deactivate originals when merging cross-repo features.
     # Uses bulk SQL UPDATE (not ORM load+modify) so concurrent calls
@@ -837,9 +905,73 @@ async def handle_check_feature_exists(
     }
 
 
+async def handle_list_design_systems(
+    db: AsyncSession,
+    org: Organization,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """List all extracted design systems (metadata only, no content)."""
+    from app.repositories.design_system import DesignSystemRefRepository
+
+    ds_repo = DesignSystemRefRepository(db, org_id=org.id)
+    rows = await ds_repo.list_with_repo_names()
+
+    logger.info("mcp_list_design_systems", org_id=str(org.id), count=len(rows))
+    return {
+        "design_systems": [
+            {
+                "repo_id": str(row["repo_id"]),
+                "repo_name": row["repo_name"] or "Unknown",
+                "is_default": row["is_default"],
+                "extracted_at": row["extracted_at"].isoformat() if row["extracted_at"] else None,
+                "content_length": len(row["content"] or ""),
+            }
+            for row in rows
+        ],
+        "count": len(rows),
+    }
+
+
+async def handle_get_design_system(
+    db: AsyncSession,
+    org: Organization,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Retrieve the full design system for a repo or the org default."""
+    from app.repositories.design_system import DesignSystemRefRepository
+
+    ds_repo = DesignSystemRefRepository(db, org_id=org.id)
+    repo_id_str = params.get("repo_id")
+
+    import uuid as _uuid
+
+    rid = _uuid.UUID(repo_id_str) if repo_id_str else None
+    ds = await ds_repo.get_effective(repo_id=rid)
+
+    if not ds:
+        return {
+            "found": False,
+            "content": "",
+            "message": "No design system extracted for this repository or organization.",
+        }
+
+    logger.info(
+        "mcp_get_design_system",
+        org_id=str(org.id),
+        repo_id=repo_id_str,
+        content_length=len(ds.content or ""),
+    )
+    return {
+        "found": True,
+        "repo_id": str(ds.repo_id) if ds.repo_id else None,
+        "is_default": ds.is_default,
+        "content": ds.content or "",
+    }
+
+
 TOOL_HANDLERS: dict[str, Any] = {
-    "get_prd_context": handle_get_prd_context,
-    "write_prd": handle_write_prd,
+    "get_bud_context": handle_get_bud_context,
+    "write_bud": handle_write_bud,
     "get_knowledge": handle_get_knowledge,
     "search_bugs": handle_search_bugs,
     "update_task_status": handle_update_task_status,
@@ -848,4 +980,6 @@ TOOL_HANDLERS: dict[str, Any] = {
     "get_pending_features": handle_get_pending_features,
     "write_feature_registry": handle_write_feature_registry,
     "check_feature_exists": handle_check_feature_exists,
+    "list_design_systems": handle_list_design_systems,
+    "get_design_system": handle_get_design_system,
 }

@@ -1,1 +1,1 @@
-"""FlowDev backend application package."""
+"""Bodhigrove backend application package."""

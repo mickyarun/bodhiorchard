@@ -28,6 +28,7 @@ class SlackSettings(BaseModel):
     enabled: bool = False
     bot_token: str = Field(default="", alias="botToken")
     signing_secret: str = Field(default="", alias="signingSecret")
+    team_id: str = Field(default="", alias="teamId")
 
     model_config = {"populate_by_name": True}
 
@@ -82,6 +83,29 @@ class RepoInfo(BaseModel):
     sha: str | None = None
     knowledge_count: int = Field(0, alias="knowledgeCount")
     feature_count: int = Field(0, alias="featureCount")
+    main_branch: str | None = Field(None, alias="mainBranch")
+    develop_branch: str | None = Field(None, alias="developBranch")
+    has_uncommitted_changes: bool = Field(False, alias="hasUncommittedChanges")
+    repo_type: str | None = Field(None, alias="repoType")
+
+    model_config = {"populate_by_name": True}
+
+
+class RepoBranchUpdate(BaseModel):
+    """Request to update a repository's branch mapping."""
+
+    main_branch: str | None = Field(None, alias="mainBranch")
+    develop_branch: str | None = Field(None, alias="developBranch")
+
+    model_config = {"populate_by_name": True}
+
+
+class RepoBranchList(BaseModel):
+    """Response with available branches for a repository."""
+
+    branches: list[str]
+    current_main: str | None = Field(None, alias="currentMain")
+    current_develop: str | None = Field(None, alias="currentDevelop")
 
     model_config = {"populate_by_name": True}
 

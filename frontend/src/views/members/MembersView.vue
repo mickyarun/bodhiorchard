@@ -4,8 +4,20 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <div class="text-h5 font-weight-bold">Members</div>
-        <div class="text-body-2 text-medium-emphasis">
-          {{ store.members.length }} member{{ store.members.length !== 1 ? 's' : '' }}
+        <div class="d-flex align-center ga-3">
+          <span class="text-body-2 text-medium-emphasis">
+            {{ visibleMembers.length }} member{{ visibleMembers.length !== 1 ? 's' : '' }}
+          </span>
+          <v-switch
+            v-if="inactiveCount > 0"
+            v-model="showInactive"
+            :label="`Show inactive (${inactiveCount})`"
+            density="compact"
+            hide-details
+            color="primary"
+            class="ml-2"
+            style="flex: none;"
+          />
         </div>
       </div>
       <div class="d-flex align-center ga-2">
@@ -26,6 +38,14 @@
           @click="openGithubImport"
         >
           Import from GitHub
+        </v-btn>
+        <v-btn
+          v-if="store.members.length >= 2"
+          variant="tonal"
+          prepend-icon="mdi-account-arrow-right-outline"
+          @click="openMergeDialog()"
+        >
+          Merge Members
         </v-btn>
         <v-btn color="primary" prepend-icon="mdi-account-plus-outline" @click="openAddMember">
           Add Member
@@ -57,7 +77,7 @@
     </v-card>
 
     <!-- Members table -->
-    <v-card v-if="!store.loading && store.members.length > 0" color="surface" class="mb-8">
+    <v-card v-if="!store.loading && visibleMembers.length > 0" color="surface" class="mb-8">
       <v-table density="comfortable">
         <thead>
           <tr>
@@ -71,7 +91,7 @@
         </thead>
         <tbody>
           <tr
-            v-for="member in store.members"
+            v-for="member in visibleMembers"
             :key="member.id"
             :class="{ 'opacity-50': !member.isActive }"
           >
@@ -89,7 +109,12 @@
                 </div>
               </div>
             </td>
-            <td class="text-medium-emphasis">{{ member.email }}</td>
+            <td class="text-medium-emphasis">
+              <div>{{ member.email }}</div>
+              <div v-if="member.emailAliases?.length" class="text-caption" style="opacity: 0.6;">
+                +{{ member.emailAliases.length }} alias{{ member.emailAliases.length !== 1 ? 'es' : '' }}
+              </div>
+            </td>
             <td>
               <v-select
                 v-if="store.roles.length > 0"
@@ -121,19 +146,34 @@
               {{ formatDate(member.createdAt) }}
             </td>
             <td>
-              <v-tooltip location="top" content-class="text-white bg-grey-darken-3">
-                <template #activator="{ props }">
-                  <v-btn
-                    v-bind="props"
-                    :icon="member.isActive ? 'mdi-account-off-outline' : 'mdi-account-check-outline'"
-                    size="small"
-                    variant="text"
-                    :color="member.isActive ? 'warning' : 'success'"
-                    @click="store.toggleMemberStatus(member.id)"
-                  />
-                </template>
-                {{ member.isActive ? 'Deactivate member' : 'Reactivate member' }}
-              </v-tooltip>
+              <div class="d-flex align-center">
+                <v-tooltip location="top" content-class="text-white bg-grey-darken-3">
+                  <template #activator="{ props }">
+                    <v-btn
+                      v-bind="props"
+                      icon="mdi-account-arrow-right-outline"
+                      size="small"
+                      variant="text"
+                      color="info"
+                      @click="openMergeDialog(member)"
+                    />
+                  </template>
+                  Merge into another member
+                </v-tooltip>
+                <v-tooltip location="top" content-class="text-white bg-grey-darken-3">
+                  <template #activator="{ props }">
+                    <v-btn
+                      v-bind="props"
+                      :icon="member.isActive ? 'mdi-account-off-outline' : 'mdi-account-check-outline'"
+                      size="small"
+                      variant="text"
+                      :color="member.isActive ? 'warning' : 'success'"
+                      @click="store.toggleMemberStatus(member.id)"
+                    />
+                  </template>
+                  {{ member.isActive ? 'Deactivate member' : 'Reactivate member' }}
+                </v-tooltip>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -466,17 +506,80 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- ─── MERGE MEMBERS DIALOG ──────────────────────────── -->
+    <v-dialog v-model="mergeDialog" max-width="520" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center justify-space-between">
+          <span>Merge Members</span>
+          <v-btn icon="mdi-close" variant="text" size="small" @click="mergeDialog = false" />
+        </v-card-title>
+        <v-card-text>
+          <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+            Select the member to keep, then pick the duplicates to merge into them.
+            Duplicates' skill profiles and emails will be transferred, then they'll be deactivated.
+          </v-alert>
+
+          <v-autocomplete
+            v-model="mergeTargetId"
+            :items="mergeTargetOptions"
+            item-title="label"
+            item-value="id"
+            label="Keep this member (target)"
+            variant="outlined"
+            density="compact"
+            placeholder="Search by name or email..."
+            auto-select-first
+            class="mb-3"
+          />
+
+          <v-autocomplete
+            v-model="mergeSourceIds"
+            :items="mergeSourceOptions"
+            item-title="label"
+            item-value="id"
+            label="Merge these duplicates"
+            variant="outlined"
+            density="compact"
+            placeholder="Search and select duplicates..."
+            multiple
+            chips
+            closable-chips
+            :disabled="!mergeTargetId"
+          />
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4">
+          <v-spacer />
+          <v-btn variant="text" @click="mergeDialog = false">Cancel</v-btn>
+          <v-btn
+            color="primary"
+            :loading="merging"
+            :disabled="!mergeTargetId || mergeSourceIds.length === 0"
+            @click="submitMerge"
+          >
+            Merge {{ mergeSourceIds.length }} member{{ mergeSourceIds.length !== 1 ? 's' : '' }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useMembersStore, type RoleOption } from '@/stores/members'
+import { useMembersStore, type Member, type RoleOption } from '@/stores/members'
 import { useSettingsStore } from '@/stores/settings'
 import api from '@/services/api'
 
 const store = useMembersStore()
 const settingsStore = useSettingsStore()
+
+// ─── Visibility filter ────────────────────────
+const showInactive = ref(false)
+const visibleMembers = computed(() =>
+  showInactive.value ? store.members : store.members.filter(m => m.isActive)
+)
+const inactiveCount = computed(() => store.members.filter(m => !m.isActive).length)
 
 // ─── Add Member ───────────────────────────────
 const addMemberDialog = ref(false)
@@ -539,7 +642,9 @@ const allImportableSelected = computed(() =>
 async function openGithubImport() {
   selectedGithubUsers.value = []
   githubImportPassword.value = ''
-  githubImportRoleId.value = ''
+  // Default to Developer role
+  const devRole = store.roles.find(r => r.name.toLowerCase() === 'developer')
+  githubImportRoleId.value = devRole?.id ?? ''
   githubError.value = ''
   githubLoaded.value = false
   githubImportDialog.value = true
@@ -606,6 +711,42 @@ async function submitGithubImport() {
     githubImportDialog.value = false
     await store.fetchMembers()
   }
+}
+
+// ─── Merge Members ────────────────────────────
+const mergeDialog = ref(false)
+const mergeTargetId = ref('')
+const mergeSourceIds = ref<string[]>([])
+const merging = ref(false)
+
+const mergeTargetOptions = computed(() =>
+  store.members
+    .filter(m => m.isActive)
+    .map(m => ({ id: m.id, label: `${m.name} — ${m.email}` }))
+)
+
+const mergeSourceOptions = computed(() =>
+  store.members
+    .filter(m => m.id !== mergeTargetId.value && m.isActive)
+    .map(m => ({ id: m.id, label: `${m.name} — ${m.email}` }))
+)
+
+function openMergeDialog(member?: Member) {
+  mergeTargetId.value = member?.id ?? ''
+  mergeSourceIds.value = []
+  mergeDialog.value = true
+}
+
+async function submitMerge() {
+  if (!mergeTargetId.value || mergeSourceIds.value.length === 0) return
+  merging.value = true
+  let allOk = true
+  for (const sourceId of mergeSourceIds.value) {
+    const ok = await store.mergeMember(mergeTargetId.value, sourceId)
+    if (!ok) allOk = false
+  }
+  merging.value = false
+  if (allOk) mergeDialog.value = false
 }
 
 // ─── Create Role ──────────────────────────────

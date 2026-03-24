@@ -6,11 +6,14 @@ ENCRYPTION_KEY environment variable via PBKDF2.
 
 import base64
 
+import structlog
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from app.config import settings
+
+logger = structlog.get_logger(__name__)
 
 # Derive a 32-byte Fernet key from the configured encryption key using PBKDF2.
 # The salt is fixed per deployment — changing it would invalidate all encrypted data.
@@ -66,4 +69,9 @@ def decrypt_secret(stored: str) -> str:
         ct = stored[4:].encode()
         return _get_fernet().decrypt(ct).decode()
     except InvalidToken:
+        logger.error(
+            "decrypt_secret_failed",
+            stored_prefix=stored[:20] + "..." if len(stored) > 20 else stored,
+            hint="InvalidToken — ENCRYPTION_KEY may have changed or data is corrupted",
+        )
         return ""

@@ -13,6 +13,7 @@ export interface Member {
   githubUsername: string | null
   isActive: boolean
   createdAt: string
+  emailAliases: string[]
 }
 
 export interface RoleOption {
@@ -160,6 +161,42 @@ export const useMembersStore = defineStore('members', () => {
     }
   }
 
+  async function mergeMember(targetId: string, sourceId: string): Promise<boolean> {
+    error.value = null
+    try {
+      await api.post(`/v1/members/${targetId}/merge`, { sourceId })
+      await fetchMembers()
+      return true
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { data?: { detail?: string } } }
+        error.value = axiosErr.response?.data?.detail || 'Failed to merge members.'
+      }
+      return false
+    }
+  }
+
+  async function updateCharacter(
+    userId: string,
+    characterModel: string | null,
+  ): Promise<boolean> {
+    error.value = null
+    try {
+      const { data } = await api.patch(`/v1/members/${userId}/character`, {
+        characterModel,
+      })
+      const idx = members.value.findIndex(m => m.id === userId)
+      if (idx !== -1) members.value[idx] = data
+      return true
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { data?: { detail?: string } } }
+        error.value = axiosErr.response?.data?.detail || 'Failed to update character.'
+      }
+      return false
+    }
+  }
+
   async function deleteRole(roleId: string): Promise<boolean> {
     error.value = null
     try {
@@ -187,6 +224,8 @@ export const useMembersStore = defineStore('members', () => {
     addMember,
     toggleMemberStatus,
     assignRole,
+    mergeMember,
+    updateCharacter,
     createRole,
     deleteRole,
   }

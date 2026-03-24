@@ -1,7 +1,7 @@
 """Claude Code CLI runner for executing AI tasks locally.
 
 This module provides the interface for triggering Claude Code from the
-FlowDev backend via local subprocess execution.
+Bodhigrove backend via local subprocess execution.
 """
 
 import asyncio
@@ -9,17 +9,19 @@ import json
 import shutil
 import sys
 import tempfile
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import structlog
 
+from app.services.gitnexus_utils import find_npx as _find_npx
+
 logger = structlog.get_logger(__name__)
 
-# Well-known location for the MCP token file, refreshed each scan.
-MCP_TOKEN_DIR = Path.home() / ".flowdev"
-MCP_TOKEN_FILE = MCP_TOKEN_DIR / "mcp_token"
+ProgressCallback = Callable[[str, dict[str, Any]], None]  # (tool_name, tool_input)
+
 _BRIDGE_PATH = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridge.py")
 
 
@@ -39,9 +41,9 @@ class ClaudeRunResult:
 class MCPServerConfig:
     """Configuration for an MCP server to expose to the Claude CLI.
 
-    Generates a stdio-based MCP config that spawns the FlowDev bridge script,
+    Generates a stdio-based MCP config that spawns the Bodhigrove bridge script,
     which translates MCP JSON-RPC calls into REST API calls back to the
-    running FlowDev backend.
+    running Bodhigrove backend.
     """
 
     backend_url: str
@@ -57,6 +59,163 @@ class ClaudeRunnerConfig:
     timeout_seconds: int = 300
     output_format: str = "json"
     mcp: MCPServerConfig | None = None
+    system_prompt_files: list[str] = field(default_factory=list)
+    model: str | None = None
+    effort: str | None = None
+
+
+def _find_tool_uses(obj: Any, callback: ProgressCallback) -> None:
+    """Recursively search a parsed JSON object for tool_use blocks.
+
+    Walks dicts and lists looking for ``{"type": "tool_use", "name": "..."}``.
+    Format-agnostic — works regardless of nesting depth in the stream event.
+    """
+    if isinstance(obj, dict):
+        if obj.get("type") == "tool_use" and isinstance(obj.get("name"), str):
+            callback(obj["name"], obj.get("input") or {})
+        for v in obj.values():
+            _find_tool_uses(v, callback)
+    elif isinstance(obj, list):
+        for item in obj:
+            _find_tool_uses(item, callback)
+
+
+async def _run_with_streaming(
+    cmd: list[str],
+    cwd: str,
+    timeout: int,
+    progress_callback: ProgressCallback,
+) -> ClaudeRunResult:
+    """Run Claude CLI with stream-json output, emitting progress on each tool call.
+
+    Reads stdout line-by-line, parses JSON events, and calls
+    ``progress_callback`` whenever a tool_use block is found.
+    Captures the final ``result`` event for the return value.
+
+    Uses asyncio.create_subprocess_exec (NOT shell) — safe from injection.
+    """
+    result_text = ""
+    cost: float | None = None
+    turns: int | None = None
+    error_subtype: str | None = None
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            limit=10 * 1024 * 1024,  # 10MB — Claude stream-json lines can exceed 64KB default
+        )
+
+        async def _read_and_wait() -> None:
+            nonlocal result_text, cost, turns, error_subtype
+            assert proc.stdout is not None  # noqa: S101
+            while True:
+                try:
+                    line = await proc.stdout.readline()
+                except ValueError:
+                    # Line exceeded even the 10MB buffer — stop parsing but let process finish
+                    logger.warning("claude_stream_line_overflow", limit_mb=10)
+                    break
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").strip()
+                if not text:
+                    continue
+                try:
+                    event = json.loads(text)
+                except json.JSONDecodeError:
+                    continue
+
+                # Look for tool_use blocks anywhere in the event
+                _find_tool_uses(event, progress_callback)
+
+                # Capture the final result event
+                if isinstance(event, dict) and event.get("type") == "result":
+                    result_text = event.get("result", "") or ""
+                    cost = event.get("total_cost_usd")
+                    turns = event.get("num_turns")
+                    subtype = event.get("subtype", "")
+                    if isinstance(subtype, str) and subtype.startswith("error"):
+                        error_subtype = subtype
+
+            # Wait for process exit under the same timeout
+            await proc.wait()
+
+        await asyncio.wait_for(_read_and_wait(), timeout=timeout)
+    except TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+            logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
+        except ProcessLookupError:
+            pass
+        return ClaudeRunResult(
+            success=False,
+            output="",
+            error=f"Timed out after {timeout}s",
+        )
+    except FileNotFoundError:
+        return ClaudeRunResult(
+            success=False,
+            output="",
+            error="Claude CLI binary not found",
+        )
+
+    # Read any remaining stderr
+    stderr_bytes = await proc.stderr.read() if proc.stderr else b""
+    stderr_str = stderr_bytes.decode("utf-8", errors="replace")
+
+    logger.info(
+        "claude_stream_finished",
+        returncode=proc.returncode,
+        output_length=len(result_text),
+        stderr_length=len(stderr_str),
+        stderr_preview=stderr_str[:300] if stderr_str else "",
+    )
+
+    if proc.returncode != 0:
+        logger.error(
+            "claude_run_failed",
+            returncode=proc.returncode,
+            stderr=stderr_str[:500],
+        )
+        return ClaudeRunResult(
+            success=False,
+            output=result_text,
+            error=f"Exit code {proc.returncode}: {stderr_str[:500]}",
+        )
+
+    if error_subtype:
+        logger.warning(
+            "claude_run_error_subtype",
+            subtype=error_subtype,
+            turns=turns,
+            cost_usd=cost,
+        )
+        return ClaudeRunResult(
+            success=False,
+            output=result_text,
+            cost_usd=cost,
+            turns_used=turns,
+            error=f"Claude CLI: {error_subtype} after {turns} turns",
+        )
+
+    logger.info(
+        "claude_run_complete",
+        cost_usd=cost,
+        turns=turns,
+        output_length=len(result_text),
+        output_preview=result_text[:200],
+    )
+
+    return ClaudeRunResult(
+        success=True,
+        output=result_text,
+        cost_usd=cost,
+        turns_used=turns,
+    )
 
 
 def is_claude_cli_available() -> bool:
@@ -72,6 +231,7 @@ async def run_claude_code(
     prompt: str,
     working_dir: str | Path | None = None,
     config: ClaudeRunnerConfig | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> ClaudeRunResult:
     """Run a prompt via the Claude Code CLI using subprocess.
 
@@ -83,6 +243,9 @@ async def run_claude_code(
         prompt: The prompt/instruction to send to Claude Code.
         working_dir: Directory to run in (for codebase context). Defaults to cwd.
         config: Runner configuration (turns, timeout).
+        progress_callback: Optional callback invoked with each tool name as
+            Claude uses tools. When provided, forces ``stream-json`` output
+            format for real-time updates. When ``None``, uses the batch path.
 
     Returns:
         ClaudeRunResult with output or error details.
@@ -101,6 +264,11 @@ async def run_claude_code(
 
     cwd = str(working_dir) if working_dir else "."
 
+    # Force stream-json when a progress callback is provided
+    output_format = config.output_format
+    if progress_callback is not None:
+        output_format = "stream-json"
+
     # Build command as a list — safe from shell injection
     # (uses asyncio.create_subprocess_exec, NOT shell=True)
     cmd = [
@@ -108,13 +276,26 @@ async def run_claude_code(
         "-p",
         prompt,
         "--output-format",
-        config.output_format,
+        output_format,
         "--dangerously-skip-permissions",
     ]
+
+    # stream-json requires --verbose (Claude CLI constraint)
+    if output_format == "stream-json":
+        cmd.append("--verbose")
 
     # 0 means unlimited — omit the flag so Claude uses its default (no cap)
     if config.max_turns > 0:
         cmd.extend(["--max-turns", str(config.max_turns)])
+
+    if config.model:
+        cmd.extend(["--model", config.model])
+    if config.effort:
+        cmd.extend(["--effort", config.effort])
+
+    # Append system prompt files (e.g., design system reference)
+    for spf in config.system_prompt_files:
+        cmd.extend(["--append-system-prompt-file", spf])
 
     # Write temporary MCP config if tools are needed
     mcp_config_file = None
@@ -122,22 +303,26 @@ async def run_claude_code(
         bridge_path = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridge.py")
         mcp_json = {
             "mcpServers": {
-                "flowdev": {
+                "bodhigrove": {
                     "command": sys.executable,
                     "args": [bridge_path],
                     "env": {
-                        "FLOWDEV_BACKEND_URL": config.mcp.backend_url,
-                        "FLOWDEV_MCP_TOKEN": config.mcp.mcp_token,
-                        "FLOWDEV_MCP_TOOLS": ",".join(config.mcp.tool_names),
+                        "BODHIGROVE_BACKEND_URL": config.mcp.backend_url,
+                        "BODHIGROVE_MCP_TOKEN": config.mcp.mcp_token,
+                        "BODHIGROVE_MCP_TOKEN_FILE": "",
+                        "BODHIGROVE_MCP_TOOLS": ",".join(config.mcp.tool_names),
                     },
                 },
             },
         }
-        mcp_config_path = Path(
-            tempfile.mktemp(suffix=".json", prefix="flowdev_mcp_"),
-        )
-        mcp_config_path.write_text(json.dumps(mcp_json))
-        mcp_config_file = mcp_config_path
+        with tempfile.NamedTemporaryFile(
+            suffix=".json",
+            prefix="bodhigrove_mcp_",
+            delete=False,
+            mode="w",
+        ) as tmp:
+            tmp.write(json.dumps(mcp_json))
+            mcp_config_file = Path(tmp.name)
         cmd.extend(["--mcp-config", str(mcp_config_file)])
 
     logger.info(
@@ -147,10 +332,19 @@ async def run_claude_code(
         cwd=cwd,
         max_turns=config.max_turns,
         timeout_seconds=config.timeout_seconds,
-        output_format=config.output_format,
+        output_format=output_format,
         mcp_enabled=config.mcp is not None,
     )
 
+    # Streaming path: read stdout line-by-line for live progress
+    if progress_callback is not None:
+        try:
+            return await _run_with_streaming(cmd, cwd, config.timeout_seconds, progress_callback)
+        finally:
+            if mcp_config_file is not None:
+                mcp_config_file.unlink(missing_ok=True)
+
+    # Batch path: wait for full output (existing behavior)
     proc: asyncio.subprocess.Process | None = None
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -196,14 +390,32 @@ async def run_claude_code(
         if config.output_format == "json":
             try:
                 parsed = json.loads(stdout_str)
+                subtype = parsed.get("subtype", "") if isinstance(parsed, dict) else ""
                 logger.info(
                     "claude_json_parsed",
                     keys=list(parsed.keys()) if isinstance(parsed, dict) else "not_a_dict",
                     type_field=parsed.get("type") if isinstance(parsed, dict) else None,
+                    subtype=subtype,
                 )
-                result_text = parsed.get("result", stdout_str)
+                result_text = parsed.get("result", "") or ""
                 cost = parsed.get("total_cost_usd")
                 turns = parsed.get("num_turns")
+
+                # Detect error subtypes (e.g. error_max_turns)
+                if isinstance(subtype, str) and subtype.startswith("error"):
+                    logger.warning(
+                        "claude_run_error_subtype",
+                        subtype=subtype,
+                        turns=turns,
+                        cost_usd=cost,
+                    )
+                    return ClaudeRunResult(
+                        success=False,
+                        output=result_text,
+                        cost_usd=cost,
+                        turns_used=turns,
+                        error=f"Claude CLI: {subtype} after {turns} turns",
+                    )
             except json.JSONDecodeError:
                 logger.warning(
                     "claude_json_parse_failed",
@@ -253,31 +465,19 @@ async def run_claude_code(
             mcp_config_file.unlink(missing_ok=True)
 
 
-async def ensure_flowdev_mcp(
-    org_id: uuid.UUID,
-    backend_url: str,
-) -> str:
-    """Ensure the FlowDev MCP server is registered with Claude CLI.
+async def ensure_gitnexus_mcp() -> None:
+    """Register GitNexus MCP server with Claude Code (idempotent).
 
-    Follows the ``claude mcp add`` pattern (like GitNexus). Registers once,
-    then refreshes the token file on each call so the bridge picks up a
-    valid token without re-registration.
-
-    Args:
-        org_id: Organization UUID for token scoping.
-        backend_url: FlowDev backend base URL.
-
-    Returns:
-        The internal MCP token (caller should revoke when done).
+    Uses ``claude mcp add`` to register the GitNexus stdio MCP server
+    globally, so all subsequent Claude CLI runs can query indexed repos
+    for UI components, layouts, and code structure during design generation.
     """
-    from app.mcp.auth import create_internal_mcp_token
+    npx = _find_npx()
+    if not npx:
+        logger.debug("gitnexus_mcp_skip_no_npx")
+        return
 
-    # Create token and write to file (bridge re-reads on every request)
-    token = create_internal_mcp_token(org_id)
-    MCP_TOKEN_DIR.mkdir(parents=True, exist_ok=True)
-    MCP_TOKEN_FILE.write_text(token)
-
-    # Check if flowdev MCP is already registered
+    # Check if already registered
     try:
         proc = await asyncio.create_subprocess_exec(
             "claude",
@@ -287,37 +487,32 @@ async def ensure_flowdev_mcp(
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-        already_registered = "flowdev" in stdout.decode()
+        if "gitnexus" in stdout.decode():
+            return
     except (TimeoutError, FileNotFoundError, OSError):
-        already_registered = False
+        return  # CLI not available — skip silently
 
-    if not already_registered:
-        # Register: claude mcp add flowdev -s user -e ... -- python bridge.py
+    # Register: claude mcp add gitnexus -s user -- npx --yes gitnexus mcp
+    try:
         proc = await asyncio.create_subprocess_exec(
             "claude",
             "mcp",
             "add",
-            "flowdev",
+            "gitnexus",
             "-s",
             "user",
-            "-e",
-            f"FLOWDEV_BACKEND_URL={backend_url}",
-            "-e",
-            f"FLOWDEV_MCP_TOKEN_FILE={MCP_TOKEN_FILE}",
             "--",
-            sys.executable,
-            _BRIDGE_PATH,
+            npx,
+            "--yes",
+            "gitnexus",
+            "mcp",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await asyncio.wait_for(proc.communicate(), timeout=10)
-        logger.info(
-            "flowdev_mcp_registered",
-            backend_url=backend_url,
-            bridge=_BRIDGE_PATH,
-        )
-
-    return token
+        await asyncio.wait_for(proc.communicate(), timeout=15)
+        logger.info("gitnexus_mcp_registered", npx=npx)
+    except (TimeoutError, FileNotFoundError, OSError) as exc:
+        logger.warning("gitnexus_mcp_register_failed", error=str(exc))
 
 
 async def _get_claude_version() -> str | None:
@@ -376,7 +571,7 @@ async def test_claude_connection() -> dict:
     logger.info("claude_connection_test_start", cli_version=version)
 
     test_result = await run_claude_code(
-        prompt="Reply with exactly: FLOWDEV_CONNECTION_OK",
+        prompt="Reply with exactly: BODHIGROVE_CONNECTION_OK",
         config=ClaudeRunnerConfig(max_turns=1, timeout_seconds=90),
     )
 

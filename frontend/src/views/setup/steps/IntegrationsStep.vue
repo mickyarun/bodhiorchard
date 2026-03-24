@@ -13,7 +13,7 @@
       <span class="text-body-2 font-weight-medium">Source Code</span>
     </div>
     <div class="text-caption text-medium-emphasis mb-4">
-      FlowDev agents need access to your code to write PRDs, triage features, link bugs,
+      Bodhigrove agents need access to your code to write BUDs, triage features, link bugs,
       and generate status updates. Point to a local path for fastest access, or connect
       a Git provider for PR tracking.
     </div>
@@ -60,7 +60,7 @@
           density="compact"
           variant="outlined"
           :hint="setupStore.state.sourceCode.type === 'workspace'
-            ? 'FlowDev will scan all repos under this directory'
+            ? 'Bodhigrove will scan all repos under this directory'
             : 'Absolute path to the git repository root'"
           persistent-hint
         >
@@ -149,9 +149,9 @@
                       <li>Go to <strong>GitHub &rarr; Settings &rarr; Developer settings &rarr;
                         Personal access tokens &rarr; Fine-grained tokens</strong></li>
                       <li>Click <strong>"Generate new token"</strong></li>
-                      <li>Name it (e.g. <code>FlowDev</code>) and set an expiration</li>
+                      <li>Name it (e.g. <code>Bodhigrove</code>) and set an expiration</li>
                       <li>Under <strong>Repository access</strong>, select the repos
-                        FlowDev should track</li>
+                        Bodhigrove should track</li>
                       <li>Under <strong>Permissions</strong>, grant:
                         <ul>
                           <li>Pull requests: <strong>Read &amp; Write</strong></li>
@@ -210,7 +210,7 @@
       <span class="text-body-2 font-weight-medium">Messaging</span>
     </div>
     <div class="text-caption text-medium-emphasis mb-4">
-      FlowDev listens for feature requests, sends standup summaries, and lets you trigger agents
+      Bodhigrove listens for feature requests, sends standup summaries, and lets you trigger agents
       directly from your team's chat.
     </div>
 
@@ -279,7 +279,7 @@
                         </strong>
                         and click <strong>"Create New App"</strong>
                       </li>
-                      <li>Choose <strong>"From scratch"</strong>, name it (e.g. <code>FlowDev</code>), and select your workspace</li>
+                      <li>Choose <strong>"From scratch"</strong>, name it (e.g. <code>Bodhigrove</code>), and select your workspace</li>
                       <li>Under <strong>Basic Information &rarr; App Credentials</strong>, copy the <strong>Signing Secret</strong></li>
                       <li>Go to <strong>OAuth &amp; Permissions</strong> and add these <strong>Bot Token Scopes</strong>:
                         <ul>
@@ -321,7 +321,7 @@
       <span class="text-body-2 font-weight-medium">AI Configuration</span>
     </div>
     <div class="text-caption text-medium-emphasis mb-4">
-      FlowDev's 11 agents each use an LLM to do their work. Pick a preset to configure all agents at once.
+      Bodhigrove's 11 agents each use an LLM to do their work. Pick a preset to configure all agents at once.
       You can customize individual agents later in the admin panel.
     </div>
 
@@ -489,7 +489,7 @@
       <!-- Hybrid preset: Cloud API key -->
       <template v-if="setupStore.state.aiConfig.preset === 'hybrid'">
         <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-          Codebase agents (Triage, PRD, Learning, Skill, Tech Plan, Test Plan) use Claude Code.
+          Codebase agents (Triage, BUD, Learning, Skill, Tech Plan, Test Plan) use Claude Code.
           Other agents (Status, Standup, Bug Linker, Reassignment, Design) use the Cloud API.
         </v-alert>
         <v-select
@@ -525,7 +525,7 @@
       <!-- Claude + Ollama preset: Ollama URL + model -->
       <template v-if="setupStore.state.aiConfig.preset === 'claude-ollama'">
         <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-          Codebase agents (Triage, PRD, Learning, Skill, Tech Plan, Test Plan) use Claude Code.
+          Codebase agents (Triage, BUD, Learning, Skill, Tech Plan, Test Plan) use Claude Code.
           Other agents (Status, Standup, Bug Linker, Reassignment, Design) use Ollama.
         </v-alert>
         <v-text-field

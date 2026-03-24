@@ -10,7 +10,7 @@ class DatabaseConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
 
     database_url: str = Field(
-        default="postgresql+asyncpg://flowdev:flowdev@localhost:5432/flowdev",
+        default="postgresql+asyncpg://bodhigrove:bodhigrove@localhost:5432/bodhigrove",
         alias="DATABASE_URL",
     )
 
@@ -61,6 +61,25 @@ class RedisConfig(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379", alias="REDIS_URL")
 
 
+class WebSocketConfig(BaseSettings):
+    """WebSocket real-time push configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="WS_", env_file=".env", extra="ignore")
+
+    heartbeat_interval: int = Field(
+        default=30,
+        description="Seconds between server keepalive pongs.",
+    )
+    max_send_queue: int = Field(
+        default=128,
+        description="Max queued outbound messages per WS connection before dropping.",
+    )
+    max_subscribe_queue: int = Field(
+        default=32,
+        description="Max queued events per event-bus subscriber before dropping.",
+    )
+
+
 class IntegrationConfig(BaseSettings):
     """Third-party integration configuration."""
 
@@ -81,6 +100,11 @@ class Settings(BaseSettings):
         alias="PUBLIC_URL",
         description="Public base URL for generating callback URLs (e.g. Slack webhooks)",
     )
+    mcp_backend_url: str = Field(
+        default="http://localhost:8000",
+        alias="MCP_BACKEND_URL",
+        description="Internal URL the MCP bridge uses to reach this backend (always localhost).",
+    )
 
     db: DatabaseConfig = DatabaseConfig()
     auth: AuthConfig = AuthConfig()
@@ -88,6 +112,7 @@ class Settings(BaseSettings):
     embedding: EmbeddingConfig = EmbeddingConfig()
     redis: RedisConfig = RedisConfig()
     integrations: IntegrationConfig = IntegrationConfig()
+    ws: WebSocketConfig = WebSocketConfig()
 
 
 settings = Settings()

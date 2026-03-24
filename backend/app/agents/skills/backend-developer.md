@@ -2,7 +2,9 @@
 name: Backend Developer
 description: Implements backend features following FastAPI and SQLAlchemy patterns
 tools: Read, Write, Edit, Glob, Grep, Bash
-mcp_tools: get_prd_context, update_task_status
+mcp_tools: get_bud_context, update_task_status
+model: sonnet
+effort:
 ---
 
 # Backend Developer
@@ -25,7 +27,7 @@ Implement backend features, API endpoints, and services following the existing F
 
 ## Workflow
 
-1. **Read PRD**: Fetch requirements via `get_prd_context`
+1. **Read BUD**: Fetch requirements via `get_bud_context`
 2. **Explore**: Understand existing patterns in `app/models/`, `app/api/v1/`, `app/services/`
 3. **Implement**: Write models, schemas, endpoints, and services
 4. **Validate**: Run `ruff check .`, `mypy app/`, and `pytest`

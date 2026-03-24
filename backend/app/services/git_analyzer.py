@@ -6,6 +6,7 @@ commit frequency, recency, and file-type distribution.
 
 import asyncio
 import math
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,11 +62,42 @@ class DevSkillEntry:
     touch_count: int
     skill_score: float
     last_touch: datetime | None
+    feature_id: uuid.UUID | None = None
+
+
+# (feature_name, path_prefixes, knowledge_item_id)
+FeatureMapEntry = tuple[str, list[str], uuid.UUID]
+FeatureMap = list[FeatureMapEntry]
+
+
+def _file_to_feature(
+    file_path: str,
+    feature_map: FeatureMap,
+) -> tuple[str, uuid.UUID] | None:
+    """Map a file path to a feature name via longest-prefix match.
+
+    Returns ``None`` when no feature prefix matches — callers should
+    skip the file rather than fall back to a directory name.
+
+    Args:
+        file_path: Relative file path from repo root.
+        feature_map: List of (feature_name, [path_prefixes], feature_id)
+            sorted by prefix length descending (longest first).
+
+    Returns:
+        Tuple of (feature_name, feature_id), or None if unmatched.
+    """
+    for feat_name, prefixes, feat_id in feature_map:
+        for prefix in prefixes:
+            if file_path.startswith(prefix):
+                return feat_name, feat_id
+    return None
 
 
 async def analyze_repo_skills(
     repo_path: str,
     since: str = DEFAULT_SINCE,
+    feature_map: FeatureMap | None = None,
 ) -> list[DevSkillEntry]:
     """Scan git log for per-author, per-module skill data.
 
@@ -74,6 +106,8 @@ async def analyze_repo_skills(
     Args:
         repo_path: Absolute path to the git repository root.
         since: Git log --since value (e.g. "6.months.ago").
+        feature_map: Optional feature-name-to-paths mapping. When provided,
+            files are mapped to feature names instead of directory names.
 
     Returns:
         List of DevSkillEntry objects with computed skill scores.
@@ -92,16 +126,25 @@ async def analyze_repo_skills(
     logger.info("git_analyzer_commits_found", repo=repo_path, count=len(commits))
 
     # Step 2: For each commit, get changed files and accumulate per-author stats
-    # author_key = email, module = top-level directory
+    # author_key = email, module = top-level directory or feature name
     author_modules: dict[str, dict[str, ModuleStats]] = {}
     author_names: dict[str, str] = {}
+    # Track which module name maps to which feature_id (if any)
+    module_feature_ids: dict[str, uuid.UUID | None] = {}
 
     for commit_hash, email, name, commit_date in commits:
         author_names[email] = name
         files = await _get_commit_files(repo_path, commit_hash)
 
         for file_path in files:
-            module = _file_to_module(file_path)
+            if feature_map:
+                match = _file_to_feature(file_path, feature_map)
+                if match is None:
+                    continue  # Skip files not linked to any feature
+                module, feat_id = match
+                module_feature_ids[module] = feat_id
+            else:
+                module = _file_to_module(file_path)
             lang = _file_to_language(file_path)
 
             if email not in author_modules:
@@ -135,6 +178,7 @@ async def analyze_repo_skills(
                     touch_count=stats.touch_count,
                     skill_score=skill_score,
                     last_touch=stats.last_touch,
+                    feature_id=module_feature_ids.get(module),
                 )
             )
 

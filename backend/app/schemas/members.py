@@ -18,6 +18,7 @@ class MemberRead(BaseModel):
     github_username: str | None = Field(None, alias="githubUsername")
     is_active: bool = Field(True, alias="isActive")
     created_at: str = Field("", alias="createdAt")
+    email_aliases: list[str] = Field(default_factory=list, alias="emailAliases")
 
     model_config = {"populate_by_name": True, "from_attributes": True}
 
@@ -39,5 +40,30 @@ class AddMemberRequest(BaseModel):
     role_id: uuid.UUID | None = Field(None, alias="roleId")
     avatar_url: str | None = Field(None, alias="avatarUrl", max_length=500)
     github_username: str | None = Field(None, alias="githubUsername", max_length=100)
+
+    model_config = {"populate_by_name": True}
+
+
+class UpdateCharacterRequest(BaseModel):
+    """Request to update a member's garden character model preference."""
+
+    character_model: str | None = Field(
+        None,
+        alias="characterModel",
+        max_length=100,
+        description="GLB filename (e.g. 'developer.glb') or null to reset to random",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class MergeMembersRequest(BaseModel):
+    """Request to merge a source member into a target member.
+
+    The source member's skill profiles and email are transferred to
+    the target, then the source is deactivated.
+    """
+
+    source_id: uuid.UUID = Field(alias="sourceId")
 
     model_config = {"populate_by_name": True}

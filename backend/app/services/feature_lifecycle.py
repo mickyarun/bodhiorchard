@@ -1,8 +1,8 @@
-"""Feature lifecycle service — bridges PRDs to the feature registry.
+"""Feature lifecycle service — bridges BUDs to the feature registry.
 
-Creates PLANNED feature_registry entries when PRDs are written,
+Creates PLANNED feature_registry entries when BUDs are written,
 transitions them through in_progress → implemented as work progresses,
-and deactivates them when PRDs are cancelled or deleted.
+and deactivates them when BUDs are wilted or deleted.
 """
 
 import re
@@ -12,14 +12,14 @@ from dataclasses import dataclass, field
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.bud import BUDStatus
 from app.models.knowledge_item import KnowledgeItem
-from app.models.prd import PRDStatus
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.services.embedding_service import embedding_service
 
 logger = structlog.get_logger(__name__)
 
-# Words filtered out when extracting tags from PRD titles
+# Words filtered out when extracting tags from BUD titles
 _STOP_WORDS = frozenset(
     {
         "a",
@@ -81,7 +81,7 @@ _CRITERIA_HEADERS = re.compile(
 
 @dataclass
 class FeatureSummary:
-    """Structured summary extracted from a PRD for feature registry."""
+    """Structured summary extracted from a BUD for feature registry."""
 
     name: str
     description: str
@@ -89,26 +89,26 @@ class FeatureSummary:
     tags: list[str] = field(default_factory=list)
 
 
-def extract_feature_from_prd(title: str, content_md: str) -> FeatureSummary:
-    """Extract a feature summary from PRD title and markdown content.
+def extract_feature_from_bud(title: str, requirements_md: str) -> FeatureSummary:
+    """Extract a feature summary from BUD title and markdown content.
 
     Pure text-parsing — no LLM calls. Designed to run in the request path.
 
     Args:
-        title: The PRD title.
-        content_md: The PRD markdown content.
+        title: The BUD title.
+        requirements_md: The BUD markdown content.
 
     Returns:
         A FeatureSummary with name, description, capabilities, and tags.
     """
     # Name: strip common prefixes
-    name = re.sub(r"^(PRD|Feature|RFC)\s*[:\-–—]\s*", "", title, flags=re.IGNORECASE).strip()
+    name = re.sub(r"^(BUD|PRD|Feature|RFC)\s*[:\-–—]\s*", "", title, flags=re.IGNORECASE).strip()
     if not name:
         name = title.strip()
 
     # Description: first non-heading, non-empty paragraph
     description = ""
-    for line in content_md.split("\n"):
+    for line in requirements_md.split("\n"):
         stripped = line.strip()
         if not stripped:
             continue
@@ -122,7 +122,7 @@ def extract_feature_from_prd(title: str, content_md: str) -> FeatureSummary:
     # Capabilities: find acceptance criteria / requirements section, extract bullets
     capabilities: list[str] = []
     in_criteria_section = False
-    for line in content_md.split("\n"):
+    for line in requirements_md.split("\n"):
         stripped = line.strip()
         if _CRITERIA_HEADERS.match(stripped):
             in_criteria_section = True
@@ -144,19 +144,19 @@ def extract_feature_from_prd(title: str, content_md: str) -> FeatureSummary:
     return FeatureSummary(name=name, description=description, capabilities=capabilities, tags=tags)
 
 
-def _format_planned_content(summary: FeatureSummary, prd_ref: str) -> str:
+def _format_planned_content(summary: FeatureSummary, bud_ref: str) -> str:
     """Format content for a PLANNED feature registry entry.
 
     Args:
         summary: The extracted feature summary.
-        prd_ref: PRD reference string (e.g. "PRD-042").
+        bud_ref: BUD reference string (e.g. "BUD-042").
 
     Returns:
         Formatted plain-text content optimized for embedding and agent reading.
     """
     lines = [summary.description, ""]
     lines.append("Status: PLANNED")
-    lines.append(f"Source: {prd_ref}")
+    lines.append(f"Source: {bud_ref}")
 
     if summary.capabilities:
         lines.append("")
@@ -170,33 +170,33 @@ def _format_planned_content(summary: FeatureSummary, prd_ref: str) -> str:
 async def create_planned_feature(
     db: AsyncSession,
     org_id: uuid.UUID,
-    prd_number: int,
+    bud_number: int,
     title: str,
-    content_md: str,
+    requirements_md: str,
 ) -> KnowledgeItem:
-    """Create a PLANNED feature_registry entry from a PRD.
+    """Create a PLANNED feature_registry entry from a BUD.
 
-    Upserts by source_ref to handle re-creation of PRDs with same number.
+    Upserts by source_ref to handle re-creation of BUDs with same number.
     Embeds the item inline for immediate semantic searchability.
 
     Args:
         db: The async database session.
         org_id: The organization UUID.
-        prd_number: The PRD number for source_ref linking.
-        title: The PRD title.
-        content_md: The PRD markdown content.
+        bud_number: The BUD number for source_ref linking.
+        title: The BUD title.
+        requirements_md: The BUD markdown content.
 
     Returns:
         The created or updated KnowledgeItem.
     """
-    summary = extract_feature_from_prd(title, content_md)
-    prd_ref = f"PRD-{prd_number:03d}"
-    content = _format_planned_content(summary, prd_ref)
+    summary = extract_feature_from_bud(title, requirements_md)
+    bud_ref = f"BUD-{bud_number:03d}"
+    content = _format_planned_content(summary, bud_ref)
     feature_title = f"Feature: {summary.name}"
 
     # Upsert by source_ref
     ki_repo = KnowledgeItemRepository(db, org_id=org_id)
-    item = await ki_repo.get_by_source_ref_and_category(prd_ref, "feature_registry")
+    item = await ki_repo.get_by_source_ref_and_category(bud_ref, "feature_registry")
 
     if item:
         item.title = feature_title
@@ -210,8 +210,8 @@ async def create_planned_feature(
             category="feature_registry",
             title=feature_title,
             content=content,
-            source="prd",
-            source_ref=prd_ref,
+            source="bud",
+            source_ref=bud_ref,
             tags=summary.tags,
             feature_status="planned",
             is_active=True,
@@ -225,45 +225,48 @@ async def create_planned_feature(
         text = f"{item.title}\n{item.content or ''}"[:2000]
         item.embedding = await embedding_service.embed(text)
     except Exception:
-        logger.warning("planned_feature_embed_failed", prd_ref=prd_ref)
+        logger.warning("planned_feature_embed_failed", bud_ref=bud_ref)
 
     logger.info(
         "planned_feature_created",
         org_id=str(org_id),
-        prd_ref=prd_ref,
+        bud_ref=bud_ref,
         feature_title=feature_title,
     )
     return item
 
 
-async def transition_feature_for_prd(
+async def transition_feature_for_bud(
     db: AsyncSession,
     org_id: uuid.UUID,
-    prd_number: int,
-    new_status: str | PRDStatus,
+    bud_number: int,
+    new_status: str | BUDStatus,
 ) -> None:
-    """Transition a feature_registry item based on PRD status change.
+    """Transition a feature_registry item based on BUD status change.
 
     Args:
         db: The async database session.
         org_id: The organization UUID.
-        prd_number: The PRD number to look up.
-        new_status: The new PRD status (string or PRDStatus enum).
+        bud_number: The BUD number to look up.
+        new_status: The new BUD status (string or BUDStatus enum).
     """
-    prd_ref = f"PRD-{prd_number:03d}"
+    bud_ref = f"BUD-{bud_number:03d}"
     new_status_str = str(new_status)
 
     ki_repo = KnowledgeItemRepository(db, org_id=org_id)
-    item = await ki_repo.get_by_source_ref_and_category(prd_ref, "feature_registry")
+    item = await ki_repo.get_by_source_ref_and_category(bud_ref, "feature_registry")
     if item is None:
-        logger.debug("transition_feature_no_item", prd_ref=prd_ref)
+        logger.debug("transition_feature_no_item", bud_ref=bud_ref)
         return
 
-    if new_status_str == PRDStatus.CANCELLED:
+    if new_status_str == BUDStatus.DISCARDED:
         item.is_active = False
         item.embedding = None
-        logger.info("feature_deactivated", prd_ref=prd_ref)
-    elif new_status_str == PRDStatus.IN_DEV and item.feature_status == "planned":
+        logger.info("feature_deactivated", bud_ref=bud_ref)
+    elif new_status_str in (BUDStatus.TECH_ARCH, BUDStatus.DESIGN):
+        # Still pre-development — keep as planned
+        pass
+    elif new_status_str == BUDStatus.DEVELOPMENT and item.feature_status == "planned":
         item.feature_status = "in_progress"
-        logger.info("feature_in_progress", prd_ref=prd_ref)
+        logger.info("feature_in_progress", bud_ref=bud_ref)
     # Other statuses: no change (scan pipeline handles "implemented")

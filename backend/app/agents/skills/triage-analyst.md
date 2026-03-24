@@ -3,6 +3,8 @@ name: Triage Analyst
 description: Analyzes incoming issues and routes them to appropriate teams/agents
 tools: Read, Grep
 mcp_tools: search_bugs, get_knowledge, get_team_context, update_task_status, check_feature_exists
+model: sonnet
+effort:
 ---
 
 # Triage Analyst
@@ -26,7 +28,7 @@ Analyze incoming issues, bugs, and requests to determine priority, category, and
 1. **Analyze**: Read the incoming issue description
 2. **Check Features**: Use `check_feature_exists` to determine if the feature already exists.
    - If exists=true with strong match AND feature_status="implemented": classify as **enhancement** to existing feature.
-   - If exists=true with strong match AND feature_status="planned": this is **already planned** — reference the PRD (source_ref) and flag as potential duplicate.
+   - If exists=true with strong match AND feature_status="planned": this is **already planned** — reference the BUD (source_ref) and flag as potential duplicate.
    - If exists=true with strong match AND feature_status="in_progress": this is **in development** — flag as possible duplicate of active work.
    - If exists=false: classify as **new feature**.
 3. **Search**: Use `search_bugs` to check for duplicates or related issues

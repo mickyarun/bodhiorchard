@@ -30,6 +30,7 @@ class Organization(BaseModel):
     github_pat: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_bot_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_signing_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slack_team_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     mcp_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships

@@ -8,7 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
-logger = structlog.get_logger("flowdev.http")
+logger = structlog.get_logger("bodhigrove.http")
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

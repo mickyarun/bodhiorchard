@@ -1,0 +1,307 @@
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, DesignJobCreated, JobCreatedResponse, ChatMessageRead, TimelineEvent } from '@/types'
+import { BUD_STATUS_ORDER } from '@/types'
+import api from '@/services/api'
+
+// Maps legacy DB status values to new pipeline statuses (pre-migration compat)
+const LEGACY_STATUS_MAP: Record<string, BUDStatus> = {
+  draft: 'bud',
+  planning: 'bud',
+  designing: 'design',
+  in_progress: 'development',
+  in_review: 'testing',
+  ready: 'prod',
+  released: 'prod',
+}
+
+function normalizeStatus(status: string): BUDStatus {
+  if (BUD_STATUS_ORDER.includes(status as BUDStatus)) return status as BUDStatus
+  return LEGACY_STATUS_MAP[status] ?? 'bud'
+}
+
+export const useBUDStore = defineStore('bud', () => {
+  const buds = ref<BUDListItem[]>([])
+  const currentBUD = ref<BUDDocument | null>(null)
+  const loading = ref(false)
+  const error = ref('')
+
+  const budsByStatus = computed(() => {
+    const grouped: Record<string, BUDListItem[]> = {}
+    for (const status of BUD_STATUS_ORDER) {
+      grouped[status] = []
+    }
+    for (const bud of buds.value) {
+      const resolved = normalizeStatus(bud.status)
+      grouped[resolved].push(bud)
+    }
+    return grouped
+  })
+
+  async function fetchBUDs(statusFilter?: BUDStatus): Promise<void> {
+    loading.value = true
+    error.value = ''
+    try {
+      const params: Record<string, string> = {}
+      if (statusFilter) params.status = statusFilter
+      const { data } = await api.get('/v1/buds/', { params })
+      buds.value = data
+    } catch {
+      error.value = 'Failed to load BUDs'
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchBUD(id: string): Promise<BUDDocument | null> {
+    loading.value = true
+    error.value = ''
+    try {
+      const { data } = await api.get(`/v1/buds/${id}`)
+      currentBUD.value = data
+      return data
+    } catch {
+      error.value = 'Failed to load BUD'
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function createBUD(title: string, requirements_md?: string): Promise<BUDDocument | null> {
+    error.value = ''
+    try {
+      const { data } = await api.post('/v1/buds/', { title, requirements_md })
+      buds.value.unshift(data)
+      return data
+    } catch {
+      error.value = 'Failed to create BUD'
+      return null
+    }
+  }
+
+  // Signal that design phase was entered (frontend should show repo selection)
+  const designAvailable = ref(false)
+
+  async function updateBUD(id: string, updates: Partial<BUDDocument>): Promise<BUDDocument | null> {
+    error.value = ''
+    designAvailable.value = false
+    try {
+      const resp = await api.patch(`/v1/buds/${id}`, updates)
+      const data = resp.data
+      const idx = buds.value.findIndex(p => p.id === id)
+      if (idx !== -1) buds.value[idx] = data
+      if (currentBUD.value?.id === id) currentBUD.value = data
+      // Check if backend signals design phase transition
+      if (resp.headers['x-design-available'] === 'true') {
+        designAvailable.value = true
+      }
+      return data
+    } catch {
+      error.value = 'Failed to update BUD'
+      return null
+    }
+  }
+
+  async function deleteBUD(id: string): Promise<boolean> {
+    error.value = ''
+    try {
+      await api.delete(`/v1/buds/${id}`)
+      buds.value = buds.value.filter(p => p.id !== id)
+      if (currentBUD.value?.id === id) currentBUD.value = null
+      return true
+    } catch {
+      error.value = 'Failed to delete BUD'
+      return false
+    }
+  }
+
+  async function chatBUD(
+    id: string,
+    message: string,
+    section: string = 'requirements_md',
+    designId?: string,
+    sessionId?: string,
+    images?: string[],
+  ): Promise<JobCreatedResponse | null> {
+    error.value = ''
+    try {
+      const body: Record<string, unknown> = { message, section }
+      if (designId) body.design_id = designId
+      if (sessionId) body.session_id = sessionId
+      if (images?.length) body.images = images
+      const { data } = await api.post(`/v1/buds/${id}/chat`, body)
+      return data
+    } catch {
+      return null
+    }
+  }
+
+  function exportBUDUrl(id: string, section: string): string {
+    return `/v1/buds/${id}/export/${section}`
+  }
+
+  async function importBUD(id: string, section: string, file: File): Promise<boolean> {
+    error.value = ''
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const { data } = await api.post(`/v1/buds/${id}/import/${section}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      if (currentBUD.value?.id === id) currentBUD.value = data
+      return true
+    } catch {
+      error.value = 'Failed to import file'
+      return false
+    }
+  }
+
+  // ── Design wireframe methods ──────────────────────────
+
+  async function generateDesigns(budId: string, repoIds: string[]): Promise<DesignJobCreated[]> {
+    try {
+      const { data } = await api.post(`/v1/buds/${budId}/designs/generate`, { repo_ids: repoIds })
+      return data
+    } catch {
+      error.value = 'Failed to start design generation'
+      return []
+    }
+  }
+
+  async function fetchDesigns(budId: string): Promise<BUDDesign[]> {
+    try {
+      const { data } = await api.get(`/v1/buds/${budId}/designs`)
+      return data
+    } catch {
+      return []
+    }
+  }
+
+  async function updateDesignHtml(budId: string, designId: string, html: string): Promise<BUDDesign | null> {
+    try {
+      const { data } = await api.put(`/v1/buds/${budId}/designs/${designId}`, { design_html: html })
+      return data
+    } catch {
+      error.value = 'Failed to update design'
+      return null
+    }
+  }
+
+  async function updateDesignNotes(budId: string, designId: string, notes: string): Promise<BUDDesign | null> {
+    try {
+      const { data } = await api.put(`/v1/buds/${budId}/designs/${designId}`, { notes })
+      return data
+    } catch {
+      error.value = 'Failed to update notes'
+      return null
+    }
+  }
+
+  async function fetchChatHistory(
+    budId: string,
+    section: string,
+    designId?: string,
+    sessionId?: string,
+  ): Promise<ChatMessageRead[]> {
+    try {
+      const params: Record<string, string> = { section }
+      if (designId) params.design_id = designId
+      if (sessionId) params.session_id = sessionId
+      const { data } = await api.get(`/v1/buds/${budId}/chat-history`, { params })
+      return data
+    } catch {
+      return []
+    }
+  }
+
+  async function fetchTimeline(budId: string): Promise<TimelineEvent[]> {
+    try {
+      const { data } = await api.get(`/v1/buds/${budId}/timeline`)
+      return data
+    } catch {
+      return []
+    }
+  }
+
+  async function regenerateDesign(budId: string, designId: string): Promise<DesignJobCreated | null> {
+    try {
+      const { data } = await api.post(`/v1/buds/${budId}/designs/${designId}/regenerate`)
+      return data
+    } catch {
+      error.value = 'Failed to regenerate design'
+      return null
+    }
+  }
+
+  // ── Tech Architecture actions ──────────────────────────
+
+  async function approveTechArch(budId: string): Promise<BUDDocument | null> {
+    error.value = ''
+    try {
+      const { data } = await api.post(`/v1/buds/${budId}/approve-tech-arch`)
+      if (currentBUD.value?.id === budId) currentBUD.value = data
+      const idx = buds.value.findIndex(p => p.id === budId)
+      if (idx !== -1) buds.value[idx] = data
+      return data
+    } catch {
+      error.value = 'Failed to approve tech architecture'
+      return null
+    }
+  }
+
+  async function rejectTechArch(budId: string, reason: string): Promise<BUDDocument | null> {
+    error.value = ''
+    try {
+      const { data } = await api.post(`/v1/buds/${budId}/reject-tech-arch`, { reason })
+      if (currentBUD.value?.id === budId) currentBUD.value = data
+      const idx = buds.value.findIndex(p => p.id === budId)
+      if (idx !== -1) buds.value[idx] = data
+      return data
+    } catch {
+      error.value = 'Failed to reject tech architecture'
+      return null
+    }
+  }
+
+  async function requestReassignment(budId: string, reason: string): Promise<BUDDocument | null> {
+    error.value = ''
+    try {
+      const { data } = await api.post(`/v1/buds/${budId}/request-reassignment`, { reason })
+      if (currentBUD.value?.id === budId) currentBUD.value = data
+      const idx = buds.value.findIndex(p => p.id === budId)
+      if (idx !== -1) buds.value[idx] = data
+      return data
+    } catch {
+      error.value = 'Failed to request reassignment'
+      return null
+    }
+  }
+
+  return {
+    buds,
+    currentBUD,
+    loading,
+    error,
+    designAvailable,
+    budsByStatus,
+    fetchBUDs,
+    fetchBUD,
+    createBUD,
+    updateBUD,
+    deleteBUD,
+    chatBUD,
+    exportBUDUrl,
+    importBUD,
+    generateDesigns,
+    fetchDesigns,
+    updateDesignHtml,
+    updateDesignNotes,
+    regenerateDesign,
+    fetchChatHistory,
+    fetchTimeline,
+    approveTechArch,
+    rejectTechArch,
+    requestReassignment,
+  }
+})

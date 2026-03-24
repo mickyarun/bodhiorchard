@@ -1,4 +1,4 @@
-"""MCP token verification for FlowDev tool calls from Claude Code."""
+"""MCP token verification for Bodhigrove tool calls from Claude Code."""
 
 import secrets
 import uuid
@@ -16,14 +16,18 @@ logger = structlog.get_logger(__name__)
 
 # Internal tokens: short-lived tokens for scan-initiated Claude CLI runs.
 # Maps token → org_id. Populated by create_internal_mcp_token(),
-# consumed by verify_mcp_token(), cleaned up by revoke_internal_mcp_token().
+# consumed by verify_mcp_token(). Tokens persist until server restart;
+# eager revocation caused race conditions with the shared token file.
 _internal_tokens: dict[str, uuid.UUID] = {}
+_MAX_INTERNAL_TOKENS = 100
 
 
 def create_internal_mcp_token(org_id: uuid.UUID) -> str:
     """Create a temporary MCP token for internal use (e.g. scan pipeline).
 
-    The token is stored in-memory and valid until explicitly revoked.
+    The token is stored in-memory and valid until server restart.
+    If the token pool exceeds ``_MAX_INTERNAL_TOKENS``, the oldest
+    entry is evicted to bound memory usage.
 
     Args:
         org_id: The organization UUID to associate with the token.
@@ -32,17 +36,13 @@ def create_internal_mcp_token(org_id: uuid.UUID) -> str:
         The plaintext token string.
     """
     token = secrets.token_urlsafe(32)
+    # Evict oldest token if at capacity
+    if len(_internal_tokens) >= _MAX_INTERNAL_TOKENS:
+        oldest_key = next(iter(_internal_tokens))
+        _internal_tokens.pop(oldest_key)
+        logger.debug("internal_token_evicted", evicted_token=oldest_key[:8])
     _internal_tokens[token] = org_id
     return token
-
-
-def revoke_internal_mcp_token(token: str) -> None:
-    """Revoke a previously issued internal MCP token.
-
-    Args:
-        token: The token to revoke.
-    """
-    _internal_tokens.pop(token, None)
 
 
 async def verify_mcp_token(
@@ -71,6 +71,12 @@ async def verify_mcp_token(
         )
 
     token = authorization[7:]
+
+    logger.debug(
+        "mcp_auth_attempt",
+        token_prefix=token[:8] if len(token) >= 8 else token,
+        internal_token_count=len(_internal_tokens),
+    )
 
     org_repo = OrganizationRepository(db)
 

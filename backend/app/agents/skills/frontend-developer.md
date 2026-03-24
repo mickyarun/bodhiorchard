@@ -2,7 +2,9 @@
 name: Frontend Developer
 description: Implements frontend features following existing patterns and design system
 tools: Read, Write, Edit, Glob, Grep, Bash
-mcp_tools: get_prd_context, update_task_status
+mcp_tools: get_bud_context, update_task_status
+model: sonnet
+effort:
 ---
 
 # Frontend Developer
@@ -23,7 +25,7 @@ Implement frontend features and fixes following the existing codebase patterns, 
 
 ## Workflow
 
-1. **Read PRD**: Fetch the requirements using `get_prd_context`
+1. **Read BUD**: Fetch the requirements using `get_bud_context`
 2. **Explore**: Read existing components and patterns in the relevant area
 3. **Implement**: Write Vue components, composables, and store changes
 4. **Validate**: Run `npx vue-tsc --noEmit` and `npm run build` to verify

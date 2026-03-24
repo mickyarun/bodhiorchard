@@ -57,17 +57,7 @@
 </template>
 
 <script setup lang="ts">
-export interface AgentInfo {
-  name: string
-  icon: string
-  triggerType: string
-  triggerIcon: string
-  tagline: string
-  description?: string
-  capabilities: string[]
-  interactsWith: string[]
-  color: string
-}
+import type { AgentInfo } from '@/data/agents'
 
 defineProps<{
   agent: AgentInfo

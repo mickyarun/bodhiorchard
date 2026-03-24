@@ -34,6 +34,12 @@ class SkillProfile(BaseModel):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     module: Mapped[str] = mapped_column(String(255), nullable=False)
+    feature_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     repo: Mapped[str | None] = mapped_column(String(500), nullable=True)
     languages: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     skill_score: Mapped[float] = mapped_column(

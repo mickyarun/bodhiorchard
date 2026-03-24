@@ -18,8 +18,8 @@ class FeatureLearning(BaseModel):
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
-    prd_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("prd_documents.id"), nullable=False
+    bud_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("bud_documents.id"), nullable=False
     )
     cycle_time_days: Mapped[float | None] = mapped_column(
         Numeric(precision=8, scale=2), nullable=True
@@ -32,4 +32,4 @@ class FeatureLearning(BaseModel):
     embedding = mapped_column(Vector(768), nullable=True)
 
     def __repr__(self) -> str:
-        return f"<FeatureLearning(id={self.id}, prd_id={self.prd_id})>"
+        return f"<FeatureLearning(id={self.id}, bud_id={self.bud_id})>"

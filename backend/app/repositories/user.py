@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
+from app.models.user import User, UserEmailAlias
 from app.repositories.base import BaseRepository
 
 
@@ -64,6 +64,9 @@ class UserRepository(BaseRepository[User]):
     async def get_email_map(self, org_id: uuid.UUID) -> dict[str, User]:
         """Build a lowercase-email to User mapping for an organization.
 
+        Includes both primary emails and email aliases, so git commits
+        authored with any known email resolve to the correct user.
+
         Args:
             org_id: The organization UUID.
 
@@ -71,4 +74,80 @@ class UserRepository(BaseRepository[User]):
             Dict mapping lowercase email strings to User instances.
         """
         users = await self.list_by_org(org_id)
-        return {u.email.lower(): u for u in users}
+        email_map = {u.email.lower(): u for u in users}
+
+        # Add aliases
+        user_by_id = {u.id: u for u in users}
+        result = await self._db.execute(
+            select(UserEmailAlias).where(UserEmailAlias.org_id == org_id)
+        )
+        for alias in result.scalars():
+            user = user_by_id.get(alias.user_id)
+            if user:
+                email_map[alias.email.lower()] = user
+
+        return email_map
+
+    async def add_email_alias(
+        self,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        email: str,
+    ) -> UserEmailAlias | None:
+        """Add an email alias for a user. Skips if already exists.
+
+        Args:
+            org_id: Organization UUID.
+            user_id: Target user UUID.
+            email: The alias email.
+
+        Returns:
+            The created alias, or None if it already exists.
+        """
+        existing = await self._db.execute(
+            select(UserEmailAlias).where(
+                UserEmailAlias.org_id == org_id,
+                UserEmailAlias.email == email,
+            )
+        )
+        if existing.scalar_one_or_none():
+            return None
+        alias = UserEmailAlias(user_id=user_id, org_id=org_id, email=email)
+        self._db.add(alias)
+        return alias
+
+    async def list_aliases(self, user_id: uuid.UUID) -> list[UserEmailAlias]:
+        """List all email aliases for a user.
+
+        Args:
+            user_id: The user UUID.
+
+        Returns:
+            List of alias records.
+        """
+        result = await self._db.execute(
+            select(UserEmailAlias).where(UserEmailAlias.user_id == user_id)
+        )
+        return list(result.scalars().all())
+
+    async def get_alias_map_for_org(
+        self,
+        org_id: uuid.UUID,
+    ) -> dict[uuid.UUID, list[str]]:
+        """Build a user_id → [alias emails] mapping for an entire org.
+
+        Single query instead of per-user lookups.
+
+        Args:
+            org_id: The organization UUID.
+
+        Returns:
+            Dict mapping user UUIDs to lists of alias email strings.
+        """
+        result = await self._db.execute(
+            select(UserEmailAlias).where(UserEmailAlias.org_id == org_id)
+        )
+        alias_map: dict[uuid.UUID, list[str]] = {}
+        for alias in result.scalars():
+            alias_map.setdefault(alias.user_id, []).append(alias.email)
+        return alias_map

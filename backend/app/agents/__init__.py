@@ -1,1 +1,1 @@
-"""AI agent orchestration layer for FlowDev."""
+"""AI agent orchestration layer for Bodhigrove."""

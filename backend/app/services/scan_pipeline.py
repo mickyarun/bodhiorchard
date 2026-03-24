@@ -22,18 +22,29 @@ from app.repositories.user import UserRepository
 from app.schemas.skills import ScanStatus
 from app.services.claude_runner import (
     ClaudeRunnerConfig,
+    MCPServerConfig,
     is_claude_cli_available,
     run_claude_code,
 )
 from app.services.embedding_service import embedding_service
 from app.services.feature_merger import (
     build_targeted_merge_prompt,
+    deactivate_superseded_repo_features,
     dedup_merged_features,
     find_semantic_duplicates,
     merge_same_name_features,
 )
-from app.services.git_analyzer import analyze_repo_skills, get_diff_since, get_head_sha
-from app.services.repo_scanner import GitNexusNotInstalledError, index_repo_with_gitnexus
+from app.services.git_analyzer import FeatureMap, analyze_repo_skills, get_diff_since, get_head_sha
+from app.services.repo_scanner import (
+    GitNexusNotInstalledError,
+    add_bodhigrove_gitignore,
+    add_prepare_script,
+    commit_and_push_bodhigrove_setup,
+    ensure_repo_worktrees,
+    index_repo_with_gitnexus,
+    init_bodhigrove_mcp_in_repo,
+    install_hooks,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -171,11 +182,147 @@ async def _embed_missing_items(db: AsyncSession, org_id: uuid.UUID) -> int:
     return total_embedded
 
 
+async def _load_feature_map(db: AsyncSession, org_id: uuid.UUID) -> FeatureMap:
+    """Load (feature_name, flattened_path_list, feature_id) from active features.
+
+    Strips title prefixes (``[Repo] Feature:`` or ``Feature:``) to produce
+    clean names for skill profiles.  Sorts by path length descending so
+    longest-prefix matching works correctly.
+
+    Args:
+        db: The async database session.
+        org_id: Organization UUID.
+
+    Returns:
+        List of (feature_name, [path_prefixes], knowledge_item_id) tuples.
+    """
+    import re
+
+    ki_repo = KnowledgeItemRepository(db, org_id=org_id)
+    items = await ki_repo.list_active(category="feature_registry", limit=500)
+
+    prefix_re = re.compile(r"^(?:\[[^\]]+\]\s*)?Feature:\s*")
+    result: FeatureMap = []
+
+    for item in items:
+        if not item.code_locations:
+            continue
+        # Clean feature name
+        name = prefix_re.sub("", item.title).strip()
+        if not name:
+            continue
+        # Flatten all layer paths into one list
+        all_paths: list[str] = []
+        for paths in item.code_locations.values():
+            if isinstance(paths, list):
+                all_paths.extend(paths)
+        if all_paths:
+            result.append((name, all_paths, item.id))
+
+    # Sort by longest path first for greedy matching
+    result.sort(key=lambda entry: max((len(p) for p in entry[1]), default=0), reverse=True)
+    return result
+
+
+async def _maybe_extract_design_system(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    repo_path: str,
+    tracked_repo: object | None,
+    full_rescan: bool,
+) -> None:
+    """Auto-extract design system during scan if design files are detected.
+
+    Runs the extractor inline (not as a separate job) and upserts the result.
+    Skips if the source files haven't changed since last extraction (by hash),
+    unless full_rescan is True.
+
+    The first repo with a design system is set as the org default if none exists.
+
+    Args:
+        db: Async database session.
+        org_id: Organization UUID.
+        repo_path: Absolute path to the repository.
+        tracked_repo: TrackedRepository model instance (or None).
+        full_rescan: Whether this is a full rescan (force re-extraction).
+    """
+    from datetime import UTC, datetime
+
+    from app.repositories.design_system import DesignSystemRefRepository
+    from app.services.design_system_extractor import (
+        compute_hash,
+        discover_design_files,
+        extract_design_system,
+        read_discovered_files,
+    )
+    from app.services.repo_scanner import detect_repo_type
+
+    if detect_repo_type(repo_path) != "frontend":
+        logger.debug("design_system_skip_non_frontend", repo=Path(repo_path).name)
+        return
+
+    repo = Path(repo_path)
+    discovered = discover_design_files(repo)
+    if not discovered:
+        return  # No design files — skip silently
+
+    repo_id = tracked_repo.id if tracked_repo and hasattr(tracked_repo, "id") else None
+    if repo_id is None:
+        return
+
+    # Check if source files changed since last extraction (skip if unchanged)
+    file_contents = read_discovered_files(discovered)
+    source_hash = compute_hash(file_contents)
+
+    ds_repo = DesignSystemRefRepository(db, org_id=org_id)
+    existing = await ds_repo.get_for_repo(repo_id)
+
+    if existing and existing.source_hash == source_hash and not full_rescan:
+        logger.info(
+            "design_system_unchanged",
+            repo=repo.name,
+            hash=source_hash[:12],
+        )
+        return
+
+    logger.info(
+        "design_system_auto_extracting",
+        repo=repo.name,
+        file_count=len(discovered),
+    )
+
+    extraction = await extract_design_system(repo)
+
+    # Set as org default if no default exists yet
+    is_default = False
+    existing_default = await ds_repo.get_default()
+    if existing_default is None:
+        is_default = True
+
+    await ds_repo.upsert(
+        repo_id=repo_id,
+        content=extraction.content,
+        source_hash=extraction.source_hash,
+        extracted_at=datetime.now(UTC),
+        is_default=is_default,
+    )
+    await db.flush()
+
+    logger.info(
+        "design_system_auto_extracted",
+        repo=repo.name,
+        method=extraction.method,
+        is_default=is_default,
+        error=extraction.error,
+    )
+
+
 async def run_scan_pipeline(
     scan_id: str,
     org_id: uuid.UUID,
     repo_paths: list[str],
     full_rescan: bool,
+    user_id: str | None = None,
 ) -> None:
     """Execute the scan pipeline as a background task.
 
@@ -189,6 +336,7 @@ async def run_scan_pipeline(
         C. Documentation extraction → knowledge_items
         D. Stale reference cleanup (incremental only)
         E. Git skill analysis → skill_profiles
+        E1b. Auto-extract design system (if design files detected)
     Then globally:
         B3. Cross-repo feature merge (workspace only)
         F. Embedding generation for items missing embeddings
@@ -199,6 +347,7 @@ async def run_scan_pipeline(
         org_id: Organization UUID.
         repo_paths: List of absolute paths to git repositories to scan.
         full_rescan: Whether to force a complete rescan.
+        user_id: Optional user ID for sending completion notifications.
     """
     from app.database import AsyncSessionLocal
 
@@ -236,11 +385,11 @@ async def run_scan_pipeline(
             tracked_repo_repo = TrackedRepoRepository(db, org_id=org_id)
 
             # On full scan, delete old scan-sourced feature items up front
-            # (PRD-sourced items are preserved — they represent user intent)
+            # (BUD-sourced items are preserved — they represent user intent)
             ki_repo = KnowledgeItemRepository(db, org_id=org_id)
             if full_rescan or not config.get("knowledge", {}).get("last_commit_sha"):
                 deleted_count = await ki_repo.delete_by_category_excluding_source(
-                    "feature_registry", exclude_source="prd"
+                    "feature_registry", exclude_source="bud"
                 )
                 await db.flush()
                 if deleted_count:
@@ -332,11 +481,90 @@ async def run_scan_pipeline(
                 scan_status.status = "indexing"
                 scan_status.progress_pct = base_pct + int(repo_pct_range * 0.1)
 
-                if not is_incremental:
-                    gitnexus_result = await index_repo_with_gitnexus(repo_path)
+                gitnexus_result = await index_repo_with_gitnexus(
+                    repo_path,
+                    force=not is_incremental,
+                )
+
+                # Register GitNexus MCP with Claude Code (idempotent, ~1s if already done)
+                if gitnexus_result.success:
+                    from app.services.claude_runner import ensure_gitnexus_mcp
+
+                    await ensure_gitnexus_mcp()
 
                 await db.flush()
                 _mark(f"B_gitnexus/{repo_name}", phase_t0)
+
+                # --- Phase B1: Worktrees, MCP init, hooks, .gitignore ---
+                # Each function is idempotent — skips if already configured.
+                # Committable files (.claude/settings.json, .gitignore) are
+                # committed back to the repo so all devs get them on pull.
+                phase_t0 = time.monotonic()
+                try:
+                    main_wt, develop_wt = await ensure_repo_worktrees(repo_path)
+
+                    # Persist detected branches to tracked_repositories
+                    if tracked_repo:
+                        from app.services.repo_scanner import (
+                            _detect_develop_branch,
+                            _detect_main_branch,
+                        )
+
+                        if tracked_repo.main_branch is None:
+                            detected_main = await _detect_main_branch(repo_path)
+                            if detected_main:
+                                tracked_repo.main_branch = detected_main
+                        if tracked_repo.develop_branch is None:
+                            detected_dev = await _detect_develop_branch(repo_path)
+                            if detected_dev:
+                                tracked_repo.develop_branch = detected_dev
+
+                    # Init Bodhigrove MCP in repo (skips if already configured)
+                    from app.config import settings as app_settings
+                    from app.mcp.auth import create_internal_mcp_token
+
+                    mcp_token = create_internal_mcp_token(org_id)
+                    mcp_changed = await init_bodhigrove_mcp_in_repo(
+                        repo_path, app_settings.public_url, mcp_token
+                    )
+
+                    # Install git hooks to .githooks/ (committed) + set core.hooksPath
+                    hooks_changed = await install_hooks(
+                        repo_path, app_settings.public_url, str(org_id)
+                    )
+
+                    # Add .bodhigrove/ to .gitignore (skips if already present)
+                    gitignore_changed = add_bodhigrove_gitignore(repo_path)
+
+                    # Add prepare script to package.json (auto-sets hooksPath on npm install)
+                    prepare_changed = add_prepare_script(repo_path)
+
+                    # Branch, commit, and push setup files for team review
+                    any_changed = (
+                        mcp_changed or hooks_changed or gitignore_changed or prepare_changed
+                    )
+                    if any_changed:
+                        base = (
+                            tracked_repo.main_branch
+                            if tracked_repo and tracked_repo.main_branch
+                            else "main"
+                        )
+                        pushed_branch = await commit_and_push_bodhigrove_setup(repo_path, base)
+                        if pushed_branch:
+                            logger.info(
+                                "bodhigrove_setup_branch_pushed",
+                                repo=repo_name,
+                                branch=pushed_branch,
+                            )
+
+                    await db.flush()
+                except Exception:
+                    logger.exception(
+                        "scan_repo_setup_failed",
+                        scan_id=scan_id,
+                        repo=repo_name,
+                    )
+                _mark(f"B1_repo_setup/{repo_name}", phase_t0)
 
                 # --- Collect Phase B2 synthesis task (run in parallel later) ---
                 if (
@@ -393,7 +621,12 @@ async def run_scan_pipeline(
                 scan_status.status = "analyzing_skills"
                 scan_status.progress_pct = base_pct + int(repo_pct_range * 0.6)
 
-                skill_entries = await analyze_repo_skills(repo_path)
+                # Load feature map for feature-linked skill profiles
+                # (on incremental scans, features already exist from prior full scan)
+                feature_map = await _load_feature_map(db, org_id)
+                skill_entries = await analyze_repo_skills(
+                    repo_path, feature_map=feature_map or None
+                )
 
                 # Auto-create members from git authors if enabled
                 auto_create = scan_cfg.get("auto_create_members", True)
@@ -433,11 +666,13 @@ async def run_scan_pipeline(
                         profile.skill_score = entry.skill_score
                         profile.languages = entry.languages
                         profile.last_touch = entry.last_touch
+                        profile.feature_id = entry.feature_id
                     else:
                         profile = SkillProfile(
                             user_id=user.id,
                             org_id=org_id,
                             module=entry.module,
+                            feature_id=entry.feature_id,
                             repo=repo_path,
                             languages=entry.languages,
                             skill_score=entry.skill_score,
@@ -449,6 +684,24 @@ async def run_scan_pipeline(
                 await db.flush()
 
                 _mark(f"E_skills/{repo_name}", phase_t0)
+
+                # --- Phase E1b: Auto-extract design system (if design files exist) ---
+                phase_t0 = time.monotonic()
+                try:
+                    await _maybe_extract_design_system(
+                        db,
+                        org_id,
+                        repo_path,
+                        tracked_repo,
+                        full_rescan,
+                    )
+                except Exception:
+                    logger.exception(
+                        "design_system_auto_extract_failed",
+                        scan_id=scan_id,
+                        repo=repo_name,
+                    )
+                _mark(f"E1b_design_system/{repo_name}", phase_t0)
 
                 # Track HEAD SHA per repo
                 head_sha = await get_head_sha(repo_path)
@@ -469,12 +722,11 @@ async def run_scan_pipeline(
                 async def _synthesize_repo(task: dict) -> dict:
                     """Run synthesis for one repo. Returns result dict."""
                     from app.config import settings as app_settings
-                    from app.mcp.auth import revoke_internal_mcp_token
+                    from app.mcp.auth import create_internal_mcp_token
                     from app.mcp.server import (
                         clear_synthesis_queue,
                         get_queue_remaining,
                     )
-                    from app.services.claude_runner import ensure_flowdev_mcp
 
                     rname = task["repo_name"]
                     t0 = time.monotonic()
@@ -483,20 +735,21 @@ async def run_scan_pipeline(
                         task["overview"],
                         is_workspace,
                     )
+                    token = create_internal_mcp_token(org_id)
                     synth_config = ClaudeRunnerConfig(
                         max_turns=scan_cfg.get("max_turns", 40),
                         timeout_seconds=scan_cfg.get("timeout_seconds", 300),
                         output_format="json",
+                        mcp=MCPServerConfig(
+                            backend_url=app_settings.mcp_backend_url,
+                            mcp_token=token,
+                        ),
                     )
-                    token = await ensure_flowdev_mcp(org_id, app_settings.public_url)
-                    try:
-                        result = await run_claude_code(
-                            prompt=prompt,
-                            working_dir=task["repo_path"],
-                            config=synth_config,
-                        )
-                    finally:
-                        revoke_internal_mcp_token(token)
+                    result = await run_claude_code(
+                        prompt=prompt,
+                        working_dir=task["repo_path"],
+                        config=synth_config,
+                    )
 
                     remaining = get_queue_remaining(
                         str(org_id),
@@ -565,6 +818,56 @@ async def run_scan_pipeline(
                     category="feature_registry"
                 )
 
+                # --- Phase E2: Re-run skill analysis with feature-based modules ---
+                # On full scans, Phase E ran before features existed. Now that
+                # features are synthesized, reload the feature map and rebuild
+                # skill profiles so modules are feature names, not directories.
+                phase_t0 = time.monotonic()
+                feature_map_e2 = await _load_feature_map(db, org_id)
+                if feature_map_e2:
+                    scan_status.status = "analyzing_skills"
+                    # Delete old directory-based profiles
+                    sp_repo_e2 = SkillProfileRepository(db, org_id=org_id)
+                    deleted_profiles = await sp_repo_e2.delete_all_for_org()
+                    if deleted_profiles:
+                        logger.info("e2_deleted_old_profiles", count=deleted_profiles)
+
+                    total_profiles = 0
+                    for repo_path_e2 in repo_paths:
+                        entries_e2 = await analyze_repo_skills(
+                            repo_path_e2, feature_map=feature_map_e2
+                        )
+                        for entry in entries_e2:
+                            user = email_to_user.get(entry.email.lower())
+                            if user is None:
+                                continue
+                            total_profiles += 1
+                            profile = await sp_repo_e2.get_by_user_and_module(
+                                user.id, entry.module
+                            )
+                            if profile:
+                                profile.touch_count = entry.touch_count
+                                profile.skill_score = entry.skill_score
+                                profile.languages = entry.languages
+                                profile.last_touch = entry.last_touch
+                                profile.feature_id = entry.feature_id
+                            else:
+                                profile = SkillProfile(
+                                    user_id=user.id,
+                                    org_id=org_id,
+                                    module=entry.module,
+                                    feature_id=entry.feature_id,
+                                    repo=repo_path_e2,
+                                    languages=entry.languages,
+                                    skill_score=entry.skill_score,
+                                    touch_count=entry.touch_count,
+                                    last_touch=entry.last_touch,
+                                )
+                                db.add(profile)
+                        await db.flush()
+
+                _mark("E2_skill_remap", phase_t0)
+
             # --- Phase B3a: Programmatic same-name merge (workspace only) ---
             phase_t0 = time.monotonic()
             if is_workspace and total_features_synthesized > 0:
@@ -583,6 +886,14 @@ async def run_scan_pipeline(
             await _embed_missing_items(db, org_id)
             _mark("F_embedding", phase_t0)
 
+            # --- Phase B3a2: Deactivate superseded repo-specific features ---
+            phase_t0 = time.monotonic()
+            if is_workspace and total_features_synthesized > 0:
+                superseded = await deactivate_superseded_repo_features(db, org_id)
+                if superseded:
+                    logger.info("superseded_cleanup_done", deactivated=superseded)
+            _mark("B3a2_superseded", phase_t0)
+
             # --- Phase B3b: Semantic dedup (any scan with 2+ features) ---
             phase_t0 = time.monotonic()
             if total_features_synthesized >= 2 and is_claude_cli_available():
@@ -597,26 +908,23 @@ async def run_scan_pipeline(
                     await db.commit()
 
                     from app.config import settings
-                    from app.mcp.auth import revoke_internal_mcp_token
-                    from app.services.claude_runner import ensure_flowdev_mcp
+                    from app.mcp.auth import create_internal_mcp_token
 
+                    merge_token = create_internal_mcp_token(org_id)
                     merge_config = ClaudeRunnerConfig(
                         max_turns=min(len(dup_groups) * 3, scan_cfg.get("max_turns", 40)),
                         timeout_seconds=scan_cfg.get("timeout_seconds", 300),
                         output_format="json",
+                        mcp=MCPServerConfig(
+                            backend_url=settings.mcp_backend_url,
+                            mcp_token=merge_token,
+                        ),
                     )
-                    merge_token = await ensure_flowdev_mcp(
-                        org_id,
-                        settings.public_url,
+                    merge_result = await run_claude_code(
+                        prompt=merge_prompt,
+                        working_dir=str(Path(repo_paths[0]).parent),
+                        config=merge_config,
                     )
-                    try:
-                        merge_result = await run_claude_code(
-                            prompt=merge_prompt,
-                            working_dir=str(Path(repo_paths[0]).parent),
-                            config=merge_config,
-                        )
-                    finally:
-                        revoke_internal_mcp_token(merge_token)
 
                     if merge_result.success:
                         logger.info(
@@ -715,11 +1023,43 @@ async def run_scan_pipeline(
                 phase_timings=phase_timings,
             )
 
+            if user_id:
+                from app.services.notification_service import send_scan_notification
+
+                send_scan_notification(
+                    scan_id=scan_id,
+                    user_id=user_id,
+                    org_id=str(org_id),
+                    completed=True,
+                    features_indexed=actual_features,
+                    profiles_found=total_profiles,
+                )
+
     except GitNexusNotInstalledError as exc:
         logger.error("scan_gitnexus_not_installed", scan_id=scan_id, error=str(exc))
         scan_status.status = "failed"
         scan_status.error = str(exc)
+        if user_id:
+            from app.services.notification_service import send_scan_notification
+
+            send_scan_notification(
+                scan_id=scan_id,
+                user_id=user_id,
+                org_id=str(org_id),
+                completed=False,
+                error_message=str(exc),
+            )
     except Exception as exc:
         logger.exception("scan_pipeline_error", scan_id=scan_id)
         scan_status.status = "failed"
         scan_status.error = str(exc)[:500]
+        if user_id:
+            from app.services.notification_service import send_scan_notification
+
+            send_scan_notification(
+                scan_id=scan_id,
+                user_id=user_id,
+                org_id=str(org_id),
+                completed=False,
+                error_message=str(exc)[:500],
+            )

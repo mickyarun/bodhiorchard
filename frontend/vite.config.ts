@@ -15,10 +15,13 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    allowedHosts: ['frontendchat.ngrok.app'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        timeout: 300000, // 5 min — AI chat endpoints can be slow
+        ws: true,
       },
     },
   },

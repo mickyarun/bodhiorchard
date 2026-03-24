@@ -8,7 +8,7 @@
       <v-card color="surface" class="pa-8 w-100" max-width="420">
         <div class="text-h5 font-weight-bold mb-1 text-center">Welcome back</div>
         <div class="text-body-2 text-medium-emphasis text-center mb-6">
-          Sign in to your FlowDev account
+          Sign in to your Bodhigrove account
         </div>
 
         <v-alert

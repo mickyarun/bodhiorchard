@@ -99,3 +99,27 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+---
+
+## Garden Engine (3D Visualization)
+
+**Before making ANY changes to `frontend/src/engine/`**, you MUST:
+
+1. **Read `frontend/src/engine/ARCHITECTURE.md`** — this is the single source of truth for the engine's structure, conventions, data flow, and design decisions.
+2. **Follow the PBR lighting rule** — NEVER use `useLighting = false` on any material. The engine uses proper IBL + ACES tone mapping + sRGB gamma. If something looks dark, adjust exposure/material properties — don't bypass the pipeline.
+3. **Respect the boundary** — only `GardenEngine` (from `engine/index.ts`) is imported by Vue. `types.ts` has zero app-layer imports.
+4. **Use MaterialFactory** — don't create ad-hoc `StandardMaterial` instances. Use `MaterialFactory.getColor()` for cached, properly-lit materials.
+5. **Return exclusion zones** — any subsystem that occupies ground space must return `{ x, z, radius }` zones so grass/rocks avoid it.
+6. **Old engine backup** — the previous engine lives in `frontend/src/engine_bkup/` for reference. It is excluded from TypeScript compilation via `tsconfig.json`.
+
+### Engine Phases
+
+| Phase | Status | What it adds |
+|-------|--------|-------------|
+| 1 — Skeleton | DONE | Application boot, PBR lighting, camera, input, materials |
+| 2 — World | PENDING | Environment, trees, buildings, pool, water, arcs |
+| 3 — Player | PENDING | GLTF characters, WASD movement, swimming, labels |
+| 4 — NPC AI | PENDING | Behavior trees, time-based schedules, activity routing |
+| 5 — Interaction | PENDING | Click/hover picking, tooltips, camera focus |
+| 6 — Effects | PENDING | Particles, splash, ZZZ, steam, vehicles |
