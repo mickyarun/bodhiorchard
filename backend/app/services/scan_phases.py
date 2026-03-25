@@ -673,6 +673,7 @@ async def phase_b3_merge(
                         max_turns=scan_cfg.get("max_turns", 40),
                         timeout_seconds=scan_cfg.get("timeout_seconds", 300),
                         output_format="json",
+                        model=settings.llm.merge_model,
                         mcp=MCPServerConfig(
                             backend_url=settings.mcp_backend_url,
                             mcp_token=merge_token,

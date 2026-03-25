@@ -42,6 +42,10 @@ class LLMConfig(BaseSettings):
     premium_provider: str = Field(default="ollama")
     premium_model: str = Field(default="llama3:70b")
     merge_batch_size: int = Field(default=500, description="Max features per LLM merge call")
+    merge_model: str = Field(
+        default="claude-opus-4-6",
+        description="Model for cross-repo feature merge (critical accuracy step)",
+    )
 
 
 class EmbeddingConfig(BaseSettings):
