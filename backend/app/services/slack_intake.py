@@ -291,40 +291,12 @@ async def handle_pm_approval(
         bud_number=next_number,
     )
 
-    # Auto-trigger PRD agent via stage mapping + agent task
-    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
-    from app.repositories.agent_skill_bud_stage import AgentSkillBudStageRepository
-    from app.schemas.jobs import BUDAgentTaskPayload
-    from app.services.job_queue import JOB_BUD_AGENT, create_job
+    # Auto-trigger PRD agent via the agent task system
+    from app.services.bud_agent_trigger import create_agent_task_for_stage
 
-    stage_repo = AgentSkillBudStageRepository(db, org_id=org.id)
-    mappings = await stage_repo.get_for_status("bud")
-    first_mapping = next((m for m in mappings if m.enabled), None)
-
-    if first_mapping:
-        task = BUDAgentTask(
-            org_id=org.id,
-            bud_id=bud.id,
-            skill_id=first_mapping.skill_id,
-            task_type="bud",
-            status=AgentTaskStatus.PENDING,
-            attempt=1,
-            triggered_by=approver.id,
-        )
-        db.add(task)
-        await db.flush()
-
-        prd_job = create_job(
-            JOB_BUD_AGENT,
-            payload=BUDAgentTaskPayload(
-                org_id=str(org.id),
-                bud_id=str(bud.id),
-                task_id=str(task.id),
-            ).model_dump(),
-            user_id=str(approver.id),
-        )
-        task.job_id = prd_job.job_id
-        task.status = AgentTaskStatus.RUNNING
+    await create_agent_task_for_stage(
+        bud, "bud", org.id, db, triggered_by=approver.id
+    )
 
 
 # ── Private helpers ────────────────────────────────────────────────

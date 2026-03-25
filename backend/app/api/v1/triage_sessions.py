@@ -193,10 +193,12 @@ async def approve_triage_session(
             thread_ts=session.thread_ts,
         )
 
-    # Trigger PRD agent via the new agent task system
-    from app.api.v1.bud import _create_agent_task_for_stage
+    # Trigger PRD agent via the agent task system
+    from app.services.bud_agent_trigger import create_agent_task_for_stage
 
-    await _create_agent_task_for_stage(bud, "bud", current_user, db)
+    await create_agent_task_for_stage(
+        bud, "bud", current_user.org_id, db, triggered_by=current_user.id
+    )
 
     return await _session_to_read(session, current_user, db)
 

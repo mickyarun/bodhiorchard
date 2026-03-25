@@ -61,7 +61,7 @@ class BUDAgentTask(BaseModel):
     )
     skill_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("agent_skills.id"),
+        ForeignKey("agent_skills.id", ondelete="RESTRICT"),
         nullable=False,
     )
     task_type: Mapped[str] = mapped_column(String(30), nullable=False)

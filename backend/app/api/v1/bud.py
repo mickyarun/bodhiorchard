@@ -314,65 +314,12 @@ async def _trigger_status_jobs(
 
     # Data-driven agent triggering via stage mappings
     if new_status != old_status:
-        await _create_agent_task_for_stage(
-            bud, str(new_status), current_user, db
+        from app.services.bud_agent_trigger import create_agent_task_for_stage
+
+        await create_agent_task_for_stage(
+            bud, str(new_status), current_user.org_id, db,
+            triggered_by=current_user.id,
         )
-
-
-async def _create_agent_task_for_stage(
-    bud: BUDDocument,
-    bud_status: str,
-    current_user: User,
-    db: AsyncSession,
-) -> None:
-    """Look up stage mapping and create an agent task if configured.
-
-    Args:
-        bud: The BUD document.
-        bud_status: The new BUD status string.
-        current_user: The user triggering the transition.
-        db: Async database session.
-    """
-    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
-    from app.repositories.agent_skill_bud_stage import AgentSkillBudStageRepository
-    from app.schemas.jobs import BUDAgentTaskPayload
-
-    stage_repo = AgentSkillBudStageRepository(db, org_id=current_user.org_id)
-    mappings = await stage_repo.get_for_status(bud_status)
-    if not mappings:
-        return
-
-    # Trigger first enabled mapping (pipeline: execution_order=1)
-    first = next((m for m in mappings if m.enabled), None)
-    if not first:
-        return
-
-    task = BUDAgentTask(
-        org_id=bud.org_id,
-        bud_id=bud.id,
-        skill_id=first.skill_id,
-        task_type=bud_status,
-        status=AgentTaskStatus.PENDING,
-        attempt=1,
-        triggered_by=current_user.id,
-    )
-    db.add(task)
-    await db.flush()
-
-    from app.services.job_queue import JOB_BUD_AGENT, create_job
-
-    job = create_job(
-        JOB_BUD_AGENT,
-        payload=BUDAgentTaskPayload(
-            org_id=str(bud.org_id),
-            bud_id=str(bud.id),
-            task_id=str(task.id),
-        ).model_dump(),
-        user_id=str(current_user.id),
-    )
-    task.job_id = job.job_id
-    task.status = AgentTaskStatus.RUNNING
-    await db.flush()
 
 
 @router.post(

@@ -379,6 +379,11 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 update_job(job_id, state=JobState.FAILED, error="Agent task not found")
                 return
 
+            # Defense-in-depth: verify task belongs to the expected org
+            if task.org_id != org_id:
+                update_job(job_id, state=JobState.FAILED, error="Org mismatch")
+                return
+
             bud_repo = BUDRepository(db, org_id=org_id)
             bud = await bud_repo.get_by_id(bud_id)
             if not bud:
