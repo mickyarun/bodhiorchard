@@ -7,7 +7,7 @@ and deduplication queries.
 import uuid
 
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -715,88 +715,6 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
         return [row[0] for row in result.all()]
 
-    async def find_semantic_duplicates(
-        self,
-        category: str,
-        threshold: float = 0.85,
-    ) -> list[tuple[uuid.UUID, uuid.UUID, float]]:
-        """Find pairs of items with high cosine similarity.
-
-        Uses raw SQL for the pgvector self-join cosine distance operation.
-
-        Args:
-            category: Category to search within.
-            threshold: Minimum cosine similarity (0-1) to consider a match.
-
-        Returns:
-            List of (id_a, id_b, similarity) tuples.
-        """
-        stmt = text("""
-            SELECT a.id AS a_id, b.id AS b_id,
-                   1 - (a.embedding <=> b.embedding) AS similarity
-            FROM knowledge_items a
-            JOIN knowledge_items b ON a.id < b.id
-            WHERE a.org_id = :org_id AND b.org_id = :org_id
-              AND a.category = :category
-              AND b.category = :category
-              AND a.is_active = true AND b.is_active = true
-              AND a.embedding IS NOT NULL AND b.embedding IS NOT NULL
-              AND (a.embedding <=> b.embedding) < :max_distance
-        """)
-        rows = (
-            await self._db.execute(
-                stmt,
-                {
-                    "org_id": str(self._org_id),
-                    "category": category,
-                    "max_distance": 1.0 - threshold,
-                },
-            )
-        ).all()
-        return [(a_id, b_id, sim) for a_id, b_id, sim in rows]
-
-    async def find_superseded_repo_features(
-        self,
-        threshold: float = 0.80,
-    ) -> list[tuple[uuid.UUID, uuid.UUID, float]]:
-        """Find repo-specific features superseded by cross-repo merged features.
-
-        Cross-joins ``[Repo] Feature: X`` items against ``Feature: X`` items
-        using pgvector cosine similarity.
-
-        Args:
-            threshold: Minimum cosine similarity to consider a match.
-
-        Returns:
-            List of (repo_specific_id, cross_repo_id, similarity) tuples.
-        """
-        stmt = text("""
-            SELECT r.id AS repo_id, c.id AS cross_id,
-                   1 - (r.embedding <=> c.embedding) AS similarity
-            FROM knowledge_items r
-            JOIN knowledge_items c
-              ON r.org_id = c.org_id
-             AND r.id != c.id
-            WHERE r.org_id = :org_id
-              AND r.category = 'feature_registry'
-              AND c.category = 'feature_registry'
-              AND r.is_active = true AND c.is_active = true
-              AND r.embedding IS NOT NULL AND c.embedding IS NOT NULL
-              AND r.title LIKE '[%%] Feature:%%'
-              AND c.title LIKE 'Feature:%%'
-              AND c.title NOT LIKE '[%%] Feature:%%'
-              AND (r.embedding <=> c.embedding) < :max_distance
-        """)
-        rows = (
-            await self._db.execute(
-                stmt,
-                {
-                    "org_id": str(self._org_id),
-                    "max_distance": 1.0 - threshold,
-                },
-            )
-        ).all()
-        return [(repo_id, cross_id, sim) for repo_id, cross_id, sim in rows]
 
     async def get_by_ids(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, KnowledgeItem]:
         """Fetch multiple items by their IDs.

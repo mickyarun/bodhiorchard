@@ -455,6 +455,50 @@ async def phase_e2_skill_remap(
     return total_profiles
 
 
+async def _collect_feature_dicts(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    ki_repo: KnowledgeItemRepository,
+) -> list[dict]:
+    """Collect active features with their repo names for the merge prompt.
+
+    Uses a single joined query to avoid N+1. Returns only features
+    that are linked to at least one repo (orphans are excluded).
+    """
+    from sqlalchemy import select as sa_select
+
+    from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
+    from app.models.tracked_repository import TrackedRepository
+
+    rows = (
+        await db.execute(
+            sa_select(
+                KnowledgeItem.title,
+                KnowledgeItem.tags,
+                TrackedRepository.name.label("repo_name"),
+            )
+            .outerjoin(KnowledgeRepoLink, KnowledgeRepoLink.knowledge_id == KnowledgeItem.id)
+            .outerjoin(TrackedRepository, TrackedRepository.id == KnowledgeRepoLink.repo_id)
+            .where(
+                KnowledgeItem.org_id == org_id,
+                KnowledgeItem.category == "feature_registry",
+                KnowledgeItem.is_active.is_(True),
+            )
+        )
+    ).all()
+
+    # Group by title → collect repo names
+    grouped: dict[str, dict] = {}
+    for title, tags, repo_name in rows:
+        if title not in grouped:
+            grouped[title] = {"title": title, "repo_names": [], "tags": tags or []}
+        if repo_name and repo_name not in grouped[title]["repo_names"]:
+            grouped[title]["repo_names"].append(repo_name)
+
+    # Only return features linked to at least one repo
+    return [f for f in grouped.values() if f["repo_names"]]
+
+
 async def phase_b3_merge(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -485,7 +529,7 @@ async def phase_b3_merge(
         Dict with possibly updated ``config`` (after commit/reload).
     """
     from app.repositories.organization import OrganizationRepository
-    from app.services.scan_pipeline import MERGE_BATCH_SIZE, build_merge_prompt
+    from app.services.scan_pipeline import _get_merge_batch_size, build_merge_prompt
 
     # --- Embed missing items ---
     scan_status.status = "embedding"
@@ -498,36 +542,18 @@ async def phase_b3_merge(
         scan_status.status = "merging_features"
         scan_status.progress_pct = 92
 
-        # Collect features with their repo names for the merge prompt
-        from app.models.tracked_repository import TrackedRepository
-
-        features = await ki_repo.list_active(category="feature_registry", limit=1000)
-
-        feature_dicts: list[dict] = []
-        for f in features:
-            repo_ids = await ki_repo.get_repo_ids(f.id)
-            rnames: list[str] = []
-            for rid in repo_ids:
-                tracked = await db.get(TrackedRepository, rid)
-                if tracked:
-                    rnames.append(tracked.name)
-            feature_dicts.append({
-                "title": f.title,
-                "repo_names": rnames,
-                "tags": f.tags or [],
-            })
-
-        if feature_dicts:
+        linked_features = await _collect_feature_dicts(db, org_id, ki_repo)
+        if linked_features:
             await db.commit()
 
             from app.config import settings
             from app.mcp.auth import create_internal_mcp_token
 
-            # Process in batches, re-run until no more merges
-            prev_count = len(feature_dicts)
-            for _pass in range(3):  # Max 3 passes to prevent infinite loops
-                for batch_start in range(0, len(feature_dicts), MERGE_BATCH_SIZE):
-                    batch = feature_dicts[batch_start:batch_start + MERGE_BATCH_SIZE]
+            merge_batch_size = _get_merge_batch_size()
+            prev_count = await ki_repo.count_active(category="feature_registry")
+            for _pass in range(3):  # Re-run if batch < total (cross-batch dupes)
+                for batch_start in range(0, len(linked_features), merge_batch_size):
+                    batch = linked_features[batch_start:batch_start + merge_batch_size]
                     merge_prompt = build_merge_prompt(batch)
 
                     merge_token = create_internal_mcp_token(org_id)
@@ -547,7 +573,7 @@ async def phase_b3_merge(
                     )
                     if result.success:
                         logger.info(
-                            "llm_merge_pass_complete",
+                            "llm_merge_complete",
                             pass_num=_pass + 1,
                             batch_size=len(batch),
                             cost=result.cost_usd,
@@ -555,11 +581,14 @@ async def phase_b3_merge(
                     else:
                         logger.warning("llm_merge_failed", error=result.error)
 
-                # Check if merges happened
+                # Check if merges happened this pass
                 new_count = await ki_repo.count_active(category="feature_registry")
                 if new_count >= prev_count:
-                    break  # No merges this pass
+                    break  # No merges — done
                 prev_count = new_count
+
+                # Rebuild feature list for next pass (stale titles removed)
+                linked_features = await _collect_feature_dicts(db, org_id, ki_repo)
 
             # Re-embed after merge
             await embed_missing_items(db, org_id)

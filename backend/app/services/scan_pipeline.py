@@ -8,7 +8,6 @@ Phase implementations live in ``scan_phases.py``; reusable helpers
 (timing, upsert, embedding) live in ``scan_helpers.py``.
 """
 
-import os
 import uuid
 from pathlib import Path
 
@@ -44,8 +43,10 @@ logger = structlog.get_logger(__name__)
 # If >30% of tracked files changed, fall back to full scan
 INCREMENTAL_THRESHOLD = 0.30
 
-# Max features per LLM merge call (configurable for different models)
-MERGE_BATCH_SIZE = int(os.getenv("MERGE_BATCH_SIZE", "500"))
+# Max features per LLM merge call (configurable via LLM_MERGE_BATCH_SIZE env)
+def _get_merge_batch_size() -> int:
+    from app.config import settings
+    return settings.llm.merge_batch_size
 
 # In-memory scan status tracking (use Redis in production)
 scan_statuses: dict[str, ScanStatus] = {}

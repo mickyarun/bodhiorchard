@@ -41,6 +41,7 @@ class LLMConfig(BaseSettings):
     base_url: str = Field(default="http://localhost:11434")
     premium_provider: str = Field(default="ollama")
     premium_model: str = Field(default="llama3:70b")
+    merge_batch_size: int = Field(default=500, description="Max features per LLM merge call")
 
 
 class EmbeddingConfig(BaseSettings):

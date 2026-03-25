@@ -407,6 +407,16 @@ async def handle_merge_features(
 
     await ki_repo.flush()
 
+    if merged_count == 0 and repos_linked == 0:
+        logger.info("mcp_merge_features_noop", org_id=str(org.id), kept=keep_title)
+        return {
+            "success": True,
+            "kept": keep_title,
+            "merged_count": 0,
+            "repos_linked": 0,
+            "warning": "No changes made — nothing to merge or link",
+        }
+
     logger.info(
         "mcp_merge_features",
         org_id=str(org.id),
