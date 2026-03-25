@@ -204,8 +204,14 @@ async def initialize_setup(
     db.add(user)
     await db.flush()
 
-    # Seed permissions and assign org_owner role
+    # Seed permissions, agent skills, and stage mappings
     await seed_permissions(db)
+
+    from app.services.bud_stage_seeder import seed_stage_mappings_for_org
+    from app.services.skill_loader import seed_skills_for_org
+
+    await seed_skills_for_org(org.id, db)
+    await seed_stage_mappings_for_org(org.id, db)
     role_repo = RoleRepository(db)
     owner_role = await role_repo.get_by_name_system("org_owner")
 

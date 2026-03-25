@@ -64,7 +64,16 @@ async def create_organization(
         slug=body.slug,
         config=body.config,
     )
-    return await org_repo.create(org)
+    created_org = await org_repo.create(org)
+
+    # Seed agent skills and stage mappings for the new org
+    from app.services.bud_stage_seeder import seed_stage_mappings_for_org
+    from app.services.skill_loader import seed_skills_for_org
+
+    await seed_skills_for_org(created_org.id, db)
+    await seed_stage_mappings_for_org(created_org.id, db)
+
+    return created_org
 
 
 @router.get("/{org_id}", response_model=OrganizationRead)
