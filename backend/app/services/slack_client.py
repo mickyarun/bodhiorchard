@@ -242,6 +242,48 @@ async def users_get_presence(token: str, user_id: str) -> str | None:
         return data.get("presence")
 
 
+async def conversations_open(token: str, user_id: str) -> str | None:
+    """Open (or resume) a direct-message conversation with a Slack user.
+
+    Args:
+        token: Slack bot token.
+        user_id: Slack user ID to DM.
+
+    Returns:
+        The DM channel ID, or None on failure.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{_SLACK_BASE}/conversations.open",
+                json={"users": user_id},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=_TIMEOUT,
+            )
+            data = resp.json()
+            if not data.get("ok"):
+                logger.warning(
+                    "slack_conversations_open_failed",
+                    error=data.get("error"),
+                    user_id=user_id,
+                )
+                return None
+            channel_id = data.get("channel", {}).get("id")
+            if not channel_id:
+                logger.warning(
+                    "slack_conversations_open_no_channel_id",
+                    user_id=user_id,
+                )
+            return channel_id
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.error(
+            "slack_conversations_open_error",
+            error=str(exc),
+            user_id=user_id,
+        )
+        return None
+
+
 async def auth_test(token: str) -> dict | None:
     """Call auth.test to retrieve bot/team info.
 

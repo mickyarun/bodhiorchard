@@ -11,7 +11,9 @@ export interface Member {
   roleName: string | null
   avatarUrl: string | null
   githubUsername: string | null
+  slackId: string | null
   isActive: boolean
+  mustChangePassword: boolean
   createdAt: string
   emailAliases: string[]
 }
@@ -197,6 +199,40 @@ export const useMembersStore = defineStore('members', () => {
     }
   }
 
+  interface SetPasswordResult {
+    password: string
+    loginUrl: string
+    slackSent?: boolean | null
+    slackError?: string | null
+  }
+
+  async function setPassword(
+    userId: string,
+    sendVia?: 'slack',
+  ): Promise<SetPasswordResult | null> {
+    error.value = null
+    try {
+      const payload = sendVia ? { sendVia } : {}
+      const { data } = await api.post(`/v1/members/${userId}/set-password`, payload)
+      const idx = members.value.findIndex(m => m.id === userId)
+      if (idx !== -1) members.value[idx].mustChangePassword = true
+      return {
+        password: data.password,
+        loginUrl: data.loginUrl ?? '',
+        slackSent: data.slackSent ?? null,
+        slackError: data.slackError ?? null,
+      }
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { data?: { detail?: string } } }
+        error.value = axiosErr.response?.data?.detail || 'Failed to set password.'
+      } else {
+        error.value = 'Failed to set password.'
+      }
+      return null
+    }
+  }
+
   async function deleteRole(roleId: string): Promise<boolean> {
     error.value = null
     try {
@@ -226,6 +262,7 @@ export const useMembersStore = defineStore('members', () => {
     assignRole,
     mergeMember,
     updateCharacter,
+    setPassword,
     createRole,
     deleteRole,
   }

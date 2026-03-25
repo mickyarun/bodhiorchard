@@ -102,6 +102,69 @@ async def get_current_user(
     user.role_id = membership.role_id  # type: ignore[attr-defined]
     user.role_ref = membership.role_ref  # type: ignore[attr-defined]
 
+    # Block API access when password change is required
+    if user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password change required",
+        )
+
+    return user
+
+
+async def get_current_user_pending_password(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Like get_current_user but allows users with must_change_password=True.
+
+    Used exclusively by the change-password endpoint.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    payload = verify_token(token)
+    if payload is None:
+        raise credentials_exception
+
+    user_id_str: str | None = payload.get("sub")
+    org_id_str: str | None = payload.get("org_id")
+    if user_id_str is None or org_id_str is None:
+        raise credentials_exception
+
+    try:
+        user_id = uuid.UUID(user_id_str)
+        org_id = uuid.UUID(org_id_str)
+    except ValueError:
+        raise credentials_exception from None
+
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+
+    if user is None:
+        raise credentials_exception
+
+    result = await db.execute(
+        select(OrgToUser).where(
+            OrgToUser.user_id == user_id,
+            OrgToUser.org_id == org_id,
+        )
+    )
+    membership = result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not a member of this organization",
+        )
+
+    user.org_id = membership.org_id  # type: ignore[attr-defined]
+    user.role = membership.role  # type: ignore[attr-defined]
+    user.role_id = membership.role_id  # type: ignore[attr-defined]
+    user.role_ref = membership.role_ref  # type: ignore[attr-defined]
+
     return user
 
 

@@ -7,11 +7,13 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const token = ref<string | null>(localStorage.getItem('flowdev_token'))
   const loginError = ref<string | null>(null)
+  const mustChangePassword = ref(false)
 
   const isAuthenticated = computed(() => !!token.value)
 
   async function login(email: string, password: string, orgSlug: string): Promise<boolean> {
     loginError.value = null
+    mustChangePassword.value = false
     try {
       const response = await api.post('/v1/auth/login', {
         email,
@@ -23,6 +25,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (response.data.refresh_token) {
         localStorage.setItem('flowdev_refresh_token', response.data.refresh_token)
       }
+      mustChangePassword.value = response.data.must_change_password === true
       // Fetch user profile but don't break login if it fails
       try { await fetchUser() } catch { /* token is valid, profile fetch can retry later */ }
       return true
@@ -54,13 +57,32 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = response.data
   }
 
+  async function changePassword(newPassword: string): Promise<string | null> {
+    try {
+      await api.post('/v1/auth/change-password', { new_password: newPassword })
+      mustChangePassword.value = false
+      return null
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
+        if (axiosErr.response?.status === 401) {
+          return 'Session expired. Please log in again.'
+        }
+        return axiosErr.response?.data?.detail || 'Failed to change password.'
+      }
+      return 'Network error. Please check your connection.'
+    }
+  }
+
   return {
     user,
     token,
     loginError,
+    mustChangePassword,
     isAuthenticated,
     login,
     logout,
     fetchUser,
+    changePassword,
   }
 })

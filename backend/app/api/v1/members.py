@@ -1,5 +1,7 @@
 """Organization member listing and role assignment endpoints."""
 
+import secrets
+import string
 import uuid
 
 import structlog
@@ -8,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.core.security import hash_password
+from app.models.organization import Organization
 from app.models.user import OrgToUser, User, UserRole
 from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
@@ -18,6 +21,8 @@ from app.schemas.members import (
     AssignRoleRequest,
     MemberRead,
     MergeMembersRequest,
+    SetPasswordRequest,
+    SetPasswordResponse,
     UpdateCharacterRequest,
 )
 
@@ -48,7 +53,9 @@ def _user_to_member(user: User, aliases: list[str] | None = None) -> MemberRead:
         roleName=role_name,
         avatarUrl=user.avatar_url,
         githubUsername=user.github_username,
+        slackId=user.slack_id,
         isActive=user.is_active,
+        mustChangePassword=user.must_change_password,
         createdAt=user.created_at.isoformat() if user.created_at else "",
         emailAliases=aliases or [],
     )
@@ -246,6 +253,148 @@ async def toggle_member_status(
     )
 
     return _user_to_member(user)
+
+
+def _generate_password(length: int = 12) -> str:
+    """Generate a secure random password with mixed characters."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%&*"
+    while True:
+        password = "".join(secrets.choice(alphabet) for _ in range(length))
+        # Ensure at least one of each category
+        if (
+            any(c.islower() for c in password)
+            and any(c.isupper() for c in password)
+            and any(c.isdigit() for c in password)
+            and any(c in "!@#$%&*" for c in password)
+        ):
+            return password
+
+
+@router.post("/members/{user_id}/set-password", response_model=SetPasswordResponse)
+async def set_member_password(
+    user_id: uuid.UUID,
+    body: SetPasswordRequest | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SetPasswordResponse:
+    """Generate and set a temporary password for a member.
+
+    Optionally sends credentials via Slack DM in the same call so the
+    plaintext password never round-trips through the client.
+
+    Args:
+        user_id: The target user UUID.
+        body: Optional request with send_via channel.
+        current_user: The authenticated user (must be org_owner or admin).
+        db: The async database session.
+
+    Returns:
+        SetPasswordResponse with the generated plaintext password
+        and optional Slack send result.
+    """
+    caller_role = getattr(current_user, "role", None)
+    if caller_role not in (UserRole.ORG_OWNER, UserRole.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only org owners and admins can set member passwords.",
+        )
+
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    user_repo = UserRepository(db, org_id=org.id)
+    user = await user_repo.get_by_id_with_membership(user_id, org.id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    # Prevent privilege escalation: non-owners cannot reset an owner's password
+    target_role = getattr(user, "role", None)
+    if target_role == UserRole.ORG_OWNER and caller_role != UserRole.ORG_OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the org owner can reset another org owner's password.",
+        )
+
+    password = _generate_password()
+    user.password_hash = hash_password(password)
+    user.must_change_password = True
+    await db.flush()
+
+    logger.info(
+        "member_password_set",
+        user_id=str(user_id),
+        set_by=current_user.email,
+    )
+
+    # Optionally send via Slack DM (password stays server-side)
+    send_via = body.send_via if body else None
+    slack_sent: bool | None = None
+    slack_error: str | None = None
+
+    if send_via == "slack":
+        slack_sent, slack_error = await _send_credentials_slack(
+            org, user, password
+        )
+
+    from app.config import settings
+
+    login_url = settings.public_url.rstrip("/") + "/login"
+
+    return SetPasswordResponse(
+        password=password,
+        loginUrl=login_url,
+        slackSent=slack_sent,
+        slackError=slack_error,
+    )
+
+
+async def _send_credentials_slack(
+    org: Organization,
+    user: User,
+    password: str,
+) -> tuple[bool, str | None]:
+    """Send login credentials to a user via Slack DM.
+
+    Returns:
+        Tuple of (sent, error_detail).
+    """
+    if not user.slack_id:
+        return False, "This member has no linked Slack account."
+
+    from app.core.encryption import decrypt_secret
+    from app.services.slack_client import chat_post_message, conversations_open
+
+    if not org.slack_bot_token:
+        return False, "Slack is not configured for this organization."
+
+    bot_token = decrypt_secret(org.slack_bot_token)
+    if not bot_token:
+        return False, "Slack token decryption failed. Check your encryption key."
+
+    dm_channel = await conversations_open(bot_token, user.slack_id)
+    if not dm_channel:
+        return False, "Failed to open DM channel with this member."
+
+    from app.config import settings
+
+    login_url = settings.public_url.rstrip("/") + "/login"
+
+    message = (
+        f"Hi {user.name}! Your login credentials have been set up.\n\n"
+        f"*Email:* `{user.email}`\n"
+        f"*Temporary Password:* `{password}`\n\n"
+        f"Log in here: {login_url}\n"
+        f"You will be asked to change your password on first login."
+    )
+
+    result = await chat_post_message(bot_token, dm_channel, message)
+    if result is None:
+        return False, "Failed to send Slack DM."
+
+    logger.info(
+        "credentials_sent_via_slack",
+        user_id=str(user.id),
+    )
+    return True, None
 
 
 @router.patch("/members/{user_id}/character", response_model=MemberRead)

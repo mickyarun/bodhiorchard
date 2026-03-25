@@ -41,6 +41,9 @@ class User(BaseModel):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     slack_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     github_username: Mapped[str | None] = mapped_column(String(100), nullable=True)

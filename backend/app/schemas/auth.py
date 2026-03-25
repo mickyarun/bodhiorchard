@@ -28,6 +28,13 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    must_change_password: bool = False
+
+
+class ChangePasswordRequest(BaseModel):
+    """Schema for changing own password."""
+
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 class RefreshRequest(BaseModel):

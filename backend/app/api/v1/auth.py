@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.deps import get_current_user, get_db, get_user_permissions
+from app.core.deps import (
+    get_current_user,
+    get_current_user_pending_password,
+    get_db,
+    get_user_permissions,
+)
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -18,7 +23,13 @@ from app.models.organization import Organization
 from app.models.user import OrgToUser, User, UserRole
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
-from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+)
 from app.schemas.user import UserRead
 
 router = APIRouter(tags=["auth"])
@@ -66,7 +77,30 @@ async def login(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=settings.auth.access_token_expire_minutes * 60,
+        must_change_password=user.must_change_password,
     )
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user_pending_password),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Change the current user's password and clear must_change_password flag.
+
+    Args:
+        body: New password.
+        current_user: The authenticated user.
+        db: The async database session.
+
+    Returns:
+        Success message.
+    """
+    current_user.password_hash = hash_password(body.new_password)
+    current_user.must_change_password = False
+    await db.flush()
+    return {"detail": "Password changed successfully."}
 
 
 @router.post("/refresh", response_model=TokenResponse)

@@ -16,7 +16,9 @@ class MemberRead(BaseModel):
     role_name: str | None = Field(None, alias="roleName")
     avatar_url: str | None = Field(None, alias="avatarUrl")
     github_username: str | None = Field(None, alias="githubUsername")
+    slack_id: str | None = Field(None, alias="slackId")
     is_active: bool = Field(True, alias="isActive")
+    must_change_password: bool = Field(False, alias="mustChangePassword")
     created_at: str = Field("", alias="createdAt")
     email_aliases: list[str] = Field(default_factory=list, alias="emailAliases")
 
@@ -53,6 +55,37 @@ class UpdateCharacterRequest(BaseModel):
         max_length=100,
         description="GLB filename (e.g. 'developer.glb') or null to reset to random",
     )
+
+    model_config = {"populate_by_name": True}
+
+
+class SetPasswordRequest(BaseModel):
+    """Request to generate and set a temporary password for a member.
+
+    Optionally send the credentials via Slack DM in the same call,
+    so the plaintext password never leaves the server boundary twice.
+    """
+
+    send_via: str | None = Field(
+        None,
+        alias="sendVia",
+        pattern=r"^(slack)$",
+        description="If set, send credentials via this channel after generating.",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class SetPasswordResponse(BaseModel):
+    """Response after generating a temporary password for a member.
+
+    The password field is sensitive — shown once in the UI and never stored.
+    """
+
+    password: str = Field(..., description="Sensitive: plaintext temporary password, shown once.")
+    login_url: str = Field("", alias="loginUrl")
+    slack_sent: bool | None = Field(None, alias="slackSent")
+    slack_error: str | None = Field(None, alias="slackError")
 
     model_config = {"populate_by_name": True}
 

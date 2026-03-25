@@ -40,6 +40,17 @@ api.interceptors.response.use(
   async (error: AxiosError<ApiError>) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
 
+    // Redirect to change-password on 403 "Password change required"
+    const responseData = error.response?.data as Record<string, unknown> | undefined
+    if (
+      error.response?.status === 403
+      && responseData?.detail === 'Password change required'
+      && !window.location.pathname.startsWith('/change-password')
+    ) {
+      window.location.href = '/change-password'
+      return Promise.reject(error)
+    }
+
     // Only intercept 401s for non-auth endpoints (don't retry login/refresh failures)
     if (
       error.response?.status !== 401

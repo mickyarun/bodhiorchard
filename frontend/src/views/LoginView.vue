@@ -107,7 +107,11 @@ async function handleLogin(): Promise<void> {
   const success = await authStore.login(email.value.trim(), password.value, orgSlug.value)
   loading.value = false
   if (success) {
-    router.push({ name: 'dashboard' })
+    if (authStore.mustChangePassword) {
+      router.push({ name: 'change-password' })
+    } else {
+      router.push({ name: 'methodology' })
+    }
   }
 }
 </script>

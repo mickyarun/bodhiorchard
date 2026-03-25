@@ -151,6 +151,20 @@
                   <template #activator="{ props }">
                     <v-btn
                       v-bind="props"
+                      icon="mdi-key-outline"
+                      size="small"
+                      variant="text"
+                      color="primary"
+                      :disabled="!member.isActive"
+                      @click="openSetPassword(member)"
+                    />
+                  </template>
+                  Set password
+                </v-tooltip>
+                <v-tooltip location="top" content-class="text-white bg-grey-darken-3">
+                  <template #activator="{ props }">
+                    <v-btn
+                      v-bind="props"
                       icon="mdi-account-arrow-right-outline"
                       size="small"
                       variant="text"
@@ -562,6 +576,112 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+    <!-- ─── SET PASSWORD DIALOG ──────────────────────────── -->
+    <v-dialog v-model="setPasswordDialog" max-width="500" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center justify-space-between">
+          <span>Set Password</span>
+          <v-btn icon="mdi-close" variant="text" size="small" @click="closeSetPassword" />
+        </v-card-title>
+        <v-card-text>
+          <!-- Before generating -->
+          <template v-if="!generatedPassword">
+            <div class="text-body-2 mb-4">
+              Generate a temporary password for
+              <strong>{{ setPasswordMember?.name }}</strong>.
+              They will be required to change it on first login.
+            </div>
+            <div class="d-flex justify-center">
+              <v-btn
+                color="primary"
+                prepend-icon="mdi-key-plus"
+                :loading="generatingPassword"
+                @click="generatePassword"
+              >
+                Generate Password
+              </v-btn>
+            </div>
+          </template>
+
+          <!-- After generating -->
+          <template v-if="generatedPassword">
+            <v-alert type="success" variant="tonal" density="compact" class="mb-4">
+              Password generated. Share it with {{ setPasswordMember?.name }} using one of the options below.
+            </v-alert>
+
+            <div class="d-flex align-center ga-2 mb-4">
+              <v-text-field
+                :model-value="generatedPassword"
+                label="Temporary Password"
+                variant="outlined"
+                density="compact"
+                readonly
+                hide-details
+                :type="showPassword ? 'text' : 'password'"
+              >
+                <template #append-inner>
+                  <v-btn
+                    :icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+                    variant="text"
+                    size="small"
+                    density="compact"
+                    @click="showPassword = !showPassword"
+                  />
+                </template>
+              </v-text-field>
+              <v-btn
+                :icon="copied ? 'mdi-check' : 'mdi-content-copy'"
+                :color="copied ? 'success' : undefined"
+                variant="tonal"
+                @click="copyPassword"
+              />
+            </div>
+
+            <v-divider class="mb-4" />
+
+            <div class="text-subtitle-2 mb-2">Share credentials</div>
+            <div class="d-flex flex-column ga-2">
+              <!-- Slack DM option -->
+              <v-btn
+                v-if="slackEnabled && setPasswordMember?.slackId"
+                variant="tonal"
+                prepend-icon="mdi-slack"
+                :loading="sendingSlack"
+                :color="slackSent ? 'success' : undefined"
+                :disabled="slackSent"
+                @click="sendViaSlack"
+              >
+                {{ slackSent ? 'Sent via Slack DM' : 'Send via Slack DM' }}
+              </v-btn>
+              <div
+                v-if="slackEnabled && !setPasswordMember?.slackId"
+                class="text-caption text-medium-emphasis"
+              >
+                Slack DM unavailable — this member has no linked Slack account.
+              </div>
+
+              <!-- Email fallback (mailto) -->
+              <v-btn
+                variant="tonal"
+                prepend-icon="mdi-email-outline"
+                :href="mailtoLink"
+              >
+                Share via Email
+              </v-btn>
+            </div>
+
+            <!-- Error feedback -->
+            <v-alert v-if="sendError" type="error" variant="tonal" density="compact" class="mt-3">
+              {{ sendError }}
+            </v-alert>
+          </template>
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4">
+          <v-spacer />
+          <v-btn variant="text" @click="closeSetPassword">Close</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -755,6 +875,96 @@ async function submitMerge() {
   }
   merging.value = false
   if (allOk) mergeDialog.value = false
+}
+
+// ─── Set Password ─────────────────────────────
+const setPasswordDialog = ref(false)
+const setPasswordMember = ref<Member | null>(null)
+const generatedPassword = ref('')
+const generatedLoginUrl = ref('')
+const generatingPassword = ref(false)
+const showPassword = ref(false)
+const copied = ref(false)
+const sendingSlack = ref(false)
+const slackSent = ref(false)
+const sendError = ref('')
+
+const slackEnabled = computed(() => !!settingsStore.connections.slack?.enabled)
+
+const mailtoLink = computed(() => {
+  if (!setPasswordMember.value || !generatedPassword.value) return ''
+  const subject = encodeURIComponent('Your login credentials')
+  const body = encodeURIComponent(
+    `Hi ${setPasswordMember.value.name},\n\n` +
+    `Your login credentials:\n` +
+    `Email: ${setPasswordMember.value.email}\n` +
+    `Temporary Password: ${generatedPassword.value}\n\n` +
+    `Log in here: ${generatedLoginUrl.value}\n` +
+    `You will be asked to change your password on first login.`
+  )
+  return `mailto:${setPasswordMember.value.email}?subject=${subject}&body=${body}`
+})
+
+function openSetPassword(member: Member) {
+  setPasswordMember.value = member
+  generatedPassword.value = ''
+  generatedLoginUrl.value = ''
+  showPassword.value = false
+  copied.value = false
+  slackSent.value = false
+  sendError.value = ''
+  setPasswordDialog.value = true
+}
+
+function closeSetPassword() {
+  setPasswordDialog.value = false
+  generatedPassword.value = ''
+  generatedLoginUrl.value = ''
+}
+
+async function generatePassword() {
+  if (!setPasswordMember.value) return
+  generatingPassword.value = true
+  sendError.value = ''
+  const result = await store.setPassword(setPasswordMember.value.id)
+  generatingPassword.value = false
+  if (result) {
+    generatedPassword.value = result.password
+    generatedLoginUrl.value = result.loginUrl
+    showPassword.value = true
+  } else {
+    sendError.value = store.error || 'Failed to generate password.'
+  }
+}
+
+async function copyPassword() {
+  try {
+    await navigator.clipboard.writeText(generatedPassword.value)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch {
+    sendError.value = 'Clipboard access denied. Please copy the password manually.'
+  }
+}
+
+async function sendViaSlack() {
+  if (!setPasswordMember.value) return
+  sendingSlack.value = true
+  sendError.value = ''
+  // Generate + send in one server-side call (password never round-trips)
+  const result = await store.setPassword(setPasswordMember.value.id, 'slack')
+  sendingSlack.value = false
+  if (result) {
+    generatedPassword.value = result.password
+    generatedLoginUrl.value = result.loginUrl
+    if (result.slackSent) {
+      slackSent.value = true
+    } else {
+      sendError.value = result.slackError || 'Failed to send via Slack.'
+    }
+  } else {
+    sendError.value = store.error || 'Failed to set password.'
+  }
 }
 
 // ─── Create Role ──────────────────────────────
