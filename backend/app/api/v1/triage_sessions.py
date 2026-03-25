@@ -13,11 +13,9 @@ from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.triage_session import TriageSessionRepository
-from app.schemas.jobs import PRDAgentJobPayload
 from app.schemas.triage_session import TriageApprovalRequest, TriageSessionRead
 from app.services import slack_client
 from app.services.feature_lifecycle import create_planned_feature
-from app.services.job_queue import JOB_PRD_AGENT, create_job
 
 logger = structlog.get_logger(__name__)
 
@@ -195,16 +193,10 @@ async def approve_triage_session(
             thread_ts=session.thread_ts,
         )
 
-        prd_payload = PRDAgentJobPayload(
-            org_id=str(org.id),
-            bud_id=str(bud.id),
-            bud_number=bud.bud_number,
-            session_id=str(session.id),
-            bot_token_encrypted=org.slack_bot_token or "",
-            slack_channel=session.slack_channel,
-            thread_ts=session.thread_ts,
-        )
-        create_job(JOB_PRD_AGENT, payload=prd_payload.model_dump())
+    # Trigger PRD agent via the new agent task system
+    from app.api.v1.bud import _create_agent_task_for_stage
+
+    await _create_agent_task_for_stage(bud, "bud", current_user, db)
 
     return await _session_to_read(session, current_user, db)
 

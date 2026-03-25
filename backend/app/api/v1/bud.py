@@ -26,16 +26,6 @@ from app.schemas.bud import (
     BUDUpdate,
     TimelineEventRead,
 )
-from app.schemas.jobs import (
-    CodeReviewJobPayload,
-    TechArchJobPayload,
-)
-from app.services.job_queue import (
-    JOB_CODE_REVIEW,
-    JOB_TECH_ARCH,
-    create_job,
-)
-
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["buds"])
