@@ -44,7 +44,7 @@ logger = structlog.get_logger(__name__)
 INCREMENTAL_THRESHOLD = 0.30
 
 # Max features per LLM merge call (configurable via LLM_MERGE_BATCH_SIZE env)
-def _get_merge_batch_size() -> int:
+def get_merge_batch_size() -> int:
     from app.config import settings
     return settings.llm.merge_batch_size
 

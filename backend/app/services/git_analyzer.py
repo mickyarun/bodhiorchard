@@ -109,7 +109,9 @@ def _file_to_feature(
             feat_words = {w.lower() for w in feat_name.split() if len(w) >= 3}
             for dp in dir_parts:
                 for fw in feat_words:
-                    if dp.startswith(fw) or fw.startswith(dp):
+                    # Allow singular/plural but not unrelated prefixes
+                    # ("notifications" ↔ "notification" OK, "webpack" ↔ "web" NOT OK)
+                    if (dp.startswith(fw) or fw.startswith(dp)) and abs(len(dp) - len(fw)) <= 2:
                         return feat_name, feat_id
 
     return None

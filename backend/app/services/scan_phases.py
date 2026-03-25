@@ -458,7 +458,6 @@ async def phase_e2_skill_remap(
 async def _collect_feature_dicts(
     db: AsyncSession,
     org_id: uuid.UUID,
-    ki_repo: KnowledgeItemRepository,
 ) -> list[dict]:
     """Collect active features with their repo names for the merge prompt.
 
@@ -499,29 +498,43 @@ async def _collect_feature_dicts(
     return [f for f in grouped.values() if f["repo_names"]]
 
 
+def _list_repo_files(repo_path: Path) -> list[str]:
+    """List up to 30 source files in a repo (sync, for use in a thread)."""
+    if not repo_path.exists():
+        return []
+    return [
+        str(p.relative_to(repo_path))
+        for p in sorted(repo_path.rglob("*"))
+        if p.is_file() and ".git" not in p.parts and "node_modules" not in p.parts
+    ][:30]
+
+
 async def _find_repos_without_features(
     db: AsyncSession,
     org_id: uuid.UUID,
-    ki_repo: KnowledgeItemRepository,
 ) -> list[dict]:
     """Find tracked repos that have no features linked to them.
 
     Returns their name + top-level file listing so the merge prompt
     can ask the LLM to link them to existing features.
     """
+    import asyncio
+
     from sqlalchemy import select as sa_select
 
-    from app.models.knowledge_item import KnowledgeRepoLink
+    from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
     from app.repositories.tracked_repository import TrackedRepoRepository
 
     tr_repo = TrackedRepoRepository(db, org_id=org_id)
     all_repos = await tr_repo.list_active()
 
-    # Get repo IDs that have at least one feature link
+    # Get repo IDs that have at least one feature link (org-scoped)
     linked_repo_ids = set(
         (
             await db.execute(
                 sa_select(KnowledgeRepoLink.repo_id).distinct()
+                .join(KnowledgeItem, KnowledgeItem.id == KnowledgeRepoLink.knowledge_id)
+                .where(KnowledgeItem.org_id == org_id)
             )
         ).scalars().all()
     )
@@ -529,14 +542,9 @@ async def _find_repos_without_features(
     result: list[dict] = []
     for repo in all_repos:
         if repo.id not in linked_repo_ids:
-            # List files in the repo for context
-            files: list[str] = []
-            repo_path = Path(repo.path)
-            if repo_path.exists():
-                for p in sorted(repo_path.rglob("*")):
-                    if p.is_file() and ".git" not in p.parts and "node_modules" not in p.parts:
-                        files.append(str(p.relative_to(repo_path)))
-            result.append({"name": repo.name, "files": files[:30]})
+            rp = Path(repo.path)  # Bind to local var for closure
+            files = await asyncio.to_thread(_list_repo_files, rp)
+            result.append({"name": repo.name, "files": files})
             logger.info(
                 "repo_without_features",
                 repo=repo.name,
@@ -575,7 +583,7 @@ async def phase_b3_merge(
         Dict with possibly updated ``config`` (after commit/reload).
     """
     from app.repositories.organization import OrganizationRepository
-    from app.services.scan_pipeline import _get_merge_batch_size, build_merge_prompt
+    from app.services.scan_pipeline import build_merge_prompt, get_merge_batch_size
 
     # --- Embed missing items ---
     scan_status.status = "embedding"
@@ -588,10 +596,10 @@ async def phase_b3_merge(
         scan_status.status = "merging_features"
         scan_status.progress_pct = 92
 
-        linked_features = await _collect_feature_dicts(db, org_id, ki_repo)
+        linked_features = await _collect_feature_dicts(db, org_id)
 
         # Detect repos with 0 features (e.g. small frontend repos)
-        unlinked_repos = await _find_repos_without_features(db, org_id, ki_repo)
+        unlinked_repos = await _find_repos_without_features(db, org_id)
 
         if linked_features:
             await db.commit()
@@ -599,7 +607,7 @@ async def phase_b3_merge(
             from app.config import settings
             from app.mcp.auth import create_internal_mcp_token
 
-            merge_batch_size = _get_merge_batch_size()
+            merge_batch_size = get_merge_batch_size()
             prev_count = await ki_repo.count_active(category="feature_registry")
             for _pass in range(3):  # Re-run if batch < total (cross-batch dupes)
                 for batch_start in range(0, len(linked_features), merge_batch_size):
@@ -638,7 +646,7 @@ async def phase_b3_merge(
                 prev_count = new_count
 
                 # Rebuild feature list for next pass (stale titles removed)
-                linked_features = await _collect_feature_dicts(db, org_id, ki_repo)
+                linked_features = await _collect_feature_dicts(db, org_id)
 
             # Re-embed after merge
             await embed_missing_items(db, org_id)
