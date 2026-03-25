@@ -98,12 +98,17 @@ async def find_semantic_duplicates(
 
 
 def _merge_group_code_locations(group: list[KnowledgeItem]) -> dict[str, list[str]]:
-    """Compute merged code_locations from all items in a duplicate group."""
+    """Compute merged code_locations from all items in a duplicate group.
+
+    Reads code_locations from junction links (KnowledgeRepoLink) since
+    the field was removed from KnowledgeItem.
+    """
     from app.services.scan_helpers import merge_code_locations
 
     merged: dict[str, list[str]] = {}
     for item in group:
-        merged = merge_code_locations(merged, item.code_locations)
+        for link in getattr(item, "repo_links", []):
+            merged = merge_code_locations(merged, link.code_locations)
     return merged
 
 

@@ -21,7 +21,6 @@ logger = structlog.get_logger(__name__)
 def format_feature_content(
     description: str,
     capabilities: list[str],
-    code_locations: dict[str, Any],
     source_clusters: list[str],
     *,
     feature_status: str | None = None,
@@ -33,13 +32,12 @@ def format_feature_content(
     (description dominates vector), triage agent reading (capabilities),
     and token efficiency (~100-150 tokens).
 
-    Code locations and cluster names are intentionally omitted — agents
-    can look those up live via GitNexus tools when needed.
+    Code locations are stored on the junction table (knowledge_to_repo),
+    not in the content text.
 
     Args:
         description: 1-2 sentence business description.
         capabilities: List of specific things the feature does.
-        code_locations: Map of layer → file paths (kept for signature compat).
         source_clusters: Cluster names (kept for signature compat).
         feature_status: Optional lifecycle status (planned/in_progress/implemented).
         source_ref: Optional BUD reference (e.g. "BUD-042").
@@ -62,15 +60,6 @@ def format_feature_content(
             lines.append(f"- {cap}")
 
     return "\n".join(lines)
-
-
-def _merge_code_locations(
-    existing: dict[str, Any] | None, incoming: dict[str, Any] | None
-) -> dict[str, list[str]]:
-    """Merge two code_locations dicts, unioning paths per layer."""
-    from app.services.scan_helpers import merge_code_locations
-
-    return merge_code_locations(existing, incoming)
 
 
 async def _try_embed(title: str, content: str) -> list[float] | None:
@@ -189,7 +178,6 @@ async def handle_write_feature_registry(
     content = format_feature_content(
         description=params["description"],
         capabilities=params["capabilities"],
-        code_locations=params["code_locations"],
         source_clusters=source_clusters,
         feature_status="implemented",
     )
@@ -216,9 +204,6 @@ async def handle_write_feature_registry(
         item.embedding = await _try_embed(title, content)
         item.is_active = True
         item.feature_status = "implemented"
-        item.code_locations = _merge_code_locations(
-            item.code_locations, params.get("code_locations")
-        )
     else:
         # 2. Check for PLANNED/IN_PROGRESS items to upgrade via semantic match
         try:
@@ -244,9 +229,6 @@ async def handle_write_feature_registry(
                     matched_item.embedding = await _try_embed(title, content)
                     matched_item.is_active = True
                     matched_item.feature_status = "implemented"
-                    matched_item.code_locations = _merge_code_locations(
-                        matched_item.code_locations, params.get("code_locations")
-                    )
                     item = matched_item
                     logger.info(
                         "feature_upgraded_from_planned",
@@ -268,7 +250,6 @@ async def handle_write_feature_registry(
                 tags=params["tags"],
                 is_active=True,
                 feature_status="implemented",
-                code_locations=params.get("code_locations") or {},
                 embedding=await _try_embed(title, content),
             )
             await ki_repo.add(item)

@@ -536,7 +536,7 @@ class _FeatureGroup(TypedDict):
     source_ref: str | None
     feature_status: str | None
     repo_paths: list[str]
-    code_locations: dict[str, list[str]] | None
+    code_locations: dict[str, list[str]]
 
 
 async def _collect_features(
@@ -560,7 +560,7 @@ async def _collect_features(
             KnowledgeItem.title,
             KnowledgeItem.source_ref,
             KnowledgeItem.feature_status,
-            KnowledgeItem.code_locations,
+            KnowledgeRepoLink.code_locations,
             TrackedRepository.path.label("repo_path"),
         )
         .outerjoin(
@@ -580,6 +580,9 @@ async def _collect_features(
 
     # Group rows by knowledge item ID to deduplicate multi-repo joins.
     # Each feature maps to a list of repo_paths it is linked to.
+    # code_locations are merged from all junction links.
+    from app.services.scan_helpers import merge_code_locations
+
     features_by_id: dict[uuid.UUID, _FeatureGroup] = {}
     for ki_id, title, source_ref, feature_status, code_locs, repo_path in rows:
         if ki_id not in features_by_id:
@@ -588,8 +591,13 @@ async def _collect_features(
                 "source_ref": source_ref,
                 "feature_status": feature_status,
                 "repo_paths": [],
-                "code_locations": code_locs,
+                "code_locations": code_locs or {},
             }
+        else:
+            # Merge code_locations from additional junction rows
+            features_by_id[ki_id]["code_locations"] = merge_code_locations(
+                features_by_id[ki_id]["code_locations"], code_locs
+            )
         if repo_path:
             features_by_id[ki_id]["repo_paths"].append(repo_path)
 

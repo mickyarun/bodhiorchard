@@ -240,8 +240,15 @@ async def load_feature_map(
     result: FeatureMap = []
 
     for item in items:
-        # Prefer per-repo junction code_locations, fall back to item field
-        locs = junction_locs.get(item.id) or item.code_locations
+        # Read code_locations from junction table (per-repo) or merged from all links
+        locs = junction_locs.get(item.id)
+        if not locs:
+            # No repo_id filter — merge code_locations from all junction links
+            merged_locs: dict[str, list[str]] = {}
+            for link in getattr(item, "repo_links", []):
+                if link.code_locations:
+                    merged_locs = merge_code_locations(merged_locs, link.code_locations)
+            locs = merged_locs or None
         # Clean feature name
         name = prefix_re.sub("", item.title).strip()
         if not name:
@@ -302,8 +309,6 @@ async def link_orphan_features(
     Returns:
         Number of orphan features linked.
     """
-    from pathlib import Path
-
     orphans = await ki_repo.list_active_without_repo_links("feature_registry")
     if not orphans:
         return 0
@@ -315,25 +320,22 @@ async def link_orphan_features(
     if not tracked_repos:
         return 0
 
+    # Orphan features have no junction links (hence no code_locations).
+    # Best-effort: match by single-repo org (link all orphans to the only repo).
     linked = 0
-    for item in orphans:
-        locs = item.code_locations or {}
-        all_paths = [p for paths in locs.values() if isinstance(paths, list) for p in paths]
-        if not all_paths:
-            continue
-        for repo in tracked_repos:
-            repo_dir = Path(repo.path).name + "/"
-            # Filter code_locations to only paths starting with this repo dir
-            repo_locs: dict[str, list[str]] = {}
-            for layer, paths in locs.items():
-                if not isinstance(paths, list):
-                    continue
-                matched = [p for p in paths if p.startswith(repo_dir)]
-                if matched:
-                    repo_locs[layer] = matched
-            if repo_locs:
-                await ki_repo.link_to_repo(item.id, repo.id, repo_locs)
-                linked += 1
+    if len(tracked_repos) == 1:
+        repo = tracked_repos[0]
+        for item in orphans:
+            await ki_repo.link_to_repo(item.id, repo.id)
+            linked += 1
+    else:
+        # Multi-repo: skip — orphans will be linked on next scan when
+        # synthesis provides repo_name.
+        logger.warning(
+            "orphan_features_no_auto_link",
+            count=len(orphans),
+            reason="multi-repo org, no code_locations to match",
+        )
     if linked:
         await db.flush()
         logger.info("orphan_features_linked", count=linked, total_orphans=len(orphans))

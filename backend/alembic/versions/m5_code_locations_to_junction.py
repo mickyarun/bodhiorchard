@@ -22,13 +22,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Add code_locations to knowledge_to_repo and migrate existing data."""
+    """Move code_locations from knowledge_items to knowledge_to_repo."""
+    # 1. Add column to junction table
     op.add_column(
         "knowledge_to_repo",
         sa.Column("code_locations", sa.JSON(), nullable=True),
     )
 
-    # Copy code_locations from knowledge_items to each linked junction row
+    # 2. Copy data from knowledge_items to each linked junction row
     op.execute("""
         UPDATE knowledge_to_repo ktr
         SET code_locations = ki.code_locations
@@ -38,7 +39,14 @@ def upgrade() -> None:
           AND ki.code_locations::jsonb != '{}'::jsonb
     """)
 
+    # 3. Drop the column from knowledge_items (now lives on junction)
+    op.drop_column("knowledge_items", "code_locations")
+
 
 def downgrade() -> None:
-    """Remove code_locations from knowledge_to_repo."""
+    """Move code_locations back to knowledge_items."""
+    op.add_column(
+        "knowledge_items",
+        sa.Column("code_locations", sa.JSON(), nullable=True),
+    )
     op.drop_column("knowledge_to_repo", "code_locations")
