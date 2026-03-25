@@ -25,7 +25,7 @@
               <div
                 v-if="!editingTitle"
                 class="text-h5 font-weight-bold"
-                :class="prdLocked ? 'prd-locked-title' : 'cursor-pointer'"
+                :class="agentLocked ? 'prd-locked-title' : 'cursor-pointer'"
                 @click="startEditTitle"
               >
                 {{ bud.title }}
@@ -138,7 +138,7 @@
               :color="chatOpen ? 'primary' : 'default'"
               size="small"
               class="ai-chat-btn"
-              :disabled="prdLocked"
+              :disabled="agentLocked"
               @click="chatOpen = !chatOpen"
             >
               <v-icon start size="16">mdi-creation-outline</v-icon>
@@ -160,9 +160,9 @@
             @reload-timeline="loadTimeline"
           />
 
-          <!-- PRD generating banner -->
+          <!-- Agent generating banner (unified for PRD, tech arch, code review) -->
           <v-alert
-            v-if="workflowRef?.prdGenerating"
+            v-if="workflowRef?.agentGenerating"
             type="info"
             variant="tonal"
             density="compact"
@@ -170,7 +170,37 @@
           >
             <div class="d-flex align-center ga-2">
               <v-progress-circular indeterminate size="16" width="2" />
-              <span>{{ workflowRef?.prdStatusMessage || 'PRD agent is enriching requirements...' }}</span>
+              <span>{{ workflowRef?.agentStatusMessage || 'AI agent is processing...' }}</span>
+            </div>
+          </v-alert>
+
+          <!-- Failed agent task — retry banner -->
+          <v-alert
+            v-if="bud.active_agent_task?.status === 'failed'"
+            type="error"
+            variant="tonal"
+            density="compact"
+            class="mx-12 mb-3"
+          >
+            <div class="d-flex align-center ga-2">
+              <div class="flex-grow-1">
+                <strong>Agent task failed</strong>
+                <div v-if="bud.active_agent_task.error_message" class="text-caption">
+                  {{ bud.active_agent_task.error_message }}
+                </div>
+                <div class="text-caption text-medium-emphasis">
+                  Attempt {{ bud.active_agent_task.attempt }}
+                </div>
+              </div>
+              <v-btn
+                color="primary"
+                variant="tonal"
+                size="small"
+                @click="budStore.retryAgentTask(bud.id, bud.active_agent_task!.id)"
+              >
+                <v-icon start size="16">mdi-refresh</v-icon>
+                Retry
+              </v-btn>
             </div>
           </v-alert>
 
@@ -187,7 +217,7 @@
                 variant="text"
                 size="small"
                 class="toolbar-btn"
-                :disabled="prdLocked"
+                :disabled="agentLocked"
                 @click="toggleEdit"
               >
                 <v-icon size="15" class="mr-1">{{ isEditing ? 'mdi-eye-outline' : 'mdi-pencil-outline' }}</v-icon>
@@ -198,7 +228,7 @@
                 variant="text"
                 size="small"
                 class="toolbar-btn"
-                :disabled="prdLocked"
+                :disabled="agentLocked"
                 @click="downloadSection(currentSection)"
               >
                 <v-icon size="15" class="mr-1">mdi-tray-arrow-down</v-icon>
@@ -209,7 +239,7 @@
                 variant="text"
                 size="small"
                 class="toolbar-btn"
-                :disabled="prdLocked"
+                :disabled="agentLocked"
                 @click="triggerUpload(currentSection)"
               >
                 <v-icon size="15" class="mr-1">mdi-tray-arrow-up</v-icon>
@@ -457,7 +487,10 @@ const isEditing = computed(() => {
   return editingContent.value
 })
 
-const prdLocked = computed(() => !!workflowRef.value?.prdGenerating)
+const agentLocked = computed(() => {
+  const t = bud.value?.active_agent_task
+  return !!t && (t.status === 'pending' || t.status === 'running')
+})
 
 // ── Markdown rendering ────────────────────────────────
 function renderMarkdown(md: string | null): string {
@@ -474,38 +507,34 @@ onMounted(async () => {
 
   const id = route.params.id as string
   await budStore.fetchBUD(id)
-  await designPanelRef.value?.loadDesigns()
+
+  // Auto-select tab based on BUD status (unless explicit ?tab= param)
+  if (!tabParam && bud.value) {
+    const statusTabMap: Record<string, string> = {
+      design: 'design',
+      tech_arch: 'tech-spec',
+      code_review: 'test-plan',
+      testing: 'test-plan',
+    }
+    const defaultTab = statusTabMap[bud.value.status]
+    if (defaultTab) activeTab.value = defaultTab
+  }
+
   await loadChatHistory()
-  workflowRef.value?.trackPrdJobIfActive()
-  workflowRef.value?.trackTechArchJobIfActive()
-  workflowRef.value?.trackCodeReviewJobIfActive()
   membersStore.fetchMembers()
   loadTimeline()
 })
 
-// Resume tech arch job tracking when metadata changes
-watch(() => bud.value?.metadata?.tech_arch_job_id, (newJobId) => {
-  if (newJobId && !workflowRef.value?.techArchGenerating) {
-    workflowRef.value?.trackTechArchJobIfActive()
+// Track active agent task via the new bud.active_agent_task field.
+// immediate: true ensures tracking starts on initial load (no race condition).
+watch(() => bud.value?.active_agent_task, (task) => {
+  if (task?.job_id && (task.status === 'pending' || task.status === 'running')) {
+    workflowRef.value?.trackAgentTask(task)
   }
-})
+}, { immediate: true })
 
-// Resume code review job tracking when metadata changes
-watch(() => (bud.value?.metadata as Record<string, unknown> | null)?.code_review_job_id, (newJobId) => {
-  if (newJobId && !workflowRef.value?.codeReviewGenerating) {
-    workflowRef.value?.trackCodeReviewJobIfActive()
-  }
-})
-
-// Resume PRD job tracking when metadata changes
-watch(() => (bud.value?.metadata as Record<string, unknown> | null)?.prd_job_id, (newJobId) => {
-  if (newJobId && !workflowRef.value?.prdGenerating) {
-    workflowRef.value?.trackPrdJobIfActive()
-  }
-})
-
-// Auto-close chat panel when PRD generation starts
-watch(prdLocked, (locked) => {
+// Auto-close chat panel when agent starts
+watch(agentLocked, (locked) => {
   if (locked && chatOpen.value) chatOpen.value = false
 })
 
@@ -531,7 +560,7 @@ function startNewSession(): void {
 }
 
 function startEditTitle(): void {
-  if (prdLocked.value) return
+  if (agentLocked.value) return
   editTitle.value = bud.value?.title || ''
   editingTitle.value = true
 }

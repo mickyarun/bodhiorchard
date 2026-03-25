@@ -278,6 +278,15 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function retryAgentTask(budId: string, taskId: string): Promise<void> {
+    try {
+      await api.post(`/v1/buds/${budId}/agent-tasks/${taskId}/retry`)
+      await fetchBUD(budId)
+    } catch {
+      error.value = 'Failed to retry agent task'
+    }
+  }
+
   return {
     buds,
     currentBUD,
@@ -303,5 +312,6 @@ export const useBUDStore = defineStore('bud', () => {
     approveTechArch,
     rejectTechArch,
     requestReassignment,
+    retryAgentTask,
   }
 })

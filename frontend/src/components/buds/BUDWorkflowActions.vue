@@ -1,24 +1,8 @@
 <template>
   <div>
-    <!-- Tech Arch Generating Banner -->
-    <v-alert
-      v-if="bud.status === 'tech_arch' && techArchGenerating"
-      type="info"
-      variant="tonal"
-      class="mx-12 mb-3"
-    >
-      <div class="d-flex align-center ga-2">
-        <v-progress-circular indeterminate size="18" width="2" class="mr-2" />
-        <div class="flex-grow-1">
-          <strong>Generating Tech Architecture...</strong>
-          <div class="text-caption text-medium-emphasis">{{ techArchStatusMessage || 'Claude is analyzing your requirements and designing the implementation plan...' }}</div>
-        </div>
-      </div>
-    </v-alert>
-
     <!-- Tech Architecture Approval Bar -->
     <v-alert
-      v-if="bud.status === 'tech_arch' && canApprove && !!bud.tech_spec_md && !techArchGenerating"
+      v-if="bud.status === 'tech_arch' && canApprove && !!bud.tech_spec_md && !agentGenerating"
       type="info"
       variant="tonal"
       class="mx-12 mb-3"
@@ -71,25 +55,9 @@
       </div>
     </v-alert>
 
-    <!-- Code Review Generating Banner -->
-    <v-alert
-      v-if="bud.status === 'code_review' && codeReviewGenerating"
-      type="info"
-      variant="tonal"
-      class="mx-12 mb-3"
-    >
-      <div class="d-flex align-center ga-2">
-        <v-progress-circular indeterminate size="18" width="2" class="mr-2" />
-        <div class="flex-grow-1">
-          <strong>Running Code Review...</strong>
-          <div class="text-caption text-medium-emphasis">{{ codeReviewStatusMessage || 'Claude is reviewing your code changes...' }}</div>
-        </div>
-      </div>
-    </v-alert>
-
     <!-- Code Review Comments Panel -->
     <v-card
-      v-if="bud.status === 'code_review' && codeReviewComments.length > 0 && !codeReviewGenerating"
+      v-if="bud.status === 'code_review' && codeReviewComments.length > 0 && !agentGenerating"
       variant="outlined"
       class="mx-12 mb-3"
     >
@@ -150,7 +118,7 @@
 
     <!-- Test Plans (code_review phase) -->
     <v-expansion-panels
-      v-if="bud.status === 'code_review' && (automationTestPlan || manualTestPlan) && !codeReviewGenerating"
+      v-if="bud.status === 'code_review' && (automationTestPlan || manualTestPlan) && !agentGenerating"
       variant="accordion"
       class="mx-12 mb-3"
     >
@@ -294,17 +262,17 @@ const rejectReason = ref('')
 const reassignReason = ref('')
 const approvingTechArch = ref(false)
 
-// Tech arch generation tracking
-const techArchGenerating = ref(false)
-const techArchStatusMessage = ref('')
+// Unified agent task tracking (replaces per-type PRD/tech arch/code review refs)
+const agentGenerating = ref(false)
+const agentStatusMessage = ref('')
 
-// PRD generation tracking
-const prdGenerating = ref(false)
-const prdStatusMessage = ref('')
+const TASK_LABELS: Record<string, string> = {
+  bud: 'Preparing Requirements',
+  tech_arch: 'Generating Tech Architecture',
+  code_review: 'Running Code Review',
+}
 
-// Code review tracking
-const codeReviewGenerating = ref(false)
-const codeReviewStatusMessage = ref('')
+// Code review UI state
 const showRepoConfirmDialog = ref(false)
 const commitRepos = ref<{ repoPath: string; repoName: string; commitCount: number; checked: boolean }[]>([])
 const excludeReason = ref('')
@@ -423,91 +391,37 @@ async function confirmCodeReviewTransition(): Promise<void> {
   const meta = { ...(props.bud.metadata || {}), confirmed_repos: confirmedRepos, excluded_repos: excludedRepos }
   await budStore.updateBUD(props.bud.id, { metadata: meta, status: 'code_review' } as never)
 
-  const refreshed = budStore.currentBUD
-  const crJobId = (refreshed?.metadata as Record<string, unknown> | null)?.code_review_job_id as string | undefined
-  if (crJobId) {
-    trackCodeReviewJob(crJobId)
-  }
-
+  // After status update, the backend creates the agent task automatically.
+  // The frontend picks it up on the next fetchBUD via active_agent_task.
+  await budStore.fetchBUD(props.bud.id)
   emit('reload-timeline')
 }
 
-function trackCodeReviewJob(jobId: string): void {
-  codeReviewGenerating.value = true
-  codeReviewStatusMessage.value = 'Starting code review...'
-  startTracking(jobId, {
+// Unified agent task tracking (replaces per-type trackPrdJobIfActive etc.)
+function trackAgentTask(task: { job_id: string | null; task_type: string; status: string }): void {
+  if (!task.job_id) return
+  agentGenerating.value = true
+  agentStatusMessage.value = TASK_LABELS[task.task_type] || 'Processing...'
+  startTracking(task.job_id, {
     onProgress(s) {
-      codeReviewStatusMessage.value = s.statusMessage || 'Reviewing code...'
+      agentStatusMessage.value = s.statusMessage || TASK_LABELS[task.task_type] || 'Processing...'
     },
     async onComplete() {
-      codeReviewGenerating.value = false
-      codeReviewStatusMessage.value = ''
+      agentGenerating.value = false
+      agentStatusMessage.value = ''
       await budStore.fetchBUD(props.bud.id)
     },
     onError(err) {
-      codeReviewGenerating.value = false
-      codeReviewStatusMessage.value = `Failed: ${err}`
+      agentGenerating.value = false
+      agentStatusMessage.value = `Failed: ${err}`
     },
   })
-}
-
-function trackPrdJobIfActive(): void {
-  const meta = props.bud?.metadata as Record<string, unknown> | null
-  const jobId = meta?.prd_job_id as string | undefined
-  if (!jobId) return
-  prdGenerating.value = true
-  startTracking(jobId, {
-    onProgress(s) {
-      prdStatusMessage.value = s.statusMessage || 'PRD agent is enriching requirements...'
-    },
-    async onComplete() {
-      prdGenerating.value = false
-      prdStatusMessage.value = ''
-      await budStore.fetchBUD(props.bud.id)
-    },
-    onError() {
-      prdGenerating.value = false
-      prdStatusMessage.value = ''
-    },
-  })
-}
-
-function trackTechArchJobIfActive(): void {
-  const meta = props.bud?.metadata as Record<string, unknown> | null
-  const jobId = meta?.tech_arch_job_id as string | undefined
-  if (!jobId) return
-  techArchGenerating.value = true
-  startTracking(jobId, {
-    onProgress(s) {
-      techArchStatusMessage.value = s.statusMessage || 'Generating tech architecture...'
-    },
-    async onComplete() {
-      techArchGenerating.value = false
-      techArchStatusMessage.value = ''
-      await budStore.fetchBUD(props.bud.id)
-    },
-    onError() {
-      techArchGenerating.value = false
-      techArchStatusMessage.value = ''
-    },
-  })
-}
-
-function trackCodeReviewJobIfActive(): void {
-  const meta = props.bud?.metadata as Record<string, unknown> | null
-  const jobId = meta?.code_review_job_id as string | undefined
-  if (!jobId) return
-  trackCodeReviewJob(jobId)
 }
 
 defineExpose({
-  prdGenerating,
-  prdStatusMessage,
-  techArchGenerating,
-  codeReviewGenerating,
+  agentGenerating,
+  agentStatusMessage,
   showCodeReviewConfirmation,
-  trackPrdJobIfActive,
-  trackTechArchJobIfActive,
-  trackCodeReviewJobIfActive,
+  trackAgentTask,
 })
 </script>

@@ -67,6 +67,19 @@ export interface BUDListItem {
   updated_at: string
 }
 
+export interface BUDAgentTask {
+  id: string
+  task_type: string
+  skill_slug: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  job_id: string | null
+  attempt: number
+  status_message: string | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface BUDDocument extends BUDListItem {
   org_id: string
   requirements_md: string | null
@@ -74,6 +87,7 @@ export interface BUDDocument extends BUDListItem {
   test_plan_md: string | null
   designs: BUDDesign[]
   metadata: Record<string, unknown> | null
+  active_agent_task: BUDAgentTask | null
 }
 
 // ── Timeline Types ──────────────────────────────────────────
