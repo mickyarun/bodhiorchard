@@ -67,6 +67,7 @@
         variant="outlined"
         hide-details
         clearable
+        autocomplete="off"
         class="repo-filter"
         :menu-props="{ maxHeight: 250, class: 'graph-dropdown' }"
         @update:model-value="onRepoFilter"
@@ -83,6 +84,7 @@
         variant="outlined"
         hide-details
         clearable
+        autocomplete="off"
         class="dev-filter"
         :menu-props="{ maxHeight: 250, class: 'graph-dropdown' }"
         @update:model-value="onDevFilter"

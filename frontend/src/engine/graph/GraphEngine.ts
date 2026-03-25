@@ -399,6 +399,7 @@ export class GraphEngine {
   filterByRepo(repoName: string | null): void {
     if (!repoName) {
       this.overlay?.clearHighlight();
+      this.resetView();
       return;
     }
     // Find the repo entity and all its features
@@ -412,10 +413,12 @@ export class GraphEngine {
     if (offsets) {
       for (const { featureId } of offsets) activeIds.add(featureId);
     }
-    // Use overlay's dim system
+    // Dim unrelated nodes
     if (this.overlay && this.graphRoot) {
       this.overlay.dimOnly(activeIds, this.nodeEntities);
     }
+    // Focus camera on the selected repo
+    this.focusOnNode(repoNodeId);
   }
 
   /** Filter graph to show only features associated with a developer. null = show all. */
