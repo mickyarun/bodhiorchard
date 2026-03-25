@@ -45,7 +45,9 @@ INCREMENTAL_THRESHOLD = 0.30
 
 # Max features per LLM merge call (configurable via LLM_MERGE_BATCH_SIZE env)
 def get_merge_batch_size() -> int:
+    """Return the max features per LLM merge call from config."""
     from app.config import settings
+
     return settings.llm.merge_batch_size
 
 # In-memory scan status tracking (use Redis in production)

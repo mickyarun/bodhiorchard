@@ -24,13 +24,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 async def run_analysis(output_file: str | None = None) -> None:
     """Run all diagnostic checks and print/write results."""
+    from sqlalchemy import select
+
     from app.database import AsyncSessionLocal
     from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
     from app.models.skill_profile import SkillProfile
     from app.models.tracked_repository import TrackedRepository
     from app.models.user import User
-    from app.repositories.organization import OrganizationRepository
-    from sqlalchemy import func, select
 
     lines: list[str] = []
 
@@ -39,13 +39,6 @@ async def run_analysis(output_file: str | None = None) -> None:
         print(msg)
 
     async with AsyncSessionLocal() as db:
-        # --- Org ---
-        org_repo = OrganizationRepository(db)
-        orgs = await db.execute(select(func.count()).select_from(
-            select(KnowledgeItem.org_id).distinct().subquery()
-        ))
-        org_count = orgs.scalar() or 0
-
         # Get first org
         from app.models.organization import Organization
 
@@ -96,7 +89,6 @@ async def run_analysis(output_file: str | None = None) -> None:
                 null_embed += 1
 
             repo_names = []
-            has_code_locs = False
             for link in links:
                 # Get repo name
                 repo_result = await db.execute(
@@ -106,8 +98,6 @@ async def run_analysis(output_file: str | None = None) -> None:
                 )
                 rname = repo_result.scalar_one_or_none() or "???"
                 repo_names.append(rname)
-                if link.code_locations:
-                    has_code_locs = True
 
             if not links:
                 no_repo_link += 1
@@ -172,7 +162,7 @@ async def run_analysis(output_file: str | None = None) -> None:
 
         feature_map = await load_feature_map(db, org_id)
         log(f"--- Feature Map ({len(feature_map)} entries) ---")
-        for name, paths, fid in feature_map:
+        for name, paths, _fid in feature_map:
             log(f"  {name}")
             log(f"    paths={paths[:5]}{'...' if len(paths) > 5 else ''}")
         log()
