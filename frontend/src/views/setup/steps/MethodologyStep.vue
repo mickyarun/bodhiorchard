@@ -12,7 +12,7 @@
         The Bodhigrove Methodology
       </h1>
       <p class="text-body-1 text-medium-emphasis mb-5" style="max-width: 600px;">
-        An AI-first alternative to Agile. From chat to deployment — every phase powered by intelligent agents.
+        An AI-native way to build software. From conversation to production — every phase powered by intelligent agents working alongside humans.
       </p>
       <v-btn
         color="primary"

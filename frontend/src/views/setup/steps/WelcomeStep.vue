@@ -10,8 +10,8 @@
       Welcome to Bodhigrove
     </h1>
     <p class="text-body-1 text-medium-emphasis mb-8" style="max-width: 520px;">
-      End-to-end AI-powered SDLC — where AI agents and humans collaborate
-      through every phase of software development
+      The AI-native development platform — where intelligent agents and humans
+      co-create software from idea to production
     </p>
 
     <v-row class="mb-8" justify="center">
@@ -62,8 +62,8 @@ const features = [
   {
     icon: 'mdi-infinity',
     color: 'secondary',
-    title: 'Full SDLC',
-    description: 'Requirements to deployment — AI assists across the entire development lifecycle',
+    title: 'Idea to Production',
+    description: 'From a chat message to deployed code — AI agents orchestrate every phase of the journey',
   },
   {
     icon: 'mdi-source-branch',
