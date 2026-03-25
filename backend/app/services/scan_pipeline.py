@@ -392,7 +392,7 @@ async def run_scan_pipeline(
                                 "repo_name": repo_name,
                             }
                             for f in gitnexus_result.features
-                            if len(f.files) >= 3
+                            if len(f.files) >= 2
                         ]
                         queue_key = set_synthesis_queue(
                             str(org_id),

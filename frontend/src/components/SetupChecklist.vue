@@ -124,6 +124,20 @@ async function fetchStatus(): Promise<void> {
   try {
     const { data } = await api.get('/setup/checklist-status')
     checklist.value = data
+
+    // If org was re-created (reset_db), clear the dismiss flag so
+    // the checklist reappears for the new setup.
+    if (!data.orgCreated || !data.scanComplete) {
+      if (dismissed.value) {
+        dismissed.value = false
+        localStorage.removeItem('flowdev_checklist_dismissed')
+        // Start polling now that we're un-dismissed
+        if (!pollInterval) {
+          pollInterval = setInterval(fetchStatus, 10_000)
+        }
+      }
+    }
+
     if (allRequiredDone.value && !checklist.value?.scanInProgress) {
       stopPolling()
     }
@@ -146,9 +160,11 @@ function stopPolling(): void {
 }
 
 onMounted(() => {
+  // Always fetch once — even if dismissed — so we can detect a DB reset
+  // and re-show the checklist.
+  fetchStatus()
   if (!dismissed.value) {
-    fetchStatus()
-    pollInterval = setInterval(fetchStatus, 10_000) // Poll every 10s
+    pollInterval = setInterval(fetchStatus, 10_000)
   }
 })
 
