@@ -499,6 +499,52 @@ async def _collect_feature_dicts(
     return [f for f in grouped.values() if f["repo_names"]]
 
 
+async def _find_repos_without_features(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    ki_repo: KnowledgeItemRepository,
+) -> list[dict]:
+    """Find tracked repos that have no features linked to them.
+
+    Returns their name + top-level file listing so the merge prompt
+    can ask the LLM to link them to existing features.
+    """
+    from sqlalchemy import select as sa_select
+
+    from app.models.knowledge_item import KnowledgeRepoLink
+    from app.repositories.tracked_repository import TrackedRepoRepository
+
+    tr_repo = TrackedRepoRepository(db, org_id=org_id)
+    all_repos = await tr_repo.list_active()
+
+    # Get repo IDs that have at least one feature link
+    linked_repo_ids = set(
+        (
+            await db.execute(
+                sa_select(KnowledgeRepoLink.repo_id).distinct()
+            )
+        ).scalars().all()
+    )
+
+    result: list[dict] = []
+    for repo in all_repos:
+        if repo.id not in linked_repo_ids:
+            # List files in the repo for context
+            files: list[str] = []
+            repo_path = Path(repo.path)
+            if repo_path.exists():
+                for p in sorted(repo_path.rglob("*")):
+                    if p.is_file() and ".git" not in p.parts and "node_modules" not in p.parts:
+                        files.append(str(p.relative_to(repo_path)))
+            result.append({"name": repo.name, "files": files[:30]})
+            logger.info(
+                "repo_without_features",
+                repo=repo.name,
+                file_count=len(files),
+            )
+    return result
+
+
 async def phase_b3_merge(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -543,6 +589,10 @@ async def phase_b3_merge(
         scan_status.progress_pct = 92
 
         linked_features = await _collect_feature_dicts(db, org_id, ki_repo)
+
+        # Detect repos with 0 features (e.g. small frontend repos)
+        unlinked_repos = await _find_repos_without_features(db, org_id, ki_repo)
+
         if linked_features:
             await db.commit()
 
@@ -554,7 +604,7 @@ async def phase_b3_merge(
             for _pass in range(3):  # Re-run if batch < total (cross-batch dupes)
                 for batch_start in range(0, len(linked_features), merge_batch_size):
                     batch = linked_features[batch_start:batch_start + merge_batch_size]
-                    merge_prompt = build_merge_prompt(batch)
+                    merge_prompt = build_merge_prompt(batch, unlinked_repos=unlinked_repos)
 
                     merge_token = create_internal_mcp_token(org_id)
                     merge_cfg = ClaudeRunnerConfig(

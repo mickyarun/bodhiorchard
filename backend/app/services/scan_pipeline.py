@@ -116,15 +116,23 @@ Important: Process ALL clusters returned by get_pending_features before calling
 it again. Do not call get_pending_features mid-batch."""
 
 
-def build_merge_prompt(features: list[dict]) -> str:
+def build_merge_prompt(
+    features: list[dict],
+    unlinked_repos: list[dict] | None = None,
+) -> str:
     """Build a prompt for cross-repo feature merging.
 
     Lists all features with their repo names and tags. The LLM calls
     ``merge_features`` for groups that represent the same business
     capability across repos.
 
+    Also lists repos whose code wasn't clustered (e.g. small frontend
+    repos) so the LLM can link them to existing features by name.
+
     Args:
         features: List of dicts with keys: title, repo_names, tags.
+        unlinked_repos: Repos with 0 clusters — include their file
+            listing so the LLM can link them to features.
 
     Returns:
         Prompt string for Claude Code CLI.
@@ -136,27 +144,48 @@ def build_merge_prompt(features: list[dict]) -> str:
         lines.append(f'{i}. "{f["title"]}" ({repos}) — {tags}')
 
     feature_list = "\n".join(lines)
+
+    unlinked_section = ""
+    if unlinked_repos:
+        repo_lines = []
+        for repo in unlinked_repos:
+            files = ", ".join(repo["files"][:20])
+            repo_lines.append(f'- **{repo["name"]}**: {files}')
+        unlinked_section = f"""
+
+## Repos with no features yet
+
+These repos were scanned but produced no features (too small for clustering).
+Link them to existing features if their code matches:
+
+{chr(10).join(repo_lines)}
+"""
+
     return f"""You are merging duplicate features across repositories.
 
 ## Features
 
 {feature_list}
-
+{unlinked_section}
 ## Instructions
 
-Look for features that represent the SAME business capability but exist
-in different repos (or have slightly different names). For each group of
-duplicates, call `merge_features` with:
+1. Look for features that represent the SAME business capability but exist
+   in different repos (or have slightly different names). Call `merge_features`
+   to consolidate them.
 
+2. For repos listed under "Repos with no features yet", if their files clearly
+   belong to an existing feature (e.g. a frontend repo with auth views matches
+   "Authentication"), call `merge_features` with that repo added to repo_names.
+
+Parameters for merge_features:
 - keep_title: The most descriptive title from the group (exact match required)
 - merge_titles: The other titles to merge into it (will be deactivated)
 - repo_names: ALL repository names this feature belongs to
 
 Rules:
 - Only merge features that are clearly the same domain
-- If a feature exists in only one repo with no duplicates, skip it
 - Do NOT merge features that are merely related (e.g. "Billing" and "Payments" are separate)
-- If no duplicates exist, you are done — do nothing"""
+- If no duplicates or links exist, you are done — do nothing"""
 
 
 async def _maybe_extract_design_system(
