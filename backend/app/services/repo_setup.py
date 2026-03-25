@@ -52,6 +52,8 @@ _SETUP_FILES = [
     ".githooks/pre-commit",
     ".githooks/post-commit",
     "package.json",
+    "CLAUDE.md",
+    ".claude/skills/",
 ]
 
 
@@ -416,21 +418,34 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
     Returns:
         The pushed branch name, or None if nothing to commit or push failed.
     """
-    # Check if setup branch already exists on remote (already pushed before)
+    # Check if setup branch already exists on remote
     stdout, _, _ = await run_git(["ls-remote", "--heads", "origin", _SETUP_BRANCH], cwd=repo_path)
-    if _SETUP_BRANCH in stdout:
-        logger.debug("bodhigrove_setup_branch_exists", repo=repo_path)
-        return None
+    branch_exists_remote = _SETUP_BRANCH in stdout
 
     # Remember current branch to switch back
     orig_branch, _, _ = await run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path)
     orig_branch = orig_branch.strip()
 
-    # Create setup branch from base
-    _, stderr, rc = await run_git(["checkout", "-b", _SETUP_BRANCH, base_branch], cwd=repo_path)
-    if rc != 0:
-        logger.warning("bodhigrove_setup_branch_failed", error=stderr[:200])
-        return None
+    if branch_exists_remote:
+        # Fetch and check out existing branch to add any new files (e.g. GitNexus config)
+        await run_git(["fetch", "origin", _SETUP_BRANCH], cwd=repo_path)
+        _, stderr, rc = await run_git(["checkout", _SETUP_BRANCH], cwd=repo_path)
+        if rc != 0:
+            # Local branch may not exist yet — create from remote
+            _, stderr, rc = await run_git(
+                ["checkout", "-b", _SETUP_BRANCH, f"origin/{_SETUP_BRANCH}"], cwd=repo_path
+            )
+        if rc != 0:
+            logger.warning("bodhigrove_setup_checkout_failed", error=stderr[:200])
+            return None
+    else:
+        # Create fresh branch from base
+        _, stderr, rc = await run_git(
+            ["checkout", "-b", _SETUP_BRANCH, base_branch], cwd=repo_path
+        )
+        if rc != 0:
+            logger.warning("bodhigrove_setup_branch_failed", error=stderr[:200])
+            return None
 
     try:
         # Stage only files that have changes
@@ -459,12 +474,14 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
             [
                 "commit",
                 "-m",
-                "chore(bodhigrove): add MCP tools, git hooks, and gitignore\n\n"
+                "chore(bodhigrove): add MCP tools, git hooks, and config\n\n"
                 "Auto-committed by Bodhigrove scan pipeline.\n"
                 "- .claude/settings.json: Bodhigrove MCP server config\n"
                 "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
                 "- package.json: prepare script sets core.hooksPath on npm install\n"
-                "- .gitignore: exclude .bodhigrove/ worktrees",
+                "- .gitignore: exclude .bodhigrove/ worktrees\n"
+                "- CLAUDE.md: GitNexus code intelligence integration\n"
+                "- .claude/skills/: GitNexus agent skill definitions",
             ],
             cwd=repo_path,
         )
@@ -472,8 +489,11 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
             logger.warning("bodhigrove_setup_commit_failed", error=stderr[:200])
             return None
 
-        # Push to origin
-        _, stderr, rc = await run_git(["push", "-u", "origin", _SETUP_BRANCH], cwd=repo_path)
+        # Push to origin (force-with-lease when updating existing branch)
+        push_cmd = ["push", "-u", "origin", _SETUP_BRANCH]
+        if branch_exists_remote:
+            push_cmd = ["push", "--force-with-lease", "-u", "origin", _SETUP_BRANCH]
+        _, stderr, rc = await run_git(push_cmd, cwd=repo_path)
         if rc != 0:
             logger.warning("bodhigrove_setup_push_failed", error=stderr[:200])
             return None
@@ -542,7 +562,9 @@ async def create_setup_pr(repo_path: str, base_branch: str, pushed_branch: str) 
                 "- `.githooks/` — pre-commit (BUD validation) + "
                 "post-commit (tracking)\n"
                 "- `package.json` — prepare script sets `core.hooksPath`\n"
-                "- `.gitignore` — exclude `.bodhigrove/` worktrees\n",
+                "- `.gitignore` — exclude `.bodhigrove/` worktrees\n"
+                "- `CLAUDE.md` — GitNexus code intelligence integration\n"
+                "- `.claude/skills/` — GitNexus agent skill definitions\n",
             ],
             cwd=repo_path,
             timeout=30,

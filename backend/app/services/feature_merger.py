@@ -177,9 +177,10 @@ async def dedup_merged_features(
         if len(item_ids) < 2:
             continue
 
-        # Keep the newest, deactivate the rest
+        # Keep the newest, transfer repo links from duplicates, then deactivate
         keep_id = item_ids[0]
         remove_ids = item_ids[1:]
+        await ki_repo.transfer_repo_links(remove_ids, keep_id)
         total_deactivated += await ki_repo.bulk_deactivate_by_ids(remove_ids)
         logger.info(
             "dedup_merged_feature",

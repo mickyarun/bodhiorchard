@@ -548,6 +548,77 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
         return list(result.scalars().all())
 
+    async def get_repo_ids_for_items(
+        self,
+        knowledge_ids: list[uuid.UUID],
+    ) -> set[uuid.UUID]:
+        """Get all unique repo IDs linked to multiple knowledge items.
+
+        Single query — avoids N+1 when collecting links from a group.
+
+        Args:
+            knowledge_ids: List of knowledge item UUIDs.
+
+        Returns:
+            Set of tracked repository UUIDs.
+        """
+        if not knowledge_ids:
+            return set()
+        result = await self._db.execute(
+            select(KnowledgeRepoLink.repo_id)
+            .where(KnowledgeRepoLink.knowledge_id.in_(knowledge_ids))
+            .distinct()
+        )
+        return set(result.scalars().all())
+
+    async def transfer_repo_links(
+        self,
+        source_ids: list[uuid.UUID],
+        target_id: uuid.UUID,
+    ) -> int:
+        """Copy all repo links from source items to a target item.
+
+        Collects repo IDs from all sources in one query, then links
+        the target to each. Idempotent — existing links are skipped.
+
+        Args:
+            source_ids: IDs of items whose repo links should be copied.
+            target_id: ID of the item to receive the links.
+
+        Returns:
+            Number of repo IDs transferred.
+        """
+        repo_ids = await self.get_repo_ids_for_items(source_ids)
+        if repo_ids:
+            await self.link_to_repos(target_id, list(repo_ids))
+        return len(repo_ids)
+
+    async def get_active_by_titles(
+        self,
+        titles: list[str],
+        category: str,
+    ) -> list[KnowledgeItem]:
+        """Fetch all active items matching any of the given titles.
+
+        Args:
+            titles: List of titles to match.
+            category: Category filter.
+
+        Returns:
+            List of matching active KnowledgeItem instances.
+        """
+        if not titles:
+            return []
+        result = await self._db.execute(
+            select(KnowledgeItem).where(
+                KnowledgeItem.org_id == self._org_id,
+                KnowledgeItem.category == category,
+                KnowledgeItem.title.in_(titles),
+                KnowledgeItem.is_active.is_(True),
+            )
+        )
+        return list(result.scalars().all())
+
     # --- Deduplication ---
 
     async def find_duplicate_titles(self, category: str) -> list[tuple[str, int]]:

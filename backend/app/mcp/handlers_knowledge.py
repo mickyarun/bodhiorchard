@@ -239,9 +239,9 @@ async def handle_write_feature_registry(
                     matched_item.title = title
                     matched_item.content = content
                     matched_item.source = "scan"
-                    matched_item.tags = sorted(
-                        set(matched_item.tags or []) | set(params["tags"])
-                    )[:10]
+                    matched_item.tags = sorted(set(matched_item.tags or []) | set(params["tags"]))[
+                        :10
+                    ]
                     matched_item.embedding = None  # Reset for re-embedding
                     matched_item.is_active = True
                     matched_item.feature_status = "implemented"
@@ -281,12 +281,32 @@ async def handle_write_feature_registry(
         await ki_repo.flush()
 
     # Deactivate originals when merging cross-repo features.
+    # First, transfer repo links from source features to the merged feature
+    # so cross-repo associations survive the merge.
     # Uses bulk SQL UPDATE (not ORM load+modify) so concurrent calls
     # are idempotent — if another request already deactivated the rows,
     # this UPDATE matches 0 rows instead of raising StaleDataError.
     merge_source_titles = params.get("merge_source_titles", [])
     merged_deactivated = 0
     if merge_source_titles:
+        # Transfer repo links from source features before deactivating them
+        if item:
+            source_items = await ki_repo.get_active_by_titles(
+                merge_source_titles, "feature_registry"
+            )
+            if source_items:
+                transferred = await ki_repo.transfer_repo_links(
+                    [s.id for s in source_items], item.id
+                )
+                if transferred:
+                    await ki_repo.flush()
+                    logger.info(
+                        "merge_repo_links_transferred",
+                        merged_title=title,
+                        source_count=len(source_items),
+                        repo_ids_transferred=transferred,
+                    )
+
         merged_deactivated = await ki_repo.bulk_deactivate_by_titles(
             merge_source_titles, "feature_registry"
         )
