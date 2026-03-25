@@ -247,20 +247,43 @@
               v-for="perm in role.permissions.slice(0, 5)"
               :key="perm.id"
               size="x-small"
-              variant="outlined"
+              color="primary"
+              variant="flat"
               label
+              class="perm-chip"
             >
               {{ perm.name }}
             </v-chip>
-            <v-chip
+            <v-tooltip
               v-if="role.permissions.length > 5"
-              size="x-small"
-              variant="tonal"
-              color="primary"
-              label
+              location="bottom"
+              max-width="320"
             >
-              +{{ role.permissions.length - 5 }} more
-            </v-chip>
+              <template #activator="{ props }">
+                <v-chip
+                  v-bind="props"
+                  size="x-small"
+                  color="primary"
+                  variant="tonal"
+                  label
+                  class="cursor-pointer"
+                >
+                  +{{ role.permissions.length - 5 }} more
+                </v-chip>
+              </template>
+              <div class="d-flex flex-wrap ga-1 pa-1">
+                <v-chip
+                  v-for="perm in role.permissions.slice(5)"
+                  :key="perm.id"
+                  size="x-small"
+                  color="primary"
+                  variant="flat"
+                  label
+                >
+                  {{ perm.name }}
+                </v-chip>
+              </div>
+            </v-tooltip>
             <span
               v-if="role.permissions.length === 0"
               class="text-caption text-medium-emphasis"
@@ -1122,5 +1145,8 @@ onMounted(() => {
 }
 .role-card:hover {
   border-color: rgba(var(--v-theme-primary), 0.4);
+}
+.perm-chip {
+  opacity: 0.85;
 }
 </style>
