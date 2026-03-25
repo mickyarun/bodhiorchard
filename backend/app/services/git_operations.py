@@ -59,21 +59,34 @@ async def run_git(args: list[str], cwd: str, timeout: int = 60) -> tuple[str, st
 async def _detect_main_branch(repo_path: str) -> str | None:
     """Detect whether the repo uses 'main' or 'master' as its primary branch.
 
+    Checks remote branches first, falls back to local branches for
+    repos without a remote.
+
     Args:
         repo_path: Absolute path to the git repository.
 
     Returns:
         Branch name ('main' or 'master'), or None if neither found.
     """
+    # Check remote branches first
     stdout, _, _ = await run_git(["branch", "-r"], cwd=repo_path)
     for candidate in ("origin/main", "origin/master"):
         if candidate in stdout:
             return candidate.split("/", 1)[1]
+    # Fallback: check local branches (for repos without a remote)
+    stdout, _, _ = await run_git(["branch"], cwd=repo_path)
+    local_branches = {b.strip().lstrip("* ") for b in stdout.splitlines()}
+    for candidate in ("main", "master"):
+        if candidate in local_branches:
+            return candidate
     return None
 
 
 async def _detect_develop_branch(repo_path: str) -> str | None:
     """Detect whether the repo uses 'develop' or 'dev' as its development branch.
+
+    Checks remote branches first, falls back to local branches for
+    repos without a remote.
 
     Args:
         repo_path: Absolute path to the git repository.
@@ -81,10 +94,17 @@ async def _detect_develop_branch(repo_path: str) -> str | None:
     Returns:
         Branch name ('develop' or 'dev'), or None if neither found.
     """
+    # Check remote branches first
     stdout, _, _ = await run_git(["branch", "-r"], cwd=repo_path)
     for candidate in ("origin/develop", "origin/dev"):
         if candidate in stdout:
             return candidate.split("/", 1)[1]
+    # Fallback: check local branches
+    stdout, _, _ = await run_git(["branch"], cwd=repo_path)
+    local_branches = {b.strip().lstrip("* ") for b in stdout.splitlines()}
+    for candidate in ("develop", "dev"):
+        if candidate in local_branches:
+            return candidate
     return None
 
 
