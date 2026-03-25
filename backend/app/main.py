@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
+from sqlalchemy import select
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
@@ -58,7 +59,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("permission_seed_failed_at_startup")
 
-    # 5. Periodic Slack presence polling
+    # 5. Seed agent skills + BUD stage mappings for all orgs (idempotent)
+    from app.models.organization import Organization
+    from app.services.bud_stage_seeder import seed_stage_mappings_for_org
+    from app.services.skill_loader import seed_skills_for_org
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Organization))
+            for org in result.scalars().all():
+                await seed_skills_for_org(org.id, session)
+                await seed_stage_mappings_for_org(org.id, session)
+            await session.commit()
+        logger.info("agent_skills_seeded")
+    except Exception:
+        logger.warning("agent_skills_seed_failed_at_startup", exc_info=True)
+
+    # 6. Periodic Slack presence polling
     from app.services.presence_cache import refresh_all_presence
 
     async def _presence_poll_loop() -> None:

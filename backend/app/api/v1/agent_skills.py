@@ -1,13 +1,13 @@
-"""Agent skill override management endpoints."""
+"""Agent skill management endpoints."""
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
-from app.models.agent_skill_override import AgentSkillOverride
+from app.models.agent_skill import AgentSkill
 from app.models.user import User
-from app.repositories.agent_skill_override import AgentSkillOverrideRepository
+from app.repositories.agent_skill import AgentSkillRepository
 from app.schemas.agent_skills import AgentSkillRead, AgentSkillUpdate
 from app.services.skill_loader import (
     Skill,
@@ -24,36 +24,36 @@ _SLUG_PATTERN = r"^[a-z0-9](?:[a-z0-9\-]{0,98}[a-z0-9])?$"
 _SLUG_PATH = Path(..., pattern=_SLUG_PATTERN, description="Skill slug (kebab-case)")
 
 
-def _check_customized(override_prompt: str, slug: str) -> bool:
-    """Compare a DB override prompt against the file default.
+def _check_customized(db_prompt: str, slug: str) -> bool:
+    """Compare a DB skill prompt against the file-based seed default.
 
     Args:
-        override_prompt: The prompt stored in the DB override.
+        db_prompt: The prompt stored in the DB.
         slug: The skill slug to load the file default for.
 
     Returns:
-        True if the override differs from the file default (or file is unavailable).
+        True if the DB version differs from the file default (or file is unavailable).
     """
     try:
         file_skill = load_skill(slug)
-        return override_prompt != file_skill.prompt
+        return db_prompt != file_skill.prompt
     except (FileNotFoundError, ValueError):
         return True
 
 
-def _override_to_read(slug: str, override: AgentSkillOverride) -> AgentSkillRead:
-    """Convert a DB override row to an AgentSkillRead schema."""
+def _skill_to_read(slug: str, skill_row: AgentSkill) -> AgentSkillRead:
+    """Convert a DB skill row to an AgentSkillRead schema."""
     return AgentSkillRead(
         skill_slug=slug,
-        name=override.name,
-        description=override.description,
-        tools=override.tools,
-        mcp_tools=override.mcp_tools,
-        prompt=override.prompt,
-        max_turns=getattr(override, "max_turns", 0) or 0,
-        model=getattr(override, "model", "") or "",
-        effort=getattr(override, "effort", "") or "",
-        is_customized=_check_customized(override.prompt, slug),
+        name=skill_row.name,
+        description=skill_row.description,
+        tools=skill_row.tools,
+        mcp_tools=skill_row.mcp_tools,
+        prompt=skill_row.prompt,
+        max_turns=getattr(skill_row, "max_turns", 0) or 0,
+        model=getattr(skill_row, "model", "") or "",
+        effort=getattr(skill_row, "effort", "") or "",
+        is_customized=_check_customized(skill_row.prompt, slug),
     )
 
 
@@ -102,27 +102,27 @@ async def list_agent_skills(
     Returns:
         List of all skills with is_customized flag.
     """
-    repo = AgentSkillOverrideRepository(db, org_id=current_user.org_id)
-    overrides = await repo.list_all()
+    repo = AgentSkillRepository(db, org_id=current_user.org_id)
+    skills = await repo.list_all()
 
-    # Lazy seed: if no overrides at all and skills directory has files, seed once
-    if not overrides and list_available_skills():
+    # Lazy seed: if no skills at all and skills directory has files, seed once
+    if not skills and list_available_skills():
         try:
             await seed_skills_for_org(current_user.org_id, db)
         except Exception:
             logger.exception("seed_skills_failed", org_id=str(current_user.org_id))
-        overrides = await repo.list_all()
+        skills = await repo.list_all()
 
-    override_map = {o.skill_slug: o for o in overrides}
+    skill_map = {s.skill_slug: s for s in skills}
     available_slugs = list_available_skills()
 
-    # Build merged list: DB overrides marked customized, file defaults as-is
-    all_slugs = sorted(set(available_slugs) | set(override_map.keys()))
+    # Build merged list: DB skills marked customized, file defaults as-is
+    all_slugs = sorted(set(available_slugs) | set(skill_map.keys()))
     result: list[AgentSkillRead] = []
 
     for slug in all_slugs:
-        if slug in override_map:
-            result.append(_override_to_read(slug, override_map[slug]))
+        if slug in skill_map:
+            result.append(_skill_to_read(slug, skill_map[slug]))
         else:
             try:
                 skill = load_skill(slug)
@@ -156,11 +156,11 @@ async def get_agent_skill(
     Raises:
         HTTPException: If the skill slug doesn't exist anywhere.
     """
-    repo = AgentSkillOverrideRepository(db, org_id=current_user.org_id)
-    override = await repo.get_by_slug(slug)
+    repo = AgentSkillRepository(db, org_id=current_user.org_id)
+    skill_row = await repo.get_by_slug(slug)
 
-    if override:
-        return _override_to_read(slug, override)
+    if skill_row:
+        return _skill_to_read(slug, skill_row)
 
     skill = _load_skill_or_raise(slug)
     return AgentSkillRead.from_skill(slug, skill)
@@ -190,7 +190,7 @@ async def update_agent_skill(
     Returns:
         The updated skill.
     """
-    repo = AgentSkillOverrideRepository(db, org_id=current_user.org_id)
+    repo = AgentSkillRepository(db, org_id=current_user.org_id)
 
     # Load current state (DB override or file default) as base
     existing = await repo.get_by_slug(slug)
@@ -216,7 +216,7 @@ async def update_agent_skill(
         model = body.model if body.model is not None else file_skill.model
         effort = body.effort if body.effort is not None else file_skill.effort
 
-    override = await repo.upsert(
+    updated = await repo.upsert(
         skill_slug=slug,
         name=name,
         description=description,
@@ -230,7 +230,7 @@ async def update_agent_skill(
 
     logger.info("agent_skill_updated", slug=slug, org_id=str(current_user.org_id))
 
-    return _override_to_read(slug, override)
+    return _skill_to_read(slug, updated)
 
 
 @router.delete(
@@ -253,7 +253,7 @@ async def reset_agent_skill(
     Raises:
         HTTPException: If no override exists to reset.
     """
-    repo = AgentSkillOverrideRepository(db, org_id=current_user.org_id)
+    repo = AgentSkillRepository(db, org_id=current_user.org_id)
     deleted = await repo.delete_by_slug(slug)
     if not deleted:
         raise HTTPException(

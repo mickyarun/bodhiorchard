@@ -16,8 +16,10 @@ from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
 from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
+from app.repositories.bud_agent_task import BUDAgentTaskRepository
 from app.schemas.bud import (
     EXPORTABLE_SECTIONS,
+    BUDAgentTaskRead,
     BUDCreate,
     BUDListItem,
     BUDRead,
@@ -142,13 +144,24 @@ async def get_bud(
     bud_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> BUDDocument:
-    """Retrieve a single BUD by ID."""
+) -> BUDRead:
+    """Retrieve a single BUD by ID, including active agent task."""
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
-    return bud
+
+    # Attach active (or last failed) agent task
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    active_task = await task_repo.get_active_for_bud(bud_id)
+    if not active_task:
+        active_task = await task_repo.get_latest_failed(bud_id)
+
+    bud_data = BUDRead.model_validate(bud)
+    if active_task:
+        bud_data.active_agent_task = BUDAgentTaskRead.model_validate(active_task)
+
+    return bud_data
 
 
 @router.get(

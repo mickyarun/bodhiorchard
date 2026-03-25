@@ -79,54 +79,45 @@ def list_available_skills() -> list[str]:
 
 
 async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSession) -> Skill:
-    """Load a skill with DB override precedence, falling back to file.
+    """Load a skill from the DB for a given org.
 
-    If the database query fails, logs a warning and falls back to the
-    file-based default so that agent execution is not blocked by a
-    transient DB issue.
+    Skills are seeded on startup so they should always exist in the DB.
 
     Args:
-        skill_name: The skill slug (e.g., 'triage-analyst').
-        org_id: Organization UUID to look up overrides for.
+        skill_name: The skill slug (e.g., 'product-manager').
+        org_id: Organization UUID to look up the skill for.
         db: Async database session.
 
     Returns:
-        A Skill object — from DB if an override exists, otherwise from file.
+        A Skill object from the DB.
+
+    Raises:
+        ValueError: If the skill is not found in the DB.
     """
-    from sqlalchemy.exc import SQLAlchemyError
+    from app.repositories.agent_skill import AgentSkillRepository
 
-    from app.repositories.agent_skill_override import AgentSkillOverrideRepository
+    repo = AgentSkillRepository(db, org_id=org_id)
+    skill_row = await repo.get_by_slug(skill_name)
 
-    try:
-        repo = AgentSkillOverrideRepository(db, org_id=org_id)
-        override = await repo.get_by_slug(skill_name)
-    except SQLAlchemyError:
-        logger.warning(
-            "skill_override_db_error_falling_back_to_file",
-            skill=skill_name,
-            org_id=str(org_id),
-            exc_info=True,
-        )
-        return load_skill(skill_name)
+    if not skill_row:
+        raise ValueError(f"Skill not found in DB: {skill_name} (org_id={org_id})")
 
-    if override:
-        return Skill(
-            name=override.name,
-            description=override.description,
-            tools=override.tools,
-            mcp_tools=override.mcp_tools,
-            prompt=override.prompt,
-            max_turns=getattr(override, "max_turns", 0) or 0,
-            model=getattr(override, "model", "") or "",
-            effort=getattr(override, "effort", "") or "",
-        )
-    return load_skill(skill_name)
+    return Skill(
+        name=skill_row.name,
+        description=skill_row.description,
+        tools=skill_row.tools,
+        mcp_tools=skill_row.mcp_tools,
+        prompt=skill_row.prompt,
+        max_turns=skill_row.max_turns or 0,
+        model=skill_row.model or "",
+        effort=skill_row.effort or "",
+    )
 
 
 async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
     """Seed all file-based skill defaults into DB for an org.
 
-    Skips any skill_slug that already has an override row. Individual
+    Skips any skill_slug that already has a DB row. Individual
     skill failures (bad file or DB constraint violation) are logged
     and skipped without aborting the entire seed.
 
@@ -139,13 +130,13 @@ async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
     """
     from sqlalchemy.exc import SQLAlchemyError
 
-    from app.repositories.agent_skill_override import AgentSkillOverrideRepository
+    from app.repositories.agent_skill import AgentSkillRepository
 
-    repo = AgentSkillOverrideRepository(db, org_id=org_id)
+    repo = AgentSkillRepository(db, org_id=org_id)
 
     # Single query to get existing slugs instead of N get_by_slug calls
-    existing_overrides = await repo.list_all()
-    existing_slugs = {o.skill_slug for o in existing_overrides}
+    existing_skills = await repo.list_all()
+    existing_slugs = {s.skill_slug for s in existing_skills}
 
     available = list_available_skills()
     seeded = 0

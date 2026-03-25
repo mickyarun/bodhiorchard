@@ -1,16 +1,16 @@
-"""Agent skill override data access repository."""
+"""Agent skill data access repository."""
 
 import uuid
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent_skill_override import AgentSkillOverride
+from app.models.agent_skill import AgentSkill
 from app.repositories.base import BaseRepository
 
 
-class AgentSkillOverrideRepository(BaseRepository[AgentSkillOverride]):
-    """Repository for agent skill overrides, scoped to an organization."""
+class AgentSkillRepository(BaseRepository[AgentSkill]):
+    """Repository for agent skills, scoped to an organization."""
 
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
         """Initialize the repository.
@@ -19,19 +19,19 @@ class AgentSkillOverrideRepository(BaseRepository[AgentSkillOverride]):
             db: Async SQLAlchemy session.
             org_id: Organization UUID for scoping queries.
         """
-        super().__init__(AgentSkillOverride, db, org_id=org_id)
+        super().__init__(AgentSkill, db, org_id=org_id)
 
-    async def get_by_slug(self, skill_slug: str) -> AgentSkillOverride | None:
-        """Fetch a single override by its skill slug.
+    async def get_by_slug(self, skill_slug: str) -> AgentSkill | None:
+        """Fetch a single skill by its slug.
 
         Args:
-            skill_slug: The skill identifier (e.g. 'triage-analyst').
+            skill_slug: The skill identifier (e.g. 'product-manager').
 
         Returns:
-            The override row, or None if no override exists.
+            The skill row, or None if not found.
         """
         stmt = self._scoped(
-            select(AgentSkillOverride).where(AgentSkillOverride.skill_slug == skill_slug)
+            select(AgentSkill).where(AgentSkill.skill_slug == skill_slug)
         )
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
@@ -47,8 +47,8 @@ class AgentSkillOverrideRepository(BaseRepository[AgentSkillOverride]):
         max_turns: int = 0,
         model: str = "",
         effort: str = "",
-    ) -> AgentSkillOverride:
-        """Insert or update an override for a skill slug.
+    ) -> AgentSkill:
+        """Insert or update a skill for a given slug.
 
         Args:
             skill_slug: The skill identifier.
@@ -62,7 +62,7 @@ class AgentSkillOverrideRepository(BaseRepository[AgentSkillOverride]):
             effort: Reasoning effort level (empty = default).
 
         Returns:
-            The created or updated override.
+            The created or updated skill.
         """
         existing = await self.get_by_slug(skill_slug)
         if existing is not None:
@@ -78,7 +78,7 @@ class AgentSkillOverrideRepository(BaseRepository[AgentSkillOverride]):
             await self._db.refresh(existing)
             return existing
 
-        override = AgentSkillOverride(
+        skill = AgentSkill(
             org_id=self._org_id,
             skill_slug=skill_slug,
             name=name,
@@ -90,21 +90,21 @@ class AgentSkillOverrideRepository(BaseRepository[AgentSkillOverride]):
             model=model,
             effort=effort,
         )
-        return await self.create(override)
+        return await self.create(skill)
 
     async def delete_by_slug(self, skill_slug: str) -> bool:
-        """Delete an override by skill slug.
+        """Delete a skill by slug.
 
         Args:
             skill_slug: The skill identifier.
 
         Returns:
-            True if a row was deleted, False if no override existed.
+            True if a row was deleted, False if not found.
         """
         stmt = (
-            delete(AgentSkillOverride)
-            .where(AgentSkillOverride.org_id == self._org_id)
-            .where(AgentSkillOverride.skill_slug == skill_slug)
+            delete(AgentSkill)
+            .where(AgentSkill.org_id == self._org_id)
+            .where(AgentSkill.skill_slug == skill_slug)
         )
         result = await self._db.execute(stmt)
         await self._db.flush()

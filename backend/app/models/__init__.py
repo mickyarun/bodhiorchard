@@ -5,7 +5,9 @@ auto-generation of migration scripts.
 """
 
 from app.models.agent_log import AgentLog
-from app.models.agent_skill_override import AgentSkillOverride
+from app.models.agent_skill import AgentSkill
+from app.models.agent_skill_bud_stage import AgentSkillBudStage
+from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.base import Base, BaseModel
 from app.models.bud import (
     BUDChatMessage,
@@ -40,7 +42,10 @@ from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
 
 __all__ = [
     "AgentLog",
-    "AgentSkillOverride",
+    "AgentSkill",
+    "AgentSkillBudStage",
+    "AgentTaskStatus",
+    "BUDAgentTask",
     "Base",
     "BaseModel",
     "BUDChatMessage",

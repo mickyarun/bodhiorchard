@@ -1,24 +1,33 @@
-"""Agent skill override model for storing per-org customized agent prompts."""
+"""Agent skill model — per-org AI agent skill configuration.
+
+Skills are seeded from file templates on startup and stored in the DB
+as the primary source of truth. Orgs can customize prompts, tools,
+and model settings per skill.
+"""
 
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
 
+if TYPE_CHECKING:
+    from app.models.agent_skill_bud_stage import AgentSkillBudStage
 
-class AgentSkillOverride(BaseModel):
-    """Per-org override of an agent skill prompt.
 
-    File-based skills in agents/skills/ serve as defaults.
-    When an override row exists for a given org + skill_slug,
-    the DB version takes precedence.
+class AgentSkill(BaseModel):
+    """Per-org agent skill configuration.
+
+    Seeded from file-based templates in agents/skills/ on startup.
+    The DB row is the runtime source of truth — file defaults are
+    only used during the seed process.
     """
 
-    __tablename__ = "agent_skill_overrides"
-    __table_args__ = (UniqueConstraint("org_id", "skill_slug", name="uq_skill_override_org_slug"),)
+    __tablename__ = "agent_skills"
+    __table_args__ = (UniqueConstraint("org_id", "skill_slug", name="uq_skill_org_slug"),)
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
@@ -33,5 +42,10 @@ class AgentSkillOverride(BaseModel):
     model: Mapped[str] = mapped_column(String(100), nullable=False, default="", server_default="")
     effort: Mapped[str] = mapped_column(String(20), nullable=False, default="", server_default="")
 
+    # Relationships
+    bud_stages: Mapped[list["AgentSkillBudStage"]] = relationship(
+        back_populates="skill", lazy="noload"
+    )
+
     def __repr__(self) -> str:
-        return f"<AgentSkillOverride(id={self.id}, org={self.org_id}, slug={self.skill_slug!r})>"
+        return f"<AgentSkill(id={self.id}, org={self.org_id}, slug={self.skill_slug!r})>"

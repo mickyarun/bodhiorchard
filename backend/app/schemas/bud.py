@@ -89,6 +89,31 @@ class DesignHtmlUpdate(BaseModel):
     notes: str | None = None
 
 
+class BUDAgentTaskRead(BaseModel):
+    """Schema for reading a BUD agent task."""
+
+    id: uuid.UUID
+    task_type: str
+    skill_slug: str = ""
+    status: str
+    job_id: str | None = None
+    attempt: int = 1
+    status_message: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_skill_slug(cls, data: object) -> object:
+        """Pull skill_slug from the joined AgentSkill relationship."""
+        if hasattr(data, "skill") and data.skill is not None:
+            data.skill_slug = data.skill.skill_slug  # type: ignore[union-attr]
+        return data
+
+
 class BUDRead(BaseModel):
     """Schema for reading a single BUD with full content."""
 
@@ -104,6 +129,7 @@ class BUDRead(BaseModel):
     metadata: dict | None = Field(None, validation_alias="metadata_")
     assignee_id: uuid.UUID | None = None
     assignee_name: str | None = None
+    active_agent_task: BUDAgentTaskRead | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -82,6 +82,9 @@ class BUDDocument(BaseModel):
     timeline_events: Mapped[list["BUDTimelineEvent"]] = relationship(
         back_populates="bud", cascade="all, delete-orphan", lazy="noload"
     )
+    agent_tasks: Mapped[list["BUDAgentTask"]] = relationship(
+        back_populates="bud", cascade="all, delete-orphan", lazy="noload"
+    )
 
     def __repr__(self) -> str:
         return f"<BUDDocument(id={self.id}, bud_number={self.bud_number})>"

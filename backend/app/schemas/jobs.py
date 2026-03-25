@@ -119,3 +119,15 @@ class DesignExtractJobPayload(BaseModel):
     repo_id: str
     repo_path: str
     is_default: bool = False
+
+
+class BUDAgentTaskPayload(BaseModel):
+    """Standardized payload for all BUD agent tasks.
+
+    The handler reads everything else from the DB via the task row
+    (which has skill_id, bud_id, org_id). No per-agent payload needed.
+    """
+
+    org_id: str
+    bud_id: str
+    task_id: str
