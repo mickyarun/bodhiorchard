@@ -321,8 +321,9 @@ async def handle_pm_approval(
                 bud_id=str(bud.id),
                 task_id=str(task.id),
             ).model_dump(),
+            user_id=str(approver.id),
         )
-        task.job_id = prd_job.jobId
+        task.job_id = prd_job.job_id
         task.status = AgentTaskStatus.RUNNING
 
 

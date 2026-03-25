@@ -397,6 +397,10 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 update_job(job_id, state=JobState.FAILED, error="Skill not found")
                 return
 
+            # Capture scalar values for use after session closes
+            _skill_slug = skill_row.skill_slug
+            _task_type = task.task_type
+
             skill = Skill(
                 name=skill_row.name,
                 description=skill_row.description,
@@ -482,16 +486,16 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                     err_task.error_message = str(exc)[:500]
                     await err_db.commit()
             update_job(job_id, state=JobState.FAILED, error=str(exc)[:200])
-            logger.exception("bud_agent_job_failed", task_id=str(task_id), task_type=payload.task_id)
+            logger.exception("bud_agent_job_failed", task_id=str(task_id))
             return
 
-    # Record timeline event
+    # Record timeline event (using captured scalars — safe after session close)
     await record_agent_timeline(
         payload.org_id,
         payload.bud_id,
         "ai_agent_completed",
-        skill_name=skill_row.skill_slug if skill_row else "unknown",
-        section=task.task_type if task else "unknown",
+        skill_name=_skill_slug,
+        section=_task_type,
         job_id=job_id,
     )
 
