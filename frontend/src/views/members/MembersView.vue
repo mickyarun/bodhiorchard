@@ -211,13 +211,12 @@
       </v-btn>
     </div>
 
-    <div class="d-flex flex-wrap ga-3">
+    <div class="roles-grid">
       <v-card
         v-for="role in store.roles"
         :key="role.id"
         color="surface"
         variant="outlined"
-        width="320"
         class="role-card"
       >
         <v-card-text class="pb-2">
@@ -1140,6 +1139,11 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
 .role-card {
   transition: border-color 0.15s ease;
 }
