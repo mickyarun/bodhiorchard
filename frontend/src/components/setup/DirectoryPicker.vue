@@ -125,33 +125,16 @@
                 :class="{ 'invisible': !dir.is_git_repo }"
               />
             </template>
-            <v-list-item-title class="text-body-2">
-              {{ dir.name }}
-              <span v-if="dir.is_git_repo && dir.has_sub_repos" class="text-caption text-medium-emphasis ml-1">
-                (contains repos)
-              </span>
-            </v-list-item-title>
-            <v-list-item-subtitle v-if="dir.is_git_repo" class="text-caption">
-              Git repository
-            </v-list-item-subtitle>
+            <v-list-item-title class="text-body-2">{{ dir.name }}</v-list-item-title>
             <template #append>
               <v-chip
-                v-if="dir.is_git_repo && !dir.has_sub_repos"
+                v-if="dir.is_git_repo"
                 size="x-small"
                 variant="tonal"
                 color="primary"
                 class="ml-2"
               >
                 git
-              </v-chip>
-              <v-chip
-                v-if="dir.has_sub_repos"
-                size="x-small"
-                variant="tonal"
-                color="warning"
-                class="ml-2"
-              >
-                monorepo
               </v-chip>
               <v-icon
                 icon="mdi-chevron-right"
@@ -203,7 +186,6 @@ interface DirectoryEntry {
   name: string
   path: string
   is_git_repo: boolean
-  has_sub_repos: boolean
 }
 
 const emit = defineEmits<{

@@ -74,23 +74,11 @@ async def browse_directories(
                 continue
             if child.is_dir():
                 is_git = (child / ".git").exists()
-                # Check if this directory contains nested git repos
-                import contextlib
-
-                has_sub_repos = False
-                if is_git:
-                    with contextlib.suppress(PermissionError):
-                        has_sub_repos = any(
-                            (gc / ".git").exists()
-                            for gc in child.iterdir()
-                            if gc.is_dir() and not gc.name.startswith(".")
-                        )
                 entries.append(
                     DirectoryEntry(
                         name=child.name,
                         path=str(child),
                         is_git_repo=is_git,
-                        has_sub_repos=has_sub_repos,
                     )
                 )
     except PermissionError as exc:
