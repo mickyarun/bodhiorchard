@@ -169,14 +169,9 @@ async def initialize_setup(
             detail="Organization slug already exists. Setup may have been completed already.",
         )
 
-    # Build org config — clean, no legacy fields
+    # Build org config — repos are tracked in tracked_repositories table
     org_config: dict = {
-        "source_code": {
-            "repos": [r.path for r in body.source_code.repos],
-        },
-        "llm": {
-            "preset": "claude-code",
-        },
+        "llm": {"preset": "claude-code"},
         "integrations": {
             "github": {"enabled": False},
             "slack": {"enabled": False},

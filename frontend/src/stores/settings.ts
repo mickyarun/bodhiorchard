@@ -8,7 +8,7 @@ export interface ConnectionsState {
     localPath: string
     type: 'workspace' | 'single-repo'
   }
-  github: { enabled: boolean; pat: string; org: string }
+  github: { enabled: boolean; pat: string; org: string; patExpiresAt: string | null }
   slack: { enabled: boolean; botToken: string; signingSecret: string; teamId: string }
   aiConfig: {
     preset: string
@@ -23,7 +23,7 @@ export interface ConnectionsState {
 function emptyState(): ConnectionsState {
   return {
     sourceCode: { localPath: '', type: 'single-repo' },
-    github: { enabled: false, pat: '', org: '' },
+    github: { enabled: false, pat: '', org: '', patExpiresAt: null },
     slack: { enabled: false, botToken: '', signingSecret: '', teamId: '' },
     aiConfig: {
       preset: 'claude-code',

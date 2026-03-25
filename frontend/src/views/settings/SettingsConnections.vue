@@ -192,6 +192,40 @@
                   hint="Leave unchanged to keep existing token"
                   persistent-hint
                 />
+                <!-- PAT expiry warning -->
+                <v-alert
+                  v-if="patExpired"
+                  type="error"
+                  variant="tonal"
+                  density="compact"
+                  class="mt-3"
+                  prepend-icon="mdi-key-alert"
+                >
+                  Token expired on {{ formatDate(settingsStore.connections.github.patExpiresAt!) }}.
+                  <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener" class="text-primary font-weight-medium">Generate a new token</a>.
+                </v-alert>
+                <v-alert
+                  v-else-if="patExpiringSoon"
+                  type="warning"
+                  variant="tonal"
+                  density="compact"
+                  class="mt-3"
+                  prepend-icon="mdi-key-alert"
+                >
+                  Token expires {{ patDaysRemaining <= 1 ? 'tomorrow' : `in ${patDaysRemaining} days` }} ({{ formatDate(settingsStore.connections.github.patExpiresAt!) }}).
+                  <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener" class="text-primary font-weight-medium">Renew token</a>.
+                </v-alert>
+                <v-chip
+                  v-else-if="settingsStore.connections.github.patExpiresAt"
+                  size="x-small"
+                  variant="tonal"
+                  color="success"
+                  prepend-icon="mdi-check-circle-outline"
+                  class="mt-3"
+                >
+                  Token valid until {{ formatDate(settingsStore.connections.github.patExpiresAt) }}
+                </v-chip>
+
                 <div class="text-caption text-medium-emphasis mt-2">
                   <v-icon icon="mdi-help-circle-outline" size="14" class="mr-1" />
                   Go to
@@ -303,6 +337,24 @@ import SettingsSlack from './SettingsSlack.vue'
 import SettingsAiConfig from './SettingsAiConfig.vue'
 
 const settingsStore = useSettingsStore()
+
+// ─── GitHub PAT expiry ──────────────────────────
+
+const PAT_WARN_DAYS = 14
+
+const patDaysRemaining = computed(() => {
+  const exp = settingsStore.connections.github.patExpiresAt
+  if (!exp) return Infinity
+  const diff = new Date(exp).getTime() - Date.now()
+  return Math.ceil(diff / (1000 * 60 * 60 * 24))
+})
+
+const patExpired = computed(() => patDaysRemaining.value <= 0)
+const patExpiringSoon = computed(() => patDaysRemaining.value > 0 && patDaysRemaining.value <= PAT_WARN_DAYS)
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
 
 // MCP token state
 const mcpTokenSet = ref(false)

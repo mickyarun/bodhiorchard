@@ -18,6 +18,7 @@ class GitHubSettings(BaseModel):
     enabled: bool = False
     pat: str = ""
     org: str = ""
+    pat_expires_at: str | None = Field(None, alias="patExpiresAt")
 
     model_config = {"populate_by_name": True}
 
