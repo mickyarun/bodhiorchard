@@ -384,6 +384,10 @@ async def run_scan_pipeline(
                     ):
                         from app.mcp.server import set_synthesis_queue
 
+                        # Adaptive threshold: small repos (< 10 clusters) use
+                        # lower bar so nothing is lost; large repos filter noise.
+                        total_clusters = len(gitnexus_result.features)
+                        min_files = 2 if total_clusters < 10 else 3
                         queue_items = [
                             {
                                 "name": f.name,
@@ -392,7 +396,7 @@ async def run_scan_pipeline(
                                 "repo_name": repo_name,
                             }
                             for f in gitnexus_result.features
-                            if len(f.files) >= 2
+                            if len(f.files) >= min_files
                         ]
                         queue_key = set_synthesis_queue(
                             str(org_id),
