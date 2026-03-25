@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
+import { useAuthStore } from '@/stores/auth'
 
 export interface Member {
   id: string
@@ -91,6 +92,15 @@ export const useMembersStore = defineStore('members', () => {
     }
   }
 
+  /** Refresh the current user's permissions (call after any role mutation). */
+  async function refreshCurrentUserPermissions(): Promise<void> {
+    try {
+      await useAuthStore().fetchUser()
+    } catch {
+      // Non-critical — permissions will refresh on next page load
+    }
+  }
+
   async function addMember(payload: {
     email: string
     name: string
@@ -104,11 +114,8 @@ export const useMembersStore = defineStore('members', () => {
       const { data } = await api.post('/v1/members', payload)
       members.value.push(data)
       return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to add member.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to add member.')
       return false
     }
   }
@@ -120,11 +127,8 @@ export const useMembersStore = defineStore('members', () => {
       const idx = members.value.findIndex(m => m.id === userId)
       if (idx !== -1) members.value[idx] = data
       return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to update status.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to update status.')
       return false
     }
   }
@@ -135,12 +139,10 @@ export const useMembersStore = defineStore('members', () => {
       const { data } = await api.patch(`/v1/members/${userId}/role`, { roleId })
       const idx = members.value.findIndex(m => m.id === userId)
       if (idx !== -1) members.value[idx] = data
+      await refreshCurrentUserPermissions()
       return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to assign role.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to assign role.')
       return false
     }
   }
@@ -155,11 +157,24 @@ export const useMembersStore = defineStore('members', () => {
       await api.post('/v1/roles', payload)
       await fetchRoles()
       return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to create role.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to create role.')
+      return false
+    }
+  }
+
+  async function updateRole(
+    roleId: string,
+    payload: { name?: string; description?: string; permission_ids?: string[] },
+  ): Promise<boolean> {
+    error.value = null
+    try {
+      await api.put(`/v1/roles/${roleId}`, payload)
+      await fetchRoles()
+      await refreshCurrentUserPermissions()
+      return true
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to update role.')
       return false
     }
   }
@@ -170,11 +185,8 @@ export const useMembersStore = defineStore('members', () => {
       await api.post(`/v1/members/${targetId}/merge`, { sourceId })
       await fetchMembers()
       return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to merge members.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to merge members.')
       return false
     }
   }
@@ -191,11 +203,8 @@ export const useMembersStore = defineStore('members', () => {
       const idx = members.value.findIndex(m => m.id === userId)
       if (idx !== -1) members.value[idx] = data
       return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to update character.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to update character.')
       return false
     }
   }
@@ -223,13 +232,8 @@ export const useMembersStore = defineStore('members', () => {
         slackSent: data.slackSent ?? null,
         slackError: data.slackError ?? null,
       }
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to set password.'
-      } else {
-        error.value = 'Failed to set password.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to set password.')
       return null
     }
   }
@@ -239,12 +243,10 @@ export const useMembersStore = defineStore('members', () => {
     try {
       await api.delete(`/v1/roles/${roleId}`)
       roles.value = roles.value.filter(r => r.id !== roleId)
+      await refreshCurrentUserPermissions()
       return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to delete role.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to delete role.')
       return false
     }
   }
@@ -265,6 +267,7 @@ export const useMembersStore = defineStore('members', () => {
     updateCharacter,
     setPassword,
     createRole,
+    updateRole,
     deleteRole,
   }
 })

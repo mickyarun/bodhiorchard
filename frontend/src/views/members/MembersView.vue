@@ -240,14 +240,22 @@
               {{ role.permissions.length }} permission{{ role.permissions.length !== 1 ? 's' : '' }}
             </td>
             <td>
-              <v-btn
-                v-if="role.scopeType !== 'SYSTEM'"
-                icon="mdi-delete-outline"
-                size="small"
-                variant="text"
-                color="error"
-                @click="confirmDeleteRole(role)"
-              />
+              <template v-if="role.scopeType !== 'SYSTEM'">
+                <v-btn
+                  icon="mdi-pencil-outline"
+                  size="small"
+                  variant="text"
+                  color="primary"
+                  @click="openEditRole(role)"
+                />
+                <v-btn
+                  icon="mdi-delete-outline"
+                  size="small"
+                  variant="text"
+                  color="error"
+                  @click="confirmDeleteRole(role)"
+                />
+              </template>
               <span v-else class="text-caption text-medium-emphasis">—</span>
             </td>
           </tr>
@@ -444,16 +452,16 @@
       </v-card>
     </v-dialog>
 
-    <!-- ─── CREATE ROLE DIALOG ─────────────────────────────── -->
-    <v-dialog v-model="createRoleDialog" max-width="600" persistent>
+    <!-- ─── CREATE / EDIT ROLE DIALOG ────────────────────────── -->
+    <v-dialog v-model="roleDialog" max-width="600" persistent>
       <v-card>
         <v-card-title class="d-flex align-center justify-space-between">
-          <span>Create Role</span>
-          <v-btn icon="mdi-close" variant="text" size="small" @click="createRoleDialog = false" />
+          <span>{{ roleForm.id ? 'Edit Role' : 'Create Role' }}</span>
+          <v-btn icon="mdi-close" variant="text" size="small" @click="roleDialog = false" />
         </v-card-title>
         <v-card-text>
           <v-text-field
-            v-model="newRole.name"
+            v-model="roleForm.name"
             label="Role Name"
             variant="outlined"
             density="compact"
@@ -461,7 +469,7 @@
             :rules="[v => !!v || 'Name is required']"
           />
           <v-text-field
-            v-model="newRole.description"
+            v-model="roleForm.description"
             label="Description (optional)"
             variant="outlined"
             density="compact"
@@ -479,7 +487,7 @@
               <v-checkbox
                 v-for="perm in cat.permissions"
                 :key="perm.id"
-                v-model="newRole.permissionIds"
+                v-model="roleForm.permissionIds"
                 :value="perm.id"
                 :label="perm.name"
                 density="compact"
@@ -491,14 +499,14 @@
         </v-card-text>
         <v-card-actions class="px-4 pb-4">
           <v-spacer />
-          <v-btn variant="text" @click="createRoleDialog = false">Cancel</v-btn>
+          <v-btn variant="text" @click="roleDialog = false">Cancel</v-btn>
           <v-btn
             color="primary"
-            :loading="creatingRole"
-            :disabled="!newRole.name"
-            @click="submitCreateRole"
+            :loading="savingRole"
+            :disabled="!roleForm.name"
+            @click="submitRole"
           >
-            Create
+            {{ roleForm.id ? 'Save' : 'Create' }}
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -967,28 +975,44 @@ async function sendViaSlack() {
   }
 }
 
-// ─── Create Role ──────────────────────────────
-const createRoleDialog = ref(false)
-const creatingRole = ref(false)
-const newRole = ref({ name: '', description: '', permissionIds: [] as string[] })
+// ─── Create / Edit Role ──────────────────────────────
+const roleDialog = ref(false)
+const savingRole = ref(false)
+const roleForm = ref({ id: '', name: '', description: '', permissionIds: [] as string[] })
 
 function openCreateRole() {
-  newRole.value = { name: '', description: '', permissionIds: [] }
+  roleForm.value = { id: '', name: '', description: '', permissionIds: [] }
   if (store.permissionCategories.length === 0) {
     store.fetchPermissions()
   }
-  createRoleDialog.value = true
+  roleDialog.value = true
 }
 
-async function submitCreateRole() {
-  creatingRole.value = true
-  const ok = await store.createRole({
-    name: newRole.value.name,
-    description: newRole.value.description || undefined,
-    permission_ids: newRole.value.permissionIds,
-  })
-  creatingRole.value = false
-  if (ok) createRoleDialog.value = false
+function openEditRole(role: RoleOption) {
+  roleForm.value = {
+    id: role.id,
+    name: role.name,
+    description: role.description || '',
+    permissionIds: role.permissions.map(p => p.id),
+  }
+  if (store.permissionCategories.length === 0) {
+    store.fetchPermissions()
+  }
+  roleDialog.value = true
+}
+
+async function submitRole() {
+  savingRole.value = true
+  const payload = {
+    name: roleForm.value.name,
+    description: roleForm.value.description || undefined,
+    permission_ids: roleForm.value.permissionIds,
+  }
+  const ok = roleForm.value.id
+    ? await store.updateRole(roleForm.value.id, payload)
+    : await store.createRole(payload)
+  savingRole.value = false
+  if (ok) roleDialog.value = false
 }
 
 // ─── Delete Role ──────────────────────────────
