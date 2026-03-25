@@ -4,6 +4,7 @@ import uuid
 from collections.abc import AsyncGenerator, Callable
 from typing import Literal
 
+import structlog
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
@@ -11,10 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import verify_token
 from app.database import AsyncSessionLocal
-from app.models.user import OrgToUser, User
+from app.models.user import OrgToUser, User, UserRole
 from app.repositories.permission import PermissionRepository
 from app.repositories.role import RoleRepository
 from app.repositories.user import UserRepository
+
+logger = structlog.get_logger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -171,6 +174,10 @@ async def get_current_user_pending_password(
 async def get_user_permissions(user: User, db: AsyncSession) -> set[str]:
     """Return the set of permission resource_id strings for a user's role.
 
+    Looks up permissions via the role_id FK first.  When role_id is NULL
+    (legacy users created before the RBAC roles table), falls back to the
+    default permission set for the user's role enum from permissions.py.
+
     Args:
         user: The user whose permissions to look up.
         db: The async database session.
@@ -179,11 +186,28 @@ async def get_user_permissions(user: User, db: AsyncSession) -> set[str]:
         A set of resource_id strings (e.g. {"backlog:view", "backlog:create"}).
     """
     role_id = getattr(user, "role_id", None)
-    if role_id is None:
-        return set()
+    if role_id is not None:
+        perm_repo = PermissionRepository(db)
+        return await perm_repo.get_user_permission_ids(role_id)
 
-    perm_repo = PermissionRepository(db)
-    return await perm_repo.get_user_permission_ids(role_id)
+    # Fallback: derive permissions from the legacy role enum when role_id
+    # is NULL (users created before the RBAC roles table was seeded).
+    role_enum = getattr(user, "role", None)
+    if role_enum is not None:
+        from app.core.permissions import DEFAULT_SYSTEM_ROLES
+
+        role_name = str(role_enum)
+        for role_def in DEFAULT_SYSTEM_ROLES:
+            if role_def.name == role_name:
+                logger.info(
+                    "permissions_from_role_enum_fallback",
+                    user_id=str(user.id),
+                    role=role_name,
+                )
+                return set(role_def.permission_ids)
+
+    logger.warning("no_permissions_resolved", user_id=str(user.id))
+    return set()
 
 
 def require_permissions(
@@ -209,7 +233,13 @@ def require_permissions(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ) -> User:
-        # org_owner bypasses all permission checks
+        # org_owner bypasses all permission checks (enum check first for
+        # legacy users without role_id, then DB lookup as defense-in-depth
+        # in case the enum attribute is missing but the role row exists).
+        role_enum = getattr(current_user, "role", None)
+        if role_enum == UserRole.ORG_OWNER:
+            return current_user
+
         role_id = getattr(current_user, "role_id", None)
         if role_id is not None:
             role_repo = RoleRepository(db)
@@ -223,15 +253,25 @@ def require_permissions(
         if mode == "all":
             if not required.issubset(user_perms):
                 missing = required - user_perms
+                logger.warning(
+                    "permission_denied",
+                    user_id=str(current_user.id),
+                    missing=sorted(missing),
+                )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Missing permissions: {', '.join(sorted(missing))}",
+                    detail="Insufficient permissions.",
                 )
         else:  # mode == "any"
             if not required.intersection(user_perms):
+                logger.warning(
+                    "permission_denied",
+                    user_id=str(current_user.id),
+                    required=sorted(required),
+                )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Requires at least one of: {', '.join(sorted(required))}",
+                    detail="Insufficient permissions.",
                 )
 
         return current_user

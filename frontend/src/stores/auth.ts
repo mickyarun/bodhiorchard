@@ -26,8 +26,12 @@ export const useAuthStore = defineStore('auth', () => {
         localStorage.setItem('flowdev_refresh_token', response.data.refresh_token)
       }
       mustChangePassword.value = response.data.must_change_password === true
-      // Fetch user profile but don't break login if it fails
-      try { await fetchUser() } catch { /* token is valid, profile fetch can retry later */ }
+      // Fetch user profile — don't block login but surface the error
+      try {
+        await fetchUser()
+      } catch {
+        loginError.value = 'Logged in but failed to load profile. Please refresh.'
+      }
       return true
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'response' in err) {

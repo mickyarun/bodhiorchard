@@ -15,7 +15,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.v1.settings_repos import router as repos_router
 from app.api.v1.settings_slack import router as slack_router
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_permissions
 from app.core.encryption import decrypt_secret, encrypt_secret
 from app.core.security import hash_password
 from app.models.user import User
@@ -37,7 +37,11 @@ router.include_router(repos_router)
 router.include_router(slack_router)
 
 
-@router.get("/connections", response_model=ConnectionsRead)
+@router.get(
+    "/connections",
+    response_model=ConnectionsRead,
+    dependencies=[Depends(require_permissions("integrations:view"))],
+)
 async def get_connections(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -97,7 +101,11 @@ async def get_connections(
     )
 
 
-@router.patch("/connections", response_model=ConnectionsRead)
+@router.patch(
+    "/connections",
+    response_model=ConnectionsRead,
+    dependencies=[Depends(require_permissions("integrations:configure"))],
+)
 async def update_connections(
     body: ConnectionsUpdate,
     current_user: User = Depends(get_current_user),
@@ -204,7 +212,11 @@ class MCPTokenResponse(BaseModel):
     message: str = "MCP token generated. Store it securely — it will not be shown again."
 
 
-@router.post("/mcp-token", response_model=MCPTokenResponse)
+@router.post(
+    "/mcp-token",
+    response_model=MCPTokenResponse,
+    dependencies=[Depends(require_permissions("org:edit_settings"))],
+)
 async def regenerate_mcp_token(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -232,7 +244,10 @@ async def regenerate_mcp_token(
     return MCPTokenResponse(mcp_token=mcp_token)
 
 
-@router.get("/mcp-token/status")
+@router.get(
+    "/mcp-token/status",
+    dependencies=[Depends(require_permissions("org:view_settings"))],
+)
 async def mcp_token_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

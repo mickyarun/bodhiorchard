@@ -46,6 +46,7 @@
           rounded="lg"
         />
         <v-list-item
+          v-if="canManageMembers"
           prepend-icon="mdi-account-group-outline"
           title="Members"
           to="/members"
@@ -56,7 +57,7 @@
       <template #append>
         <v-divider class="mb-2" />
         <v-list density="compact" nav class="px-2 pb-2">
-          <v-list-group value="settings">
+          <v-list-group v-if="canViewSettings" value="settings">
             <template #activator="{ props }">
               <v-list-item
                 v-bind="props"
@@ -66,18 +67,21 @@
               />
             </template>
             <v-list-item
-              title="Connections"
+              v-if="canViewConnections"
+              title="Integrations"
               to="/settings"
               rounded="lg"
               class="pl-10"
             />
             <v-list-item
+              v-if="canViewDesignSystems"
               title="Design Systems"
               to="/settings/design-systems"
               rounded="lg"
               class="pl-10"
             />
             <v-list-item
+              v-if="canViewAgentPrompts"
               title="Agent Prompts"
               to="/settings/agent-prompts"
               rounded="lg"
@@ -136,18 +140,18 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import FlowDevLogo from '@/components/common/FlowDevLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
+import { usePermissions } from '@/composables/usePermissions'
 
 const router = useRouter()
 const authStore = useAuthStore()
-
-// Roles that have the backlog:approve permission by default
-const APPROVER_ROLES = new Set(['org_owner', 'admin', 'pm', 'tech_lead'])
-
-const canApprove = computed(() => {
-  const role = authStore.user?.role
-  if (!role) return false
-  return APPROVER_ROLES.has(role)
-})
+const {
+  canApprove,
+  canManageMembers,
+  canViewSettings,
+  canViewConnections,
+  canViewDesignSystems,
+  canViewAgentPrompts,
+} = usePermissions()
 
 const userInitials = computed(() => {
   const name = authStore.user?.name || ''

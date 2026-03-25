@@ -191,7 +191,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
             "nodes:*",
             "buds:*",
             "team:*",
-            "org:view_settings",
+            "org:*",
             "integrations:*",
             "knowledge:*",
             "reports:*",
@@ -207,7 +207,6 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
             "team:view",
             "knowledge:*",
             "reports:*",
-            "integrations:view",
         ],
     ),
     RoleDef(

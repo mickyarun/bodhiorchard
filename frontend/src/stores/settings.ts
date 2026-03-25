@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import api from '@/services/api'
+import { extractApiError } from '@/utils/errors'
 import type { RepoBranchList, RepoInfo } from '@/types'
 
 export interface ConnectionsState {
@@ -49,8 +50,8 @@ export const useSettingsStore = defineStore('settings', () => {
     try {
       const { data } = await api.get('/v1/settings/connections')
       connections.value = data
-    } catch {
-      error.value = 'Failed to load settings.'
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to load settings.')
     } finally {
       loading.value = false
     }
@@ -65,13 +66,8 @@ export const useSettingsStore = defineStore('settings', () => {
       connections.value = data
       saveSuccess.value = true
       return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to save settings.'
-      } else {
-        error.value = 'Network error. Please check your connection.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to save settings.')
       return false
     } finally {
       saving.value = false
@@ -87,8 +83,8 @@ export const useSettingsStore = defineStore('settings', () => {
     try {
       const { data } = await api.get('/v1/settings/repos')
       repos.value = data
-    } catch {
-      error.value = 'Failed to load repositories.'
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to load repositories.')
     } finally {
       reposLoading.value = false
     }
@@ -99,11 +95,8 @@ export const useSettingsStore = defineStore('settings', () => {
       await api.post('/v1/settings/repos', { path })
       await fetchRepos()
       return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { detail?: string } } }
-        error.value = axiosErr.response?.data?.detail || 'Failed to add repository.'
-      }
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to add repository.')
       return false
     }
   }
@@ -113,8 +106,8 @@ export const useSettingsStore = defineStore('settings', () => {
       await api.delete('/v1/settings/repos', { data: { path } })
       await fetchRepos()
       return true
-    } catch {
-      error.value = 'Failed to remove repository.'
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to remove repository.')
       return false
     }
   }
@@ -124,8 +117,8 @@ export const useSettingsStore = defineStore('settings', () => {
       await api.patch(`/v1/settings/repos/${repoId}/status`, { status })
       await fetchRepos()
       return true
-    } catch {
-      error.value = 'Failed to update repository status.'
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to update repository status.')
       return false
     }
   }
@@ -134,8 +127,8 @@ export const useSettingsStore = defineStore('settings', () => {
     try {
       const { data } = await api.get(`/v1/settings/repos/${repoId}/branches`)
       return data
-    } catch {
-      error.value = 'Failed to load branches.'
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to load branches.')
       return null
     }
   }
@@ -152,8 +145,8 @@ export const useSettingsStore = defineStore('settings', () => {
       })
       await fetchRepos()
       return true
-    } catch {
-      error.value = 'Failed to update branch mapping.'
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to update branch mapping.')
       return false
     }
   }

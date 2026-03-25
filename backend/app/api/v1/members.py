@@ -61,7 +61,12 @@ def _user_to_member(user: User, aliases: list[str] | None = None) -> MemberRead:
     )
 
 
-@router.post("/members", response_model=MemberRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/members",
+    response_model=MemberRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permissions("team:invite"))],
+)
 async def add_member(
     body: AddMemberRequest,
     current_user: User = Depends(get_current_user),
@@ -129,7 +134,11 @@ async def add_member(
     return _user_to_member(created)
 
 
-@router.get("/members", response_model=list[MemberRead])
+@router.get(
+    "/members",
+    response_model=list[MemberRead],
+    dependencies=[Depends(require_permissions("team:manage"))],
+)
 async def list_members(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -154,7 +163,10 @@ async def list_members(
     return [_user_to_member(u, alias_map.get(u.id)) for u in users]
 
 
-@router.patch("/members/{user_id}/role")
+@router.patch(
+    "/members/{user_id}/role",
+    dependencies=[Depends(require_permissions("team:assign_roles"))],
+)
 async def assign_role(
     user_id: uuid.UUID,
     body: AssignRoleRequest,
@@ -214,7 +226,10 @@ async def assign_role(
     return _user_to_member(user)
 
 
-@router.patch("/members/{user_id}/status")
+@router.patch(
+    "/members/{user_id}/status",
+    dependencies=[Depends(require_permissions("team:manage"))],
+)
 async def toggle_member_status(
     user_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -270,7 +285,11 @@ def _generate_password(length: int = 12) -> str:
             return password
 
 
-@router.post("/members/{user_id}/set-password", response_model=SetPasswordResponse)
+@router.post(
+    "/members/{user_id}/set-password",
+    response_model=SetPasswordResponse,
+    dependencies=[Depends(require_permissions("team:manage"))],
+)
 async def set_member_password(
     user_id: uuid.UUID,
     body: SetPasswordRequest | None = None,
@@ -292,13 +311,6 @@ async def set_member_password(
         SetPasswordResponse with the generated plaintext password
         and optional Slack send result.
     """
-    caller_role = getattr(current_user, "role", None)
-    if caller_role not in (UserRole.ORG_OWNER, UserRole.ADMIN):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only org owners and admins can set member passwords.",
-        )
-
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     user_repo = UserRepository(db, org_id=org.id)
@@ -307,6 +319,7 @@ async def set_member_password(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     # Prevent privilege escalation: non-owners cannot reset an owner's password
+    caller_role = getattr(current_user, "role", None)
     target_role = getattr(user, "role", None)
     if target_role == UserRole.ORG_OWNER and caller_role != UserRole.ORG_OWNER:
         raise HTTPException(
@@ -397,7 +410,11 @@ async def _send_credentials_slack(
     return True, None
 
 
-@router.patch("/members/{user_id}/character", response_model=MemberRead)
+@router.patch(
+    "/members/{user_id}/character",
+    response_model=MemberRead,
+    dependencies=[Depends(require_permissions("team:manage"))],
+)
 async def update_character(
     user_id: uuid.UUID,
     body: UpdateCharacterRequest,

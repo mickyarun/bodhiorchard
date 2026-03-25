@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import api from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 
 let setupChecked = false
 let isSetupComplete = false
@@ -106,26 +107,31 @@ const router = createRouter({
         {
           path: 'triage',
           name: 'triage',
+          meta: { permission: 'backlog:approve' },
           component: () => import('@/views/triage/TriageQueueView.vue'),
         },
         {
           path: 'members',
           name: 'members',
+          meta: { permission: 'team:manage' },
           component: () => import('@/views/members/MembersView.vue'),
         },
         {
           path: 'settings',
           name: 'settings',
+          meta: { permission: 'integrations:view' },
           component: () => import('@/views/settings/SettingsConnections.vue'),
         },
         {
           path: 'settings/design-systems',
           name: 'settings-design-systems',
+          meta: { permission: 'integrations:configure' },
           component: () => import('@/views/settings/SettingsDesignSystems.vue'),
         },
         {
           path: 'settings/agent-prompts',
           name: 'settings-agent-prompts',
+          meta: { permission: 'agents:configure' },
           component: () => import('@/views/settings/SettingsAgentPrompts.vue'),
         },
       ],
@@ -157,6 +163,27 @@ router.beforeEach(async (to) => {
   // Already logged in — redirect away from login
   if (to.name === 'login' && localStorage.getItem('flowdev_token')) {
     return { name: 'methodology' }
+  }
+
+  // Permission guard — redirect to dashboard if user lacks required permission
+  const requiredPerm = to.meta?.permission as string | string[] | undefined
+  if (requiredPerm) {
+    const authStore = useAuthStore()
+    // On page refresh, user is null but token exists — load profile first
+    if (!authStore.user && localStorage.getItem('flowdev_token')) {
+      try {
+        await authStore.fetchUser()
+      } catch {
+        // Profile load failed — fall through with empty permissions
+      }
+    }
+    const perms = authStore.user?.permissions ?? []
+    const allowed = Array.isArray(requiredPerm)
+      ? requiredPerm.some(p => perms.includes(p))
+      : perms.includes(requiredPerm)
+    if (!allowed) {
+      return { name: 'dashboard' }
+    }
   }
 })
 

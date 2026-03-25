@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/services/api'
+import { extractApiError } from '@/utils/errors'
 
 export interface Member {
   id: string
@@ -54,8 +55,8 @@ export const useMembersStore = defineStore('members', () => {
     try {
       const { data } = await api.get('/v1/members')
       members.value = data
-    } catch {
-      error.value = 'Failed to load members.'
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to load members.')
     } finally {
       loading.value = false
     }
@@ -71,8 +72,8 @@ export const useMembersStore = defineStore('members', () => {
         scopeType: (r.scopeType as string) ?? (r.scope_type as string) ?? 'SYSTEM',
         permissions: (r.permissions as PermissionItem[]) ?? [],
       }))
-    } catch {
-      // Roles endpoint may require permissions — fail silently
+    } catch (err) {
+      console.warn('[members] fetchRoles failed:', (err as { response?: { status?: number } })?.response?.status)
     }
   }
 
@@ -85,8 +86,8 @@ export const useMembersStore = defineStore('members', () => {
         description: cat.description,
         permissions: cat.permissions ?? [],
       }))
-    } catch {
-      // May require permissions
+    } catch (err) {
+      console.warn('[members] fetchPermissions failed:', (err as { response?: { status?: number } })?.response?.status)
     }
   }
 

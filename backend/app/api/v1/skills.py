@@ -7,7 +7,7 @@ import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.knowledge_item import KnowledgeItem
 from app.models.user import User
 from app.repositories.knowledge_item import KnowledgeItemRepository
@@ -32,7 +32,11 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["skills"])
 
 
-@router.post("/scan", response_model=ScanResponse)
+@router.post(
+    "/scan",
+    response_model=ScanResponse,
+    dependencies=[Depends(require_permissions("org:edit_settings"))],
+)
 async def trigger_scan(
     body: ScanRequest,
     background_tasks: BackgroundTasks,
