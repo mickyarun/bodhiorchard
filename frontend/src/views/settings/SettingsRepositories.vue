@@ -82,7 +82,7 @@
 
     <!-- Scan progress / results -->
     <v-expand-transition>
-      <div v-if="scanStatus === 'running' && scanProgress > 0" class="mb-4">
+      <div v-if="scanStatus === 'running'" class="mb-4">
         <v-progress-linear
           :model-value="scanProgress"
           color="primary"

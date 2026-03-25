@@ -100,14 +100,17 @@ def _file_to_feature(
                 return feat_name, feat_id
 
     # 2. Directory-name fallback: match file's directory components
-    #    against feature name words (e.g. "services/otp/verify.py"
-    #    matches feature "OTP Authentication" via "otp").
+    #    against feature name words. Handles singular/plural by checking
+    #    if either is a prefix of the other (e.g. "notifications" dir
+    #    matches feature word "notification" and vice versa).
     dir_parts = {p.lower() for p in Path(file_path).parts[:-1]} - _FEATURE_MATCH_STOP_DIRS
     if dir_parts:
         for feat_name, _prefixes, feat_id in feature_map:
             feat_words = {w.lower() for w in feat_name.split() if len(w) >= 3}
-            if len(dir_parts & feat_words) >= 1:
-                return feat_name, feat_id
+            for dp in dir_parts:
+                for fw in feat_words:
+                    if dp.startswith(fw) or fw.startswith(dp):
+                        return feat_name, feat_id
 
     return None
 
