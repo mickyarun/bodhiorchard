@@ -24,13 +24,15 @@ export interface EdgeHandle {
 
 export class GraphEdgeBuilder {
   private materials: MaterialFactory
-  private matKeysUsed = new Set<string>()
+  private matKeysUsed: string[] = []
 
   // Pre-allocated arc points to avoid per-frame Vec3 allocations
   private readonly _arcPoints: pc.Vec3[] = Array.from(
     { length: SEGMENTS + 1 },
     () => new pc.Vec3(),
   )
+  // Scratch vector for midpoint calculations during buildEdge
+  private readonly _scratchMid = new pc.Vec3()
 
   constructor(materials: MaterialFactory) {
     this.materials = materials
@@ -48,9 +50,7 @@ export class GraphEdgeBuilder {
 
     const c = color ?? DEFAULT_EDGE_COLOR
     const matKey = `gn_edge_${c[0].toFixed(2)}_${c[1].toFixed(2)}_${c[2].toFixed(2)}`
-    if (!this.matKeysUsed.has(matKey)) {
-      this.matKeysUsed.add(matKey)
-    }
+    this.matKeysUsed.push(matKey)
     const mat = this.materials.getColor(matKey, c[0], c[1], c[2], {
       metalness: 0,
       gloss: 0.3,
@@ -65,16 +65,12 @@ export class GraphEdgeBuilder {
     for (let i = 0; i < points.length - 1; i++) {
       const a = points[i]
       const b = points[i + 1]
-      const mid = new pc.Vec3(
-        (a.x + b.x) / 2,
-        (a.y + b.y) / 2,
-        (a.z + b.z) / 2,
-      )
+      this._scratchMid.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2)
       const len = a.distance(b)
 
       const seg = new pc.Entity(`Seg_${i}`)
       seg.addComponent('render', { type: 'box' })
-      seg.setPosition(mid.x, mid.y, mid.z)
+      seg.setPosition(this._scratchMid.x, this._scratchMid.y, this._scratchMid.z)
       seg.setLocalScale(SEGMENT_THICKNESS, SEGMENT_THICKNESS, len)
       seg.lookAt(b)
 
@@ -123,11 +119,11 @@ export class GraphEdgeBuilder {
     return this._arcPoints
   }
 
-  /** Release all materials created by this builder. */
+  /** Release all materials acquired by this builder (one release per acquisition). */
   destroy(): void {
     for (const key of this.matKeysUsed) {
       this.materials.release(key)
     }
-    this.matKeysUsed.clear()
+    this.matKeysUsed = []
   }
 }

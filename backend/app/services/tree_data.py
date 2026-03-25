@@ -14,6 +14,7 @@ import asyncio
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import TypedDict
 
 import structlog
 from cachetools import TTLCache
@@ -526,6 +527,13 @@ async def _collect_bud_stages(db: AsyncSession, org_id: uuid.UUID, tree: TreeDat
         )
 
 
+class _FeatureGroup(TypedDict):
+    title: str | None
+    source_ref: str | None
+    feature_status: str | None
+    repo_paths: list[str]
+
+
 async def _collect_features(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -534,11 +542,16 @@ async def _collect_features(
 ) -> None:
     """Collect features from the feature registry with BUD linkage.
 
-    JOINs knowledge_to_repo → tracked_repositories to resolve the repo
+    JOINs knowledge_to_repo → tracked_repositories to resolve the repo(s)
     each feature belongs to, then maps repo_path → first branch for placement.
+
+    A feature linked to multiple repos via knowledge_to_repo is emitted once
+    per linked repo so it appears under each repo in the graph. Features with
+    no repo link are still emitted with repo_name=None.
     """
     result = await db.execute(
         select(
+            KnowledgeItem.id.label("ki_id"),
             KnowledgeItem.title,
             KnowledgeItem.source_ref,
             KnowledgeItem.feature_status,
@@ -556,30 +569,37 @@ async def _collect_features(
         .where(KnowledgeItem.category == "feature_registry")
         .where(KnowledgeItem.is_active.is_(True))
         .order_by(KnowledgeItem.created_at.desc())
-        .limit(200)
     )
     rows = result.all()
-    tree.total_features = len(rows)
+
+    # Group rows by knowledge item ID to deduplicate multi-repo joins.
+    # Each feature maps to a list of repo_paths it is linked to.
+    features_by_id: dict[uuid.UUID, _FeatureGroup] = {}
+    for ki_id, title, source_ref, feature_status, repo_path in rows:
+        if ki_id not in features_by_id:
+            features_by_id[ki_id] = {
+                "title": title,
+                "source_ref": source_ref,
+                "feature_status": feature_status,
+                "repo_paths": [],
+            }
+        if repo_path:
+            features_by_id[ki_id]["repo_paths"].append(repo_path)
+
+    tree.total_features = len(features_by_id)
+
+    # Build a quick lookup: repo_path → (repo_name, first_branch)
+    repo_lookup: dict[str, tuple[str, str | None]] = {}
+    for repo in tree.repos:
+        first_branch = repo.branches[0].name if repo.branches else None
+        repo_lookup[repo.repo_path] = (repo.repo_name, first_branch)
 
     bud_pattern = re.compile(r"BUD-(\d+)")
 
-    for title, source_ref, feature_status, repo_path in rows:
-        status = feature_status or "implemented"
-
-        # Map repo_path → repo_name + first branch for placement
-        branch_name: str | None = None
-        matched_repo_name: str | None = None
-        if repo_path:
-            for repo in tree.repos:
-                if repo.repo_path == repo_path:
-                    matched_repo_name = repo.repo_name
-                    if repo.branches:
-                        branch_name = repo.branches[0].name
-                    break
-
-        # Fallback: try file_branch_map (rarely works but preserves old path)
-        if not branch_name and source_ref and source_ref in file_branch_map:
-            branch_name = file_branch_map[source_ref]
+    for feat in features_by_id.values():
+        title = feat["title"] or "Untitled feature"
+        source_ref = feat["source_ref"]
+        status = feat["feature_status"] or "implemented"
 
         from_bud: int | None = None
         if source_ref:
@@ -587,16 +607,41 @@ async def _collect_features(
             if match:
                 from_bud = int(match.group(1))
 
-        tree.features.append(
-            FeatureItem(
-                title=title or "Untitled feature",
-                status=status,
-                source_ref=source_ref,
-                branch_name=branch_name,
-                repo_name=matched_repo_name,
-                from_bud=from_bud,
+        # Resolve linked repos
+        matched_repos: list[tuple[str, str | None]] = []
+        for rp in feat["repo_paths"]:
+            if rp in repo_lookup:
+                matched_repos.append(repo_lookup[rp])
+
+        if matched_repos:
+            # Emit one FeatureItem per linked repo
+            for repo_name, branch_name in matched_repos:
+                tree.features.append(
+                    FeatureItem(
+                        title=title,
+                        status=status,
+                        source_ref=source_ref,
+                        branch_name=branch_name,
+                        repo_name=repo_name,
+                        from_bud=from_bud,
+                    )
+                )
+        else:
+            # No repo link — fallback branch from file_branch_map
+            branch_name = None
+            if source_ref and source_ref in file_branch_map:
+                branch_name = file_branch_map[source_ref]
+
+            tree.features.append(
+                FeatureItem(
+                    title=title,
+                    status=status,
+                    source_ref=source_ref,
+                    branch_name=branch_name,
+                    repo_name=None,
+                    from_bud=from_bud,
+                )
             )
-        )
 
 
 async def _collect_bugs(

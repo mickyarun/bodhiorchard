@@ -6,11 +6,20 @@
  * - Features are placed on a fixed Fibonacci sphere around their repo (no simulation)
  * - Features move with their repo as children
  *
+ * This class is a thin orchestrator that wires together:
+ *   GraphCameraController — orbit camera + smooth transitions
+ *   GraphPickingSystem    — raycasting, hover, click
+ *   ForceSimulator        — force-directed layout (pure math)
+ *   GraphNodeBuilder      — PlayCanvas sphere entities
+ *   GraphEdgeBuilder      — curved arc edges
+ *   GraphLabelSystem      — billboard text labels
+ *
  * Public API:
  *   init(container, w, h, callbacks?) — boots PlayCanvas
  *   setData(data)                     — builds graph from EngineData
  *   resize(w, h)                      — viewport resize
  *   focusOnNode(nodeId)               — focus camera on a node
+ *   resetView()                       — reset to full graph view
  *   destroy()                         — cleanup
  */
 import * as pc from "playcanvas";
@@ -25,45 +34,17 @@ import {
 import { GraphNodeBuilder } from "./GraphNodeBuilder";
 import { GraphEdgeBuilder, type EdgeHandle } from "./GraphEdgeBuilder";
 import { GraphLabelSystem } from "./GraphLabelSystem";
-
-// ─── Callback Types ─────────────────────────────
-
-export interface GraphRepoInfo {
-  repoName: string;
-  health: string;
-  growthStage: string;
-  totalFiles: number;
-  totalCommits: number;
-}
-
-export interface GraphFeatureInfo {
-  title: string;
-  status: string;
-  repoName: string | null;
-  sourceRef: string | null;
-  fromBud: number | null;
-  branchName: string | null;
-}
-
-export interface GraphCallbacks {
-  onRepoClick?: (info: GraphRepoInfo) => void;
-  onFeatureClick?: (info: GraphFeatureInfo) => void;
-  onHover?: (
-    tooltip: { text: string; screenX: number; screenY: number } | null,
-  ) => void;
-  onReady?: () => void;
-}
+import { GraphCameraController } from "./GraphCameraController";
+import { GraphPickingSystem } from "./GraphPickingSystem";
+import type { GraphCallbacks } from "./GraphTypes";
 
 // ─── Layout Constants ───────────────────────────
 
-/**
- * Compute feature sphere radius based on count.
- * Grows sub-linearly so clusters stay compact.
- */
+/** Compute feature sphere radius based on count. Grows sub-linearly so clusters stay compact. */
 function featureSphereRadius(count: number): number {
   if (count <= 1) return 3;
   if (count <= 5) return 3 + count * 0.5;
-  return 5 + Math.sqrt(count) * 0.8; // ~7 for 10, ~9 for 20, ~11 for 50
+  return 5 + Math.sqrt(count) * 0.8;
 }
 
 const REPO_EDGE_LENGTH = 35;
@@ -75,19 +56,14 @@ const WARMUP_ITERATIONS = 200;
 export class GraphEngine {
   private app: pc.AppBase | null = null;
   private root: pc.Entity | null = null;
-  private camera: pc.Entity | null = null;
-  private input: InputManager | null = null;
-  private materials: MaterialFactory | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private callbacks: GraphCallbacks = {};
 
-  // Simple orbit camera — start facing front, slightly above
-  private camYaw = 0;
-  private camPitch = 30;
-  private camDistance = 60;
-  private camTarget = new pc.Vec3(0, 0, 0);
-
-  // Graph subsystems
+  // Subsystems
+  private input: InputManager | null = null;
+  private materials: MaterialFactory | null = null;
+  private camera: GraphCameraController | null = null;
+  private picking: GraphPickingSystem | null = null;
   private simulator: ForceSimulator | null = null;
   private nodeBuilder: GraphNodeBuilder | null = null;
   private edgeBuilder: GraphEdgeBuilder | null = null;
@@ -104,32 +80,14 @@ export class GraphEngine {
     { featureId: string; offset: pc.Vec3 }[]
   >();
 
-  // Hover state
-  private lastHoveredId: string | null = null;
-  private lastHoverPos = { x: -1, y: -1 };
-
-  // Rotation animation
-  private rotationSpeed = 5;
-
-  // Camera animation (smooth focus transitions)
-  private animating = false;
-  private animProgress = 0;
-  private animDuration = 0.6; // seconds
-  private animFrom = { targetX: 0, targetY: 0, targetZ: 0, distance: 60, pitch: 10 };
-  private animTo = { targetX: 0, targetY: 0, targetZ: 0, distance: 30, pitch: 20 };
-  // Saved full-graph camera state for resetView()
-  private fullViewDistance = 60;
-  private fullViewPitch = 10;
-
   // IBL cubemap reference for cleanup
   private iblCubemap: pc.Texture | null = null;
 
-  // Pre-allocated scratch vectors
+  // Pre-allocated scratch vectors for simulation updates
   private readonly _tmpFrom = new pc.Vec3();
   private readonly _tmpTo = new pc.Vec3();
-  private readonly _rayFrom = new pc.Vec3();
-  private readonly _rayTo = new pc.Vec3();
-  private readonly _rayDir = new pc.Vec3();
+
+  // ─── Lifecycle ─────────────────────────────────
 
   async init(
     container: HTMLElement,
@@ -174,50 +132,19 @@ export class GraphEngine {
     this.root = new pc.Entity("GraphRoot");
     this.app.root.addChild(this.root);
 
-    // Camera
-    this.camera = new pc.Entity("GraphCamera");
-    this.camera.addComponent("camera", {
-      clearColor: new pc.Color(0.06, 0.07, 0.1),
-      projection: pc.PROJECTION_PERSPECTIVE,
-      fov: 45,
-      nearClip: 0.1,
-      farClip: 1000,
-      frustumCulling: true,
-    });
-    this.root.addChild(this.camera);
-    this.updateCameraOrbit();
-
     // Lights
-    const sun = new pc.Entity("GraphSun");
-    sun.addComponent("light", {
-      type: "directional",
-      color: new pc.Color(1, 0.97, 0.92),
-      intensity: 1.8,
-      castShadows: false,
-    });
-    sun.setEulerAngles(55, -30, 0);
-    this.root.addChild(sun);
+    this.createLights();
 
-    const fill = new pc.Entity("GraphFill");
-    fill.addComponent("light", {
-      type: "directional",
-      color: new pc.Color(0.5, 0.6, 0.9),
-      intensity: 0.6,
-      castShadows: false,
-    });
-    fill.setEulerAngles(-50, 40, 0);
-    this.root.addChild(fill);
-
-    // Input
+    // Subsystems
+    this.camera = new GraphCameraController(this.root);
     this.input = new InputManager();
     this.input.init(this.canvas);
-
-    // Materials + subsystems
     this.materials = new MaterialFactory();
     this.nodeBuilder = new GraphNodeBuilder(this.materials);
     this.edgeBuilder = new GraphEdgeBuilder(this.materials);
     this.labelSystem = new GraphLabelSystem();
-    this.labelSystem.setCameraEntity(this.camera);
+    this.labelSystem.setCameraEntity(this.camera.getEntity());
+    this.picking = new GraphPickingSystem();
 
     // Frame loop
     this.app.on("update", (dt: number) => this.onUpdate(dt));
@@ -226,7 +153,8 @@ export class GraphEngine {
     this.callbacks.onReady?.();
   }
 
-  /** Build graph from engine data. */
+  // ─── Data ──────────────────────────────────────
+
   async setData(data: EngineData): Promise<void> {
     if (!this.app || !this.root) return;
 
@@ -234,10 +162,7 @@ export class GraphEngine {
     this.graphRoot = new pc.Entity("GraphEntities");
     this.root.addChild(this.graphRoot);
 
-    const repos = data.repos;
-    const features = data.features;
-    const relationships = data.relationships;
-
+    const { repos, features, relationships } = data;
     this.nodeBuilder!.assignRepoColors(repos.map((r) => r.repo_name));
 
     // ─── Force simulation: REPOS ONLY ─────────────
@@ -247,9 +172,7 @@ export class GraphEngine {
     const repoCount = repos.length;
     for (let i = 0; i < repoCount; i++) {
       const repo = repos[i];
-      // Single repo → place at origin. Multiple → arrange in circle.
-      let rx = 0,
-        rz = 0;
+      let rx = 0, rz = 0;
       if (repoCount > 1) {
         const repoRadius = repoCount * 8;
         const angle = (2 * Math.PI * i) / repoCount;
@@ -258,12 +181,8 @@ export class GraphEngine {
       }
       forceNodes.push({
         id: `repo_${repo.repo_name}`,
-        x: rx,
-        y: 0,
-        z: rz,
-        vx: 0,
-        vy: 0,
-        vz: 0,
+        x: rx, y: 0, z: rz,
+        vx: 0, vy: 0, vz: 0,
         mass: REPO_MASS,
         pinned: repoCount === 1,
         collides: true,
@@ -295,22 +214,20 @@ export class GraphEngine {
       if (fNode) entity.setPosition(fNode.x, fNode.y, fNode.z);
       this.graphRoot.addChild(entity);
       this.nodeEntities.set(nodeId, entity);
-      this.labelSystem!.createLabel(
-        this.app!,
-        repo.repo_name,
-        entity,
-        2.2,
-        0.4,
-      );
+      this.labelSystem!.createLabel(this.app!, repo.repo_name, entity, 2.2, 0.4);
     }
 
     // ─── Index features by repo ───────────────────
     const featuresByRepo = new Map<string, EngineFeature[]>();
+    const unlinkedFeatures: EngineFeature[] = [];
     for (const f of features) {
-      const key = f.repo_name ?? "";
-      const arr = featuresByRepo.get(key);
-      if (arr) arr.push(f);
-      else featuresByRepo.set(key, [f]);
+      if (f.repo_name) {
+        const arr = featuresByRepo.get(f.repo_name);
+        if (arr) arr.push(f);
+        else featuresByRepo.set(f.repo_name, [f]);
+      } else {
+        unlinkedFeatures.push(f);
+      }
     }
 
     // ─── Create feature entities on Fibonacci sphere ─
@@ -338,10 +255,7 @@ export class GraphEngine {
           radius * Math.sin(phi) * Math.sin(theta),
         );
 
-        const entity = this.nodeBuilder!.buildFeatureNode(
-          repoFeatures[j],
-          featureIdx,
-        );
+        const entity = this.nodeBuilder!.buildFeatureNode(repoFeatures[j], featureIdx);
         const repoPos = repoEntity.getPosition();
         entity.setPosition(
           repoPos.x + offset.x,
@@ -356,12 +270,7 @@ export class GraphEngine {
         const from = repoEntity.getPosition().clone();
         const to = entity.getPosition().clone();
         const edgeColor = this.nodeBuilder!.getRepoColor(repo.repo_name);
-        const handle = this.edgeBuilder!.buildEdge(
-          from,
-          to,
-          `${repoNodeId}__${fId}`,
-          edgeColor,
-        );
+        const handle = this.edgeBuilder!.buildEdge(from, to, `${repoNodeId}__${fId}`, edgeColor);
         this.graphRoot.addChild(handle.parent);
         this.edgeHandles.set(`${repoNodeId}__${fId}`, handle);
 
@@ -371,285 +280,166 @@ export class GraphEngine {
       this.featureOffsets.set(repoNodeId, offsets);
     }
 
-    // Compute the bounding extent of the entire graph
-    let maxExtent = 10;
-    for (const [, entity] of this.nodeEntities) {
-      const pos = entity.getPosition();
-      const d = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
-      maxExtent = Math.max(maxExtent, d);
+    // ─── Unlinked features ────────────────────────
+    if (unlinkedFeatures.length > 0) {
+      const ulRadius = featureSphereRadius(unlinkedFeatures.length);
+      for (let j = 0; j < unlinkedFeatures.length; j++) {
+        const fId = `feat_${featureIdx}`;
+        const n = unlinkedFeatures.length;
+        const phi = Math.acos(1 - (2 * (j + 0.5)) / n);
+        const theta = Math.PI * (1 + Math.sqrt(5)) * j;
+
+        const entity = this.nodeBuilder!.buildFeatureNode(unlinkedFeatures[j], featureIdx);
+        entity.setPosition(
+          ulRadius * Math.sin(phi) * Math.cos(theta),
+          ulRadius * Math.cos(phi),
+          ulRadius * Math.sin(phi) * Math.sin(theta),
+        );
+        this.graphRoot.addChild(entity);
+        this.nodeEntities.set(fId, entity);
+        featureIdx++;
+      }
     }
-    // Add the largest feature sphere radius for padding
-    let maxFeatureRadius = 0;
-    for (const repo of repos) {
-      const rf = featuresByRepo.get(repo.repo_name) ?? [];
-      maxFeatureRadius = Math.max(
-        maxFeatureRadius,
-        featureSphereRadius(rf.length),
-      );
+
+    // ─── Auto-frame camera to fit graph ───────────
+    this.autoFrameCamera(repos, featuresByRepo);
+  }
+
+  // ─── Public API ────────────────────────────────
+
+  focusOnNode(nodeId: string): void {
+    const entity = this.nodeEntities.get(nodeId);
+    if (!entity || !this.camera) return;
+
+    const pos = entity.getPosition();
+    const offsets = this.featureOffsets.get(nodeId);
+    const featureCount = offsets?.length ?? 0;
+    const idealDist = featureSphereRadius(featureCount) * 3.5;
+
+    this.camera.focusOn(pos.x, pos.y, pos.z, idealDist, 20);
+  }
+
+  resetView(): void {
+    this.camera?.resetView();
+  }
+
+  resize(width: number, height: number): void {
+    this.app?.resizeCanvas(width, height);
+  }
+
+  destroy(): void {
+    this.clearGraph();
+    this.simulator = null;
+    this.input?.destroy();
+    this.input = null;
+    this.picking = null;
+    this.camera = null;
+    this.iblCubemap?.destroy();
+    this.iblCubemap = null;
+    this.materials?.clear();
+    this.materials = null;
+    if (this.app) {
+      this.app.destroy();
+      this.app = null;
     }
-    const totalExtent = maxExtent + maxFeatureRadius;
-
-    // Camera distance to fit: extent / tan(halfFov), with padding
-    const halfFovRad = ((45 / 2) * Math.PI) / 180;
-    this.camDistance = (totalExtent * 0.9) / Math.tan(halfFovRad);
-    this.camTarget.set(0, 0, 0);
-    // Low pitch (nearly level) for the panoramic horizontal view
-    this.camPitch = 10;
-    this.camYaw = 0;
-    this.updateCameraOrbit();
-
-    // Save full-view state for resetView()
-    this.fullViewDistance = this.camDistance;
-    this.fullViewPitch = this.camPitch;
+    if (this.canvas) {
+      this.canvas.remove();
+      this.canvas = null;
+    }
   }
 
-  // ─── Camera ─────────────────────────────────────
-
-  private updateCameraOrbit(): void {
-    if (!this.camera) return;
-    const pitchRad = (this.camPitch * Math.PI) / 180;
-    const yawRad = (this.camYaw * Math.PI) / 180;
-    const x =
-      this.camTarget.x +
-      this.camDistance * Math.cos(pitchRad) * Math.sin(yawRad);
-    const y = this.camTarget.y + this.camDistance * Math.sin(pitchRad);
-    const z =
-      this.camTarget.z +
-      this.camDistance * Math.cos(pitchRad) * Math.cos(yawRad);
-    this.camera.setPosition(x, y, z);
-    this.camera.lookAt(this.camTarget);
-  }
-
-  // ─── Frame Loop ─────────────────────────────────
-
-  /** Ease-out cubic for smooth camera transitions. */
-  private easeOut(t: number): number {
-    return 1 - Math.pow(1 - t, 3);
-  }
+  // ─── Frame Loop ────────────────────────────────
 
   private onUpdate(dt: number): void {
-    let cameraChanged = false;
-
-    // Camera animation (smooth focus/reset transitions)
-    if (this.animating) {
-      this.animProgress += dt / this.animDuration;
-      const t = this.easeOut(Math.min(this.animProgress, 1));
-
-      this.camTarget.set(
-        this.animFrom.targetX + (this.animTo.targetX - this.animFrom.targetX) * t,
-        this.animFrom.targetY + (this.animTo.targetY - this.animFrom.targetY) * t,
-        this.animFrom.targetZ + (this.animTo.targetZ - this.animFrom.targetZ) * t,
-      );
-      this.camDistance = this.animFrom.distance + (this.animTo.distance - this.animFrom.distance) * t;
-      this.camPitch = this.animFrom.pitch + (this.animTo.pitch - this.animFrom.pitch) * t;
-      cameraChanged = true;
-
-      if (this.animProgress >= 1) {
-        this.animating = false;
-      }
-    }
-
-    // Auto-rotation: rotate camera yaw (paused during animation)
-    if (this.rotationSpeed > 0 && !this.animating) {
-      this.camYaw += this.rotationSpeed * dt;
-      cameraChanged = true;
-    }
-
-    // Camera controls: drag orbit, scroll zoom
-    if (this.input) {
-      const orbit = this.input.getOrbitDelta();
-      if (orbit.dx !== 0 || orbit.dy !== 0) {
-        this.camYaw -= orbit.dx * 0.3;
-        this.camPitch = Math.max(
-          5,
-          Math.min(85, this.camPitch + orbit.dy * 0.3),
-        );
-        cameraChanged = true;
-      }
-
-      const scroll = this.input.getScrollDelta();
-      if (scroll !== 0) {
-        this.camDistance = Math.max(
-          10,
-          Math.min(300, this.camDistance - scroll * 3),
-        );
-        cameraChanged = true;
-      }
-      // Consume pan delta (panning not supported in graph view)
-      this.input.getPanDelta();
-    }
-
-    if (cameraChanged) this.updateCameraOrbit();
+    // Camera
+    this.camera?.update(dt, this.input);
 
     // Force simulation (repos only — features are fixed offsets)
-    if (this.simulator && !this.simulator.isSettled()) {
-      this.simulator.step(dt);
-
-      // Update repo positions
-      for (const fNode of this.simulator.nodes) {
-        const entity = this.nodeEntities.get(fNode.id);
-        if (entity) entity.setPosition(fNode.x, fNode.y, fNode.z);
-      }
-
-      // Move features with their repo
-      for (const [repoId, offsets] of this.featureOffsets) {
-        const repoEntity = this.nodeEntities.get(repoId);
-        if (!repoEntity) continue;
-        const repoPos = repoEntity.getPosition();
-
-        for (const { featureId, offset } of offsets) {
-          const featEntity = this.nodeEntities.get(featureId);
-          if (featEntity) {
-            featEntity.setPosition(
-              repoPos.x + offset.x,
-              repoPos.y + offset.y,
-              repoPos.z + offset.z,
-            );
-          }
-
-          // Update edge
-          const edgeId = `${repoId}__${featureId}`;
-          const handle = this.edgeHandles.get(edgeId);
-          if (handle) {
-            this._tmpFrom.set(repoPos.x, repoPos.y, repoPos.z);
-            this._tmpTo.set(
-              repoPos.x + offset.x,
-              repoPos.y + offset.y,
-              repoPos.z + offset.z,
-            );
-            this.edgeBuilder!.updateEdge(handle, this._tmpFrom, this._tmpTo);
-          }
-        }
-      }
-    }
+    this.updateSimulation(dt);
 
     // Billboard labels
     this.labelSystem?.updateBillboards();
 
     // Picking
-    this.handlePicking();
+    if (this.camera && this.input && this.picking) {
+      this.picking.update(
+        this.camera.getEntity(),
+        this.input,
+        this.nodeEntities,
+        this.callbacks,
+      );
+    }
   }
 
-  // ─── Raycasting / Picking ─────────────────────
+  // ─── Simulation ────────────────────────────────
 
-  private handlePicking(): void {
-    if (!this.app || !this.camera || !this.input) return;
+  private updateSimulation(dt: number): void {
+    if (!this.simulator || this.simulator.isSettled()) return;
 
-    const click = this.input.consumeClick();
-    const hoverPos = this.input.getHoverPos();
+    this.simulator.step(dt);
 
-    if (click) {
-      const hit = this.raycast(click.x, click.y);
-      if (hit) {
-        const userData = (hit as unknown as Record<string, unknown>)
-          ._userData as Record<string, unknown> | undefined;
-        if (userData?.type === "graph_repo") {
-          this.callbacks.onRepoClick?.({
-            repoName: userData.repoName as string,
-            health: userData.health as string,
-            growthStage: userData.growthStage as string,
-            totalFiles: userData.totalFiles as number,
-            totalCommits: userData.totalCommits as number,
-          });
-        } else if (userData?.type === "graph_feature") {
-          this.callbacks.onFeatureClick?.({
-            title: userData.title as string,
-            status: userData.status as string,
-            repoName: userData.repoName as string | null,
-            sourceRef: userData.sourceRef as string | null,
-            fromBud: userData.fromBud as number | null,
-            branchName: userData.branchName as string | null,
-          });
+    // Update repo positions
+    for (const fNode of this.simulator.nodes) {
+      const entity = this.nodeEntities.get(fNode.id);
+      if (entity) entity.setPosition(fNode.x, fNode.y, fNode.z);
+    }
+
+    // Move features with their repo + update edges
+    for (const [repoId, offsets] of this.featureOffsets) {
+      const repoEntity = this.nodeEntities.get(repoId);
+      if (!repoEntity) continue;
+      const repoPos = repoEntity.getPosition();
+
+      for (const { featureId, offset } of offsets) {
+        const featEntity = this.nodeEntities.get(featureId);
+        if (featEntity) {
+          featEntity.setPosition(
+            repoPos.x + offset.x,
+            repoPos.y + offset.y,
+            repoPos.z + offset.z,
+          );
+        }
+
+        const edgeId = `${repoId}__${featureId}`;
+        const handle = this.edgeHandles.get(edgeId);
+        if (handle) {
+          this._tmpFrom.set(repoPos.x, repoPos.y, repoPos.z);
+          this._tmpTo.set(
+            repoPos.x + offset.x,
+            repoPos.y + offset.y,
+            repoPos.z + offset.z,
+          );
+          this.edgeBuilder!.updateEdge(handle, this._tmpFrom, this._tmpTo);
         }
       }
     }
-
-    // Hover — skip if mouse hasn't moved
-    if (
-      hoverPos.x === this.lastHoverPos.x &&
-      hoverPos.y === this.lastHoverPos.y
-    )
-      return;
-    this.lastHoverPos.x = hoverPos.x;
-    this.lastHoverPos.y = hoverPos.y;
-
-    const hit = this.raycast(hoverPos.x, hoverPos.y);
-    if (hit) {
-      const userData = (hit as unknown as Record<string, unknown>)._userData as
-        | Record<string, unknown>
-        | undefined;
-      const nodeId =
-        (userData?.repoName as string) ?? (userData?.title as string) ?? "";
-      if (nodeId !== this.lastHoveredId) {
-        this.lastHoveredId = nodeId;
-        let text = "";
-        if (userData?.type === "graph_repo")
-          text = `${userData.repoName} (${userData.health})`;
-        else if (userData?.type === "graph_feature")
-          text = `${userData.title}\n[${userData.status}]`;
-        if (text)
-          this.callbacks.onHover?.({
-            text,
-            screenX: hoverPos.x,
-            screenY: hoverPos.y,
-          });
-      }
-    } else if (this.lastHoveredId) {
-      this.lastHoveredId = null;
-      this.callbacks.onHover?.(null);
-    }
   }
 
-  private raycast(screenX: number, screenY: number): pc.Entity | null {
-    if (!this.camera?.camera || !this.app) return null;
+  // ─── Setup Helpers ─────────────────────────────
 
-    const cam = this.camera.camera;
-    cam.screenToWorld(screenX, screenY, cam.nearClip, this._rayFrom);
-    cam.screenToWorld(screenX, screenY, cam.farClip, this._rayTo);
-    this._rayDir.sub2(this._rayTo, this._rayFrom).normalize();
+  private createLights(): void {
+    if (!this.root) return;
 
-    let closestEntity: pc.Entity | null = null;
-    let closestDist = Infinity;
+    const sun = new pc.Entity("GraphSun");
+    sun.addComponent("light", {
+      type: "directional",
+      color: new pc.Color(1, 0.97, 0.92),
+      intensity: 1.8,
+      castShadows: false,
+    });
+    sun.setEulerAngles(55, -30, 0);
+    this.root.addChild(sun);
 
-    for (const [, entity] of this.nodeEntities) {
-      if (!entity.tags.has("pickable")) continue;
-      const pos = entity.getPosition();
-      const scale = entity.getLocalScale();
-      const radius = Math.max(scale.x, scale.y, scale.z) / 2;
-      const dist = this.raySphereIntersect(
-        this._rayFrom,
-        this._rayDir,
-        pos,
-        radius,
-      );
-      if (dist !== null && dist < closestDist) {
-        closestDist = dist;
-        closestEntity = entity;
-      }
-    }
-
-    return closestEntity;
+    const fill = new pc.Entity("GraphFill");
+    fill.addComponent("light", {
+      type: "directional",
+      color: new pc.Color(0.5, 0.6, 0.9),
+      intensity: 0.6,
+      castShadows: false,
+    });
+    fill.setEulerAngles(-50, 40, 0);
+    this.root.addChild(fill);
   }
-
-  private raySphereIntersect(
-    origin: pc.Vec3,
-    dir: pc.Vec3,
-    center: pc.Vec3,
-    radius: number,
-  ): number | null {
-    const ox = origin.x - center.x;
-    const oy = origin.y - center.y;
-    const oz = origin.z - center.z;
-    const a = dir.x * dir.x + dir.y * dir.y + dir.z * dir.z;
-    const b = 2 * (ox * dir.x + oy * dir.y + oz * dir.z);
-    const c = ox * ox + oy * oy + oz * oz - radius * radius;
-    const discriminant = b * b - 4 * a * c;
-    if (discriminant < 0) return null;
-    const t = (-b - Math.sqrt(discriminant)) / (2 * a);
-    return t > 0 ? t : null;
-  }
-
-  // ─── IBL ─────────────────────────────────────────
 
   private setupIBL(): void {
     if (!this.app) return;
@@ -683,46 +473,28 @@ export class GraphEngine {
     this.iblCubemap = cubemap;
   }
 
-  // ─── Public API ───────────────────────────────
-
-  /** Smoothly animate camera to focus on a specific node. */
-  focusOnNode(nodeId: string): void {
-    const entity = this.nodeEntities.get(nodeId);
-    if (!entity) return;
-
-    const pos = entity.getPosition();
-
-    // Compute ideal distance based on feature count for this repo
-    const offsets = this.featureOffsets.get(nodeId);
-    const featureCount = offsets?.length ?? 0;
-    const idealDist = featureSphereRadius(featureCount) * 3.5;
-
-    this.startCameraAnimation(pos.x, pos.y, pos.z, idealDist, 20);
-  }
-
-  /** Smoothly animate camera back to the full graph overview. */
-  resetView(): void {
-    this.startCameraAnimation(0, 0, 0, this.fullViewDistance, this.fullViewPitch);
-  }
-
-  private startCameraAnimation(
-    targetX: number, targetY: number, targetZ: number,
-    distance: number, pitch: number,
+  private autoFrameCamera(
+    repos: EngineData["repos"],
+    featuresByRepo: Map<string, EngineFeature[]>,
   ): void {
-    this.animFrom = {
-      targetX: this.camTarget.x,
-      targetY: this.camTarget.y,
-      targetZ: this.camTarget.z,
-      distance: this.camDistance,
-      pitch: this.camPitch,
-    };
-    this.animTo = { targetX, targetY, targetZ, distance, pitch };
-    this.animProgress = 0;
-    this.animating = true;
-  }
+    if (!this.camera) return;
 
-  resize(width: number, height: number): void {
-    this.app?.resizeCanvas(width, height);
+    let maxExtent = 10;
+    for (const [, entity] of this.nodeEntities) {
+      const pos = entity.getPosition();
+      const d = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+      maxExtent = Math.max(maxExtent, d);
+    }
+
+    let maxFeatureRadius = 0;
+    for (const repo of repos) {
+      const rf = featuresByRepo.get(repo.repo_name) ?? [];
+      maxFeatureRadius = Math.max(maxFeatureRadius, featureSphereRadius(rf.length));
+    }
+
+    const totalExtent = maxExtent + maxFeatureRadius;
+    const distance = (totalExtent * 0.9) / Math.tan(this.camera.halfFovRad);
+    this.camera.setFullView(distance, 10);
   }
 
   private clearGraph(): void {
@@ -742,25 +514,6 @@ export class GraphEngine {
       this.edgeBuilder = new GraphEdgeBuilder(this.materials);
     }
     this.labelSystem = new GraphLabelSystem();
-    if (this.camera) this.labelSystem.setCameraEntity(this.camera);
-  }
-
-  destroy(): void {
-    this.clearGraph();
-    this.simulator = null;
-    this.input?.destroy();
-    this.input = null;
-    this.iblCubemap?.destroy();
-    this.iblCubemap = null;
-    this.materials?.clear();
-    this.materials = null;
-    if (this.app) {
-      this.app.destroy();
-      this.app = null;
-    }
-    if (this.canvas) {
-      this.canvas.remove();
-      this.canvas = null;
-    }
+    if (this.camera) this.labelSystem.setCameraEntity(this.camera.getEntity());
   }
 }

@@ -5,7 +5,7 @@
  *   1. Repulsion  — all node pairs push apart (Coulomb's law)
  *   2. Attraction — edges pull connected nodes toward ideal length (Hooke's law)
  *   3. Centering  — gentle pull toward origin to prevent drift
- *   4. Y-spread   — clamp y to [Y_MIN, Y_MAX] for slight vertical layering
+ *   4. Collision  — push overlapping heavy nodes (repos) apart
  *   5. Damping    — velocity decays each step for stability
  *   6. Alpha      — global cooling factor; simulation settles when alpha < threshold
  */
@@ -132,7 +132,7 @@ export class ForceSimulator {
       if (!b.pinned) { b.vx -= fx / b.mass; b.vy -= fy / b.mass; b.vz -= fz / b.mass }
     }
 
-    // 3. Centering + Y-constraint + integrate
+    // 3. Centering + damping + integrate
     for (const node of this._nodes) {
       if (node.pinned) continue
 

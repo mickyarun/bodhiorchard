@@ -169,6 +169,16 @@ export const agents: AgentInfo[] = [
     color: 'primary',
   },
   {
+    name: 'Smart Assignment Agent',
+    icon: 'mdi-account-arrow-right-outline',
+    triggerType: 'Phase Gate Approved',
+    triggerIcon: 'mdi-check-circle-outline',
+    tagline: 'Assigns the best-fit developer based on skill scores, capacity, and module expertise.',
+    capabilities: ['Skill matching', 'Capacity balancing', 'Module expertise', 'Workload optimization'],
+    interactsWith: ['Skill Agent', 'Tech Plan Agent'],
+    color: 'info',
+  },
+  {
     name: 'Skill Agent',
     icon: 'mdi-account-cog-outline',
     triggerType: 'Daily Cron 02:00',

@@ -36,7 +36,7 @@ class SlackSettings(BaseModel):
 class AIConfigSettings(BaseModel):
     """AI/LLM configuration."""
 
-    preset: str = "hybrid"
+    preset: str = "claude-code"
     ollama_url: str = Field(default="http://localhost:11434", alias="ollamaUrl")
     ollama_model: str = Field(default="llama3:8b", alias="ollamaModel")
     cloud_provider: str = Field(default="anthropic", alias="cloudProvider")

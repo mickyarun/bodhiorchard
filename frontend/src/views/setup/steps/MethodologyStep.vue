@@ -95,7 +95,7 @@
         <v-icon icon="mdi-robot-happy-outline" size="32" color="primary" class="mb-2" />
         <div class="text-h6 font-weight-medium">Meet the Agents</div>
         <p class="text-caption text-medium-emphasis" style="max-width: 480px;">
-          Eleven specialized agents orchestrate every phase — triggered automatically, connected to each other.
+          Twelve specialized agents orchestrate every phase — triggered automatically, connected to each other.
         </p>
       </div>
       <v-row dense>
@@ -418,8 +418,9 @@ const comparisonRows = [
   { phase: 'Intake', agile: 'Ticket in Jira, manual triage, sprint planning', bodhigrove: 'Chat message → Triage Agent analyzes, finds duplicates, estimates capacity' },
   { phase: 'Estimation', agile: 'Story points, planning poker, team debate', bodhigrove: 'AI predicts cycle time from historical features, 85% confidence' },
   { phase: 'Specification', agile: 'PM writes BUD manually, reviews in meetings', bodhigrove: 'BUD Agent drafts spec with codebase context, enterprise rules, prior art' },
-  { phase: 'Design', agile: 'Designer creates in Figma, hands off specs', bodhigrove: 'Agents scope design, capture Figma review via MCP, auto-generate tech plan' },
-  { phase: 'Development', agile: 'Dev picks up ticket, starts from scratch', bodhigrove: 'AI agent implements on preferred infra, dev does code review' },
+  { phase: 'Design', agile: 'Designer creates in Figma, hands off specs', bodhigrove: 'AI generates wireframes; Designer reviews, edits, and advances to Tech Architecture' },
+  { phase: 'Tech Arch', agile: 'Architect writes design doc, reviews in meetings', bodhigrove: 'AI generates tech plan; Tech Lead reviews; Smart Assignment Agent suggests developer' },
+  { phase: 'Development', agile: 'Dev picks up ticket, starts from scratch', bodhigrove: 'Best-fit dev assigned by AI, implements from tech plan, human reviews code' },
   { phase: 'Testing', agile: 'QA writes test cases manually, runs regression', bodhigrove: 'Auto-generated test plan (unit, integration, e2e, perf, security, UAT)' },
   { phase: 'QA & UAT', agile: 'QA writes test cases, manual handoff', bodhigrove: 'QA approves/refines automation plan, executes manual tests, signs off for UAT' },
   { phase: 'Deployment', agile: 'Release train, manual status updates', bodhigrove: 'Status Agent auto-detects PR merges, BUD becomes Feature on deploy' },
@@ -435,28 +436,28 @@ const phases = [
     icon: 'mdi-chat-outline',
     description: 'Any chat interface (Slack, Teams, or API) receives the request. The Triage Agent analyzes it, searches for duplicates via vector search, runs a structured intake interview covering business impact, customer context, timeline, and dependencies.',
     ai: 'Analyzes request, searches for duplicates, estimates complexity from code search, generates PM recommendation with priority scoring.',
-    human: 'Submits idea, answers intake questions, approves or deprioritizes.',
+    human: 'Submits idea, answers intake questions. PM or org owner reviews triage output, modifies, and moves to BUD generation.',
   },
   {
     name: 'Phase 2: BUD Generation',
     icon: 'mdi-file-document-edit-outline',
-    description: 'The BUD becomes the single source of truth — containing spec, tech spec, test plan, and acceptance criteria. The BUD Agent searches enterprise rules and prior art to auto-generate all sections.',
+    description: 'The BUD becomes the single source of truth — containing spec, tech spec, test plan, and acceptance criteria. The BUD Agent searches enterprise rules and prior art to auto-generate all sections. The assigned PM then reviews, refines, and advances to Design when satisfied.',
     ai: 'Searches enterprise rules & prior art, generates overview, goals, user stories, requirements, acceptance criteria, out of scope, dependencies, risks. Creates BUD folder in repo.',
-    human: 'Reviews, refines, and approves the BUD.',
+    human: 'Reviews AI-generated spec, refines requirements, advances to Design when ready.',
   },
   {
     name: 'Phase 3: Design',
     icon: 'mdi-palette-outline',
-    description: 'After BUD approval, agents scope design requirements. Each relevant agent provides design input (scope, constraints, patterns). MCP integration captures design review from Figma or preferred design tool.',
-    ai: 'Scopes design requirements, provides pattern recommendations, captures Figma review via MCP, auto-generates technical plan from approved design.',
-    human: 'Creates visual design in preferred tools, reviews agent-generated tech plan, approves for development.',
+    description: 'After BUD advances to Design, agents scope design requirements and generate wireframes. The assigned Designer reviews, edits in preferred tools, and advances to Tech Architecture when satisfied.',
+    ai: 'Scopes design requirements, generates HTML wireframes using project design system, provides pattern recommendations, captures Figma review via MCP.',
+    human: 'Reviews AI-generated wireframes, edits in preferred tools, advances to Tech Architecture when ready.',
   },
   {
-    name: 'Phase 4: Development',
+    name: 'Phase 4: Tech Architecture & Development',
     icon: 'mdi-code-braces',
-    description: 'AI agent implements based on the approved tech plan with full codebase access — reads CLAUDE.md, org standards, and design guidelines. Works on any preferred infrastructure.',
-    ai: 'Implements feature following tech plan, org standards, and design guidelines. Full codebase context.',
-    human: 'Does code review, approves PRs, makes architecture decisions.',
+    description: 'After Design advances, the Tech Arch Agent generates the implementation plan. The Tech Lead reviews and advances to development. The Smart Assignment Agent suggests the best-fit developer based on skills and capacity. The Manager reviews the assignment if present, otherwise the developer is assigned directly. AI then implements with full codebase access.',
+    ai: 'Generates tech plan, suggests best-fit developer via Smart Assignment Agent, implements feature following org standards.',
+    human: 'Reviews tech plan, advances to development. Manager reviews developer assignment if present.',
   },
   {
     name: 'Phase 5: Auto Test Generation',
@@ -513,10 +514,11 @@ const aiHandles = [
   'Skill profiling & assignment recommendations',
   'Knowledge sync (code → docs → vector DB)',
   'Capacity planning & workload balancing',
+  'Smart developer assignment based on skills & capacity',
 ]
 
 const humanHandles = [
-  'Approval decisions at every gate',
+  'Review and advance decisions at every phase',
   'Code review & architecture choices',
   'Visual design in preferred tools',
   'Business trade-offs & prioritization',
@@ -562,7 +564,7 @@ const skillItems = [
   { icon: 'mdi-trending-up', label: 'Evolving Skills', detail: 'Skills grow automatically as developers contribute — no manual profile updates needed.' },
 ]
 
-const budStatuses = ['bud', 'design', 'development', 'testing', 'uat', 'prod', 'closed']
+const budStatuses = ['bud', 'design', 'tech_arch', 'development', 'testing', 'uat', 'prod', 'closed']
 
 const budFeatures = [
   'Contains spec, tech spec, test plan, acceptance criteria, and metadata',

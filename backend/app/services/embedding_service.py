@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING
+
+# Suppress HuggingFace tokenizers fork warning (fastembed uses ONNX, not PyTorch)
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import structlog
 

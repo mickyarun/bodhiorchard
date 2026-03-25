@@ -21,7 +21,7 @@ interface CachedMaterial {
   lastUsed: number  // monotonic counter for LRU eviction
 }
 
-const DEFAULT_MAX_CACHE = 256
+const DEFAULT_MAX_CACHE = 512
 
 export class MaterialFactory {
   private cache = new Map<string, CachedMaterial>()

@@ -81,7 +81,7 @@ async def get_connections(
             teamId=org.slack_team_id or "",
         ),
         aiConfig=AIConfigSettings(
-            preset=llm_cfg.get("preset", "hybrid"),
+            preset=llm_cfg.get("preset", "claude-code"),
             ollamaUrl=llm_cfg.get("ollama_url", "http://localhost:11434"),
             ollamaModel=llm_cfg.get("ollama_model", "llama3:8b"),
             cloudProvider=llm_cfg.get("cloud_provider", "anthropic"),

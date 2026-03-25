@@ -12,11 +12,6 @@ export interface ConnectionsState {
   slack: { enabled: boolean; botToken: string; signingSecret: string; teamId: string }
   aiConfig: {
     preset: string
-    ollamaUrl: string
-    ollamaModel: string
-    cloudProvider: string
-    cloudApiKey: string
-    cloudModel: string
   }
   scan: {
     timeoutSeconds: number
@@ -31,12 +26,7 @@ function emptyState(): ConnectionsState {
     github: { enabled: false, pat: '', org: '' },
     slack: { enabled: false, botToken: '', signingSecret: '', teamId: '' },
     aiConfig: {
-      preset: 'hybrid',
-      ollamaUrl: 'http://localhost:11434',
-      ollamaModel: 'llama3:8b',
-      cloudProvider: 'anthropic',
-      cloudApiKey: '',
-      cloudModel: 'claude-sonnet-4-5-20250514',
+      preset: 'claude-code',
     },
     scan: {
       timeoutSeconds: 300,

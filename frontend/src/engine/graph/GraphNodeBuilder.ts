@@ -4,11 +4,12 @@
  * Each repo gets a unique vibrant color from a palette. Feature nodes
  * inherit a lighter tint of their parent repo's color.
  *
- * Both are tagged 'pickable' with _userData for raycasting identification.
+ * Both are tagged 'pickable' with typed GraphNodeData for raycasting identification.
  */
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { EngineRepoData, EngineFeature } from '../types'
+import { setGraphData } from './GraphNodeData'
 
 // ─── Distinct Repo Colors (vibrant palette) ─────
 
@@ -57,7 +58,7 @@ const FEATURE_SCALE = 1.0
 export class GraphNodeBuilder {
   private materials: MaterialFactory
   private repoColorMap = new Map<string, [number, number, number]>()
-  private matKeysUsed = new Set<string>()
+  private matKeysUsed: string[] = []
 
   constructor(materials: MaterialFactory) {
     this.materials = materials
@@ -84,7 +85,7 @@ export class GraphNodeBuilder {
 
     const color = this.getRepoColor(repo.repo_name)
     const matKey = `gn_repo_${repo.repo_name}`
-    this.matKeysUsed.add(matKey)
+    this.matKeysUsed.push(matKey)
     const mat = this.materials.getColor(matKey, color[0], color[1], color[2], {
       metalness: 0.35,
       gloss: 0.7,
@@ -93,14 +94,14 @@ export class GraphNodeBuilder {
     entity.render!.meshInstances[0].material = mat
 
     entity.tags.add('pickable')
-    ;(entity as unknown as Record<string, unknown>)._userData = {
+    setGraphData(entity, {
       type: 'graph_repo',
       repoName: repo.repo_name,
       health: repo.health,
       growthStage: repo.growth_stage,
       totalFiles: repo.total_files,
       totalCommits: repo.total_commits,
-    }
+    })
 
     return entity
   }
@@ -111,11 +112,13 @@ export class GraphNodeBuilder {
     entity.addComponent('render', { type: 'sphere' })
     entity.setLocalScale(FEATURE_SCALE, FEATURE_SCALE, FEATURE_SCALE)
 
-    // Each feature gets a distinct color from the feature palette
-    const color = FEATURE_PALETTE[index % FEATURE_PALETTE.length]
+    // Each feature gets a color from the feature palette — materials are shared
+    // by palette index to avoid blowing the MaterialFactory LRU cache (256 limit)
+    const colorIdx = index % FEATURE_PALETTE.length
+    const color = FEATURE_PALETTE[colorIdx]
 
-    const matKey = `gn_feat_${feature.repo_name ?? 'none'}_${index}`
-    this.matKeysUsed.add(matKey)
+    const matKey = `gn_feat_color_${colorIdx}`
+    this.matKeysUsed.push(matKey)
     const mat = this.materials.getColor(matKey, color[0], color[1], color[2], {
       metalness: 0.1,
       gloss: 0.5,
@@ -124,7 +127,7 @@ export class GraphNodeBuilder {
     entity.render!.meshInstances[0].material = mat
 
     entity.tags.add('pickable')
-    ;(entity as unknown as Record<string, unknown>)._userData = {
+    setGraphData(entity, {
       type: 'graph_feature',
       title: feature.title,
       status: feature.status,
@@ -132,17 +135,17 @@ export class GraphNodeBuilder {
       sourceRef: feature.source_ref,
       fromBud: feature.from_bud,
       branchName: feature.branch_name,
-    }
+    })
 
     return entity
   }
 
-  /** Release all materials created by this builder. */
+  /** Release all materials acquired by this builder (one release per acquisition). */
   destroy(): void {
     for (const key of this.matKeysUsed) {
       this.materials.release(key)
     }
-    this.matKeysUsed.clear()
+    this.matKeysUsed = []
     this.repoColorMap.clear()
   }
 }

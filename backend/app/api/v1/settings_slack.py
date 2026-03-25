@@ -1,5 +1,6 @@
-"""Slack member sync and linking endpoints."""
+"""Slack member sync, linking, and import endpoints."""
 
+import secrets
 import uuid
 
 import structlog
@@ -10,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.core.encryption import decrypt_secret
-from app.models.user import OrgToUser, User
+from app.core.security import hash_password
+from app.models.user import OrgToUser, User, UserRole
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 
@@ -25,6 +27,7 @@ class SlackMemberPreview(BaseModel):
     slack_id: str
     slack_name: str
     slack_avatar: str | None = None
+    slack_email: str | None = None
     matched_user_id: uuid.UUID | None = None
     matched_user_name: str | None = None
     already_linked: bool = False
@@ -34,6 +37,28 @@ class SlackLinkRequest(BaseModel):
     """Mapping of Slack ID → Bodhigrove user ID for bulk linking."""
 
     links: list[dict[str, str]]
+
+
+class SlackImportItem(BaseModel):
+    """A Slack member to import as a new Bodhigrove user."""
+
+    slack_id: str
+    slack_name: str
+    slack_email: str
+    slack_avatar: str | None = None
+
+
+class SlackImportRequest(BaseModel):
+    """Batch import of Slack members as new Bodhigrove users."""
+
+    imports: list[SlackImportItem]
+
+
+class SlackImportResponse(BaseModel):
+    """Response from batch import of Slack members."""
+
+    imported: int
+    skipped: list[str] = []
 
 
 @router.post("/slack/sync-members", response_model=list[SlackMemberPreview])
@@ -87,7 +112,7 @@ async def sync_slack_members(
         display_name = (
             member.get("real_name") or profile.get("display_name") or member.get("name", sid)
         )
-        avatar = profile.get("image_48")
+        avatar = profile.get("image_72") or profile.get("image_48")
         slack_email = (profile.get("email") or "").lower()
 
         # Check if already linked
@@ -98,6 +123,7 @@ async def sync_slack_members(
                     slack_id=sid,
                     slack_name=display_name,
                     slack_avatar=avatar,
+                    slack_email=slack_email or None,
                     matched_user_id=linked_user.id,
                     matched_user_name=linked_user.name,
                     already_linked=True,
@@ -105,14 +131,27 @@ async def sync_slack_members(
             )
             continue
 
-        # Try email match as a suggestion
+        # Try email match first, then name prefix match
         matched_user = email_to_user.get(slack_email) if slack_email else None
+
+        if not matched_user and display_name:
+            # Match by name tokens (case-insensitive):
+            # any Slack name token matching any FlowDev user name token
+            slack_tokens = {t.lower() for t in display_name.split() if len(t) >= 3}
+            for user in users:
+                if not user.name:
+                    continue
+                user_tokens = {t.lower() for t in user.name.split() if len(t) >= 3}
+                if slack_tokens & user_tokens:
+                    matched_user = user
+                    break
 
         results.append(
             SlackMemberPreview(
                 slack_id=sid,
                 slack_name=display_name,
                 slack_avatar=avatar,
+                slack_email=slack_email or None,
                 matched_user_id=matched_user.id if matched_user else None,
                 matched_user_name=matched_user.name if matched_user else None,
                 already_linked=False,
@@ -223,3 +262,64 @@ async def unlink_slack_member(
     )
 
     return {"success": True}
+
+
+@router.post("/slack/import-members", response_model=SlackImportResponse)
+async def import_slack_members(
+    body: SlackImportRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SlackImportResponse:
+    """Import Slack workspace members as new Bodhigrove users.
+
+    Creates a User + OrgToUser membership for each Slack member that does
+    not already exist (by email). Automatically links the Slack ID.
+
+    Args:
+        body: List of Slack members to import.
+        current_user: The authenticated user.
+        db: The async database session.
+
+    Returns:
+        Count of imported users and list of skipped emails (duplicates).
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    user_repo = UserRepository(db, org_id=org.id)
+
+    imported = 0
+    skipped: list[str] = []
+
+    for item in body.imports:
+        existing = await user_repo.get_by_email_in_org(org.id, item.slack_email)
+        if existing is not None:
+            skipped.append(item.slack_email)
+            continue
+
+        new_user = User(
+            email=item.slack_email,
+            name=item.slack_name,
+            password_hash=hash_password(secrets.token_urlsafe(12)),
+            avatar_url=item.slack_avatar,
+            slack_id=item.slack_id,
+        )
+        created = await user_repo.create(new_user)
+
+        membership = OrgToUser(
+            user_id=created.id,
+            org_id=org.id,
+            role=UserRole.DEVELOPER,
+        )
+        db.add(membership)
+        imported += 1
+
+    await db.flush()
+
+    logger.info(
+        "slack_members_imported",
+        imported=imported,
+        skipped=len(skipped),
+        by=current_user.email,
+    )
+
+    return SlackImportResponse(imported=imported, skipped=skipped)

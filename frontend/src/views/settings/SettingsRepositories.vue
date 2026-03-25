@@ -107,6 +107,19 @@
 
     <v-expand-transition>
       <v-alert
+        v-if="isLocked"
+        type="info"
+        variant="tonal"
+        density="compact"
+        icon="mdi-lock-outline"
+        class="mb-4"
+      >
+        Repo editing is disabled while a scan is running.
+      </v-alert>
+    </v-expand-transition>
+
+    <v-expand-transition>
+      <v-alert
         v-if="scanStatus === 'completed'"
         type="success"
         variant="tonal"
@@ -274,6 +287,7 @@
                       size="x-small"
                       variant="text"
                       :color="repo.status === 'active' ? 'warning' : 'success'"
+                      :disabled="isLocked"
                       @click="settingsStore.setRepoStatus(repo.id, repo.status === 'active' ? 'ignored' : 'active')"
                     />
                   </template>
@@ -286,6 +300,7 @@
                       size="x-small"
                       variant="text"
                       color="error"
+                      :disabled="isLocked"
                       @click="settingsStore.removeRepo(repo.path)"
                     />
                   </template>
@@ -307,6 +322,7 @@
           variant="tonal"
           size="small"
           prepend-icon="mdi-plus"
+          :disabled="isLocked"
           @click="showAddRepoDialog = true"
         >
           Add Repository
@@ -397,6 +413,15 @@
         <template v-else>
           This will scan for changes since the last index. Unchanged items are kept.
         </template>
+        <v-alert
+          type="warning"
+          variant="tonal"
+          density="compact"
+          icon="mdi-source-branch-sync"
+          class="mt-3"
+        >
+          Scanning will temporarily stash uncommitted changes. Commit your work first.
+        </v-alert>
         <div v-if="indexStats && indexStats.knowledgeItems.total > 0" class="mt-2 text-caption text-medium-emphasis">
           Current index: {{ indexStats.knowledgeItems.total }} knowledge items,
           {{ indexStats.skillProfiles }} skill profiles.
@@ -466,6 +491,16 @@
           />
         </template>
       </v-text-field>
+      <v-alert
+        type="warning"
+        variant="tonal"
+        density="compact"
+        icon="mdi-source-branch-sync"
+        class="mt-3"
+      >
+        Scanning will temporarily stash uncommitted changes and checkout the main branch.
+        <strong>Commit or back up your work</strong> before scanning.
+      </v-alert>
       <v-checkbox
         v-model="scanAfterAdd"
         label="Scan after adding"
@@ -549,13 +584,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import DirectoryPicker from '@/components/setup/DirectoryPicker.vue'
 import api from '@/services/api'
 import type { RepoInfo } from '@/types'
 
 const settingsStore = useSettingsStore()
+
+// Disable repo editing while a scan is running
+const isLocked = computed(() => scanStatus.value === 'running')
 
 // Scan state
 const scanStatus = ref<'idle' | 'running' | 'completed' | 'failed'>('idle')
@@ -611,9 +649,18 @@ const maxTurnsOptions = [
   { title: 'Unlimited', value: 0 },
 ]
 
-onMounted(() => {
+onMounted(async () => {
   fetchIndexStats()
   settingsStore.fetchRepos()
+
+  // If a scan was auto-triggered from setup, resume polling
+  const setupScanId = localStorage.getItem('flowdev_scan_id')
+  if (setupScanId && scanStatus.value === 'idle') {
+    currentScanId = setupScanId
+    scanStatus.value = 'running'
+    scanStatusLabel.value = 'Scanning'
+    startPolling()
+  }
 })
 
 onUnmounted(() => {
@@ -788,12 +835,14 @@ function startPolling(): void {
           unmatchedAuthors: data.unmatchedAuthors || [],
           synthesisWarning: data.synthesisWarning || '',
         }
+        localStorage.removeItem('flowdev_scan_id')
         stopPolling()
         fetchIndexStats()
         notifyScanDone(true, data.featuresIndexed || 0, data.profilesFound || 0)
       } else if (data.status === 'failed') {
         scanStatus.value = 'failed'
         scanError.value = data.error || 'Scan failed.'
+        localStorage.removeItem('flowdev_scan_id')
         stopPolling()
         notifyScanDone(false)
       }

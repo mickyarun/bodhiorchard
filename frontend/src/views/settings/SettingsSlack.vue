@@ -190,22 +190,14 @@
           </v-expand-transition>
         </div>
 
-        <!-- Slack Member Sync -->
+        <!-- Slack Member Sync — NOT collapsible, always visible when Slack is enabled -->
         <div
-          class="rounded-lg"
+          class="rounded-lg pa-4"
           style="border: 1px solid rgba(var(--v-theme-on-surface), 0.08);"
         >
-          <div
-            class="d-flex align-center ga-2 pa-3 text-body-2"
-            style="cursor: pointer;"
-            @click="slackSyncOpen = !slackSyncOpen"
-          >
-            <v-icon
-              :icon="slackSyncOpen ? 'mdi-chevron-down' : 'mdi-chevron-right'"
-              size="18"
-            />
-            <v-icon icon="mdi-account-sync-outline" size="16" color="primary" />
-            <span class="font-weight-medium">Sync Members</span>
+          <div class="d-flex align-center ga-2 mb-3">
+            <v-icon icon="mdi-account-sync-outline" size="18" color="primary" />
+            <span class="text-body-2 font-weight-medium">Sync Members</span>
             <v-spacer />
             <v-btn
               size="small"
@@ -213,108 +205,166 @@
               color="primary"
               prepend-icon="mdi-sync"
               :loading="slackSyncLoading"
-              @click.stop="fetchSlackMembers"
+              @click="fetchSlackMembers"
             >
               Sync
             </v-btn>
           </div>
-          <v-expand-transition>
-            <div v-if="slackSyncOpen" class="px-3 pb-3">
-              <div class="text-caption text-medium-emphasis mb-3">
-                Link Slack workspace users to FlowDev members so names appear correctly in triage and approvals.
-                <br />
-                <strong>Required scopes:</strong>
-                <v-chip size="x-small" variant="tonal" color="primary" class="ml-1">users:read</v-chip>
-                <v-chip size="x-small" variant="tonal" color="primary" class="ml-1">users:read.email</v-chip>
-                — add in your Slack app under <em>OAuth &amp; Permissions</em>, then reinstall.
+
+          <div class="text-caption text-medium-emphasis mb-3">
+            Link Slack workspace users to FlowDev members, or import them as new members.
+            <br />
+            <strong>Required scopes:</strong>
+            <v-chip size="x-small" variant="tonal" color="primary" class="ml-1">users:read</v-chip>
+            <v-chip size="x-small" variant="tonal" color="primary" class="ml-1">users:read.email</v-chip>
+          </div>
+
+          <v-alert v-if="slackSyncError" type="error" variant="tonal" density="compact" class="mb-3">
+            {{ slackSyncError }}
+          </v-alert>
+
+          <template v-if="slackMembers.length > 0">
+            <!-- Member list -->
+            <div
+              v-for="member in slackMembers"
+              :key="member.slack_id"
+              class="d-flex align-center ga-3 py-2"
+              style="border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.05);"
+            >
+              <!-- Avatar -->
+              <v-avatar size="32" color="primary" variant="tonal">
+                <v-img
+                  v-if="member.slack_avatar"
+                  :src="member.slack_avatar"
+                  :alt="member.slack_name"
+                  referrerpolicy="no-referrer"
+                  cover
+                />
+                <span v-else class="text-caption">
+                  {{ member.slack_name.charAt(0).toUpperCase() }}
+                </span>
+              </v-avatar>
+
+              <!-- Name + email -->
+              <div style="min-width: 130px;">
+                <div class="text-body-2 font-weight-medium">{{ member.slack_name }}</div>
+                <div v-if="member.slack_email" class="text-caption text-medium-emphasis" style="margin-top: -2px;">
+                  {{ member.slack_email }}
+                </div>
               </div>
 
-              <v-alert v-if="slackSyncError" type="error" variant="tonal" density="compact" class="mb-3">
-                {{ slackSyncError }}
-              </v-alert>
+              <v-icon icon="mdi-arrow-right" size="16" class="text-medium-emphasis" />
 
-              <div v-if="slackMembers.length > 0">
-                <div
-                  v-for="member in slackMembers"
-                  :key="member.slack_id"
-                  class="d-flex align-center ga-3 py-2"
-                  style="border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.05);"
-                >
-                  <v-avatar size="32" :image="member.slack_avatar || undefined" color="primary" variant="tonal">
-                    <span v-if="!member.slack_avatar" class="text-caption">
-                      {{ member.slack_name.charAt(0).toUpperCase() }}
-                    </span>
-                  </v-avatar>
-                  <div style="min-width: 140px;">
-                    <div class="text-body-2 font-weight-medium">{{ member.slack_name }}</div>
-                  </div>
-                  <v-icon icon="mdi-arrow-right" size="16" class="text-medium-emphasis" />
-                  <template v-if="!member.already_linked">
-                    <v-autocomplete
-                      v-model="slackLinkMap[member.slack_id]"
-                      :items="flowdevMemberOptions"
-                      item-title="name"
-                      item-value="id"
-                      density="compact"
-                      variant="outlined"
-                      hide-details
-                      placeholder="Search member..."
-                      clearable
-                      auto-select-first
-                      style="max-width: 240px;"
-                    />
-                    <v-btn
-                      icon="mdi-close"
-                      size="x-small"
-                      variant="text"
-                      color="medium-emphasis"
-                      title="Remove from list"
-                      @click="dismissSlackMember(member.slack_id)"
-                    />
-                  </template>
-                  <div v-else class="d-flex align-center ga-2">
-                    <v-icon icon="mdi-check-circle" size="16" color="success" />
-                    <span class="text-body-2">{{ member.matched_user_name }}</span>
-                    <v-btn
-                      icon="mdi-link-variant-off"
-                      size="x-small"
-                      variant="text"
-                      color="error"
-                      title="Unlink"
-                      @click="unlinkSlackMember(member.slack_id)"
-                    />
-                  </div>
-                </div>
-
+              <!-- Already linked -->
+              <template v-if="member.already_linked">
+                <v-icon icon="mdi-check-circle" size="16" color="success" />
+                <span class="text-body-2">{{ member.matched_user_name }}</span>
                 <v-btn
-                  class="mt-3"
-                  color="primary"
-                  variant="flat"
-                  size="small"
-                  prepend-icon="mdi-link-variant"
-                  :loading="slackLinkLoading"
-                  :disabled="Object.keys(slackLinkMap).length === 0"
-                  @click="linkSlackMembers"
+                  icon="mdi-link-variant-off"
+                  size="x-small"
+                  variant="text"
+                  color="error"
+                  title="Unlink"
+                  @click="unlinkSlackMember(member.slack_id)"
+                />
+              </template>
+
+              <!-- Unlinked -->
+              <template v-else>
+                <!-- Action toggle: two plain buttons -->
+                <v-btn
+                  :variant="getAction(member.slack_id) === 'link' ? 'flat' : 'outlined'"
+                  :color="getAction(member.slack_id) === 'link' ? 'primary' : 'default'"
+                  size="x-small"
+                  @click="setAction(member.slack_id, 'link')"
                 >
-                  Link Selected
+                  Link
+                </v-btn>
+                <v-btn
+                  :variant="getAction(member.slack_id) === 'import' ? 'flat' : 'outlined'"
+                  :color="getAction(member.slack_id) === 'import' ? 'success' : 'default'"
+                  size="x-small"
+                  @click="setAction(member.slack_id, 'import')"
+                >
+                  Import
                 </v-btn>
 
-                <v-alert
-                  v-if="slackLinkSuccess"
-                  type="success"
-                  variant="tonal"
+                <!-- Link mode: autocomplete -->
+                <v-autocomplete
+                  v-if="getAction(member.slack_id) === 'link'"
+                  :model-value="slackLinkMap[member.slack_id] ?? null"
+                  :items="flowdevMemberOptions"
+                  item-title="name"
+                  item-value="id"
                   density="compact"
-                  class="mt-2"
-                >
-                  {{ slackLinkSuccess }}
-                </v-alert>
-              </div>
+                  variant="outlined"
+                  hide-details
+                  placeholder="Search member..."
+                  clearable
+                  auto-select-first
+                  style="max-width: 220px;"
+                  @update:model-value="onLinkSelect(member.slack_id, $event)"
+                />
 
-              <div v-else-if="!slackSyncLoading" class="text-caption text-medium-emphasis">
-                Click "Sync" to fetch Slack workspace members.
-              </div>
+                <!-- X to remove from list -->
+                <v-btn
+                  icon="mdi-close"
+                  size="x-small"
+                  variant="text"
+                  color="medium-emphasis"
+                  title="Remove from list"
+                  @click="dismissSlackMember(member.slack_id)"
+                />
+              </template>
             </div>
-          </v-expand-transition>
+
+            <!-- Summary + Save -->
+            <div class="d-flex align-center ga-3 mt-4">
+              <v-chip v-if="linkCount > 0" color="primary" variant="tonal" size="small" prepend-icon="mdi-link-variant">
+                {{ linkCount }} to link
+              </v-chip>
+              <v-chip v-if="importCount > 0" color="success" variant="tonal" size="small" prepend-icon="mdi-account-plus">
+                {{ importCount }} to import
+              </v-chip>
+              <v-spacer />
+              <v-btn
+                color="primary"
+                variant="flat"
+                size="small"
+                prepend-icon="mdi-content-save"
+                :loading="slackLinkLoading || slackImportLoading"
+                :disabled="linkCount === 0 && importCount === 0"
+                @click="saveChanges"
+              >
+                Save Changes
+              </v-btn>
+            </div>
+
+            <v-alert
+              v-if="importNoEmailCount > 0"
+              type="warning"
+              variant="tonal"
+              density="compact"
+              class="mt-2"
+            >
+              {{ importNoEmailCount }} member{{ importNoEmailCount !== 1 ? 's' : '' }} set to Import but missing email.
+              Add <strong>users:read.email</strong> to <strong>Bot Token Scopes</strong> (not User Token Scopes) in your Slack app, then reinstall and re-sync.
+            </v-alert>
+
+            <v-alert
+              v-if="slackLinkSuccess"
+              type="success"
+              variant="tonal"
+              density="compact"
+              class="mt-2"
+            >
+              {{ slackLinkSuccess }}
+            </v-alert>
+          </template>
+
+          <div v-else-if="!slackSyncLoading" class="text-caption text-medium-emphasis">
+            Click "Sync" to fetch Slack workspace members.
+          </div>
         </div>
       </div>
     </v-expand-transition>
@@ -332,7 +382,6 @@ const membersStore = useMembersStore()
 
 const slackManifestOpen = ref(false)
 const slackEventsOpen = ref(false)
-const slackSyncOpen = ref(false)
 
 // Slack manifest for quick app creation
 const slackManifest = JSON.stringify({
@@ -391,28 +440,90 @@ function copyWebhookUrl(): void {
   navigator.clipboard.writeText(webhookUrl)
 }
 
-// Slack member sync
+// ─── Slack Member Sync ──────────────────────────
+
 interface SlackMemberPreview {
   slack_id: string
   slack_name: string
   slack_avatar: string | null
+  slack_email: string | null
   matched_user_id: string | null
   matched_user_name: string | null
   already_linked: boolean
 }
 
+type SlackAction = 'link' | 'import'
+
 const slackMembers = ref<SlackMemberPreview[]>([])
 const slackLinkMap = ref<Record<string, string>>({})
+const slackActionMap = ref<Record<string, SlackAction>>({})
 const slackSyncLoading = ref(false)
 const slackSyncError = ref('')
 const slackLinkLoading = ref(false)
+const slackImportLoading = ref(false)
 const slackLinkSuccess = ref('')
 
 const flowdevMemberOptions = computed(() =>
   membersStore.members
     .filter(m => m.isActive)
-    .map(m => ({ id: m.id, name: `${m.name} (${m.email})` }))
+    .map(m => ({ id: m.id, name: `${m.name} (${m.email})` })),
 )
+
+// ─── Explicit getters/setters (avoid v-model on dynamic record keys) ───
+
+function getAction(slackId: string): SlackAction {
+  return slackActionMap.value[slackId] ?? 'link'
+}
+
+function setAction(slackId: string, action: SlackAction): void {
+  slackActionMap.value = { ...slackActionMap.value, [slackId]: action }
+}
+
+function onLinkSelect(slackId: string, userId: string | null): void {
+  if (userId) {
+    slackLinkMap.value = { ...slackLinkMap.value, [slackId]: userId }
+  } else {
+    const copy = { ...slackLinkMap.value }
+    delete copy[slackId]
+    slackLinkMap.value = copy
+  }
+}
+
+function dismissSlackMember(slackId: string): void {
+  slackMembers.value = slackMembers.value.filter(m => m.slack_id !== slackId)
+  const a = { ...slackActionMap.value }; delete a[slackId]; slackActionMap.value = a
+  const l = { ...slackLinkMap.value }; delete l[slackId]; slackLinkMap.value = l
+}
+
+// ─── Counts ─────────────────────────────────────
+
+const linkCount = computed(() => {
+  let n = 0
+  for (const [id, action] of Object.entries(slackActionMap.value)) {
+    if (action === 'link' && slackLinkMap.value[id]) n++
+  }
+  return n
+})
+
+const importCount = computed(() => {
+  let n = 0
+  for (const [id, action] of Object.entries(slackActionMap.value)) {
+    const member = slackMembers.value.find(m => m.slack_id === id)
+    if (action === 'import' && member?.slack_email) n++
+  }
+  return n
+})
+
+const importNoEmailCount = computed(() => {
+  let n = 0
+  for (const [id, action] of Object.entries(slackActionMap.value)) {
+    const member = slackMembers.value.find(m => m.slack_id === id)
+    if (action === 'import' && !member?.slack_email) n++
+  }
+  return n
+})
+
+// ─── API calls ──────────────────────────────────
 
 async function fetchSlackMembers(): Promise<void> {
   slackSyncLoading.value = true
@@ -420,38 +531,31 @@ async function fetchSlackMembers(): Promise<void> {
   slackLinkSuccess.value = ''
   try {
     const { data } = await api.post('/v1/settings/slack/sync-members')
+
     slackMembers.value = data
-    slackLinkMap.value = {}
-    for (const m of data) {
-      if (m.matched_user_id && !m.already_linked) {
-        slackLinkMap.value[m.slack_id] = m.matched_user_id
+    const newActions: Record<string, SlackAction> = {}
+    const newLinks: Record<string, string> = {}
+
+    for (const m of data as SlackMemberPreview[]) {
+      if (m.already_linked) continue
+      if (m.matched_user_id) {
+        newActions[m.slack_id] = 'link'
+        newLinks[m.slack_id] = m.matched_user_id
+      } else {
+        newActions[m.slack_id] = 'import'
       }
     }
-    slackSyncOpen.value = true
+
+    // Replace entire objects for guaranteed reactivity
+    slackActionMap.value = newActions
+    slackLinkMap.value = newLinks
     if (membersStore.members.length === 0) {
       await membersStore.fetchMembers()
     }
-  } catch {
+  } catch (err) {
     slackSyncError.value = 'Failed to fetch Slack members. Check bot token.'
   } finally {
     slackSyncLoading.value = false
-  }
-}
-
-async function linkSlackMembers(): Promise<void> {
-  slackLinkLoading.value = true
-  slackLinkSuccess.value = ''
-  try {
-    const links = Object.entries(slackLinkMap.value)
-      .filter(([, userId]) => userId)
-      .map(([slackId, userId]) => ({ slack_id: slackId, user_id: userId }))
-    const { data } = await api.post('/v1/settings/slack/link-members', { links })
-    slackLinkSuccess.value = `Linked ${data.linked} member${data.linked !== 1 ? 's' : ''} successfully.`
-    await fetchSlackMembers()
-  } catch {
-    slackSyncError.value = 'Failed to link members.'
-  } finally {
-    slackLinkLoading.value = false
   }
 }
 
@@ -464,8 +568,52 @@ async function unlinkSlackMember(slackId: string): Promise<void> {
   }
 }
 
-function dismissSlackMember(slackId: string): void {
-  slackMembers.value = slackMembers.value.filter(m => m.slack_id !== slackId)
-  delete slackLinkMap.value[slackId]
+async function saveChanges(): Promise<void> {
+  slackLinkSuccess.value = ''
+  slackSyncError.value = ''
+  const messages: string[] = []
+
+  try {
+    // Link
+    if (linkCount.value > 0) {
+      slackLinkLoading.value = true
+      const links = Object.entries(slackLinkMap.value)
+        .filter(([id]) => slackActionMap.value[id] === 'link')
+        .filter(([, userId]) => userId)
+        .map(([slackId, userId]) => ({ slack_id: slackId, user_id: userId }))
+      const { data } = await api.post('/v1/settings/slack/link-members', { links })
+      messages.push(`Linked ${data.linked} member${data.linked !== 1 ? 's' : ''}`)
+    }
+
+    // Import
+    if (importCount.value > 0) {
+      slackImportLoading.value = true
+      const imports = slackMembers.value
+        .filter(m => slackActionMap.value[m.slack_id] === 'import' && m.slack_email)
+        .map(m => ({
+          slack_id: m.slack_id,
+          slack_name: m.slack_name,
+          slack_email: m.slack_email!,
+          slack_avatar: m.slack_avatar,
+        }))
+      const { data } = await api.post('/v1/settings/slack/import-members', { imports })
+      messages.push(`Imported ${data.imported} member${data.imported !== 1 ? 's' : ''}`)
+      if (data.skipped?.length) {
+        messages.push(`Skipped ${data.skipped.length} (already exist)`)
+      }
+      await membersStore.fetchMembers()
+    }
+
+    slackLinkSuccess.value = messages.join('. ') + '.'
+    // Reset to pre-sync state
+    slackMembers.value = []
+    slackActionMap.value = {}
+    slackLinkMap.value = {}
+  } catch (err) {
+    slackSyncError.value = 'Failed to save changes.'
+  } finally {
+    slackLinkLoading.value = false
+    slackImportLoading.value = false
+  }
 }
 </script>
