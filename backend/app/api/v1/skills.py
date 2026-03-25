@@ -25,7 +25,8 @@ from app.schemas.skills import (
     SkillProfileRead,
 )
 from app.services.embedding_service import embedding_service
-from app.services.scan_pipeline import run_scan_pipeline, scan_statuses
+from app.services.scan_pipeline import run_scan_pipeline
+from app.services.scan_progress import create_scan_progress, get_scan_progress
 
 logger = structlog.get_logger(__name__)
 
@@ -108,8 +109,7 @@ async def trigger_scan(
     repo_paths = valid_paths
 
     scan_id = str(uuid.uuid4())
-    scan_status = ScanStatus(scanId=scan_id, status="started", progressPct=0)
-    scan_statuses[scan_id] = scan_status
+    await create_scan_progress(scan_id, str(org.id))
 
     background_tasks.add_task(
         run_scan_pipeline,
@@ -137,13 +137,13 @@ async def get_scan_status(
     Returns:
         ScanStatus with progress percentage and results.
     """
-    scan_status = scan_statuses.get(scan_id)
-    if scan_status is None:
+    scan_progress = await get_scan_progress(scan_id)
+    if scan_progress is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Scan not found: {scan_id}",
         )
-    return scan_status
+    return scan_progress
 
 
 @router.get("/profiles", response_model=list[SkillProfileRead])

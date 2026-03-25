@@ -2,7 +2,7 @@
 
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class ScanRequest(BaseModel):
@@ -22,6 +22,31 @@ class ScanResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+STATUS_LABELS: dict[str, str] = {
+    "started": "Starting scan",
+    "checking_out": "Checking out repository",
+    "analyzing_changes": "Analyzing changes",
+    "indexing_code": "Indexing code structure",
+    "setting_up_gitnexus": "Setting up GitNexus",
+    "setting_up_worktrees": "Configuring worktrees",
+    "setting_up_mcp": "Setting up Bodhigrove MCP",
+    "installing_hooks": "Installing git hooks",
+    "pushing_setup": "Pushing setup files",
+    "cleaning_stale": "Cleaning stale references",
+    "analyzing_skills": "Analyzing developer skills",
+    "extracting_design_system": "Extracting design system",
+    "synthesizing_features": "Synthesizing features",
+    "generating_embeddings": "Generating embeddings",
+    "merging_features": "Merging cross-repo features",
+    "remapping_skills": "Remapping skills to features",
+    "saving_results": "Saving results",
+    "finalizing": "Finalizing",
+    "finalizing_repo": "Finalizing repository",
+    "completed": "Scan complete",
+    "failed": "Scan failed",
+}
+
+
 class ScanStatus(BaseModel):
     """Status of a running or completed scan."""
 
@@ -37,6 +62,12 @@ class ScanStatus(BaseModel):
     synthesis_warning: str | None = Field(default=None, alias="synthesisWarning")
     setup_pr_message: str | None = Field(default=None, alias="setupPrMessage")
     error: str | None = None
+
+    @computed_field(alias="statusLabel")  # type: ignore[misc]
+    @property
+    def status_label(self) -> str:
+        """Human-readable label for the current status."""
+        return STATUS_LABELS.get(self.status, self.status)
 
     model_config = {"populate_by_name": True}
 

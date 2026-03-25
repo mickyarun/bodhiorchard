@@ -58,15 +58,15 @@
     </v-list>
 
     <!-- Scan progress bar -->
-    <div v-if="checklist.scanInProgress" class="px-4 pb-3">
+    <div v-if="checklist.scanInProgress || wsScanActive" class="px-4 pb-3">
       <v-progress-linear
-        :model-value="checklist.scanProgress"
+        :model-value="displayProgress"
         color="primary"
         rounded
         height="6"
       />
       <div class="text-caption text-medium-emphasis mt-1">
-        Scanning repository... this usually takes 15–30 minutes
+        {{ displayStatusLabel }}
       </div>
     </div>
   </v-card>
@@ -75,11 +75,30 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '@/services/api'
+import { useScanSocket } from '@/composables/useScanSocket'
+import type { ScanStatusData } from '@/composables/useScanSocket'
 import type { SetupChecklistStatus } from '@/types/setup'
 
 const checklist = ref<SetupChecklistStatus | null>(null)
 const dismissed = ref(localStorage.getItem('flowdev_checklist_dismissed') === 'true')
 let pollInterval: ReturnType<typeof setInterval> | null = null
+
+// WS-driven progress (real-time, replaces stale poll data)
+const { scanData, startTracking, stopTracking } = useScanSocket()
+const wsScanActive = ref(false)
+const wsProgress = ref(0)
+const wsStatusLabel = ref('')
+let currentWsScanId: string | null = null
+
+// Use WS progress when available, fall back to poll data
+const displayProgress = computed(() =>
+  wsScanActive.value ? wsProgress.value : (checklist.value?.scanProgress ?? 0),
+)
+const displayStatusLabel = computed(() =>
+  wsScanActive.value && wsStatusLabel.value
+    ? wsStatusLabel.value
+    : 'Scanning repository...',
+)
 
 interface ChecklistItem {
   key: string
@@ -94,6 +113,8 @@ interface ChecklistItem {
 const items = computed<ChecklistItem[]>(() => {
   if (!checklist.value) return []
   const c = checklist.value
+  const scanInProgress = c.scanInProgress || wsScanActive.value
+  const progress = displayProgress.value
   return [
     { key: 'org', label: 'Create organization', done: c.orgCreated },
     { key: 'claude', label: 'Connect Claude Code', done: c.claudeCodeTested },
@@ -102,8 +123,8 @@ const items = computed<ChecklistItem[]>(() => {
       key: 'scan',
       label: 'Scan repository',
       done: c.scanComplete,
-      inProgress: c.scanInProgress,
-      progressText: c.scanInProgress ? `${c.scanProgress}%` : undefined,
+      inProgress: scanInProgress,
+      progressText: scanInProgress ? `${progress}%` : undefined,
     },
     { key: 'branches', label: 'Map branch strategy', done: c.branchesMapped, route: '/settings' },
     { key: 'github', label: 'Connect GitHub', done: c.githubConnected, route: '/settings', optional: true },
@@ -119,6 +140,33 @@ const allRequiredDone = computed(() => {
     && checklist.value.scanComplete
     && checklist.value.branchesMapped
 })
+
+// Start WS tracking when poll detects an active scan
+function maybeStartWsTracking(scanId: string): void {
+  if (currentWsScanId === scanId) return // already tracking
+  if (currentWsScanId) stopTracking()
+
+  currentWsScanId = scanId
+  wsScanActive.value = true
+
+  startTracking(scanId, {
+    onProgress: (data: ScanStatusData) => {
+      wsProgress.value = data.progressPct || 0
+      wsStatusLabel.value = data.statusLabel || ''
+    },
+    onComplete: () => {
+      wsScanActive.value = false
+      currentWsScanId = null
+      // Refresh checklist state to mark scan as complete
+      fetchStatus()
+    },
+    onError: () => {
+      wsScanActive.value = false
+      currentWsScanId = null
+      fetchStatus()
+    },
+  })
+}
 
 async function fetchStatus(): Promise<void> {
   try {
@@ -138,7 +186,12 @@ async function fetchStatus(): Promise<void> {
       }
     }
 
-    if (allRequiredDone.value && !checklist.value?.scanInProgress) {
+    // Start WS tracking if a scan is running
+    if (data.scanInProgress && data.scanId) {
+      maybeStartWsTracking(data.scanId)
+    }
+
+    if (allRequiredDone.value && !data.scanInProgress) {
       stopPolling()
     }
   } catch {
@@ -150,6 +203,9 @@ function dismiss(): void {
   dismissed.value = true
   localStorage.setItem('flowdev_checklist_dismissed', 'true')
   stopPolling()
+  stopTracking()
+  wsScanActive.value = false
+  currentWsScanId = null
 }
 
 function stopPolling(): void {
@@ -170,6 +226,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopPolling()
+  stopTracking()
 })
 </script>
 

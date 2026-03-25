@@ -16,7 +16,6 @@ from app.core.security import hash_password
 from app.models.user import OrgToUser, User, UserRole
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.user import UserRepository
-from app.schemas.skills import ScanStatus
 from app.services.claude_runner import (
     ClaudeRunnerConfig,
     MCPServerConfig,
@@ -113,9 +112,11 @@ async def phase_b1_repo_setup(
     repo_name: str,
     tracked_repo: object | None,
     scan_id: str,
-    scan_status: ScanStatus,
-) -> None:
+    base_pct: int,
+) -> str | None:
     """Phase B1: Worktrees, MCP init, hooks, .gitignore, commit+push+PR.
+
+    Reports granular progress for each sub-step.
 
     Args:
         db: Async database session.
@@ -123,8 +124,11 @@ async def phase_b1_repo_setup(
         repo_path: Absolute path to the repository.
         repo_name: Name of the repository.
         tracked_repo: TrackedRepository model instance (or None).
-        scan_id: Scan identifier for logging.
-        scan_status: ScanStatus instance to update with PR message.
+        scan_id: Scan identifier for logging and progress tracking.
+        base_pct: Base progress percentage for this repo's range.
+
+    Returns:
+        Setup PR message string if a PR was created without a URL, else None.
     """
     from app.config import settings as app_settings
     from app.mcp.auth import create_internal_mcp_token
@@ -138,8 +142,16 @@ async def phase_b1_repo_setup(
         init_bodhigrove_mcp_in_repo,
         install_hooks,
     )
+    from app.services.scan_progress import update_scan_progress
+
+    setup_pr_message: str | None = None
 
     try:
+        await update_scan_progress(
+            scan_id,
+            status="setting_up_worktrees",
+            progress_pct=base_pct + 18,
+        )
         main_wt, develop_wt = await ensure_repo_worktrees(repo_path)
 
         # Persist detected branches to tracked_repositories
@@ -154,12 +166,22 @@ async def phase_b1_repo_setup(
                     tracked_repo.develop_branch = detected_dev  # type: ignore[union-attr]
 
         # Init Bodhigrove MCP in repo (skips if already configured)
+        await update_scan_progress(
+            scan_id,
+            status="setting_up_mcp",
+            progress_pct=base_pct + 22,
+        )
         mcp_token = create_internal_mcp_token(org_id)
         mcp_changed = await init_bodhigrove_mcp_in_repo(
             repo_path, app_settings.public_url, mcp_token
         )
 
         # Install git hooks to .githooks/ + set core.hooksPath
+        await update_scan_progress(
+            scan_id,
+            status="installing_hooks",
+            progress_pct=base_pct + 25,
+        )
         hooks_changed = await install_hooks(repo_path, app_settings.public_url, str(org_id))
 
         # Add .bodhigrove/ to .gitignore
@@ -171,6 +193,11 @@ async def phase_b1_repo_setup(
         # Branch, commit, push setup files, and create PR
         any_changed = mcp_changed or hooks_changed or gitignore_changed or prepare_changed
         if any_changed:
+            await update_scan_progress(
+                scan_id,
+                status="pushing_setup",
+                progress_pct=base_pct + 28,
+            )
             base = (
                 tracked_repo.main_branch  # type: ignore[union-attr]
                 if tracked_repo and tracked_repo.main_branch  # type: ignore[union-attr]
@@ -191,7 +218,7 @@ async def phase_b1_repo_setup(
                         url=pr_url,
                     )
                 else:
-                    scan_status.setup_pr_message = (
+                    setup_pr_message = (
                         f"Setup branch '{pushed_branch}' pushed "
                         f"to {repo_name}. Create a PR manually "
                         "to merge the Bodhigrove config files."
@@ -204,6 +231,8 @@ async def phase_b1_repo_setup(
             scan_id=scan_id,
             repo=repo_name,
         )
+
+    return setup_pr_message
 
 
 async def phase_e_skills(
@@ -263,7 +292,7 @@ async def phase_b2_synthesis(
     pending_synthesis: list[dict],
     is_workspace: bool,
     scan_cfg: dict,
-    scan_status: ScanStatus,
+    scan_id: str,
     ki_repo: KnowledgeItemRepository,
 ) -> int:
     """Phase B2: Parallel feature synthesis via Claude Code.
@@ -274,7 +303,7 @@ async def phase_b2_synthesis(
         pending_synthesis: List of synthesis task dicts.
         is_workspace: Whether this is a multi-repo workspace scan.
         scan_cfg: Scan configuration dict from org config.
-        scan_status: ScanStatus instance to update.
+        scan_id: Scan identifier for progress tracking.
         ki_repo: Knowledge item repository instance.
 
     Returns:
@@ -286,9 +315,13 @@ async def phase_b2_synthesis(
     import asyncio as _aio
 
     from app.services.scan_pipeline import build_synthesis_prompt
+    from app.services.scan_progress import get_scan_progress, update_scan_progress
 
-    scan_status.status = "synthesizing_features"
-    scan_status.progress_pct = 50
+    await update_scan_progress(
+        scan_id,
+        status="synthesizing_features",
+        progress_pct=65,
+    )
 
     # Commit so MCP callbacks don't block on our locks
     await db.commit()
@@ -373,17 +406,23 @@ async def phase_b2_synthesis(
                 elapsed_s=outcome["elapsed_s"],
                 remaining_clusters=len(remaining),
             )
-            scan_status.features_skipped += len(remaining)
             is_timeout = "Timed out" in (result.error or "")
-            if is_timeout:
-                scan_status.synthesis_warning = (
+            warning_msg = (
+                (
                     f"{rname}: {len(remaining)} feature(s) skipped "
                     "— timed out. Increase timeout in Settings."
                 )
-            else:
-                scan_status.synthesis_warning = (
-                    f"{rname}: {len(remaining)} feature(s) skipped — synthesis failed."
-                )
+                if is_timeout
+                else (f"{rname}: {len(remaining)} feature(s) skipped — synthesis failed.")
+            )
+            # Accumulate skipped count (don't overwrite previous repos)
+            current = await get_scan_progress(scan_id)
+            accumulated = (current.features_skipped if current else 0) + len(remaining)
+            await update_scan_progress(
+                scan_id,
+                features_skipped=accumulated,
+                synthesis_warning=warning_msg,
+            )
 
     # Count features actually written to DB
     return await ki_repo.count_active(category="feature_registry")
@@ -394,7 +433,7 @@ async def phase_e2_skill_remap(
     org_id: uuid.UUID,
     repo_paths: list[str],
     email_to_user: dict[str, User],
-    scan_status: ScanStatus,
+    scan_id: str,
 ) -> int:
     """Phase E2: Re-run skill analysis with feature-based modules.
 
@@ -411,18 +450,23 @@ async def phase_e2_skill_remap(
         org_id: Organization UUID.
         repo_paths: List of all repo paths being scanned.
         email_to_user: Mapping of lowercase email → User.
-        scan_status: ScanStatus instance to update.
+        scan_id: Scan identifier for progress tracking.
 
     Returns:
         Total profiles upserted.
     """
     from app.repositories.skill_profile import SkillProfileRepository
+    from app.services.scan_progress import update_scan_progress
 
     feature_map_e2 = await load_feature_map(db, org_id)
     if not feature_map_e2:
         return 0
 
-    scan_status.status = "analyzing_skills"
+    await update_scan_progress(
+        scan_id,
+        status="remapping_skills",
+        progress_pct=92,
+    )
     sp_repo_e2 = SkillProfileRepository(db, org_id=org_id)
 
     # Run new analysis first (before deleting anything)
@@ -532,11 +576,14 @@ async def _find_repos_without_features(
     linked_repo_ids = set(
         (
             await db.execute(
-                sa_select(KnowledgeRepoLink.repo_id).distinct()
+                sa_select(KnowledgeRepoLink.repo_id)
+                .distinct()
                 .join(KnowledgeItem, KnowledgeItem.id == KnowledgeRepoLink.knowledge_id)
                 .where(KnowledgeItem.org_id == org_id)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
 
     result: list[dict] = []
@@ -560,7 +607,7 @@ async def phase_b3_merge(
     is_workspace: bool,
     total_features_synthesized: int,
     scan_cfg: dict,
-    scan_status: ScanStatus,
+    scan_id: str,
     ki_repo: KnowledgeItemRepository,
 ) -> dict:
     """Phase B3: Cross-repo feature merge via LLM + embedding + cleanup.
@@ -576,7 +623,7 @@ async def phase_b3_merge(
         is_workspace: Whether this is a multi-repo workspace scan.
         total_features_synthesized: Count of features from synthesis.
         scan_cfg: Scan configuration dict from org config.
-        scan_status: ScanStatus instance to update.
+        scan_id: Scan identifier for progress tracking.
         ki_repo: Knowledge item repository instance.
 
     Returns:
@@ -584,17 +631,24 @@ async def phase_b3_merge(
     """
     from app.repositories.organization import OrganizationRepository
     from app.services.scan_pipeline import build_merge_prompt, get_merge_batch_size
+    from app.services.scan_progress import update_scan_progress
 
     # --- Embed missing items ---
-    scan_status.status = "embedding"
-    scan_status.progress_pct = 88
+    await update_scan_progress(
+        scan_id,
+        status="generating_embeddings",
+        progress_pct=80,
+    )
     await embed_missing_items(db, org_id)
 
     # --- LLM-based cross-repo merge (multi-repo scans with 2+ features) ---
     config: dict = {}
     if is_workspace and total_features_synthesized >= 2 and is_claude_cli_available():
-        scan_status.status = "merging_features"
-        scan_status.progress_pct = 92
+        await update_scan_progress(
+            scan_id,
+            status="merging_features",
+            progress_pct=88,
+        )
 
         linked_features = await _collect_feature_dicts(db, org_id)
 
@@ -611,7 +665,7 @@ async def phase_b3_merge(
             prev_count = await ki_repo.count_active(category="feature_registry")
             for _pass in range(3):  # Re-run if batch < total (cross-batch dupes)
                 for batch_start in range(0, len(linked_features), merge_batch_size):
-                    batch = linked_features[batch_start:batch_start + merge_batch_size]
+                    batch = linked_features[batch_start : batch_start + merge_batch_size]
                     merge_prompt = build_merge_prompt(batch, unlinked_repos=unlinked_repos)
 
                     merge_token = create_internal_mcp_token(org_id)

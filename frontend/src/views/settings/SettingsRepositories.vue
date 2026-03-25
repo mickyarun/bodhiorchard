@@ -90,17 +90,8 @@
           rounded
           height="6"
         />
-        <div class="d-flex align-center ga-2">
-          <div class="text-caption text-medium-emphasis">
-            {{ scanStatusLabel }}... {{ scanProgress }}%
-          </div>
-          <v-btn
-            variant="text"
-            density="compact"
-            size="x-small"
-            icon="mdi-refresh"
-            @click="refreshScanStatus"
-          />
+        <div class="text-caption text-medium-emphasis">
+          {{ scanStatusLabel }}... {{ scanProgress }}%
         </div>
       </div>
     </v-expand-transition>
@@ -817,7 +808,7 @@ function startPolling(): void {
 
   function handleProgress(data: ScanStatusData): void {
     scanProgress.value = data.progressPct || 0
-    scanStatusLabel.value = formatStatusLabel(data.status)
+    scanStatusLabel.value = data.statusLabel || formatStatusLabel(data.status)
   }
 
   function handleComplete(data: ScanStatusData): void {
@@ -861,47 +852,32 @@ function notifyScanDone(success: boolean, features = 0, profiles = 0): void {
   new Notification(title, { body, icon: '/favicon.ico' })
 }
 
-async function refreshScanStatus(): Promise<void> {
-  if (!currentScanId) return
-  try {
-    const { data } = await api.get(`/v1/skills/scan/${currentScanId}/status`)
-    scanProgress.value = data.progressPct || 0
-    scanStatusLabel.value = formatStatusLabel(data.status)
-
-    if (data.status === 'completed') {
-      scanStatus.value = 'completed'
-      scanResult.value = {
-        scanMode: data.scanMode || 'full',
-        featuresIndexed: data.featuresIndexed || 0,
-        featuresSkipped: data.featuresSkipped || 0,
-        profilesFound: data.profilesFound || 0,
-        staleCleaned: data.staleCleaned || 0,
-        unmatchedAuthors: data.unmatchedAuthors || [],
-        synthesisWarning: data.synthesisWarning || '',
-      }
-      stopScanWs()
-    } else if (data.status === 'failed') {
-      scanStatus.value = 'failed'
-      scanError.value = data.error || 'Scan failed.'
-      stopScanWs()
-    }
-  } catch {
-    // Non-critical
-  }
-}
-
 function formatStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     started: 'Starting',
+    checking_out: 'Checking out repository',
     analyzing_changes: 'Analyzing changes',
-    indexing: 'Indexing codebase',
-    synthesizing_features: 'Synthesizing feature descriptions',
-    merging_features: 'Merging cross-repo features',
+    indexing_code: 'Indexing code structure',
+    setting_up_gitnexus: 'Setting up GitNexus',
+    setting_up_worktrees: 'Configuring worktrees',
+    setting_up_mcp: 'Setting up Bodhigrove MCP',
+    installing_hooks: 'Installing git hooks',
+    pushing_setup: 'Pushing setup files',
     cleaning_stale: 'Cleaning stale references',
-    analyzing_skills: 'Analyzing skills',
-    embedding: 'Generating embeddings',
+    analyzing_skills: 'Analyzing developer skills',
+    extracting_design_system: 'Extracting design system',
+    synthesizing_features: 'Synthesizing features',
+    generating_embeddings: 'Generating embeddings',
+    merging_features: 'Merging cross-repo features',
+    remapping_skills: 'Remapping skills to features',
+    saving_results: 'Saving results',
+    finalizing: 'Finalizing',
+    finalizing_repo: 'Finalizing repository',
     completed: 'Complete',
     failed: 'Failed',
+    // Backward compat for old status names
+    indexing: 'Indexing codebase',
+    embedding: 'Generating embeddings',
   }
   return labels[status] || status
 }

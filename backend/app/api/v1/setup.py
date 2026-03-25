@@ -253,11 +253,11 @@ async def initialize_setup(
 
         embed_ok, embed_err = await embedding_service.check()
         if embed_ok:
-            from app.schemas.skills import ScanStatus
-            from app.services.scan_pipeline import run_scan_pipeline, scan_statuses
+            from app.services.scan_pipeline import run_scan_pipeline
+            from app.services.scan_progress import create_scan_progress
 
             scan_id = str(uuid.uuid4())
-            scan_statuses[scan_id] = ScanStatus(scanId=scan_id, status="started", progressPct=0)
+            await create_scan_progress(scan_id, str(org.id))
 
             background_tasks.add_task(
                 run_scan_pipeline,
@@ -325,19 +325,18 @@ async def get_checklist_status(
     users = await user_repo.list_by_org(org.id)
 
     # Check scan status
-    from app.services.scan_pipeline import scan_statuses
+    from app.services.scan_progress import get_active_scan_for_org
 
     scan_in_progress = False
     scan_id: str | None = None
     scan_progress = 0
     scan_complete = any(r.last_scanned_at is not None for r in active_repos)
 
-    for sid, ss in scan_statuses.items():
-        if ss.status not in ("completed", "failed"):
-            scan_in_progress = True
-            scan_id = sid
-            scan_progress = ss.progress_pct
-            break
+    active_scan = await get_active_scan_for_org(str(org.id))
+    if active_scan:
+        scan_in_progress = True
+        scan_id = active_scan.scan_id
+        scan_progress = active_scan.progress_pct
 
     return SetupStatusResponse(
         orgCreated=True,

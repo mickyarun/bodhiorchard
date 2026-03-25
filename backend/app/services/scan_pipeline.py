@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
-from app.schemas.skills import ScanStatus
 from app.services.claude_runner import is_claude_cli_available
 from app.services.git_analyzer import analyze_repo_skills, get_head_sha
 from app.services.git_operations import create_scan_worktree, remove_scan_worktree
@@ -37,11 +36,13 @@ from app.services.scan_phases import (
     phase_e_skills,
     phase_g_persist,
 )
+from app.services.scan_progress import update_scan_progress
 
 logger = structlog.get_logger(__name__)
 
 # If >30% of tracked files changed, fall back to full scan
 INCREMENTAL_THRESHOLD = 0.30
+
 
 # Max features per LLM merge call (configurable via LLM_MERGE_BATCH_SIZE env)
 def get_merge_batch_size() -> int:
@@ -49,16 +50,6 @@ def get_merge_batch_size() -> int:
     from app.config import settings
 
     return settings.llm.merge_batch_size
-
-# In-memory scan status tracking (use Redis in production)
-scan_statuses: dict[str, ScanStatus] = {}
-
-
-def _publish_scan_status(scan_id: str, scan_status: ScanStatus) -> None:
-    """Publish scan status to the event bus for WebSocket delivery."""
-    from app.services.event_bus import publish
-
-    publish(f"scan:{scan_id}", scan_status.model_dump(by_alias=True))
 
 
 def build_synthesis_prompt(
@@ -152,7 +143,7 @@ def build_merge_prompt(
         repo_lines = []
         for repo in unlinked_repos:
             files = ", ".join(repo["files"][:20])
-            repo_lines.append(f'- **{repo["name"]}**: {files}')
+            repo_lines.append(f"- **{repo['name']}**: {files}")
         unlinked_section = f"""
 
 ## Repos with no features yet
@@ -318,7 +309,6 @@ async def run_scan_pipeline(
     """
     from app.database import AsyncSessionLocal
 
-    scan_status = scan_statuses[scan_id]
     is_workspace = len(repo_paths) > 1
     timer = PhaseTimer(scan_id)
     soft_deleted_ids: list[uuid.UUID] = []
@@ -363,8 +353,7 @@ async def run_scan_pipeline(
 
             for repo_idx, repo_path in enumerate(repo_paths):
                 repo_name = Path(repo_path).name
-                base_pct = int(5 + (repo_idx / len(repo_paths)) * 80)
-                repo_pct_range = 80 // len(repo_paths)
+                base_pct = int(5 + (repo_idx / len(repo_paths)) * 55)
 
                 if is_workspace:
                     logger.info(
@@ -380,6 +369,11 @@ async def run_scan_pipeline(
 
                 # Create a temporary worktree for scanning the main branch
                 # without touching the user's working tree.
+                await update_scan_progress(
+                    scan_id,
+                    status="checking_out",
+                    progress_pct=base_pct,
+                )
                 try:
                     scan_path = await create_scan_worktree(repo_path, main_branch)
                 except RuntimeError:
@@ -393,9 +387,11 @@ async def run_scan_pipeline(
                 try:
                     # --- Phase A: Determine scan mode ---
                     timer.start()
-                    scan_status.status = "analyzing_changes"
-                    scan_status.progress_pct = base_pct
-                    _publish_scan_status(scan_id, scan_status)
+                    await update_scan_progress(
+                        scan_id,
+                        status="analyzing_changes",
+                        progress_pct=base_pct + 5,
+                    )
 
                     last_sha = tracked_repo.head_sha if tracked_repo else None
                     if not last_sha:
@@ -424,9 +420,11 @@ async def run_scan_pipeline(
 
                     # --- Phase B: GitNexus indexing ---
                     timer.start()
-                    scan_status.status = "indexing"
-                    scan_status.progress_pct = base_pct + int(repo_pct_range * 0.1)
-                    _publish_scan_status(scan_id, scan_status)
+                    await update_scan_progress(
+                        scan_id,
+                        status="indexing_code",
+                        progress_pct=base_pct + 10,
+                    )
 
                     gitnexus_result = await index_repo_with_gitnexus(
                         scan_path,
@@ -436,6 +434,11 @@ async def run_scan_pipeline(
                     if gitnexus_result.success:
                         from app.services.claude_runner import ensure_gitnexus_mcp
 
+                        await update_scan_progress(
+                            scan_id,
+                            status="setting_up_gitnexus",
+                            progress_pct=base_pct + 15,
+                        )
                         await ensure_gitnexus_mcp()
 
                     await db.flush()
@@ -443,15 +446,20 @@ async def run_scan_pipeline(
 
                     # --- Phase B1: Worktrees, MCP init, hooks, .gitignore ---
                     timer.start()
-                    await phase_b1_repo_setup(
+                    setup_pr_msg = await phase_b1_repo_setup(
                         db,
                         org_id,
                         repo_path,
                         repo_name,
                         tracked_repo,
                         scan_id,
-                        scan_status,
+                        base_pct,
                     )
+                    if setup_pr_msg:
+                        await update_scan_progress(
+                            scan_id,
+                            setup_pr_message=setup_pr_msg,
+                        )
                     timer.mark(f"B1_repo_setup/{repo_name}")
 
                     # --- Collect Phase B2 synthesis task ---
@@ -497,7 +505,11 @@ async def run_scan_pipeline(
                     # --- Phase D: Stale reference cleanup (incremental only) ---
                     timer.start()
                     if is_incremental and deleted_files:
-                        scan_status.status = "cleaning_stale"
+                        await update_scan_progress(
+                            scan_id,
+                            status="cleaning_stale",
+                            progress_pct=base_pct + 32,
+                        )
                         cleaned = await cleanup_stale_references(db, org_id, deleted_files)
                         total_stale += cleaned
                         await db.flush()
@@ -506,9 +518,11 @@ async def run_scan_pipeline(
 
                     # --- Phase E: Git skill analysis ---
                     timer.start()
-                    scan_status.status = "analyzing_skills"
-                    scan_status.progress_pct = base_pct + int(repo_pct_range * 0.6)
-                    _publish_scan_status(scan_id, scan_status)
+                    await update_scan_progress(
+                        scan_id,
+                        status="analyzing_skills",
+                        progress_pct=base_pct + 38,
+                    )
 
                     feature_map = await load_feature_map(db, org_id)
                     skill_entries = await analyze_repo_skills(
@@ -530,6 +544,11 @@ async def run_scan_pipeline(
 
                     # --- Phase E1b: Auto-extract design system ---
                     timer.start()
+                    await update_scan_progress(
+                        scan_id,
+                        status="extracting_design_system",
+                        progress_pct=base_pct + 48,
+                    )
                     try:
                         await _maybe_extract_design_system(
                             db,
@@ -547,6 +566,11 @@ async def run_scan_pipeline(
                     timer.mark(f"E1b_design_system/{repo_name}")
 
                     # Track HEAD SHA per repo (use scan_path for accurate SHA)
+                    await update_scan_progress(
+                        scan_id,
+                        status="finalizing_repo",
+                        progress_pct=base_pct + 52,
+                    )
                     head_sha = await get_head_sha(scan_path)
                     if head_sha:
                         new_shas[repo_path] = head_sha
@@ -562,7 +586,7 @@ async def run_scan_pipeline(
                 _pending_synthesis,
                 is_workspace,
                 scan_cfg,
-                scan_status,
+                scan_id,
                 ki_repo,
             )
             timer.mark("B2_synthesis_parallel")
@@ -577,7 +601,7 @@ async def run_scan_pipeline(
                 is_workspace,
                 total_features_synthesized,
                 scan_cfg,
-                scan_status,
+                scan_id,
                 ki_repo,
             )
             if merge_config:
@@ -592,7 +616,7 @@ async def run_scan_pipeline(
                     org_id,
                     repo_paths,
                     email_to_user,
-                    scan_status,
+                    scan_id,
                 )
                 if e2_profiles:
                     total_profiles = e2_profiles
@@ -608,6 +632,11 @@ async def run_scan_pipeline(
 
             # --- Phase G: Save last commit SHAs + scan results ---
             timer.start()
+            await update_scan_progress(
+                scan_id,
+                status="saving_results",
+                progress_pct=96,
+            )
             actual_features = await phase_g_persist(
                 db,
                 org_id,
@@ -623,18 +652,25 @@ async def run_scan_pipeline(
 
             # Final catch-all: embed any items still missing embeddings
             # (e.g. created during merge after the earlier embed pass).
+            await update_scan_progress(
+                scan_id,
+                status="finalizing",
+                progress_pct=98,
+            )
             final_embedded = await embed_missing_items(db, org_id)
             if final_embedded:
                 logger.info("scan_final_embed_pass", scan_id=scan_id, embedded=final_embedded)
 
-            scan_status.features_indexed = actual_features
-            scan_status.profiles_found = total_profiles
-            scan_status.stale_cleaned = total_stale
-            scan_status.unmatched_authors = all_unmatched[:20]
-            scan_status.scan_mode = overall_mode
-            scan_status.status = "completed"
-            scan_status.progress_pct = 100
-            _publish_scan_status(scan_id, scan_status)
+            await update_scan_progress(
+                scan_id,
+                status="completed",
+                progress_pct=100,
+                features_indexed=actual_features,
+                profiles_found=total_profiles,
+                stale_cleaned=total_stale,
+                unmatched_authors=all_unmatched[:20],
+                scan_mode=overall_mode,
+            )
 
             logger.info(
                 "scan_complete",
@@ -661,9 +697,7 @@ async def run_scan_pipeline(
 
     except GitNexusNotInstalledError as exc:
         logger.error("scan_gitnexus_not_installed", scan_id=scan_id, error=str(exc))
-        scan_status.status = "failed"
-        scan_status.error = str(exc)
-        _publish_scan_status(scan_id, scan_status)
+        await update_scan_progress(scan_id, status="failed", error=str(exc))
         await _rollback_soft_deleted_features(org_id, scan_id, soft_deleted_ids)
         if user_id:
             from app.services.notification_service import send_scan_notification
@@ -677,9 +711,7 @@ async def run_scan_pipeline(
             )
     except Exception as exc:
         logger.exception("scan_pipeline_error", scan_id=scan_id)
-        scan_status.status = "failed"
-        scan_status.error = str(exc)[:500]
-        _publish_scan_status(scan_id, scan_status)
+        await update_scan_progress(scan_id, status="failed", error=str(exc)[:500])
         await _rollback_soft_deleted_features(org_id, scan_id, soft_deleted_ids)
         if user_id:
             from app.services.notification_service import send_scan_notification

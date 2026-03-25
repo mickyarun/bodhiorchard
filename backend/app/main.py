@@ -7,8 +7,8 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
-from sqlalchemy import select
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from app.api.router import api_router
 from app.core.logging import setup_logging
@@ -106,6 +106,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cleanup_task.cancel()
     presence_task.cancel()
     await stop_workers()
+
+    from app.services.redis_client import close_redis
+
+    await close_redis()
     logger.info("bodhigrove_shutdown")
 
 
