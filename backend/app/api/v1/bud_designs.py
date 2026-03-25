@@ -20,7 +20,7 @@ router = APIRouter()
 
 
 @router.get(
-    "/",
+    "",
     response_model=list[BUDDesignRead],
     dependencies=[Depends(require_permissions("buds:view"))],
 )

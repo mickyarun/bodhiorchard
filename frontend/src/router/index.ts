@@ -77,12 +77,7 @@ const router = createRouter({
         {
           path: 'dashboard',
           name: 'dashboard',
-          component: () => import('@/views/dashboard/TreeDashboard.vue'),
-        },
-        {
-          path: 'graphtest',
-          name: 'graphtest',
-          component: () => import('@/views/dashboard/GraphTestView.vue'),
+          component: () => import('@/views/dashboard/DashboardView.vue'),
         },
         {
           path: 'buds',

@@ -80,6 +80,7 @@ class FeatureItem(BaseModel):
     from_bud: int | None = None
     linked_repos: list[str] = Field(default_factory=list)
     code_locations: dict[str, list[str]] | None = None
+    repo_code_locations: dict[str, dict[str, list[str]]] | None = None
 
 
 class BUDItem(BaseModel):

@@ -139,11 +139,11 @@
               v-for="repo in feature.linkedRepos"
               :key="repo"
               size="small"
-              :variant="repo === feature.repoName ? 'flat' : 'outlined'"
-              :color="repo === feature.repoName ? 'primary' : undefined"
+              :variant="repo === selectedCodeRepo ? 'flat' : 'outlined'"
+              :color="repo === selectedCodeRepo ? 'success' : (repo === feature.repoName ? 'primary' : undefined)"
               label
               class="cursor-pointer"
-              @click="emit('repo-focus', repo)"
+              @click="selectedCodeRepo = repo; emit('repo-focus', repo)"
             >
               {{ repo }}
             </v-chip>
@@ -154,9 +154,9 @@
         </div>
 
         <!-- Code Locations -->
-        <div v-if="feature.codeLocations && Object.keys(feature.codeLocations).length > 0" class="mb-3">
+        <div v-if="displayedCodeLocations && Object.keys(displayedCodeLocations).length > 0" class="mb-3">
           <div class="text-subtitle-2 mb-1">Code Locations</div>
-          <div v-for="(paths, layer) in feature.codeLocations" :key="layer" class="mb-1">
+          <div v-for="(paths, layer) in displayedCodeLocations" :key="layer" class="mb-1">
             <v-chip size="x-small" label variant="tonal" class="mb-1">{{ layer }}</v-chip>
             <div
               v-for="path in paths"
@@ -205,7 +205,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { GraphRepoInfo, GraphFeatureInfo } from '@/engine/graph'
 import type { TreeData, FeatureItem } from '@/types/dashboard'
 
@@ -228,6 +228,21 @@ const emit = defineEmits<{
 }>()
 
 const featureSearch = ref('')
+const selectedCodeRepo = ref<string | null>(null)
+
+watch(() => props.feature, () => { selectedCodeRepo.value = null })
+
+/** Code locations filtered by selected repo. */
+const displayedCodeLocations = computed<Record<string, string[]> | null>(() => {
+  if (!props.feature?.codeLocations) return null
+  if (!selectedCodeRepo.value || !props.treeData) return props.feature.codeLocations
+
+  const repoFeature = props.treeData.features.find(
+    f => f.title === props.feature!.title && f.repo_name === selectedCodeRepo.value
+  )
+  const perRepo = repoFeature?.repo_code_locations?.[selectedCodeRepo.value]
+  return perRepo && Object.keys(perRepo).length > 0 ? perRepo : props.feature.codeLocations
+})
 
 const panelTitle = computed(() => {
   if (props.repo) return props.repo.repoName

@@ -52,6 +52,21 @@ def get_merge_batch_size() -> int:
     return settings.llm.merge_batch_size
 
 
+_WRITE_FEATURE_DOCS = """      - feature_name: Human-readable name (e.g., "Card Payments")
+      - description: 1-2 sentences of what this feature does in business terms
+      - capabilities: 3-6 specific things this feature does
+      - code_locations: Map layers to file paths, e.g.:
+        {{"backend": ["src/services/card/"], "frontend": ["src/views/Pay.vue"]}}
+        Layers: backend, frontend, batch (background jobs), other
+      - tags: 2-5 lowercase search keywords"""
+
+_GROUPING_RULES = """## Grouping Rules
+
+- Group related functionality into a SINGLE feature
+- Target broad domain-level features, not narrow per-file features
+- Skip infrastructure (config, build, CI/CD, testing utilities)"""
+
+
 def build_synthesis_prompt(
     repo_name: str,
     readme_overview: str,
@@ -84,22 +99,13 @@ Follow this loop exactly:
    a. Read the cluster's key files to understand what the code does
    b. Skip infrastructure/utility clusters (logging, config, migrations, CI/CD)
    c. For real business features, call `write_feature_registry` with:
-      - feature_name: Human-readable name (e.g., "Card Payments")
-      - description: 1-2 sentences of what this feature does in business terms
-      - capabilities: 3-6 specific things this feature does
-      - code_locations: Map layers to file paths, e.g.:
-        {{"backend": ["src/services/card/"], "frontend": ["src/views/Pay.vue"]}}
-        Layers: backend, frontend, batch (background jobs), other
-      - tags: 2-5 lowercase search keywords
+{_WRITE_FEATURE_DOCS}
       - source_clusters: Array containing the cluster name(s)
 {repo_name_line}
 4. Go back to step 1
 
-## Grouping Rules
+{_GROUPING_RULES}
 
-- Group related functionality into a SINGLE feature. For example, all
-  OTP-related code (verification, generation, recovery) should be ONE
-  feature called "OTP Authentication", not separate features per sub-function.
 - When multiple clusters clearly belong to the same domain, combine them
   into one `write_feature_registry` call with all their code_locations merged.
 - Target 8-15 features per repo. Prefer broader domain-level features
@@ -107,6 +113,46 @@ Follow this loop exactly:
 
 Important: Process ALL clusters returned by get_pending_features before calling
 it again. Do not call get_pending_features mid-batch."""
+
+
+def build_direct_scan_prompt(
+    repo_name: str,
+    readme_overview: str,
+    file_tree: str,
+) -> str:
+    """Build prompt for repos where GitNexus found no clusters.
+
+    Claude scans the file structure directly to identify features instead of
+    processing a cluster queue.
+
+    Args:
+        repo_name: Name of the repository being processed.
+        readme_overview: First 2000 chars of the repo README.
+        file_tree: Newline-separated list of source files.
+
+    Returns:
+        Prompt string for Claude Code CLI.
+    """
+    repo_name_line = f'      - repo_name: "{repo_name}"'
+    return f"""You are scanning repository "{repo_name}" to identify business features.
+This repo had no code clusters detected, so scan the file structure directly.
+
+README Overview:
+{readme_overview[:2000]}
+
+## File Structure
+{file_tree[:3000]}
+
+## Instructions
+
+1. Read the key source files to understand what the code does
+2. Identify 3-8 business-level features (not infrastructure/utilities)
+3. For each feature, call `write_feature_registry` with:
+{_WRITE_FEATURE_DOCS}
+      - source_clusters: ["direct_scan"]
+{repo_name_line}
+
+{_GROUPING_RULES}"""
 
 
 def build_merge_prompt(
@@ -466,39 +512,59 @@ async def run_scan_pipeline(
                     if (
                         not is_incremental
                         and gitnexus_result.success
-                        and gitnexus_result.features
                         and is_claude_cli_available()
                     ):
-                        from app.mcp.server import set_synthesis_queue
+                        if gitnexus_result.features:
+                            # Normal: queue clusters for synthesis
+                            from app.mcp.server import set_synthesis_queue
 
-                        # Adaptive threshold: small repos (< 10 clusters) use
-                        # lower bar so nothing is lost; large repos filter noise.
-                        total_clusters = len(gitnexus_result.features)
-                        min_files = 2 if total_clusters < 10 else 3
-                        queue_items = [
-                            {
-                                "name": f.name,
-                                "files": f.files[:15],
-                                "symbols": len(f.files),
-                                "repo_name": repo_name,
-                            }
-                            for f in gitnexus_result.features
-                            if len(f.files) >= min_files
-                        ]
-                        queue_key = set_synthesis_queue(
-                            str(org_id),
-                            queue_items,
-                            repo_name=repo_name,
-                        )
-                        _pending_synthesis.append(
-                            {
-                                "repo_name": repo_name,
-                                "repo_path": repo_path,
-                                "overview": gitnexus_result.repo_overview or "",
-                                "queue_key": queue_key,
-                                "cluster_count": len(queue_items),
-                            }
-                        )
+                            total_clusters = len(gitnexus_result.features)
+                            min_files = 2 if total_clusters < 10 else 3
+                            queue_items = [
+                                {
+                                    "name": f.name,
+                                    "files": f.files[:15],
+                                    "symbols": len(f.files),
+                                    "repo_name": repo_name,
+                                }
+                                for f in gitnexus_result.features
+                                if len(f.files) >= min_files
+                            ]
+                            queue_key = set_synthesis_queue(
+                                str(org_id),
+                                queue_items,
+                                repo_name=repo_name,
+                            )
+                            _pending_synthesis.append(
+                                {
+                                    "repo_name": repo_name,
+                                    "repo_path": repo_path,
+                                    "overview": gitnexus_result.repo_overview or "",
+                                    "queue_key": queue_key,
+                                    "cluster_count": len(queue_items),
+                                }
+                            )
+                        else:
+                            # Direct scan: no clusters, Claude scans file tree
+                            import asyncio
+
+                            from app.services.scan_phases import _list_repo_files
+
+                            files = await asyncio.to_thread(
+                                _list_repo_files, Path(repo_path)
+                            )
+                            if files:
+                                _pending_synthesis.append(
+                                    {
+                                        "repo_name": repo_name,
+                                        "repo_path": repo_path,
+                                        "overview": gitnexus_result.repo_overview or "",
+                                        "queue_key": None,
+                                        "cluster_count": 0,
+                                        "direct_scan": True,
+                                        "file_tree": "\n".join(files),
+                                    }
+                                )
                     elif not is_incremental and not is_claude_cli_available():
                         logger.info("feature_synthesis_skipped_no_claude_cli")
 

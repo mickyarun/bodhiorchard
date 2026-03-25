@@ -63,6 +63,7 @@ export interface FeatureItem {
   from_bud: number | null
   linked_repos: string[]
   code_locations: Record<string, string[]> | null
+  repo_code_locations?: Record<string, Record<string, string[]>> | null
 }
 
 export interface BUDItem {

@@ -52,6 +52,10 @@ export class GraphCameraController {
       farClip: 1000,
       frustumCulling: true,
     })
+    // v2.17+: toneMapping & gammaCorrection moved from Scene to CameraComponent
+    const cam = this.entity.camera!
+    ;(cam as unknown as Record<string, unknown>).toneMapping = pc.TONEMAP_ACES
+    ;(cam as unknown as Record<string, unknown>).gammaCorrection = pc.GAMMA_SRGB
     parent.addChild(this.entity)
     this.applyOrbit()
   }

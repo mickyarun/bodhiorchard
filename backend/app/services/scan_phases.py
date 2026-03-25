@@ -337,11 +337,18 @@ async def phase_b2_synthesis(
 
         rname = task["repo_name"]
         t0 = time.monotonic()
-        prompt = build_synthesis_prompt(
-            rname,
-            task["overview"],
-            is_workspace,
-        )
+
+        if task.get("direct_scan"):
+            from app.services.scan_pipeline import build_direct_scan_prompt
+
+            prompt = build_direct_scan_prompt(
+                rname, task["overview"], task["file_tree"],
+            )
+        else:
+            prompt = build_synthesis_prompt(
+                rname, task["overview"], is_workspace,
+            )
+
         token = create_internal_mcp_token(org_id)
         synth_config = ClaudeRunnerConfig(
             max_turns=scan_cfg.get("max_turns", 40),
@@ -358,14 +365,18 @@ async def phase_b2_synthesis(
             config=synth_config,
         )
 
-        remaining = get_queue_remaining(
-            str(org_id),
-            queue_key=task["queue_key"],
-        )
-        clear_synthesis_queue(
-            str(org_id),
-            queue_key=task["queue_key"],
-        )
+        if task.get("direct_scan"):
+            remaining: list = []
+        else:
+            remaining = get_queue_remaining(
+                str(org_id),
+                queue_key=task["queue_key"],
+            )
+            clear_synthesis_queue(
+                str(org_id),
+                queue_key=task["queue_key"],
+            )
+
         elapsed = round(time.monotonic() - t0, 1)
         return {
             "repo_name": rname,
@@ -399,25 +410,26 @@ async def phase_b2_synthesis(
                 remaining_clusters=len(remaining),
             )
         else:
+            skipped = len(remaining) if remaining else 1
             logger.warning(
                 "feature_synthesis_failed",
                 repo=rname,
                 error=result.error,
                 elapsed_s=outcome["elapsed_s"],
-                remaining_clusters=len(remaining),
+                remaining_clusters=skipped,
             )
             is_timeout = "Timed out" in (result.error or "")
             warning_msg = (
                 (
-                    f"{rname}: {len(remaining)} feature(s) skipped "
+                    f"{rname}: {skipped} feature(s) skipped "
                     "— timed out. Increase timeout in Settings."
                 )
                 if is_timeout
-                else (f"{rname}: {len(remaining)} feature(s) skipped — synthesis failed.")
+                else (f"{rname}: synthesis failed — features may be incomplete.")
             )
             # Accumulate skipped count (don't overwrite previous repos)
             current = await get_scan_progress(scan_id)
-            accumulated = (current.features_skipped if current else 0) + len(remaining)
+            accumulated = (current.features_skipped if current else 0) + skipped
             await update_scan_progress(
                 scan_id,
                 features_skipped=accumulated,
@@ -542,15 +554,29 @@ async def _collect_feature_dicts(
     return [f for f in grouped.values() if f["repo_names"]]
 
 
-def _list_repo_files(repo_path: Path) -> list[str]:
-    """List up to 30 source files in a repo (sync, for use in a thread)."""
+_SOURCE_EXTENSIONS = frozenset({
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".vue", ".go", ".rs",
+    ".java", ".kt", ".rb", ".cs", ".swift", ".svelte",
+})
+_SKIP_DIRS = frozenset({".git", "node_modules", "dist", "__pycache__", ".next", "build"})
+
+
+def _list_repo_files(repo_path: Path, max_files: int = 50) -> list[str]:
+    """List source files in a repo (sync, for use in a thread).
+
+    Filters to common source extensions and excludes build artifacts.
+    """
     if not repo_path.exists():
         return []
     return [
         str(p.relative_to(repo_path))
         for p in sorted(repo_path.rglob("*"))
-        if p.is_file() and ".git" not in p.parts and "node_modules" not in p.parts
-    ][:30]
+        if (
+            p.is_file()
+            and p.suffix in _SOURCE_EXTENSIONS
+            and not _SKIP_DIRS.intersection(p.parts)
+        )
+    ][:max_files]
 
 
 async def _find_repos_without_features(

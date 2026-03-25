@@ -164,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useSettingsStore } from '@/stores/settings'
 import { useJobSocket } from '@/composables/useJobSocket'
@@ -243,6 +243,8 @@ function debouncedSaveNotes(designId: string, value: string): void {
     if (idx !== -1) designs.value[idx] = { ...designs.value[idx], notes: value }
   }, 800)
 }
+
+onMounted(() => loadDesigns())
 
 async function loadDesigns(): Promise<void> {
   designs.value = await budStore.fetchDesigns(props.budId)

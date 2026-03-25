@@ -125,10 +125,7 @@ export class GraphEngine {
 
     // PBR lighting
     this.app.scene.ambientLight = new pc.Color(0.35, 0.35, 0.4);
-    const scene = this.app.scene as unknown as Record<string, unknown>;
-    scene.toneMapping = pc.TONEMAP_ACES;
-    scene.gammaCorrection = pc.GAMMA_SRGB;
-    scene.exposure = 1.4;
+    (this.app.scene as unknown as Record<string, unknown>).exposure = 1.4;
     this.app.scene.skyboxIntensity = 0.4;
     this.setupIBL();
 

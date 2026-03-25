@@ -55,16 +55,15 @@ export class Application {
     // ─── Scene lighting: THE fix for black models ─────────────
     this.app.scene.ambientLight = new pc.Color(0.4, 0.4, 0.45)
 
-    // PlayCanvas v2 exposes some scene settings via untyped properties
     const scene = this.app.scene as unknown as Record<string, unknown>
-    scene.toneMapping = pc.TONEMAP_ACES
-    scene.gammaCorrection = pc.GAMMA_SRGB
     scene.exposure = 1.2
 
-    scene.fogType = pc.FOG_LINEAR
-    scene.fogColor = new pc.Color(0.75, 0.85, 0.95)
-    scene.fogStart = 150
-    scene.fogEnd = 500
+    // Fog (v2.17+: scene.fog is a read-only getter, set properties on it)
+    const fog = (this.app.scene as unknown as { fog: Record<string, unknown> }).fog
+    fog.type = pc.FOG_LINEAR
+    fog.color = new pc.Color(0.75, 0.85, 0.95)
+    fog.start = 150
+    fog.end = 500
 
     this.app.scene.skyboxIntensity = 0.6
 
@@ -85,6 +84,10 @@ export class Application {
       farClip: 1500,
       frustumCulling: true,
     })
+    // v2.17+: toneMapping & gammaCorrection moved from Scene to CameraComponent
+    const cam = this.camera.camera!
+    ;(cam as unknown as Record<string, unknown>).toneMapping = pc.TONEMAP_ACES
+    ;(cam as unknown as Record<string, unknown>).gammaCorrection = pc.GAMMA_SRGB
     // Initial position set by CameraController.init() via computeOrbitPosition()
     this.camera.setPosition(0, 100, 100)
     this.camera.lookAt(0, 0, 0)

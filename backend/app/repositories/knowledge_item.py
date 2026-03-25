@@ -537,12 +537,21 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
         existing = result.scalar_one_or_none()
         if existing:
-            # Merge code_locations if new data provided
             if code_locations:
                 existing.code_locations = _merge_junction_code_locations(
                     existing.code_locations, code_locations
                 )
+            elif existing.code_locations is None:
+                # Existing row has null code_locations — inherit from sibling junction
+                code_locations = await self._inherit_code_locations(knowledge_id)
+                if code_locations:
+                    existing.code_locations = code_locations
             return
+
+        # New junction — inherit code_locations from sibling if not provided
+        if code_locations is None:
+            code_locations = await self._inherit_code_locations(knowledge_id)
+
         self._db.add(
             KnowledgeRepoLink(
                 knowledge_id=knowledge_id,
@@ -550,6 +559,18 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
                 code_locations=code_locations,
             )
         )
+
+    async def _inherit_code_locations(
+        self, knowledge_id: uuid.UUID,
+    ) -> dict | None:
+        """Find code_locations from an existing junction for the same feature."""
+        result = await self._db.execute(
+            select(KnowledgeRepoLink.code_locations)
+            .where(KnowledgeRepoLink.knowledge_id == knowledge_id)
+            .where(KnowledgeRepoLink.code_locations.isnot(None))
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def link_to_repos(
         self,

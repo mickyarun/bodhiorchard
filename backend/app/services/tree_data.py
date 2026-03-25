@@ -537,6 +537,7 @@ class _FeatureGroup(TypedDict):
     feature_status: str | None
     repo_paths: list[str]
     code_locations: dict[str, list[str]]
+    per_repo_code_locations: dict[str, dict[str, list[str]]]
 
 
 async def _collect_features(
@@ -592,6 +593,7 @@ async def _collect_features(
                 "feature_status": feature_status,
                 "repo_paths": [],
                 "code_locations": code_locs or {},
+                "per_repo_code_locations": {},
             }
         else:
             # Merge code_locations from additional junction rows
@@ -600,6 +602,8 @@ async def _collect_features(
             )
         if repo_path:
             features_by_id[ki_id]["repo_paths"].append(repo_path)
+        if repo_path and code_locs:
+            features_by_id[ki_id]["per_repo_code_locations"][repo_path] = code_locs
 
     tree.total_features = len(features_by_id)
 
@@ -631,6 +635,13 @@ async def _collect_features(
         all_repo_names = [rn for rn, _ in matched_repos]
         code_locs = feat["code_locations"]
 
+        # Build per-repo code_locations mapping (repo_name → code_locs)
+        repo_cl: dict[str, dict[str, list[str]]] = {
+            repo_lookup[rp][0]: cl
+            for rp, cl in feat["per_repo_code_locations"].items()
+            if rp in repo_lookup
+        }
+
         if matched_repos:
             # Emit one FeatureItem per linked repo
             for repo_name, branch_name in matched_repos:
@@ -644,6 +655,7 @@ async def _collect_features(
                         from_bud=from_bud,
                         linked_repos=all_repo_names,
                         code_locations=code_locs,
+                        repo_code_locations=repo_cl or None,
                     )
                 )
         else:
