@@ -23,11 +23,7 @@ from app.services.claude_runner import (
     is_claude_cli_available,
     run_claude_code,
 )
-from app.services.feature_merger import (
-    build_targeted_merge_prompt,
-    dedup_merged_features,
-    find_semantic_duplicates,
-)
+from app.services.feature_merger import dedup_merged_features
 from app.services.git_analyzer import analyze_repo_skills, get_diff_since
 from app.services.scan_helpers import (
     embed_missing_items,
@@ -469,7 +465,11 @@ async def phase_b3_merge(
     scan_status: ScanStatus,
     ki_repo: KnowledgeItemRepository,
 ) -> dict:
-    """Phase B3: Cross-repo feature merge (name merge + semantic dedup).
+    """Phase B3: Cross-repo feature merge via LLM + embedding + cleanup.
+
+    Lists all features for the LLM, which calls ``merge_features`` MCP
+    to consolidate duplicates across repos. Replaces the old semantic
+    dedup approach.
 
     Args:
         db: Async database session.
@@ -485,59 +485,86 @@ async def phase_b3_merge(
         Dict with possibly updated ``config`` (after commit/reload).
     """
     from app.repositories.organization import OrganizationRepository
+    from app.services.scan_pipeline import MERGE_BATCH_SIZE, build_merge_prompt
 
-    # --- Phase F: Embed missing items (once, across all repos) ---
+    # --- Embed missing items ---
     scan_status.status = "embedding"
     scan_status.progress_pct = 88
     await embed_missing_items(db, org_id)
 
-    # --- Phase B3b: Semantic dedup (any scan with 2+ features) ---
+    # --- LLM-based cross-repo merge (multi-repo scans with 2+ features) ---
     config: dict = {}
-    if total_features_synthesized >= 2 and is_claude_cli_available():
-        dup_groups = await find_semantic_duplicates(db, org_id)
-        if dup_groups:
-            scan_status.status = "merging_features"
-            scan_status.progress_pct = 92
-            merge_prompt = build_targeted_merge_prompt(dup_groups)
+    if is_workspace and total_features_synthesized >= 2 and is_claude_cli_available():
+        scan_status.status = "merging_features"
+        scan_status.progress_pct = 92
 
-            # Commit before launching Claude CLI so the MCP callbacks
-            # don't block on our transaction's row locks / connection.
+        # Collect features with their repo names for the merge prompt
+        from app.models.tracked_repository import TrackedRepository
+
+        features = await ki_repo.list_active(category="feature_registry", limit=1000)
+
+        feature_dicts: list[dict] = []
+        for f in features:
+            repo_ids = await ki_repo.get_repo_ids(f.id)
+            rnames: list[str] = []
+            for rid in repo_ids:
+                tracked = await db.get(TrackedRepository, rid)
+                if tracked:
+                    rnames.append(tracked.name)
+            feature_dicts.append({
+                "title": f.title,
+                "repo_names": rnames,
+                "tags": f.tags or [],
+            })
+
+        if feature_dicts:
             await db.commit()
 
             from app.config import settings
             from app.mcp.auth import create_internal_mcp_token
 
-            merge_token = create_internal_mcp_token(org_id)
-            merge_config = ClaudeRunnerConfig(
-                max_turns=min(len(dup_groups) * 3, scan_cfg.get("max_turns", 40)),
-                timeout_seconds=scan_cfg.get("timeout_seconds", 300),
-                output_format="json",
-                mcp=MCPServerConfig(
-                    backend_url=settings.mcp_backend_url,
-                    mcp_token=merge_token,
-                ),
-            )
-            merge_result = await run_claude_code(
-                prompt=merge_prompt,
-                working_dir=str(Path(repo_paths[0]).parent),
-                config=merge_config,
-            )
+            # Process in batches, re-run until no more merges
+            prev_count = len(feature_dicts)
+            for _pass in range(3):  # Max 3 passes to prevent infinite loops
+                for batch_start in range(0, len(feature_dicts), MERGE_BATCH_SIZE):
+                    batch = feature_dicts[batch_start:batch_start + MERGE_BATCH_SIZE]
+                    merge_prompt = build_merge_prompt(batch)
 
-            if merge_result.success:
-                logger.info(
-                    "semantic_merge_complete",
-                    groups=len(dup_groups),
-                    cost=merge_result.cost_usd,
-                )
-                # Re-embed items created by the merge
-                await embed_missing_items(db, org_id)
-            else:
-                logger.warning(
-                    "semantic_merge_failed",
-                    error=merge_result.error,
-                )
+                    merge_token = create_internal_mcp_token(org_id)
+                    merge_cfg = ClaudeRunnerConfig(
+                        max_turns=scan_cfg.get("max_turns", 40),
+                        timeout_seconds=scan_cfg.get("timeout_seconds", 300),
+                        output_format="json",
+                        mcp=MCPServerConfig(
+                            backend_url=settings.mcp_backend_url,
+                            mcp_token=merge_token,
+                        ),
+                    )
+                    result = await run_claude_code(
+                        prompt=merge_prompt,
+                        working_dir=str(Path(repo_paths[0]).parent),
+                        config=merge_cfg,
+                    )
+                    if result.success:
+                        logger.info(
+                            "llm_merge_pass_complete",
+                            pass_num=_pass + 1,
+                            batch_size=len(batch),
+                            cost=result.cost_usd,
+                        )
+                    else:
+                        logger.warning("llm_merge_failed", error=result.error)
 
-            # Re-load org after commit (session state was cleared)
+                # Check if merges happened
+                new_count = await ki_repo.count_active(category="feature_registry")
+                if new_count >= prev_count:
+                    break  # No merges this pass
+                prev_count = new_count
+
+            # Re-embed after merge
+            await embed_missing_items(db, org_id)
+
+            # Re-load org after commit
             org_repo = OrganizationRepository(db)
             org = await org_repo.get_by_id(org_id)
             config = dict(org.config or {})
@@ -547,19 +574,13 @@ async def phase_b3_merge(
     if deduped:
         logger.info("post_merge_dedup", deactivated=deduped)
 
-    # Hard-delete deactivated feature_registry items created by the
-    # merge/dedup process. The pipeline also runs a separate cleanup
-    # after B3 for soft-deleted items from scan start.
+    # Hard-delete deactivated feature_registry items
     cleanup_deleted = await ki_repo.delete_inactive_by_category("feature_registry")
     if cleanup_deleted:
         await db.flush()
-        logger.info(
-            "merge_artifact_cleanup",
-            deleted=cleanup_deleted,
-        )
+        logger.info("merge_artifact_cleanup", deleted=cleanup_deleted)
 
-    # Auto-link orphan features (no repo link) by matching code_locations
-    # paths to tracked repo directory names.
+    # Auto-link orphan features
     from app.services.scan_helpers import link_orphan_features
 
     await link_orphan_features(db, org_id, ki_repo)

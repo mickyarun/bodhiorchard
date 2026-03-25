@@ -8,6 +8,7 @@ Phase implementations live in ``scan_phases.py``; reusable helpers
 (timing, upsert, embedding) live in ``scan_helpers.py``.
 """
 
+import os
 import uuid
 from pathlib import Path
 
@@ -42,6 +43,9 @@ logger = structlog.get_logger(__name__)
 
 # If >30% of tracked files changed, fall back to full scan
 INCREMENTAL_THRESHOLD = 0.30
+
+# Max features per LLM merge call (configurable for different models)
+MERGE_BATCH_SIZE = int(os.getenv("MERGE_BATCH_SIZE", "500"))
 
 # In-memory scan status tracking (use Redis in production)
 scan_statuses: dict[str, ScanStatus] = {}
@@ -109,6 +113,49 @@ Follow this loop exactly:
 
 Important: Process ALL clusters returned by get_pending_features before calling
 it again. Do not call get_pending_features mid-batch."""
+
+
+def build_merge_prompt(features: list[dict]) -> str:
+    """Build a prompt for cross-repo feature merging.
+
+    Lists all features with their repo names and tags. The LLM calls
+    ``merge_features`` for groups that represent the same business
+    capability across repos.
+
+    Args:
+        features: List of dicts with keys: title, repo_names, tags.
+
+    Returns:
+        Prompt string for Claude Code CLI.
+    """
+    lines = []
+    for i, f in enumerate(features, 1):
+        repos = ", ".join(f["repo_names"]) if f["repo_names"] else "unlinked"
+        tags = ", ".join(f.get("tags") or [])
+        lines.append(f'{i}. "{f["title"]}" ({repos}) — {tags}')
+
+    feature_list = "\n".join(lines)
+    return f"""You are merging duplicate features across repositories.
+
+## Features
+
+{feature_list}
+
+## Instructions
+
+Look for features that represent the SAME business capability but exist
+in different repos (or have slightly different names). For each group of
+duplicates, call `merge_features` with:
+
+- keep_title: The most descriptive title from the group (exact match required)
+- merge_titles: The other titles to merge into it (will be deactivated)
+- repo_names: ALL repository names this feature belongs to
+
+Rules:
+- Only merge features that are clearly the same domain
+- If a feature exists in only one repo with no duplicates, skip it
+- Do NOT merge features that are merely related (e.g. "Billing" and "Payments" are separate)
+- If no duplicates exist, you are done — do nothing"""
 
 
 async def _maybe_extract_design_system(
@@ -488,21 +535,8 @@ async def run_scan_pipeline(
             )
             timer.mark("B2_synthesis_parallel")
 
-            # --- Phase E2: Re-run skill analysis with feature-based modules ---
-            if _pending_synthesis and total_features_synthesized > 0:
-                timer.start()
-                e2_profiles = await phase_e2_skill_remap(
-                    db,
-                    org_id,
-                    repo_paths,
-                    email_to_user,
-                    scan_status,
-                )
-                if e2_profiles:
-                    total_profiles = e2_profiles
-                timer.mark("E2_skill_remap")
-
             # --- Phase B3: Cross-repo merge + embedding + dedup ---
+            # Must run BEFORE E2 so skill remap uses merged feature names.
             timer.start()
             merge_config = await phase_b3_merge(
                 db,
@@ -517,6 +551,20 @@ async def run_scan_pipeline(
             if merge_config:
                 config = merge_config
             timer.mark("B3_merge")
+
+            # --- Phase E2: Re-run skill analysis with merged feature names ---
+            if _pending_synthesis and total_features_synthesized > 0:
+                timer.start()
+                e2_profiles = await phase_e2_skill_remap(
+                    db,
+                    org_id,
+                    repo_paths,
+                    email_to_user,
+                    scan_status,
+                )
+                if e2_profiles:
+                    total_profiles = e2_profiles
+                timer.mark("E2_skill_remap")
 
             # Synthesis + merge succeeded — hard-delete only the features that
             # were soft-deleted at scan start and not reactivated by synthesis.

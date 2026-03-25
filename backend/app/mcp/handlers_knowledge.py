@@ -359,3 +359,64 @@ async def handle_check_feature_exists(
         "feature_count": len(features),
         "features": features,
     }
+
+
+async def handle_merge_features(
+    db: AsyncSession,
+    org: Organization,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge duplicate features across repos.
+
+    Keeps the feature with ``keep_title``, deactivates features in
+    ``merge_titles``, and links the kept feature to all specified repos.
+    """
+    keep_title = params["keep_title"]
+    merge_titles = params.get("merge_titles", [])
+    repo_names = params.get("repo_names", [])
+
+    ki_repo = KnowledgeItemRepository(db, org_id=org.id)
+
+    # 1. Find the feature to keep
+    item = await ki_repo.get_by_title_and_category(keep_title, "feature_registry")
+    if not item:
+        return {"success": False, "error": f"Feature not found: {keep_title}"}
+
+    # 2. Transfer repo links from merge sources, then deactivate them
+    merged_count = 0
+    if merge_titles:
+        source_items = await ki_repo.get_active_by_titles(merge_titles, "feature_registry")
+        if source_items:
+            await ki_repo.transfer_repo_links([s.id for s in source_items], item.id)
+            merged_count = await ki_repo.bulk_deactivate_by_titles(
+                merge_titles, "feature_registry"
+            )
+            await ki_repo.flush()
+
+    # 3. Link to all specified repos
+    repos_linked = 0
+    if repo_names:
+        from app.repositories.tracked_repository import TrackedRepoRepository
+
+        tr_repo = TrackedRepoRepository(db, org_id=org.id)
+        for rname in repo_names:
+            tracked = await tr_repo.get_by_name(rname)
+            if tracked:
+                await ki_repo.link_to_repo(item.id, tracked.id)
+                repos_linked += 1
+
+    await ki_repo.flush()
+
+    logger.info(
+        "mcp_merge_features",
+        org_id=str(org.id),
+        kept=keep_title,
+        merged=merged_count,
+        repos_linked=repos_linked,
+    )
+    return {
+        "success": True,
+        "kept": keep_title,
+        "merged_count": merged_count,
+        "repos_linked": repos_linked,
+    }

@@ -24,6 +24,7 @@ from app.mcp.handlers_knowledge import (
     handle_check_feature_exists,
     handle_get_knowledge,
     handle_get_pending_features,
+    handle_merge_features,
     handle_search_bugs,
     handle_write_feature_registry,
 )
@@ -215,6 +216,42 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         },
     ),
     MCPToolDefinition(
+        name="merge_features",
+        description=(
+            "Merge duplicate features across repos. Keeps the feature with "
+            "keep_title, deactivates features in merge_titles, and links the "
+            "kept feature to all specified repos."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "keep_title": {
+                    "type": "string",
+                    "description": (
+                        "Title of the feature to keep "
+                        "(e.g. 'Feature: Authentication')"
+                    ),
+                },
+                "merge_titles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Titles of duplicate features to merge into the kept "
+                        "one (will be deactivated)"
+                    ),
+                },
+                "repo_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "All repo names this merged feature belongs to"
+                    ),
+                },
+            },
+            "required": ["keep_title", "repo_names"],
+        },
+    ),
+    MCPToolDefinition(
         name="search_bugs",
         description="Find bugs related to a given description or area",
         input_schema={
@@ -369,6 +406,7 @@ TOOL_HANDLERS: dict[str, Any] = {
     "get_pending_features": handle_get_pending_features,
     "write_feature_registry": handle_write_feature_registry,
     "check_feature_exists": handle_check_feature_exists,
+    "merge_features": handle_merge_features,
     "list_design_systems": handle_list_design_systems,
     "get_design_system": handle_get_design_system,
 }
