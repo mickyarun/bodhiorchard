@@ -16,12 +16,11 @@
         <v-btn
           v-else
           color="primary"
-          variant="tonal"
-          size="small"
+          variant="flat"
           prepend-icon="mdi-view-dashboard-outline"
           @click="router.push({ name: 'dashboard' })"
         >
-          Dashboard
+          Go to Dashboard
         </v-btn>
       </div>
     </v-app-bar>

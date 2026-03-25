@@ -98,7 +98,12 @@ class Settings(BaseSettings):
     public_url: str = Field(
         default="http://localhost:8000",
         alias="PUBLIC_URL",
-        description="Public base URL for generating callback URLs (e.g. Slack webhooks)",
+        description="Public base URL for the backend (e.g. Slack webhooks, git hooks)",
+    )
+    frontend_url: str = Field(
+        default="http://localhost:5173",
+        alias="FRONTEND_URL",
+        description="Public base URL for the frontend (used in login links, emails, Slack DMs)",
     )
     mcp_backend_url: str = Field(
         default="http://localhost:8000",

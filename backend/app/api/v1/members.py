@@ -337,7 +337,7 @@ async def set_member_password(
 
     from app.config import settings
 
-    login_url = settings.public_url.rstrip("/") + "/login"
+    login_url = settings.frontend_url.rstrip("/") + "/login"
 
     return SetPasswordResponse(
         password=password,
@@ -376,7 +376,7 @@ async def _send_credentials_slack(
 
     from app.config import settings
 
-    login_url = settings.public_url.rstrip("/") + "/login"
+    login_url = settings.frontend_url.rstrip("/") + "/login"
 
     message = (
         f"Hi {user.name}! Your login credentials have been set up.\n\n"
