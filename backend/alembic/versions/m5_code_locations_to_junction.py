@@ -39,14 +39,7 @@ def upgrade() -> None:
           AND ki.code_locations::jsonb != '{}'::jsonb
     """)
 
-    # 3. Drop the column from knowledge_items (now lives on junction)
-    op.drop_column("knowledge_items", "code_locations")
-
 
 def downgrade() -> None:
-    """Move code_locations back to knowledge_items."""
-    op.add_column(
-        "knowledge_items",
-        sa.Column("code_locations", sa.JSON(), nullable=True),
-    )
+    """Remove code_locations from knowledge_to_repo."""
     op.drop_column("knowledge_to_repo", "code_locations")
