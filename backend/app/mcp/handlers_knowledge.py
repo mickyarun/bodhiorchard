@@ -67,20 +67,19 @@ def format_feature_content(
 def _merge_code_locations(
     existing: dict[str, Any] | None, incoming: dict[str, Any] | None
 ) -> dict[str, list[str]]:
-    """Merge two code_locations dicts, unioning paths per layer (O(n) per layer)."""
-    merged: dict[str, list[str]] = {}
-    all_layers = set((existing or {}).keys()) | set((incoming or {}).keys())
-    for layer in sorted(all_layers):
-        existing_paths = (existing or {}).get(layer, [])
-        incoming_paths = (incoming or {}).get(layer, [])
-        seen: set[str] = set(existing_paths)
-        result = list(existing_paths)
-        for p in incoming_paths:
-            if p not in seen:
-                seen.add(p)
-                result.append(p)
-        merged[layer] = result
-    return merged
+    """Merge two code_locations dicts, unioning paths per layer."""
+    from app.services.scan_helpers import merge_code_locations
+
+    return merge_code_locations(existing, incoming)
+
+
+async def _try_embed(title: str, content: str) -> list[float] | None:
+    """Attempt to embed a feature inline. Returns None on failure."""
+    try:
+        return await embedding_service.embed(f"{title}\n{content}"[:2000])
+    except Exception as exc:
+        logger.warning("inline_embed_failed", title=title, error=str(exc))
+        return None
 
 
 async def handle_get_knowledge(
@@ -214,7 +213,7 @@ async def handle_write_feature_registry(
         item.content = content
         item.source = "scan"
         item.tags = sorted(set(item.tags or []) | set(params["tags"]))[:10]
-        item.embedding = None  # Reset for re-embedding
+        item.embedding = await _try_embed(title, content)
         item.is_active = True
         item.feature_status = "implemented"
         item.code_locations = _merge_code_locations(
@@ -242,7 +241,7 @@ async def handle_write_feature_registry(
                     matched_item.tags = sorted(set(matched_item.tags or []) | set(params["tags"]))[
                         :10
                     ]
-                    matched_item.embedding = None  # Reset for re-embedding
+                    matched_item.embedding = await _try_embed(title, content)
                     matched_item.is_active = True
                     matched_item.feature_status = "implemented"
                     matched_item.code_locations = _merge_code_locations(
@@ -270,14 +269,17 @@ async def handle_write_feature_registry(
                 is_active=True,
                 feature_status="implemented",
                 code_locations=params.get("code_locations") or {},
+                embedding=await _try_embed(title, content),
             )
             await ki_repo.add(item)
 
     await ki_repo.flush()
 
-    # Link to repo via junction table
+    # Link to repo via junction table (with per-repo code_locations)
     if repo_id and item:
-        await ki_repo.link_to_repo(item.id, repo_id)
+        await ki_repo.link_to_repo(
+            item.id, repo_id, code_locations=params.get("code_locations")
+        )
         await ki_repo.flush()
 
     # Deactivate originals when merging cross-repo features.

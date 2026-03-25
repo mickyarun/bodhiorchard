@@ -588,9 +588,12 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import DirectoryPicker from '@/components/setup/DirectoryPicker.vue'
 import api from '@/services/api'
+import { useScanSocket } from '@/composables/useScanSocket'
+import type { ScanStatusData } from '@/composables/useScanSocket'
 import type { RepoInfo } from '@/types'
 
 const settingsStore = useSettingsStore()
+const { scanData, startTracking: startScanWs, stopTracking: stopScanWs } = useScanSocket()
 
 // Disable repo editing while a scan is running
 const isLocked = computed(() => scanStatus.value === 'running')
@@ -609,7 +612,6 @@ const scanResult = ref({
   unmatchedAuthors: [] as string[],
   synthesisWarning: '' as string,
 })
-let scanPollInterval: ReturnType<typeof setInterval> | null = null
 let currentScanId = ''
 
 // Index stats
@@ -664,10 +666,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (scanPollInterval) {
-    clearInterval(scanPollInterval)
-    scanPollInterval = null
-  }
+  stopScanWs()
 })
 
 function onDirectorySelected(path: string) {
@@ -812,46 +811,43 @@ async function triggerScan(fullRescan: boolean = false): Promise<void> {
 }
 
 function startPolling(): void {
-  if (scanPollInterval) clearInterval(scanPollInterval)
-
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission()
   }
 
-  scanPollInterval = setInterval(async () => {
-    try {
-      const { data } = await api.get(`/v1/skills/scan/${currentScanId}/status`)
-      scanProgress.value = data.progressPct || 0
-      scanStatusLabel.value = formatStatusLabel(data.status)
+  function handleProgress(data: ScanStatusData): void {
+    scanProgress.value = data.progressPct || 0
+    scanStatusLabel.value = formatStatusLabel(data.status)
+  }
 
-      if (data.status === 'completed') {
-        scanStatus.value = 'completed'
-        scanResult.value = {
-          scanMode: data.scanMode || 'full',
-          featuresIndexed: data.featuresIndexed || 0,
-          featuresSkipped: data.featuresSkipped || 0,
-          profilesFound: data.profilesFound || 0,
-          staleCleaned: data.staleCleaned || 0,
-          unmatchedAuthors: data.unmatchedAuthors || [],
-          synthesisWarning: data.synthesisWarning || '',
-        }
-        localStorage.removeItem('flowdev_scan_id')
-        stopPolling()
-        fetchIndexStats()
-        notifyScanDone(true, data.featuresIndexed || 0, data.profilesFound || 0)
-      } else if (data.status === 'failed') {
-        scanStatus.value = 'failed'
-        scanError.value = data.error || 'Scan failed.'
-        localStorage.removeItem('flowdev_scan_id')
-        stopPolling()
-        notifyScanDone(false)
-      }
-    } catch {
-      scanStatus.value = 'failed'
-      scanError.value = 'Lost connection while polling scan status.'
-      stopPolling()
+  function handleComplete(data: ScanStatusData): void {
+    scanStatus.value = 'completed'
+    scanResult.value = {
+      scanMode: data.scanMode || 'full',
+      featuresIndexed: data.featuresIndexed || 0,
+      featuresSkipped: data.featuresSkipped || 0,
+      profilesFound: data.profilesFound || 0,
+      staleCleaned: data.staleCleaned || 0,
+      unmatchedAuthors: data.unmatchedAuthors || [],
+      synthesisWarning: data.synthesisWarning || '',
     }
-  }, 2000)
+    localStorage.removeItem('flowdev_scan_id')
+    fetchIndexStats()
+    notifyScanDone(true, data.featuresIndexed || 0, data.profilesFound || 0)
+  }
+
+  function handleError(error: string): void {
+    scanStatus.value = 'failed'
+    scanError.value = error || 'Scan failed.'
+    localStorage.removeItem('flowdev_scan_id')
+    notifyScanDone(false)
+  }
+
+  startScanWs(currentScanId, {
+    onProgress: handleProgress,
+    onComplete: handleComplete,
+    onError: handleError,
+  })
 }
 
 function notifyScanDone(success: boolean, features = 0, profiles = 0): void {
@@ -883,21 +879,14 @@ async function refreshScanStatus(): Promise<void> {
         unmatchedAuthors: data.unmatchedAuthors || [],
         synthesisWarning: data.synthesisWarning || '',
       }
-      stopPolling()
+      stopScanWs()
     } else if (data.status === 'failed') {
       scanStatus.value = 'failed'
       scanError.value = data.error || 'Scan failed.'
-      stopPolling()
+      stopScanWs()
     }
   } catch {
     // Non-critical
-  }
-}
-
-function stopPolling(): void {
-  if (scanPollInterval) {
-    clearInterval(scanPollInterval)
-    scanPollInterval = null
   }
 }
 

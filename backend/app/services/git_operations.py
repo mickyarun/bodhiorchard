@@ -195,6 +195,63 @@ async def restore_after_scan(repo_path: str, orig_branch: str, had_stash: bool) 
             logger.info("scan_restored_stash", repo=repo_path)
 
 
+async def create_scan_worktree(repo_path: str, main_branch: str) -> str:
+    """Create a temporary git worktree for scanning without touching the working tree.
+
+    Creates a detached worktree at ``<repo>/.bodhigrove/scan-wt`` pointing at
+    the tip of ``main_branch``. This allows scanning the mainline code while
+    the user continues working on their current branch.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+        main_branch: Branch to check out in the worktree (e.g. "main").
+
+    Returns:
+        Absolute path to the worktree directory.
+
+    Raises:
+        RuntimeError: If worktree creation fails.
+    """
+    wt_path = str(Path(repo_path) / ".bodhigrove" / "scan-wt")
+
+    # Clean up any stale worktree from a previous interrupted scan
+    if Path(wt_path).exists():
+        await run_git(["worktree", "remove", wt_path, "--force"], cwd=repo_path)
+
+    _, stderr, rc = await run_git(
+        ["worktree", "add", "--detach", wt_path, main_branch],
+        cwd=repo_path,
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to create scan worktree: {stderr[:200]}")
+
+    logger.info(
+        "scan_worktree_created",
+        repo=repo_path,
+        worktree=wt_path,
+        branch=main_branch,
+    )
+    return wt_path
+
+
+async def remove_scan_worktree(repo_path: str) -> None:
+    """Remove the temporary scan worktree.
+
+    Safe to call even if the worktree doesn't exist.
+
+    Args:
+        repo_path: Absolute path to the git repository (not the worktree).
+    """
+    wt_path = str(Path(repo_path) / ".bodhigrove" / "scan-wt")
+    if not Path(wt_path).exists():
+        return
+    _, stderr, rc = await run_git(["worktree", "remove", wt_path, "--force"], cwd=repo_path)
+    if rc != 0:
+        logger.warning("scan_worktree_remove_failed", repo=repo_path, stderr=stderr[:200])
+    else:
+        logger.info("scan_worktree_removed", repo=repo_path)
+
+
 async def list_remote_branches(repo_path: str) -> list[str]:
     """List all remote branch names (origin/main → 'main').
 

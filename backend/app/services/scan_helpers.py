@@ -9,6 +9,7 @@ import time
 import uuid
 
 import structlog
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.skill_profile import SkillProfile
@@ -133,7 +134,8 @@ async def cleanup_stale_references(
     for item in items:
         if item.source_ref and item.source_ref in deleted_set:
             item.is_active = False
-            item.embedding = None
+            # Keep embedding intact — if reactivated later it won't need
+            # re-embedding (Bug 8 fix).
             deactivated += 1
 
     logger.info(
@@ -174,51 +176,165 @@ async def embed_missing_items(db: AsyncSession, org_id: uuid.UUID) -> int:
             vectors = await embedding_service.embed_batch(texts)
             for item, vector in zip(batch, vectors, strict=True):
                 item.embedding = vector
-            total_embedded += len(batch)
             await db.flush()
+            total_embedded += len(batch)
         except Exception:
             logger.exception("embed_batch_failed", batch_start=i, batch_size=len(batch))
-            break
+            # Retry one-by-one so a single bad item doesn't block the rest
+            for single_item in batch:
+                try:
+                    text = f"{single_item.title}\n{single_item.content or ''}"[:2000]
+                    single_item.embedding = await embedding_service.embed(text)
+                    total_embedded += 1
+                except Exception:
+                    logger.warning("embed_single_failed", title=single_item.title)
+            await db.flush()
+            continue
 
     logger.info("embed_missing_items", org_id=str(org_id), embedded=total_embedded)
     return total_embedded
 
 
-async def load_feature_map(db: AsyncSession, org_id: uuid.UUID) -> FeatureMap:
+async def load_feature_map(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    repo_id: uuid.UUID | None = None,
+) -> FeatureMap:
     """Load (feature_name, flattened_path_list, feature_id) from active features.
 
-    Strips title prefixes (``[Repo] Feature:`` or ``Feature:``) to produce
-    clean names for skill profiles.  Sorts by path length descending so
-    longest-prefix matching works correctly.
+    Strips the ``Feature:`` title prefix to produce clean names for skill
+    profiles.  Sorts by path length descending so longest-prefix matching
+    works correctly.
+
+    When ``repo_id`` is provided, code_locations are read from the
+    ``knowledge_to_repo`` junction table for that specific repo, giving
+    per-repo path accuracy.
 
     Args:
         db: The async database session.
         org_id: Organization UUID.
+        repo_id: Optional repo filter — reads per-repo code_locations
+            from the junction table instead of the denormalized field.
 
     Returns:
         List of (feature_name, [path_prefixes], knowledge_item_id) tuples.
     """
+    from app.models.knowledge_item import KnowledgeRepoLink
+
     ki_repo = KnowledgeItemRepository(db, org_id=org_id)
     items = await ki_repo.list_active(category="feature_registry", limit=500)
+
+    # Build a per-repo code_locations lookup from junction table
+    junction_locs: dict[uuid.UUID, dict] = {}
+    if repo_id:
+        rows = await db.execute(
+            sa_select(KnowledgeRepoLink.knowledge_id, KnowledgeRepoLink.code_locations).where(
+                KnowledgeRepoLink.repo_id == repo_id,
+                KnowledgeRepoLink.code_locations.is_not(None),
+            )
+        )
+        for kid, locs in rows.all():
+            junction_locs[kid] = locs
 
     prefix_re = re.compile(r"^Feature:\s*")
     result: FeatureMap = []
 
     for item in items:
-        if not item.code_locations:
-            continue
+        # Prefer per-repo junction code_locations, fall back to item field
+        locs = junction_locs.get(item.id) or item.code_locations
         # Clean feature name
         name = prefix_re.sub("", item.title).strip()
         if not name:
             continue
         # Flatten all layer paths into one list
         all_paths: list[str] = []
-        for paths in item.code_locations.values():
-            if isinstance(paths, list):
-                all_paths.extend(paths)
-        if all_paths:
-            result.append((name, all_paths, item.id))
+        if locs:
+            for paths in locs.values():
+                if isinstance(paths, list):
+                    all_paths.extend(paths)
+        # Include features even with empty paths — they can still match
+        # via directory-name fallback in _file_to_feature().
+        result.append((name, all_paths, item.id))
 
     # Sort by longest path first for greedy matching
     result.sort(key=lambda entry: max((len(p) for p in entry[1]), default=0), reverse=True)
     return result
+
+
+def merge_code_locations(
+    existing: dict[str, list[str]] | None,
+    incoming: dict[str, list[str]] | None,
+) -> dict[str, list[str]]:
+    """Merge two code_locations dicts, unioning paths per layer.
+
+    Shared helper used by the MCP handler, repository junction logic,
+    and feature merge pipeline.
+    """
+    merged: dict[str, list[str]] = {}
+    all_layers = set((existing or {}).keys()) | set((incoming or {}).keys())
+    for layer in sorted(all_layers):
+        existing_paths: list[str] = (existing or {}).get(layer, [])
+        incoming_paths: list[str] = (incoming or {}).get(layer, [])
+        seen: set[str] = set(existing_paths)
+        combined = list(existing_paths)
+        for p in incoming_paths:
+            if p not in seen:
+                seen.add(p)
+                combined.append(p)
+        merged[layer] = combined
+    return merged
+
+
+async def link_orphan_features(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    ki_repo: KnowledgeItemRepository,
+) -> int:
+    """Auto-link orphan features (no repo link) to tracked repos.
+
+    Matches code_location paths against tracked repository directory names.
+
+    Args:
+        db: Async database session.
+        org_id: Organization UUID.
+        ki_repo: Knowledge item repository instance.
+
+    Returns:
+        Number of orphan features linked.
+    """
+    from pathlib import Path
+
+    orphans = await ki_repo.list_active_without_repo_links("feature_registry")
+    if not orphans:
+        return 0
+
+    from app.repositories.tracked_repository import TrackedRepoRepository
+
+    tr_repo = TrackedRepoRepository(db, org_id=org_id)
+    tracked_repos = await tr_repo.list_active()
+    if not tracked_repos:
+        return 0
+
+    linked = 0
+    for item in orphans:
+        locs = item.code_locations or {}
+        all_paths = [p for paths in locs.values() if isinstance(paths, list) for p in paths]
+        if not all_paths:
+            continue
+        for repo in tracked_repos:
+            repo_dir = Path(repo.path).name + "/"
+            # Filter code_locations to only paths starting with this repo dir
+            repo_locs: dict[str, list[str]] = {}
+            for layer, paths in locs.items():
+                if not isinstance(paths, list):
+                    continue
+                matched = [p for p in paths if p.startswith(repo_dir)]
+                if matched:
+                    repo_locs[layer] = matched
+            if repo_locs:
+                await ki_repo.link_to_repo(item.id, repo.id, repo_locs)
+                linked += 1
+    if linked:
+        await db.flush()
+        logger.info("orphan_features_linked", count=linked, total_orphans=len(orphans))
+    return linked

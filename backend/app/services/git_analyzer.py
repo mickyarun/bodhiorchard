@@ -18,6 +18,12 @@ logger = structlog.get_logger(__name__)
 # How far back to scan by default
 DEFAULT_SINCE = "6.months.ago"
 
+# Common directory names excluded from feature-name matching fallback
+_FEATURE_MATCH_STOP_DIRS = frozenset({
+    "src", "lib", "app", "api", "core", "test", "tests",
+    "utils", "common", "shared", "config", "scripts",
+})
+
 # Extension-to-language mapping
 LANG_MAP: dict[str, str] = {
     ".py": "Python",
@@ -76,8 +82,8 @@ def _file_to_feature(
 ) -> tuple[str, uuid.UUID] | None:
     """Map a file path to a feature name via longest-prefix match.
 
-    Returns ``None`` when no feature prefix matches — callers should
-    skip the file rather than fall back to a directory name.
+    Falls back to directory-name matching when no prefix matches: compares
+    the file's directory components against feature name words.
 
     Args:
         file_path: Relative file path from repo root.
@@ -87,10 +93,22 @@ def _file_to_feature(
     Returns:
         Tuple of (feature_name, feature_id), or None if unmatched.
     """
+    # 1. Strict prefix matching (primary)
     for feat_name, prefixes, feat_id in feature_map:
         for prefix in prefixes:
             if file_path.startswith(prefix):
                 return feat_name, feat_id
+
+    # 2. Directory-name fallback: match file's directory components
+    #    against feature name words (e.g. "services/otp/verify.py"
+    #    matches feature "OTP Authentication" via "otp").
+    dir_parts = {p.lower() for p in Path(file_path).parts[:-1]} - _FEATURE_MATCH_STOP_DIRS
+    if dir_parts:
+        for feat_name, _prefixes, feat_id in feature_map:
+            feat_words = {w.lower() for w in feat_name.split() if len(w) >= 3}
+            if len(dir_parts & feat_words) >= 1:
+                return feat_name, feat_id
+
     return None
 
 

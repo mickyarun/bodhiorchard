@@ -33,6 +33,7 @@ class KnowledgeRepoLink(Base):
         ForeignKey("tracked_repositories.id", ondelete="CASCADE"),
         nullable=False,
     )
+    code_locations: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class KnowledgeItem(BaseModel):

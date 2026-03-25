@@ -406,6 +406,10 @@ async def phase_e2_skill_remap(
     features are synthesized, reload the feature map and rebuild
     skill profiles so modules are feature names, not directories.
 
+    Only wipes old profiles if the new feature-based analysis covers
+    at least 70% of the old profile count, to avoid data loss when
+    the feature map is sparse (Bug 6 fix).
+
     Args:
         db: Async database session.
         org_id: Organization UUID.
@@ -423,17 +427,34 @@ async def phase_e2_skill_remap(
         return 0
 
     scan_status.status = "analyzing_skills"
-    # Delete old directory-based profiles
     sp_repo_e2 = SkillProfileRepository(db, org_id=org_id)
-    deleted_profiles = await sp_repo_e2.delete_all_for_org()
-    if deleted_profiles:
-        logger.info("e2_deleted_old_profiles", count=deleted_profiles)
 
-    total_profiles = 0
+    # Run new analysis first (before deleting anything)
+    new_entries = []
     for repo_path_e2 in repo_paths:
         entries_e2 = await analyze_repo_skills(repo_path_e2, feature_map=feature_map_e2)
-        count, _ = await upsert_skill_profiles(db, org_id, entries_e2, email_to_user)
-        total_profiles += count
+        new_entries.extend(entries_e2)
+
+    existing_count = await sp_repo_e2.count_profiles()
+
+    # Only wipe+replace if new analysis has good coverage
+    if not existing_count or len(new_entries) >= existing_count * 0.7:
+        deleted_profiles = await sp_repo_e2.delete_all_for_org()
+        if deleted_profiles:
+            logger.info("e2_deleted_old_profiles", count=deleted_profiles)
+        total_profiles = 0
+        count, _ = await upsert_skill_profiles(db, org_id, new_entries, email_to_user)
+        total_profiles = count
+    else:
+        # Sparse feature map — update feature_ids on matching profiles
+        # without wiping unmatched ones.
+        logger.warning(
+            "e2_sparse_map_partial_update",
+            new_entries=len(new_entries),
+            existing=existing_count,
+        )
+        count, _ = await upsert_skill_profiles(db, org_id, new_entries, email_to_user)
+        total_profiles = existing_count
 
     return total_profiles
 
@@ -526,7 +547,9 @@ async def phase_b3_merge(
     if deduped:
         logger.info("post_merge_dedup", deactivated=deduped)
 
-    # Hard-delete deactivated feature_registry items (merge artifacts).
+    # Hard-delete deactivated feature_registry items created by the
+    # merge/dedup process. The pipeline also runs a separate cleanup
+    # after B3 for soft-deleted items from scan start.
     cleanup_deleted = await ki_repo.delete_inactive_by_category("feature_registry")
     if cleanup_deleted:
         await db.flush()
@@ -534,6 +557,12 @@ async def phase_b3_merge(
             "merge_artifact_cleanup",
             deleted=cleanup_deleted,
         )
+
+    # Auto-link orphan features (no repo link) by matching code_locations
+    # paths to tracked repo directory names.
+    from app.services.scan_helpers import link_orphan_features
+
+    await link_orphan_features(db, org_id, ki_repo)
 
     return config
 

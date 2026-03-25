@@ -5,7 +5,6 @@ targeted merge prompt building, and post-merge deduplication of
 concurrent MCP retries.
 """
 
-import re
 import uuid
 
 import structlog
@@ -16,14 +15,12 @@ from app.repositories.knowledge_item import KnowledgeItemRepository
 
 logger = structlog.get_logger(__name__)
 
-REPO_PREFIX_RE = re.compile(r"^\[([^\]]+)\]\s*Feature:\s*(.+)$")
-
 
 async def find_semantic_duplicates(
     db: AsyncSession,
     org_id: uuid.UUID,
-    threshold: float = 0.85,
-    max_group_size: int = 4,
+    threshold: float = 0.78,
+    max_group_size: int = 6,
 ) -> list[list[KnowledgeItem]]:
     """Find features with different names but overlapping content.
 
@@ -100,32 +97,35 @@ async def find_semantic_duplicates(
     return result
 
 
+def _merge_group_code_locations(group: list[KnowledgeItem]) -> dict[str, list[str]]:
+    """Compute merged code_locations from all items in a duplicate group."""
+    from app.services.scan_helpers import merge_code_locations
+
+    merged: dict[str, list[str]] = {}
+    for item in group:
+        merged = merge_code_locations(merged, item.code_locations)
+    return merged
+
+
 def build_targeted_merge_prompt(
     groups: list[list[KnowledgeItem]],
 ) -> str:
     """Build a merge prompt with specific duplicate pairs and inline content.
 
-    Handles both cross-repo and intra-repo duplicates. When all items in a
-    group share the same repo prefix, the merged feature keeps that prefix.
+    Pre-computes merged code_locations from source features so merged
+    features are born with valid paths (Bug 4 fix).
     """
     sections: list[str] = []
     for i, group in enumerate(groups, 1):
         parts: list[str] = [f"## Merge Task {i}\n"]
         titles: list[str] = []
-        repo_prefixes: set[str] = set()
         for item in group:
             parts.append(f"**{item.title}**\n```\n{item.content or '(empty)'}\n```\n")
             titles.append(item.title)
-            m = REPO_PREFIX_RE.match(item.title)
-            if m:
-                repo_prefixes.add(m.group(1))
 
-        # If all items are from the same repo, tell Claude to keep the prefix
-        if len(repo_prefixes) == 1:
-            repo = next(iter(repo_prefixes))
-            parts.append(f'repo_name for write_feature_registry: "{repo}"\n')
-        else:
-            parts.append("Do NOT set repo_name (merged features are cross-repo)\n")
+        # Pre-compute merged code_locations from source features
+        merged_locs = _merge_group_code_locations(group)
+        parts.append(f"code_locations for write_feature_registry: {merged_locs}\n")
 
         parts.append("merge_source_titles for write_feature_registry: " + str(titles) + "\n")
         sections.append("\n".join(parts))
@@ -144,10 +144,9 @@ For each merge task above:
    - feature_name: A unified name that covers the combined scope
    - description: Combined description (1-2 sentences)
    - capabilities: Merged list (deduplicate similar ones, keep up to 8)
-   - code_locations: {{}} (empty)
+   - code_locations: Use the pre-computed code_locations shown above for each task
    - tags: Combined and deduplicated (up to 5)
    - source_clusters: []
-   - repo_name: Set ONLY if noted above for the task, otherwise omit
    - merge_source_titles: The titles listed above (deactivates the originals)"""
 
 

@@ -20,11 +20,12 @@ from app.repositories.user import UserRepository
 from app.schemas.skills import ScanStatus
 from app.services.claude_runner import is_claude_cli_available
 from app.services.git_analyzer import analyze_repo_skills, get_head_sha
-from app.services.git_operations import restore_after_scan, stash_and_checkout_main
+from app.services.git_operations import create_scan_worktree, remove_scan_worktree
 from app.services.gitnexus_indexer import GitNexusNotInstalledError, index_repo_with_gitnexus
 from app.services.scan_helpers import (
     PhaseTimer,
     cleanup_stale_references,
+    embed_missing_items,
     load_feature_map,
 )
 from app.services.scan_phases import (
@@ -44,6 +45,13 @@ INCREMENTAL_THRESHOLD = 0.30
 
 # In-memory scan status tracking (use Redis in production)
 scan_statuses: dict[str, ScanStatus] = {}
+
+
+def _publish_scan_status(scan_id: str, scan_status: ScanStatus) -> None:
+    """Publish scan status to the event bus for WebSocket delivery."""
+    from app.services.event_bus import publish
+
+    publish(f"scan:{scan_id}", scan_status.model_dump(by_alias=True))
 
 
 def build_synthesis_prompt(
@@ -88,6 +96,16 @@ Follow this loop exactly:
       - source_clusters: Array containing the cluster name(s)
 {repo_name_line}
 4. Go back to step 1
+
+## Grouping Rules
+
+- Group related functionality into a SINGLE feature. For example, all
+  OTP-related code (verification, generation, recovery) should be ONE
+  feature called "OTP Authentication", not separate features per sub-function.
+- When multiple clusters clearly belong to the same domain, combine them
+  into one `write_feature_registry` call with all their code_locations merged.
+- Target 8-15 features per repo. Prefer broader domain-level features
+  over narrow per-function features.
 
 Important: Process ALL clusters returned by get_pending_features before calling
 it again. Do not call get_pending_features mid-batch."""
@@ -224,6 +242,7 @@ async def run_scan_pipeline(
     scan_status = scan_statuses[scan_id]
     is_workspace = len(repo_paths) > 1
     timer = PhaseTimer(scan_id)
+    soft_deleted_ids: list[uuid.UUID] = []
 
     try:
         async with AsyncSessionLocal() as db:
@@ -248,18 +267,19 @@ async def run_scan_pipeline(
 
             tracked_repo_repo = TrackedRepoRepository(db, org_id=org_id)
 
-            # On full scan, delete old scan-sourced feature items up front
+            # On full scan, soft-delete old scan-sourced features (preserves
+            # data for rollback if the pipeline fails partway through).
             ki_repo = KnowledgeItemRepository(db, org_id=org_id)
             if full_rescan or not config.get("knowledge", {}).get("last_commit_sha"):
-                deleted_count = await ki_repo.delete_by_category_excluding_source(
+                soft_deleted_ids = await ki_repo.soft_delete_by_category_excluding_source(
                     "feature_registry", exclude_source="bud"
                 )
                 await db.flush()
-                if deleted_count:
+                if soft_deleted_ids:
                     logger.info(
-                        "scan_deleted_old_features",
+                        "scan_soft_deleted_features",
                         scan_id=scan_id,
-                        deleted=deleted_count,
+                        deactivated=len(soft_deleted_ids),
                     )
 
             for repo_idx, repo_path in enumerate(repo_paths):
@@ -276,26 +296,27 @@ async def run_scan_pipeline(
                         total=len(repo_paths),
                     )
 
-                # Look up tracked repo BEFORE stash (need main_branch)
                 tracked_repo = await tracked_repo_repo.get_by_path(repo_path)
                 main_branch = (tracked_repo.main_branch if tracked_repo else None) or "main"
 
-                # Stash uncommitted changes and checkout main for canonical scan
+                # Create a temporary worktree for scanning the main branch
+                # without touching the user's working tree.
                 try:
-                    orig_branch, had_stash = await stash_and_checkout_main(repo_path, main_branch)
+                    scan_path = await create_scan_worktree(repo_path, main_branch)
                 except RuntimeError:
-                    logger.exception(
-                        "scan_stash_checkout_failed",
+                    logger.warning(
+                        "scan_worktree_failed_using_repo",
                         scan_id=scan_id,
                         repo=repo_name,
                     )
-                    continue
+                    scan_path = repo_path  # Fallback: scan in-place
 
                 try:
                     # --- Phase A: Determine scan mode ---
                     timer.start()
                     scan_status.status = "analyzing_changes"
                     scan_status.progress_pct = base_pct
+                    _publish_scan_status(scan_id, scan_status)
 
                     last_sha = tracked_repo.head_sha if tracked_repo else None
                     if not last_sha:
@@ -304,12 +325,15 @@ async def run_scan_pipeline(
                             repo_path
                         ) or knowledge_cfg.get("last_commit_sha")
 
-                    is_incremental, full_rescan, deleted_files = await phase_a_scan_mode(
+                    # Per-repo copy so one repo forcing full_rescan doesn't
+                    # leak to subsequent repos (Bug 1 fix).
+                    repo_full_rescan = full_rescan
+                    is_incremental, repo_full_rescan, deleted_files = await phase_a_scan_mode(
                         db,
                         org_id,
                         repo_path,
                         repo_name,
-                        full_rescan,
+                        repo_full_rescan,
                         last_sha,
                         ki_repo,
                         scan_id,
@@ -323,9 +347,10 @@ async def run_scan_pipeline(
                     timer.start()
                     scan_status.status = "indexing"
                     scan_status.progress_pct = base_pct + int(repo_pct_range * 0.1)
+                    _publish_scan_status(scan_id, scan_status)
 
                     gitnexus_result = await index_repo_with_gitnexus(
-                        repo_path,
+                        scan_path,
                         force=not is_incremental,
                     )
 
@@ -400,10 +425,11 @@ async def run_scan_pipeline(
                     timer.start()
                     scan_status.status = "analyzing_skills"
                     scan_status.progress_pct = base_pct + int(repo_pct_range * 0.6)
+                    _publish_scan_status(scan_id, scan_status)
 
                     feature_map = await load_feature_map(db, org_id)
                     skill_entries = await analyze_repo_skills(
-                        repo_path, feature_map=feature_map or None
+                        scan_path, feature_map=feature_map or None
                     )
 
                     profiles, unmatched, email_to_user = await phase_e_skills(
@@ -425,9 +451,9 @@ async def run_scan_pipeline(
                         await _maybe_extract_design_system(
                             db,
                             org_id,
-                            repo_path,
+                            scan_path,
                             tracked_repo,
-                            full_rescan,
+                            repo_full_rescan,
                         )
                     except Exception:
                         logger.exception(
@@ -437,13 +463,13 @@ async def run_scan_pipeline(
                         )
                     timer.mark(f"E1b_design_system/{repo_name}")
 
-                    # Track HEAD SHA per repo
-                    head_sha = await get_head_sha(repo_path)
+                    # Track HEAD SHA per repo (use scan_path for accurate SHA)
+                    head_sha = await get_head_sha(scan_path)
                     if head_sha:
                         new_shas[repo_path] = head_sha
 
                 finally:
-                    await restore_after_scan(repo_path, orig_branch, had_stash)
+                    await remove_scan_worktree(repo_path)
 
             # --- Phase B2: Parallel feature synthesis via Claude Code ---
             timer.start()
@@ -488,6 +514,14 @@ async def run_scan_pipeline(
                 config = merge_config
             timer.mark("B3_merge")
 
+            # Synthesis + merge succeeded — hard-delete only the features that
+            # were soft-deleted at scan start and not reactivated by synthesis.
+            if soft_deleted_ids:
+                purged = await ki_repo.delete_inactive_by_ids(soft_deleted_ids)
+                if purged:
+                    await db.flush()
+                    logger.info("scan_purged_stale_features", scan_id=scan_id, purged=purged)
+
             # --- Phase G: Save last commit SHAs + scan results ---
             timer.start()
             actual_features = await phase_g_persist(
@@ -503,6 +537,12 @@ async def run_scan_pipeline(
             )
             timer.mark("G_persist")
 
+            # Final catch-all: embed any items still missing embeddings
+            # (e.g. created during merge after the earlier embed pass).
+            final_embedded = await embed_missing_items(db, org_id)
+            if final_embedded:
+                logger.info("scan_final_embed_pass", scan_id=scan_id, embedded=final_embedded)
+
             scan_status.features_indexed = actual_features
             scan_status.profiles_found = total_profiles
             scan_status.stale_cleaned = total_stale
@@ -510,6 +550,7 @@ async def run_scan_pipeline(
             scan_status.scan_mode = overall_mode
             scan_status.status = "completed"
             scan_status.progress_pct = 100
+            _publish_scan_status(scan_id, scan_status)
 
             logger.info(
                 "scan_complete",
@@ -538,6 +579,8 @@ async def run_scan_pipeline(
         logger.error("scan_gitnexus_not_installed", scan_id=scan_id, error=str(exc))
         scan_status.status = "failed"
         scan_status.error = str(exc)
+        _publish_scan_status(scan_id, scan_status)
+        await _rollback_soft_deleted_features(org_id, scan_id, soft_deleted_ids)
         if user_id:
             from app.services.notification_service import send_scan_notification
 
@@ -552,6 +595,8 @@ async def run_scan_pipeline(
         logger.exception("scan_pipeline_error", scan_id=scan_id)
         scan_status.status = "failed"
         scan_status.error = str(exc)[:500]
+        _publish_scan_status(scan_id, scan_status)
+        await _rollback_soft_deleted_features(org_id, scan_id, soft_deleted_ids)
         if user_id:
             from app.services.notification_service import send_scan_notification
 
@@ -562,3 +607,37 @@ async def run_scan_pipeline(
                 completed=False,
                 error_message=str(exc)[:500],
             )
+
+
+async def _rollback_soft_deleted_features(
+    org_id: uuid.UUID,
+    scan_id: str,
+    deactivated_ids: list[uuid.UUID],
+) -> None:
+    """Reactivate only the features soft-deleted by this scan run.
+
+    Uses a fresh DB session since the original session may be in a bad state.
+
+    Args:
+        org_id: Organization UUID.
+        scan_id: Scan identifier for logging.
+        deactivated_ids: IDs of items soft-deleted at scan start.
+    """
+    if not deactivated_ids:
+        return
+
+    from app.database import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as recovery_db:
+            ki_recovery = KnowledgeItemRepository(recovery_db, org_id=org_id)
+            restored = await ki_recovery.reactivate_by_ids(deactivated_ids)
+            await recovery_db.commit()
+            if restored:
+                logger.info(
+                    "scan_rollback_restored_features",
+                    scan_id=scan_id,
+                    restored=restored,
+                )
+    except Exception:
+        logger.exception("scan_rollback_failed", scan_id=scan_id)

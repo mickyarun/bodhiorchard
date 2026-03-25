@@ -384,6 +384,28 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
         return result.rowcount
 
+    async def delete_inactive_by_ids(self, ids: list[uuid.UUID]) -> int:
+        """Hard-delete specific inactive items by ID.
+
+        Only deletes items that are already inactive, preventing
+        accidental deletion of active items.
+
+        Args:
+            ids: List of item UUIDs to delete.
+
+        Returns:
+            Number of rows deleted.
+        """
+        if not ids:
+            return 0
+        result = await self._db.execute(
+            sql_delete(KnowledgeItem).where(
+                KnowledgeItem.id.in_(ids),
+                KnowledgeItem.is_active.is_(False),
+            )
+        )
+        return result.rowcount
+
     # --- Title/prefix queries ---
 
     async def list_titles_with_prefix(self, like_pattern: str) -> list[str]:
@@ -496,27 +518,36 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         self,
         knowledge_id: uuid.UUID,
         repo_id: uuid.UUID,
+        code_locations: dict | None = None,
     ) -> None:
-        """Create a link between a knowledge item and a tracked repository.
+        """Create or update a link between a knowledge item and a tracked repository.
 
-        Idempotent — skips if link already exists.
+        Idempotent — if link already exists, merges code_locations.
 
         Args:
             knowledge_id: The knowledge item UUID.
             repo_id: The tracked repository UUID.
+            code_locations: Optional per-repo code location mapping.
         """
-        existing = await self._db.execute(
-            select(KnowledgeRepoLink.id).where(
+        result = await self._db.execute(
+            select(KnowledgeRepoLink).where(
                 KnowledgeRepoLink.knowledge_id == knowledge_id,
                 KnowledgeRepoLink.repo_id == repo_id,
             )
         )
-        if existing.scalar_one_or_none():
+        existing = result.scalar_one_or_none()
+        if existing:
+            # Merge code_locations if new data provided
+            if code_locations:
+                existing.code_locations = _merge_junction_code_locations(
+                    existing.code_locations, code_locations
+                )
             return
         self._db.add(
             KnowledgeRepoLink(
                 knowledge_id=knowledge_id,
                 repo_id=repo_id,
+                code_locations=code_locations,
             )
         )
 
@@ -578,8 +609,8 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
     ) -> int:
         """Copy all repo links from source items to a target item.
 
-        Collects repo IDs from all sources in one query, then links
-        the target to each. Idempotent — existing links are skipped.
+        Carries over code_locations from source junction rows so per-repo
+        paths survive merges.
 
         Args:
             source_ids: IDs of items whose repo links should be copied.
@@ -588,10 +619,23 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         Returns:
             Number of repo IDs transferred.
         """
-        repo_ids = await self.get_repo_ids_for_items(source_ids)
-        if repo_ids:
-            await self.link_to_repos(target_id, list(repo_ids))
-        return len(repo_ids)
+        if not source_ids:
+            return 0
+        # Load full junction rows (not just repo_ids) to carry code_locations
+        result = await self._db.execute(
+            select(KnowledgeRepoLink).where(
+                KnowledgeRepoLink.knowledge_id.in_(source_ids)
+            )
+        )
+        source_links = list(result.scalars().all())
+        if not source_links:
+            return 0
+
+        # Call link_to_repo for every source link — it merges code_locations
+        # when a link already exists, so duplicate repo_ids are safe.
+        for link in source_links:
+            await self.link_to_repo(target_id, link.repo_id, link.code_locations)
+        return len({link.repo_id for link in source_links})
 
     async def get_active_by_titles(
         self,
@@ -785,6 +829,98 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
         return list(result.scalars().all())
 
+    # --- Soft-delete / reactivate (transactional safety) ---
+
+    async def soft_delete_by_category_excluding_source(
+        self,
+        category: str,
+        *,
+        exclude_source: str | None = None,
+    ) -> list[uuid.UUID]:
+        """Soft-delete items in a category by setting is_active=False.
+
+        Unlike ``delete_by_category_excluding_source``, this preserves data
+        so it can be rolled back via ``reactivate_by_ids`` if the scan
+        pipeline fails.
+
+        Args:
+            category: Category to deactivate.
+            exclude_source: Source value to exclude from deactivation.
+
+        Returns:
+            List of deactivated item IDs (for scoped rollback).
+        """
+        # First collect IDs, then bulk-update
+        id_stmt = select(KnowledgeItem.id).where(
+            KnowledgeItem.org_id == self._org_id,
+            KnowledgeItem.category == category,
+            KnowledgeItem.is_active.is_(True),
+        )
+        if exclude_source:
+            id_stmt = id_stmt.where(KnowledgeItem.source != exclude_source)
+        id_rows = await self._db.execute(id_stmt)
+        ids = [row[0] for row in id_rows.all()]
+        if not ids:
+            return []
+        await self._db.execute(
+            sql_update(KnowledgeItem)
+            .where(KnowledgeItem.id.in_(ids))
+            .values(is_active=False)
+        )
+        return ids
+
+    async def reactivate_by_ids(self, ids: list[uuid.UUID]) -> int:
+        """Reactivate specific soft-deleted items for rollback on scan failure.
+
+        Args:
+            ids: List of item UUIDs to reactivate.
+
+        Returns:
+            Number of rows reactivated.
+        """
+        if not ids:
+            return 0
+        result = await self._db.execute(
+            sql_update(KnowledgeItem)
+            .where(
+                KnowledgeItem.id.in_(ids),
+                KnowledgeItem.is_active.is_(False),
+            )
+            .values(is_active=True)
+        )
+        return result.rowcount
+
+    # --- Orphan detection ---
+
+    async def list_active_without_repo_links(
+        self,
+        category: str,
+    ) -> list[KnowledgeItem]:
+        """Fetch active items that have no entries in knowledge_to_repo.
+
+        Args:
+            category: Category filter.
+
+        Returns:
+            List of orphaned KnowledgeItem instances.
+        """
+        # Subquery scoped to this org's items to avoid cross-org leaks
+        linked_ids = (
+            select(KnowledgeRepoLink.knowledge_id)
+            .join(KnowledgeItem, KnowledgeRepoLink.knowledge_id == KnowledgeItem.id)
+            .where(KnowledgeItem.org_id == self._org_id)
+            .distinct()
+        )
+        result = await self._db.execute(
+            select(KnowledgeItem).where(
+                KnowledgeItem.org_id == self._org_id,
+                KnowledgeItem.category == category,
+                KnowledgeItem.is_active.is_(True),
+                KnowledgeItem.id.not_in(linked_ids),
+            )
+        )
+        return list(result.scalars().all())
+
     # --- Stale cleanup ---
 
     async def list_active_items(self) -> list[KnowledgeItem]:
@@ -800,3 +936,13 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
             )
         )
         return list(result.scalars().all())
+
+
+def _merge_junction_code_locations(
+    existing: dict[str, list[str]] | None,
+    incoming: dict[str, list[str]] | None,
+) -> dict[str, list[str]]:
+    """Merge two code_locations dicts, unioning paths per layer."""
+    from app.services.scan_helpers import merge_code_locations
+
+    return merge_code_locations(existing, incoming)
