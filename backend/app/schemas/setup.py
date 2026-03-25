@@ -77,6 +77,7 @@ class DirectoryEntry(BaseModel):
     name: str
     path: str
     is_git_repo: bool = False
+    has_sub_repos: bool = False
 
 
 class BrowseDirectoriesResponse(BaseModel):
