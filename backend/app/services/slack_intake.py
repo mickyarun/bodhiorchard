@@ -291,23 +291,39 @@ async def handle_pm_approval(
         bud_number=next_number,
     )
 
-    # Auto-trigger PRD agent via the async job queue
-    from app.schemas.jobs import PRDAgentJobPayload
-    from app.services.job_queue import JOB_PRD_AGENT, create_job
+    # Auto-trigger PRD agent via stage mapping + agent task
+    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
+    from app.repositories.agent_skill_bud_stage import AgentSkillBudStageRepository
+    from app.schemas.jobs import BUDAgentTaskPayload
+    from app.services.job_queue import JOB_BUD_AGENT, create_job
 
-    prd_payload = PRDAgentJobPayload(
-        org_id=str(org.id),
-        bud_id=str(bud.id),
-        bud_number=bud.bud_number,
-        session_id=str(session.id),
-        bot_token_encrypted=org.slack_bot_token or "",
-        slack_channel=session.slack_channel,
-        thread_ts=session.thread_ts,
-    )
-    prd_job = create_job(JOB_PRD_AGENT, payload=prd_payload.model_dump())
+    stage_repo = AgentSkillBudStageRepository(db, org_id=org.id)
+    mappings = await stage_repo.get_for_status("bud")
+    first_mapping = next((m for m in mappings if m.enabled), None)
 
-    # Store job ID on BUD so frontend can track PRD generation progress
-    bud.metadata_ = {**(bud.metadata_ or {}), "prd_job_id": prd_job.jobId}
+    if first_mapping:
+        task = BUDAgentTask(
+            org_id=org.id,
+            bud_id=bud.id,
+            skill_id=first_mapping.skill_id,
+            task_type="bud",
+            status=AgentTaskStatus.PENDING,
+            attempt=1,
+            triggered_by=approver.id,
+        )
+        db.add(task)
+        await db.flush()
+
+        prd_job = create_job(
+            JOB_BUD_AGENT,
+            payload=BUDAgentTaskPayload(
+                org_id=str(org.id),
+                bud_id=str(bud.id),
+                task_id=str(task.id),
+            ).model_dump(),
+        )
+        task.job_id = prd_job.jobId
+        task.status = AgentTaskStatus.RUNNING
 
 
 # ── Private helpers ────────────────────────────────────────────────

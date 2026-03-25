@@ -21,6 +21,7 @@ _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 _JOB_LABELS: dict[str, str] = {
     "bud_chat": "BUD Chat",
+    "bud_agent": "BUD Agent",
     "design_agent": "Design Agent",
     "design_extract": "Design System Extraction",
     "prd_agent": "PRD Agent",

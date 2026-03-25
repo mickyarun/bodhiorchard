@@ -75,7 +75,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("agent_skills_seed_failed_at_startup", exc_info=True)
 
-    # 6. Periodic Slack presence polling
+    # 6. Recover stuck agent tasks from prior crash/restart
+    from app.repositories.bud_agent_task import recover_stuck_agent_tasks
+
+    try:
+        async with AsyncSessionLocal() as session:
+            recovered = await recover_stuck_agent_tasks(session)
+            await session.commit()
+        if recovered:
+            logger.info("recovered_stuck_agent_tasks", count=recovered)
+    except Exception:
+        logger.warning("agent_task_recovery_failed", exc_info=True)
+
+    # 7. Periodic Slack presence polling
     from app.services.presence_cache import refresh_all_presence
 
     async def _presence_poll_loop() -> None:

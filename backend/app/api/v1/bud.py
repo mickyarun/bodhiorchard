@@ -307,60 +307,157 @@ async def _trigger_status_jobs(
     current_user: User,
     db: AsyncSession,
 ) -> None:
-    """Enqueue jobs and set response headers for status transitions.
+    """Enqueue agent jobs for status transitions using stage mappings.
 
-    Mutates bud.metadata_ and flushes to DB when jobs are created.
+    Looks up the agent_skill_bud_stages table to find which agent
+    should run for the new status. Creates a BUDAgentTask row and
+    enqueues a JOB_BUD_AGENT job with a standardized payload.
     """
     if "status" not in update_data:
         return
 
     new_status = update_data["status"]
 
+    # Design phase has special handling (not an agent task)
     if new_status == BUDStatus.DESIGN and old_status != BUDStatus.DESIGN:
         response.headers["X-Design-Available"] = "true"
 
-    # Code review transition: DEVELOPMENT → CODE_REVIEW
-    if new_status == BUDStatus.CODE_REVIEW and old_status != BUDStatus.CODE_REVIEW:
-        meta = dict(bud.metadata_ or {})
-        confirmed_repos = meta.get("confirmed_repos", [])
+    # Data-driven agent triggering via stage mappings
+    if new_status != old_status:
+        await _create_agent_task_for_stage(
+            bud, str(new_status), current_user, db
+        )
 
-        code_review_payload = CodeReviewJobPayload(
-            org_id=str(current_user.org_id),
-            bud_id=str(bud.id),
-            bud_number=bud.bud_number,
-            title=bud.title,
-            tech_spec_md=bud.tech_spec_md or "",
-            confirmed_repos=confirmed_repos,
-        )
-        cr_job = create_job(
-            JOB_CODE_REVIEW,
-            payload=code_review_payload.model_dump(),
-            user_id=str(current_user.id),
-        )
-        meta["code_review_job_id"] = cr_job.job_id
-        bud.metadata_ = meta
-        await db.flush()
-        await db.refresh(bud)
-        response.headers["X-CodeReview-Job"] = "true"
 
-    # Tech arch transition
-    if new_status == BUDStatus.TECH_ARCH and old_status != BUDStatus.TECH_ARCH:
-        payload = TechArchJobPayload(
-            org_id=str(current_user.org_id),
+async def _create_agent_task_for_stage(
+    bud: BUDDocument,
+    bud_status: str,
+    current_user: User,
+    db: AsyncSession,
+) -> None:
+    """Look up stage mapping and create an agent task if configured.
+
+    Args:
+        bud: The BUD document.
+        bud_status: The new BUD status string.
+        current_user: The user triggering the transition.
+        db: Async database session.
+    """
+    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
+    from app.repositories.agent_skill_bud_stage import AgentSkillBudStageRepository
+    from app.schemas.jobs import BUDAgentTaskPayload
+
+    stage_repo = AgentSkillBudStageRepository(db, org_id=current_user.org_id)
+    mappings = await stage_repo.get_for_status(bud_status)
+    if not mappings:
+        return
+
+    # Trigger first enabled mapping (pipeline: execution_order=1)
+    first = next((m for m in mappings if m.enabled), None)
+    if not first:
+        return
+
+    task = BUDAgentTask(
+        org_id=bud.org_id,
+        bud_id=bud.id,
+        skill_id=first.skill_id,
+        task_type=bud_status,
+        status=AgentTaskStatus.PENDING,
+        attempt=1,
+        triggered_by=current_user.id,
+    )
+    db.add(task)
+    await db.flush()
+
+    from app.services.job_queue import JOB_BUD_AGENT, create_job
+
+    job = create_job(
+        JOB_BUD_AGENT,
+        payload=BUDAgentTaskPayload(
+            org_id=str(bud.org_id),
             bud_id=str(bud.id),
-            bud_number=bud.bud_number,
-            title=bud.title,
-            requirements_md=bud.requirements_md or "",
+            task_id=str(task.id),
+        ).model_dump(),
+        user_id=str(current_user.id),
+    )
+    task.job_id = job.job_id
+    task.status = AgentTaskStatus.RUNNING
+    await db.flush()
+
+
+@router.post(
+    "/{bud_id}/agent-tasks/{task_id}/retry",
+    response_model=BUDAgentTaskRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def retry_agent_task(
+    bud_id: uuid.UUID,
+    task_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BUDAgentTaskRead:
+    """Retry a failed agent task, creating a new attempt.
+
+    Args:
+        bud_id: The BUD UUID.
+        task_id: The failed task UUID.
+        current_user: The authenticated user.
+        db: Async database session.
+
+    Returns:
+        The new agent task (202 Accepted).
+    """
+    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
+    from app.schemas.jobs import BUDAgentTaskPayload
+    from app.services.job_queue import JOB_BUD_AGENT, create_job
+
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+
+    # Verify the old task
+    old_task = await task_repo.get_by_id(task_id)
+    if not old_task or old_task.bud_id != bud_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if old_task.status != AgentTaskStatus.FAILED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Only failed tasks can be retried"
         )
-        tech_arch_job = create_job(
-            JOB_TECH_ARCH, payload=payload.model_dump(), user_id=str(current_user.id)
+
+    # Guard: no concurrent active task
+    active = await task_repo.get_active_for_bud(bud_id)
+    if active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Another task is already running"
         )
-        meta = dict(bud.metadata_ or {})
-        meta["tech_arch_job_id"] = tech_arch_job.job_id
-        bud.metadata_ = meta
-        await db.flush()
-        await db.refresh(bud)
-        response.headers["X-TechArch-Job"] = "true"
+
+    # Create new task with incremented attempt
+    new_task = BUDAgentTask(
+        org_id=current_user.org_id,
+        bud_id=bud_id,
+        skill_id=old_task.skill_id,
+        task_type=old_task.task_type,
+        status=AgentTaskStatus.PENDING,
+        attempt=old_task.attempt + 1,
+        triggered_by=current_user.id,
+    )
+    db.add(new_task)
+    await db.flush()
+
+    # Enqueue job
+    job = create_job(
+        JOB_BUD_AGENT,
+        payload=BUDAgentTaskPayload(
+            org_id=str(current_user.org_id),
+            bud_id=str(bud_id),
+            task_id=str(new_task.id),
+        ).model_dump(),
+        user_id=str(current_user.id),
+    )
+    new_task.job_id = job.job_id
+    new_task.status = AgentTaskStatus.RUNNING
+    await db.flush()
+
+    return BUDAgentTaskRead.model_validate(new_task)
 
 
 @router.delete(

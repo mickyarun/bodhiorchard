@@ -11,6 +11,7 @@ update_job(state=FAILED) instead.
 
 import os
 
+from app.services.bud_agent_handler import handle_bud_agent_job
 from app.services.job_agents import (
     handle_code_review_job,
     handle_prd_job,
@@ -20,6 +21,7 @@ from app.services.job_agents import (
 from app.services.job_chat import handle_chat_job
 from app.services.job_design import handle_design_agent_job, handle_design_extract_job
 from app.services.job_queue import (
+    JOB_BUD_AGENT,
     JOB_BUD_CHAT,
     JOB_CODE_REVIEW,
     JOB_DESIGN_AGENT,
@@ -33,6 +35,7 @@ from app.services.job_queue import (
 # Re-export all handlers so existing imports continue to work
 __all__ = [
     "setup_job_handlers",
+    "handle_bud_agent_job",
     "handle_chat_job",
     "handle_triage_job",
     "handle_prd_job",
@@ -58,3 +61,7 @@ def setup_job_handlers() -> None:
     register_job_type(JOB_DESIGN_EXTRACT, handle_design_extract_job, worker_count=1)
     register_job_type(JOB_TECH_ARCH, handle_tech_arch_job, worker_count=1)
     register_job_type(JOB_CODE_REVIEW, handle_code_review_job, worker_count=1)
+
+    # Unified BUD agent handler (new path — replaces PRD/tech_arch/code_review above)
+    bud_agent_workers = int(os.environ.get("JOB_BUD_AGENT_WORKERS", "2"))
+    register_job_type(JOB_BUD_AGENT, handle_bud_agent_job, worker_count=bud_agent_workers)

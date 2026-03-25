@@ -24,6 +24,7 @@ JOB_DESIGN_AGENT = "design_agent"
 JOB_DESIGN_EXTRACT = "design_extract"
 JOB_TECH_ARCH = "tech_arch"
 JOB_CODE_REVIEW = "code_review"
+JOB_BUD_AGENT = "bud_agent"
 JOB_SCAN = "scan"  # Future
 JOB_AGENT_RUN = "agent_run"  # Future
 
