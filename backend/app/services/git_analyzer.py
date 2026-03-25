@@ -18,11 +18,6 @@ logger = structlog.get_logger(__name__)
 # How far back to scan by default
 DEFAULT_SINCE = "6.months.ago"
 
-# Common directory names excluded from feature-name matching fallback
-_FEATURE_MATCH_STOP_DIRS = frozenset({
-    "src", "lib", "app", "api", "core", "test", "tests",
-    "utils", "common", "shared", "config", "scripts",
-})
 
 # Extension-to-language mapping
 LANG_MAP: dict[str, str] = {
@@ -80,10 +75,11 @@ def _file_to_feature(
     file_path: str,
     feature_map: FeatureMap,
 ) -> tuple[str, uuid.UUID] | None:
-    """Map a file path to a feature name via longest-prefix match.
+    """Map a file path to a feature name via strict code_locations prefix match.
 
-    Falls back to directory-name matching when no prefix matches: compares
-    the file's directory components against feature name words.
+    Relies on code_locations paths from the junction table (populated by
+    the LLM during synthesis). No fuzzy fallback — if a file doesn't match
+    any feature's code_locations prefixes, it is skipped.
 
     Args:
         file_path: Relative file path from repo root.
@@ -93,27 +89,10 @@ def _file_to_feature(
     Returns:
         Tuple of (feature_name, feature_id), or None if unmatched.
     """
-    # 1. Strict prefix matching (primary)
     for feat_name, prefixes, feat_id in feature_map:
         for prefix in prefixes:
             if file_path.startswith(prefix):
                 return feat_name, feat_id
-
-    # 2. Directory-name fallback: match file's directory components
-    #    against feature name words. Handles singular/plural by checking
-    #    if either is a prefix of the other (e.g. "notifications" dir
-    #    matches feature word "notification" and vice versa).
-    dir_parts = {p.lower() for p in Path(file_path).parts[:-1]} - _FEATURE_MATCH_STOP_DIRS
-    if dir_parts:
-        for feat_name, _prefixes, feat_id in feature_map:
-            feat_words = {w.lower() for w in feat_name.split() if len(w) >= 3}
-            for dp in dir_parts:
-                for fw in feat_words:
-                    # Allow singular/plural but not unrelated prefixes
-                    # ("notifications" ↔ "notification" OK, "webpack" ↔ "web" NOT OK)
-                    if (dp.startswith(fw) or fw.startswith(dp)) and abs(len(dp) - len(fw)) <= 2:
-                        return feat_name, feat_id
-
     return None
 
 
