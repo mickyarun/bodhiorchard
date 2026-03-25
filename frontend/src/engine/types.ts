@@ -49,6 +49,8 @@ export interface EngineFeature {
   branch_name: string | null
   repo_name: string | null
   from_bud: number | null
+  linked_repos: string[]
+  code_locations: Record<string, string[]> | null
 }
 
 export interface EngineBUD {

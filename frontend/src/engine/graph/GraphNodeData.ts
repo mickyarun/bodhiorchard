@@ -28,6 +28,8 @@ export interface GraphFeatureData {
   sourceRef: string | null
   fromBud: number | null
   branchName: string | null
+  linkedRepos: string[]
+  codeLocations: Record<string, string[]> | null
 }
 
 export type GraphNodeData = GraphRepoData | GraphFeatureData

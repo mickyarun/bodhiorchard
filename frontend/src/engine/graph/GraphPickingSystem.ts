@@ -79,6 +79,8 @@ export class GraphPickingSystem {
         sourceRef: data.sourceRef,
         fromBud: data.fromBud,
         branchName: data.branchName,
+        linkedRepos: data.linkedRepos,
+        codeLocations: data.codeLocations,
       })
     }
   }

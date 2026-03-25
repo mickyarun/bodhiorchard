@@ -76,6 +76,8 @@ function adaptTreeData(data: TreeData): EngineData {
       branch_name: f.branch_name,
       repo_name: f.repo_name,
       from_bud: f.from_bud,
+      linked_repos: f.linked_repos ?? [],
+      code_locations: f.code_locations ?? null,
     })),
     buds: data.buds.map(b => ({
       bud_number: b.bud_number,

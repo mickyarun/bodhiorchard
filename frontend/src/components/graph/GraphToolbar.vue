@@ -1,5 +1,5 @@
 <template>
-  <div class="graph-toolbar" @wheel.stop>
+  <div class="graph-toolbar" @wheel.stop @pointerdown.stop @mousedown.stop @click.stop>
     <v-card variant="tonal" class="pa-2 d-flex align-center ga-2 flex-wrap" density="compact">
       <!-- Cross-repo links toggle -->
       <v-btn

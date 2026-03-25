@@ -152,11 +152,17 @@ export class GraphEngine {
     this.picking.setTooltipEnricher((data, text) => {
       if (data.type === 'graph_feature' && this.crossRepo) {
         const count = this.crossRepo.getRepoCount(data.title);
-        if (count > 1) return `${text}\n(${count} repos)`;
+        if (count > 1) {
+          this.crossRepo.showLabelForTitle(data.title);
+          return `${text}\n(${count} repos)`;
+        }
       }
+      // Hide label when hovering non-cross-repo nodes
+      this.crossRepo?.showLabelForTitle(null);
       return text;
     });
     this.crossRepo = new GraphCrossRepoSystem(this.materials);
+    this.crossRepo.setContext(this.app, this.camera.getEntity());
     this.overlay = new GraphOverlaySystem(this.materials);
     this.overlay.init();
     this.overlay.setCameraEntity(this.camera.getEntity());
@@ -437,9 +443,10 @@ export class GraphEngine {
     // Force simulation (repos only — features are fixed offsets)
     this.updateSimulation(dt);
 
-    // Billboard labels + badge billboarding
+    // Billboard labels + badge billboarding + cross-repo label billboarding
     this.labelSystem?.updateBillboards();
     this.overlay?.updatePositions(this.nodeEntities);
+    this.crossRepo?.updatePositions(this.nodeEntities);
 
     // Picking
     if (this.camera && this.input && this.picking) {
@@ -602,6 +609,9 @@ export class GraphEngine {
       this.nodeBuilder = new GraphNodeBuilder(this.materials);
       this.edgeBuilder = new GraphEdgeBuilder(this.materials);
       this.crossRepo = new GraphCrossRepoSystem(this.materials);
+      if (this.app && this.camera) {
+        this.crossRepo.setContext(this.app, this.camera.getEntity());
+      }
       this.overlay = new GraphOverlaySystem(this.materials);
       this.overlay.init();
       if (this.camera) this.overlay.setCameraEntity(this.camera.getEntity());

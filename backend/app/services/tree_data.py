@@ -536,6 +536,7 @@ class _FeatureGroup(TypedDict):
     source_ref: str | None
     feature_status: str | None
     repo_paths: list[str]
+    code_locations: dict[str, list[str]] | None
 
 
 async def _collect_features(
@@ -559,6 +560,7 @@ async def _collect_features(
             KnowledgeItem.title,
             KnowledgeItem.source_ref,
             KnowledgeItem.feature_status,
+            KnowledgeItem.code_locations,
             TrackedRepository.path.label("repo_path"),
         )
         .outerjoin(
@@ -579,13 +581,14 @@ async def _collect_features(
     # Group rows by knowledge item ID to deduplicate multi-repo joins.
     # Each feature maps to a list of repo_paths it is linked to.
     features_by_id: dict[uuid.UUID, _FeatureGroup] = {}
-    for ki_id, title, source_ref, feature_status, repo_path in rows:
+    for ki_id, title, source_ref, feature_status, code_locs, repo_path in rows:
         if ki_id not in features_by_id:
             features_by_id[ki_id] = {
                 "title": title,
                 "source_ref": source_ref,
                 "feature_status": feature_status,
                 "repo_paths": [],
+                "code_locations": code_locs,
             }
         if repo_path:
             features_by_id[ki_id]["repo_paths"].append(repo_path)
@@ -617,6 +620,9 @@ async def _collect_features(
             if rp in repo_lookup:
                 matched_repos.append(repo_lookup[rp])
 
+        all_repo_names = [rn for rn, _ in matched_repos]
+        code_locs = feat["code_locations"]
+
         if matched_repos:
             # Emit one FeatureItem per linked repo
             for repo_name, branch_name in matched_repos:
@@ -628,6 +634,8 @@ async def _collect_features(
                         branch_name=branch_name,
                         repo_name=repo_name,
                         from_bud=from_bud,
+                        linked_repos=all_repo_names,
+                        code_locations=code_locs,
                     )
                 )
         else:
@@ -644,6 +652,8 @@ async def _collect_features(
                     branch_name=branch_name,
                     repo_name=None,
                     from_bud=from_bud,
+                    linked_repos=[],
+                    code_locations=code_locs,
                 )
             )
 

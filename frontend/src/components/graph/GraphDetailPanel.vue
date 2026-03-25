@@ -3,6 +3,9 @@
     class="graph-detail-panel"
     elevation="8"
     @wheel.stop
+    @pointerdown.stop
+    @mousedown.stop
+    @click.stop
   >
     <v-card-title class="d-flex align-center justify-space-between pa-4 pb-2">
       <span class="text-h6 text-truncate" :title="panelTitle">
@@ -104,28 +107,69 @@
     <!-- Feature detail -->
     <template v-if="feature">
       <v-card-text class="pa-4">
-        <div class="d-flex align-center ga-2 mb-3">
+        <div class="d-flex align-center ga-2 mb-3 flex-wrap">
           <v-chip :color="statusColor(feature.status)" size="small" label>
             {{ formatStatus(feature.status) }}
           </v-chip>
-          <span v-if="feature.repoName" class="text-body-2 text-medium-emphasis">
-            {{ feature.repoName }}
-          </span>
-        </div>
-
-        <div v-if="feature.sourceRef" class="text-body-2 text-medium-emphasis mb-3">
-          Source: {{ feature.sourceRef }}
-        </div>
-
-        <div v-if="feature.fromBud" class="mb-3">
           <v-chip
+            v-if="feature.linkedRepos && feature.linkedRepos.length > 1"
+            size="small"
+            color="cyan"
+            variant="tonal"
+            prepend-icon="mdi-link-variant"
+          >
+            {{ feature.linkedRepos.length }} repos
+          </v-chip>
+          <v-chip
+            v-if="feature.fromBud"
             size="small"
             color="success"
             variant="outlined"
             prepend-icon="mdi-seed-outline"
           >
-            From BUD #{{ feature.fromBud }}
+            BUD #{{ feature.fromBud }}
           </v-chip>
+        </div>
+
+        <!-- Linked Repos -->
+        <div v-if="feature.linkedRepos && feature.linkedRepos.length > 0" class="mb-3">
+          <div class="text-subtitle-2 mb-1">Repositories</div>
+          <div class="d-flex ga-1 flex-wrap">
+            <v-chip
+              v-for="repo in feature.linkedRepos"
+              :key="repo"
+              size="small"
+              :variant="repo === feature.repoName ? 'flat' : 'outlined'"
+              :color="repo === feature.repoName ? 'primary' : undefined"
+              label
+              class="cursor-pointer"
+              @click="emit('repo-focus', repo)"
+            >
+              {{ repo }}
+            </v-chip>
+          </div>
+        </div>
+        <div v-else-if="feature.repoName" class="mb-3">
+          <span class="text-body-2 text-medium-emphasis">{{ feature.repoName }}</span>
+        </div>
+
+        <!-- Code Locations -->
+        <div v-if="feature.codeLocations && Object.keys(feature.codeLocations).length > 0" class="mb-3">
+          <div class="text-subtitle-2 mb-1">Code Locations</div>
+          <div v-for="(paths, layer) in feature.codeLocations" :key="layer" class="mb-1">
+            <v-chip size="x-small" label variant="tonal" class="mb-1">{{ layer }}</v-chip>
+            <div
+              v-for="path in paths"
+              :key="path"
+              class="text-caption text-medium-emphasis code-path"
+            >
+              {{ path }}
+            </div>
+          </div>
+        </div>
+
+        <div v-if="feature.sourceRef" class="text-body-2 text-medium-emphasis mb-3">
+          Source: {{ feature.sourceRef }}
         </div>
 
         <!-- Skilled Members -->
@@ -180,6 +224,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'developer-highlight', userId: string): void
+  (e: 'repo-focus', repoName: string): void
 }>()
 
 const featureSearch = ref('')
@@ -332,6 +377,12 @@ const members = computed<SkilledMember[]>(() => {
 
 .feature-row:hover {
   background: rgba(255, 255, 255, 0.04);
+}
+
+.code-path {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  padding-left: 8px;
+  line-height: 1.6;
 }
 
 .feature-dot {

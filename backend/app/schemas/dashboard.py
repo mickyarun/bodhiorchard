@@ -78,6 +78,8 @@ class FeatureItem(BaseModel):
     branch_name: str | None = None
     repo_name: str | None = None
     from_bud: int | None = None
+    linked_repos: list[str] = Field(default_factory=list)
+    code_locations: dict[str, list[str]] | None = None
 
 
 class BUDItem(BaseModel):

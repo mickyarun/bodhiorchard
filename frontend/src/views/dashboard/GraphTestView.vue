@@ -74,6 +74,7 @@
           :tree-data="treeData"
           @close="backToOverview"
           @developer-highlight="onDeveloperHighlight"
+          @repo-focus="repo => graphCanvasRef?.focusOnRepo(repo)"
         />
       </Transition>
     </div>

@@ -135,6 +135,8 @@ export class GraphNodeBuilder {
       sourceRef: feature.source_ref,
       fromBud: feature.from_bud,
       branchName: feature.branch_name,
+      linkedRepos: feature.linked_repos,
+      codeLocations: feature.code_locations,
     })
 
     return entity
