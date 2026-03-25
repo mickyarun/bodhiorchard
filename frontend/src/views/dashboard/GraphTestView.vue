@@ -57,11 +57,13 @@
       <GraphToolbar
         v-if="treeData && !selectedRepo && !selectedFeature"
         :members="toolbarMembers"
+        :repos="toolbarRepos"
         @toggle-cross-repo="v => graphCanvasRef?.setCrossRepoLinksVisible(v)"
         @toggle-bus-factor="v => graphCanvasRef?.setBusFactorVisible(v)"
         @toggle-status="v => graphCanvasRef?.setStatusOverlay(v)"
         @toggle-threats="v => graphCanvasRef?.setThreatOverlay(v)"
         @toggle-bud-badges="v => graphCanvasRef?.setBudBadgesVisible(v)"
+        @filter-repo="v => graphCanvasRef?.filterByRepo(v)"
         @filter-developer="v => graphCanvasRef?.filterByDeveloper(v)"
       />
 
@@ -102,6 +104,10 @@ const toolbarMembers = computed(() =>
     userId: m.user_id,
     name: m.name,
   }))
+)
+
+const toolbarRepos = computed(() =>
+  (treeData.value?.repos ?? []).map(r => r.repo_name).sort()
 )
 
 function onRepoClick(info: GraphRepoInfo): void {

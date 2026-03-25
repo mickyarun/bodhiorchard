@@ -395,6 +395,29 @@ export class GraphEngine {
     this.overlay?.setBudBadgesVisible(visible);
   }
 
+  /** Filter graph to show only the selected repo and its features. null = show all. */
+  filterByRepo(repoName: string | null): void {
+    if (!repoName) {
+      this.overlay?.clearHighlight();
+      return;
+    }
+    // Find the repo entity and all its features
+    const activeIds = new Set<string>();
+    const repoNodeId = `repo_${repoName}`;
+    if (this.nodeEntities.has(repoNodeId)) {
+      activeIds.add(repoNodeId);
+    }
+    // Features that belong to this repo
+    const offsets = this.featureOffsets.get(repoNodeId);
+    if (offsets) {
+      for (const { featureId } of offsets) activeIds.add(featureId);
+    }
+    // Use overlay's dim system
+    if (this.overlay && this.graphRoot) {
+      this.overlay.dimOnly(activeIds, this.nodeEntities);
+    }
+  }
+
   /** Filter graph to show only features associated with a developer. null = show all. */
   filterByDeveloper(userId: string | null): void {
     if (!userId) {

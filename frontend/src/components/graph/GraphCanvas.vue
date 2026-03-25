@@ -235,6 +235,9 @@ defineExpose({
   setThreatOverlay(active: boolean) {
     engine?.setThreatOverlay(active)
   },
+  filterByRepo(repoName: string | null) {
+    engine?.filterByRepo(repoName)
+  },
   filterByDeveloper(userId: string | null) {
     engine?.filterByDeveloper(userId)
   },

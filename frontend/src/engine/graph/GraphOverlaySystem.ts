@@ -241,6 +241,12 @@ export class GraphOverlaySystem {
     }
   }
 
+  /** Dim all nodes except those in the active set (no highlight rings). */
+  dimOnly(activeEntityIds: Set<string>, nodeEntities: Map<string, pc.Entity>): void {
+    this.clearHighlight()
+    this.dimSystem.dimExcept(activeEntityIds, nodeEntities)
+  }
+
   /** Clear developer highlight and restore all node opacities. */
   clearHighlight(): void {
     this.highlightedDevId = null

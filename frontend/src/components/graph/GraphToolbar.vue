@@ -58,7 +58,21 @@
 
       <v-divider vertical class="mx-1" />
 
-      <!-- Developer filter (searchable, scroll-isolated) -->
+      <!-- Repo filter -->
+      <v-autocomplete
+        v-model="selectedRepo"
+        :items="repoItems"
+        placeholder="Filter by repo"
+        density="compact"
+        variant="outlined"
+        hide-details
+        clearable
+        class="repo-filter"
+        :menu-props="{ maxHeight: 250, class: 'graph-dropdown' }"
+        @update:model-value="onRepoFilter"
+      />
+
+      <!-- Developer filter -->
       <v-autocomplete
         v-model="selectedDev"
         :items="devItems"
@@ -94,6 +108,7 @@ interface MemberItem {
 
 const props = defineProps<{
   members: MemberItem[]
+  repos: string[]
 }>()
 
 const emit = defineEmits<{
@@ -103,6 +118,7 @@ const emit = defineEmits<{
   (e: 'toggle-threats', active: boolean): void
   (e: 'toggle-bud-badges', active: boolean): void
   (e: 'filter-developer', userId: string | null): void
+  (e: 'filter-repo', repoName: string | null): void
 }>()
 
 const crossRepo = ref(true)
@@ -111,8 +127,10 @@ const statusColors = ref(false)
 const threats = ref(false)
 const budBadges = ref(false)
 const selectedDev = ref<string | null>(null)
+const selectedRepo = ref<string | null>(null)
 
 const devItems = computed(() => props.members)
+const repoItems = computed(() => props.repos)
 
 function toggleCrossRepo(): void {
   crossRepo.value = !crossRepo.value
@@ -139,6 +157,10 @@ function toggleBudBadges(): void {
   emit('toggle-bud-badges', budBadges.value)
 }
 
+function onRepoFilter(repoName: string | null): void {
+  emit('filter-repo', repoName)
+}
+
 function onDevFilter(userId: string | null): void {
   emit('filter-developer', userId)
 }
@@ -151,6 +173,11 @@ function onDevFilter(userId: string | null): void {
   left: 16px;
   z-index: 10;
   max-width: calc(100% - 32px);
+}
+
+.repo-filter {
+  max-width: 200px;
+  min-width: 150px;
 }
 
 .dev-filter {
