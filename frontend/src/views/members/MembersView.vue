@@ -228,7 +228,7 @@
                 size="18"
                 :color="role.scopeType === 'SYSTEM' ? 'info' : 'success'"
               />
-              <span class="text-subtitle-2 font-weight-bold">{{ role.name }}</span>
+              <span class="text-subtitle-2 font-weight-bold text-high-emphasis">{{ role.name }}</span>
             </div>
             <v-chip
               :color="role.scopeType === 'SYSTEM' ? 'info' : 'success'"
@@ -247,7 +247,7 @@
               v-for="perm in role.permissions.slice(0, 5)"
               :key="perm.id"
               size="x-small"
-              variant="tonal"
+              variant="outlined"
               label
             >
               {{ perm.name }}
