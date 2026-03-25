@@ -101,7 +101,31 @@ async def generate_designs(
             design_id=design_id,
         )
 
-    await db.flush()
+    # Create a BUDAgentTask for unified UI tracking (banner + lock)
+    if results:
+        from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
+        from app.repositories.agent_skill import AgentSkillRepository
+        from app.repositories.bud_agent_task import BUDAgentTaskRepository
+
+        task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+        active = await task_repo.get_active_for_bud(bud_id)
+        if not active:
+            skill_repo = AgentSkillRepository(db, org_id=current_user.org_id)
+            designer_skill = await skill_repo.get_by_slug("designer")
+            if designer_skill:
+                task = BUDAgentTask(
+                    org_id=current_user.org_id,
+                    bud_id=bud_id,
+                    skill_id=designer_skill.id,
+                    task_type="design",
+                    status=AgentTaskStatus.RUNNING,
+                    attempt=1,
+                    triggered_by=current_user.id,
+                    job_id=results[0]["jobId"],
+                )
+                db.add(task)
+
+    await db.commit()
     return results
 
 

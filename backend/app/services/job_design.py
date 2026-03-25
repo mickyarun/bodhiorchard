@@ -181,6 +181,32 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         error=final_error,
     )
 
+    # Check if all design jobs for this BUD are done — complete the tracking task
+    await _maybe_complete_design_task(payload.bud_id, payload.org_id)
+
+
+async def _maybe_complete_design_task(bud_id: str, org_id: str) -> None:
+    """Mark design BUDAgentTask as complete if no designs are still generating."""
+    from app.database import AsyncSessionLocal
+    from app.models.bud import BUDDesignStatus
+    from app.models.bud_agent_task import AgentTaskStatus
+    from app.repositories.bud import BUDDesignRepository
+    from app.repositories.bud_agent_task import BUDAgentTaskRepository
+
+    async with AsyncSessionLocal() as db:
+        design_repo = BUDDesignRepository(db, org_id=uuid_mod.UUID(org_id))
+        still_generating = await design_repo.count_by_status(
+            uuid_mod.UUID(bud_id), BUDDesignStatus.GENERATING,
+        )
+        if still_generating > 0:
+            return
+
+        task_repo = BUDAgentTaskRepository(db, org_id=uuid_mod.UUID(org_id))
+        task = await task_repo.get_active_for_bud(uuid_mod.UUID(bud_id))
+        if task and task.task_type == "design":
+            task.status = AgentTaskStatus.COMPLETED
+            await db.commit()
+
 
 async def handle_design_extract_job(job_id: str, raw_payload: dict[str, Any]) -> None:
     """Extract a design system from a tracked repository via LLM."""

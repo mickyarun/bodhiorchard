@@ -47,6 +47,15 @@ async def create_agent_task_for_stage(
     if not first:
         return
 
+    # Skip if agent already completed or is running for this stage
+    from app.repositories.bud_agent_task import BUDAgentTaskRepository
+
+    task_repo = BUDAgentTaskRepository(db, org_id=org_id)
+    if await task_repo.get_completed_for_bud_and_type(bud.id, bud_status):
+        return
+    if await task_repo.get_active_for_bud(bud.id):
+        return
+
     task = BUDAgentTask(
         org_id=org_id,
         bud_id=bud.id,

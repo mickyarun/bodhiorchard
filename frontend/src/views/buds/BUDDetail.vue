@@ -104,6 +104,7 @@
                     <v-list-item
                       base-color="error"
                       class="delete-item"
+                      :disabled="agentLocked"
                       @click="confirmDelete = true"
                     >
                       <div class="d-flex align-center">
@@ -407,7 +408,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
@@ -551,9 +552,10 @@ watch(
   { immediate: true },
 )
 
-// Auto-close chat panel when agent starts
-watch(agentLocked, (locked) => {
+// Auto-close chat panel when agent starts; reload timeline when agent finishes
+watch(agentLocked, (locked, wasLocked) => {
   if (locked && chatOpen.value) chatOpen.value = false
+  if (!locked && wasLocked) loadTimeline()
 })
 
 // Load chat history when switching tabs
@@ -606,11 +608,12 @@ async function updateStatus(newStatus: string): Promise<void> {
 
   await budStore.updateBUD(bud.value.id, { status: newStatus } as never)
 
-  // If entering design phase, trigger design generation flow
+  // If entering design phase, switch to design tab and open repo picker
   if (budStore.designAvailable) {
     budStore.designAvailable = false
-    // Trigger via the design panel ref
     activeTab.value = 'design'
+    await nextTick()
+    designPanelRef.value?.triggerDesignGeneration()
   }
 
   await loadTimeline()

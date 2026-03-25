@@ -118,6 +118,21 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
             for row in rows
         ]
 
+    async def count_by_status(
+        self, bud_id: uuid.UUID, status: BUDDesignStatus,
+    ) -> int:
+        """Count designs for a BUD with a given status."""
+        from sqlalchemy import func
+
+        stmt = self._scoped(
+            select(func.count())
+            .select_from(BUDDesign)
+            .where(BUDDesign.bud_id == bud_id)
+            .where(BUDDesign.status == status)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one()
+
     async def upsert(
         self,
         bud_id: uuid.UUID,

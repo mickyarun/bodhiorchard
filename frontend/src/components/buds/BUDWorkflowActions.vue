@@ -268,6 +268,7 @@ const agentStatusMessage = ref('')
 
 const AGENT_CONFIG: Record<string, { name: string; label: string }> = {
   bud: { name: 'PM Agent', label: 'Writing requirements...' },
+  design: { name: 'Designer Agent', label: 'Generating wireframes...' },
   tech_arch: { name: 'Tech Architect Agent', label: 'Generating tech spec...' },
   code_review: { name: 'Code Review Agent', label: 'Reviewing code...' },
 }

@@ -167,6 +167,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useSettingsStore } from '@/stores/settings'
+import { useDesignSystemStore } from '@/stores/designSystem'
 import { useJobSocket } from '@/composables/useJobSocket'
 import type { BUDDesign, RepoInfo } from '@/types'
 
@@ -182,6 +183,7 @@ const emit = defineEmits<{
 
 const budStore = useBUDStore()
 const settingsStore = useSettingsStore()
+const designSystemStore = useDesignSystemStore()
 const { startTracking } = useJobSocket()
 
 // Multi-design state
@@ -262,15 +264,20 @@ async function loadDesigns(): Promise<void> {
 
 async function triggerDesignGeneration(): Promise<void> {
   availableReposLoading.value = true
-  await settingsStore.fetchRepos()
-  const activeRepos = settingsStore.repos.filter(r => r.status === 'active')
-  availableRepos.value = activeRepos
+  await Promise.all([settingsStore.fetchRepos(), designSystemStore.fetchAll()])
+
+  // Only show repos that have a design system extracted
+  const dsRepoIds = new Set(designSystemStore.items.map(ds => ds.repo_id))
+  const frontendRepos = settingsStore.repos.filter(
+    r => r.status === 'active' && dsRepoIds.has(r.id),
+  )
+  availableRepos.value = frontendRepos
   availableReposLoading.value = false
 
-  if (activeRepos.length === 0) {
+  if (frontendRepos.length === 0) {
     await startDesignJobs([])
-  } else if (activeRepos.length === 1) {
-    await startDesignJobs([activeRepos[0].id])
+  } else if (frontendRepos.length === 1) {
+    await startDesignJobs([frontendRepos[0].id])
   } else {
     selectedRepoIds.value = []
     showRepoDialog.value = true
@@ -285,6 +292,7 @@ async function confirmDesignGeneration(): Promise<void> {
 async function startDesignJobs(repoIds: string[]): Promise<void> {
   const jobs = await budStore.generateDesigns(props.budId, repoIds)
   await loadDesigns()
+  await budStore.fetchBUD(props.budId)  // Trigger agent banner via active_agent_task
   emit('switch-to-design')
   for (const job of jobs) {
     trackDesignJob(job.designId, job.jobId)
@@ -368,6 +376,7 @@ defineExpose({
   loadDesigns,
   toggleDesignEdit,
   refreshDesignPreview,
+  triggerDesignGeneration,
   updateBlobUrls,
 })
 </script>
