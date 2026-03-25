@@ -99,10 +99,10 @@
             :key="dir.path"
             :value="dir.path"
             class="dir-item"
-            @click="navigateTo(dir.path)"
+            @click="dir.is_git_repo ? toggleRepo(dir.path) : navigateTo(dir.path)"
           >
             <template #prepend>
-              <!-- Checkbox for git repos -->
+              <!-- Checkbox for git repos, folder icon for regular dirs -->
               <v-checkbox-btn
                 v-if="dir.is_git_repo"
                 :model-value="selectedPaths.has(dir.path)"
@@ -125,22 +125,20 @@
                 :class="{ 'invisible': !dir.is_git_repo }"
               />
             </template>
-            <v-list-item-title class="text-body-2">{{ dir.name }}</v-list-item-title>
+            <v-list-item-title class="text-body-2">
+              {{ dir.name }}
+              <span v-if="dir.is_git_repo" class="text-caption text-medium-emphasis">
+                Git repository
+              </span>
+            </v-list-item-title>
             <template #append>
-              <v-chip
-                v-if="dir.is_git_repo"
-                size="x-small"
-                variant="tonal"
-                color="primary"
-                class="ml-2"
+              <div
+                class="browse-icon d-flex align-center"
+                title="Browse inside"
+                @click.stop="navigateTo(dir.path)"
               >
-                git
-              </v-chip>
-              <v-icon
-                icon="mdi-chevron-right"
-                size="18"
-                class="text-medium-emphasis ml-1"
-              />
+                <v-icon icon="mdi-chevron-right" size="20" />
+              </div>
             </template>
           </v-list-item>
         </v-list>
@@ -301,5 +299,18 @@ defineExpose({ open })
   visibility: hidden;
   width: 0;
   margin: 0;
+}
+
+.browse-icon {
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.browse-icon:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
 }
 </style>

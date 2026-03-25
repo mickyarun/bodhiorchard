@@ -240,6 +240,14 @@
               <v-list-item-subtitle v-if="entry.is_git_repo">
                 Git repository
               </v-list-item-subtitle>
+              <template #append>
+                <v-icon
+                  icon="mdi-chevron-right"
+                  size="20"
+                  class="text-medium-emphasis"
+                  @click.stop="browse(entry.path)"
+                />
+              </template>
             </v-list-item>
             <v-list-item v-if="!directories.length && !browseLoading">
               <div class="text-caption text-medium-emphasis">No subdirectories</div>
