@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="graph-header d-flex align-center ga-3 px-4 py-2">
       <v-btn
-        v-if="selectedRepo"
+        v-if="selectedRepo || selectedFeature"
         icon="mdi-arrow-left"
         variant="text"
         size="small"
@@ -53,26 +53,17 @@
         @feature-click="onFeatureClick"
       />
 
-      <!-- Legend (hidden when repo is focused) -->
-      <div v-if="!selectedRepo" class="graph-legend">
-        <v-card variant="tonal" class="pa-3" density="compact">
-          <div class="text-caption font-weight-bold mb-2">Legend</div>
-          <div class="d-flex flex-column ga-1">
-            <div class="d-flex align-center ga-2">
-              <div class="legend-dot" style="width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.5);" />
-              <span class="text-caption">Repo (unique color each)</span>
-            </div>
-            <div class="d-flex align-center ga-2">
-              <div class="legend-dot" style="width: 8px; height: 8px; border: 2px solid rgba(255,255,255,0.3);" />
-              <span class="text-caption">Feature (lighter tint of repo)</span>
-            </div>
-            <div class="d-flex align-center ga-2">
-              <div class="legend-line" />
-              <span class="text-caption">Curved arc = connection</span>
-            </div>
-          </div>
-        </v-card>
-      </div>
+      <!-- Toolbar (hidden when detail panel is open) -->
+      <GraphToolbar
+        v-if="treeData && !selectedRepo && !selectedFeature"
+        :members="toolbarMembers"
+        @toggle-cross-repo="v => graphCanvasRef?.setCrossRepoLinksVisible(v)"
+        @toggle-bus-factor="v => graphCanvasRef?.setBusFactorVisible(v)"
+        @toggle-status="v => graphCanvasRef?.setStatusOverlay(v)"
+        @toggle-threats="v => graphCanvasRef?.setThreatOverlay(v)"
+        @toggle-bud-badges="v => graphCanvasRef?.setBudBadgesVisible(v)"
+        @filter-developer="v => graphCanvasRef?.filterByDeveloper(v)"
+      />
 
       <!-- Detail panel -->
       <Transition name="slide">
@@ -82,6 +73,7 @@
           :feature="selectedFeature"
           :tree-data="treeData"
           @close="backToOverview"
+          @developer-highlight="onDeveloperHighlight"
         />
       </Transition>
     </div>
@@ -93,6 +85,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useDashboardStore } from '@/stores/dashboard'
 import GraphCanvas from '@/components/graph/GraphCanvas.vue'
 import GraphDetailPanel from '@/components/graph/GraphDetailPanel.vue'
+import GraphToolbar from '@/components/graph/GraphToolbar.vue'
 import type { GraphRepoInfo, GraphFeatureInfo } from '@/engine/graph'
 
 const dashboardStore = useDashboardStore()
@@ -103,10 +96,16 @@ const selectedFeature = ref<GraphFeatureInfo | null>(null)
 
 const treeData = computed(() => dashboardStore.treeData)
 
+const toolbarMembers = computed(() =>
+  (treeData.value?.members ?? []).map(m => ({
+    userId: m.user_id,
+    name: m.name,
+  }))
+)
+
 function onRepoClick(info: GraphRepoInfo): void {
   selectedRepo.value = info
   selectedFeature.value = null
-  // Focus camera on the clicked repo
   graphCanvasRef.value?.focusOnRepo(info.repoName)
 }
 
@@ -115,9 +114,14 @@ function onFeatureClick(info: GraphFeatureInfo): void {
   selectedRepo.value = null
 }
 
+function onDeveloperHighlight(userId: string): void {
+  graphCanvasRef.value?.highlightDeveloper(userId)
+}
+
 function backToOverview(): void {
   selectedRepo.value = null
   selectedFeature.value = null
+  graphCanvasRef.value?.clearHighlight()
   graphCanvasRef.value?.resetView()
 }
 
@@ -147,26 +151,6 @@ onMounted(async () => {
 .graph-body {
   flex: 1;
   min-height: 0;
-}
-
-.graph-legend {
-  position: absolute;
-  bottom: 16px;
-  left: 16px;
-  z-index: 10;
-}
-
-.legend-dot {
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.legend-line {
-  width: 20px;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.4);
-  border-radius: 1px;
-  flex-shrink: 0;
 }
 
 .slide-enter-active,

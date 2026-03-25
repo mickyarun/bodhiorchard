@@ -22,7 +22,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import type { TreeData } from '@/types/dashboard'
-import type { EngineData, RepoHealth, ThreatSeverity, BUDStatus, RelType } from '@/engine/types'
+import type { EngineData, EngineFeatureSkill, RepoHealth, ThreatSeverity, BUDStatus, RelType } from '@/engine/types'
 import { GraphEngine } from '@/engine/graph'
 import type { GraphRepoInfo, GraphFeatureInfo } from '@/engine/graph'
 
@@ -115,6 +115,12 @@ function adaptTreeData(data: TreeData): EngineData {
       rel_type: r.rel_type as RelType,
       weight: r.weight,
     })),
+    feature_skills: (data.feature_skills ?? []).map((s): EngineFeatureSkill => ({
+      feature_title: s.feature_title,
+      developer_count: s.developer_count,
+      developers: s.developers,
+      top_developer_name: s.top_developer_name ?? null,
+    })),
   }
 }
 
@@ -201,13 +207,37 @@ onUnmounted(() => {
   }
 })
 
-/** Expose engine methods to parent for camera control. */
+/** Expose engine methods to parent for camera control and overlays. */
 defineExpose({
   focusOnRepo(repoName: string) {
     engine?.focusOnNode(`repo_${repoName}`)
   },
   resetView() {
     engine?.resetView()
+  },
+  setCrossRepoLinksVisible(visible: boolean) {
+    engine?.setCrossRepoLinksVisible(visible)
+  },
+  setBusFactorVisible(visible: boolean) {
+    engine?.setBusFactorVisible(visible)
+  },
+  highlightDeveloper(userId: string) {
+    engine?.highlightDeveloper(userId)
+  },
+  clearHighlight() {
+    engine?.clearHighlight()
+  },
+  setStatusOverlay(active: boolean) {
+    engine?.setStatusOverlay(active)
+  },
+  setThreatOverlay(active: boolean) {
+    engine?.setThreatOverlay(active)
+  },
+  filterByDeveloper(userId: string | null) {
+    engine?.filterByDeveloper(userId)
+  },
+  setBudBadgesVisible(visible: boolean) {
+    engine?.setBudBadgesVisible(visible)
   },
 })
 </script>

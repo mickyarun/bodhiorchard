@@ -118,6 +118,12 @@ function adaptTreeData(data: TreeData): EngineData {
       rel_type: r.rel_type as RelType,
       weight: r.weight,
     })),
+    feature_skills: (data.feature_skills ?? []).map(s => ({
+      feature_title: s.feature_title,
+      developer_count: s.developer_count,
+      developers: s.developers,
+      top_developer_name: s.top_developer_name ?? null,
+    })),
   }
 }
 

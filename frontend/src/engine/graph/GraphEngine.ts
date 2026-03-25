@@ -36,6 +36,8 @@ import { GraphEdgeBuilder, type EdgeHandle } from "./GraphEdgeBuilder";
 import { GraphLabelSystem } from "./GraphLabelSystem";
 import { GraphCameraController } from "./GraphCameraController";
 import { GraphPickingSystem } from "./GraphPickingSystem";
+import { GraphCrossRepoSystem } from "./GraphCrossRepoSystem";
+import { GraphOverlaySystem } from "./GraphOverlaySystem";
 import type { GraphCallbacks } from "./GraphTypes";
 
 // ─── Layout Constants ───────────────────────────
@@ -68,6 +70,8 @@ export class GraphEngine {
   private nodeBuilder: GraphNodeBuilder | null = null;
   private edgeBuilder: GraphEdgeBuilder | null = null;
   private labelSystem: GraphLabelSystem | null = null;
+  private crossRepo: GraphCrossRepoSystem | null = null;
+  private overlay: GraphOverlaySystem | null = null;
 
   // Entity tracking
   private nodeEntities = new Map<string, pc.Entity>();
@@ -145,6 +149,17 @@ export class GraphEngine {
     this.labelSystem = new GraphLabelSystem();
     this.labelSystem.setCameraEntity(this.camera.getEntity());
     this.picking = new GraphPickingSystem();
+    this.picking.setTooltipEnricher((data, text) => {
+      if (data.type === 'graph_feature' && this.crossRepo) {
+        const count = this.crossRepo.getRepoCount(data.title);
+        if (count > 1) return `${text}\n(${count} repos)`;
+      }
+      return text;
+    });
+    this.crossRepo = new GraphCrossRepoSystem(this.materials);
+    this.overlay = new GraphOverlaySystem(this.materials);
+    this.overlay.init();
+    this.overlay.setCameraEntity(this.camera.getEntity());
 
     // Frame loop
     this.app.on("update", (dt: number) => this.onUpdate(dt));
@@ -301,6 +316,15 @@ export class GraphEngine {
       }
     }
 
+    // ─── Cross-repo feature arcs ────────────────────
+    this.crossRepo?.build(this.nodeEntities, this.graphRoot);
+
+    // ─── Developer skill overlays ─────────────────
+    this.overlay?.setThreats(data.threats);
+    this.overlay?.setBuds(data.buds);
+    this.overlay?.build(data.feature_skills, this.nodeEntities, this.graphRoot);
+    this.overlay?.buildBudBadges(this.app!, this.nodeEntities, this.graphRoot);
+
     // ─── Auto-frame camera to fit graph ───────────
     this.autoFrameCamera(repos, featuresByRepo);
   }
@@ -323,6 +347,58 @@ export class GraphEngine {
     this.camera?.resetView();
   }
 
+  /** Toggle cross-repo feature arcs on/off. */
+  setCrossRepoLinksVisible(visible: boolean): void {
+    this.crossRepo?.setVisible(visible);
+  }
+
+  /** Get the number of repos a feature spans (1 = single-repo). */
+  getFeatureRepoCount(title: string): number {
+    return this.crossRepo?.getRepoCount(title) ?? 1;
+  }
+
+  /** Toggle bus factor warning rings on features. */
+  setBusFactorVisible(visible: boolean): void {
+    this.overlay?.setBusFactorVisible(visible);
+  }
+
+  /** Highlight all features a developer is skilled in, dim others. */
+  highlightDeveloper(userId: string): void {
+    if (!this.graphRoot) return;
+    this.overlay?.highlightDeveloper(userId, this.nodeEntities, this.graphRoot);
+  }
+
+  /** Clear developer highlight and restore all opacities. */
+  clearHighlight(): void {
+    this.overlay?.clearHighlight();
+  }
+
+  /** Toggle status color overlay (features recolored by planned/in_progress/implemented). */
+  setStatusOverlay(active: boolean): void {
+    this.overlay?.setStatusOverlay(active, this.nodeEntities);
+  }
+
+  /** Toggle threat/bug highlight overlay. */
+  setThreatOverlay(active: boolean): void {
+    if (!this.graphRoot) return;
+    this.overlay?.setThreatOverlay(active, this.nodeEntities, this.graphRoot);
+  }
+
+  /** Toggle BUD lifecycle badges on features. */
+  setBudBadgesVisible(visible: boolean): void {
+    this.overlay?.setBudBadgesVisible(visible);
+  }
+
+  /** Filter graph to show only features associated with a developer. null = show all. */
+  filterByDeveloper(userId: string | null): void {
+    if (!userId) {
+      this.overlay?.clearHighlight();
+      return;
+    }
+    if (!this.graphRoot) return;
+    this.overlay?.highlightDeveloper(userId, this.nodeEntities, this.graphRoot);
+  }
+
   resize(width: number, height: number): void {
     this.app?.resizeCanvas(width, height);
   }
@@ -330,6 +406,10 @@ export class GraphEngine {
   destroy(): void {
     this.clearGraph();
     this.simulator = null;
+    this.crossRepo?.destroy();
+    this.crossRepo = null;
+    this.overlay?.destroy();
+    this.overlay = null;
     this.input?.destroy();
     this.input = null;
     this.picking = null;
@@ -357,8 +437,9 @@ export class GraphEngine {
     // Force simulation (repos only — features are fixed offsets)
     this.updateSimulation(dt);
 
-    // Billboard labels
+    // Billboard labels + badge billboarding
     this.labelSystem?.updateBillboards();
+    this.overlay?.updatePositions(this.nodeEntities);
 
     // Picking
     if (this.camera && this.input && this.picking) {
@@ -413,6 +494,12 @@ export class GraphEngine {
         }
       }
     }
+
+    // Update cross-repo arcs (features moved, so arc endpoints changed)
+    this.crossRepo?.updatePositions(this.nodeEntities);
+
+    // Update bus factor ring positions
+    this.overlay?.updatePositions(this.nodeEntities);
   }
 
   // ─── Setup Helpers ─────────────────────────────
@@ -508,10 +595,16 @@ export class GraphEngine {
     this.labelSystem?.destroy();
     this.nodeBuilder?.destroy();
     this.edgeBuilder?.destroy();
+    this.crossRepo?.destroy();
+    this.overlay?.destroy();
 
     if (this.materials) {
       this.nodeBuilder = new GraphNodeBuilder(this.materials);
       this.edgeBuilder = new GraphEdgeBuilder(this.materials);
+      this.crossRepo = new GraphCrossRepoSystem(this.materials);
+      this.overlay = new GraphOverlaySystem(this.materials);
+      this.overlay.init();
+      if (this.camera) this.overlay.setCameraEntity(this.camera.getEntity());
     }
     this.labelSystem = new GraphLabelSystem();
     if (this.camera) this.labelSystem.setCameraEntity(this.camera.getEntity());

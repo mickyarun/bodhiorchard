@@ -90,6 +90,18 @@ class BUDItem(BaseModel):
     repo_name: str | None = None
 
 
+class FeatureSkillSummary(BaseModel):
+    """Developer skill summary for a feature (bus factor analysis)."""
+
+    feature_title: str
+    developer_count: int = 0
+    developers: list[str] = Field(
+        default_factory=list,
+        description="user_id list of developers skilled in this feature's modules",
+    )
+    top_developer_name: str | None = None
+
+
 class RelationshipArc(BaseModel):
     """A code relationship arc between two branches/modules."""
 
@@ -148,3 +160,6 @@ class TreeData(BaseModel):
 
     # Code relationship arcs between branches
     relationships: list[RelationshipArc] = []
+
+    # Feature skill summaries (bus factor analysis)
+    feature_skills: list[FeatureSkillSummary] = []

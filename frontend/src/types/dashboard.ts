@@ -106,4 +106,12 @@ export interface TreeData {
   threats: SecurityThreat[]
   agent_activity: AgentActivityItem[]
   relationships: RelationshipArc[]
+  feature_skills: FeatureSkillSummary[]
+}
+
+export interface FeatureSkillSummary {
+  feature_title: string
+  developer_count: number
+  developers: string[]
+  top_developer_name: string | null
 }

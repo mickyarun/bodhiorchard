@@ -89,6 +89,15 @@ export interface EngineAgentActivity {
   status: string
 }
 
+// ─── Feature Skills (Bus Factor) ────────────────────
+
+export interface EngineFeatureSkill {
+  feature_title: string
+  developer_count: number
+  developers: string[]
+  top_developer_name: string | null
+}
+
 // ─── Relationships ──────────────────────────────────
 
 export interface EngineRelationship {
@@ -110,6 +119,7 @@ export interface EngineData {
   members: EngineMember[]
   agent_activity: EngineAgentActivity[]
   relationships: EngineRelationship[]
+  feature_skills: EngineFeatureSkill[]
 }
 
 // ─── Callback Events ────────────────────────────────

@@ -77,8 +77,12 @@ export class InputManager {
     this.mouse.on(pc.EVENT_MOUSEMOVE, this.onMouseMove, this)
     this.mouse.on(pc.EVENT_MOUSEWHEEL, this.onMouseWheel, this)
 
-    // Prevent page scroll when wheeling over the canvas
+    // Prevent page scroll when wheeling over the canvas (but not UI overlays)
     this.nativeWheelHandler = (e: WheelEvent) => {
+      if (e.target instanceof HTMLElement &&
+          e.target.closest('.v-overlay, .v-menu, .v-list, .graph-detail-panel, .graph-toolbar')) {
+        return
+      }
       e.preventDefault()
     }
     canvas.addEventListener('wheel', this.nativeWheelHandler, { passive: false })
@@ -233,6 +237,13 @@ export class InputManager {
   }
 
   private onMouseWheel(event: pc.MouseEvent): void {
+    // Ignore scroll when mouse is over a UI overlay (dropdown menus, panels)
+    const native = (event as unknown as { event?: Event }).event
+    if (native?.target instanceof HTMLElement) {
+      if (native.target.closest('.v-overlay, .v-menu, .v-list, .graph-detail-panel, .graph-toolbar')) {
+        return
+      }
+    }
     this.scrollDelta += event.wheelDelta
   }
 

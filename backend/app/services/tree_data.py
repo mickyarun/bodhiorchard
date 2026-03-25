@@ -34,6 +34,7 @@ from app.schemas.dashboard import (
     BUDItem,
     BUDStageCount,
     FeatureItem,
+    FeatureSkillSummary,
     LeafData,
     MemberActivity,
     RelationshipArc,
@@ -103,6 +104,9 @@ async def get_tree_data(
 
     # 7. Detect cross-repo relationships from shared branch/community names
     _collect_cross_repo_relationships(tree)
+
+    # 8. Compute feature skill summaries (bus factor)
+    await _compute_feature_skills(db, org_id, tree)
 
     _cache[cache_key] = tree
     return tree
@@ -726,18 +730,24 @@ async def _collect_members(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) 
 
     total_touches = sum(row.total_touches or 0 for row in rows)
 
+    # Pre-load top 3 modules per user in a single query (avoids N+1)
+    user_ids = [row.id for row in rows]
+    modules_result = await db.execute(
+        select(SkillProfile.user_id, SkillProfile.module, SkillProfile.skill_score)
+        .where(SkillProfile.org_id == org_id)
+        .where(SkillProfile.user_id.in_(user_ids))
+        .order_by(SkillProfile.user_id, SkillProfile.skill_score.desc())
+    )
+    user_modules: dict[uuid.UUID, list[str]] = {}
+    for uid, module, _score in modules_result.all():
+        user_modules.setdefault(uid, [])
+        if len(user_modules[uid]) < 3:
+            user_modules[uid].append(module)
+
     for row in rows:
         touches = row.total_touches or 0
         care_pct = round((touches / total_touches * 100) if total_touches > 0 else 0, 1)
-
-        modules_result = await db.execute(
-            select(SkillProfile.module)
-            .where(SkillProfile.user_id == row.id)
-            .where(SkillProfile.org_id == org_id)
-            .order_by(SkillProfile.skill_score.desc())
-            .limit(3)
-        )
-        top_modules = [m for (m,) in modules_result.all()]
+        top_modules = user_modules.get(row.id, [])
 
         # Look up Slack presence state
         presence = "active"
@@ -802,3 +812,96 @@ def _collect_cross_repo_relationships(tree: TreeData) -> None:
         shared_communities=shared_names[:10],
         total_relationships=len(tree.relationships),
     )
+
+
+async def _compute_feature_skills(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    tree: TreeData,
+) -> None:
+    """Compute developer skill summaries per feature for bus-factor analysis.
+
+    Matches developers to features by module name. For each feature, finds
+    developers whose SkillProfile.module matches the feature's branch_name
+    (case-insensitive substring). This works because branch names are
+    top-level directory communities and skill modules are the same directories.
+
+    Falls back to feature_id FK when available, but most profiles use module matching.
+    """
+    # 1. Load all skill profiles for this org (module → developers)
+    result = await db.execute(
+        select(
+            SkillProfile.module,
+            SkillProfile.user_id,
+            SkillProfile.skill_score,
+            SkillProfile.feature_id,
+            User.name.label("dev_name"),
+        )
+        .join(User, User.id == SkillProfile.user_id)
+        .where(SkillProfile.org_id == org_id)
+        .where(SkillProfile.skill_score > 0.1)
+        .where(User.is_active.is_(True))
+        .order_by(SkillProfile.skill_score.desc())
+    )
+    rows = result.all()
+
+    # Build module→developers and feature_id→developers lookups
+    # module_lower → [(uid, name, score)]
+    module_devs: dict[str, list[tuple[str, str, float]]] = {}
+    for module, user_id, score, _feature_id, dev_name in rows:
+        key = module.lower()
+        module_devs.setdefault(key, []).append((str(user_id), dev_name, float(score)))
+
+    # 2. For each unique feature title, find matching developers
+    seen_titles: set[str] = set()
+    for feat in tree.features:
+        if feat.title in seen_titles:
+            continue
+        seen_titles.add(feat.title)
+
+        matched: dict[str, tuple[str, float]] = {}  # uid → (name, best_score)
+
+        # Extract keywords from feature title for matching
+        # e.g. "Feature: Payment Refund Processing" → ["payment", "refund", "processing"]
+        raw_title = feat.title.lower()
+        # Strip "feature:" prefix if present
+        if raw_title.startswith("feature:"):
+            raw_title = raw_title[8:]
+        title_words = [
+            w for w in raw_title.split()
+            if len(w) > 2 and w not in {"the", "and", "for", "with"}
+        ]
+
+        # Match by branch_name (module == branch/community name)
+        if feat.branch_name:
+            branch_lower = feat.branch_name.lower()
+            for mod_key, devs in module_devs.items():
+                if branch_lower in mod_key or mod_key in branch_lower:
+                    for uid, name, score in devs:
+                        if uid not in matched or score > matched[uid][1]:
+                            matched[uid] = (name, score)
+
+        # Match by title keywords against module names
+        # A module matches if 2+ title keywords appear in it
+        if not matched and len(title_words) >= 2:
+            for mod_key, devs in module_devs.items():
+                hits = sum(1 for w in title_words if w in mod_key)
+                if hits >= 2:
+                    for uid, name, score in devs:
+                        if uid not in matched or score > matched[uid][1]:
+                            matched[uid] = (name, score)
+
+        if not matched:
+            continue
+
+        # Sort by score descending
+        sorted_devs = sorted(matched.items(), key=lambda x: x[1][1], reverse=True)
+
+        tree.feature_skills.append(
+            FeatureSkillSummary(
+                feature_title=feat.title,
+                developer_count=len(sorted_devs),
+                developers=[uid for uid, _ in sorted_devs],
+                top_developer_name=sorted_devs[0][1][0] if sorted_devs else None,
+            )
+        )

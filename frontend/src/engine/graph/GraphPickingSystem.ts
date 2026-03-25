@@ -7,16 +7,26 @@
 import * as pc from 'playcanvas'
 import type { InputManager } from '../input/InputManager'
 import { getGraphData } from './GraphNodeData'
+import type { GraphNodeData } from './GraphNodeData'
 import type { GraphCallbacks } from './GraphTypes'
+
+/** Optional function to enrich hover tooltip text (e.g. add cross-repo count). */
+export type TooltipEnricher = (data: GraphNodeData, baseText: string) => string
 
 export class GraphPickingSystem {
   private lastHoveredId: string | null = null
   private lastHoverPos = { x: -1, y: -1 }
+  private tooltipEnricher: TooltipEnricher | null = null
 
   // Pre-allocated scratch vectors for raycasting
   private readonly _rayFrom = new pc.Vec3()
   private readonly _rayTo = new pc.Vec3()
   private readonly _rayDir = new pc.Vec3()
+
+  /** Set optional tooltip enricher (called after base tooltip text is computed). */
+  setTooltipEnricher(enricher: TooltipEnricher | null): void {
+    this.tooltipEnricher = enricher
+  }
 
   /** Run picking for one frame. */
   update(
@@ -87,10 +97,14 @@ export class GraphPickingSystem {
     if (nodeId === this.lastHoveredId) return
 
     this.lastHoveredId = nodeId
-    const text =
+    let text =
       data.type === 'graph_repo'
         ? `${data.repoName} (${data.health})`
         : `${data.title}\n[${data.status}]`
+
+    if (this.tooltipEnricher) {
+      text = this.tooltipEnricher(data, text)
+    }
 
     callbacks.onHover?.({ text, screenX: hoverPos.x, screenY: hoverPos.y })
   }

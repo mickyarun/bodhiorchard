@@ -5,7 +5,7 @@
     @wheel.stop
   >
     <v-card-title class="d-flex align-center justify-space-between pa-4 pb-2">
-      <span class="text-h6 text-truncate">
+      <span class="text-h6 text-truncate" :title="panelTitle">
         {{ panelTitle }}
       </span>
       <v-btn icon="mdi-close" variant="text" size="small" @click="emit('close')" />
@@ -135,7 +135,8 @@
             <v-list-item
               v-for="member in members"
               :key="member.user_id"
-              class="px-0"
+              class="px-0 cursor-pointer"
+              @click="emit('developer-highlight', member.user_id)"
             >
               <template #prepend>
                 <v-avatar size="28" color="primary" variant="tonal" class="mr-2">
@@ -178,6 +179,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'developer-highlight', userId: string): void
 }>()
 
 const featureSearch = ref('')
@@ -244,10 +246,31 @@ const repoFeatureCounts = computed(() => {
   return Object.keys(counts).length > 0 ? counts : null
 })
 
-/** Match members whose top_modules overlap with the feature's branch_name or title. */
+/** Find skilled developers for this feature using backend-computed feature_skills. */
 const members = computed<SkilledMember[]>(() => {
   if (!props.feature || !props.treeData) return []
 
+  // 1. Try backend-computed feature_skills (most accurate)
+  const skillSummary = props.treeData.feature_skills?.find(
+    s => s.feature_title === props.feature!.title
+  )
+
+  if (skillSummary && skillSummary.developers.length > 0) {
+    const memberMap = new Map(props.treeData.members.map(m => [m.user_id, m]))
+    return skillSummary.developers
+      .map(uid => {
+        const m = memberMap.get(uid)
+        if (!m) return null
+        return {
+          user_id: uid,
+          name: m.name,
+          matchingModules: m.top_modules.slice(0, 3),
+        }
+      })
+      .filter((x): x is SkilledMember => x !== null)
+  }
+
+  // 2. Fallback: fuzzy match top_modules against feature branch/title
   const featureBranch = props.feature.branchName?.toLowerCase() ?? ''
   const featureTitle = props.feature.title.toLowerCase()
   const featureRepo = props.feature.repoName?.toLowerCase() ?? ''
