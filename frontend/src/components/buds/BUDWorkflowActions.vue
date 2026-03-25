@@ -266,10 +266,10 @@ const approvingTechArch = ref(false)
 const agentGenerating = ref(false)
 const agentStatusMessage = ref('')
 
-const TASK_LABELS: Record<string, string> = {
-  bud: 'Preparing Requirements',
-  tech_arch: 'Generating Tech Architecture',
-  code_review: 'Running Code Review',
+const AGENT_CONFIG: Record<string, { name: string; label: string }> = {
+  bud: { name: 'PM Agent', label: 'Writing requirements...' },
+  tech_arch: { name: 'Tech Architect Agent', label: 'Generating tech spec...' },
+  code_review: { name: 'Code Review Agent', label: 'Reviewing code...' },
 }
 
 // Code review UI state
@@ -398,18 +398,23 @@ async function confirmCodeReviewTransition(): Promise<void> {
 }
 
 // Unified agent task tracking (replaces per-type trackPrdJobIfActive etc.)
+const agentName = ref('')
+
 function trackAgentTask(task: { job_id: string | null; task_type: string; status: string }): void {
   if (!task.job_id) return
   agentGenerating.value = true
-  agentStatusMessage.value = TASK_LABELS[task.task_type] || 'Processing...'
+  agentName.value = AGENT_CONFIG[task.task_type]?.name || 'AI Agent'
+  agentStatusMessage.value = AGENT_CONFIG[task.task_type]?.label || 'Processing...'
   startTracking(task.job_id, {
     onProgress(s) {
-      agentStatusMessage.value = s.statusMessage || TASK_LABELS[task.task_type] || 'Processing...'
+      agentStatusMessage.value = s.statusMessage || AGENT_CONFIG[task.task_type]?.label || 'Processing...'
     },
     async onComplete() {
       agentGenerating.value = false
       agentStatusMessage.value = ''
+      agentName.value = ''
       await budStore.fetchBUD(props.bud.id)
+      emit('reload-timeline')
     },
     onError(err) {
       agentGenerating.value = false
@@ -420,6 +425,7 @@ function trackAgentTask(task: { job_id: string | null; task_type: string; status
 
 defineExpose({
   agentGenerating,
+  agentName,
   agentStatusMessage,
   showCodeReviewConfirmation,
   trackAgentTask,

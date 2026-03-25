@@ -91,7 +91,7 @@ async def _build_prd_prompt(
             triage_context = session.triage_context or {}
 
     prompt = await build_prd_prompt(
-        skill_name=skill.name,
+        skill_name=skill.slug,
         bud_number=bud.bud_number,
         bud_title=bud.title,
         triage_context=triage_context,
@@ -408,6 +408,7 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
 
             skill = Skill(
                 name=skill_row.name,
+                slug=skill_row.skill_slug,
                 description=skill_row.description,
                 tools=skill_row.tools,
                 mcp_tools=skill_row.mcp_tools,
@@ -441,7 +442,7 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             )
 
             config = ClaudeRunnerConfig(
-                max_turns=skill.max_turns or 3,
+                max_turns=max(skill.max_turns, 0),
                 timeout_seconds=600,
                 mcp=mcp,
                 model=skill.model or None,

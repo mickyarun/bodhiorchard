@@ -84,7 +84,7 @@ const dismissed = ref(localStorage.getItem('flowdev_checklist_dismissed') === 't
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 // WS-driven progress (real-time, replaces stale poll data)
-const { scanData, startTracking, stopTracking } = useScanSocket()
+const { startTracking, stopTracking } = useScanSocket()
 const wsScanActive = ref(false)
 const wsProgress = ref(0)
 const wsStatusLabel = ref('')

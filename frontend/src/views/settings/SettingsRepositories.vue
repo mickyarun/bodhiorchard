@@ -584,7 +584,7 @@ import type { ScanStatusData } from '@/composables/useScanSocket'
 import type { RepoInfo } from '@/types'
 
 const settingsStore = useSettingsStore()
-const { scanData, startTracking: startScanWs, stopTracking: stopScanWs } = useScanSocket()
+const { startTracking: startScanWs, stopTracking: stopScanWs } = useScanSocket()
 
 // Disable repo editing while a scan is running
 const isLocked = computed(() => scanStatus.value === 'running')

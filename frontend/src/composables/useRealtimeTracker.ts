@@ -45,7 +45,7 @@ export interface TrackerConfig<T> {
 }
 
 export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
-  const data = ref<T | null>(null) as { value: T | null }
+  const data = ref<T | null>(null)
   const isActive = ref(false)
 
   const pollIntervalMs = config.pollIntervalMs ?? 2000

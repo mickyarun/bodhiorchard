@@ -26,6 +26,7 @@ class Skill:
     """A loaded agent skill definition (immutable after construction)."""
 
     name: str
+    slug: str
     description: str
     tools: list[str]
     mcp_tools: list[str]
@@ -57,6 +58,7 @@ def load_skill(skill_name: str) -> Skill:
 
     return Skill(
         name=frontmatter.get("name", skill_name),
+        slug=skill_name,
         description=frontmatter.get("description", ""),
         tools=_parse_list(frontmatter.get("tools", "")),
         mcp_tools=_parse_list(frontmatter.get("mcp_tools", "")),
@@ -104,6 +106,7 @@ async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSessio
 
     return Skill(
         name=skill_row.name,
+        slug=skill_row.skill_slug,
         description=skill_row.description,
         tools=skill_row.tools,
         mcp_tools=skill_row.mcp_tools,

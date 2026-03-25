@@ -16,11 +16,114 @@
       <template v-else-if="bud">
         <div class="bud-page-content">
           <!-- Header -->
-          <div class="d-flex align-center ga-3 mb-1">
-            <v-btn icon="mdi-arrow-left" variant="text" size="small" @click="$router.push('/buds')" />
+          <div class="d-flex align-start ga-3 mb-1">
+            <v-btn icon="mdi-arrow-left" variant="text" size="small" class="mt-1" @click="$router.push('/buds')" />
             <div class="flex-grow-1">
-              <div class="text-caption text-medium-emphasis">
-                BUD-{{ String(bud.bud_number).padStart(3, '0') }}
+              <div class="d-flex align-center ga-2 mb-1 flex-wrap">
+                <span class="text-caption text-medium-emphasis">
+                  BUD-{{ String(bud.bud_number).padStart(3, '0') }}
+                </span>
+                <v-chip
+                  :color="statusColor"
+                  variant="tonal"
+                  size="x-small"
+                  label
+                >
+                  {{ BUD_STATUS_LABELS[bud.status] }}
+                </v-chip>
+                <v-menu location="bottom">
+                  <template #activator="{ props: assigneeProps }">
+                    <v-chip
+                      v-bind="assigneeProps"
+                      :color="bud.assignee_name ? 'teal' : 'default'"
+                      variant="tonal"
+                      size="x-small"
+                      label
+                      class="cursor-pointer"
+                    >
+                      <v-icon start size="12">{{ bud.assignee_name ? 'mdi-account' : 'mdi-account-outline' }}</v-icon>
+                      {{ bud.assignee_name || 'Unassigned' }}
+                    </v-chip>
+                  </template>
+                  <v-card min-width="240" max-width="300" class="pa-2">
+                    <v-text-field
+                      v-model="assigneeSearch"
+                      variant="outlined"
+                      density="compact"
+                      placeholder="Search members..."
+                      hide-details
+                      prepend-inner-icon="mdi-magnify"
+                      class="mb-1"
+                    />
+                    <v-list density="compact" max-height="240" class="overflow-y-auto">
+                      <v-list-item
+                        v-if="bud.assignee_id"
+                        density="compact"
+                        @click="handleAssigneeChange(null)"
+                      >
+                        <template #prepend>
+                          <v-icon size="18" color="error">mdi-account-remove</v-icon>
+                        </template>
+                        <v-list-item-title class="text-caption">Unassign</v-list-item-title>
+                      </v-list-item>
+                      <v-list-item
+                        v-for="m in membersStore.members.filter(
+                          mm => mm.isActive && mm.name.toLowerCase().includes(assigneeSearch.toLowerCase())
+                        )"
+                        :key="m.id"
+                        :active="bud.assignee_id === m.id"
+                        density="compact"
+                        @click="handleAssigneeChange(m.id)"
+                      >
+                        <template #prepend>
+                          <v-avatar size="24" color="surface-variant" class="mr-2">
+                            <span class="text-caption">{{ m.name.charAt(0).toUpperCase() }}</span>
+                          </v-avatar>
+                        </template>
+                        <v-list-item-title class="text-caption">{{ m.name }}</v-list-item-title>
+                        <v-list-item-subtitle class="text-caption">{{ m.role }}</v-list-item-subtitle>
+                      </v-list-item>
+                    </v-list>
+                  </v-card>
+                </v-menu>
+                <v-menu>
+                  <template #activator="{ props: menuProps }">
+                    <v-btn v-bind="menuProps" icon="mdi-dots-vertical" variant="text" size="x-small" />
+                  </template>
+                  <v-list density="compact" min-width="180">
+                    <v-list-subheader>Change Status</v-list-subheader>
+                    <v-list-item
+                      v-for="s in statusItems"
+                      :key="s.value"
+                      :title="s.title"
+                      :active="bud.status === s.value"
+                      :disabled="agentLocked"
+                      @click="updateStatus(s.value)"
+                    />
+                    <v-divider class="my-1" />
+                    <v-list-item
+                      base-color="error"
+                      class="delete-item"
+                      @click="confirmDelete = true"
+                    >
+                      <div class="d-flex align-center">
+                        <v-icon icon="mdi-delete-outline" size="18" class="mr-2" />
+                        Delete BUD
+                      </div>
+                    </v-list-item>
+                  </v-list>
+                </v-menu>
+                <v-btn
+                  :variant="chatOpen ? 'flat' : 'tonal'"
+                  :color="chatOpen ? 'primary' : 'default'"
+                  size="x-small"
+                  class="ai-chat-btn"
+                  :disabled="agentLocked"
+                  @click="chatOpen = !chatOpen"
+                >
+                  <v-icon start size="14">mdi-creation-outline</v-icon>
+                  AI
+                </v-btn>
               </div>
               <div
                 v-if="!editingTitle"
@@ -44,106 +147,6 @@
                 @keyup.escape="editingTitle = false"
               />
             </div>
-            <v-chip
-              :color="statusColor"
-              variant="tonal"
-              size="small"
-              label
-            >
-              {{ BUD_STATUS_LABELS[bud.status] }}
-            </v-chip>
-            <v-menu location="bottom">
-              <template #activator="{ props: assigneeProps }">
-                <v-chip
-                  v-bind="assigneeProps"
-                  :color="bud.assignee_name ? 'teal' : 'default'"
-                  variant="tonal"
-                  size="small"
-                  label
-                  class="cursor-pointer"
-                >
-                  <v-icon start size="14">{{ bud.assignee_name ? 'mdi-account' : 'mdi-account-outline' }}</v-icon>
-                  {{ bud.assignee_name || 'Unassigned' }}
-                </v-chip>
-              </template>
-              <v-card min-width="240" max-width="300" class="pa-2">
-                <v-text-field
-                  v-model="assigneeSearch"
-                  variant="outlined"
-                  density="compact"
-                  placeholder="Search members..."
-                  hide-details
-                  prepend-inner-icon="mdi-magnify"
-                  class="mb-1"
-                />
-                <v-list density="compact" max-height="240" class="overflow-y-auto">
-                  <v-list-item
-                    v-if="bud.assignee_id"
-                    density="compact"
-                    @click="handleAssigneeChange(null)"
-                  >
-                    <template #prepend>
-                      <v-icon size="18" color="error">mdi-account-remove</v-icon>
-                    </template>
-                    <v-list-item-title class="text-caption">Unassign</v-list-item-title>
-                  </v-list-item>
-                  <v-list-item
-                    v-for="m in membersStore.members.filter(
-                      mm => mm.isActive && mm.name.toLowerCase().includes(assigneeSearch.toLowerCase())
-                    )"
-                    :key="m.id"
-                    :active="bud.assignee_id === m.id"
-                    density="compact"
-                    @click="handleAssigneeChange(m.id)"
-                  >
-                    <template #prepend>
-                      <v-avatar size="24" color="surface-variant" class="mr-2">
-                        <span class="text-caption">{{ m.name.charAt(0).toUpperCase() }}</span>
-                      </v-avatar>
-                    </template>
-                    <v-list-item-title class="text-caption">{{ m.name }}</v-list-item-title>
-                    <v-list-item-subtitle class="text-caption">{{ m.role }}</v-list-item-subtitle>
-                  </v-list-item>
-                </v-list>
-              </v-card>
-            </v-menu>
-            <v-menu>
-              <template #activator="{ props: menuProps }">
-                <v-btn v-bind="menuProps" icon="mdi-dots-vertical" variant="text" size="small" />
-              </template>
-              <v-list density="compact" min-width="180">
-                <v-list-subheader>Change Status</v-list-subheader>
-                <v-list-item
-                  v-for="s in statusItems"
-                  :key="s.value"
-                  :title="s.title"
-                  :active="bud.status === s.value"
-                  @click="updateStatus(s.value)"
-                />
-                <v-divider class="my-1" />
-                <v-list-item
-                  base-color="error"
-                  class="delete-item"
-                  @click="confirmDelete = true"
-                >
-                  <div class="d-flex align-center">
-                    <v-icon icon="mdi-delete-outline" size="18" class="mr-2" />
-                    Delete BUD
-                  </div>
-                </v-list-item>
-              </v-list>
-            </v-menu>
-            <v-btn
-              :variant="chatOpen ? 'flat' : 'tonal'"
-              :color="chatOpen ? 'primary' : 'default'"
-              size="small"
-              class="ai-chat-btn"
-              :disabled="agentLocked"
-              @click="chatOpen = !chatOpen"
-            >
-              <v-icon start size="16">mdi-creation-outline</v-icon>
-              AI
-            </v-btn>
           </div>
 
           <div class="text-caption text-medium-emphasis mb-3 ml-12">
@@ -161,18 +164,30 @@
           />
 
           <!-- Agent generating banner (unified for PRD, tech arch, code review) -->
-          <v-alert
+          <div
             v-if="workflowRef?.agentGenerating"
-            type="info"
-            variant="tonal"
-            density="compact"
-            class="mx-12 mb-3"
+            class="agent-banner mx-12 mb-3"
           >
-            <div class="d-flex align-center ga-2">
-              <v-progress-circular indeterminate size="16" width="2" />
-              <span>{{ workflowRef?.agentStatusMessage || 'AI agent is processing...' }}</span>
+            <div class="d-flex align-center ga-3">
+              <v-icon icon="mdi-robot-outline" size="20" color="primary" />
+              <div class="d-flex flex-column agent-banner__text">
+                <span class="text-body-2 font-weight-medium">
+                  {{ workflowRef?.agentName || 'AI Agent' }}
+                </span>
+                <span class="text-caption text-medium-emphasis text-truncate">
+                  {{ workflowRef?.agentStatusMessage || 'Processing...' }}
+                </span>
+              </div>
+              <v-spacer />
+              <v-progress-linear
+                indeterminate
+                color="primary"
+                height="3"
+                rounded
+                class="agent-banner__progress"
+              />
             </div>
-          </v-alert>
+          </div>
 
           <!-- Failed agent task — retry banner -->
           <v-alert
@@ -525,13 +540,16 @@ onMounted(async () => {
   loadTimeline()
 })
 
-// Track active agent task via the new bud.active_agent_task field.
-// immediate: true ensures tracking starts on initial load (no race condition).
-watch(() => bud.value?.active_agent_task, (task) => {
-  if (task?.job_id && (task.status === 'pending' || task.status === 'running')) {
-    workflowRef.value?.trackAgentTask(task)
-  }
-}, { immediate: true })
+// Track active agent task. Watches both the task data and the component ref
+// so tracking starts as soon as both are available (covers any mount order).
+watch(
+  [() => bud.value?.active_agent_task, workflowRef],
+  ([task, wf]) => {
+    if (!task?.job_id || (task.status !== 'pending' && task.status !== 'running')) return
+    if (wf) wf.trackAgentTask(task)
+  },
+  { immediate: true },
+)
 
 // Auto-close chat panel when agent starts
 watch(agentLocked, (locked) => {
@@ -637,7 +655,7 @@ async function handleChatSend(msg: string, images: string[] = []): Promise<void>
     },
     async onComplete(data) {
       chatLoading.value = false
-      const { reply, updated_content } = data as { reply: string; updated_content: string | null }
+      const { reply, updated_content } = data as unknown as { reply: string; updated_content: string | null }
       chatMessages.value.push({ role: 'ai', text: reply })
       if (updated_content !== null) {
         if (budStore.currentBUD) {
@@ -729,6 +747,22 @@ function formatDate(dateStr: string): string {
 </script>
 
 <style scoped>
+/* ── Agent banner ────────────────────────────── */
+.agent-banner {
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(var(--v-theme-primary), 0.25);
+  background: rgba(var(--v-theme-primary), 0.06);
+}
+
+.agent-banner__text {
+  min-width: 0;
+}
+
+.agent-banner__progress {
+  max-width: 120px;
+}
+
 /* ── Layout ──────────────────────────────────── */
 .bud-detail-layout {
   display: flex;

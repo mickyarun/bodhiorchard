@@ -15,8 +15,8 @@ from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
 from app.models.user import User
 from app.repositories.bud import BUDRepository
-from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.bud_agent_task import BUDAgentTaskRepository
+from app.repositories.bud_timeline import BUDTimelineRepository
 from app.schemas.bud import (
     EXPORTABLE_SECTIONS,
     BUDAgentTaskRead,
@@ -26,7 +26,24 @@ from app.schemas.bud import (
     BUDUpdate,
     TimelineEventRead,
 )
+
 logger = structlog.get_logger(__name__)
+
+
+async def _bud_response(
+    bud: BUDDocument, org_id: uuid.UUID, db: AsyncSession,
+) -> BUDRead:
+    """Build BUDRead with active (or last-failed) agent task attached."""
+    task_repo = BUDAgentTaskRepository(db, org_id=org_id)
+    active_task = await task_repo.get_active_for_bud(bud.id)
+    if not active_task:
+        active_task = await task_repo.get_latest_failed(bud.id)
+
+    bud_data = BUDRead.model_validate(bud)
+    if active_task:
+        bud_data.active_agent_task = BUDAgentTaskRead.model_validate(active_task)
+    return bud_data
+
 
 router = APIRouter(tags=["buds"])
 
@@ -73,7 +90,7 @@ async def create_bud(
     body: BUDCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> BUDDocument:
+) -> BUDRead:
     """Create a new BUD with auto-incremented bud_number."""
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     next_number = await bud_repo.next_bud_number()
@@ -122,7 +139,15 @@ async def create_bud(
 
     logger.info("bud_created", bud_id=str(bud.id), bud_number=next_number, org_id=str(bud.org_id))
 
-    return bud
+    # Auto-trigger PM agent, same as the Slack approval flow
+    from app.services.bud_agent_trigger import create_agent_task_for_stage
+
+    await create_agent_task_for_stage(
+        bud, "bud", current_user.org_id, db,
+        triggered_by=current_user.id,
+    )
+
+    return await _bud_response(bud, current_user.org_id, db)
 
 
 @router.get(
@@ -141,17 +166,7 @@ async def get_bud(
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
 
-    # Attach active (or last failed) agent task
-    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
-    active_task = await task_repo.get_active_for_bud(bud_id)
-    if not active_task:
-        active_task = await task_repo.get_latest_failed(bud_id)
-
-    bud_data = BUDRead.model_validate(bud)
-    if active_task:
-        bud_data.active_agent_task = BUDAgentTaskRead.model_validate(active_task)
-
-    return bud_data
+    return await _bud_response(bud, current_user.org_id, db)
 
 
 @router.get(
@@ -180,7 +195,7 @@ async def update_bud(
     response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> BUDDocument:
+) -> BUDRead:
     """Update a BUD (title, status, requirements, tech spec, test plan, metadata)."""
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
@@ -286,7 +301,7 @@ async def update_bud(
     # Trigger side-effect jobs on status transitions
     await _trigger_status_jobs(bud, old_status, update_data, response, current_user, db)
 
-    return bud
+    return await _bud_response(bud, current_user.org_id, db)
 
 
 async def _trigger_status_jobs(
@@ -392,7 +407,9 @@ async def retry_agent_task(
     )
     new_task.job_id = job.job_id
     new_task.status = AgentTaskStatus.RUNNING
-    await db.flush()
+
+    # Single atomic commit — must happen before return so the worker can read the task
+    await db.commit()
 
     return BUDAgentTaskRead.model_validate(new_task)
 

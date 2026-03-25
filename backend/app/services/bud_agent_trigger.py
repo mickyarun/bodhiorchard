@@ -57,7 +57,7 @@ async def create_agent_task_for_stage(
         triggered_by=triggered_by,
     )
     db.add(task)
-    await db.flush()
+    await db.flush()  # get task.id without committing
 
     job = create_job(
         JOB_BUD_AGENT,
@@ -70,7 +70,10 @@ async def create_agent_task_for_stage(
     )
     task.job_id = job.job_id
     task.status = AgentTaskStatus.RUNNING
-    await db.flush()
+
+    # Single atomic commit — task + job_id visible to worker together.
+    # Must commit before returning because the worker opens its own session.
+    await db.commit()
 
     logger.info(
         "agent_task_created",
