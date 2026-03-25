@@ -195,7 +195,7 @@
     </v-card>
 
     <!-- ─── ROLES SECTION ──────────────────────────────────── -->
-    <div class="d-flex align-center justify-space-between mb-4">
+    <div class="d-flex align-center justify-space-between mb-4 mt-8">
       <div>
         <div class="text-h6 font-weight-bold">Roles</div>
         <div class="text-body-2 text-medium-emphasis">
@@ -204,7 +204,6 @@
       </div>
       <v-btn
         color="primary"
-        variant="tonal"
         prepend-icon="mdi-plus"
         @click="openCreateRole"
       >
@@ -212,56 +211,88 @@
       </v-btn>
     </div>
 
-    <v-card color="surface">
-      <v-table density="comfortable">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Description</th>
-            <th>Type</th>
-            <th>Permissions</th>
-            <th style="width: 100px;">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="role in store.roles" :key="role.id">
-            <td class="font-weight-medium">{{ role.name }}</td>
-            <td class="text-medium-emphasis">{{ role.description || '—' }}</td>
-            <td>
-              <v-chip
+    <div class="d-flex flex-wrap ga-3">
+      <v-card
+        v-for="role in store.roles"
+        :key="role.id"
+        color="surface"
+        variant="outlined"
+        width="320"
+        class="role-card"
+      >
+        <v-card-text class="pb-2">
+          <div class="d-flex align-center justify-space-between mb-1">
+            <div class="d-flex align-center ga-2">
+              <v-icon
+                :icon="role.scopeType === 'SYSTEM' ? 'mdi-shield-lock-outline' : 'mdi-shield-edit-outline'"
+                size="18"
                 :color="role.scopeType === 'SYSTEM' ? 'info' : 'success'"
-                size="small"
-                variant="tonal"
-              >
-                {{ role.scopeType === 'SYSTEM' ? 'System' : 'Custom' }}
-              </v-chip>
-            </td>
-            <td class="text-caption text-medium-emphasis">
-              {{ role.permissions.length }} permission{{ role.permissions.length !== 1 ? 's' : '' }}
-            </td>
-            <td>
-              <template v-if="role.scopeType !== 'SYSTEM'">
-                <v-btn
-                  icon="mdi-pencil-outline"
-                  size="small"
-                  variant="text"
-                  color="primary"
-                  @click="openEditRole(role)"
-                />
-                <v-btn
-                  icon="mdi-delete-outline"
-                  size="small"
-                  variant="text"
-                  color="error"
-                  @click="confirmDeleteRole(role)"
-                />
-              </template>
-              <span v-else class="text-caption text-medium-emphasis">—</span>
-            </td>
-          </tr>
-        </tbody>
-      </v-table>
-    </v-card>
+              />
+              <span class="text-subtitle-2 font-weight-bold">{{ role.name }}</span>
+            </div>
+            <v-chip
+              :color="role.scopeType === 'SYSTEM' ? 'info' : 'success'"
+              size="x-small"
+              variant="tonal"
+              label
+            >
+              {{ role.scopeType === 'SYSTEM' ? 'System' : 'Custom' }}
+            </v-chip>
+          </div>
+          <div class="text-caption text-medium-emphasis mb-3" style="min-height: 16px;">
+            {{ role.description || '' }}
+          </div>
+          <div class="d-flex flex-wrap ga-1">
+            <v-chip
+              v-for="perm in role.permissions.slice(0, 5)"
+              :key="perm.id"
+              size="x-small"
+              variant="tonal"
+              label
+            >
+              {{ perm.name }}
+            </v-chip>
+            <v-chip
+              v-if="role.permissions.length > 5"
+              size="x-small"
+              variant="tonal"
+              color="primary"
+              label
+            >
+              +{{ role.permissions.length - 5 }} more
+            </v-chip>
+            <span
+              v-if="role.permissions.length === 0"
+              class="text-caption text-medium-emphasis"
+            >
+              No permissions
+            </span>
+          </div>
+        </v-card-text>
+        <v-divider v-if="role.scopeType !== 'SYSTEM'" />
+        <v-card-actions v-if="role.scopeType !== 'SYSTEM'" class="px-3 py-1">
+          <v-btn
+            size="small"
+            variant="text"
+            color="primary"
+            prepend-icon="mdi-pencil-outline"
+            @click="openEditRole(role)"
+          >
+            Edit
+          </v-btn>
+          <v-spacer />
+          <v-btn
+            size="small"
+            variant="text"
+            color="error"
+            prepend-icon="mdi-delete-outline"
+            @click="confirmDeleteRole(role)"
+          >
+            Delete
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </div>
 
     <!-- ─── ADD MEMBER DIALOG ──────────────────────────────── -->
     <v-dialog v-model="addMemberDialog" max-width="480" persistent>
@@ -477,25 +508,47 @@
           />
 
           <div class="text-subtitle-2 mb-2">Permissions</div>
-          <div
-            v-for="cat in store.permissionCategories"
-            :key="cat.key"
-            class="mb-3"
-          >
-            <div class="text-body-2 font-weight-medium mb-1">{{ cat.name }}</div>
-            <div class="d-flex flex-wrap ga-2">
-              <v-checkbox
-                v-for="perm in cat.permissions"
-                :key="perm.id"
-                v-model="roleForm.permissionIds"
-                :value="perm.id"
-                :label="perm.name"
-                density="compact"
-                hide-details
-                class="mr-4"
-              />
-            </div>
-          </div>
+          <v-expansion-panels variant="accordion" multiple>
+            <v-expansion-panel
+              v-for="cat in store.permissionCategories"
+              :key="cat.key"
+            >
+              <v-expansion-panel-title class="text-body-2 font-weight-medium py-2">
+                <div class="d-flex align-center ga-2">
+                  {{ cat.name }}
+                  <v-chip
+                    v-if="countCategorySelected(cat) > 0"
+                    size="x-small"
+                    color="primary"
+                    variant="tonal"
+                    label
+                  >
+                    {{ countCategorySelected(cat) }}/{{ cat.permissions.length }}
+                  </v-chip>
+                </div>
+              </v-expansion-panel-title>
+              <v-expansion-panel-text>
+                <div
+                  v-if="cat.description"
+                  class="text-caption text-medium-emphasis mb-2"
+                >
+                  {{ cat.description }}
+                </div>
+                <div class="d-flex flex-wrap">
+                  <v-checkbox
+                    v-for="perm in cat.permissions"
+                    :key="perm.id"
+                    v-model="roleForm.permissionIds"
+                    :value="perm.id"
+                    :label="perm.name"
+                    density="compact"
+                    hide-details
+                    class="mr-4"
+                  />
+                </div>
+              </v-expansion-panel-text>
+            </v-expansion-panel>
+          </v-expansion-panels>
         </v-card-text>
         <v-card-actions class="px-4 pb-4">
           <v-spacer />
@@ -980,6 +1033,10 @@ const roleDialog = ref(false)
 const savingRole = ref(false)
 const roleForm = ref({ id: '', name: '', description: '', permissionIds: [] as string[] })
 
+function countCategorySelected(cat: { permissions: { id: string }[] }): number {
+  return cat.permissions.filter(p => roleForm.value.permissionIds.includes(p.id)).length
+}
+
 function openCreateRole() {
   roleForm.value = { id: '', name: '', description: '', permissionIds: [] }
   if (store.permissionCategories.length === 0) {
@@ -1058,3 +1115,12 @@ onMounted(() => {
   settingsStore.fetchConnections()
 })
 </script>
+
+<style scoped>
+.role-card {
+  transition: border-color 0.15s ease;
+}
+.role-card:hover {
+  border-color: rgba(var(--v-theme-primary), 0.4);
+}
+</style>

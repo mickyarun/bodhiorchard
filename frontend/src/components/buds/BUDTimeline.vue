@@ -238,6 +238,7 @@ const SECTION_LABELS: Record<string, string> = {
   tech_spec_md: 'Tech Spec',
   test_plan_md: 'Test Plan',
   design: 'Design',
+  title: 'Title',
 }
 
 const AGENT_LABELS: Record<string, string> = {

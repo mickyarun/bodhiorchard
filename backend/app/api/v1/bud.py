@@ -208,6 +208,7 @@ async def update_bud(
     # Capture old values BEFORE applying updates
     old_status = bud.status
     old_assignee_id = bud.assignee_id
+    old_title = bud.title
 
     # Handle manual assignee_id changes (before status logic which may auto-assign)
     if "assignee_id" in update_data:
@@ -255,6 +256,20 @@ async def update_bud(
             new_status,
             actor_id=current_user.id,
             actor_name=current_user.name,
+        )
+
+    # Record title change
+    if "title" in update_data and update_data["title"] != old_title:
+        from app.services.bud_timeline import record_event
+
+        await record_event(
+            db,
+            current_user.org_id,
+            bud.id,
+            "content_updated",
+            actor_id=current_user.id,
+            actor_name=current_user.name,
+            detail={"section": "title", "old_title": old_title, "new_title": update_data["title"]},
         )
 
     for field, value in update_data.items():

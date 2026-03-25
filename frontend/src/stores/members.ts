@@ -70,7 +70,7 @@ export const useMembersStore = defineStore('members', () => {
         id: r.id as string,
         name: r.name as string,
         description: (r.description as string | null) ?? null,
-        scopeType: (r.scopeType as string) ?? (r.scope_type as string) ?? 'SYSTEM',
+        scopeType: ((r.scopeType as string) ?? (r.scope_type as string) ?? 'system').toUpperCase(),
         permissions: (r.permissions as PermissionItem[]) ?? [],
       }))
     } catch (err) {

@@ -22,9 +22,13 @@
               <div class="text-caption text-medium-emphasis">
                 BUD-{{ String(bud.bud_number).padStart(3, '0') }}
               </div>
-              <div v-if="!editingTitle" class="text-h5 font-weight-bold cursor-pointer" @click="startEditTitle">
+              <div
+                v-if="!editingTitle"
+                class="text-h5 font-weight-bold"
+                :class="prdLocked ? 'prd-locked-title' : 'cursor-pointer'"
+                @click="startEditTitle"
+              >
                 {{ bud.title }}
-                <v-icon icon="mdi-pencil-outline" size="16" class="ml-1 text-medium-emphasis" />
               </div>
               <v-text-field
                 v-else
@@ -134,6 +138,7 @@
               :color="chatOpen ? 'primary' : 'default'"
               size="small"
               class="ai-chat-btn"
+              :disabled="prdLocked"
               @click="chatOpen = !chatOpen"
             >
               <v-icon start size="16">mdi-creation-outline</v-icon>
@@ -182,6 +187,7 @@
                 variant="text"
                 size="small"
                 class="toolbar-btn"
+                :disabled="prdLocked"
                 @click="toggleEdit"
               >
                 <v-icon size="15" class="mr-1">{{ isEditing ? 'mdi-eye-outline' : 'mdi-pencil-outline' }}</v-icon>
@@ -192,6 +198,7 @@
                 variant="text"
                 size="small"
                 class="toolbar-btn"
+                :disabled="prdLocked"
                 @click="downloadSection(currentSection)"
               >
                 <v-icon size="15" class="mr-1">mdi-tray-arrow-down</v-icon>
@@ -202,6 +209,7 @@
                 variant="text"
                 size="small"
                 class="toolbar-btn"
+                :disabled="prdLocked"
                 @click="triggerUpload(currentSection)"
               >
                 <v-icon size="15" class="mr-1">mdi-tray-arrow-up</v-icon>
@@ -449,6 +457,8 @@ const isEditing = computed(() => {
   return editingContent.value
 })
 
+const prdLocked = computed(() => !!workflowRef.value?.prdGenerating)
+
 // ── Markdown rendering ────────────────────────────────
 function renderMarkdown(md: string | null): string {
   if (!md) return ''
@@ -487,6 +497,18 @@ watch(() => (bud.value?.metadata as Record<string, unknown> | null)?.code_review
   }
 })
 
+// Resume PRD job tracking when metadata changes
+watch(() => (bud.value?.metadata as Record<string, unknown> | null)?.prd_job_id, (newJobId) => {
+  if (newJobId && !workflowRef.value?.prdGenerating) {
+    workflowRef.value?.trackPrdJobIfActive()
+  }
+})
+
+// Auto-close chat panel when PRD generation starts
+watch(prdLocked, (locked) => {
+  if (locked && chatOpen.value) chatOpen.value = false
+})
+
 // Load chat history when switching tabs
 watch(activeTab, () => {
   currentSessionId.value = undefined
@@ -509,6 +531,7 @@ function startNewSession(): void {
 }
 
 function startEditTitle(): void {
+  if (prdLocked.value) return
   editTitle.value = bud.value?.title || ''
   editingTitle.value = true
 }
@@ -520,6 +543,7 @@ async function saveTitle(): Promise<void> {
   }
   if (editTitle.value.trim() !== bud.value.title) {
     await budStore.updateBUD(bud.value.id, { title: editTitle.value.trim() })
+    await loadTimeline()
   }
   editingTitle.value = false
 }
@@ -938,5 +962,11 @@ function formatDate(dateStr: string): string {
   width: 0;
   min-width: 0;
   opacity: 0;
+}
+
+/* ── PRD lock state ───────────────────────────── */
+.prd-locked-title {
+  opacity: 0.5;
+  pointer-events: none;
 }
 </style>
