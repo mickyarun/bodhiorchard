@@ -123,7 +123,7 @@
         <div class="text-body-2 font-weight-medium mb-2">Setup</div>
         <div class="text-caption text-medium-emphasis mb-3">
           MCP is auto-configured in your repos during scanning (<code>.mcp.json</code>).
-          To activate, set your token as an environment variable:
+          To activate, set your token as a persistent environment variable:
         </div>
         <div class="config-snippet pa-3 rounded mb-3" style="background: rgba(0,0,0,0.3); position: relative;">
           <v-btn
@@ -135,8 +135,36 @@
           />
           <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ envVarSnippet }}</pre>
         </div>
+
+        <v-expansion-panels variant="accordion" class="mb-2">
+          <v-expansion-panel>
+            <v-expansion-panel-title class="text-caption py-1">
+              <v-icon icon="mdi-apple" size="14" class="mr-1" /> macOS
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ macInstructions }}</pre>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+          <v-expansion-panel>
+            <v-expansion-panel-title class="text-caption py-1">
+              <v-icon icon="mdi-linux" size="14" class="mr-1" /> Linux (Ubuntu)
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ linuxInstructions }}</pre>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+          <v-expansion-panel>
+            <v-expansion-panel-title class="text-caption py-1">
+              <v-icon icon="mdi-microsoft-windows" size="14" class="mr-1" /> Windows
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ windowsInstructions }}</pre>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
+
         <div class="text-caption text-medium-emphasis">
-          Add this to your shell profile (<code>~/.zshrc</code> or <code>~/.bashrc</code>) and restart Claude Code.
+          After adding, restart your terminal and Claude Code for the change to take effect.
         </div>
       </v-card>
 
@@ -368,6 +396,29 @@ const regeneratingToken = ref(false)
 const envVarSnippet = computed(() => {
   const token = newMcpToken.value || '<your-bodhigrove-token>'
   return `export BODHIGROVE_MCP_TOKEN="${token}"`
+})
+
+const macInstructions = computed(() => {
+  const token = newMcpToken.value || '<your-bodhigrove-token>'
+  return `# Add to ~/.zshrc (default shell on macOS)
+echo 'export BODHIGROVE_MCP_TOKEN="${token}"' >> ~/.zshrc
+source ~/.zshrc`
+})
+
+const linuxInstructions = computed(() => {
+  const token = newMcpToken.value || '<your-bodhigrove-token>'
+  return `# Add to ~/.bashrc (or ~/.zshrc if using zsh)
+echo 'export BODHIGROVE_MCP_TOKEN="${token}"' >> ~/.bashrc
+source ~/.bashrc`
+})
+
+const windowsInstructions = computed(() => {
+  const token = newMcpToken.value || '<your-bodhigrove-token>'
+  return `# PowerShell — set permanently for current user
+[Environment]::SetEnvironmentVariable("BODHIGROVE_MCP_TOKEN", "${token}", "User")
+
+# Or via CMD
+setx BODHIGROVE_MCP_TOKEN "${token}"`
 })
 
 onMounted(async () => {
