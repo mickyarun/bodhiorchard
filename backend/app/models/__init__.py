@@ -7,7 +7,6 @@ auto-generation of migration scripts.
 from app.models.agent_log import AgentLog
 from app.models.agent_skill import AgentSkill
 from app.models.agent_skill_bud_stage import AgentSkillBudStage
-from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.base import Base, BaseModel
 from app.models.bud import (
     BUDChatMessage,
@@ -18,9 +17,11 @@ from app.models.bud import (
     BUDTimelineEvent,
     BUDTimelineEventType,
 )
+from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.bud_commit import BUDCommit
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.design_system import DesignSystemRef
+from app.models.dev_activity import DevActivityLog
 from app.models.enterprise_rule import EnterpriseRule
 from app.models.feature_learning import FeatureLearning
 from app.models.jwt_token import JWTToken
@@ -60,6 +61,7 @@ __all__ = [
     "BugSeverity",
     "BugStatus",
     "DesignSystemRef",
+    "DevActivityLog",
     "EnterpriseRule",
     "FeatureLearning",
     "JWTToken",

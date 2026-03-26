@@ -110,16 +110,90 @@ async def handle_update_task_status(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Update task/agent log status."""
+    """Persist developer activity update and publish for real-time UI."""
+    from app.models.dev_activity import DevActivityLog
+    from app.services.event_bus import publish
+
     task_id = params.get("task_id", "")
     task_status = params.get("status", "")
     message = params.get("message", "")
 
+    # Resolve BUD from task_id (supports BUD number like "1" or UUID)
+    bud = await _resolve_bud(db, org.id, task_id)
+    if not bud:
+        logger.warning("mcp_update_task_status_bud_not_found", task_id=task_id)
+        return {"success": False, "error": f"BUD not found for task_id: {task_id}"}
+
+    # Build metadata from optional fields
+    metadata: dict[str, Any] = {}
+    if params.get("files_touched"):
+        metadata["files_touched"] = params["files_touched"]
+    if params.get("stats"):
+        metadata["stats"] = params["stats"]
+    if params.get("effectiveness"):
+        metadata["effectiveness"] = params["effectiveness"]
+
+    log = DevActivityLog(
+        org_id=org.id,
+        bud_id=bud.id,
+        status=task_status,
+        message=message[:2000],
+        source="mcp",
+        metadata_=metadata or None,
+    )
+    db.add(log)
+    await db.commit()
+
+    # Publish for real-time WebSocket updates
+    publish(f"bud:{bud.id}:activity", {
+        "id": str(log.id),
+        "status": task_status,
+        "message": message[:2000],
+        "source": "mcp",
+        "metadata": metadata or None,
+        "created_at": log.created_at.isoformat(),
+    })
+
     logger.info(
         "mcp_update_task_status",
         org_id=str(org.id),
+        bud_id=str(bud.id),
         task_id=task_id,
         status=task_status,
         message=message[:200],
     )
-    return {"success": True, "message": f"Task {task_id} updated to {task_status}"}
+    return {"success": True, "bud_number": bud.bud_number}
+
+
+async def _resolve_bud(
+    db: AsyncSession, org_id: Any, task_id: str,
+) -> BUDDocument | None:
+    """Resolve a BUD from a task_id (BUD number string or UUID)."""
+    import uuid
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+
+    # Try as BUD number first (most common from developer CLI)
+    try:
+        bud_number = int(task_id)
+        from sqlalchemy import select
+
+        stmt = select(BUDDocument).where(
+            BUDDocument.org_id == org_id,
+            BUDDocument.bud_number == bud_number,
+        ).limit(1)
+        result = await db.execute(stmt)
+        bud = result.scalar_one_or_none()
+        if bud:
+            return bud
+    except (ValueError, TypeError):
+        pass
+
+    # Try as UUID
+    try:
+        bud_id = uuid.UUID(task_id)
+        return await bud_repo.get_by_id(bud_id)
+    except (ValueError, TypeError):
+        pass
+
+    return None

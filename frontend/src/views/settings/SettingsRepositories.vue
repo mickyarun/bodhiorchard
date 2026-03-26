@@ -200,6 +200,11 @@
                     <v-icon v-bind="props" icon="mdi-alert-circle-outline" size="14" color="warning" class="ml-1" />
                   </template>
                 </v-tooltip>
+                <v-tooltip v-if="repo.setupStatus === 'not_setup'" text="MCP + hooks not set up — developer activity tracking won't work. Re-scan to fix." location="top">
+                  <template #activator="{ props: tipProps }">
+                    <v-icon v-bind="tipProps" icon="mdi-link-off" size="14" color="error" class="ml-1" />
+                  </template>
+                </v-tooltip>
               </td>
               <td class="text-caption text-medium-emphasis">{{ repo.path }}</td>
               <td class="text-center">

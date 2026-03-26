@@ -110,6 +110,16 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def list_for_bud(self, bud_id: uuid.UUID) -> list[BUDAgentTask]:
+        """List all agent tasks for a BUD, most recent first."""
+        stmt = self._scoped(
+            select(BUDAgentTask)
+            .where(BUDAgentTask.bud_id == bud_id)
+            .order_by(BUDAgentTask.created_at.desc())
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
     async def mark_running(self, task_id: uuid.UUID, job_id: str) -> None:
         """Mark a task as running with its in-memory job ID.
 

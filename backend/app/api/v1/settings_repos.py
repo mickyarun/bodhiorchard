@@ -37,6 +37,18 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["settings-repos"])
 
 
+def _detect_setup_status(repo_path: str) -> str:
+    """Check if Bodhigrove MCP + hooks are set up in a repo.
+
+    Returns: 'merged' | 'not_setup'
+    """
+    mcp_config = Path(repo_path) / ".claude" / "settings.json"
+    hooks_dir = Path(repo_path) / ".githooks" / "post-commit"
+    if mcp_config.exists() and hooks_dir.exists():
+        return "merged"
+    return "not_setup"
+
+
 @router.get("/repos", response_model=list[RepoInfo])
 async def list_repos(
     current_user: User = Depends(get_current_user),
@@ -70,6 +82,7 @@ async def list_repos(
             developBranch=r.develop_branch,
             hasUncommittedChanges=False,
             repoType=detect_repo_type(r.path),
+            setupStatus=_detect_setup_status(r.path),
         )
         for r in repos
     ]

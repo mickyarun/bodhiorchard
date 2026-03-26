@@ -266,18 +266,68 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     ),
     MCPToolDefinition(
         name="update_task_status",
-        description="Report task progress back to Bodhigrove",
+        description=(
+            "Report development progress to Bodhigrove. Call this periodically "
+            "to update the team on what you're working on. Use the BUD number "
+            "as task_id (e.g. '1' for BUD-001)."
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "task_id": {"type": "string"},
+                "task_id": {
+                    "type": "string",
+                    "description": "BUD number (e.g. '1') or BUD UUID",
+                },
                 "status": {
                     "type": "string",
                     "enum": ["in_progress", "completed", "failed", "blocked"],
                 },
-                "message": {"type": "string"},
+                "message": {
+                    "type": "string",
+                    "description": "What you're doing or just completed",
+                },
+                "files_touched": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Files created or modified",
+                },
+                "stats": {
+                    "type": "object",
+                    "properties": {
+                        "lines_added": {"type": "integer"},
+                        "lines_removed": {"type": "integer"},
+                        "tests_added": {"type": "integer"},
+                        "cost_usd": {"type": "number"},
+                        "tokens_used": {"type": "integer"},
+                    },
+                },
+                "effectiveness": {
+                    "type": "object",
+                    "description": "Self-assessment when status is completed",
+                    "properties": {
+                        "confidence": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10,
+                            "description": "How confident the implementation is correct",
+                        },
+                        "complexity": {
+                            "type": "string",
+                            "enum": ["low", "medium", "high"],
+                        },
+                        "test_coverage": {
+                            "type": "string",
+                            "enum": ["none", "partial", "full"],
+                        },
+                        "risks": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Known risks or concerns",
+                        },
+                    },
+                },
             },
-            "required": ["task_id", "status"],
+            "required": ["task_id", "status", "message"],
         },
     ),
     MCPToolDefinition(

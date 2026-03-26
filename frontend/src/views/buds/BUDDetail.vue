@@ -226,6 +226,7 @@
               <v-tab value="requirements">Requirements</v-tab>
               <v-tab value="design">Design</v-tab>
               <v-tab value="tech-spec">Tech Spec</v-tab>
+              <v-tab value="development">Development</v-tab>
               <v-tab value="test-plan">Test Plan</v-tab>
             </v-tabs>
             <div class="toolbar-actions">
@@ -326,6 +327,14 @@
                 </div>
               </v-tabs-window-item>
 
+              <!-- Development -->
+              <v-tabs-window-item value="development">
+                <BUDDevelopmentPanel
+                  ref="devPanelRef"
+                  :bud-id="bud.id"
+                />
+              </v-tabs-window-item>
+
               <!-- Test Plan -->
               <v-tabs-window-item value="test-plan">
                 <textarea
@@ -420,6 +429,7 @@ import type { BUDSectionKey, TimelineEvent } from '@/types'
 import ChatPanel from '@/components/buds/ChatPanel.vue'
 import BUDTimeline from '@/components/buds/BUDTimeline.vue'
 import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
+import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -437,6 +447,7 @@ const confirmDelete = ref(false)
 
 // Child component refs
 const designPanelRef = ref<InstanceType<typeof BUDDesignPanel> | null>(null)
+const devPanelRef = ref<InstanceType<typeof BUDDevelopmentPanel> | null>(null)
 const workflowRef = ref<InstanceType<typeof BUDWorkflowActions> | null>(null)
 
 const canApprove = computed(() => {
@@ -529,6 +540,7 @@ onMounted(async () => {
     const statusTabMap: Record<string, string> = {
       design: 'design',
       tech_arch: 'tech-spec',
+      development: 'development',
       code_review: 'test-plan',
       testing: 'test-plan',
     }

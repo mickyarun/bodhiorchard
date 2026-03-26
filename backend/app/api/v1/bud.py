@@ -1,11 +1,12 @@
 """BUD CRUD endpoints and sub-router aggregation."""
 
 import uuid
+from datetime import datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.bud_chat import router as chat_router
@@ -488,6 +489,128 @@ async def list_commit_repos(
         )
         for s in summaries
     ]
+
+
+# ── Development Activity ─────────────────────────────────────────
+
+
+class DevActivityRead(BaseModel):
+    """Schema for a single developer activity entry."""
+
+    id: uuid.UUID
+    status: str
+    message: str
+    source: str
+    actor_name: str | None = None
+    metadata: dict | None = Field(None, validation_alias="metadata_")
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DevCommitRead(BaseModel):
+    """Schema for a single BUD commit."""
+
+    commit_sha: str
+    commit_message: str
+    branch_name: str
+    files_changed: str
+    repo_path: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DevStatsRead(BaseModel):
+    """Aggregated development stats for a BUD."""
+
+    total_commits: int = 0
+    total_files_changed: int = 0
+    repos_touched: int = 0
+    agent_runs: int = 0
+    effectiveness_score: int = 0
+    confidence: float = 0.0
+    completion_rate: float = 0.0
+    cost_per_commit: float = 0.0
+    total_cost_usd: float = 0.0
+    test_coverage: str = "none"
+    risk_count: int = 0
+
+
+class DevActivityResponse(BaseModel):
+    """Full development activity response."""
+
+    activities: list[DevActivityRead] = []
+    commits: list[DevCommitRead] = []
+    repos: list[CommitRepoRead] = []
+    stats: DevStatsRead = DevStatsRead()
+
+
+@router.get(
+    "/{bud_id}/dev-activity",
+    response_model=DevActivityResponse,
+    dependencies=[Depends(require_permissions("buds:view"))],
+)
+async def get_dev_activity(
+    bud_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DevActivityResponse:
+    """Get development activity summary: commits, MCP updates, and stats."""
+    from pathlib import Path
+
+    from app.repositories.bud_commit import BUDCommitRepository
+    from app.repositories.dev_activity import DevActivityLogRepository
+
+    commit_repo = BUDCommitRepository(db, org_id=current_user.org_id)
+    activity_repo = DevActivityLogRepository(db, org_id=current_user.org_id)
+
+    commits = await commit_repo.list_for_bud(bud_id, limit=50)
+    activities = await activity_repo.list_for_bud(bud_id, limit=50)
+    repo_summaries = await commit_repo.list_repos_for_bud(bud_id)
+
+    # Agent tasks for effectiveness scoring
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    agent_tasks = await task_repo.list_for_bud(bud_id)
+
+    # Count unique files across all commits
+    all_files: set[str] = set()
+    for c in commits:
+        if c.files_changed:
+            all_files.update(f.strip() for f in c.files_changed.split(",") if f.strip())
+
+    # Calculate AI effectiveness
+    from app.services.dev_stats import calculate_effectiveness
+
+    eff = calculate_effectiveness(activities, commits, agent_tasks)
+
+    return DevActivityResponse(
+        activities=[DevActivityRead.model_validate(a) for a in activities],
+        commits=[DevCommitRead.model_validate(c) for c in commits],
+        repos=[
+            CommitRepoRead(
+                repo_path=s.repo_path,
+                repo_name=Path(s.repo_path).name,
+                commit_count=s.commit_count,
+                first_sha=s.first_sha,
+                last_sha=s.last_sha,
+            )
+            for s in repo_summaries
+        ],
+        stats=DevStatsRead(
+            total_commits=len(commits),
+            total_files_changed=len(all_files),
+            repos_touched=len(repo_summaries),
+            agent_runs=len(agent_tasks),
+            effectiveness_score=eff["score"],
+            confidence=eff["confidence"],
+            completion_rate=eff["completion_rate"],
+            cost_per_commit=eff["cost_per_commit"],
+            total_cost_usd=eff["total_cost_usd"],
+            test_coverage=eff["test_coverage"],
+            risk_count=eff["risk_count"],
+        ),
+    )
 
 
 # ── Export / Import ───────────────────────────────────────────────

@@ -184,6 +184,11 @@ async def phase_b1_repo_setup(
         )
         hooks_changed = await install_hooks(repo_path, app_settings.public_url, str(org_id))
 
+        # Ensure hooks are active regardless of commit/push status
+        from app.services.git_operations import run_git
+
+        await run_git(["config", "core.hooksPath", ".githooks"], cwd=repo_path)
+
         # Add .bodhigrove/ to .gitignore
         gitignore_changed = add_bodhigrove_gitignore(repo_path)
 

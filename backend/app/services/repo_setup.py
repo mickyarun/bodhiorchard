@@ -495,7 +495,19 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
             push_cmd = ["push", "--force-with-lease", "-u", "origin", _SETUP_BRANCH]
         _, stderr, rc = await run_git(push_cmd, cwd=repo_path)
         if rc != 0:
-            logger.warning("bodhigrove_setup_push_failed", error=stderr[:200])
+            # No remote or push failed — merge setup into base branch directly
+            logger.info("bodhigrove_setup_no_remote_merging", repo=repo_path)
+            await run_git(["checkout", base_branch], cwd=repo_path)
+            _, merge_err, merge_rc = await run_git(
+                ["merge", _SETUP_BRANCH, "--no-edit"], cwd=repo_path,
+            )
+            if merge_rc == 0:
+                await run_git(["branch", "-d", _SETUP_BRANCH], cwd=repo_path)
+                logger.info("bodhigrove_setup_merged_locally", repo=repo_path)
+                return _SETUP_BRANCH
+            logger.warning(
+                "bodhigrove_setup_merge_failed", repo=repo_path, error=merge_err[:200],
+            )
             return None
 
         logger.info(

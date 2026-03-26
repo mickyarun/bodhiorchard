@@ -40,6 +40,7 @@ export type BUDStatus = 'bud' | 'design' | 'tech_arch' | 'development' | 'code_r
 export const BUD_SECTIONS = {
   requirements_md: { tab: 'requirements', label: 'Requirements', exportable: true },
   tech_spec_md: { tab: 'tech-spec', label: 'Tech Spec', exportable: true },
+  development: { tab: 'development', label: 'Development', exportable: false },
   test_plan_md: { tab: 'test-plan', label: 'Test Plan', exportable: true },
   design: { tab: 'design', label: 'Design', exportable: false },
 } as const
@@ -97,6 +98,55 @@ export interface TimelineEvent {
   actor_name: string | null
   detail: Record<string, unknown> | null
   created_at: string
+}
+
+// ── Dev Activity Types ───────────────────────────────────────────
+export interface DevActivity {
+  id: string
+  status: 'in_progress' | 'completed' | 'failed' | 'blocked'
+  message: string
+  source: 'mcp' | 'hook' | 'agent'
+  actor_name: string | null
+  metadata: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface DevCommit {
+  commit_sha: string
+  commit_message: string
+  branch_name: string
+  files_changed: string
+  repo_path: string
+  created_at: string
+}
+
+export interface DevCommitRepo {
+  repo_path: string
+  repo_name: string
+  commit_count: number
+  first_sha: string
+  last_sha: string
+}
+
+export interface DevStats {
+  total_commits: number
+  total_files_changed: number
+  repos_touched: number
+  agent_runs: number
+  effectiveness_score: number
+  confidence: number
+  completion_rate: number
+  cost_per_commit: number
+  total_cost_usd: number
+  test_coverage: string
+  risk_count: number
+}
+
+export interface DevActivityResponse {
+  activities: DevActivity[]
+  commits: DevCommit[]
+  repos: DevCommitRepo[]
+  stats: DevStats
 }
 
 // ── BUD Design Types ─────────────────────────────────────────────
@@ -214,6 +264,7 @@ export interface RepoInfo {
   developBranch: string | null
   hasUncommittedChanges: boolean
   repoType: string | null
+  setupStatus: 'merged' | 'not_setup'
 }
 
 export interface RepoBranchList {
