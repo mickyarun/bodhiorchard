@@ -234,36 +234,6 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
-  // ── Tech Architecture actions ──────────────────────────
-
-  async function approveTechArch(budId: string): Promise<BUDDocument | null> {
-    error.value = ''
-    try {
-      const { data } = await api.post(`/v1/buds/${budId}/approve-tech-arch`)
-      if (currentBUD.value?.id === budId) currentBUD.value = data
-      const idx = buds.value.findIndex(p => p.id === budId)
-      if (idx !== -1) buds.value[idx] = data
-      return data
-    } catch {
-      error.value = 'Failed to approve tech architecture'
-      return null
-    }
-  }
-
-  async function rejectTechArch(budId: string, reason: string): Promise<BUDDocument | null> {
-    error.value = ''
-    try {
-      const { data } = await api.post(`/v1/buds/${budId}/reject-tech-arch`, { reason })
-      if (currentBUD.value?.id === budId) currentBUD.value = data
-      const idx = buds.value.findIndex(p => p.id === budId)
-      if (idx !== -1) buds.value[idx] = data
-      return data
-    } catch {
-      error.value = 'Failed to reject tech architecture'
-      return null
-    }
-  }
-
   async function requestReassignment(budId: string, reason: string): Promise<BUDDocument | null> {
     error.value = ''
     try {
@@ -309,8 +279,6 @@ export const useBUDStore = defineStore('bud', () => {
     regenerateDesign,
     fetchChatHistory,
     fetchTimeline,
-    approveTechArch,
-    rejectTechArch,
     requestReassignment,
     retryAgentTask,
   }
