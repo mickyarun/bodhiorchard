@@ -454,10 +454,13 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
             logger.warning("bodhigrove_setup_checkout_failed", error=stderr[:200])
             return None
     else:
-        # Create fresh branch from base
-        _, stderr, rc = await run_git(
-            ["checkout", "-b", _SETUP_BRANCH, base_branch], cwd=repo_path
-        )
+        # Try checking out existing local branch first
+        _, stderr, rc = await run_git(["checkout", _SETUP_BRANCH], cwd=repo_path)
+        if rc != 0:
+            # Branch doesn't exist locally — create from base
+            _, stderr, rc = await run_git(
+                ["checkout", "-b", _SETUP_BRANCH, base_branch], cwd=repo_path
+            )
         if rc != 0:
             logger.warning("bodhigrove_setup_branch_failed", error=stderr[:200])
             return None
