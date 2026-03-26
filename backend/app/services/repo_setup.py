@@ -93,6 +93,7 @@ assert _BODHIGROVE_CLAUDE_SECTION.rstrip().endswith(_BG_END), "Marker mismatch"
 
 _SETUP_FILES = [
     ".claude/settings.json",
+    ".mcp.json",
     ".gitignore",
     ".githooks/pre-commit",
     ".githooks/post-commit",
@@ -249,40 +250,64 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str, mcp_toke
         True if the file was written (changed), False if already up to date.
     """
     import contextlib
+    import shutil
 
     repo = Path(repo_path)
+
+    # Copy bridge script into repo so .mcp.json can use a relative path
+    # (portable across developer machines — no absolute paths)
+    source_bridge = Path(__file__).resolve().parents[1] / "mcp" / "stdio_bridge.py"
+    dest_dir = repo / ".bodhigrove"
+    dest_dir.mkdir(exist_ok=True)
+    dest_bridge = dest_dir / "mcp_bridge.py"
+    shutil.copy2(source_bridge, dest_bridge)
+
+    # Write .mcp.json at project root (Claude Code reads MCP servers from here)
+    mcp_json_path = repo / ".mcp.json"
+    mcp_config = {
+        "mcpServers": {
+            "bodhigrove": {
+                "command": "python3",
+                "args": [".bodhigrove/mcp_bridge.py"],
+                "env": {
+                    "BODHIGROVE_BACKEND_URL": backend_url,
+                    "BODHIGROVE_MCP_TOKEN": mcp_token,
+                },
+            },
+        },
+    }
+
+    # Check if already configured with correct URL + token
+    if mcp_json_path.exists():
+        with contextlib.suppress(json.JSONDecodeError, OSError):
+            existing = json.loads(mcp_json_path.read_text())
+            existing_env = (
+                existing.get("mcpServers", {}).get("bodhigrove", {}).get("env", {})
+            )
+            if (
+                existing_env.get("BODHIGROVE_BACKEND_URL") == backend_url
+                and existing_env.get("BODHIGROVE_MCP_TOKEN") == mcp_token
+                and dest_bridge.exists()
+            ):
+                logger.debug("bodhigrove_mcp_already_configured", repo=repo_path)
+                return False
+
+    mcp_json_path.write_text(json.dumps(mcp_config, indent=2))
+
+    # Also keep .claude/settings.json for backward compatibility
     claude_dir = repo / ".claude"
     claude_dir.mkdir(exist_ok=True)
     settings_path = claude_dir / "settings.json"
-
-    bridge_script = str(Path(__file__).resolve().parents[1] / "mcp" / "stdio_bridge.py")
 
     settings: dict = {}
     if settings_path.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
             settings = json.loads(settings_path.read_text())
 
-    # Check if already configured with correct URL
-    existing_mcp = settings.get("mcpServers", {}).get("bodhigrove", {})
-    existing_env = existing_mcp.get("env", {})
-    if (
-        existing_env.get("BODHIGROVE_BACKEND_URL") == backend_url
-        and existing_env.get("BODHIGROVE_MCP_TOKEN") == mcp_token
-    ):
-        logger.debug("bodhigrove_mcp_already_configured", repo=repo_path)
-        return False
-
     settings.setdefault("mcpServers", {})
-    settings["mcpServers"]["bodhigrove"] = {
-        "command": "python3",
-        "args": [bridge_script],
-        "env": {
-            "BODHIGROVE_BACKEND_URL": backend_url,
-            "BODHIGROVE_MCP_TOKEN": mcp_token,
-        },
-    }
-
+    settings["mcpServers"]["bodhigrove"] = mcp_config["mcpServers"]["bodhigrove"]
     settings_path.write_text(json.dumps(settings, indent=2))
+
     logger.info("bodhigrove_mcp_written", repo=repo_path)
     return True
 
