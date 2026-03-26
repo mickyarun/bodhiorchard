@@ -139,10 +139,12 @@ async def handle_update_task_status(
         status=task_status,
         message=message[:2000],
         source="mcp",
+        actor_name=params.get("actor_name"),
         metadata_=metadata or None,
     )
     db.add(log)
-    await db.commit()
+    await db.flush()
+    await db.refresh(log)
 
     # Publish for real-time WebSocket updates
     publish(f"bud:{bud.id}:activity", {
@@ -176,14 +178,7 @@ async def _resolve_bud(
     # Try as BUD number first (most common from developer CLI)
     try:
         bud_number = int(task_id)
-        from sqlalchemy import select
-
-        stmt = select(BUDDocument).where(
-            BUDDocument.org_id == org_id,
-            BUDDocument.bud_number == bud_number,
-        ).limit(1)
-        result = await db.execute(stmt)
-        bud = result.scalar_one_or_none()
+        bud = await bud_repo.get_by_number(bud_number)
         if bud:
             return bud
     except (ValueError, TypeError):

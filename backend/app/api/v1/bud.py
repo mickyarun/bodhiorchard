@@ -564,13 +564,12 @@ async def get_dev_activity(
 
     commit_repo = BUDCommitRepository(db, org_id=current_user.org_id)
     activity_repo = DevActivityLogRepository(db, org_id=current_user.org_id)
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
 
+    # Sequential — AsyncSession is not safe for concurrent use
     commits = await commit_repo.list_for_bud(bud_id, limit=50)
     activities = await activity_repo.list_for_bud(bud_id, limit=50)
     repo_summaries = await commit_repo.list_repos_for_bud(bud_id)
-
-    # Agent tasks for effectiveness scoring
-    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
     agent_tasks = await task_repo.list_for_bud(bud_id)
 
     # Count unique files across all commits

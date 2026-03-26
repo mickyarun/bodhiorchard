@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.models.bud_agent_task import BUDAgentTask
+    from app.models.bud_commit import BUDCommit
+    from app.models.dev_activity import DevActivityLog
 
 
 def calculate_effectiveness(
-    activities: list[Any],
-    commits: list[Any],
-    agent_tasks: list[Any],
+    activities: list[DevActivityLog],
+    commits: list[BUDCommit],
+    agent_tasks: list[BUDAgentTask],
 ) -> dict[str, Any]:
     """Calculate AI effectiveness metrics from available data.
 
