@@ -37,6 +37,20 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["settings-repos"])
 
 
+def _detect_design_system_status(repo_id: str, ds_repo_ids: set[str]) -> str:
+    """Check if a design system exists or is being extracted.
+
+    Returns: 'ready' | 'extracting' | 'none'
+    """
+    if repo_id in ds_repo_ids:
+        return "ready"
+    from app.services.job_queue import JOB_DESIGN_EXTRACT, is_job_active
+
+    if is_job_active(JOB_DESIGN_EXTRACT, {"repo_id": repo_id}):
+        return "extracting"
+    return "none"
+
+
 def _detect_setup_status(repo_path: str) -> str:
     """Check if Bodhigrove MCP + hooks are set up in a repo.
 
@@ -68,6 +82,13 @@ async def list_repos(
     repo_repo = TrackedRepoRepository(db, org_id=org.id)
     repos = await repo_repo.list_visible()
 
+    # Batch-fetch design system repo IDs for status check
+    from app.repositories.design_system import DesignSystemRefRepository
+
+    ds_repo = DesignSystemRefRepository(db, org_id=org.id)
+    all_ds = await ds_repo.list_all()
+    ds_repo_ids = {str(ds.repo_id) for ds in all_ds}
+
     return [
         RepoInfo(
             id=str(r.id),
@@ -83,6 +104,7 @@ async def list_repos(
             hasUncommittedChanges=False,
             repoType=detect_repo_type(r.path),
             setupStatus=_detect_setup_status(r.path),
+            designSystemStatus=_detect_design_system_status(str(r.id), ds_repo_ids),
         )
         for r in repos
     ]

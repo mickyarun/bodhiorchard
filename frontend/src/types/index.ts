@@ -281,6 +281,7 @@ export interface RepoInfo {
   hasUncommittedChanges: boolean
   repoType: string | null
   setupStatus: 'merged' | 'not_setup'
+  designSystemStatus: 'none' | 'extracting' | 'ready'
 }
 
 export interface RepoBranchList {

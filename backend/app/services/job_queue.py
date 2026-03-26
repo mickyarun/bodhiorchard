@@ -201,6 +201,18 @@ def cleanup_completed_jobs() -> int:
     return len(stale)
 
 
+def is_job_active(job_type: str, match_payload: dict[str, str]) -> bool:
+    """Check if any active (queued/running) job of the given type matches the payload fields."""
+    for entry in _job_store.values():
+        if entry.status.job_type != job_type:
+            continue
+        if entry.status.state not in (JobState.QUEUED, JobState.RUNNING):
+            continue
+        if all(entry.payload.get(k) == v for k, v in match_payload.items()):
+            return True
+    return False
+
+
 # ── Worker loop + lifecycle ────────────────────────────────────────
 
 

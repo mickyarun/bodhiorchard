@@ -234,13 +234,12 @@ async def _maybe_extract_design_system(
     tracked_repo: object | None,
     full_rescan: bool,
 ) -> None:
-    """Auto-extract design system during scan if design files are detected.
+    """Enqueue async design system extraction if design files are detected.
 
-    Runs the extractor inline (not as a separate job) and upserts the result.
-    Skips if the source files haven't changed since last extraction (by hash),
-    unless full_rescan is True.
-
-    The first repo with a design system is set as the org default if none exists.
+    Performs fast checks (repo type, file discovery, hash comparison) inline,
+    then delegates the actual LLM/regex extraction to a background worker via
+    JOB_DESIGN_EXTRACT. Skips if source files haven't changed since last
+    extraction (by hash), unless full_rescan is True.
 
     Args:
         db: Async database session.
@@ -249,13 +248,10 @@ async def _maybe_extract_design_system(
         tracked_repo: TrackedRepository model instance (or None).
         full_rescan: Whether this is a full rescan (force re-extraction).
     """
-    from datetime import UTC, datetime
-
     from app.repositories.design_system import DesignSystemRefRepository
     from app.services.design_system_extractor import (
         compute_hash,
         discover_design_files,
-        extract_design_system,
         read_discovered_files,
     )
     from app.services.repo_setup import detect_repo_type
@@ -288,35 +284,26 @@ async def _maybe_extract_design_system(
         )
         return
 
+    # Enqueue async extraction instead of blocking the scan
+    from app.schemas.jobs import DesignExtractJobPayload
+    from app.services.job_queue import JOB_DESIGN_EXTRACT, create_job
+
+    existing_default = await ds_repo.get_default()
+
+    job = create_job(
+        JOB_DESIGN_EXTRACT,
+        payload=DesignExtractJobPayload(
+            org_id=str(org_id),
+            repo_id=str(repo_id),
+            repo_path=repo_path,
+            is_default=existing_default is None,
+        ).model_dump(),
+    )
     logger.info(
-        "design_system_auto_extracting",
+        "design_extract_enqueued",
         repo=repo.name,
         file_count=len(discovered),
-    )
-
-    extraction = await extract_design_system(repo)
-
-    # Set as org default if no default exists yet
-    is_default = False
-    existing_default = await ds_repo.get_default()
-    if existing_default is None:
-        is_default = True
-
-    await ds_repo.upsert(
-        repo_id=repo_id,
-        content=extraction.content,
-        source_hash=extraction.source_hash,
-        extracted_at=datetime.now(UTC),
-        is_default=is_default,
-    )
-    await db.flush()
-
-    logger.info(
-        "design_system_auto_extracted",
-        repo=repo.name,
-        method=extraction.method,
-        is_default=is_default,
-        error=extraction.error,
+        job_id=job.job_id,
     )
 
 

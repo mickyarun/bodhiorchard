@@ -89,6 +89,7 @@ class RepoInfo(BaseModel):
     has_uncommitted_changes: bool = Field(False, alias="hasUncommittedChanges")
     repo_type: str | None = Field(None, alias="repoType")
     setup_status: str = Field("not_setup", alias="setupStatus")
+    design_system_status: str = Field("none", alias="designSystemStatus")
 
     model_config = {"populate_by_name": True}
 

@@ -108,14 +108,40 @@
     </v-tabs-window>
   </div>
 
-  <!-- Empty state: generate -->
+  <!-- Empty state: generate or extracting -->
   <div v-else class="section-empty">
+    <!-- Extraction in progress -->
+    <v-alert
+      v-if="extractingRepos.length > 0"
+      type="info"
+      variant="tonal"
+      density="compact"
+      class="mb-4"
+      style="max-width: 440px;"
+    >
+      <div class="d-flex align-center ga-2">
+        <v-progress-circular indeterminate size="16" width="2" />
+        <span>
+          Design system extraction in progress for
+          {{ extractingRepos.map(r => r.name).join(', ') }}...
+        </span>
+      </div>
+      <div class="text-caption text-medium-emphasis mt-1">
+        Wireframe generation will be available once extraction completes.
+      </div>
+    </v-alert>
+
     <v-icon icon="mdi-palette-outline" size="40" class="mb-3" />
     <div>No design yet</div>
     <div class="text-caption text-medium-emphasis mt-1 mb-3">
       Generate wireframes using your repos' design systems
     </div>
-    <v-btn variant="tonal" size="small" @click="triggerDesignGeneration">
+    <v-btn
+      variant="tonal"
+      size="small"
+      :disabled="extractingRepos.length > 0 && designSystemStore.items.length === 0"
+      @click="triggerDesignGeneration"
+    >
       <v-icon start size="15">mdi-creation-outline</v-icon>
       Generate Wireframes
     </v-btn>
@@ -185,6 +211,11 @@ const budStore = useBUDStore()
 const settingsStore = useSettingsStore()
 const designSystemStore = useDesignSystemStore()
 const { startTracking } = useJobSocket()
+
+// Repos with design system extraction in progress
+const extractingRepos = computed(() =>
+  settingsStore.repos.filter(r => r.designSystemStatus === 'extracting'),
+)
 
 // Multi-design state
 const designs = ref<BUDDesign[]>([])
