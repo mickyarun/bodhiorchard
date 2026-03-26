@@ -664,7 +664,7 @@ onMounted(async () => {
   // Fallback: check backend for active scan (e.g. page opened mid-scan)
   if (scanStatus.value === 'idle') {
     try {
-      const { data } = await api.get('/api/setup/checklist-status')
+      const { data } = await api.get('/setup/checklist-status')
       if (data.scanInProgress && data.scanId) {
         currentScanId = data.scanId
         localStorage.setItem('flowdev_scan_id', currentScanId)

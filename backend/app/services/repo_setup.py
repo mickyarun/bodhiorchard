@@ -324,11 +324,8 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
             settings = json.loads(settings_path.read_text())
 
     settings.setdefault("mcpServers", {})
+    # Overwrite with token-free config (replaces any stale token from old setups)
     settings["mcpServers"]["bodhigrove"] = mcp_config["mcpServers"]["bodhigrove"]
-    # Remove stale token from old setups (security: don't commit secrets)
-    settings["mcpServers"]["bodhigrove"].get("env", {}).pop(
-        "BODHIGROVE_MCP_TOKEN", None,
-    )
     settings_path.write_text(json.dumps(settings, indent=2))
 
     logger.info("bodhigrove_mcp_written", repo=repo_path)
