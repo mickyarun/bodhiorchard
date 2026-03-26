@@ -43,16 +43,12 @@ export class Mat3 {
     return new Mat3([c, 0, s, 0, 1, 0, -s, 0, c])
   }
 
-  static rotateZ(theta: number): Mat3 {
-    const c = Math.cos(theta), s = Math.sin(theta)
-    return new Mat3([c, -s, 0, s, c, 0, 0, 0, 1])
-  }
-
-  /** Rodrigues' rotation formula — rotate around arbitrary axis. */
+  /** Rodrigues' rotation formula — rotate around arbitrary axis. Does not mutate input. */
   static rotateAxis(axis: Vec3, theta: number): Mat3 {
-    axis.normalize()
+    const len = axis.length()
+    if (len === 0) return Mat3.identity()
     const s = Math.sin(theta), c = Math.cos(theta)
-    const { x, y, z } = axis
+    const x = axis.x / len, y = axis.y / len, z = axis.z / len
     return new Mat3([
       c + (1-c)*x*x,     (1-c)*x*y - s*z,   (1-c)*x*z + s*y,
       (1-c)*x*y + s*z,   c + (1-c)*y*y,      (1-c)*y*z - s*x,

@@ -176,6 +176,8 @@ export class UIOverlay {
   }
 
   destroy(): void {
+    this.onGrowCallback = null
+    this.onResetCallback = null
     this.panel.remove()
   }
 }

@@ -57,7 +57,7 @@ export class TreeTestEngine {
     this.materials = new MaterialFactory()
 
     // Ground
-    this.ground = new GroundBuilder(this.application.app, this.materials)
+    this.ground = new GroundBuilder(this.application.app)
     const groundRoot = new pc.Entity('GroundRoot')
     this.application.app.root.addChild(groundRoot)
     this.ground.build(groundRoot, 4)
@@ -128,6 +128,7 @@ export class TreeTestEngine {
       this.lastInputTime = elapsed
     }
 
+    // Drain unused input channels to prevent accumulation
     this.input.getPanDelta()
     this.input.getMovementVector()
 

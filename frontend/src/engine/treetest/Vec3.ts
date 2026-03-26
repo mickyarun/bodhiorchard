@@ -47,12 +47,4 @@ export class Vec3 {
     return Math.acos(Math.max(-1, Math.min(1, cos)))
   }
 
-  /** Rotate point around Y axis (for camera orbit). */
-  static rotateAroundY(p: Vec3, sinA: number, cosA: number): Vec3 {
-    return new Vec3(
-      sinA * p.x - cosA * p.z,
-      p.y,
-      cosA * p.x + sinA * p.z,
-    )
-  }
 }

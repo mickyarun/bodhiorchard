@@ -73,17 +73,3 @@ export function getRulesMatrix(rules: TreeRules): Mat3 {
   return Mat3.identity().multiply(yRot).multiply(xRot)
 }
 
-export function blendRules(d1: TreeRules, d2: TreeRules, ratio: number): TreeRules {
-  const lerp = (a: number, b: number) => a * (1 - ratio) + b * ratio
-  return {
-    growLean: lerp(d1.growLean, d2.growLean),
-    angle: lerp(d1.angle, d2.angle),
-    angleWarp: lerp(d1.angleWarp, d2.angleWarp),
-    size: lerp(d1.size, d2.size),
-    sizeWarp: lerp(d1.sizeWarp, d2.sizeWarp),
-    whorl: lerp(d1.whorl, d2.whorl),
-    whorlWarp: lerp(d1.whorlWarp, d2.whorlWarp),
-    colorWarp: Math.round(lerp(d1.colorWarp, d2.colorWarp)),
-    minSize: d2.minSize,
-  }
-}
