@@ -635,6 +635,14 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
         if rc != 0:
             # No remote or push failed — merge setup into base branch directly
             logger.info("bodhigrove_setup_no_remote_merging", repo=repo_path)
+
+            # Remove worktrees that may lock the base branch
+            wt_path = Path(repo_path) / ".bodhigrove" / "main"
+            if wt_path.exists():
+                await run_git(
+                    ["worktree", "remove", str(wt_path), "--force"], cwd=repo_path,
+                )
+
             await run_git(["checkout", base_branch], cwd=repo_path)
             _, merge_err, merge_rc = await run_git(
                 ["merge", _SETUP_BRANCH, "--no-edit"], cwd=repo_path,
@@ -655,7 +663,12 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
         )
         return _SETUP_BRANCH
     finally:
-        # Always switch to main branch (not the original feature branch)
+        # Remove worktrees that may lock the base branch, then switch back
+        wt_main = Path(repo_path) / ".bodhigrove" / "main"
+        if wt_main.exists():
+            await run_git(
+                ["worktree", "remove", str(wt_main), "--force"], cwd=repo_path,
+            )
         await run_git(["checkout", base_branch], cwd=repo_path)
 
 
