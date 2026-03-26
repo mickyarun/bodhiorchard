@@ -305,15 +305,20 @@ async def install_hooks(repo_path: str, backend_url: str, org_id: str) -> bool:
         hook_path = hooks_dir / hook_name
         hook_content = builder(backend_url, org_id)
 
+        full_content = f"#!/bin/sh\n{hook_content}"
         if hook_path.exists():
             existing = hook_path.read_text()
             if _HOOK_MARKER in existing:
-                continue  # Already installed
-            # Append to existing hook
-            with hook_path.open("a") as f:
-                f.write(f"\n{hook_content}")
+                if existing.strip() == full_content.strip():
+                    continue  # Already up to date
+                # Overwrite with updated hook content
+                hook_path.write_text(full_content)
+            else:
+                # Append to existing non-Bodhigrove hook
+                with hook_path.open("a") as f:
+                    f.write(f"\n{hook_content}")
         else:
-            hook_path.write_text(f"#!/bin/sh\n{hook_content}")
+            hook_path.write_text(full_content)
 
         hook_path.chmod(0o755)
         changed = True
