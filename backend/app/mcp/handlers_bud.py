@@ -114,9 +114,14 @@ async def handle_update_task_status(
     from app.models.dev_activity import DevActivityLog
     from app.services.event_bus import publish
 
+    valid_statuses = {"in_progress", "completed", "failed", "blocked"}
+
     task_id = params.get("task_id", "")
     task_status = params.get("status", "")
     message = params.get("message", "")
+
+    if task_status not in valid_statuses:
+        return {"success": False, "error": f"Invalid status: {task_status}"}
 
     # Resolve BUD from task_id (supports BUD number like "1" or UUID)
     bud = await _resolve_bud(db, org.id, task_id)
