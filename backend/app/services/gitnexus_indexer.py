@@ -123,9 +123,25 @@ async def index_repo_with_gitnexus(
         )
 
         if returncode != 0:
-            logger.warning("gitnexus_nonzero_exit", returncode=returncode, stderr=stderr[:500])
-            result.error = f"GitNexus analyze failed (code {returncode}): {stderr[:200]}"
-            return result
+            # npm peer dependency warnings cause exit code 1 but analysis succeeds
+            is_npm_warn_only = "npm warn" in stderr and "error" not in stderr.lower()
+            if is_npm_warn_only:
+                logger.info(
+                    "gitnexus_npm_warnings_ignored",
+                    returncode=returncode,
+                    stderr_preview=stderr[:200],
+                )
+            else:
+                logger.warning(
+                    "gitnexus_nonzero_exit",
+                    returncode=returncode,
+                    stderr=stderr[:500],
+                )
+                result.error = (
+                    f"GitNexus analyze failed (code {returncode}): "
+                    f"{stderr[:200]}"
+                )
+                return result
 
         logger.info("gitnexus_analyze_complete", repo=repo_path)
     except TimeoutError:
