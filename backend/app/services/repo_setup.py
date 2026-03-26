@@ -296,14 +296,11 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
         },
     }
 
-    # Check if already configured with correct URL + bridge exists
+    # Check if config matches exactly (catches stale tokens, format changes)
+    expected_json = json.dumps(mcp_config, indent=2)
     if mcp_json_path.exists() and dest_bridge.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
-            existing = json.loads(mcp_json_path.read_text())
-            existing_env = (
-                existing.get("mcpServers", {}).get("bodhigrove", {}).get("env", {})
-            )
-            if existing_env.get("BODHIGROVE_BACKEND_URL") == backend_url:
+            if mcp_json_path.read_text().strip() == expected_json.strip():
                 logger.debug("bodhigrove_mcp_already_configured", repo=repo_path)
                 return False
 
