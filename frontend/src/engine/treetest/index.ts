@@ -16,14 +16,14 @@ import { clamp, lerp } from '../utils/MathUtils'
 const CAM = {
   yaw: -30,
   pitch: 22,
-  distance: 22,
-  lookAtY: 2.5,
-  autoOrbitSpeed: 4,
+  distance: 12,
+  lookAtY: 1.5,
+  autoOrbitSpeed: 6,
   idleDelay: 2.0,
   sensitivity: 0.3,
   zoomScale: 0.15,
-  zoomMin: 5,
-  zoomMax: 80,
+  zoomMin: 1,
+  zoomMax: 30,
   smoothing: 0.08,
 }
 
@@ -60,7 +60,7 @@ export class TreeTestEngine {
     this.ground = new GroundBuilder(this.application.app)
     const groundRoot = new pc.Entity('GroundRoot')
     this.application.app.root.addChild(groundRoot)
-    this.ground.build(groundRoot, 20)
+    this.ground.build(groundRoot, 4)
 
     // Tree system
     this.tree = new Tree3DSystem(this.application.app, this.materials)
@@ -81,7 +81,7 @@ export class TreeTestEngine {
 
   private startGrowth(): void {
     if (!this.tree) return
-    this.tree.startForest(5)
+    this.tree.startTree()
     this.ui?.setGrowEnabled(false)
     this.ui?.setGrowLabel('Growing...')
   }
@@ -102,7 +102,7 @@ export class TreeTestEngine {
       const stillGrowing = this.tree.update(dt)
       if (!stillGrowing && !this.tree.isGrowing()) {
         this.ui?.setGrowEnabled(true)
-        this.ui?.setGrowLabel('New Forest')
+        this.ui?.setGrowLabel('New Tree')
       }
       this.ui?.showProgress(this.tree.isGrowing() ? 0.5 : 0)
     }
