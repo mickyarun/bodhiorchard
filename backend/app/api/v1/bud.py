@@ -153,6 +153,7 @@ async def create_bud(
     await create_agent_task_for_stage(
         bud, "bud", current_user.org_id, db,
         triggered_by=current_user.id,
+        force=True,
     )
 
     return await _bud_response(bud, current_user.org_id, db)

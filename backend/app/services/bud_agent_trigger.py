@@ -22,6 +22,7 @@ async def create_agent_task_for_stage(
     db: AsyncSession,
     *,
     triggered_by: uuid.UUID | None = None,
+    force: bool = False,
 ) -> None:
     """Look up stage mapping and create an agent task if configured.
 
@@ -48,9 +49,10 @@ async def create_agent_task_for_stage(
         return
 
     # Skip if the output section already has content — prevents re-runs on
-    # status back-and-forth and respects manually written/imported content.
+    # status back-and-forth. Callers pass force=True on initial creation
+    # (PM agent should always refine user input into a PRD).
     output_section = first.output_section
-    if output_section and hasattr(bud, output_section):
+    if not force and output_section and hasattr(bud, output_section):
         existing_content = getattr(bud, output_section)
         if existing_content and existing_content.strip():
             logger.info(

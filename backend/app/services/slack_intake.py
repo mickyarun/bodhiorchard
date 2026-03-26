@@ -295,7 +295,7 @@ async def handle_pm_approval(
     from app.services.bud_agent_trigger import create_agent_task_for_stage
 
     await create_agent_task_for_stage(
-        bud, "bud", org.id, db, triggered_by=approver.id
+        bud, "bud", org.id, db, triggered_by=approver.id, force=True,
     )
 
 
