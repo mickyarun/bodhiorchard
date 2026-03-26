@@ -9,9 +9,9 @@
     <div v-else-if="!hasActivity" class="empty-state">
       <v-icon icon="mdi-code-braces" size="48" color="primary" class="mb-3 opacity-40" />
       <div class="text-h6 font-weight-medium mb-2">Ready for development</div>
-      <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 420px;">
+      <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 440px;">
         Start coding on a <code>bud-{{ budNumber }}/</code> branch. Commits will appear here
-        automatically via git hooks. Use Claude Code with Bodhigrove MCP to report progress.
+        automatically — git hooks and Bodhigrove MCP are auto-configured during repo scanning.
       </div>
       <div class="d-flex ga-2 justify-center">
         <v-btn
