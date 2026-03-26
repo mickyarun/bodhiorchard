@@ -148,22 +148,9 @@ async def _build_tech_arch_prompt(
                         "follow them and override the generated wireframe where they conflict.\n\n"
                     )
 
-    # Gather design system tokens
+    # Check if design systems exist (for conditional instructions)
     ds_repo = DesignSystemRefRepository(db, org_id=org_id)
-    ds_context = ""
-    seen_repos: set[uuid_mod.UUID] = set()
-    if bud.designs:
-        for d in bud.designs:
-            if d.repo_id and d.repo_id not in seen_repos:
-                seen_repos.add(d.repo_id)
-                ds = await ds_repo.get_for_repo(d.repo_id)
-                if ds:
-                    rname = repo_id_to_name.get(d.repo_id, "unknown")
-                    ds_context += f"\n### Design System: {rname}\n{ds.content[:8000]}\n"
-    if not ds_context:
-        default_ds = await ds_repo.get_default()
-        if default_ds:
-            ds_context = f"\n### Design System (default)\n{default_ds.content[:8000]}\n"
+    has_design_system = bool(await ds_repo.get_default())
 
     # Build repo context
     repo_context = ""
@@ -192,12 +179,17 @@ async def _build_tech_arch_prompt(
     )
     if design_context:
         prompt += f"\n## Design Wireframes & Notes\n{design_context}\n"
-    if ds_context:
-        prompt += f"\n## Design System Tokens\n{ds_context}\n"
+    if has_design_system:
+        prompt += (
+            "\n## Design System\n\n"
+            "Use the `get_design_system` MCP tool to fetch design tokens "
+            "(colors, typography, spacing, component defaults) when needed. "
+            "Do NOT hardcode values — reference the design system.\n"
+        )
     if repo_context:
         prompt += repo_context
 
-    has_designs = bool(design_context or ds_context)
+    has_designs = bool(design_context or has_design_system)
 
     instructions = "\n## Instructions\n\n"
     if has_designs:

@@ -2,7 +2,7 @@
 name: Tech Planner
 description: Generates detailed technical implementation plans with step-by-step TODOs from approved BUDs
 tools: Read, Glob, Grep, Bash
-mcp_tools: get_bud_context, update_task_status, get_team_context
+mcp_tools: get_bud_context, update_task_status, get_team_context, get_design_system
 max_turns: 0
 model: sonnet
 effort:
