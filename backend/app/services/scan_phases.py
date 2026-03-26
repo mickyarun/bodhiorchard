@@ -136,6 +136,7 @@ async def phase_b1_repo_setup(
     from app.services.repo_setup import (
         add_bodhigrove_gitignore,
         add_prepare_script,
+        append_bodhigrove_claude_instructions,
         commit_and_push_bodhigrove_setup,
         create_setup_pr,
         ensure_repo_worktrees,
@@ -196,8 +197,6 @@ async def phase_b1_repo_setup(
         prepare_changed = add_prepare_script(repo_path)
 
         # Add Bodhigrove workflow instructions to CLAUDE.md
-        from app.services.repo_setup import append_bodhigrove_claude_instructions
-
         claude_md_changed = append_bodhigrove_claude_instructions(repo_path)
 
         # Branch, commit, push setup files, and create PR

@@ -88,6 +88,9 @@ This repo is tracked by Bodhigrove. MCP tools are auto-configured in `.claude/se
 <!-- bodhigrove:end -->
 """
 
+assert _BODHIGROVE_CLAUDE_SECTION.lstrip().startswith(_BG_START), "Marker mismatch"
+assert _BODHIGROVE_CLAUDE_SECTION.rstrip().endswith(_BG_END), "Marker mismatch"
+
 _SETUP_FILES = [
     ".claude/settings.json",
     ".gitignore",
@@ -121,13 +124,20 @@ def append_bodhigrove_claude_instructions(repo_path: str) -> bool:
     # Already has Bodhigrove section — check if content changed
     if _BG_START in content:
         start = content.index(_BG_START)
-        end = content.index(_BG_END) + len(_BG_END) if _BG_END in content else len(content)
+        if _BG_END not in content:
+            logger.warning(
+                "bodhigrove_claude_md_malformed",
+                repo=repo_path,
+                detail="start marker without end marker — skipping",
+            )
+            return False
+        end = content.index(_BG_END) + len(_BG_END)
         existing = content[start:end]
         new_section = _BODHIGROVE_CLAUDE_SECTION.strip()
         if existing.strip() == new_section:
             return False  # Already up to date
-        # Replace existing section
-        content = content[:start] + new_section + "\n" + content[end:]
+        # Replace existing section, avoid accumulating blank lines
+        content = content[:start] + new_section + "\n" + content[end:].lstrip("\n")
     else:
         # Insert after gitnexus:end or append at end
         gitnexus_end = "<!-- gitnexus:end -->"
