@@ -130,7 +130,9 @@ def append_bodhigrove_claude_instructions(repo_path: str) -> bool:
     """
     claude_md = Path(repo_path) / "CLAUDE.md"
     if not claude_md.exists():
-        return False
+        # Create CLAUDE.md with just the Bodhigrove section
+        claude_md.write_text(_BODHIGROVE_CLAUDE_SECTION.strip() + "\n")
+        return True
 
     content = claude_md.read_text()
 
