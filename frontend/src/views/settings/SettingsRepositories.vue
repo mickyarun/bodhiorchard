@@ -651,13 +651,31 @@ onMounted(async () => {
   fetchIndexStats()
   settingsStore.fetchRepos()
 
-  // If a scan was auto-triggered from setup, resume polling
-  const setupScanId = localStorage.getItem('flowdev_scan_id')
-  if (setupScanId && scanStatus.value === 'idle') {
-    currentScanId = setupScanId
+  // Resume tracking if a scan is running (from this page or setup)
+  const savedScanId = localStorage.getItem('flowdev_scan_id')
+  if (savedScanId && scanStatus.value === 'idle') {
+    currentScanId = savedScanId
     scanStatus.value = 'running'
-    scanStatusLabel.value = 'Scanning'
+    scanStatusLabel.value = 'Scanning...'
     startPolling()
+    return
+  }
+
+  // Fallback: check backend for active scan (e.g. page opened mid-scan)
+  if (scanStatus.value === 'idle') {
+    try {
+      const { data } = await api.get('/api/setup/checklist-status')
+      if (data.scanInProgress && data.scanId) {
+        currentScanId = data.scanId
+        localStorage.setItem('flowdev_scan_id', currentScanId)
+        scanStatus.value = 'running'
+        scanProgress.value = data.scanProgress || 0
+        scanStatusLabel.value = 'Scanning...'
+        startPolling()
+      }
+    } catch {
+      // Ignore — setup endpoint may not be available
+    }
   }
 })
 
@@ -798,6 +816,7 @@ async function triggerScan(fullRescan: boolean = false): Promise<void> {
     scanStatusLabel.value = 'Starting'
     const { data } = await api.post('/v1/skills/scan', { fullRescan: Boolean(fullRescan) })
     currentScanId = data.scanId
+    localStorage.setItem('flowdev_scan_id', currentScanId)
     startPolling()
   } catch (err: unknown) {
     scanStatus.value = 'failed'
