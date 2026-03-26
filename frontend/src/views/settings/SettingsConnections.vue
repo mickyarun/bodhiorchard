@@ -119,12 +119,13 @@
           </v-alert>
         </v-expand-transition>
 
-        <!-- Claude Code config snippet -->
-        <div class="text-body-2 font-weight-medium mb-2">Claude Code Configuration</div>
-        <div class="text-caption text-medium-emphasis mb-2">
-          Add this to your Claude Code MCP settings (claude_desktop_config.json or .claude/settings.json):
+        <!-- Setup instructions -->
+        <div class="text-body-2 font-weight-medium mb-2">Setup</div>
+        <div class="text-caption text-medium-emphasis mb-3">
+          MCP is auto-configured in your repos during scanning (<code>.mcp.json</code>).
+          To activate, set your token as an environment variable:
         </div>
-        <div class="config-snippet pa-3 rounded" style="background: rgba(0,0,0,0.3); position: relative;">
+        <div class="config-snippet pa-3 rounded mb-3" style="background: rgba(0,0,0,0.3); position: relative;">
           <v-btn
             icon="mdi-content-copy"
             variant="text"
@@ -132,7 +133,10 @@
             style="position: absolute; top: 4px; right: 4px;"
             @click="copyConfig"
           />
-          <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ mcpConfigSnippet }}</pre>
+          <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ envVarSnippet }}</pre>
+        </div>
+        <div class="text-caption text-medium-emphasis">
+          Add this to your shell profile (<code>~/.zshrc</code> or <code>~/.bashrc</code>) and restart Claude Code.
         </div>
       </v-card>
 
@@ -361,20 +365,9 @@ const mcpTokenSet = ref(false)
 const newMcpToken = ref('')
 const regeneratingToken = ref(false)
 
-const mcpConfigSnippet = computed(() => {
+const envVarSnippet = computed(() => {
   const token = newMcpToken.value || '<your-bodhigrove-token>'
-  return JSON.stringify({
-    mcpServers: {
-      bodhigrove: {
-        url: 'http://localhost:8000/mcp',
-        headers: { Authorization: `Bearer ${token}` },
-      },
-      gitnexus: {
-        command: 'gitnexus',
-        args: ['mcp'],
-      },
-    },
-  }, null, 2)
+  return `export BODHIGROVE_MCP_TOKEN="${token}"`
 })
 
 onMounted(async () => {
@@ -413,7 +406,7 @@ function copyToken(): void {
 }
 
 function copyConfig(): void {
-  navigator.clipboard.writeText(mcpConfigSnippet.value)
+  navigator.clipboard.writeText(envVarSnippet.value)
 }
 </script>
 
