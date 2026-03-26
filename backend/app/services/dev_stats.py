@@ -52,7 +52,9 @@ def calculate_effectiveness(
         scores.append(avg_confidence / 10.0)
 
     # 2. Agent task completion rate (only meaningful when dev activity exists)
-    completed = sum(1 for t in agent_tasks if getattr(t, "status", "") == "completed")
+    from app.models.bud_agent_task import AgentTaskStatus
+
+    completed = sum(1 for t in agent_tasks if t.status == AgentTaskStatus.COMPLETED)
     total = len(agent_tasks)
     completion_rate = completed / total if total else 0.0
     if total and (confidences or commits):
@@ -68,7 +70,7 @@ def calculate_effectiveness(
     if commits and total_cost > 0:
         scores.append(max(0.0, 1.0 - cost_per_commit))
 
-    overall = round((sum(scores) / len(scores)) * 100) if scores else 0
+    overall = max(0, min(100, round((sum(scores) / len(scores)) * 100))) if scores else 0
 
     return {
         "score": overall,

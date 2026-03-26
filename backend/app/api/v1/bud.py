@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
@@ -472,7 +473,6 @@ async def list_commit_repos(
     Used by the frontend when transitioning to code_review to show
     a confirmation dialog of which repos have been touched.
     """
-    from pathlib import Path
 
     from app.repositories.bud_commit import BUDCommitRepository
 
@@ -574,7 +574,6 @@ async def get_dev_activity(
     db: AsyncSession = Depends(get_db),
 ) -> DevActivityResponse:
     """Get development activity summary: commits, MCP updates, and stats."""
-    from pathlib import Path
 
     from app.repositories.bud_commit import BUDCommitRepository
     from app.repositories.dev_activity import DevActivityLogRepository
@@ -604,12 +603,13 @@ async def get_dev_activity(
     commit_user_ids = {c.user_id for c in commits if c.user_id}
     user_names: dict[uuid.UUID, str] = {}
     if commit_user_ids:
+        from sqlalchemy import select as sa_select
+
         from app.models.user import User as UserModel
 
-        for uid in commit_user_ids:
-            u = await db.get(UserModel, uid)
-            if u:
-                user_names[uid] = u.name
+        result = await db.execute(sa_select(UserModel).where(UserModel.id.in_(commit_user_ids)))
+        for u in result.scalars():
+            user_names[u.id] = u.name
 
     commit_reads = [
         DevCommitRead(

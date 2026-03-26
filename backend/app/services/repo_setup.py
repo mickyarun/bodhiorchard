@@ -253,7 +253,8 @@ def _build_post_commit_hook(backend_url: str, org_id: str) -> str:
         "REPO_PATH=$(git rev-parse --show-toplevel)\n"
         "AUTHOR=$(git log -1 --format='%an' | head -c 200 | "
         "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
-        "EMAIL=$(git log -1 --format='%ae' | head -c 200)\n"
+        "EMAIL=$(git log -1 --format='%ae' | head -c 200 | "
+        "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
         "\n"
         "# Build JSON safely with printf\n"
         'JSON=$(printf \'{"bud_number":%s,"sha":"%s","message":"%s",'
