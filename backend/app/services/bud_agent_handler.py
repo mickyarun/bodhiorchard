@@ -106,23 +106,67 @@ async def _build_tech_arch_prompt(
     bud: BUDDocument, skill: Skill, org_id: uuid_mod.UUID, db: Any
 ) -> tuple[str, str | None]:
     """Build tech architecture prompt with design context and repo info."""
+    from app.repositories.design_system import DesignSystemRefRepository
     from app.repositories.tracked_repository import TrackedRepoRepository
 
     bud_ref = f"BUD-{bud.bud_number:03d}"
 
-    # Gather design context
-    design_context = ""
-    if bud.designs:
-        for d in bud.designs:
-            if d.design_html:
-                repo_label = d.repo_id or "general"
-                design_context += f"\n## Design ({repo_label})\n{d.design_html[:2000]}\n"
-
-    # Fetch repos
+    # Fetch repos and build lookup maps
     repo_repo = TrackedRepoRepository(db, org_id=org_id)
     repo_pairs = await repo_repo.get_active_path_name_pairs()
     working_dir = repo_pairs[0][0] if repo_pairs else None
 
+    # Build repo_id → name and repo_id → path maps
+    repo_id_to_name: dict[uuid_mod.UUID, str] = {}
+    repo_id_to_path: dict[uuid_mod.UUID, str] = {}
+    for path, name in repo_pairs:
+        tr = await repo_repo.get_by_path(path)
+        if tr:
+            repo_id_to_name[tr.id] = name
+            repo_id_to_path[tr.id] = path
+
+    # Gather design context: wireframe paths + notes (override)
+    design_context = ""
+    if bud.designs:
+        for d in bud.designs:
+            repo_name = repo_id_to_name.get(d.repo_id, "general") if d.repo_id else "general"
+            repo_path = repo_id_to_path.get(d.repo_id) if d.repo_id else None
+
+            if d.design_path or d.notes:
+                design_context += f"\n### Design: {repo_name}\n"
+                if d.design_path and repo_path:
+                    full_path = f"{repo_path}/{d.design_path}"
+                    design_context += (
+                        f"**Wireframe:** `{full_path}`\n"
+                        "Read this HTML wireframe to understand the UI layout and components.\n\n"
+                    )
+                if d.notes:
+                    design_context += (
+                        f"**Design Notes (OVERRIDE):**\n{d.notes}\n\n"
+                        "These notes take priority over the wireframe HTML. "
+                        "If notes contain Figma links, reference designs, "
+                        "or specific instructions, "
+                        "follow them and override the generated wireframe where they conflict.\n\n"
+                    )
+
+    # Gather design system tokens
+    ds_repo = DesignSystemRefRepository(db, org_id=org_id)
+    ds_context = ""
+    seen_repos: set[uuid_mod.UUID] = set()
+    if bud.designs:
+        for d in bud.designs:
+            if d.repo_id and d.repo_id not in seen_repos:
+                seen_repos.add(d.repo_id)
+                ds = await ds_repo.get_for_repo(d.repo_id)
+                if ds:
+                    rname = repo_id_to_name.get(d.repo_id, "unknown")
+                    ds_context += f"\n### Design System: {rname}\n{ds.content[:4000]}\n"
+    if not ds_context:
+        default_ds = await ds_repo.get_default()
+        if default_ds:
+            ds_context = f"\n### Design System (default)\n{default_ds.content[:4000]}\n"
+
+    # Build repo context
     repo_context = ""
     if repo_pairs:
         repo_list = "\n".join(f"- **{name}**: `{path}`" for path, name in repo_pairs)
@@ -142,32 +186,44 @@ async def _build_tech_arch_prompt(
             "Start by reading `gitnexus://repo/*/context` to understand the codebase.\n"
         )
 
+    # Assemble prompt
     prompt = (
         f"Generate a detailed technical implementation plan for {bud_ref}: {bud.title}.\n\n"
         f"## Requirements\n\n{bud.requirements_md or ''}\n"
     )
     if design_context:
-        prompt += f"\n## Existing Design Context\n{design_context}\n"
+        prompt += f"\n## Design Wireframes & Notes\n{design_context}\n"
+    if ds_context:
+        prompt += f"\n## Design System Tokens\n{ds_context}\n"
     if repo_context:
         prompt += repo_context
 
     instructions = (
         "\n## Instructions\n\n"
-        "Create a comprehensive tech spec covering:\n"
+        "Create a comprehensive tech spec that **aligns with the designs above**.\n\n"
+        "The tech spec MUST:\n"
+        "- Read the wireframe HTML files to understand the UI layout\n"
+        "- Reference specific UI components and screens from the wireframes\n"
+        "- Use the design system tokens (colors, typography, spacing) listed above\n"
+        "- Map each wireframe screen to specific files/routes\n"
+        "- Include data model changes needed to support the UI\n\n"
+        "Cover:\n"
         "- Architecture approach and key design decisions\n"
         "- Files to create or modify (with full paths)\n"
-        "- Data model changes (if any)\n"
-        "- API endpoints (if any)\n"
+        "- Data model changes\n"
+        "- API endpoints\n"
+        "- Frontend components (referencing wireframe elements)\n"
         "- Dependencies and integration points\n"
         "- Risk areas and mitigation strategies\n\n"
     )
     if repo_pairs:
         instructions += (
-            "1. First, read `gitnexus://repo/*/context` for a codebase overview.\n"
-            "2. Use `gitnexus_query` to find code related to the requirements.\n"
-            "3. Use `gitnexus_context` on key symbols to understand dependencies.\n"
-            "4. Output the plan as clean markdown.\n\n"
-            "REMEMBER: Use gitnexus MCP tools, NOT bash find/grep/ls.\n"
+            "1. First, read the wireframe files listed in the Design section.\n"
+            "2. Read `gitnexus://repo/*/context` for a codebase overview.\n"
+            "3. Use `gitnexus_query` to find code related to the requirements.\n"
+            "4. Use `gitnexus_context` on key symbols to understand dependencies.\n"
+            "5. Output the plan as clean markdown.\n\n"
+            "REMEMBER: Use gitnexus MCP tools for code exploration, NOT bash find/grep/ls.\n"
         )
     else:
         instructions += "Output the plan as clean markdown."
