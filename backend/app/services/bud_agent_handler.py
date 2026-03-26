@@ -111,19 +111,18 @@ async def _build_tech_arch_prompt(
 
     bud_ref = f"BUD-{bud.bud_number:03d}"
 
-    # Fetch repos and build lookup maps
+    # Fetch repos in a single query (id, path, name)
     repo_repo = TrackedRepoRepository(db, org_id=org_id)
-    repo_pairs = await repo_repo.get_active_path_name_pairs()
-    working_dir = repo_pairs[0][0] if repo_pairs else None
+    repo_triples = await repo_repo.get_active_id_path_name()
+    repo_pairs = [(path, name) for _, path, name in repo_triples]
+    working_dir = repo_triples[0][1] if repo_triples else None
 
-    # Build repo_id → name and repo_id → path maps
+    # Build lookup maps from the single query
     repo_id_to_name: dict[uuid_mod.UUID, str] = {}
     repo_id_to_path: dict[uuid_mod.UUID, str] = {}
-    for path, name in repo_pairs:
-        tr = await repo_repo.get_by_path(path)
-        if tr:
-            repo_id_to_name[tr.id] = name
-            repo_id_to_path[tr.id] = path
+    for rid, path, name in repo_triples:
+        repo_id_to_name[rid] = name
+        repo_id_to_path[rid] = path
 
     # Gather design context: wireframe paths + notes (override)
     design_context = ""
@@ -160,11 +159,11 @@ async def _build_tech_arch_prompt(
                 ds = await ds_repo.get_for_repo(d.repo_id)
                 if ds:
                     rname = repo_id_to_name.get(d.repo_id, "unknown")
-                    ds_context += f"\n### Design System: {rname}\n{ds.content[:4000]}\n"
+                    ds_context += f"\n### Design System: {rname}\n{ds.content[:8000]}\n"
     if not ds_context:
         default_ds = await ds_repo.get_default()
         if default_ds:
-            ds_context = f"\n### Design System (default)\n{default_ds.content[:4000]}\n"
+            ds_context = f"\n### Design System (default)\n{default_ds.content[:8000]}\n"
 
     # Build repo context
     repo_context = ""
@@ -198,32 +197,45 @@ async def _build_tech_arch_prompt(
     if repo_context:
         prompt += repo_context
 
-    instructions = (
-        "\n## Instructions\n\n"
-        "Create a comprehensive tech spec that **aligns with the designs above**.\n\n"
-        "The tech spec MUST:\n"
-        "- Read the wireframe HTML files to understand the UI layout\n"
-        "- Reference specific UI components and screens from the wireframes\n"
-        "- Use the design system tokens (colors, typography, spacing) listed above\n"
-        "- Map each wireframe screen to specific files/routes\n"
-        "- Include data model changes needed to support the UI\n\n"
+    has_designs = bool(design_context or ds_context)
+
+    instructions = "\n## Instructions\n\n"
+    if has_designs:
+        instructions += (
+            "Create a comprehensive tech spec that **aligns with the designs**.\n\n"
+            "The tech spec MUST:\n"
+            "- Read the wireframe HTML files to understand the UI layout\n"
+            "- Reference specific UI components and screens from the wireframes\n"
+            "- Use the design system tokens (colors, typography, spacing)\n"
+            "- Map each wireframe screen to specific files/routes\n"
+            "- Include data model changes needed to support the UI\n\n"
+        )
+    else:
+        instructions += "Create a comprehensive tech spec.\n\n"
+
+    instructions += (
         "Cover:\n"
         "- Architecture approach and key design decisions\n"
         "- Files to create or modify (with full paths)\n"
         "- Data model changes\n"
         "- API endpoints\n"
-        "- Frontend components (referencing wireframe elements)\n"
+        "- Frontend components\n"
         "- Dependencies and integration points\n"
         "- Risk areas and mitigation strategies\n\n"
     )
     if repo_pairs:
+        steps = []
+        if has_designs:
+            steps.append("Read the wireframe files listed in the Design section.")
+        steps.append("Read `gitnexus://repo/*/context` for a codebase overview.")
+        steps.append("Use `gitnexus_query` to find code related to the requirements.")
+        steps.append("Use `gitnexus_context` on key symbols to understand deps.")
+        steps.append("Output the plan as clean markdown.")
+        for i, step in enumerate(steps, 1):
+            instructions += f"{i}. {step}\n"
         instructions += (
-            "1. First, read the wireframe files listed in the Design section.\n"
-            "2. Read `gitnexus://repo/*/context` for a codebase overview.\n"
-            "3. Use `gitnexus_query` to find code related to the requirements.\n"
-            "4. Use `gitnexus_context` on key symbols to understand dependencies.\n"
-            "5. Output the plan as clean markdown.\n\n"
-            "REMEMBER: Use gitnexus MCP tools for code exploration, NOT bash find/grep/ls.\n"
+            "\nREMEMBER: Use gitnexus MCP tools for code exploration, "
+            "NOT bash find/grep/ls.\n"
         )
     else:
         instructions += "Output the plan as clean markdown."

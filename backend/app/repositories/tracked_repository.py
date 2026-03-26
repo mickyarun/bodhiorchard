@@ -178,3 +178,22 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
             ).order_by(TrackedRepository.name)
         )
         return list(result.all())
+
+    async def get_active_id_path_name(
+        self,
+    ) -> list[tuple[uuid.UUID, str, str]]:
+        """Return (id, path, name) triples of active repos.
+
+        Returns:
+            List of (id, path, name) tuples.
+        """
+        result = await self._db.execute(
+            self._scoped(
+                select(
+                    TrackedRepository.id,
+                    TrackedRepository.path,
+                    TrackedRepository.name,
+                ).where(TrackedRepository.status == RepoStatus.ACTIVE)
+            ).order_by(TrackedRepository.name)
+        )
+        return list(result.all())
