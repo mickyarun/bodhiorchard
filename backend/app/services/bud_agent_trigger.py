@@ -47,12 +47,23 @@ async def create_agent_task_for_stage(
     if not first:
         return
 
-    # Skip if agent already completed or is running for this stage
+    # Skip if the output section already has content (no need to re-run)
+    output_section = first.output_section
+    if output_section and hasattr(bud, output_section):
+        existing_content = getattr(bud, output_section)
+        if existing_content and existing_content.strip():
+            logger.info(
+                "agent_skip_content_exists",
+                bud_id=str(bud.id),
+                status=bud_status,
+                section=output_section,
+            )
+            return
+
+    # Skip if an agent is already running for this BUD
     from app.repositories.bud_agent_task import BUDAgentTaskRepository
 
     task_repo = BUDAgentTaskRepository(db, org_id=org_id)
-    if await task_repo.get_completed_for_bud_and_type(bud.id, bud_status):
-        return
     if await task_repo.get_active_for_bud(bud.id):
         return
 
