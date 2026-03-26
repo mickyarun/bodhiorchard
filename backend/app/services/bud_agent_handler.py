@@ -342,13 +342,34 @@ async def _handle_tech_arch_result(
     task: BUDAgentTask,
     db: Any,
 ) -> dict | None:
-    """Tech arch result: save output to tech_spec_md."""
+    """Tech arch result: save output to tech_spec_md and populate impacted_repos."""
     from app.repositories.bud import BUDRepository
+    from app.repositories.tracked_repository import TrackedRepoRepository
 
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud:
         bud.tech_spec_md = output
+
+        # Populate impacted_repos from designs + active repos
+        repo_repo = TrackedRepoRepository(db, org_id=org_id)
+        repo_triples = await repo_repo.get_active_id_path_name()
+
+        impacted: list[dict[str, str]] = []
+        design_repo_ids = {d.repo_id for d in (bud.designs or []) if d.repo_id}
+
+        for rid, _path, name in repo_triples:
+            if rid in design_repo_ids:
+                impacted.append({"repo_id": str(rid), "repo_name": name})
+
+        # If no designs, include all active repos (tech spec covers everything)
+        if not impacted:
+            impacted = [
+                {"repo_id": str(rid), "repo_name": name}
+                for rid, _path, name in repo_triples
+            ]
+
+        bud.impacted_repos = impacted
         await db.flush()
 
     # Send approval notification
