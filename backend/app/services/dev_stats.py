@@ -51,11 +51,11 @@ def calculate_effectiveness(
     if confidences:
         scores.append(avg_confidence / 10.0)
 
-    # 2. Agent task completion rate
+    # 2. Agent task completion rate (only meaningful when dev activity exists)
     completed = sum(1 for t in agent_tasks if getattr(t, "status", "") == "completed")
     total = len(agent_tasks)
     completion_rate = completed / total if total else 0.0
-    if total:
+    if total and (confidences or commits):
         scores.append(completion_rate)
 
     # 3. Cost efficiency (lower cost per commit = better)

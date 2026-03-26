@@ -229,7 +229,7 @@
               <v-tab value="development">Development</v-tab>
               <v-tab value="test-plan">Test Plan</v-tab>
             </v-tabs>
-            <div class="toolbar-actions">
+            <div v-if="activeTab !== 'development'" class="toolbar-actions">
               <v-btn
                 variant="text"
                 size="small"
@@ -332,6 +332,9 @@
                 <BUDDevelopmentPanel
                   ref="devPanelRef"
                   :bud-id="bud.id"
+                  :bud-number="bud.bud_number"
+                  :has-tech-spec="!!bud.tech_spec_md"
+                  @download-tech-spec="downloadSection('tech_spec_md')"
                 />
               </v-tabs-window-item>
 

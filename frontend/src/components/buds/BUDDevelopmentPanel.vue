@@ -1,124 +1,159 @@
 <template>
-  <div class="dev-panel">
-    <!-- Stats Cards -->
-    <div class="stats-grid mb-4">
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.total_commits }}</div>
-        <div class="stat-label">Commits</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.total_files_changed }}</div>
-        <div class="stat-label">Files</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ formatCost(stats.total_cost_usd) }}</div>
-        <div class="stat-label">AI Cost</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" :class="scoreColor">
-          {{ stats.effectiveness_score || '—' }}
-        </div>
-        <div class="stat-label">AI Score</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.repos_touched }}</div>
-        <div class="stat-label">Repos</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.agent_runs }}</div>
-        <div class="stat-label">Agent Runs</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.test_coverage }}</div>
-        <div class="stat-label">Tests</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.risk_count }}</div>
-        <div class="stat-label">Risks</div>
-      </div>
+  <div class="dev-panel pa-4">
+    <!-- Loading -->
+    <div v-if="loading" class="d-flex justify-center py-12">
+      <v-progress-circular indeterminate size="24" width="2" />
     </div>
 
-    <!-- Activity Feed -->
-    <div class="mb-4">
-      <div class="text-subtitle-2 font-weight-medium mb-2">Activity</div>
-      <div v-if="loading" class="d-flex justify-center py-4">
-        <v-progress-circular indeterminate size="20" width="2" />
+    <!-- Empty state: no activity yet -->
+    <div v-else-if="!hasActivity" class="empty-state">
+      <v-icon icon="mdi-code-braces" size="48" color="primary" class="mb-3 opacity-40" />
+      <div class="text-h6 font-weight-medium mb-2">Ready for development</div>
+      <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 420px;">
+        Start coding on a <code>bud-{{ budNumber }}/</code> branch. Commits will appear here
+        automatically via git hooks. Use Claude Code with Bodhigrove MCP to report progress.
       </div>
-      <div v-else-if="feed.length === 0" class="text-caption text-medium-emphasis py-4 text-center">
-        No development activity yet
-      </div>
-      <div v-else class="activity-feed">
-        <div
-          v-for="item in feed"
-          :key="item.id"
-          class="activity-item d-flex align-start ga-2"
+      <div class="d-flex ga-2 justify-center">
+        <v-btn
+          v-if="hasTechSpec"
+          variant="tonal"
+          size="small"
+          prepend-icon="mdi-download"
+          @click="$emit('download-tech-spec')"
         >
-          <v-icon
-            :icon="item.icon"
-            :color="item.color"
-            size="16"
-            class="mt-1"
-          />
-          <div class="flex-grow-1" style="min-width: 0;">
-            <div class="text-body-2 text-truncate">{{ item.message }}</div>
-            <div class="text-caption text-medium-emphasis">{{ item.time }}</div>
-          </div>
-          <v-chip
-            v-if="item.status"
-            :color="statusColor(item.status)"
-            size="x-small"
-            variant="tonal"
-            label
-          >
-            {{ item.status }}
-          </v-chip>
-        </div>
+          Download Tech Spec
+        </v-btn>
+        <v-btn
+          variant="outlined"
+          size="small"
+          prepend-icon="mdi-content-copy"
+          @click="copyBranchName"
+        >
+          Copy Branch Name
+        </v-btn>
+      </div>
+      <div v-if="branchCopied" class="text-caption text-success mt-2">
+        Copied: bud-{{ budNumber }}/...
       </div>
     </div>
 
-    <!-- Repos & Branches -->
-    <div v-if="repos.length > 0">
-      <div class="text-subtitle-2 font-weight-medium mb-2">Repos & Branches</div>
-      <v-card
-        v-for="repo in repos"
-        :key="repo.repo_path"
-        variant="outlined"
-        class="mb-2 pa-3"
-      >
-        <div class="d-flex align-center justify-space-between">
-          <div>
-            <div class="text-body-2 font-weight-medium">{{ repo.repo_name }}</div>
-            <div class="text-caption text-medium-emphasis">
-              {{ repo.commit_count }} commit{{ repo.commit_count !== 1 ? 's' : '' }}
+    <!-- Has activity -->
+    <template v-else>
+      <!-- Stats Row -->
+      <div class="stats-row mb-5">
+        <div class="stat-card">
+          <v-icon icon="mdi-source-commit" size="18" color="primary" class="mb-1" />
+          <div class="stat-value">{{ stats.total_commits }}</div>
+          <div class="stat-label">Commits</div>
+        </div>
+        <div class="stat-card">
+          <v-icon icon="mdi-file-multiple" size="18" color="teal" class="mb-1" />
+          <div class="stat-value">{{ stats.total_files_changed }}</div>
+          <div class="stat-label">Files</div>
+        </div>
+        <div class="stat-card">
+          <v-icon icon="mdi-currency-usd" size="18" color="warning" class="mb-1" />
+          <div class="stat-value">{{ formatCost(stats.total_cost_usd) }}</div>
+          <div class="stat-label">AI Cost</div>
+        </div>
+        <div class="stat-card">
+          <v-icon icon="mdi-chart-arc" size="18" :color="scoreIconColor" class="mb-1" />
+          <div class="stat-value" :class="scoreTextColor">
+            {{ hasEffectivenessData ? stats.effectiveness_score : '—' }}
+          </div>
+          <div class="stat-label">AI Score</div>
+        </div>
+      </div>
+
+      <!-- Activity Feed -->
+      <div class="mb-5">
+        <div class="d-flex align-center mb-3">
+          <div class="text-subtitle-2 font-weight-medium">Activity Feed</div>
+          <v-spacer />
+          <div class="text-caption text-medium-emphasis">{{ feed.length }} entries</div>
+        </div>
+        <div class="activity-feed">
+          <div
+            v-for="item in feed"
+            :key="item.id"
+            class="activity-item"
+          >
+            <div class="activity-dot" :style="{ background: `rgb(var(--v-theme-${item.color}))` }" />
+            <div class="activity-content">
+              <div class="text-body-2">{{ item.message }}</div>
+              <div class="text-caption text-medium-emphasis">{{ item.time }}</div>
+            </div>
+            <v-chip
+              v-if="item.chipLabel"
+              :color="item.color"
+              size="x-small"
+              variant="tonal"
+              label
+              class="ml-2"
+            >
+              {{ item.chipLabel }}
+            </v-chip>
+          </div>
+        </div>
+      </div>
+
+      <!-- Repos -->
+      <div v-if="repos.length > 0">
+        <div class="text-subtitle-2 font-weight-medium mb-3">Repositories</div>
+        <div class="repos-list">
+          <div
+            v-for="repo in repos"
+            :key="repo.repo_path"
+            class="repo-card"
+          >
+            <v-icon icon="mdi-source-repository" size="18" color="primary" class="mr-2" />
+            <div class="flex-grow-1">
+              <div class="text-body-2 font-weight-medium">{{ repo.repo_name }}</div>
+              <div class="text-caption text-medium-emphasis">
+                {{ repo.commit_count }} commit{{ repo.commit_count !== 1 ? 's' : '' }}
+                &middot; latest {{ repo.last_sha.slice(0, 7) }}
+              </div>
             </div>
           </div>
-          <v-chip size="x-small" variant="tonal" label>
-            {{ repo.last_sha.slice(0, 7) }}
-          </v-chip>
         </div>
-      </v-card>
-    </div>
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useBudActivity } from '@/composables/useBudActivity'
 import type { DevActivity } from '@/types'
 
 const props = defineProps<{
   budId: string
+  budNumber?: number
+  hasTechSpec?: boolean
+}>()
+
+defineEmits<{
+  (e: 'download-tech-spec'): void
 }>()
 
 const { activities, commits, repos, stats, loading, load, startListening } = useBudActivity(props.budId)
+const branchCopied = ref(false)
 
-// Merge activities + commits into a unified feed sorted by time
+const hasActivity = computed(() =>
+  activities.value.length > 0 || commits.value.length > 0,
+)
+
+const hasEffectivenessData = computed(() =>
+  activities.value.some(a => a.metadata?.effectiveness) || stats.value.total_commits > 0,
+)
+
+// Feed items
 interface FeedItem {
   id: string
   icon: string
   color: string
   message: string
-  status: string | null
+  chipLabel: string | null
   time: string
   timestamp: number
 }
@@ -132,7 +167,7 @@ const feed = computed<FeedItem[]>(() => {
       icon: activityIcon(a),
       color: statusColor(a.status),
       message: a.message,
-      status: a.status,
+      chipLabel: a.status,
       time: timeAgo(a.created_at),
       timestamp: new Date(a.created_at).getTime(),
     })
@@ -144,7 +179,7 @@ const feed = computed<FeedItem[]>(() => {
       icon: 'mdi-source-commit',
       color: 'grey',
       message: `${c.commit_sha.slice(0, 7)} — ${c.commit_message}`,
-      status: null,
+      chipLabel: null,
       time: timeAgo(c.created_at),
       timestamp: new Date(c.created_at).getTime(),
     })
@@ -153,12 +188,20 @@ const feed = computed<FeedItem[]>(() => {
   return items.sort((a, b) => b.timestamp - a.timestamp).slice(0, 30)
 })
 
-const scoreColor = computed(() => {
+const scoreIconColor = computed(() => {
+  if (!hasEffectivenessData.value) return 'grey'
+  const s = stats.value.effectiveness_score
+  if (s >= 80) return 'success'
+  if (s >= 50) return 'warning'
+  return 'error'
+})
+
+const scoreTextColor = computed(() => {
+  if (!hasEffectivenessData.value) return 'text-medium-emphasis'
   const s = stats.value.effectiveness_score
   if (s >= 80) return 'text-success'
   if (s >= 50) return 'text-warning'
-  if (s > 0) return 'text-error'
-  return ''
+  return 'text-error'
 })
 
 function activityIcon(a: DevActivity): string {
@@ -177,6 +220,7 @@ function statusColor(status: string): string {
 
 function formatCost(cost: number): string {
   if (!cost) return '$0'
+  if (cost < 0.01) return `$${cost.toFixed(3)}`
   return `$${cost.toFixed(2)}`
 }
 
@@ -190,58 +234,103 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
+async function copyBranchName(): Promise<void> {
+  const name = `bud-${String(props.budNumber || 0).padStart(3, '0')}/`
+  await navigator.clipboard.writeText(name)
+  branchCopied.value = true
+  setTimeout(() => { branchCopied.value = false }, 2000)
+}
+
 onMounted(() => {
   load()
   startListening()
 })
 
-// Reload when budId changes
-watch(() => props.budId, () => {
-  load()
-})
+watch(() => props.budId, () => load())
 
 defineExpose({ load })
 </script>
 
 <style scoped>
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-}
-
-.stat-card {
-  padding: 12px;
-  border-radius: 8px;
-  background: rgba(var(--v-theme-surface-variant), 0.3);
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 16px;
   text-align: center;
 }
 
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  background: rgba(var(--v-theme-surface-variant), 0.15);
+}
+
 .stat-value {
-  font-size: 1.25rem;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 700;
   line-height: 1.2;
 }
 
 .stat-label {
-  font-size: 0.7rem;
-  color: rgba(var(--v-theme-on-surface), 0.5);
+  font-size: 0.65rem;
+  color: rgba(var(--v-theme-on-surface), 0.45);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-top: 2px;
+  letter-spacing: 0.8px;
+  margin-top: 4px;
 }
 
 .activity-feed {
-  max-height: 400px;
+  max-height: 360px;
   overflow-y: auto;
 }
 
 .activity-item {
-  padding: 8px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
 }
 
 .activity-item:last-child {
   border-bottom: none;
+}
+
+.activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.activity-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.repos-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.repo-card {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
 </style>
