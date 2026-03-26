@@ -7,7 +7,7 @@
 import { ref, onUnmounted } from 'vue'
 import api from '@/services/api'
 import { subscribe, unsubscribe } from '@/services/socket'
-import type { DevActivity, DevActivityResponse, DevCommit, DevCommitRepo, DevStats } from '@/types'
+import type { DevActivity, DevActivityResponse, DevCommit, DevCommitRepo, DevContributor, DevStats } from '@/types'
 
 const DEFAULT_STATS: DevStats = {
   total_commits: 0,
@@ -26,6 +26,7 @@ const DEFAULT_STATS: DevStats = {
 export function useBudActivity(budId: string) {
   const activities = ref<DevActivity[]>([])
   const commits = ref<DevCommit[]>([])
+  const contributors = ref<DevContributor[]>([])
   const repos = ref<DevCommitRepo[]>([])
   const stats = ref<DevStats>({ ...DEFAULT_STATS })
   const loading = ref(false)
@@ -42,6 +43,7 @@ export function useBudActivity(budId: string) {
       const { data } = await api.get<DevActivityResponse>(`/v1/buds/${budId}/dev-activity`)
       activities.value = data.activities
       commits.value = data.commits
+      contributors.value = data.contributors
       repos.value = data.repos
       stats.value = data.stats
     } finally {
@@ -59,5 +61,5 @@ export function useBudActivity(budId: string) {
 
   onUnmounted(stopListening)
 
-  return { activities, commits, repos, stats, loading, load, startListening, stopListening }
+  return { activities, commits, contributors, repos, stats, loading, load, startListening, stopListening }
 }

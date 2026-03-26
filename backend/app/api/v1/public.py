@@ -92,6 +92,8 @@ class BUDCommitRequest(BaseModel):
     files: str = Field(default="", max_length=5000)
     repo_path: str = Field(..., max_length=1000)
     branch: str = Field(..., max_length=500)
+    author: str = Field(default="", max_length=255)
+    author_email: str = Field(default="", max_length=255)
 
 
 @router.post("/{org_id}/bud-commit", status_code=status.HTTP_201_CREATED)
@@ -124,6 +126,29 @@ async def record_bud_commit(
             detail=f"BUD-{body.bud_number} not found",
         )
 
+    # Resolve commit author to a Bodhigrove user (check email + aliases)
+    resolved_user_id: uuid.UUID | None = None
+    if body.author_email:
+        from app.models.user import UserEmailAlias
+        from app.repositories.user import UserRepository
+
+        user_repo = UserRepository(db)
+        user = await user_repo.get_by_email_in_org(org_id, body.author_email)
+        if not user:
+            alias_result = await db.execute(
+                select(UserEmailAlias).where(
+                    UserEmailAlias.org_id == org_id,
+                    UserEmailAlias.email == body.author_email,
+                )
+            )
+            alias = alias_result.scalar_one_or_none()
+            if alias:
+                from app.models.user import User
+
+                user = await db.get(User, alias.user_id)
+        if user:
+            resolved_user_id = user.id
+
     commit_repo = BUDCommitRepository(db, org_id=org_id)
     commit = await commit_repo.create_commit(
         bud_id=bud.id,
@@ -132,6 +157,9 @@ async def record_bud_commit(
         commit_sha=body.sha,
         commit_message=body.message,
         files_changed=body.files,
+        author_name=body.author or None,
+        author_email=body.author_email or None,
+        user_id=resolved_user_id,
     )
 
     if commit is None:
@@ -141,6 +169,7 @@ async def record_bud_commit(
         "bud_commit_recorded",
         bud_number=body.bud_number,
         sha=body.sha[:8],
+        author=body.author,
         repo_path=body.repo_path,
     )
     return {"status": "created"}

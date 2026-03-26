@@ -35,6 +35,11 @@ class BUDCommit(BaseModel):
     commit_sha: Mapped[str] = mapped_column(String(40), nullable=False)
     commit_message: Mapped[str] = mapped_column(String(500), nullable=False)
     files_changed: Mapped[str] = mapped_column(String(5000), nullable=False, default="")
+    author_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    author_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
     committed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

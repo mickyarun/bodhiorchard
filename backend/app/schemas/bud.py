@@ -127,6 +127,7 @@ class BUDRead(BaseModel):
     test_plan_md: str | None = None
     designs: list[BUDDesignRead] = []
     metadata: dict | None = Field(None, validation_alias="metadata_")
+    impacted_repos: list[dict] | None = None
     assignee_id: uuid.UUID | None = None
     assignee_name: str | None = None
     active_agent_task: BUDAgentTaskRead | None = None

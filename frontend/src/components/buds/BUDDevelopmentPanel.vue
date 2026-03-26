@@ -5,7 +5,7 @@
       <v-progress-circular indeterminate size="24" width="2" />
     </div>
 
-    <!-- Empty state: no activity yet -->
+    <!-- Empty state -->
     <div v-else-if="!hasActivity" class="empty-state">
       <v-icon icon="mdi-code-braces" size="48" color="primary" class="mb-3 opacity-40" />
       <div class="text-h6 font-weight-medium mb-2">Ready for development</div>
@@ -13,6 +13,23 @@
         Start coding on a <code>bud-{{ budNumber }}/</code> branch. Commits will appear here
         automatically — git hooks and Bodhigrove MCP are auto-configured during repo scanning.
       </div>
+
+      <!-- Impacted repos hint -->
+      <div v-if="impactedRepos && impactedRepos.length" class="mb-4">
+        <div class="text-caption text-medium-emphasis mb-1">Impacted repositories</div>
+        <div class="d-flex ga-2 flex-wrap justify-center">
+          <v-chip
+            v-for="r in impactedRepos"
+            :key="r.repo_id || r.repo_name"
+            size="small"
+            variant="tonal"
+            prepend-icon="mdi-source-repository"
+          >
+            {{ r.repo_name }}
+          </v-chip>
+        </div>
+      </div>
+
       <div class="d-flex ga-2 justify-center">
         <v-btn
           v-if="hasTechSpec"
@@ -32,9 +49,7 @@
           Copy Branch Name
         </v-btn>
       </div>
-      <div v-if="branchCopied" class="text-caption text-success mt-2">
-        Copied: bud-{{ budNumber }}/...
-      </div>
+      <div v-if="branchCopied" class="text-caption text-success mt-2">Copied!</div>
     </div>
 
     <!-- Has activity -->
@@ -65,47 +80,80 @@
         </div>
       </div>
 
-      <!-- Activity Feed -->
-      <div class="mb-5">
-        <div class="d-flex align-center mb-3">
-          <div class="text-subtitle-2 font-weight-medium">Activity Feed</div>
-          <v-spacer />
-          <div class="text-caption text-medium-emphasis">{{ feed.length }} entries</div>
-        </div>
+      <!-- MCP Activity (separate from commits) -->
+      <div v-if="activities.length > 0" class="mb-5">
+        <div class="text-subtitle-2 font-weight-medium mb-3">Agent Updates</div>
         <div class="activity-feed">
-          <div
-            v-for="item in feed"
-            :key="item.id"
-            class="activity-item"
-          >
-            <div class="activity-dot" :style="{ background: `rgb(var(--v-theme-${item.color}))` }" />
+          <div v-for="a in activities" :key="a.id" class="activity-item">
+            <div class="activity-dot" :style="{ background: `rgb(var(--v-theme-${statusColor(a.status)}))` }" />
             <div class="activity-content">
-              <div class="text-body-2">{{ item.message }}</div>
-              <div class="text-caption text-medium-emphasis">{{ item.time }}</div>
+              <div class="text-body-2">{{ a.message }}</div>
+              <div class="text-caption text-medium-emphasis">{{ timeAgo(a.created_at) }}</div>
             </div>
-            <v-chip
-              v-if="item.chipLabel"
-              :color="item.color"
-              size="x-small"
-              variant="tonal"
-              label
-              class="ml-2"
-            >
-              {{ item.chipLabel }}
+            <v-chip :color="statusColor(a.status)" size="x-small" variant="tonal" label class="ml-2">
+              {{ a.status }}
             </v-chip>
           </div>
         </div>
+      </div>
+
+      <!-- Contributors (grouped by developer) -->
+      <div v-if="contributors.length > 0" class="mb-5">
+        <div class="d-flex align-center mb-3">
+          <div class="text-subtitle-2 font-weight-medium">Contributors</div>
+          <v-spacer />
+          <div class="text-caption text-medium-emphasis">{{ contributors.length }} developer{{ contributors.length !== 1 ? 's' : '' }}</div>
+        </div>
+        <v-expansion-panels variant="accordion">
+          <v-expansion-panel
+            v-for="dev in contributors"
+            :key="dev.user_id || dev.author_email || 'unknown'"
+          >
+            <v-expansion-panel-title>
+              <div class="d-flex align-center ga-2 flex-grow-1">
+                <v-avatar size="28" color="surface-variant">
+                  <span class="text-caption font-weight-bold">
+                    {{ (dev.user_name || dev.author_name || '?')[0].toUpperCase() }}
+                  </span>
+                </v-avatar>
+                <div>
+                  <span class="text-body-2 font-weight-medium">
+                    {{ dev.user_name || dev.author_name || dev.author_email || 'Unknown' }}
+                  </span>
+                  <span v-if="!dev.user_id && dev.author_email" class="text-caption text-medium-emphasis ml-1">
+                    ({{ dev.author_email }})
+                  </span>
+                </div>
+                <v-spacer />
+                <v-chip size="x-small" variant="tonal" class="mr-2">
+                  {{ dev.commit_count }} commit{{ dev.commit_count !== 1 ? 's' : '' }}
+                </v-chip>
+                <v-chip size="x-small" variant="tonal" color="teal">
+                  {{ dev.files_changed }} file{{ dev.files_changed !== 1 ? 's' : '' }}
+                </v-chip>
+              </div>
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <div
+                v-for="c in dev.commits"
+                :key="c.commit_sha"
+                class="commit-row"
+              >
+                <code class="text-caption">{{ c.commit_sha.slice(0, 7) }}</code>
+                <span class="text-body-2 mx-2">{{ c.commit_message }}</span>
+                <v-spacer />
+                <span class="text-caption text-medium-emphasis">{{ timeAgo(c.created_at) }}</span>
+              </div>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
       </div>
 
       <!-- Repos -->
       <div v-if="repos.length > 0">
         <div class="text-subtitle-2 font-weight-medium mb-3">Repositories</div>
         <div class="repos-list">
-          <div
-            v-for="repo in repos"
-            :key="repo.repo_path"
-            class="repo-card"
-          >
+          <div v-for="repo in repos" :key="repo.repo_path" class="repo-card">
             <v-icon icon="mdi-source-repository" size="18" color="primary" class="mr-2" />
             <div class="flex-grow-1">
               <div class="text-body-2 font-weight-medium">{{ repo.repo_name }}</div>
@@ -124,69 +172,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useBudActivity } from '@/composables/useBudActivity'
-import type { DevActivity } from '@/types'
 
 const props = defineProps<{
   budId: string
   budNumber?: number
   hasTechSpec?: boolean
+  impactedRepos?: { repo_id: string; repo_name: string }[] | null
 }>()
 
 defineEmits<{
   (e: 'download-tech-spec'): void
 }>()
 
-const { activities, commits, repos, stats, loading, load, startListening } = useBudActivity(props.budId)
+const { activities, contributors, repos, stats, loading, load, startListening } = useBudActivity(props.budId)
 const branchCopied = ref(false)
 
 const hasActivity = computed(() =>
-  activities.value.length > 0 || commits.value.length > 0,
+  activities.value.length > 0 || contributors.value.length > 0,
 )
 
 const hasEffectivenessData = computed(() =>
   activities.value.some(a => a.metadata?.effectiveness) || stats.value.total_commits > 0,
 )
-
-// Feed items
-interface FeedItem {
-  id: string
-  icon: string
-  color: string
-  message: string
-  chipLabel: string | null
-  time: string
-  timestamp: number
-}
-
-const feed = computed<FeedItem[]>(() => {
-  const items: FeedItem[] = []
-
-  for (const a of activities.value) {
-    items.push({
-      id: `a-${a.id}`,
-      icon: activityIcon(a),
-      color: statusColor(a.status),
-      message: a.message,
-      chipLabel: a.status,
-      time: timeAgo(a.created_at),
-      timestamp: new Date(a.created_at).getTime(),
-    })
-  }
-
-  for (const c of commits.value) {
-    items.push({
-      id: `c-${c.commit_sha}`,
-      icon: 'mdi-source-commit',
-      color: 'grey',
-      message: `${c.commit_sha.slice(0, 7)} — ${c.commit_message}`,
-      chipLabel: null,
-      time: timeAgo(c.created_at),
-      timestamp: new Date(c.created_at).getTime(),
-    })
-  }
-
-  return items.sort((a, b) => b.timestamp - a.timestamp).slice(0, 30)
-})
 
 const scoreIconColor = computed(() => {
   if (!hasEffectivenessData.value) return 'grey'
@@ -203,13 +210,6 @@ const scoreTextColor = computed(() => {
   if (s >= 50) return 'text-warning'
   return 'text-error'
 })
-
-function activityIcon(a: DevActivity): string {
-  if (a.status === 'completed') return 'mdi-check-circle'
-  if (a.status === 'failed') return 'mdi-alert-circle'
-  if (a.status === 'blocked') return 'mdi-pause-circle'
-  return 'mdi-progress-wrench'
-}
 
 function statusColor(status: string): string {
   if (status === 'completed') return 'success'
@@ -291,7 +291,7 @@ defineExpose({ load })
 }
 
 .activity-feed {
-  max-height: 360px;
+  max-height: 300px;
   overflow-y: auto;
 }
 
@@ -299,7 +299,7 @@ defineExpose({ load })
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 0;
+  padding: 8px 0;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
 }
 
@@ -318,6 +318,17 @@ defineExpose({ load })
 .activity-content {
   flex: 1;
   min-width: 0;
+}
+
+.commit-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.04);
+}
+
+.commit-row:last-child {
+  border-bottom: none;
 }
 
 .repos-list {

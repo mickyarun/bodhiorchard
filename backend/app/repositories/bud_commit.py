@@ -45,6 +45,9 @@ class BUDCommitRepository(BaseRepository[BUDCommit]):
         commit_sha: str,
         commit_message: str,
         files_changed: str = "",
+        author_name: str | None = None,
+        author_email: str | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> BUDCommit | None:
         """Create a commit record, deduplicating by SHA via unique constraint.
 
@@ -58,6 +61,9 @@ class BUDCommitRepository(BaseRepository[BUDCommit]):
             commit_sha: Full 40-char commit hash.
             commit_message: First line of commit message.
             files_changed: Comma-separated list of changed files.
+            author_name: Git author name (from git log --format=%an).
+            author_email: Git author email (from git log --format=%ae).
+            user_id: Resolved Bodhigrove user UUID (if email matched).
 
         Returns:
             The created BUDCommit, or None if duplicate.
@@ -70,6 +76,9 @@ class BUDCommitRepository(BaseRepository[BUDCommit]):
             commit_sha=commit_sha,
             commit_message=commit_message[:500],
             files_changed=files_changed[:5000],
+            author_name=author_name,
+            author_email=author_email,
+            user_id=user_id,
         )
         try:
             created = await self.create(commit)

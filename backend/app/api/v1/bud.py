@@ -516,9 +516,25 @@ class DevCommitRead(BaseModel):
     branch_name: str
     files_changed: str
     repo_path: str
+    author_name: str | None = None
+    author_email: str | None = None
+    user_id: uuid.UUID | None = None
+    user_name: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ContributorRead(BaseModel):
+    """A developer who has contributed to a BUD."""
+
+    user_id: str | None = None
+    user_name: str | None = None
+    author_name: str | None = None
+    author_email: str | None = None
+    commit_count: int = 0
+    files_changed: int = 0
+    commits: list[DevCommitRead] = []
 
 
 class DevStatsRead(BaseModel):
@@ -542,6 +558,7 @@ class DevActivityResponse(BaseModel):
 
     activities: list[DevActivityRead] = []
     commits: list[DevCommitRead] = []
+    contributors: list[ContributorRead] = []
     repos: list[CommitRepoRead] = []
     stats: DevStatsRead = DevStatsRead()
 
@@ -583,9 +600,56 @@ async def get_dev_activity(
 
     eff = calculate_effectiveness(activities, commits, agent_tasks)
 
+    # Build commit reads with user_name resolved
+    commit_user_ids = {c.user_id for c in commits if c.user_id}
+    user_names: dict[uuid.UUID, str] = {}
+    if commit_user_ids:
+        from app.models.user import User as UserModel
+
+        for uid in commit_user_ids:
+            u = await db.get(UserModel, uid)
+            if u:
+                user_names[uid] = u.name
+
+    commit_reads = [
+        DevCommitRead(
+            commit_sha=c.commit_sha,
+            commit_message=c.commit_message,
+            branch_name=c.branch_name,
+            files_changed=c.files_changed,
+            repo_path=c.repo_path,
+            author_name=c.author_name,
+            author_email=c.author_email,
+            user_id=c.user_id,
+            user_name=user_names.get(c.user_id) if c.user_id else None,
+            created_at=c.created_at,
+        )
+        for c in commits
+    ]
+
+    # Group commits by contributor (user_id or author_email fallback)
+    contrib_map: dict[str, ContributorRead] = {}
+    for cr in commit_reads:
+        key = str(cr.user_id) if cr.user_id else (cr.author_email or "unknown")
+        if key not in contrib_map:
+            contrib_map[key] = ContributorRead(
+                user_id=str(cr.user_id) if cr.user_id else None,
+                user_name=cr.user_name,
+                author_name=cr.author_name,
+                author_email=cr.author_email,
+            )
+        contrib = contrib_map[key]
+        contrib.commit_count += 1
+        if cr.files_changed:
+            contrib.files_changed += len(
+                [f for f in cr.files_changed.split(",") if f.strip()]
+            )
+        contrib.commits.append(cr)
+
     return DevActivityResponse(
         activities=[DevActivityRead.model_validate(a) for a in activities],
-        commits=[DevCommitRead.model_validate(c) for c in commits],
+        commits=commit_reads,
+        contributors=sorted(contrib_map.values(), key=lambda c: c.commit_count, reverse=True),
         repos=[
             CommitRepoRead(
                 repo_path=s.repo_path,

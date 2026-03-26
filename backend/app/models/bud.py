@@ -71,6 +71,7 @@ class BUDDocument(BaseModel):
     test_plan_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     embedding = mapped_column(Vector(384), nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    impacted_repos: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

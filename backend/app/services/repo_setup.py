@@ -251,11 +251,16 @@ def _build_post_commit_hook(backend_url: str, org_id: str) -> str:
         "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
         "FILES=$(git diff-tree --no-commit-id --name-only -r HEAD | tr '\\n' ',')\n"
         "REPO_PATH=$(git rev-parse --show-toplevel)\n"
+        "AUTHOR=$(git log -1 --format='%an' | head -c 200 | "
+        "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
+        "EMAIL=$(git log -1 --format='%ae' | head -c 200)\n"
         "\n"
         "# Build JSON safely with printf\n"
         'JSON=$(printf \'{"bud_number":%s,"sha":"%s","message":"%s",'
-        '"files":"%s","repo_path":"%s","branch":"%s"}\''
-        ' "$BUD_NUM" "$SHA" "$MSG" "$FILES" "$REPO_PATH" "$BRANCH")\n'
+        '"files":"%s","repo_path":"%s","branch":"%s",'
+        '"author":"%s","author_email":"%s"}\''
+        ' "$BUD_NUM" "$SHA" "$MSG" "$FILES" "$REPO_PATH" "$BRANCH"'
+        ' "$AUTHOR" "$EMAIL")\n'
         "\n"
         f'curl -s -X POST "{backend_url}/api/v1/public/{org_id}/bud-commit" \\\n'
         '  -H "Content-Type: application/json" \\\n'

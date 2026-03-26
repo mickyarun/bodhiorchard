@@ -88,6 +88,7 @@ export interface BUDDocument extends BUDListItem {
   test_plan_md: string | null
   designs: BUDDesign[]
   metadata: Record<string, unknown> | null
+  impacted_repos: { repo_id: string; repo_name: string }[] | null
   active_agent_task: BUDAgentTask | null
 }
 
@@ -117,7 +118,21 @@ export interface DevCommit {
   branch_name: string
   files_changed: string
   repo_path: string
+  author_name: string | null
+  author_email: string | null
+  user_id: string | null
+  user_name: string | null
   created_at: string
+}
+
+export interface DevContributor {
+  user_id: string | null
+  user_name: string | null
+  author_name: string | null
+  author_email: string | null
+  commit_count: number
+  files_changed: number
+  commits: DevCommit[]
 }
 
 export interface DevCommitRepo {
@@ -145,6 +160,7 @@ export interface DevStats {
 export interface DevActivityResponse {
   activities: DevActivity[]
   commits: DevCommit[]
+  contributors: DevContributor[]
   repos: DevCommitRepo[]
   stats: DevStats
 }
