@@ -1,42 +1,5 @@
 <template>
   <div>
-    <!-- Tech Architecture Approval Bar -->
-    <v-alert
-      v-if="bud.status === 'tech_arch' && canApprove && !!bud.tech_spec_md && !agentGenerating"
-      type="info"
-      variant="tonal"
-      class="mx-12 mb-3"
-    >
-      <div class="d-flex align-center ga-2">
-        <div class="flex-grow-1">
-          <strong>Tech Architecture Review</strong>
-          <span v-if="awaitingManagerApproval"> — Awaiting manager approval</span>
-          <span v-else> — Review the tech spec and approve or reject</span>
-        </div>
-        <v-btn
-          color="success"
-          variant="flat"
-          size="small"
-          :loading="approvingTechArch"
-          :disabled="approvingTechArch"
-          @click="handleApproveTechArch"
-        >
-          <v-icon start size="16">mdi-check</v-icon>
-          Approve
-        </v-btn>
-        <v-btn
-          color="error"
-          variant="tonal"
-          size="small"
-          :disabled="approvingTechArch"
-          @click="showRejectDialog = true"
-        >
-          <v-icon start size="16">mdi-close</v-icon>
-          Reject
-        </v-btn>
-      </div>
-    </v-alert>
-
     <!-- Reassignment Button (development phase, current assignee only) -->
     <v-alert
       v-if="bud.status === 'development' && isCurrentAssignee"
@@ -142,31 +105,6 @@
       </v-expansion-panel>
     </v-expansion-panels>
 
-    <!-- Reject Tech Arch dialog -->
-    <v-dialog v-model="showRejectDialog" max-width="440">
-      <v-card color="surface" class="pa-6">
-        <div class="text-h6 mb-2">Reject Tech Plan</div>
-        <div class="text-body-2 text-medium-emphasis mb-4">
-          Provide a reason so the team can revise the plan.
-        </div>
-        <v-textarea
-          v-model="rejectReason"
-          variant="outlined"
-          label="Reason"
-          rows="3"
-          counter="5000"
-          :rules="[v => !!v?.trim() || 'Reason is required']"
-        />
-        <v-card-actions class="pa-0">
-          <v-spacer />
-          <v-btn variant="text" @click="showRejectDialog = false">Cancel</v-btn>
-          <v-btn color="error" variant="flat" :disabled="!rejectReason?.trim()" @click="handleRejectTechArch">
-            Reject
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
     <!-- Reassignment dialog -->
     <v-dialog v-model="showReassignDialog" max-width="440">
       <v-card color="surface" class="pa-6">
@@ -255,12 +193,9 @@ const budStore = useBUDStore()
 const authStore = useAuthStore()
 const { startTracking } = useJobSocket()
 
-// Tech architecture state
-const showRejectDialog = ref(false)
+// Reassignment state
 const showReassignDialog = ref(false)
-const rejectReason = ref('')
 const reassignReason = ref('')
-const approvingTechArch = ref(false)
 
 // Unified agent task tracking (replaces per-type PRD/tech arch/code review refs)
 const agentGenerating = ref(false)
@@ -289,12 +224,6 @@ interface CodeReviewComment {
   skip_reason?: string
 }
 
-const awaitingManagerApproval = computed(() => {
-  const meta = props.bud?.metadata as Record<string, unknown> | null
-  const approval = meta?.tech_arch_approval as Record<string, unknown> | undefined
-  return approval?.awaiting_manager === true
-})
-
 const codeReviewComments = computed<CodeReviewComment[]>(() => {
   const meta = props.bud?.metadata as Record<string, unknown> | null
   return (meta?.code_review_comments as CodeReviewComment[] | undefined) ?? []
@@ -314,22 +243,6 @@ function renderMarkdown(md: string | null): string {
   if (!md) return ''
   const raw = marked.parse(md, { async: false }) as string
   return DOMPurify.sanitize(raw)
-}
-
-async function handleApproveTechArch(): Promise<void> {
-  approvingTechArch.value = true
-  try {
-    await budStore.approveTechArch(props.bud.id)
-  } finally {
-    approvingTechArch.value = false
-  }
-}
-
-async function handleRejectTechArch(): Promise<void> {
-  if (!rejectReason.value.trim()) return
-  await budStore.rejectTechArch(props.bud.id, rejectReason.value)
-  showRejectDialog.value = false
-  rejectReason.value = ''
 }
 
 async function handleReassignment(): Promise<void> {
