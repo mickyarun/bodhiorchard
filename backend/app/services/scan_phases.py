@@ -131,7 +131,6 @@ async def phase_b1_repo_setup(
         Setup PR message string if a PR was created without a URL, else None.
     """
     from app.config import settings as app_settings
-    from app.mcp.auth import create_internal_mcp_token
     from app.services.git_operations import _detect_develop_branch, _detect_main_branch
     from app.services.repo_setup import (
         add_bodhigrove_gitignore,
@@ -172,9 +171,8 @@ async def phase_b1_repo_setup(
             status="setting_up_mcp",
             progress_pct=base_pct + 22,
         )
-        mcp_token = create_internal_mcp_token(org_id)
         mcp_changed = await init_bodhigrove_mcp_in_repo(
-            repo_path, app_settings.public_url, mcp_token
+            repo_path, app_settings.public_url,
         )
 
         # Install git hooks to .githooks/ + set core.hooksPath

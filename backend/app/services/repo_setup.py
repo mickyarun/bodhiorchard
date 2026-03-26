@@ -247,16 +247,16 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
 # ── Bodhigrove MCP server init ─────────────────────────────────────
 
 
-async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str, mcp_token: str) -> bool:
-    """Write .claude/settings.json with Bodhigrove MCP server config.
+async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
+    """Write .mcp.json and .claude/settings.json with Bodhigrove MCP config.
 
-    Idempotent: skips if the bodhigrove entry already exists with the
-    correct backend URL. Only updates when config is missing or stale.
+    Copies the MCP bridge script into the repo at .bodhigrove/mcp_bridge.py
+    and writes config with a relative path. Token is NOT included — developers
+    set BODHIGROVE_MCP_TOKEN env var themselves.
 
     Args:
         repo_path: Absolute path to the git repository.
-        backend_url: URL of the Bodhigrove backend (e.g. http://localhost:8000).
-        mcp_token: Long-lived org-scoped MCP token.
+        backend_url: URL of the Bodhigrove backend.
 
     Returns:
         True if the file was written (changed), False if already up to date.
@@ -265,18 +265,11 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str, mcp_toke
     import shutil
 
     repo = Path(repo_path)
-
-    # Copy bridge script into repo so .mcp.json can use a relative path
-    # (portable across developer machines — no absolute paths)
     source_bridge = Path(__file__).resolve().parents[1] / "mcp" / "stdio_bridge.py"
     dest_dir = repo / ".bodhigrove"
-    dest_dir.mkdir(exist_ok=True)
     dest_bridge = dest_dir / "mcp_bridge.py"
-    shutil.copy2(source_bridge, dest_bridge)
 
-    # Write .mcp.json at project root (Claude Code reads MCP servers from here)
-    # Token is empty — developers set BODHIGROVE_MCP_TOKEN env var themselves
-    # (token from Settings → Integrations → MCP Token)
+    # Build config (token NOT included — developer sets env var)
     mcp_json_path = repo / ".mcp.json"
     mcp_config = {
         "mcpServers": {
@@ -290,19 +283,20 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str, mcp_toke
         },
     }
 
-    # Check if already configured with correct URL
-    if mcp_json_path.exists():
+    # Check if already configured with correct URL + bridge exists
+    if mcp_json_path.exists() and dest_bridge.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
             existing = json.loads(mcp_json_path.read_text())
             existing_env = (
                 existing.get("mcpServers", {}).get("bodhigrove", {}).get("env", {})
             )
-            if (
-                existing_env.get("BODHIGROVE_BACKEND_URL") == backend_url
-                and dest_bridge.exists()
-            ):
+            if existing_env.get("BODHIGROVE_BACKEND_URL") == backend_url:
                 logger.debug("bodhigrove_mcp_already_configured", repo=repo_path)
                 return False
+
+    # Copy bridge script (after early-return check)
+    dest_dir.mkdir(exist_ok=True)
+    shutil.copy2(source_bridge, dest_bridge)
 
     mcp_json_path.write_text(json.dumps(mcp_config, indent=2))
 
@@ -318,6 +312,10 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str, mcp_toke
 
     settings.setdefault("mcpServers", {})
     settings["mcpServers"]["bodhigrove"] = mcp_config["mcpServers"]["bodhigrove"]
+    # Remove stale token from old setups (security: don't commit secrets)
+    settings["mcpServers"]["bodhigrove"].get("env", {}).pop(
+        "BODHIGROVE_MCP_TOKEN", None,
+    )
     settings_path.write_text(json.dumps(settings, indent=2))
 
     logger.info("bodhigrove_mcp_written", repo=repo_path)
@@ -649,11 +647,13 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
             logger.info("bodhigrove_setup_no_remote_merging", repo=repo_path)
 
             # Remove worktrees that may lock the base branch
-            wt_path = Path(repo_path) / ".bodhigrove" / "main"
-            if wt_path.exists():
-                await run_git(
-                    ["worktree", "remove", str(wt_path), "--force"], cwd=repo_path,
-                )
+            for wt_name in ("main", "develop"):
+                wt_path = Path(repo_path) / ".bodhigrove" / wt_name
+                if wt_path.exists():
+                    await run_git(
+                        ["worktree", "remove", str(wt_path), "--force"],
+                        cwd=repo_path,
+                    )
 
             await run_git(["checkout", base_branch], cwd=repo_path)
             _, merge_err, merge_rc = await run_git(
