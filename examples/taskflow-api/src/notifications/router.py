@@ -1,6 +1,6 @@
 """Notification API endpoints — list, mark read, preferences."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,7 @@ from src.notifications.service import (
     list_notifications,
     mark_read,
     mark_all_read,
+    delete_notification,
     update_preferences,
 )
 
@@ -26,7 +27,18 @@ class PreferencesRequest(BaseModel):
 def index(unread_only: bool = False, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     """List notifications for the current user."""
     notifs = list_notifications(db, user["user_id"], unread_only=unread_only)
-    return [{"id": n.id, "type": n.type, "title": n.title, "is_read": n.is_read} for n in notifs]
+    return [
+        {
+            "id": n.id,
+            "type": n.type,
+            "title": n.title,
+            "body": n.body,
+            "link": n.link,
+            "is_read": n.is_read,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in notifs
+    ]
 
 
 @router.patch("/{notification_id}/read")
@@ -41,6 +53,15 @@ def read_all(user: dict = Depends(get_current_user), db: Session = Depends(get_d
     """Mark all notifications as read."""
     count = mark_all_read(db, user["user_id"])
     return {"marked": count}
+
+
+@router.delete("/{notification_id}")
+def delete(notification_id: int, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Delete (dismiss) a notification permanently."""
+    found = delete_notification(db, notification_id, user["user_id"])
+    if not found:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"detail": "Deleted"}
 
 
 @router.put("/preferences")
