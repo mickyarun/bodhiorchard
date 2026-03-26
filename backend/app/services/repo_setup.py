@@ -54,7 +54,19 @@ _BODHIGROVE_CLAUDE_SECTION = """\
 
 ## Bodhigrove — Development Workflow
 
-This repo is tracked by Bodhigrove. MCP tools are auto-configured in `.claude/settings.json`.
+This repo is tracked by Bodhigrove. MCP tools are configured in `.mcp.json`.
+
+### IMPORTANT: MCP Setup Required
+
+Before starting any BUD work, verify Bodhigrove MCP is connected:
+1. Check that `update_task_status` tool is available
+2. If NOT available, **STOP** and set up your token:
+   - Go to Bodhigrove Settings → Integrations → MCP Token
+   - Copy your token
+   - Run: `export BODHIGROVE_MCP_TOKEN="your-token"` in your shell profile
+   - Restart Claude Code
+
+**Do NOT proceed with BUD work if MCP tools are unavailable.**
 
 ### Always Do
 
@@ -263,6 +275,8 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str, mcp_toke
     shutil.copy2(source_bridge, dest_bridge)
 
     # Write .mcp.json at project root (Claude Code reads MCP servers from here)
+    # Token is empty — developers set BODHIGROVE_MCP_TOKEN env var themselves
+    # (token from Settings → Integrations → MCP Token)
     mcp_json_path = repo / ".mcp.json"
     mcp_config = {
         "mcpServers": {
@@ -271,13 +285,12 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str, mcp_toke
                 "args": [".bodhigrove/mcp_bridge.py"],
                 "env": {
                     "BODHIGROVE_BACKEND_URL": backend_url,
-                    "BODHIGROVE_MCP_TOKEN": mcp_token,
                 },
             },
         },
     }
 
-    # Check if already configured with correct URL + token
+    # Check if already configured with correct URL
     if mcp_json_path.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
             existing = json.loads(mcp_json_path.read_text())
@@ -286,7 +299,6 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str, mcp_toke
             )
             if (
                 existing_env.get("BODHIGROVE_BACKEND_URL") == backend_url
-                and existing_env.get("BODHIGROVE_MCP_TOKEN") == mcp_token
                 and dest_bridge.exists()
             ):
                 logger.debug("bodhigrove_mcp_already_configured", repo=repo_path)
