@@ -164,6 +164,28 @@
             @reload-timeline="loadTimeline"
           />
 
+          <!-- Status change progress -->
+          <div
+            v-if="statusChanging"
+            class="agent-banner mx-12 mb-3"
+          >
+            <div class="d-flex align-center ga-3">
+              <v-icon icon="mdi-swap-horizontal" size="20" color="primary" />
+              <div class="d-flex flex-column agent-banner__text">
+                <span class="text-body-2 font-weight-medium">Updating status...</span>
+                <span class="text-caption text-medium-emphasis">Assigning developer</span>
+              </div>
+              <v-spacer />
+              <v-progress-linear
+                indeterminate
+                color="primary"
+                height="3"
+                rounded
+                class="agent-banner__progress"
+              />
+            </div>
+          </div>
+
           <!-- Agent generating banner (unified for PRD, tech arch, code review) -->
           <div
             v-if="workflowRef?.agentGenerating"
@@ -613,6 +635,8 @@ async function saveTitle(): Promise<void> {
   editingTitle.value = false
 }
 
+const statusChanging = ref(false)
+
 async function updateStatus(newStatus: string): Promise<void> {
   if (!bud.value) return
 
@@ -622,7 +646,12 @@ async function updateStatus(newStatus: string): Promise<void> {
     return
   }
 
-  await budStore.updateBUD(bud.value.id, { status: newStatus } as never)
+  statusChanging.value = true
+  try {
+    await budStore.updateBUD(bud.value.id, { status: newStatus } as never)
+  } finally {
+    statusChanging.value = false
+  }
 
   // If entering design phase, switch to design tab and open repo picker
   if (budStore.designAvailable) {
