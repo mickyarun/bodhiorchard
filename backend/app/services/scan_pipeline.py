@@ -230,7 +230,7 @@ Rules:
 async def _maybe_extract_design_system(
     db: AsyncSession,
     org_id: uuid.UUID,
-    repo_path: str,
+    scan_path: str,
     tracked_repo: object | None,
     full_rescan: bool,
 ) -> None:
@@ -244,7 +244,7 @@ async def _maybe_extract_design_system(
     Args:
         db: Async database session.
         org_id: Organization UUID.
-        repo_path: Absolute path to the repository.
+        scan_path: Path to scan (may be a worktree — used for file discovery/hash only).
         tracked_repo: TrackedRepository model instance (or None).
         full_rescan: Whether this is a full rescan (force re-extraction).
     """
@@ -256,11 +256,11 @@ async def _maybe_extract_design_system(
     )
     from app.services.repo_setup import detect_repo_type
 
-    if detect_repo_type(repo_path) != "frontend":
-        logger.debug("design_system_skip_non_frontend", repo=Path(repo_path).name)
+    if detect_repo_type(scan_path) != "frontend":
+        logger.debug("design_system_skip_non_frontend", repo=Path(scan_path).name)
         return
 
-    repo = Path(repo_path)
+    repo = Path(scan_path)
     discovered = discover_design_files(repo)
     if not discovered:
         return  # No design files — skip silently
@@ -286,16 +286,23 @@ async def _maybe_extract_design_system(
 
     # Enqueue async extraction instead of blocking the scan
     from app.schemas.jobs import DesignExtractJobPayload
-    from app.services.job_queue import JOB_DESIGN_EXTRACT, create_job
+    from app.services.job_queue import JOB_DESIGN_EXTRACT, create_job, is_job_active
+
+    if is_job_active(JOB_DESIGN_EXTRACT, {"repo_id": str(repo_id)}):
+        logger.info("design_extract_already_queued", repo=repo.name)
+        return
 
     existing_default = await ds_repo.get_default()
+
+    # Use tracked_repo.path (permanent) not scan_path (worktree, may be deleted)
+    permanent_path = tracked_repo.path if hasattr(tracked_repo, "path") else scan_path
 
     job = create_job(
         JOB_DESIGN_EXTRACT,
         payload=DesignExtractJobPayload(
             org_id=str(org_id),
             repo_id=str(repo_id),
-            repo_path=repo_path,
+            repo_path=permanent_path,
             is_default=existing_default is None,
         ).model_dump(),
     )

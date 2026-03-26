@@ -277,7 +277,10 @@ function debouncedSaveNotes(designId: string, value: string): void {
   }, 800)
 }
 
-onMounted(() => loadDesigns())
+onMounted(() => {
+  loadDesigns()
+  settingsStore.fetchRepos()
+})
 
 async function loadDesigns(): Promise<void> {
   designs.value = await budStore.fetchDesigns(props.budId)
