@@ -47,11 +47,10 @@ async def create_agent_task_for_stage(
     if not first:
         return
 
-    # Skip if the output section already has content (prevents re-runs on
-    # status back-and-forth). Exception: "bud" status always runs — the PM agent
-    # refines user-provided requirements, not just fills empty fields.
+    # Skip if the output section already has content — prevents re-runs on
+    # status back-and-forth and respects manually written/imported content.
     output_section = first.output_section
-    if output_section and bud_status != "bud" and hasattr(bud, output_section):
+    if output_section and hasattr(bud, output_section):
         existing_content = getattr(bud, output_section)
         if existing_content and existing_content.strip():
             logger.info(
