@@ -95,21 +95,6 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_completed_for_bud_and_type(
-        self, bud_id: uuid.UUID, task_type: str,
-    ) -> BUDAgentTask | None:
-        """Get a completed task for a BUD + task type (prevents re-triggering)."""
-        stmt = self._scoped(
-            select(BUDAgentTask)
-            .where(BUDAgentTask.bud_id == bud_id)
-            .where(BUDAgentTask.task_type == task_type)
-            .where(BUDAgentTask.status == AgentTaskStatus.COMPLETED)
-            .order_by(BUDAgentTask.created_at.desc())
-            .limit(1)
-        )
-        result = await self._db.execute(stmt)
-        return result.scalar_one_or_none()
-
     async def list_for_bud(self, bud_id: uuid.UUID) -> list[BUDAgentTask]:
         """List all agent tasks for a BUD, most recent first."""
         stmt = self._scoped(
