@@ -14,7 +14,6 @@ import { defaultTrunk, defaultBranch, type TreeRules, type Color3, WORLD_SCALE }
 const GROW_SPEED = 200 * WORLD_SCALE    // ~3 world units/sec
 const ROOT_COLOR: Color3 = [180, 180, 180]
 const THICKNESS_DIVISOR = 14            // branch radius = size / 14
-const MAX_BRANCHES = 400                // cap exponential growth
 
 export class Tree3DSystem {
   private materials: MaterialFactory
@@ -22,7 +21,6 @@ export class Tree3DSystem {
 
   private tree: TreeBranch | null = null
   private activeBranches: TreeBranch[] = []
-  private totalBranches = 0
   private trunkRules: TreeRules
   private branchRules: TreeRules
   private goal = new Vec3(0, 1, 0)
@@ -44,7 +42,6 @@ export class Tree3DSystem {
   startTree(): void {
     this.clearEntities()
     this.activeBranches = []
-    this.totalBranches = 1
 
     const avgSize = (this.trunkRules.size + this.branchRules.size) / 2
     this.tree = new TreeBranch(0, 0, 0, (120 / avgSize) * WORLD_SCALE, ROOT_COLOR)
@@ -57,7 +54,6 @@ export class Tree3DSystem {
     this.clearEntities()
     this.tree = null
     this.activeBranches = []
-    this.totalBranches = 0
     this.growing = false
   }
 
@@ -86,12 +82,10 @@ export class Tree3DSystem {
 
     for (const branch of this.activeBranches) {
       if (branch.grow(growAmount)) {
-        if (this.totalBranches < MAX_BRANCHES) {
-          const babyTrunk = branch.makeBaby(this.trunkRules, this.goal)
-          const babyBranch = branch.makeBaby(this.branchRules, this.goal)
-          if (babyTrunk) { newBranches.push(babyTrunk); this.totalBranches++ }
-          if (babyBranch) { newBranches.push(babyBranch); this.totalBranches++ }
-        }
+        const babyTrunk = branch.makeBaby(this.trunkRules, this.goal)
+        const babyBranch = branch.makeBaby(this.branchRules, this.goal)
+        if (babyTrunk) newBranches.push(babyTrunk)
+        if (babyBranch) newBranches.push(babyBranch)
         dead.add(branch)
       }
     }
@@ -107,9 +101,11 @@ export class Tree3DSystem {
     const entity = new pc.Entity('B')
     entity.addComponent('render', { type: 'cylinder' })
     entity.render!.meshInstances[0].material = this.getMaterial(branch.color)
+    // Park at branch root, invisible — updateEntity will size/orient it as it grows
+    entity.setPosition(branch.root.x, branch.root.y, branch.root.z)
+    entity.setLocalScale(0.001, 0.001, 0.001)
     this.treeRoot.addChild(entity)
     this.entityMap.set(branch, entity)
-    this.updateEntity(branch)
   }
 
   /** Update the transform of an existing entity to match current growth state. */
