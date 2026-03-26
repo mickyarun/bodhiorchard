@@ -332,9 +332,13 @@ async def _trigger_status_jobs(
 
     new_status = update_data["status"]
 
-    # Design phase has special handling (not an agent task)
+    # Design phase: only prompt for generation if no designs exist yet
     if new_status == BUDStatus.DESIGN and old_status != BUDStatus.DESIGN:
-        response.headers["X-Design-Available"] = "true"
+        has_designs = bud.designs and any(
+            d.status == "ready" for d in bud.designs
+        )
+        if not has_designs:
+            response.headers["X-Design-Available"] = "true"
 
     # Data-driven agent triggering via stage mappings
     if new_status != old_status:
