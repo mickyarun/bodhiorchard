@@ -213,10 +213,21 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
     main_branch = await _detect_main_branch(repo_path)
     develop_branch = await _detect_develop_branch(repo_path)
 
+    # Detect current branch to avoid worktree conflict
+    current_branch, _, _ = await run_git(
+        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path,
+    )
+    current_branch = current_branch.strip()
+
     results: list[str | None] = [None, None]
 
     for idx, (branch, dirname) in enumerate([(main_branch, "main"), (develop_branch, "develop")]):
         if branch is None:
+            continue
+
+        # If this branch is already checked out, use repo path directly
+        if branch == current_branch:
+            results[idx] = repo_path
             continue
 
         wt_path = worktree_dir / dirname
