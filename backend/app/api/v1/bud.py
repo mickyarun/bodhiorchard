@@ -492,6 +492,11 @@ async def list_commit_repos(
     ]
 
 
+def _parse_files_changed(raw: str) -> list[str]:
+    """Parse comma-separated files_changed string into a clean list."""
+    return [f.strip() for f in raw.split(",") if f.strip()] if raw else []
+
+
 # ── Development Activity ─────────────────────────────────────────
 
 
@@ -524,7 +529,7 @@ async def get_dev_activity(
     all_files: set[str] = set()
     for c in commits:
         if c.files_changed:
-            all_files.update(f.strip() for f in c.files_changed.split(",") if f.strip())
+            all_files.update(_parse_files_changed(c.files_changed))
 
     # Calculate AI effectiveness
     from app.services.dev_stats import calculate_effectiveness
@@ -535,13 +540,10 @@ async def get_dev_activity(
     commit_user_ids = {c.user_id for c in commits if c.user_id}
     user_names: dict[uuid.UUID, str] = {}
     if commit_user_ids:
-        from sqlalchemy import select as sa_select
+        from app.repositories.user import UserRepository
 
-        from app.models.user import User as UserModel
-
-        result = await db.execute(sa_select(UserModel).where(UserModel.id.in_(commit_user_ids)))
-        for u in result.scalars():
-            user_names[u.id] = u.name
+        user_repo = UserRepository(db)
+        user_names = await user_repo.get_names_by_ids(commit_user_ids)
 
     commit_reads = [
         DevCommitRead(
@@ -573,9 +575,7 @@ async def get_dev_activity(
         contrib = contrib_map[key]
         contrib.commit_count += 1
         if cr.files_changed:
-            contrib.files_changed += len(
-                [f for f in cr.files_changed.split(",") if f.strip()]
-            )
+            contrib.files_changed += len(_parse_files_changed(cr.files_changed))
         contrib.commits.append(cr)
 
     return DevActivityResponse(

@@ -80,6 +80,22 @@ class UserRepository(BaseRepository[User]):
         )
         return result.scalar_one_or_none()
 
+    async def get_names_by_ids(self, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Batch-fetch user names by IDs.
+
+        Args:
+            user_ids: Set of user UUIDs to look up.
+
+        Returns:
+            Dict mapping user_id to user name.
+        """
+        if not user_ids:
+            return {}
+        result = await self._db.execute(
+            select(User.id, User.name).where(User.id.in_(user_ids))
+        )
+        return {row.id: row.name for row in result.all()}
+
     async def list_by_org(self, org_id: uuid.UUID) -> list[User]:
         """List all users in a given organization.
 

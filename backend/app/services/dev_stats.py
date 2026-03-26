@@ -41,7 +41,7 @@ def calculate_effectiveness(
         meta = getattr(a, "metadata_", None) or {}
         eff = meta.get("effectiveness", {})
         if eff.get("confidence"):
-            confidences.append(int(eff["confidence"]))
+            confidences.append(min(int(eff["confidence"]), 10))
         if eff.get("test_coverage"):
             latest_coverage = eff["test_coverage"]
         if eff.get("risks"):

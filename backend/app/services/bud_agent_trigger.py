@@ -32,6 +32,7 @@ async def create_agent_task_for_stage(
         org_id: Organization UUID.
         db: Async database session.
         triggered_by: Optional user UUID who triggered the transition.
+        force: If True, skip the content-exists check (used on initial BUD creation).
     """
     from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
     from app.repositories.agent_skill_bud_stage import AgentSkillBudStageRepository
