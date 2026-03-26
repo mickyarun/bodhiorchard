@@ -16,8 +16,8 @@ import { clamp, lerp } from '../utils/MathUtils'
 const CAM = {
   yaw: -30,
   pitch: 22,
-  distance: 12,
-  lookAtY: 1.5,
+  distance: 20,
+  lookAtY: 2.0,
   autoOrbitSpeed: 6,
   idleDelay: 2.0,
   sensitivity: 0.3,
