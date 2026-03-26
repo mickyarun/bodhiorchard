@@ -2,8 +2,8 @@
  * Tree3DSystem — BFS growth orchestrator + PlayCanvas renderer.
  * Port of Tree3D's TreeWorld.java growth algorithm.
  *
- * Each branch is rendered as a PlayCanvas cylinder entity.
- * Growth happens per-frame via step() which advances the BFS wavefront.
+ * Performance: incremental entity management — each branch gets one entity,
+ * created on birth and updated in-place while growing. No destroy/recreate cycle.
  */
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
@@ -11,9 +11,10 @@ import { Vec3 } from './Vec3'
 import { TreeBranch } from './TreeBranch'
 import { defaultTrunk, defaultBranch, type TreeRules, type Color3, WORLD_SCALE } from './TreeRules'
 
-const GROW_SPEED = 200 * WORLD_SCALE  // ~3 world units/sec
+const GROW_SPEED = 200 * WORLD_SCALE    // ~3 world units/sec
 const ROOT_COLOR: Color3 = [180, 180, 180]
-const THICKNESS_DIVISOR = 14   // branch radius = size / this (Java: line width = size/7)
+const THICKNESS_DIVISOR = 14            // branch radius = size / 14
+const MAX_BRANCHES = 400                // cap exponential growth
 
 export class Tree3DSystem {
   private materials: MaterialFactory
@@ -21,13 +22,13 @@ export class Tree3DSystem {
 
   private tree: TreeBranch | null = null
   private activeBranches: TreeBranch[] = []
-  private rootSize = 0
+  private totalBranches = 0
   private trunkRules: TreeRules
   private branchRules: TreeRules
-  private goal = new Vec3(0, 1, 0) // grow upward (+Y in PlayCanvas)
+  private goal = new Vec3(0, 1, 0)
 
-  // PlayCanvas entities for rendering
-  private branchEntities: pc.Entity[] = []
+  // One entity per branch — created once on birth, updated in-place while growing
+  private entityMap = new Map<TreeBranch, pc.Entity>()
   private materialCache = new Map<string, pc.StandardMaterial>()
 
   private growing = false
@@ -40,170 +41,136 @@ export class Tree3DSystem {
     app.root.addChild(this.treeRoot)
   }
 
-  /** Start growing a new tree. */
   startTree(): void {
-    this.destroyEntities()
+    this.clearEntities()
     this.activeBranches = []
+    this.totalBranches = 1
 
     const avgSize = (this.trunkRules.size + this.branchRules.size) / 2
-    this.rootSize = (120 / avgSize) * WORLD_SCALE
-    // Root at ground level, growing upward
-    this.tree = new TreeBranch(0, 0, 0, this.rootSize, ROOT_COLOR)
+    this.tree = new TreeBranch(0, 0, 0, (120 / avgSize) * WORLD_SCALE, ROOT_COLOR)
     this.activeBranches.push(this.tree)
+    this.createEntity(this.tree)
     this.growing = true
   }
 
-  /** Reset — destroy everything. */
   reset(): void {
-    this.destroyEntities()
+    this.clearEntities()
     this.tree = null
     this.activeBranches = []
+    this.totalBranches = 0
     this.growing = false
   }
 
-  /** Per-frame update. Returns true if tree is still growing. */
+  /** Per-frame update. Returns true while tree is still growing. */
   update(dt: number): boolean {
     if (!this.growing || this.activeBranches.length === 0) return false
 
-    const growAmount = GROW_SPEED * dt
-    const done = this.step(growAmount)
+    const newBranches = this.step(GROW_SPEED * dt)
 
-    // Rebuild visual entities from tree data
-    this.rebuildEntities()
+    // Create entities for newly-born branches (once per branch)
+    for (const b of newBranches) this.createEntity(b)
 
-    if (!done) {
-      this.growing = false
-    }
+    // Update transforms only for currently-growing branches
+    for (const b of this.activeBranches) this.updateEntity(b)
+
+    if (this.activeBranches.length === 0) this.growing = false
     return this.growing
   }
 
   isGrowing(): boolean { return this.growing }
 
-  /** One step of the BFS growth algorithm — exact port of TreeWorld.step(). */
-  private step(growAmount: number): boolean {
+  /** One BFS step — returns newly-born branches. Port of TreeWorld.step(). */
+  private step(growAmount: number): TreeBranch[] {
     const newBranches: TreeBranch[] = []
-    const deadBranches: TreeBranch[] = []
+    const dead = new Set<TreeBranch>()
 
     for (const branch of this.activeBranches) {
       if (branch.grow(growAmount)) {
-        // Branch fully grown — spawn two children
-        const babyTrunk = branch.makeBaby(this.trunkRules, this.goal)
-        const babyBranch = branch.makeBaby(this.branchRules, this.goal)
-
-        if (babyTrunk) newBranches.push(babyTrunk)
-        if (babyBranch) newBranches.push(babyBranch)
-        deadBranches.push(branch)
+        if (this.totalBranches < MAX_BRANCHES) {
+          const babyTrunk = branch.makeBaby(this.trunkRules, this.goal)
+          const babyBranch = branch.makeBaby(this.branchRules, this.goal)
+          if (babyTrunk) { newBranches.push(babyTrunk); this.totalBranches++ }
+          if (babyBranch) { newBranches.push(babyBranch); this.totalBranches++ }
+        }
+        dead.add(branch)
       }
     }
 
-    // Remove finished, add new
-    this.activeBranches = this.activeBranches.filter(b => !deadBranches.includes(b))
+    // O(n) removal using Set instead of O(n²) filter+includes
+    this.activeBranches = this.activeBranches.filter(b => !dead.has(b))
     this.activeBranches.push(...newBranches)
-
-    return this.activeBranches.length > 0
+    return newBranches
   }
 
-  /** Traverse tree, create/update PlayCanvas cylinder per branch. */
-  private rebuildEntities(): void {
-    this.destroyEntities()
-    if (!this.tree) return
-    this.traverseAndBuild(this.tree)
+  /** Create a PlayCanvas entity for a branch. Called once per branch on birth. */
+  private createEntity(branch: TreeBranch): void {
+    const entity = new pc.Entity('B')
+    entity.addComponent('render', { type: 'cylinder' })
+    entity.render!.meshInstances[0].material = this.getMaterial(branch.color)
+    this.treeRoot.addChild(entity)
+    this.entityMap.set(branch, entity)
+    this.updateEntity(branch)
   }
 
-  private traverseAndBuild(branch: TreeBranch): void {
-    if (branch.growthSize <= 0) return
+  /** Update the transform of an existing entity to match current growth state. */
+  private updateEntity(branch: TreeBranch): void {
+    const entity = this.entityMap.get(branch)
+    if (!entity || branch.growthSize <= 0) return
 
     const growTip = branch.getGrowTip()
-    const worldTip = branch.root.add(growTip)
-
-    // Midpoint for entity position
-    const midX = (branch.root.x + worldTip.x) / 2
-    const midY = (branch.root.y + worldTip.y) / 2
-    const midZ = (branch.root.z + worldTip.z) / 2
-
-    // Branch direction
     const dirLen = growTip.length()
     if (dirLen < 0.01) return
 
-    // Thickness: Java uses stroke width = size/7, we use radius = size/14
+    const worldTip = branch.root.add(growTip)
     const thickness = Math.max(branch.size / THICKNESS_DIVISOR, 0.003)
 
-    // Get or create material for this color
-    const mat = this.getMaterial(branch.color)
-
-    const entity = new pc.Entity('B')
-    entity.addComponent('render', { type: 'cylinder' })
-    entity.render!.meshInstances[0].material = mat
-
-    // Scale: diameter × length × diameter
     entity.setLocalScale(thickness * 2, dirLen, thickness * 2)
-
-    // Position at midpoint
-    entity.setPosition(midX, midY, midZ)
-
-    // Orient: align cylinder Y-axis with branch direction
+    entity.setPosition(
+      (branch.root.x + worldTip.x) / 2,
+      (branch.root.y + worldTip.y) / 2,
+      (branch.root.z + worldTip.z) / 2,
+    )
     this.orientAlongDirection(entity, growTip)
-
-    this.treeRoot.addChild(entity)
-    this.branchEntities.push(entity)
-
-    // Recurse into children
-    for (const baby of branch.babies) {
-      this.traverseAndBuild(baby)
-    }
   }
 
-  /** Align entity's local Y-axis with the given direction vector. */
   private orientAlongDirection(entity: pc.Entity, dir: Vec3): void {
-    // Default cylinder axis is Y. We need to rotate Y-axis to align with dir.
     const up = new pc.Vec3(0, 1, 0)
     const target = new pc.Vec3(dir.x, dir.y, dir.z)
     target.normalize()
 
-    // Quaternion from Y-axis to target direction
     const dot = up.dot(target)
-    if (dot > 0.9999) return // already aligned
-    if (dot < -0.9999) {
-      // Opposite — rotate 180° around X
-      entity.setEulerAngles(180, 0, 0)
-      return
-    }
+    if (dot > 0.9999) return
+    if (dot < -0.9999) { entity.setEulerAngles(180, 0, 0); return }
 
     const cross = new pc.Vec3()
     cross.cross(up, target)
     const quat = new pc.Quat(cross.x, cross.y, cross.z, 1 + dot)
-    const len = Math.sqrt(quat.x * quat.x + quat.y * quat.y + quat.z * quat.z + quat.w * quat.w)
+    const len = Math.sqrt(quat.x**2 + quat.y**2 + quat.z**2 + quat.w**2)
     quat.x /= len; quat.y /= len; quat.z /= len; quat.w /= len
     entity.setRotation(quat)
   }
 
-  /** Get/create PBR material for the given RGB color. */
   private getMaterial(color: Color3): pc.StandardMaterial {
     const key = `${color[0]}_${color[1]}_${color[2]}`
     let mat = this.materialCache.get(key)
-    if (mat) return mat
-
-    mat = this.materials.getColor(
-      `tree_${key}`,
-      color[0] / 255,
-      color[1] / 255,
-      color[2] / 255,
-      { metalness: 0, gloss: 0.2 },
-    )
-    this.materialCache.set(key, mat)
+    if (!mat) {
+      mat = this.materials.getColor(
+        `tree_${key}`, color[0] / 255, color[1] / 255, color[2] / 255,
+        { metalness: 0, gloss: 0.2 },
+      )
+      this.materialCache.set(key, mat)
+    }
     return mat
   }
 
-  private destroyEntities(): void {
-    for (const e of this.branchEntities) e.destroy()
-    this.branchEntities = []
+  private clearEntities(): void {
+    for (const entity of this.entityMap.values()) entity.destroy()
+    this.entityMap.clear()
   }
 
   destroy(): void {
-    this.destroyEntities()
-    for (const [key] of this.materialCache) {
-      this.materials.release(`tree_${key}`)
-    }
+    this.clearEntities()
+    for (const [key] of this.materialCache) this.materials.release(`tree_${key}`)
     this.materialCache.clear()
     this.treeRoot.destroy()
   }
