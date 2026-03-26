@@ -45,6 +45,48 @@ _HOOK_MARKER = "# installed-by-bodhigrove"
 _PREPARE_CMD = "git config core.hooksPath .githooks"
 
 _SETUP_BRANCH = "bodhigrove/init-setup"
+_BG_START = "<!-- bodhigrove:start -->"
+_BG_END = "<!-- bodhigrove:end -->"
+
+_BODHIGROVE_CLAUDE_SECTION = """\
+<!-- bodhigrove:start -->
+---
+
+## Bodhigrove — Development Workflow
+
+This repo is tracked by Bodhigrove. MCP tools are auto-configured in `.claude/settings.json`.
+
+### Always Do
+
+- **Report progress** via `update_task_status` MCP tool when working on BUD tasks.
+  Use the BUD number as `task_id` (e.g. `"1"` for BUD-001).
+- **Branch naming:** Use `bud-NNN/<description>` branches (e.g. `bud-001/notification-redesign`).
+  Pre-commit hooks validate BUD existence.
+- **After each TODO step**, report what you did:
+  ```
+  update_task_status(task_id="1", status="in_progress", message="Implemented auth middleware")
+  ```
+- **On completion**, include effectiveness self-assessment:
+  ```
+  update_task_status(task_id="1", status="completed", message="Done",
+    effectiveness={confidence: 8, complexity: "medium", test_coverage: "partial"})
+  ```
+
+### Available MCP Tools
+
+| Tool | When to use |
+|------|-------------|
+| `update_task_status` | Report progress on BUD work (in_progress/completed/failed/blocked) |
+| `get_bud_context` | Fetch BUD requirements, tech spec, and designs |
+| `get_knowledge` | Search the organization's knowledge base |
+| `get_design_system` | Fetch design tokens (colors, typography, components) |
+
+### Commit Tracking
+
+- Commits on `bud-NNN/` branches are automatically tracked by Bodhigrove
+- Post-commit hooks report author, files, and message to the team dashboard
+<!-- bodhigrove:end -->
+"""
 
 _SETUP_FILES = [
     ".claude/settings.json",
@@ -55,6 +97,49 @@ _SETUP_FILES = [
     "CLAUDE.md",
     ".claude/skills/",
 ]
+
+
+def append_bodhigrove_claude_instructions(repo_path: str) -> bool:
+    """Append Bodhigrove workflow instructions to CLAUDE.md.
+
+    Inserts after ``<!-- gitnexus:end -->`` if present, otherwise appends
+    at end of file. Uses ``<!-- bodhigrove:start/end -->`` markers for
+    idempotent updates.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+
+    Returns:
+        True if CLAUDE.md was modified, False if unchanged.
+    """
+    claude_md = Path(repo_path) / "CLAUDE.md"
+    if not claude_md.exists():
+        return False
+
+    content = claude_md.read_text()
+
+    # Already has Bodhigrove section — check if content changed
+    if _BG_START in content:
+        start = content.index(_BG_START)
+        end = content.index(_BG_END) + len(_BG_END) if _BG_END in content else len(content)
+        existing = content[start:end]
+        new_section = _BODHIGROVE_CLAUDE_SECTION.strip()
+        if existing.strip() == new_section:
+            return False  # Already up to date
+        # Replace existing section
+        content = content[:start] + new_section + "\n" + content[end:]
+    else:
+        # Insert after gitnexus:end or append at end
+        gitnexus_end = "<!-- gitnexus:end -->"
+        if gitnexus_end in content:
+            idx = content.index(gitnexus_end) + len(gitnexus_end)
+            section = _BODHIGROVE_CLAUDE_SECTION.strip()
+            content = content[:idx] + "\n\n" + section + "\n" + content[idx:]
+        else:
+            content = content.rstrip() + "\n\n" + _BODHIGROVE_CLAUDE_SECTION.strip() + "\n"
+
+    claude_md.write_text(content)
+    return True
 
 
 # ── Repo type detection ───────────────────────────────────────────

@@ -195,8 +195,16 @@ async def phase_b1_repo_setup(
         # Add prepare script to package.json
         prepare_changed = add_prepare_script(repo_path)
 
+        # Add Bodhigrove workflow instructions to CLAUDE.md
+        from app.services.repo_setup import append_bodhigrove_claude_instructions
+
+        claude_md_changed = append_bodhigrove_claude_instructions(repo_path)
+
         # Branch, commit, push setup files, and create PR
-        any_changed = mcp_changed or hooks_changed or gitignore_changed or prepare_changed
+        any_changed = (
+            mcp_changed or hooks_changed or gitignore_changed
+            or prepare_changed or claude_md_changed
+        )
         if any_changed:
             await update_scan_progress(
                 scan_id,

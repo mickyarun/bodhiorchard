@@ -231,6 +231,21 @@ async def _build_tech_arch_prompt(
         )
     else:
         instructions += "Output the plan as clean markdown."
+
+    # Instruct agent to include dev workflow in its output
+    instructions += (
+        "\n## Include in your output\n\n"
+        "At the end of the tech spec, add a **Development Workflow** "
+        "section with these instructions for the implementing developer:\n\n"
+        f"- Branch: `bud-{bud.bud_number:03d}/<description>`\n"
+        "- After each TODO step, report progress using "
+        "`update_task_status` MCP tool:\n"
+        f'  - task_id: "{bud.bud_number}"\n'
+        '  - status: "in_progress" | "completed" | "blocked"\n'
+        "  - message: what you just completed\n"
+        "- On completion, include effectiveness self-assessment "
+        "(confidence, complexity, test_coverage, risks)\n"
+    )
     prompt += instructions
 
     return prompt, working_dir
