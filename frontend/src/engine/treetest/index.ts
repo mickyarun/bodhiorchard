@@ -9,6 +9,7 @@ import { Application } from '../core/Application'
 import { InputManager } from '../input/InputManager'
 import { MaterialFactory } from '../rendering/MaterialFactory'
 import { Tree3DSystem } from './Tree3DSystem'
+import { LeafSystem } from './LeafSystem'
 import { GroundBuilder } from './GroundBuilder'
 import { UIOverlay } from './UIOverlay'
 import { clamp, lerp } from '../utils/MathUtils'
@@ -32,6 +33,7 @@ export class TreeTestEngine {
   private input: InputManager | null = null
   private materials: MaterialFactory | null = null
   private tree: Tree3DSystem | null = null
+  private leaves: LeafSystem | null = null
   private ground: GroundBuilder | null = null
   private ui: UIOverlay | null = null
   private canvas: HTMLCanvasElement | null = null
@@ -42,6 +44,10 @@ export class TreeTestEngine {
   private targetDistance = CAM.distance
   private lookAtY = CAM.lookAtY
   private lastInputTime = 0
+  // Cached lookAt target — avoids new pc.Vec3 every frame (review: MED perf issue)
+  private lookAtTarget = new pc.Vec3(0, CAM.lookAtY, 0)
+  // Tracks whether leaves have been spawned for the current tree
+  private leavesSpawned = false
 
   async init(container: HTMLElement, width: number, height: number): Promise<void> {
     this.canvas = document.createElement('canvas')
@@ -70,8 +76,9 @@ export class TreeTestEngine {
     app.root.addChild(groundRoot)
     this.ground.build(groundRoot, 4)
 
-    // Tree system
-    this.tree = new Tree3DSystem(app, this.materials)
+    // Tree + leaf systems
+    this.tree   = new Tree3DSystem(app, this.materials)
+    this.leaves = new LeafSystem(app, this.materials)
 
     this.computeOrbitPosition()
     this.application.setConfig({ onUpdate: (dt) => this.onUpdate(dt) })
@@ -89,32 +96,46 @@ export class TreeTestEngine {
 
   private startGrowth(): void {
     if (!this.tree) return
+    this.leavesSpawned = false
+    this.leaves?.clear()
     this.tree.startTree(this.ui?.getSelectedColor())
     this.ui?.setGrowEnabled(false)
     this.ui?.setGrowLabel('Growing...')
+    this.ui?.showProgress(0.5)
   }
 
   private resetTree(): void {
     if (!this.tree) return
     this.tree.reset()
+    this.leaves?.clear()
+    this.leavesSpawned = false
     this.ui?.setGrowEnabled(true)
     this.ui?.setGrowLabel('Grow')
     this.ui?.setStage(0)
+    this.ui?.showProgress(0)
   }
 
   private onUpdate(dt: number): void {
     if (!this.input || !this.application) return
 
-    // Tree growth
     if (this.tree) {
-      const stillGrowing = this.tree.update(dt)
-      if (!stillGrowing && !this.tree.isGrowing()) {
-        this.ui?.setGrowEnabled(true)
-        this.ui?.setGrowLabel('New Tree')
+      const wasGrowing = this.tree.isGrowing()
+      if (wasGrowing) {
+        const stillGrowing = this.tree.update(dt)
+        this.ui?.showProgress(0.5)
+        // Detect the exact frame the tree finishes growing
+        if (!stillGrowing && !this.leavesSpawned) {
+          const tips = this.tree.getTerminalTips()
+          this.leaves?.spawnLeaves(tips, this.tree.getRootColor())
+          this.leavesSpawned = true
+          this.ui?.setGrowEnabled(true)
+          this.ui?.setGrowLabel('New Tree')
+          this.ui?.showProgress(0)
+        }
       }
-      this.ui?.showProgress(this.tree.isGrowing() ? 0.5 : 0)
     }
 
+    this.leaves?.update(dt)
     this.handleCamera(dt)
   }
 
@@ -158,7 +179,7 @@ export class TreeTestEngine {
       Math.max(this.lookAtY + this.distance * Math.sin(pitchRad), 0.3),
       this.distance * Math.cos(pitchRad) * Math.cos(yawRad),
     )
-    camera.lookAt(new pc.Vec3(0, this.lookAtY, 0))
+    camera.lookAt(this.lookAtTarget)  // review: reuse cached Vec3, no allocation
   }
 
   resize(width: number, height: number): void {
@@ -167,6 +188,7 @@ export class TreeTestEngine {
 
   destroy(): void {
     this.tree?.destroy(); this.tree = null
+    this.leaves?.destroy(); this.leaves = null
     this.ground?.destroy(); this.ground = null
     this.ui?.destroy(); this.ui = null
     this.input?.destroy(); this.input = null
