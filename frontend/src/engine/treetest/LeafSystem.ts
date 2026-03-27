@@ -18,8 +18,8 @@ import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { Color3 } from './TreeRules'
 
-const MAX_TIPS        = 80     // cap terminal tips — max entities = 80 * 2 = 160
-const LEAVES_PER_TIP  = 2
+const MAX_TIPS        = 160    // cap terminal tips — max entities = 160 * 5 = 800
+const LEAVES_PER_TIP  = 5
 const LEAF_HEIGHT     = 0.20   // world units
 const LEAF_WIDTH      = 0.55   // width/height ratio
 const WIND_FREQ_BASE  = 1.3    // Hz
@@ -113,6 +113,9 @@ export class LeafSystem {
 
     const entity = new pc.Entity('Leaf')
     entity.addComponent('render', { meshInstances: [mi] })
+    // Disable shadow casting — leaves don't need to cast shadows and removing
+    // them from the shadow pass is the biggest single performance saving.
+    entity.render!.castShadows = false
 
     const pitch = 30 + Math.random() * 45
     const yaw   = Math.random() * 360
