@@ -194,7 +194,12 @@ export class Tree3DSystem {
 
     if (N <= DEFAULT_LEVELS) {
       this.growSpeed = GROW_SPEED
-      return defaultRoot
+      // Scale trunk size with feature count so visual size reflects repo scope:
+      //   N=0  → 25% (bare stub)   N=1  → ~40% (sapling)
+      //   N=5  → ~65% (mid-size)   N=16 → 100% (standard)
+      // Uses N^0.35 power curve — same exponent family as the large-N branch.
+      const scaleFactor = N === 0 ? 0.25 : Math.min(Math.pow(N / DEFAULT_LEVELS, 0.35), 1.0)
+      return defaultRoot * scaleFactor
     }
 
     // Trunk height scales as N^0.25 — subtle but visible from 16 → 250 features
