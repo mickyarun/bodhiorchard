@@ -593,15 +593,65 @@ def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
     # Fallback: "execution_plan" or "test_plan" key
     if not plan:
         plan = parsed.get("execution_plan", "") or parsed.get("test_plan", "")
-        if isinstance(plan, dict):
-            # Convert dict plan to markdown
-            plan = str(plan)
+
+    # Convert dict/list plans to readable markdown
+    if isinstance(plan, dict):
+        plan = _dict_plan_to_markdown(plan)
+    elif isinstance(plan, list):
+        plan = "\n".join(f"- {item}" if isinstance(item, str) else str(item) for item in plan)
+    elif not isinstance(plan, str):
+        plan = ""
 
     return {
         "automation_test_cases": auto if isinstance(auto, list) else [],
         "manual_test_cases": manual if isinstance(manual, list) else [],
-        "test_execution_plan": plan if isinstance(plan, str) else "",
+        "test_execution_plan": plan,
     }
+
+
+def _dict_plan_to_markdown(plan: dict[str, Any]) -> str:
+    """Convert a dict execution plan to readable markdown."""
+    import json
+
+    lines: list[str] = []
+
+    # Handle common structures: {strategy, phases}
+    if "strategy" in plan:
+        lines.append(f"## Strategy\n\n{plan['strategy']}\n")
+
+    if "phases" in plan and isinstance(plan["phases"], list):
+        lines.append("## Phases\n")
+        for phase in plan["phases"]:
+            if isinstance(phase, dict):
+                name = phase.get("name", "Phase")
+                order = phase.get("order", "")
+                prefix = f"{order}. " if order else "- "
+                lines.append(f"{prefix}**{name}**")
+                if phase.get("description"):
+                    lines.append(f"  {phase['description']}")
+                if phase.get("command"):
+                    lines.append(f"  ```\n  {phase['command']}\n  ```")
+                if phase.get("rationale"):
+                    lines.append(f"  _{phase['rationale']}_")
+                if phase.get("test_ids") and isinstance(phase["test_ids"], list):
+                    lines.append(f"  Tests: {', '.join(phase['test_ids'][:10])}")
+                if phase.get("tasks") and isinstance(phase["tasks"], list):
+                    for task in phase["tasks"]:
+                        if isinstance(task, dict):
+                            bug = task.get("bug", "")
+                            fix = task.get("fix", "")
+                            lines.append(f"  - {bug}: {fix}" if bug else f"  - {task}")
+                lines.append("")
+            else:
+                lines.append(f"- {phase}")
+    elif not lines:
+        # Fallback: dump as formatted JSON
+        try:
+            lines.append(f"```json\n{json.dumps(plan, indent=2)}\n```")
+        except (TypeError, ValueError):
+            lines.append(str(plan))
+
+    return "\n".join(lines)
 
 
 async def _handle_testing_result(
