@@ -1,42 +1,45 @@
 /**
- * CircularFence — procedural wooden fence ring for the exterior scene.
+ * CircularFence — procedural wooden fence ring.
  *
- * Arranges box-primitive posts + tangential rail panels around a circle.
- * A gate opening is cut at a given angle, with taller gate pillars marking
- * each side of the gap.
+ * Two styles:
+ *   'solid' (default) — close-spaced posts + a continuous solid plank panel.
+ *                       Used for zone property fences (dense, opaque).
+ *   'rail'            — wider-spaced posts + 2 thin horizontal rails.
+ *                       Used for the outer campus perimeter (light, open).
  *
- * Coordinate convention (PlayCanvas / housetest XZ plane):
- *   angle = 0   →  point at (cx, cz + radius)  = front (+Z from center)
- *   angle = π   →  back  (-Z from center)
- *   angle = π/2 →  right (+X from center)
+ * Coordinate convention (PlayCanvas XZ plane):
+ *   angle = 0  →  (cx,  cz + radius)  =  +Z from center
+ *   angle = π  →  (cx,  cz - radius)  =  -Z from center
+ *   angle = π/2 → (cx + radius, cz)   =  +X from center
  *
- * Placement formula:
- *   px = Math.sin(angle) * radius
- *   pz = Math.cos(angle) * radius
- *
- * Panel rotation: each panel's local X axis lies along the tangent to the
- * circle, so setLocalEulerAngles(0, angle * RAD2DEG, 0) makes it face
- * perpendicular to the radius — no lookAt, no quaternion math required.
+ * Tangent rotation: each panel/rail's local X aligns along the circle tangent.
+ *   yaw = angle * (180 / Math.PI)  — no lookAt, no quaternion math required.
  */
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 
-// ─── Fence geometry constants ────────────────────────────────────────────────
+// ─── Solid-fence constants ────────────────────────────────────────────────────
 
-/** Post pillar dimensions. Box pivot is at center → lift by half height. */
 const POST_HEIGHT     = 1.10
 const POST_WIDTH      = 0.10
-
-/** Solid rail panel height and depth (thickness). Width = arc length per segment. */
 const PANEL_HEIGHT    = 0.85
 const PANEL_THICKNESS = 0.07
+const GATE_POST_W     = 0.16
+const GATE_POST_H     = 1.28
 
-/** Gate pillars: visibly thicker and taller than regular posts. */
-const GATE_POST_W = 0.16
-const GATE_POST_H = 1.28
+/** Arc length per segment for solid zone fences (dense spacing). */
+const SOLID_SEGMENT_WIDTH = 0.95
 
-/** Target arc length per segment — controls visual density of the fence. */
-const TARGET_PANEL_WIDTH = 0.95
+// ─── Rail-fence constants ─────────────────────────────────────────────────────
+
+const RAIL_POST_HEIGHT   = 1.00
+const RAIL_POST_WIDTH    = 0.12
+const RAIL_THICKNESS     = 0.06  // both width and height of the horizontal rail bar
+/** Two horizontal rails: 30% and 78% of post height. */
+const RAIL_Y_FRACTIONS   = [0.30, 0.78]
+
+/** Arc length per segment for rail fences (wide, open spacing). */
+const RAIL_SEGMENT_WIDTH  = 4.0
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -49,12 +52,19 @@ export interface CircularFenceOptions {
   cz: number
   /**
    * Angle (radians) at the center of the gate gap.
-   * angle=0 → +Z from center (front, toward player spawn).
-   * Compute exact alignment: Math.asin((pathX - cx) / radius)
+   * angle=0 → +Z from center.
+   * Use Math.asin((pathX - cx) / radius) to align with a path.
+   * Ignored when gateWidth = 0 (no gate).
    */
-  gateAngle: number
-  /** World-space width of the gate opening (default 1.6). */
+  gateAngle?: number
+  /** World-space width of the gate opening. Set 0 for no gate (default 1.6). */
   gateWidth?: number
+  /**
+   * Visual style:
+   *  'solid' — dense posts + continuous solid panel (default, used for zone fences)
+   *  'rail'  — wider posts + 2 horizontal rails (light perimeter fence)
+   */
+  style?: 'solid' | 'rail'
 }
 
 // ─── CircularFence ───────────────────────────────────────────────────────────
@@ -68,39 +78,55 @@ export class CircularFence {
 
   /**
    * Build the fence ring as children of `parent`.
-   * The root entity is positioned at (cx, 0, cz); all posts/panels are
-   * in local space relative to that root — matching the BuildingFactory pattern.
+   * Root entity sits at (cx, 0, cz); all posts/panels are in local space —
+   * matching the BuildingFactory pattern used throughout the engine.
    */
   build(parent: pc.Entity, opts: CircularFenceOptions): pc.Entity {
-    const { radius, cx, cz, gateAngle, gateWidth = 1.6 } = opts
-
-    const postMat     = this.materials.getColor('fence_post',  0.55, 0.40, 0.24)
-    const panelMat    = this.materials.getColor('fence_panel', 0.64, 0.50, 0.30)
-    const gatePostMat = this.materials.getColor('fence_gate',  0.42, 0.30, 0.16)
-
-    // ── Segment count: scale with circumference so panel width stays near target
-    const segmentCount = Math.max(16, Math.round((2 * Math.PI * radius) / TARGET_PANEL_WIDTH))
-    const angleStep    = (2 * Math.PI) / segmentCount
-    const panelWidth   = (2 * Math.PI * radius) / segmentCount   // actual arc width
-    const gateHalfArc  = (gateWidth / radius) / 2                // radians to skip each side
+    const {
+      radius, cx, cz,
+      gateAngle = 0,
+      gateWidth = 1.6,
+      style = 'solid',
+    } = opts
 
     const root = new pc.Entity('CircularFence')
     root.setLocalPosition(cx, 0, cz)
     parent.addChild(root)
 
+    if (style === 'rail') {
+      this._buildRailFence(root, radius, gateAngle, gateWidth)
+    } else {
+      this._buildSolidFence(root, radius, gateAngle, gateWidth)
+    }
+
+    return root
+  }
+
+  // ─── Solid fence (zone boundaries) ──────────────────────────────────────────
+
+  private _buildSolidFence(
+    root: pc.Entity,
+    radius: number,
+    gateAngle: number,
+    gateWidth: number,
+  ): void {
+    const postMat     = this.materials.getColor('fence_post',  0.55, 0.40, 0.24)
+    const panelMat    = this.materials.getColor('fence_panel', 0.64, 0.50, 0.30)
+    const gatePostMat = this.materials.getColor('fence_gate',  0.42, 0.30, 0.16)
+
+    const segmentCount = Math.max(16, Math.round((2 * Math.PI * radius) / SOLID_SEGMENT_WIDTH))
+    const angleStep    = (2 * Math.PI) / segmentCount
+    const panelWidth   = (2 * Math.PI * radius) / segmentCount
+    const gateHalfArc  = gateWidth > 0 ? (gateWidth / radius) / 2 : 0
+
     for (let i = 0; i < segmentCount; i++) {
       const angle = i * angleStep
+      if (gateWidth > 0 && Math.abs(this._normalizeAngle(angle - gateAngle)) < gateHalfArc) continue
 
-      // Skip segments inside the gate arc
-      if (Math.abs(this._normalizeAngle(angle - gateAngle)) < gateHalfArc) continue
-
-      // Position on ring (local to root, which sits at cx/cz)
       const px  = Math.sin(angle) * radius
       const pz  = Math.cos(angle) * radius
-      // Tangent yaw: panel local-X aligns along the circle tangent
       const yaw = angle * (180 / Math.PI)
 
-      // ── Post: square pillar, lifted so bottom sits on y=0 ──
       const post = new pc.Entity('Post')
       post.addComponent('render', { type: 'box' })
       post.setLocalScale(POST_WIDTH, POST_HEIGHT, POST_WIDTH)
@@ -108,7 +134,6 @@ export class CircularFence {
       post.render!.meshInstances[0].material = postMat
       root.addChild(post)
 
-      // ── Panel: flat plank tangent to the circle ──
       const panel = new pc.Entity('Panel')
       panel.addComponent('render', { type: 'box' })
       panel.setLocalScale(panelWidth, PANEL_HEIGHT, PANEL_THICKNESS)
@@ -118,24 +143,80 @@ export class CircularFence {
       root.addChild(panel)
     }
 
-    // ── Gate pillars: one on each side of the opening ──
-    for (const side of [-1, 1] as const) {
-      const gatePostAngle = gateAngle + side * gateHalfArc
-      const gpx = Math.sin(gatePostAngle) * radius
-      const gpz = Math.cos(gatePostAngle) * radius
-
-      const gatePost = new pc.Entity('GatePost')
-      gatePost.addComponent('render', { type: 'box' })
-      gatePost.setLocalScale(GATE_POST_W, GATE_POST_H, GATE_POST_W)
-      gatePost.setLocalPosition(gpx, GATE_POST_H / 2, gpz)
-      gatePost.render!.meshInstances[0].material = gatePostMat
-      root.addChild(gatePost)
+    if (gateWidth > 0) {
+      this._buildGatePillars(root, radius, gateAngle, gateHalfArc, gatePostMat)
     }
-
-    return root
   }
 
-  /** Normalize an angle to the range [-π, π]. */
+  // ─── Rail fence (light perimeter) ────────────────────────────────────────────
+
+  private _buildRailFence(
+    root: pc.Entity,
+    radius: number,
+    gateAngle: number,
+    gateWidth: number,
+  ): void {
+    const postMat = this.materials.getColor('fence_post',  0.52, 0.38, 0.22)
+    const railMat = this.materials.getColor('fence_panel', 0.60, 0.46, 0.26)
+
+    const segmentCount = Math.max(12, Math.round((2 * Math.PI * radius) / RAIL_SEGMENT_WIDTH))
+    const angleStep    = (2 * Math.PI) / segmentCount
+    const railSpan     = (2 * Math.PI * radius) / segmentCount  // arc length between posts
+    const gateHalfArc  = gateWidth > 0 ? (gateWidth / radius) / 2 : 0
+
+    for (let i = 0; i < segmentCount; i++) {
+      const angle = i * angleStep
+      if (gateWidth > 0 && Math.abs(this._normalizeAngle(angle - gateAngle)) < gateHalfArc) continue
+
+      const px  = Math.sin(angle) * radius
+      const pz  = Math.cos(angle) * radius
+      const yaw = angle * (180 / Math.PI)
+
+      // Post
+      const post = new pc.Entity('Post')
+      post.addComponent('render', { type: 'box' })
+      post.setLocalScale(RAIL_POST_WIDTH, RAIL_POST_HEIGHT, RAIL_POST_WIDTH)
+      post.setLocalPosition(px, RAIL_POST_HEIGHT / 2, pz)
+      post.render!.meshInstances[0].material = postMat
+      root.addChild(post)
+
+      // Two horizontal rails at RAIL_Y_FRACTIONS of post height
+      for (const frac of RAIL_Y_FRACTIONS) {
+        const rail = new pc.Entity('Rail')
+        rail.addComponent('render', { type: 'box' })
+        rail.setLocalScale(railSpan, RAIL_THICKNESS, RAIL_THICKNESS)
+        rail.setLocalPosition(px, RAIL_POST_HEIGHT * frac, pz)
+        rail.setLocalEulerAngles(0, yaw, 0)
+        rail.render!.meshInstances[0].material = railMat
+        root.addChild(rail)
+      }
+    }
+  }
+
+  // ─── Gate pillars (solid fence only) ─────────────────────────────────────────
+
+  private _buildGatePillars(
+    root: pc.Entity,
+    radius: number,
+    gateAngle: number,
+    gateHalfArc: number,
+    mat: pc.Material,
+  ): void {
+    for (const side of [-1, 1] as const) {
+      const a   = gateAngle + side * gateHalfArc
+      const gpx = Math.sin(a) * radius
+      const gpz = Math.cos(a) * radius
+
+      const post = new pc.Entity('GatePost')
+      post.addComponent('render', { type: 'box' })
+      post.setLocalScale(GATE_POST_W, GATE_POST_H, GATE_POST_W)
+      post.setLocalPosition(gpx, GATE_POST_H / 2, gpz)
+      post.render!.meshInstances[0].material = mat
+      root.addChild(post)
+    }
+  }
+
+  /** Normalize angle to [-π, π]. */
   private _normalizeAngle(angle: number): number {
     let a = angle
     while (a >  Math.PI) a -= 2 * Math.PI

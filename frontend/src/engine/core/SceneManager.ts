@@ -293,30 +293,46 @@ export class SceneManager {
   // ─── Zone Fences ──────────────────────────────
 
   /**
-   * Build a circular wooden fence around each building zone.
+   * Build fences for all zones + one light rail fence around the whole campus.
    *
-   * Gate angle is computed so the opening aligns with the path from the
-   * orchard hub (0, 0) into the zone: atan2(-zone.x, -zone.z) gives the
-   * bearing on the ring that faces toward the center of the world.
-   * Gate width (3.0) gives comfortable clearance for path stones + characters.
+   * Zone fences (solid style):
+   *   Gate angle = atan2(-zone.x, -zone.z) → opening faces toward the orchard hub.
+   *   Gate width 3.0 units gives clearance for path stones + characters.
+   *
+   * Outer perimeter (rail style):
+   *   Closed ring (no gate) at worldRadius + 8 units margin.
+   *   Wide post spacing (~4 units) keeps entity count low for a large ring.
    */
   private buildZoneFences(factory: BuildingFactory): void {
     if (!factory.materialFactory) return
     const fence = new CircularFence(factory.materialFactory)
 
+    // ── Zone property fences (solid) ──────────────────────────────────────────
     for (const zone of this.layout.getAllZones()) {
-      if (zone.name === 'orchard') continue  // central hub has paths from all sides
+      if (zone.name === 'orchard') continue  // central hub — paths from all sides, no fence
 
       const gateAngle = Math.atan2(-zone.x, -zone.z)
-      const fenceEntity = fence.build(this.app.root, {
+      this.buildingEntities.push(fence.build(this.app.root, {
         radius:    zone.radius,
         cx:        zone.x,
         cz:        zone.z,
         gateAngle,
         gateWidth: 3.0,
-      })
-      this.buildingEntities.push(fenceEntity)
+        style:     'solid',
+      }))
     }
+
+    // ── Outer campus perimeter (light rail) ────────────────────────────────────
+    // worldRadius is the furthest zone edge from origin (~51 units).
+    // +8 gives a comfortable visual margin before the green ground fades out.
+    const outerRadius = this.layout.getWorldRadius() + 8
+    this.buildingEntities.push(fence.build(this.app.root, {
+      radius:    outerRadius,
+      cx:        0,
+      cz:        0,
+      gateWidth: 0,        // closed ring — no gate needed at the perimeter
+      style:     'rail',
+    }))
   }
 
   // ─── Repo Visualization Factory ─────────────────
