@@ -583,7 +583,7 @@ def _parse_code_review_output(output: str) -> dict[str, Any]:
     Returns:
         Dict with code_review_comments, automation_test_plan_md, manual_test_plan_md.
     """
-    from app.services.json_parser import extract_json
+    from app.services.json_parser import parse_json_response
 
     default: dict[str, Any] = {
         "code_review_comments": [],
@@ -595,7 +595,7 @@ def _parse_code_review_output(output: str) -> dict[str, Any]:
         return default
 
     try:
-        parsed = extract_json(output)
+        parsed = parse_json_response(output)
         if isinstance(parsed, dict):
             return {
                 "code_review_comments": parsed.get("code_review_comments", []),

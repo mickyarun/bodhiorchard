@@ -247,11 +247,15 @@ async def _build_tech_arch_prompt(
 async def _build_code_review_prompt(
     bud: BUDDocument, skill: Skill, org_id: uuid_mod.UUID, db: Any
 ) -> tuple[str, str | None]:
-    """Build code review prompt with git diffs from confirmed repos."""
+    """Build a lean code review prompt with repo locations and commit SHAs.
+
+    Instead of embedding full diffs and tech specs inline, provides the agent
+    with repo paths, branch info, and commit SHAs so it can use tools (Read,
+    Bash git diff, gitnexus MCP) to explore code itself.
+    """
     from pathlib import Path
 
     from app.repositories.dev_activity import DevActivityLogRepository
-    from app.services.repo_scanner import run_git
 
     bud_ref = f"BUD-{bud.bud_number:03d}"
     meta = bud.metadata_ or {}
@@ -260,7 +264,8 @@ async def _build_code_review_prompt(
     activity_repo = DevActivityLogRepository(db, org_id=org_id)
     last_shas = await activity_repo.get_last_sha_per_repo(bud.id)
 
-    all_diffs: list[dict[str, str]] = []
+    # Build repo context: paths + last commit SHAs
+    repo_sections: list[str] = []
     working_dir: str | None = None
 
     for repo_info in confirmed_repos:
@@ -271,42 +276,45 @@ async def _build_code_review_prompt(
         if working_dir is None:
             working_dir = repo_path
 
+        last_sha = last_shas.get(repo_path, "HEAD")
         develop_wt = Path(repo_path) / ".bodhigrove" / "develop"
-        if develop_wt.exists():
-            await run_git(["pull"], cwd=str(develop_wt))
-
-        last_sha = last_shas.get(repo_path)
-        if not last_sha:
-            continue
-
         diff_base = "develop" if develop_wt.exists() else "HEAD~10"
-        diff_stdout, _, rc = await run_git(
-            ["diff", f"{diff_base}...{last_sha}", "--stat", "--patch"],
-            cwd=repo_path,
-            timeout=120,
+
+        repo_sections.append(
+            f"- **{repo_name}**: `{repo_path}`\n"
+            f"  - Last commit: `{last_sha}`\n"
+            f"  - Diff command: `git diff {diff_base}...{last_sha} --stat --patch`"
         )
-        if rc != 0:
-            diff_stdout, _, _ = await run_git(
-                ["diff", f"HEAD~5..{last_sha}"],
-                cwd=repo_path,
-                timeout=120,
-            )
-        if diff_stdout:
-            all_diffs.append({"repo_name": repo_name, "diff": diff_stdout[:50000]})
 
-    if not all_diffs:
-        raise ValueError("No code changes found in confirmed repos")
+    if not repo_sections:
+        raise ValueError("No confirmed repos with commits for code review")
 
-    diff_sections = "\n\n".join(
-        f"## Repository: {d['repo_name']}\n\n```diff\n{d['diff']}\n```" for d in all_diffs
+    repo_list = "\n".join(repo_sections)
+
+    # Build the BUD context reference (use MCP tool instead of inline)
+    bud_context = (
+        f"Use `get_bud_context` MCP tool to fetch the full tech spec and requirements "
+        f"for {bud_ref}. The tech spec contains the implementation plan this code "
+        f"should follow — check for deviations.\n"
     )
+    # If MCP is unavailable, provide a brief summary as fallback
+    if bud.tech_spec_md:
+        # Just the first 500 chars as a hint, not the full spec
+        snippet = bud.tech_spec_md[:500].rsplit("\n", 1)[0]
+        bud_context += f"\nTech spec preview (use MCP for full version):\n{snippet}...\n"
 
     prompt = (
         f"You are performing an automated code review for {bud_ref}: {bud.title}.\n\n"
-        f"## Original Tech Spec\n\n{(bud.tech_spec_md or '')[:10000]}\n\n"
-        f"## Code Changes\n\n{diff_sections}\n\n"
-        "## Instructions\n\n"
-        "Review the code changes and produce a JSON response with this exact structure:\n"
+        f"## Repositories to Review\n\n{repo_list}\n\n"
+        f"## BUD Context\n\n{bud_context}\n\n"
+        "## How to Review\n\n"
+        "1. Run `git diff` in each repo to see the actual code changes\n"
+        "2. Read the modified files to understand context\n"
+        "3. Use `get_bud_context` MCP tool to fetch the tech spec\n"
+        "4. Check for: bugs, security issues (OWASP top 10), type safety, "
+        "missing error handling, spec deviations\n\n"
+        "## Output Format\n\n"
+        "Produce a JSON response with this exact structure:\n"
         "```json\n"
         "{\n"
         '  "code_review_comments": [\n'
@@ -404,7 +412,7 @@ async def _handle_code_review_result(
     task: BUDAgentTask,
     db: Any,
 ) -> dict | None:
-    """Code review result: parse JSON and store comments + test plans in metadata."""
+    """Code review result: parse JSON, store comments, auto-transition if clean re-review."""
     from app.repositories.bud import BUDRepository
     from app.services.job_agents import _parse_code_review_output
 
@@ -412,19 +420,227 @@ async def _handle_code_review_result(
 
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
+    qa_push_requested = False
+    comment_count = 0
+
     if bud:
         meta = dict(bud.metadata_ or {})
-        meta["code_review_comments"] = review_data.get("code_review_comments", [])
+        qa_push_requested = meta.pop("qa_push_requested", False)
+        new_comments = review_data.get("code_review_comments", [])
+        meta["code_review_comments"] = new_comments
+        # Clear old resolutions since comments changed
+        if qa_push_requested:
+            meta.pop("code_review_resolutions", None)
         auto_plan = review_data.get("automation_test_plan_md", "")
         manual_plan = review_data.get("manual_test_plan_md", "")
         if auto_plan or manual_plan:
             meta["automation_test_plan_md"] = auto_plan
             meta["manual_test_plan_md"] = manual_plan
         bud.metadata_ = meta
+        comment_count = len(new_comments)
+
+        # Auto-transition to testing if this was a re-review and no new issues
+        if qa_push_requested and comment_count == 0:
+            from app.models.bud import BUDStatus
+            from app.services.bud_assignment import auto_assign_for_phase
+            from app.services.bud_timeline import record_event
+
+            old_status = bud.status
+            bud.status = BUDStatus.TESTING
+            await record_event(
+                db, org_id, bud_id, "status_change",
+                detail={"from": old_status, "to": "testing", "auto": True},
+            )
+            await auto_assign_for_phase(db, org_id, bud, BUDStatus.TESTING)
+
+            # Trigger QA agent task
+            from app.services.bud_agent_trigger import create_agent_task_for_stage
+
+            await create_agent_task_for_stage(
+                bud, "testing", org_id, db, force=True,
+            )
+
         await db.flush()
 
-    comment_count = len(review_data.get("code_review_comments", []))
-    return {"section": "test_plan_md", "comment_count": comment_count}
+    return {
+        "section": "test_plan_md",
+        "comment_count": comment_count,
+        "auto_transitioned": qa_push_requested and comment_count == 0,
+    }
+
+
+# ── Testing (QA) prompt builder + result handler ─────────────────
+
+
+async def _build_testing_prompt(
+    bud: BUDDocument, skill: Skill, org_id: uuid_mod.UUID, db: Any
+) -> tuple[str, str | None]:
+    """Build a lean QA testing prompt with repo locations and commit refs.
+
+    Provides the agent with repo paths and commit SHAs so it can use tools
+    to explore code and diffs itself, rather than embedding everything inline.
+    """
+    from pathlib import Path
+
+    from app.repositories.dev_activity import DevActivityLogRepository
+
+    bud_ref = f"BUD-{bud.bud_number:03d}"
+    meta = bud.metadata_ or {}
+    confirmed_repos = meta.get("confirmed_repos", [])
+
+    activity_repo = DevActivityLogRepository(db, org_id=org_id)
+    last_shas = await activity_repo.get_last_sha_per_repo(bud.id)
+
+    # Build repo context: paths + last commit SHAs
+    repo_sections: list[str] = []
+    working_dir: str | None = None
+
+    for repo_info in confirmed_repos:
+        repo_path = repo_info.get("repo_path", "")
+        repo_name = repo_info.get("repo_name", Path(repo_path).name)
+        if not repo_path:
+            continue
+        if working_dir is None:
+            working_dir = repo_path
+
+        last_sha = last_shas.get(repo_path, "HEAD")
+        develop_wt = Path(repo_path) / ".bodhigrove" / "develop"
+        diff_base = "develop" if develop_wt.exists() else "HEAD~10"
+
+        repo_sections.append(
+            f"- **{repo_name}**: `{repo_path}`\n"
+            f"  - Last commit: `{last_sha}`\n"
+            f"  - Diff command: `git diff {diff_base}...{last_sha} --stat --patch`"
+        )
+
+    repo_list = "\n".join(repo_sections) if repo_sections else "(no repos confirmed)"
+
+    # Draft test plans from code review (keep these inline — they're short)
+    draft_auto = meta.get("automation_test_plan_md", "")
+    draft_manual = meta.get("manual_test_plan_md", "")
+
+    draft_context = ""
+    if draft_auto or draft_manual:
+        draft_context = "\n## Draft Test Plans (from Code Review)\n\n"
+        if draft_auto:
+            draft_context += f"### Automation\n\n{draft_auto}\n\n"
+        if draft_manual:
+            draft_context += f"### Manual\n\n{draft_manual}\n\n"
+        draft_context += (
+            "Expand these drafts into detailed, structured test cases "
+            "with concrete inputs and expected outputs.\n\n"
+        )
+
+    prompt = (
+        f"You are generating comprehensive test cases for {bud_ref}: {bud.title}.\n\n"
+        f"## Repositories\n\n{repo_list}\n\n"
+        f"## How to Get Context\n\n"
+        f"1. Use `get_bud_context` MCP tool to fetch the full tech spec and requirements\n"
+        f"2. Run `git diff` in each repo to see the actual code changes\n"
+        f"3. Read the modified files to understand what was implemented\n"
+        f"4. Use gitnexus MCP tools to explore the codebase structure\n\n"
+    )
+
+    if draft_context:
+        prompt += draft_context
+
+    prompt += (
+        "## Instructions\n\n"
+        "Analyze the requirements, tech spec, and code changes to produce:\n"
+        "1. **Automation test cases** — Playwright/Cucumber scenarios with Gherkin, "
+        "concrete inputs, and expected outputs\n"
+        "2. **Manual test cases** — step-by-step procedures for things automation "
+        "can't easily cover (accessibility, usability, visual regression)\n"
+        "3. **Test execution plan** — recommended order and strategy\n\n"
+        "Output ONLY the JSON — no markdown wrapper, no explanation.\n"
+    )
+
+    return prompt, working_dir
+
+
+async def _handle_testing_result(
+    bud_id: uuid_mod.UUID,
+    org_id: uuid_mod.UUID,
+    output: str,
+    task: BUDAgentTask,
+    db: Any,
+) -> dict | None:
+    """Testing result: parse JSON and store test cases in dedicated BUD columns."""
+    from app.repositories.bud import BUDRepository
+    from app.services.json_parser import parse_json_response
+
+    default: dict[str, Any] = {
+        "automation_test_cases": [],
+        "manual_test_cases": [],
+        "test_execution_plan": "",
+    }
+
+    parsed_data = default
+    if output:
+        try:
+            parsed = parse_json_response(output)
+            if isinstance(parsed, dict):
+                parsed_data = {
+                    "automation_test_cases": parsed.get("automation_test_cases", []),
+                    "manual_test_cases": parsed.get("manual_test_cases", []),
+                    "test_execution_plan": parsed.get("test_execution_plan", ""),
+                }
+        except Exception:
+            logger.warning("testing_output_parse_failed", bud_id=str(bud_id))
+
+    # Initialize manual test case results as pending
+    for case in parsed_data["manual_test_cases"]:
+        if "result" not in case:
+            case["result"] = "pending"
+        if "evidence" not in case:
+            case["evidence"] = []
+        case.setdefault("tester_name", None)
+        case.setdefault("tested_at", None)
+
+    auto_count = len(parsed_data["automation_test_cases"])
+    manual_count = len(parsed_data["manual_test_cases"])
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud:
+        bud.qa_automation_cases = parsed_data["automation_test_cases"]
+        bud.qa_manual_cases = parsed_data["manual_test_cases"]
+        bud.qa_execution_plan_md = parsed_data["test_execution_plan"]
+
+        # Also populate test_plan_md with a human-readable summary
+        bud.test_plan_md = (
+            f"# Test Plan for BUD-{bud.bud_number:03d}\n\n"
+            f"- **{auto_count}** automation test cases\n"
+            f"- **{manual_count}** manual test cases\n\n"
+            f"{parsed_data['test_execution_plan']}"
+        )
+        await db.flush()
+
+    # Send notification to assigned QA
+    if bud and bud.assignee_id:
+        from app.services.notification_service import send_lifecycle_notification
+
+        bud_ref = f"BUD-{bud.bud_number:03d}"
+        try:
+            send_lifecycle_notification(
+                org_id=str(org_id),
+                user_id=str(bud.assignee_id),
+                notification_type="testing_ready",
+                title=f"Test cases ready: {bud_ref}",
+                message=(
+                    f'Test cases for "{bud.title}" are ready. '
+                    f"{auto_count} automation + {manual_count} manual test cases."
+                ),
+                bud_id=str(bud_id),
+            )
+        except Exception:
+            logger.warning("testing_notification_failed", bud_id=str(bud_id))
+
+    return {
+        "section": "qa_execution_plan_md",
+        "automation_count": auto_count,
+        "manual_count": manual_count,
+    }
 
 
 # ── Registry ──────────────────────────────────────────────────────
@@ -433,12 +649,14 @@ PROMPT_BUILDERS: dict[str, PromptBuilder] = {
     "bud": _build_prd_prompt,
     "tech_arch": _build_tech_arch_prompt,
     "code_review": _build_code_review_prompt,
+    "testing": _build_testing_prompt,
 }
 
 RESULT_HANDLERS: dict[str, ResultHandler] = {
     "bud": _handle_prd_result,
     "tech_arch": _handle_tech_arch_result,
     "code_review": _handle_code_review_result,
+    "testing": _handle_testing_result,
 }
 
 

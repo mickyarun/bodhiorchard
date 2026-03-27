@@ -18,92 +18,8 @@
       </div>
     </v-alert>
 
-    <!-- Code Review Comments Panel -->
-    <v-card
-      v-if="bud.status === 'code_review' && codeReviewComments.length > 0 && !agentGenerating"
-      variant="outlined"
-      class="mx-12 mb-3"
-    >
-      <v-card-title class="text-subtitle-1 d-flex align-center">
-        <v-icon start size="18">mdi-comment-check-outline</v-icon>
-        Code Review Comments ({{ codeReviewComments.length }})
-      </v-card-title>
-      <v-divider />
-      <v-list density="compact">
-        <v-list-item
-          v-for="(c, idx) in codeReviewComments"
-          :key="idx"
-          :class="{ 'bg-green-lighten-5': c.status === 'accepted', 'bg-grey-lighten-4': c.status === 'skipped' }"
-        >
-          <template #prepend>
-            <v-icon
-              :color="c.severity === 'error' ? 'error' : c.severity === 'warning' ? 'warning' : 'info'"
-              size="18"
-            >
-              {{ c.severity === 'error' ? 'mdi-alert-circle' : c.severity === 'warning' ? 'mdi-alert' : 'mdi-information' }}
-            </v-icon>
-          </template>
-          <v-list-item-title class="text-body-2">
-            <code class="text-caption">{{ c.repo }}/{{ c.file }}:{{ c.line }}</code>
-            <v-chip v-if="c.deviates_from_spec" size="x-small" color="error" variant="tonal" class="ml-2">Spec Deviation</v-chip>
-          </v-list-item-title>
-          <v-list-item-subtitle class="text-body-2 mt-1">{{ c.comment }}</v-list-item-subtitle>
-          <template #append>
-            <div v-if="!c.status || c.status === 'pending'" class="d-flex ga-1">
-              <v-btn size="x-small" variant="tonal" color="success" @click="handleReviewComment(idx, 'accepted')">
-                Accept
-              </v-btn>
-              <v-btn size="x-small" variant="tonal" color="grey" @click="handleReviewComment(idx, 'skipped', 'Not applicable')">
-                Skip
-              </v-btn>
-            </div>
-            <v-chip v-else size="x-small" :color="c.status === 'accepted' ? 'success' : 'grey'" variant="tonal">
-              {{ c.status }}
-            </v-chip>
-          </template>
-        </v-list-item>
-      </v-list>
-      <v-divider />
-      <v-card-actions>
-        <v-spacer />
-        <v-btn
-          color="primary"
-          variant="flat"
-          size="small"
-          :disabled="codeReviewComments.some(c => !c.status || c.status === 'pending')"
-          @click="emit('status-change', 'testing')"
-        >
-          Move to QA
-          <v-icon end size="16">mdi-arrow-right</v-icon>
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-
-    <!-- Test Plans (code_review phase) -->
-    <v-expansion-panels
-      v-if="bud.status === 'code_review' && (automationTestPlan || manualTestPlan) && !agentGenerating"
-      variant="accordion"
-      class="mx-12 mb-3"
-    >
-      <v-expansion-panel v-if="automationTestPlan">
-        <v-expansion-panel-title>
-          <v-icon start size="18">mdi-test-tube</v-icon>
-          Automation Test Plan
-        </v-expansion-panel-title>
-        <v-expansion-panel-text>
-          <div class="markdown-body" v-html="renderMarkdown(automationTestPlan)" />
-        </v-expansion-panel-text>
-      </v-expansion-panel>
-      <v-expansion-panel v-if="manualTestPlan">
-        <v-expansion-panel-title>
-          <v-icon start size="18">mdi-clipboard-check-outline</v-icon>
-          Manual Test Plan
-        </v-expansion-panel-title>
-        <v-expansion-panel-text>
-          <div class="markdown-body" v-html="renderMarkdown(manualTestPlan)" />
-        </v-expansion-panel-text>
-      </v-expansion-panel>
-    </v-expansion-panels>
+    <!-- Code Review checklist is rendered INSIDE the Code Review tab (BUDDetail.vue) -->
+    <!-- Checklist state is exposed via defineExpose for the parent to use -->
 
     <!-- Reassignment dialog -->
     <v-dialog v-model="showReassignDialog" max-width="440">
@@ -131,15 +47,15 @@
     </v-dialog>
 
     <!-- Repo Confirmation Dialog (for code_review transition) -->
-    <v-dialog v-model="showRepoConfirmDialog" max-width="520">
-      <v-card>
-        <v-card-title>Confirm Repos for Code Review</v-card-title>
-        <v-card-text>
-          <p class="text-body-2 mb-3">Select which repositories should be included in the code review:</p>
-          <v-list density="compact">
-            <v-list-item v-for="repo in commitRepos" :key="repo.repoPath">
+    <v-dialog v-model="showRepoConfirmDialog" max-width="480">
+      <v-card class="pa-2">
+        <v-card-title class="text-h6 pb-1">Confirm Repos for Code Review</v-card-title>
+        <v-card-text class="pb-2">
+          <p class="text-body-2 text-medium-emphasis mb-3">Select which repositories should be included in the code review:</p>
+          <v-list density="compact" class="py-0">
+            <v-list-item v-for="repo in commitRepos" :key="repo.repoPath" class="px-0">
               <template #prepend>
-                <v-checkbox-btn v-model="repo.checked" density="compact" />
+                <v-checkbox-btn v-model="repo.checked" density="compact" color="primary" />
               </template>
               <v-list-item-title class="text-body-2">{{ repo.repoName }}</v-list-item-title>
               <v-list-item-subtitle class="text-caption">{{ repo.commitCount }} commit{{ repo.commitCount !== 1 ? 's' : '' }}</v-list-item-subtitle>
@@ -157,10 +73,10 @@
             class="mt-3"
           />
         </v-card-text>
-        <v-card-actions>
-          <v-btn variant="text" @click="showRepoConfirmDialog = false">Cancel</v-btn>
+        <v-card-actions class="px-4 pb-3 pt-0">
           <v-spacer />
-          <v-btn color="primary" variant="flat" @click="confirmCodeReviewTransition">
+          <v-btn variant="text" size="small" @click="showRepoConfirmDialog = false">Cancel</v-btn>
+          <v-btn color="primary" variant="flat" size="small" class="ml-2" @click="confirmCodeReviewTransition">
             Start Code Review
           </v-btn>
         </v-card-actions>
@@ -170,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useJobSocket } from '@/composables/useJobSocket'
@@ -206,6 +122,7 @@ const AGENT_CONFIG: Record<string, { name: string; label: string }> = {
   design: { name: 'Designer Agent', label: 'Generating wireframes...' },
   tech_arch: { name: 'Tech Architect Agent', label: 'Generating tech spec...' },
   code_review: { name: 'Code Review Agent', label: 'Reviewing code...' },
+  testing: { name: 'QA Agent', label: 'Generating test cases...' },
 }
 
 // Code review UI state
@@ -224,10 +141,81 @@ interface CodeReviewComment {
   skip_reason?: string
 }
 
+interface CodeReviewResolution {
+  done: boolean | null  // null = untouched, true = done, false = not done (requires comment)
+  comment: string
+}
+
 const codeReviewComments = computed<CodeReviewComment[]>(() => {
   const meta = props.bud?.metadata as Record<string, unknown> | null
   return (meta?.code_review_comments as CodeReviewComment[] | undefined) ?? []
 })
+
+// Code review checklist resolutions
+const resolutions = ref<CodeReviewResolution[]>([])
+const pushAttempted = ref(false)
+
+// Initialize resolutions from existing metadata or fresh
+function initResolutions(): void {
+  const meta = props.bud?.metadata as Record<string, unknown> | null
+  const existing = (meta?.code_review_resolutions as CodeReviewResolution[] | undefined) ?? []
+  const comments = codeReviewComments.value
+  resolutions.value = comments.map((_, idx) =>
+    existing[idx] ?? { done: null, comment: '' },
+  )
+}
+initResolutions()
+
+// Watch for BUD updates to re-init resolutions
+watch(() => codeReviewComments.value.length, () => initResolutions())
+
+const resolvedCount = computed(() =>
+  resolutions.value.filter(r => r.done === true || (r.done === false && r.comment.trim())).length,
+)
+
+const canPushToQA = computed(() =>
+  codeReviewComments.value.length > 0
+  && resolutions.value.length === codeReviewComments.value.length
+  && resolutions.value.every(r => r.done === true || (r.done === false && r.comment.trim())),
+)
+
+function updateResolution(idx: number, checked: boolean): void {
+  if (!resolutions.value[idx]) {
+    resolutions.value[idx] = { done: null, comment: '' }
+  }
+  // Checking the box = done, unchecking = not done (needs comment)
+  resolutions.value[idx].done = checked
+  if (checked) resolutions.value[idx].comment = ''
+}
+
+async function handlePushToQA(): Promise<void> {
+  pushAttempted.value = true
+  if (!canPushToQA.value) return
+
+  // Save resolutions + flag for re-review before QA transition
+  const meta = { ...(props.bud.metadata || {}) } as Record<string, unknown>
+  meta.code_review_resolutions = resolutions.value
+  meta.qa_push_requested = true
+  await budStore.updateBUD(props.bud.id, { metadata: meta } as never)
+
+  // Trigger re-review — backend will auto-transition to testing if no new issues
+  try {
+    const resp = await fetch(`/api/v1/buds/${props.bud.id}/re-review`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${authStore.token}` },
+    })
+    if (resp.ok) {
+      const task = await resp.json()
+      if (task.job_id) {
+        trackAgentTask({ job_id: task.job_id, task_type: 'code_review', status: 'running' })
+      }
+    }
+  } catch {
+    // Fallback: just reload
+    await budStore.fetchBUD(props.bud.id)
+  }
+  emit('reload-timeline')
+}
 
 const automationTestPlan = computed(() => {
   const meta = props.bud?.metadata as Record<string, unknown> | null
@@ -252,17 +240,6 @@ async function handleReassignment(): Promise<void> {
   reassignReason.value = ''
 }
 
-async function handleReviewComment(idx: number, action: 'accepted' | 'skipped', reason?: string): Promise<void> {
-  const meta = { ...(props.bud.metadata || {}) } as Record<string, unknown>
-  const comments = [...(meta.code_review_comments as CodeReviewComment[] || [])]
-  if (comments[idx]) {
-    comments[idx] = { ...comments[idx], status: action }
-    if (reason) comments[idx].skip_reason = reason
-    meta.code_review_comments = comments
-    await budStore.updateBUD(props.bud.id, { metadata: meta } as never)
-  }
-}
-
 async function showCodeReviewConfirmation(): Promise<void> {
   try {
     const resp = await fetch(`/api/v1/buds/${props.bud.id}/commits/repos`, {
@@ -277,9 +254,11 @@ async function showCodeReviewConfirmation(): Promise<void> {
         checked: true,
       }))
     } else {
+      console.error('[CodeReview] commits/repos failed:', resp.status, await resp.text())
       commitRepos.value = []
     }
-  } catch {
+  } catch (err) {
+    console.error('[CodeReview] commits/repos error:', err)
     commitRepos.value = []
   }
   showRepoConfirmDialog.value = true
@@ -343,5 +322,13 @@ defineExpose({
   agentStatusMessage,
   showCodeReviewConfirmation,
   trackAgentTask,
+  // Code review checklist state (rendered in Code Review tab, not here)
+  codeReviewComments,
+  resolutions,
+  resolvedCount,
+  canPushToQA,
+  pushAttempted,
+  updateResolution,
+  handlePushToQA,
 })
 </script>

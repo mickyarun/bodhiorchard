@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.bud_chat import router as chat_router
 from app.api.v1.bud_designs import router as designs_router
+from app.api.v1.bud_qa import router as qa_router
 from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
@@ -45,7 +46,12 @@ async def _bud_response(
     task_repo = BUDAgentTaskRepository(db, org_id=org_id)
     active_task = await task_repo.get_active_for_bud(bud.id)
     if not active_task:
-        active_task = await task_repo.get_latest_failed(bud.id)
+        # Only show last-failed if no completed task exists after it (i.e. retry succeeded)
+        failed = await task_repo.get_latest_failed(bud.id)
+        if failed:
+            completed = await task_repo.get_latest_completed(bud.id)
+            if not completed or completed.created_at < failed.created_at:
+                active_task = failed
 
     bud_data = BUDRead.model_validate(bud)
     if active_task:
@@ -57,6 +63,7 @@ router = APIRouter(tags=["buds"])
 
 # ── Sub-routers ───────────────────────────────────────────────────
 router.include_router(designs_router, prefix="/{bud_id}/designs", tags=["bud-designs"])
+router.include_router(qa_router, prefix="/{bud_id}/qa", tags=["bud-qa"])
 router.include_router(workflows_router, prefix="/{bud_id}", tags=["bud-workflows"])
 router.include_router(chat_router, prefix="/{bud_id}", tags=["bud-chat"])
 
@@ -351,6 +358,50 @@ async def _trigger_status_jobs(
 
 
 @router.post(
+    "/{bud_id}/re-review",
+    response_model=BUDAgentTaskRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def trigger_re_review(
+    bud_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BUDAgentTaskRead:
+    """Re-run code review before transitioning to QA.
+
+    Forces a new code_review agent task. The handler will auto-transition
+    to testing if no new comments are found (when qa_push_requested is set).
+    """
+    from app.services.bud_agent_trigger import create_agent_task_for_stage
+
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if not bud:
+        raise HTTPException(status_code=404, detail="BUD not found")
+    if bud.status != "code_review":
+        raise HTTPException(status_code=409, detail="BUD is not in code_review status")
+
+    # Check no agent already running
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    active = await task_repo.get_active_for_bud(bud_id)
+    if active:
+        raise HTTPException(status_code=409, detail="Another task is already running")
+
+    await create_agent_task_for_stage(
+        bud, "code_review", current_user.org_id, db,
+        triggered_by=current_user.id, force=True,
+    )
+    await db.commit()
+
+    # Return the newly created task
+    new_task = await task_repo.get_active_for_bud(bud_id)
+    if not new_task:
+        raise HTTPException(status_code=500, detail="Failed to create re-review task")
+    return BUDAgentTaskRead.model_validate(new_task)
+
+
+@router.post(
     "/{bud_id}/agent-tasks/{task_id}/retry",
     response_model=BUDAgentTaskRead,
     status_code=status.HTTP_202_ACCEPTED,
@@ -423,6 +474,7 @@ async def retry_agent_task(
 
     # Single atomic commit — must happen before return so the worker can read the task
     await db.commit()
+    await db.refresh(new_task)
 
     return BUDAgentTaskRead.model_validate(new_task)
 

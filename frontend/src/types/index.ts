@@ -41,7 +41,8 @@ export const BUD_SECTIONS = {
   requirements_md: { tab: 'requirements', label: 'Requirements', exportable: true },
   tech_spec_md: { tab: 'tech-spec', label: 'Tech Spec', exportable: true },
   development: { tab: 'development', label: 'Development', exportable: false },
-  test_plan_md: { tab: 'test-plan', label: 'Test Plan', exportable: true },
+  code_review: { tab: 'code-review', label: 'Code Review', exportable: false },
+  qa: { tab: 'qa', label: 'QA', exportable: false },
   design: { tab: 'design', label: 'Design', exportable: false },
 } as const
 
@@ -86,10 +87,51 @@ export interface BUDDocument extends BUDListItem {
   requirements_md: string | null
   tech_spec_md: string | null
   test_plan_md: string | null
+  qa_automation_cases: AutomationTestCase[] | null
+  qa_manual_cases: ManualTestCase[] | null
+  qa_execution_plan_md: string | null
   designs: BUDDesign[]
   metadata: Record<string, unknown> | null
   impacted_repos: { repo_id: string; repo_name: string }[] | null
   active_agent_task: BUDAgentTask | null
+}
+
+// ── QA Test Case Types ─────────────────────────────────────
+
+export interface AutomationTestCase {
+  id: string
+  title: string
+  type: 'e2e' | 'integration' | 'unit' | 'api'
+  gherkin: string
+  input: string
+  expected_output: string
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  tags: string[]
+}
+
+export interface ManualTestCase {
+  id: string
+  title: string
+  description: string
+  preconditions: string
+  steps: string[]
+  expected_result: string
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  category: 'functional' | 'usability' | 'accessibility' | 'security'
+  result: 'pending' | 'pass' | 'fail' | 'blocked' | 'skipped'
+  evidence: TestEvidence[]
+  tester_name: string | null
+  tested_at: string | null
+  notes?: string
+}
+
+export interface TestEvidence {
+  id: string
+  test_case_id: string
+  filename: string
+  mime_type: string
+  uploaded_by: string | null
+  created_at: string
 }
 
 // ── Timeline Types ──────────────────────────────────────────

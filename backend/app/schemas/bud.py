@@ -22,6 +22,7 @@ BUD_SECTIONS: dict[str, BUDSectionInfo] = {
     "requirements_md": BUDSectionInfo("requirements", "Requirements", True),
     "tech_spec_md": BUDSectionInfo("tech-spec", "Tech Spec", True),
     "test_plan_md": BUDSectionInfo("test-plan", "Test Plan", True),
+    "qa": BUDSectionInfo("qa", "QA", False),
     "design": BUDSectionInfo("design", "Design", False),
 }
 
@@ -125,6 +126,9 @@ class BUDRead(BaseModel):
     requirements_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
+    qa_automation_cases: list[dict] | None = None
+    qa_manual_cases: list[dict] | None = None
+    qa_execution_plan_md: str | None = None
     designs: list[BUDDesignRead] = []
     metadata: dict | None = Field(None, validation_alias="metadata_")
     impacted_repos: list[dict] | None = None

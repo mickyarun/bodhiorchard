@@ -95,6 +95,21 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_latest_completed(self, bud_id: uuid.UUID) -> BUDAgentTask | None:
+        """Get the most recent completed task for a BUD.
+
+        Used to suppress stale failed-task display after a successful retry.
+        """
+        stmt = self._scoped(
+            select(BUDAgentTask)
+            .where(BUDAgentTask.bud_id == bud_id)
+            .where(BUDAgentTask.status == AgentTaskStatus.COMPLETED)
+            .order_by(BUDAgentTask.created_at.desc())
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_for_bud(self, bud_id: uuid.UUID) -> list[BUDAgentTask]:
         """List all agent tasks for a BUD, most recent first."""
         stmt = self._scoped(

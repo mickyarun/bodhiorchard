@@ -23,6 +23,24 @@ class BUDRepository(BaseRepository[BUDDocument]):
         """
         super().__init__(BUDDocument, db, org_id=org_id)
 
+    async def get_by_id_for_update(self, entity_id: uuid.UUID) -> BUDDocument | None:
+        """Fetch a BUD with a row-level lock (SELECT ... FOR UPDATE).
+
+        Use when updating JSONB columns that require atomic read-modify-write.
+        Disables eager-loaded joins (e.g. assignee) since FOR UPDATE cannot
+        be applied to the nullable side of an outer join.
+        """
+        from sqlalchemy.orm import lazyload
+
+        stmt = self._scoped(
+            select(BUDDocument)
+            .where(BUDDocument.id == entity_id)
+            .options(lazyload(BUDDocument.assignee))
+            .with_for_update()
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_buds(
         self,
         *,

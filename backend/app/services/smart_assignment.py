@@ -1,7 +1,8 @@
-"""Smart developer assignment based on skill profiles and workload.
+"""Smart role-based assignment using skill profiles and workload.
 
-Scores developers by skill match (50%), workload (30%), and recency (20%)
-to intelligently assign the DEVELOPMENT phase of a BUD.
+Scores candidates by skill match (50%), workload (30%), and recency (20%)
+to intelligently assign any BUD phase that requires smart assignment
+(e.g., DEVELOPMENT, TESTING).
 """
 
 import json
@@ -110,20 +111,21 @@ async def _extract_modules(
     return _extract_modules_regex(tech_spec_md)
 
 
-async def score_developers(
+async def score_candidates(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud: BUDDocument,
+    role: str,
     exclude_user_ids: list[uuid.UUID] | None = None,
 ) -> list[tuple[User, float]]:
-    """Score all eligible developers in the org for a BUD.
+    """Score all eligible users with the given role in the org for a BUD.
 
     Returns sorted list of (User, score) descending by score.
-    Excludes developers with >= 3 active BUDs.
+    Excludes users with >= 3 active BUDs.
     """
     exclude_ids = set(exclude_user_ids or [])
 
-    # Find active developers
+    # Find active users with the target role
     from app.models.user import OrgToUser
 
     result = await db.execute(
@@ -131,7 +133,7 @@ async def score_developers(
         .join(OrgToUser, OrgToUser.user_id == User.id)
         .where(
             OrgToUser.org_id == org_id,
-            OrgToUser.role == UserRole.DEVELOPER,
+            OrgToUser.role == role,
             User.is_active == true(),
         )
     )
@@ -223,19 +225,20 @@ async def score_developers(
     return scored
 
 
-async def assign_best_developer(
+async def assign_best_for_role(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud: BUDDocument,
+    role: str,
     exclude_user_ids: list[uuid.UUID] | None = None,
 ) -> User | None:
-    """Pick the best developer for a BUD based on skill profiles.
+    """Pick the best user with the given role for a BUD based on skill profiles.
 
-    Returns the top-scoring developer, or None if no candidates exist.
+    Returns the top-scoring candidate, or None if no candidates exist.
     When the top 2 candidates are within 10% of each other, uses an LLM
     tiebreak for the final decision.
     """
-    scored = await score_developers(db, org_id, bud, exclude_user_ids)
+    scored = await score_candidates(db, org_id, bud, role, exclude_user_ids)
     if not scored:
         return None
 
@@ -252,6 +255,16 @@ async def assign_best_developer(
             return winner
 
     return top_user
+
+
+async def assign_best_developer(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud: BUDDocument,
+    exclude_user_ids: list[uuid.UUID] | None = None,
+) -> User | None:
+    """Backward-compatible wrapper: pick the best developer for a BUD."""
+    return await assign_best_for_role(db, org_id, bud, UserRole.DEVELOPER, exclude_user_ids)
 
 
 async def _llm_tiebreak(
@@ -298,7 +311,9 @@ async def reassign_developer(
 
     No LLM fallback for reassignment — just picks the top scorer.
     """
-    scored = await score_developers(db, org_id, bud, exclude_user_ids=[current_assignee_id])
+    scored = await score_candidates(
+        db, org_id, bud, UserRole.DEVELOPER, exclude_user_ids=[current_assignee_id]
+    )
     if not scored:
         logger.info(
             "reassign_no_candidates",

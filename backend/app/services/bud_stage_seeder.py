@@ -35,6 +35,12 @@ DEFAULT_STAGE_MAPPINGS: list[dict[str, str | int]] = [
         "execution_order": 1,
         "output_section": "test_plan_md",
     },
+    {
+        "bud_status": "testing",
+        "skill_slug": "qa-engineer",
+        "execution_order": 1,
+        "output_section": "qa_execution_plan_md",
+    },
 ]
 
 

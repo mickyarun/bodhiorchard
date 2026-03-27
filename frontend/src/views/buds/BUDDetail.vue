@@ -249,9 +249,10 @@
               <v-tab value="design">Design</v-tab>
               <v-tab value="tech-spec">Tech Spec</v-tab>
               <v-tab value="development">Development</v-tab>
-              <v-tab value="test-plan">Test Plan</v-tab>
+              <v-tab value="code-review">Code Review</v-tab>
+              <v-tab value="qa">QA</v-tab>
             </v-tabs>
-            <div v-if="activeTab !== 'development'" class="toolbar-actions">
+            <div v-if="activeTab !== 'development' && activeTab !== 'code-review' && activeTab !== 'qa'" class="toolbar-actions">
               <v-btn
                 variant="text"
                 size="small"
@@ -361,29 +362,197 @@
                 />
               </v-tabs-window-item>
 
-              <!-- Test Plan -->
-              <v-tabs-window-item value="test-plan">
-                <textarea
-                  v-if="editingTestPlan"
-                  v-model="editTestPlan"
-                  class="section-editor"
-                  placeholder="Test cases and testing strategy..."
-                  @blur="saveTestPlan"
-                />
-                <div
-                  v-else-if="bud.test_plan_md"
-                  class="rendered-markdown"
-                  v-html="renderMarkdown(bud.test_plan_md)"
-                />
-                <div v-else class="section-empty">
-                  <v-icon icon="mdi-clipboard-check-outline" size="40" class="mb-3" />
-                  <div>No test plan yet</div>
-                  <v-btn variant="tonal" size="small" class="mt-3" @click="toggleTestPlanEdit">
-                    <v-icon start size="15">mdi-pencil-outline</v-icon>
-                    Start writing
-                  </v-btn>
+              <!-- Code Review -->
+              <v-tabs-window-item value="code-review">
+                <div class="pa-4">
+                  <!-- Agent running state -->
+                  <div v-if="workflowRef?.agentGenerating && bud.status === 'code_review'" class="d-flex justify-center py-12">
+                    <v-progress-circular indeterminate size="24" width="2" class="mr-3" />
+                    <span class="text-body-2 text-medium-emphasis">{{ workflowRef?.agentStatusMessage || 'Reviewing code...' }}</span>
+                  </div>
+
+                  <!-- Empty state: not in code_review yet -->
+                  <div v-else-if="bud.status !== 'code_review' && bud.status !== 'testing' && bud.status !== 'uat' && bud.status !== 'prod' && bud.status !== 'closed'" class="text-center py-12">
+                    <v-icon icon="mdi-code-tags-check" size="48" color="primary" class="mb-3 opacity-40" />
+                    <div class="text-h6 font-weight-medium mb-2">Code review not started</div>
+                    <div class="text-body-2 text-medium-emphasis">
+                      Code review will begin when development is complete and moved to the code review stage.
+                    </div>
+                  </div>
+
+                  <!-- Completed state: already past code review -->
+                  <div v-else-if="bud.status !== 'code_review'" class="text-center py-8">
+                    <v-icon icon="mdi-check-circle-outline" size="48" color="success" class="mb-3 opacity-60" />
+                    <div class="text-body-1 font-weight-medium">Code review completed</div>
+                  </div>
+
+                  <!-- Active code review: show checklist -->
+                  <template v-else>
+                    <!-- Toolbar: Download + Add Manual Comment -->
+                    <div class="d-flex align-center mb-3 ga-2">
+                      <v-icon start size="18">mdi-clipboard-check-outline</v-icon>
+                      <span class="text-subtitle-1 font-weight-medium">
+                        Code Review ({{ workflowRef?.resolvedCount ?? 0 }}/{{ workflowRef?.codeReviewComments?.length ?? 0 }})
+                      </span>
+                      <v-spacer />
+                      <v-progress-linear
+                        v-if="workflowRef?.codeReviewComments?.length"
+                        :model-value="(workflowRef.resolvedCount / workflowRef.codeReviewComments.length) * 100"
+                        color="primary"
+                        height="6"
+                        rounded
+                        style="max-width: 100px"
+                      />
+                      <v-btn
+                        variant="tonal"
+                        size="small"
+                        prepend-icon="mdi-download"
+                        @click="downloadCodeReview"
+                      >
+                        Download
+                      </v-btn>
+                      <v-btn
+                        variant="outlined"
+                        size="small"
+                        prepend-icon="mdi-plus"
+                        @click="showAddManualComment = true"
+                      >
+                        Add Comment
+                      </v-btn>
+                    </div>
+
+                    <!-- Checklist -->
+                    <v-list v-if="workflowRef?.codeReviewComments?.length" density="compact" class="rounded-lg border mb-3">
+                      <v-list-item
+                        v-for="(c, idx) in workflowRef.codeReviewComments"
+                        :key="idx"
+                        :class="{
+                          'bg-green-lighten-5': workflowRef.resolutions[idx]?.done === true,
+                          'bg-orange-lighten-5': workflowRef.resolutions[idx]?.done === false,
+                        }"
+                      >
+                        <template #prepend>
+                          <v-checkbox-btn
+                            :model-value="workflowRef.resolutions[idx]?.done ?? false"
+                            density="compact"
+                            color="success"
+                            @update:model-value="(val: boolean) => workflowRef.updateResolution(idx, val)"
+                          />
+                        </template>
+                        <v-list-item-title class="text-body-2">
+                          <v-icon
+                            :color="c.severity === 'error' ? 'error' : c.severity === 'warning' ? 'warning' : 'info'"
+                            size="14"
+                            class="mr-1"
+                          >
+                            {{ c.severity === 'error' ? 'mdi-alert-circle' : c.severity === 'warning' ? 'mdi-alert' : 'mdi-information' }}
+                          </v-icon>
+                          <code class="text-caption">{{ c.repo }}/{{ c.file }}:{{ c.line }}</code>
+                          <v-chip v-if="c.deviates_from_spec" size="x-small" color="error" variant="tonal" class="ml-2">Spec Deviation</v-chip>
+                          <v-chip v-if="c.source === 'manual'" size="x-small" color="purple" variant="tonal" class="ml-2">Manual</v-chip>
+                        </v-list-item-title>
+                        <v-list-item-subtitle class="text-body-2 mt-1">{{ c.comment }}</v-list-item-subtitle>
+
+                        <div v-if="workflowRef.resolutions[idx]?.done === false" class="mt-1 ml-8">
+                          <v-text-field
+                            v-model="workflowRef.resolutions[idx].comment"
+                            variant="outlined"
+                            density="compact"
+                            placeholder="Why not addressed? (required)"
+                            :error="!workflowRef.resolutions[idx].comment?.trim() && workflowRef.pushAttempted"
+                            hide-details="auto"
+                          />
+                        </div>
+                      </v-list-item>
+                    </v-list>
+
+                    <!-- No agent comments yet -->
+                    <div v-else class="text-center py-6 mb-3">
+                      <v-icon icon="mdi-check-all" size="36" color="success" class="mb-2 opacity-60" />
+                      <div class="text-body-2 text-medium-emphasis">No agent review comments. Add manual comments above.</div>
+                    </div>
+
+                    <!-- Re-review + Push to QA -->
+                    <div class="d-flex align-center">
+                      <span class="text-caption text-medium-emphasis">
+                        Re-runs code review to verify fixes, then moves to QA if clean
+                      </span>
+                      <v-spacer />
+                      <v-btn
+                        variant="text"
+                        size="small"
+                        color="warning"
+                        @click="skipCodeReview"
+                      >
+                        Skip & Push to QA
+                      </v-btn>
+                      <v-btn
+                        color="primary"
+                        variant="flat"
+                        size="small"
+                        class="ml-2"
+                        :disabled="!workflowRef?.canPushToQA"
+                        @click="workflowRef?.handlePushToQA()"
+                      >
+                        <v-icon start size="16">mdi-refresh</v-icon>
+                        Re-review & Push to QA
+                      </v-btn>
+                    </div>
+                  </template>
+
+                  <!-- Add Manual Comment Dialog -->
+                  <v-dialog v-model="showAddManualComment" max-width="480">
+                    <v-card class="pa-2">
+                      <v-card-title class="text-h6 pb-1">Add Code Review Comment</v-card-title>
+                      <v-card-text class="pb-2">
+                        <v-select
+                          v-model="manualComment.repo"
+                          variant="outlined"
+                          density="compact"
+                          label="Repository"
+                          :items="repoDropdownItems"
+                          class="mb-2"
+                        />
+                        <v-textarea
+                          v-model="manualComment.comment"
+                          variant="outlined"
+                          density="compact"
+                          label="Comment"
+                          rows="3"
+                          placeholder="Describe the issue or feedback..."
+                          :rules="[v => !!v?.trim() || 'Comment is required']"
+                        />
+                      </v-card-text>
+                      <v-card-actions class="px-4 pb-3 pt-0">
+                        <v-spacer />
+                        <v-btn variant="text" size="small" @click="showAddManualComment = false">Cancel</v-btn>
+                        <v-btn
+                          color="primary"
+                          variant="flat"
+                          size="small"
+                          :disabled="!manualComment.comment?.trim()"
+                          @click="addManualComment"
+                        >
+                          Add Comment
+                        </v-btn>
+                      </v-card-actions>
+                    </v-card>
+                  </v-dialog>
                 </div>
               </v-tabs-window-item>
+
+              <!-- QA -->
+              <v-tabs-window-item value="qa">
+                <BUDQAPanel
+                  :bud-id="bud.id"
+                  :bud-number="bud.bud_number"
+                  :test-plan-md="bud.test_plan_md"
+                  :impacted-repos="bud.impacted_repos"
+                  :active-agent-task="bud.active_agent_task"
+                />
+              </v-tabs-window-item>
+
+              <!-- Test Plan tab removed — test plan content is now part of QA tab -->
             </v-tabs-window>
           </div>
 
@@ -456,6 +625,7 @@ import ChatPanel from '@/components/buds/ChatPanel.vue'
 import BUDTimeline from '@/components/buds/BUDTimeline.vue'
 import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
 import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
+import BUDQAPanel from '@/components/buds/BUDQAPanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -480,6 +650,68 @@ const canApprove = computed(() => {
   const role = authStore.user?.role
   return role === 'tech_lead' || role === 'manager' || role === 'org_owner'
 })
+
+// ── Code Review: download + manual comments ──────────────
+const showAddManualComment = ref(false)
+const manualComment = ref({ repo: '', comment: '' })
+
+const repoDropdownItems = computed(() => {
+  const repos = bud.value?.impacted_repos || []
+  return repos.map(r => r.repo_name)
+})
+
+function downloadCodeReview(): void {
+  if (!bud.value || !workflowRef.value) return
+  const budRef = `BUD-${String(bud.value.bud_number).padStart(3, '0')}`
+  const comments = workflowRef.value.codeReviewComments || []
+
+  let md = `# Code Review: ${budRef} — ${bud.value.title}\n\n`
+  md += `**${comments.length} comments**\n\n`
+  for (const c of comments) {
+    const tag = c.severity === 'error' ? '[ERROR]' : c.severity === 'warning' ? '[WARN]' : '[INFO]'
+    const loc = c.file ? `${c.repo}/${c.file}:${c.line}` : c.repo
+    md += `### ${tag} ${loc}\n\n${c.comment}\n\n`
+    if (c.deviates_from_spec) md += `> Spec deviation\n\n`
+    md += `---\n\n`
+  }
+
+  const blob = new Blob([md], { type: 'text/markdown' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${budRef}-code-review.md`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+async function skipCodeReview(): Promise<void> {
+  if (!bud.value) return
+  const meta = { ...(bud.value.metadata || {}) } as Record<string, unknown>
+  meta.code_review_skipped = true
+  await budStore.updateBUD(bud.value.id, { metadata: meta, status: 'testing' } as never)
+  await budStore.fetchBUD(bud.value.id)
+}
+
+async function addManualComment(): Promise<void> {
+  if (!bud.value || !manualComment.value.comment.trim()) return
+
+  const meta = { ...(bud.value.metadata || {}) } as Record<string, unknown>
+  const comments = [...((meta.code_review_comments as Array<Record<string, unknown>>) || [])]
+  comments.push({
+    repo: manualComment.value.repo || 'general',
+    file: '',
+    line: 0,
+    severity: 'warning',
+    comment: manualComment.value.comment,
+    deviates_from_spec: false,
+    source: 'manual',
+  })
+  meta.code_review_comments = comments
+  await budStore.updateBUD(bud.value.id, { metadata: meta } as never)
+  await budStore.fetchBUD(bud.value.id)
+
+  manualComment.value = { repo: '', comment: '' }
+  showAddManualComment.value = false
+}
 
 const isCurrentAssignee = computed(() =>
   bud.value?.assignee_id != null && authStore.user?.id === bud.value.assignee_id,
@@ -567,8 +799,8 @@ onMounted(async () => {
       design: 'design',
       tech_arch: 'tech-spec',
       development: 'development',
-      code_review: 'test-plan',
-      testing: 'test-plan',
+      code_review: 'code-review',
+      testing: 'qa',
     }
     const defaultTab = statusTabMap[bud.value.status]
     if (defaultTab) activeTab.value = defaultTab

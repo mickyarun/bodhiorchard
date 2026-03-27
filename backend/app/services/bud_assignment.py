@@ -30,6 +30,9 @@ PHASE_ROLE_MAP: dict[BUDStatus, str] = {
 # Statuses that don't count toward a user's active workload
 _TERMINAL_STATUSES = {BUDStatus.CLOSED, BUDStatus.DISCARDED, BUDStatus.PROD}
 
+# Phases that use smart (skill-based) assignment instead of round-robin
+_SMART_ASSIGNMENT_PHASES = {BUDStatus.DEVELOPMENT, BUDStatus.TESTING}
+
 
 async def auto_assign_for_phase(
     db: AsyncSession,
@@ -53,11 +56,11 @@ async def auto_assign_for_phase(
     if role_name is None:
         return bud.assignee_id
 
-    # Smart assignment for DEVELOPMENT phase: use skill-based matching
-    if new_status == BUDStatus.DEVELOPMENT:
-        from app.services.smart_assignment import assign_best_developer
+    # Smart assignment for phases that benefit from skill-based matching
+    if new_status in _SMART_ASSIGNMENT_PHASES:
+        from app.services.smart_assignment import assign_best_for_role
 
-        chosen_user = await assign_best_developer(db, org_id, bud)
+        chosen_user = await assign_best_for_role(db, org_id, bud, role=role_name)
         if chosen_user:
             old_assignee_id = bud.assignee_id
             if old_assignee_id and old_assignee_id != chosen_user.id:
