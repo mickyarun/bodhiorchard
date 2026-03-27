@@ -308,12 +308,20 @@ export class SceneManager {
     const fence = new CircularFence(factory.materialFactory)
 
     // ── Zone property fences (solid) ──────────────────────────────────────────
-    for (const zone of this.layout.getAllZones()) {
-      if (zone.name === 'orchard') continue  // central hub — paths from all sides, no fence
+    // Zones to skip entirely (no fence).
+    const noFence = new Set(['orchard', 'pool'])
+    // Per-zone radius overrides — use zone.radius when not listed.
+    const radiusOverride: Record<string, number> = {
+      housing: 18,   // wider ring to encompass the full village spread
+    }
 
+    for (const zone of this.layout.getAllZones()) {
+      if (noFence.has(zone.name)) continue
+
+      const radius    = radiusOverride[zone.name] ?? zone.radius
       const gateAngle = Math.atan2(-zone.x, -zone.z)
       this.buildingEntities.push(fence.build(this.app.root, {
-        radius:    zone.radius,
+        radius,
         cx:        zone.x,
         cz:        zone.z,
         gateAngle,
