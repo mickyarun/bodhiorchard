@@ -20,7 +20,6 @@
  * which uses proper IBL + ACES tone mapping (see ARCHITECTURE.md).
  */
 import * as pc from 'playcanvas'
-import type { MaterialFactory } from '../rendering/MaterialFactory'
 import { Vec3 } from './Vec3'
 import { TreeBranch } from './TreeBranch'
 import { defaultTrunk, defaultBranch, type TreeRules, type Color3, WORLD_SCALE } from './TreeRules'
@@ -28,6 +27,7 @@ import { defaultTrunk, defaultBranch, type TreeRules, type Color3, WORLD_SCALE }
 const GROW_SPEED             = 200 * WORLD_SCALE
 const DEFAULT_ROOT_COLOR: Color3 = [180, 180, 180]
 const THICKNESS_DIVISOR   = 14
+const MIN_THICKNESS        = 0.003  // world units — prevents hairline artifacts on tiny branches
 const COLLECT_MAX_DEPTH   = 30
 const DEFAULT_LEVELS      = 16
 
@@ -63,15 +63,18 @@ export class Tree3DSystem {
   // Entity → feature lookup built after growth completes
   private featureEntityMap      = new Map<pc.Entity, { title: string; status: string }>()
 
-  // Static scratch objects — zero GC in hot update paths
-  private static _up      = new pc.Vec3(0, 1, 0)
-  private static _target  = new pc.Vec3()
-  private static _cross   = new pc.Vec3()
-  private static _quat    = new pc.Quat()
+  // Static scratch objects — zero GC in hot update paths. Never mutate _up — it is a shared constant.
+  private static readonly _up      = new pc.Vec3(0, 1, 0)
+  private static readonly _target  = new pc.Vec3()
+  private static readonly _cross   = new pc.Vec3()
+  private static readonly _quat    = new pc.Quat()
   // Scratch Vec3 for getGrowTipInto — avoids 2 allocations per active branch per frame
-  private static _growTip = new Vec3(0, 0, 0)
+  private static readonly _growTip = new Vec3(0, 0, 0)
 
-  constructor(app: pc.AppBase, _materials: MaterialFactory) {
+  // Reusable buffer for new branches emitted by step() — avoids a fresh [] allocation every frame
+  private readonly _newBranchBuffer: TreeBranch[] = []
+
+  constructor(app: pc.AppBase) {
     this.trunkRules  = defaultTrunk()
     this.branchRules = defaultBranch()
     this.treeRoot    = new pc.Entity('Tree3D')
@@ -216,7 +219,8 @@ export class Tree3DSystem {
    * Dead branches are swapped to the end and the array is truncated in place.
    */
   private step(growAmount: number): TreeBranch[] {
-    const newBranches: TreeBranch[] = []
+    const newBranches = this._newBranchBuffer
+    newBranches.length = 0
 
     let i = 0
     while (i < this.activeBranches.length) {
@@ -319,7 +323,7 @@ export class Tree3DSystem {
     const dirLen = growTip.length()
     if (dirLen < 0.01) return
 
-    const thickness = Math.max(branch.size / THICKNESS_DIVISOR, 0.003)
+    const thickness = Math.max(branch.size / THICKNESS_DIVISOR, MIN_THICKNESS)
     entity.setLocalScale(thickness * 2, dirLen, thickness * 2)
     entity.setPosition(
       branch.root.x + growTip.x / 2,

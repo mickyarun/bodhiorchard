@@ -10,6 +10,8 @@
  */
 import type { Color3 } from './TreeRules'
 
+const FEATURE_COUNTS: readonly number[][] = [[3, 10, 20, 50], [100, 150, 200, 250]]
+
 const COLOR_PRESETS: { label: string; color: Color3; hex: string }[] = [
   { label: 'Cyan',    color: [  0, 180, 200], hex: '#00b4c8' },
   { label: 'Jade',    color: [  0, 200, 120], hex: '#00c878' },
@@ -20,7 +22,7 @@ const COLOR_PRESETS: { label: string; color: Color3; hex: string }[] = [
 ]
 
 export class UIOverlay {
-  private container: HTMLElement
+  private readonly container: HTMLElement
   private panel!: HTMLElement
   private growBtn!: HTMLButtonElement
   private resetBtn!: HTMLButtonElement
@@ -34,6 +36,12 @@ export class UIOverlay {
 
   private birdsEnabled = true
   private beesEnabled  = true
+
+  // Feature hover tooltip — built in build(), owned here so index.ts has no DOM dependency
+  private tooltipEl!:     HTMLDivElement
+  private tooltipTitle!:  HTMLSpanElement
+  private tooltipStatus!: HTMLSpanElement
+  private tooltipDot!:    HTMLSpanElement
 
   private onGrowCallback:           (() => void) | null = null
   private onResetCallback:          (() => void) | null = null
@@ -206,7 +214,7 @@ export class UIOverlay {
       gap:           '5px',
     })
 
-    for (const rowCounts of [[3, 10, 20, 50], [100, 150, 200, 250]] as number[][]) {
+    for (const rowCounts of FEATURE_COUNTS) {
       const row = document.createElement('div')
       Object.assign(row.style, { display: 'flex', gap: '6px' })
       for (const count of rowCounts) {
@@ -314,6 +322,39 @@ export class UIOverlay {
     this.panel.appendChild(featRow)
     this.panel.appendChild(btnRow)
     this.container.appendChild(this.panel)
+
+    // Feature hover tooltip — purely via DOM methods, no innerHTML
+    this.tooltipEl = document.createElement('div')
+    Object.assign(this.tooltipEl.style, {
+      position:       'absolute',
+      pointerEvents:  'none',
+      display:        'none',
+      background:     'rgba(10, 10, 20, 0.85)',
+      color:          '#fff',
+      border:         '1px solid rgba(255,255,255,0.15)',
+      borderRadius:   '8px',
+      padding:        '7px 12px',
+      fontSize:       '13px',
+      fontFamily:     'system-ui, -apple-system, sans-serif',
+      backdropFilter: 'blur(8px)',
+      whiteSpace:     'nowrap',
+      zIndex:         '20',
+      lineHeight:     '1.5',
+    })
+    this.tooltipTitle = document.createElement('span')
+    this.tooltipTitle.style.fontWeight = '700'
+
+    const statusLine = document.createElement('div')
+    Object.assign(statusLine.style, { fontSize: '11px', opacity: '0.75' })
+
+    this.tooltipDot    = document.createElement('span')
+    this.tooltipStatus = document.createElement('span')
+    statusLine.appendChild(this.tooltipDot)
+    statusLine.appendChild(this.tooltipStatus)
+
+    this.tooltipEl.appendChild(this.tooltipTitle)
+    this.tooltipEl.appendChild(statusLine)
+    this.container.appendChild(this.tooltipEl)
   }
 
   // ─── Public API ───────────────────────────────────────────────────────────
@@ -343,6 +384,31 @@ export class UIOverlay {
     return (COLOR_PRESETS.find(p => p.label === this.colorSelect.value) ?? COLOR_PRESETS[0]).color
   }
 
+  /** Show the feature hover tooltip at canvas-relative (x, y). */
+  showFeatureTooltip(title: string, status: string, x: number, y: number): void {
+    this.tooltipTitle.textContent  = title
+    this.tooltipStatus.textContent = ' ' + status.replace('_', ' ')
+    this.tooltipDot.textContent    = '● '
+    this.tooltipDot.style.color    =
+      status === 'planned'     ? '#3cc850' :
+      status === 'in_progress' ? '#f09628' : '#dc3232'
+
+    this.tooltipEl.style.display = 'block'
+
+    // Clamp so tooltip stays inside the container
+    const tw   = this.tooltipEl.offsetWidth  || 160
+    const th   = this.tooltipEl.offsetHeight || 48
+    const cw   = this.container.clientWidth
+    const left = Math.min(x + 14, cw - tw - 8)
+    const top  = Math.max(y - th - 14, 8)
+    this.tooltipEl.style.left = `${left}px`
+    this.tooltipEl.style.top  = `${top}px`
+  }
+
+  hideFeatureTooltip(): void {
+    this.tooltipEl.style.display = 'none'
+  }
+
   destroy(): void {
     this.colorSelect.removeEventListener('change',      this._onColorChange)
     this.growBtn.removeEventListener('mouseenter',      this._onGrowEnter)
@@ -361,6 +427,7 @@ export class UIOverlay {
     this.onToggleBirdsCallback  = null
     this.onToggleBeesCallback   = null
     this.onLoadFeaturesCallback = null
+    this.tooltipEl.remove()
     this.panel.remove()
   }
 

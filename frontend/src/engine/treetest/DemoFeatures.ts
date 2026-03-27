@@ -17,11 +17,6 @@ export const STATUS_COLOR: Record<DemoFeature['status'], Color3> = {
   implemented: [220,  50,  50],
 }
 
-/** Map a feature list to Color3 values for Tree3DSystem.setFeatureColors(). */
-export function featureColors(features: DemoFeature[]): Color3[] {
-  return features.map(f => STATUS_COLOR[f.status])
-}
-
 // ─── Mock Generation ─────────────────────────────────────────────────────────
 
 const WORDS_A = [

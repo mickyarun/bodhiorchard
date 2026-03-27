@@ -32,6 +32,16 @@ const CAM = {
   smoothing: 0.08,
 }
 
+// Canopy bounding constants — controls creature placement and camera auto-fit
+const CANOPY = {
+  minRadius:      1.5,   // minimum canopy radius (world units)
+  birdsClearance: 1.5,   // extra clearance added to canopy radius for birds
+  birdsAbove:     0.5,   // height above maxY for birds flight ceiling
+  camLookFactor:  0.42,  // lookAtY = maxY × this factor for tall trees
+  camDistFactor:  1.8,   // targetDistance = maxY × this factor for tall trees
+  camFitThreshold: 6,    // only auto-fit camera when tree is this much taller than current lookAtY
+}
+
 // Pixel radius within which a hover registers on a projected branch position
 const HOVER_PX = 18
 
@@ -57,12 +67,6 @@ export class TreeTestEngine {
   private lookAtTarget = new pc.Vec3(0, CAM.lookAtY, 0)
   // Tracks whether leaves have been spawned for the current tree
   private leavesSpawned = false
-
-  // Hover tooltip DOM nodes
-  private tooltipEl:     HTMLDivElement   | null = null
-  private tooltipTitle:  HTMLSpanElement  | null = null
-  private tooltipStatus: HTMLSpanElement  | null = null
-  private tooltipDot:    HTMLSpanElement  | null = null
 
   private _onMouseMove:  ((e: MouseEvent) => void) | null = null
   private _onMouseLeave: (() => void) | null = null
@@ -98,7 +102,7 @@ export class TreeTestEngine {
     this.ground.build(groundRoot, 4)
 
     // Tree + leaf systems
-    this.tree   = new Tree3DSystem(app, this.materials)
+    this.tree   = new Tree3DSystem(app)
     this.leaves = new LeafSystem(app, this.materials)
 
     // Creature systems — load GLBs in parallel, non-blocking for tree boot
@@ -109,43 +113,9 @@ export class TreeTestEngine {
     this.computeOrbitPosition()
     this.application.setConfig({ onUpdate: (dt) => this.onUpdate(dt) })
 
-    // Build tooltip DOM — purely via DOM methods, no innerHTML
-    container.style.position = 'relative'
-    this.tooltipEl = document.createElement('div')
-    Object.assign(this.tooltipEl.style, {
-      position:       'absolute',
-      pointerEvents:  'none',
-      display:        'none',
-      background:     'rgba(10, 10, 20, 0.85)',
-      color:          '#fff',
-      border:         '1px solid rgba(255,255,255,0.15)',
-      borderRadius:   '8px',
-      padding:        '7px 12px',
-      fontSize:       '13px',
-      fontFamily:     'system-ui, -apple-system, sans-serif',
-      backdropFilter: 'blur(8px)',
-      whiteSpace:     'nowrap',
-      zIndex:         '20',
-      lineHeight:     '1.5',
-    })
-    this.tooltipTitle = document.createElement('span')
-    this.tooltipTitle.style.fontWeight = '700'
-
-    const statusLine = document.createElement('div')
-    Object.assign(statusLine.style, { fontSize: '11px', opacity: '0.75' })
-
-    this.tooltipDot    = document.createElement('span')
-    this.tooltipStatus = document.createElement('span')
-    statusLine.appendChild(this.tooltipDot)
-    statusLine.appendChild(this.tooltipStatus)
-
-    this.tooltipEl.appendChild(this.tooltipTitle)
-    this.tooltipEl.appendChild(statusLine)
-    container.appendChild(this.tooltipEl)
-
     // Wire hover events on canvas
     this._onMouseMove  = (e) => this.onMouseMove(e)
-    this._onMouseLeave = ()  => this.hideTooltip()
+    this._onMouseLeave = ()  => this.ui?.hideFeatureTooltip()
     this.canvas.addEventListener('mousemove',  this._onMouseMove)
     this.canvas.addEventListener('mouseleave', this._onMouseLeave)
 
@@ -193,7 +163,7 @@ export class TreeTestEngine {
     this.birds?.clear()
     this.bees?.clear()
     this.leavesSpawned = false
-    this.hideTooltip()
+    this.ui?.hideFeatureTooltip()
     this.ui?.setGrowEnabled(true)
     this.ui?.setGrowLabel('Grow')
     this.ui?.showProgress(0)
@@ -202,51 +172,10 @@ export class TreeTestEngine {
   private onUpdate(dt: number): void {
     if (!this.input || !this.application) return
 
-    if (this.tree) {
-      const wasGrowing = this.tree.isGrowing()
-      if (wasGrowing) {
-        const stillGrowing = this.tree.update(dt)
-        this.ui?.showProgress(0.5)
-        // Detect the exact frame the tree finishes growing
-        if (!stillGrowing && !this.leavesSpawned) {
-          const tips = this.tree.getTerminalTips()
-          this.leaves?.spawnLeaves(tips, this.tree.getRootColor())
-          this.leavesSpawned = true
-          this.ui?.setGrowEnabled(true)
-          this.ui?.setGrowLabel('New Tree')
-          this.ui?.showProgress(0)
-
-          // Build entity → feature map for hover hit-testing
-          this.tree.buildFeatureEntityMap()
-
-          // Position creatures at canopy — compute bounding sphere from terminal tips
-          if (tips.length > 0) {
-            let cx = 0, cy = 0, cz = 0
-            let minY = Infinity, maxY = -Infinity
-            for (const t of tips) {
-              cx += t.position.x; cy += t.position.y; cz += t.position.z
-              minY = Math.min(minY, t.position.y)
-              maxY = Math.max(maxY, t.position.y)
-            }
-            cx /= tips.length; cy /= tips.length; cz /= tips.length
-            let maxR = 0
-            for (const t of tips) {
-              const dx = t.position.x - cx, dz = t.position.z - cz
-              maxR = Math.max(maxR, Math.sqrt(dx * dx + dz * dz))
-            }
-            const canopyR      = Math.max(maxR, 1.5)
-            const canopyCenter = new pc.Vec3(cx, cy, cz)
-            this.birds?.setTreeTarget(canopyCenter, canopyR + 1.5, maxY + 0.5)
-            this.bees?.setTreeTarget(canopyCenter,  canopyR,        cy)
-
-            // Auto-fit camera to tree height for large trees
-            if (maxY > this.lookAtY + 6) {
-              this.lookAtY = maxY * 0.42
-              this.lookAtTarget.y = this.lookAtY
-              this.targetDistance = clamp(maxY * 1.8, CAM.distance, CAM.zoomMax)
-            }
-          }
-        }
+    if (this.tree?.isGrowing()) {
+      const stillGrowing = this.tree.update(dt)
+      if (!stillGrowing && !this.leavesSpawned) {
+        this.onGrowthComplete(this.tree.getTerminalTips())
       }
     }
 
@@ -256,19 +185,58 @@ export class TreeTestEngine {
     this.handleCamera(dt)
   }
 
+  /** Called once on the frame growth finishes — spawns leaves, positions creatures, fits camera. */
+  private onGrowthComplete(tips: Array<{ position: pc.Vec3; size: number }>): void {
+    this.leaves?.spawnLeaves(tips, this.tree!.getRootColor())
+    this.leavesSpawned = true
+    this.ui?.setGrowEnabled(true)
+    this.ui?.setGrowLabel('New Tree')
+    this.ui?.showProgress(0)
+
+    // Build entity → feature map for hover hit-testing
+    this.tree!.buildFeatureEntityMap()
+
+    if (tips.length === 0) return
+
+    // Compute canopy bounding sphere from terminal tips
+    let cx = 0, cy = 0, cz = 0
+    let maxY = -Infinity
+    for (const t of tips) {
+      cx += t.position.x; cy += t.position.y; cz += t.position.z
+      maxY = Math.max(maxY, t.position.y)
+    }
+    cx /= tips.length; cy /= tips.length; cz /= tips.length
+    let maxR = 0
+    for (const t of tips) {
+      const dx = t.position.x - cx, dz = t.position.z - cz
+      maxR = Math.max(maxR, Math.sqrt(dx * dx + dz * dz))
+    }
+    const canopyR      = Math.max(maxR, CANOPY.minRadius)
+    const canopyCenter = new pc.Vec3(cx, cy, cz)
+    this.birds?.setTreeTarget(canopyCenter, canopyR + CANOPY.birdsClearance, maxY + CANOPY.birdsAbove)
+    this.bees?.setTreeTarget(canopyCenter,  canopyR, cy)
+
+    // Auto-fit camera to tree height for large trees
+    if (maxY > this.lookAtY + CANOPY.camFitThreshold) {
+      this.lookAtY = maxY * CANOPY.camLookFactor
+      this.lookAtTarget.y = this.lookAtY
+      this.targetDistance = clamp(maxY * CANOPY.camDistFactor, CAM.distance, CAM.zoomMax)
+    }
+  }
+
   // ─── Hover Tooltip ──────────────────────────────────────────────────────────
 
   private onMouseMove(e: MouseEvent): void {
-    if (!this.tree || !this.application || !this.canvas || !this.tooltipEl) return
+    if (!this.tree || !this.application || !this.canvas || !this.ui) return
     const featureMap = this.tree.getFeatureEntityMap()
-    if (featureMap.size === 0) { this.hideTooltip(); return }
+    if (featureMap.size === 0) { this.ui.hideFeatureTooltip(); return }
 
     const rect = this.canvas.getBoundingClientRect()
     const mx   = e.clientX - rect.left
     const my   = e.clientY - rect.top
 
     const cameraComp = this.application.camera.camera
-    if (!cameraComp) { this.hideTooltip(); return }
+    if (!cameraComp) { this.ui.hideFeatureTooltip(); return }
 
     const screenPos = TreeTestEngine._screenPos
     let best: { title: string; status: string } | null = null
@@ -286,43 +254,17 @@ export class TreeTestEngine {
     }
 
     if (best) {
-      this.showTooltip(best.title, best.status, mx, my)
+      this.ui.showFeatureTooltip(best.title, best.status, mx, my)
     } else {
-      this.hideTooltip()
+      this.ui.hideFeatureTooltip()
     }
-  }
-
-  private showTooltip(title: string, status: string, x: number, y: number): void {
-    if (!this.tooltipEl || !this.tooltipTitle || !this.tooltipStatus || !this.tooltipDot) return
-
-    this.tooltipTitle.textContent  = title
-    this.tooltipStatus.textContent = ' ' + status.replace('_', ' ')
-    this.tooltipDot.textContent    = '● '
-    this.tooltipDot.style.color    =
-      status === 'planned'     ? '#3cc850' :
-      status === 'in_progress' ? '#f09628' : '#dc3232'
-
-    this.tooltipEl.style.display = 'block'
-
-    // Clamp so tooltip doesn't overflow canvas edges
-    const tw   = this.tooltipEl.offsetWidth  || 160
-    const th   = this.tooltipEl.offsetHeight || 48
-    const cw   = this.canvas?.clientWidth  ?? 800
-    const left = Math.min(x + 14, cw - tw - 8)
-    const top  = Math.max(y - th - 14, 8)
-    this.tooltipEl.style.left = `${left}px`
-    this.tooltipEl.style.top  = `${top}px`
-  }
-
-  private hideTooltip(): void {
-    if (this.tooltipEl) this.tooltipEl.style.display = 'none'
   }
 
   // ─── Camera ─────────────────────────────────────────────────────────────────
 
   private handleCamera(dt: number): void {
-    if (!this.input) return
-    const elapsed = this.application!.clock.elapsed
+    if (!this.input || !this.application) return
+    const elapsed = this.application.clock.elapsed
 
     const orbit = this.input.getOrbitDelta()
     if (orbit.dx !== 0 || orbit.dy !== 0) {
@@ -372,19 +314,25 @@ export class TreeTestEngine {
     if (this.canvas && this._onMouseLeave) this.canvas.removeEventListener('mouseleave', this._onMouseLeave)
     this._onMouseMove  = null
     this._onMouseLeave = null
-    this.tooltipEl?.remove(); this.tooltipEl = null
-    this.tooltipTitle  = null
-    this.tooltipStatus = null
-    this.tooltipDot    = null
-    this.tree?.destroy(); this.tree = null
-    this.leaves?.destroy(); this.leaves = null
-    this.birds?.destroy(); this.birds = null
-    this.bees?.destroy(); this.bees = null
-    this.ground?.destroy(); this.ground = null
-    this.ui?.destroy(); this.ui = null
-    this.input?.destroy(); this.input = null
-    this.materials?.clear(); this.materials = null
-    this.application?.destroy(); this.application = null
-    if (this.canvas) { this.canvas.remove(); this.canvas = null }
+    this.tree?.destroy()
+    this.tree = null
+    this.leaves?.destroy()
+    this.leaves = null
+    this.birds?.destroy()
+    this.birds = null
+    this.bees?.destroy()
+    this.bees = null
+    this.ground?.destroy()
+    this.ground = null
+    this.ui?.destroy()
+    this.ui = null
+    this.input?.destroy()
+    this.input = null
+    this.materials?.clear()
+    this.materials = null
+    this.application?.destroy()
+    this.application = null
+    this.canvas?.remove()
+    this.canvas = null
   }
 }
