@@ -2,12 +2,24 @@
  * UIOverlay — HTML controls overlay for the tree growth demo.
  *
  * Pure DOM manipulation. Creates a floating panel with:
- * - "Grow" button (disabled during transitions)
+ * - Color picker (preset bark colors)
+ * - "Grow" / "New Tree" button
  * - "Reset" button
  * - Stage indicator label
  * - Progress bar during transitions
  */
 const STAGE_NAMES = ['Seed', 'Growing...', 'Tree'] as const
+
+export type Color3 = [number, number, number]
+
+const COLOR_PRESETS: { label: string; color: Color3; hex: string }[] = [
+  { label: 'Cyan',    color: [  0, 180, 200], hex: '#00b4c8' },
+  { label: 'Jade',    color: [  0, 200, 120], hex: '#00c878' },
+  { label: 'Gold',    color: [220, 160,   0], hex: '#dca000' },
+  { label: 'Azure',   color: [ 80, 140, 255], hex: '#508cff' },
+  { label: 'Rose',    color: [220,  80, 140], hex: '#dc508c' },
+  { label: 'Violet',  color: [160,  80, 255], hex: '#a050ff' },
+]
 
 export class UIOverlay {
   private container: HTMLElement
@@ -17,6 +29,8 @@ export class UIOverlay {
   private stageLabel!: HTMLElement
   private progressBar!: HTMLElement
   private progressFill!: HTMLElement
+  private colorSelect!: HTMLSelectElement
+  private colorSwatch!: HTMLElement
 
   private onGrowCallback: (() => void) | null = null
   private onResetCallback: (() => void) | null = null
@@ -78,6 +92,62 @@ export class UIOverlay {
       transition: 'width 0.1s linear',
     })
     this.progressBar.appendChild(this.progressFill)
+
+    // Color picker row
+    const colorRow = document.createElement('div')
+    Object.assign(colorRow.style, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      pointerEvents: 'auto',
+    })
+
+    this.colorSwatch = document.createElement('div')
+    Object.assign(this.colorSwatch.style, {
+      width: '14px',
+      height: '14px',
+      borderRadius: '50%',
+      background: COLOR_PRESETS[0].hex,
+      border: '2px solid rgba(255,255,255,0.4)',
+      flexShrink: '0',
+    })
+
+    this.colorSelect = document.createElement('select')
+    Object.assign(this.colorSelect.style, {
+      background: 'rgba(0,0,0,0.55)',
+      color: '#fff',
+      border: '1px solid rgba(255,255,255,0.25)',
+      borderRadius: '16px',
+      padding: '5px 12px',
+      fontSize: '13px',
+      fontFamily: 'inherit',
+      cursor: 'pointer',
+      backdropFilter: 'blur(8px)',
+      outline: 'none',
+      appearance: 'none',
+      paddingRight: '28px',
+    })
+
+    // Arrow indicator via background image
+    this.colorSelect.style.backgroundImage =
+      `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23ffffff99'/%3E%3C/svg%3E")`
+    this.colorSelect.style.backgroundRepeat = 'no-repeat'
+    this.colorSelect.style.backgroundPosition = 'right 10px center'
+
+    for (const preset of COLOR_PRESETS) {
+      const opt = document.createElement('option')
+      opt.value = preset.label
+      opt.textContent = preset.label
+      this.colorSelect.appendChild(opt)
+    }
+
+    this.colorSelect.addEventListener('change', () => {
+      const preset = COLOR_PRESETS.find(p => p.label === this.colorSelect.value)
+      if (preset) this.colorSwatch.style.background = preset.hex
+    })
+
+    colorRow.appendChild(this.colorSwatch)
+    colorRow.appendChild(this.colorSelect)
 
     // Button row
     const btnRow = document.createElement('div')
@@ -143,6 +213,7 @@ export class UIOverlay {
 
     this.panel.appendChild(this.stageLabel)
     this.panel.appendChild(this.progressBar)
+    this.panel.appendChild(colorRow)
     this.panel.appendChild(btnRow)
     this.container.appendChild(this.panel)
   }
@@ -173,6 +244,10 @@ export class UIOverlay {
   showProgress(fraction: number): void {
     this.progressBar.style.opacity = fraction > 0 && fraction < 1 ? '1' : '0'
     this.progressFill.style.width = `${Math.round(fraction * 100)}%`
+  }
+
+  getSelectedColor(): Color3 {
+    return (COLOR_PRESETS.find(p => p.label === this.colorSelect.value) ?? COLOR_PRESETS[0]).color
   }
 
   destroy(): void {

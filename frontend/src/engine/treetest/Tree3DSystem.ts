@@ -12,7 +12,7 @@ import { TreeBranch } from './TreeBranch'
 import { defaultTrunk, defaultBranch, type TreeRules, type Color3, WORLD_SCALE } from './TreeRules'
 
 const GROW_SPEED = 200 * WORLD_SCALE    // ~3 world units/sec
-const ROOT_COLOR: Color3 = [180, 180, 180]
+const DEFAULT_ROOT_COLOR: Color3 = [180, 180, 180]
 const THICKNESS_DIVISOR = 14            // branch radius = size / 14
 
 export class Tree3DSystem {
@@ -39,12 +39,15 @@ export class Tree3DSystem {
     app.root.addChild(this.treeRoot)
   }
 
-  startTree(): void {
+  startTree(rootColor: Color3 = DEFAULT_ROOT_COLOR): void {
     this.clearEntities()
+    // Release old materials so the new color generates fresh emissive materials
+    for (const key of this.materialCache.keys()) this.materials.release(`tree_${key}`)
+    this.materialCache.clear()
     this.activeBranches = []
 
     const avgSize = (this.trunkRules.size + this.branchRules.size) / 2
-    this.tree = new TreeBranch(0, 0, 0, (120 / avgSize) * WORLD_SCALE, ROOT_COLOR)
+    this.tree = new TreeBranch(0, 0, 0, (120 / avgSize) * WORLD_SCALE, rootColor)
     this.activeBranches.push(this.tree)
     this.createEntity(this.tree)
     this.growing = true
@@ -82,6 +85,7 @@ export class Tree3DSystem {
 
     for (const branch of this.activeBranches) {
       if (branch.grow(growAmount)) {
+        this.updateEntity(branch) // finalize to exact full size before leaving activeBranches
         const babyTrunk = branch.makeBaby(this.trunkRules, this.goal)
         const babyBranch = branch.makeBaby(this.branchRules, this.goal)
         if (babyTrunk) newBranches.push(babyTrunk)
@@ -150,10 +154,14 @@ export class Tree3DSystem {
     const key = `${color[0]}_${color[1]}_${color[2]}`
     let mat = this.materialCache.get(key)
     if (!mat) {
-      mat = this.materials.getColor(
-        `tree_${key}`, color[0] / 255, color[1] / 255, color[2] / 255,
-        { metalness: 0, gloss: 0.2 },
-      )
+      const r = color[0] / 255, g = color[1] / 255, b = color[2] / 255
+      // Emissive glow: branches self-illuminate at 70% of their color.
+      // Tips approach white via wiggleColor, so bright tips glow near-white.
+      mat = this.materials.getColor(`tree_${key}`, r, g, b, {
+        metalness: 0,
+        gloss: 0.3,
+        emissive: [r * 0.7, g * 0.7, b * 0.7],
+      })
       this.materialCache.set(key, mat)
     }
     return mat

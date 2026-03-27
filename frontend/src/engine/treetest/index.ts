@@ -51,19 +51,27 @@ export class TreeTestEngine {
     this.application = new Application()
     this.application.init(this.canvas, width, height)
 
+    // Glow mode: near-black scene so emissive branches stand out
+    const app = this.application.app
+    const cam = this.application.camera.camera!
+    ;(cam as unknown as Record<string, unknown>).clearColor = new pc.Color(0.02, 0.02, 0.04)
+    app.scene.ambientLight = new pc.Color(0.05, 0.05, 0.08)
+    const fog = (app.scene as unknown as { fog: Record<string, unknown> }).fog
+    fog.type = pc.FOG_NONE
+
     this.input = new InputManager()
     this.input.init(this.canvas)
 
     this.materials = new MaterialFactory()
 
     // Ground
-    this.ground = new GroundBuilder(this.application.app)
+    this.ground = new GroundBuilder(app)
     const groundRoot = new pc.Entity('GroundRoot')
-    this.application.app.root.addChild(groundRoot)
+    app.root.addChild(groundRoot)
     this.ground.build(groundRoot, 4)
 
     // Tree system
-    this.tree = new Tree3DSystem(this.application.app, this.materials)
+    this.tree = new Tree3DSystem(app, this.materials)
 
     this.computeOrbitPosition()
     this.application.setConfig({ onUpdate: (dt) => this.onUpdate(dt) })
@@ -81,7 +89,7 @@ export class TreeTestEngine {
 
   private startGrowth(): void {
     if (!this.tree) return
-    this.tree.startTree()
+    this.tree.startTree(this.ui?.getSelectedColor())
     this.ui?.setGrowEnabled(false)
     this.ui?.setGrowLabel('Growing...')
   }
