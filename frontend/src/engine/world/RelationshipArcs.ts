@@ -8,6 +8,7 @@
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { EngineRelationship, RelType } from '../types'
+import { setTreeData } from './TreeNodeData'
 
 const ARC_HEIGHT = 8
 const ARC_SEGMENTS = 16
@@ -77,13 +78,13 @@ export class RelationshipArcs {
     // Create small box segments between consecutive points
     const arcParent = new pc.Entity(`Arc_${rel.rel_type}_${rel.source_repo}_${rel.target_repo}`)
     arcParent.tags.add('pickable')
-    ;(arcParent as unknown as Record<string, unknown>)._userData = {
-      type: 'relationship',
+    setTreeData(arcParent, {
+      type: 'tree_relationship',
       sourceRepo: rel.source_repo,
       targetRepo: rel.target_repo,
       relType: rel.rel_type,
       weight: rel.weight,
-    }
+    })
 
     for (let i = 0; i < points.length - 1; i++) {
       const a = points[i]

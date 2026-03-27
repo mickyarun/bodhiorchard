@@ -148,6 +148,17 @@ export interface EngineHouseInfo {
   activity: ActivityState
 }
 
+export interface EngineFeatureInfo {
+  title: string
+  status: string
+  repoName: string | null
+  linkedRepos: string[]
+  codeLocations: Record<string, string[]> | null
+  branchName: string | null
+  fromBud: number | null
+  sourceRef: string | null
+}
+
 // ─── Time / Activity ────────────────────────────────
 
 export type ActivityState =
@@ -166,6 +177,7 @@ export interface EngineCallbacks {
   onTreeClick?: (info: EngineTreeInfo) => void
   onDeveloperClick?: (info: EngineCharacterInfo) => void
   onHouseClick?: (info: EngineHouseInfo) => void
+  onFeatureClick?: (info: EngineFeatureInfo) => void
   onHover?: (tooltip: { text: string; screenX: number; screenY: number } | null) => void
 }
 

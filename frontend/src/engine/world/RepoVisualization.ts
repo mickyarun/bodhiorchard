@@ -27,6 +27,12 @@ export interface RepoVisualization {
   /** Get the entity for a repo visual (for picking, interaction). */
   getTreeEntity(repoName: string): pc.Entity | undefined
 
+  /** Per-frame update for animated visualizations (optional). */
+  update?(dt: number): void
+
+  /** All entities tagged 'pickable' — repo containers + feature branches (optional). */
+  getPickableEntities?(): pc.Entity[]
+
   /** Tear down all visuals and free GPU/CPU resources. */
   destroy(): void
 }

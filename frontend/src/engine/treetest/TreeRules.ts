@@ -37,7 +37,7 @@ export function defaultTrunk(): TreeRules {
 
 export function defaultBranch(): TreeRules {
   return {
-    growLean: 0,
+    growLean: 0.3,             // phototropism — pulls branches toward vertical, prevents extreme droop
     angle: Math.PI / 3.5,      // ~51°
     angleWarp: Math.PI / 6,    // 30°
     size: 0.7,

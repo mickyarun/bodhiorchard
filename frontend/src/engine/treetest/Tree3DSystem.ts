@@ -74,7 +74,11 @@ export class Tree3DSystem {
   // Reusable buffer for new branches emitted by step() — avoids a fresh [] allocation every frame
   private readonly _newBranchBuffer: TreeBranch[] = []
 
-  constructor(app: pc.AppBase) {
+  // When false: no emissive component (for use in the main garden engine with PBR lighting)
+  private readonly useEmissive: boolean
+
+  constructor(app: pc.AppBase, options?: { useEmissive?: boolean }) {
+    this.useEmissive = options?.useEmissive ?? true
     this.trunkRules  = defaultTrunk()
     this.branchRules = defaultBranch()
     this.treeRoot    = new pc.Entity('Tree3D')
@@ -86,7 +90,12 @@ export class Tree3DSystem {
     this.featureData = features
   }
 
-  startTree(rootColor: Color3 = DEFAULT_ROOT_COLOR): void {
+  /**
+   * Begin growing a new tree.
+   * @param rootColor - trunk color (0-255 RGB)
+   * @param worldX/Y/Z - world-space position of the root (default 0,0,0 for standalone demo)
+   */
+  startTree(rootColor: Color3 = DEFAULT_ROOT_COLOR, worldX = 0, worldY = 0, worldZ = 0): void {
     this.rootColor = rootColor
     this.clearEntities()
     // Destroy old branch materials AFTER entities are gone — safe, explicit, no ref-count issues
@@ -100,7 +109,7 @@ export class Tree3DSystem {
 
     const rootSize = this.scaleRulesForFeatureCount(this.featureData.length)
 
-    this.tree = TreeBranch.createRoot(0, 0, 0, rootSize, rootColor)
+    this.tree = TreeBranch.createRoot(worldX, worldY, worldZ, rootSize, rootColor)
     this.activeBranches.push(this.tree)
     this.createEntity(this.tree)
     this.growing = true
@@ -307,6 +316,10 @@ export class Tree3DSystem {
     const entity = new pc.Entity('B')
     entity.addComponent('render', { type: 'cylinder' })
     entity.render!.meshInstances[0].material = this.getMaterial(branch.color)
+    // Thin cylinders contribute negligible shadow detail but add significant shadow-pass cost.
+    // Disabling here matches LeafSystem's approach — biggest single performance saving.
+    entity.render!.castShadows   = false
+    entity.render!.receiveShadows = false
     entity.setPosition(branch.root.x, branch.root.y, branch.root.z)
     entity.setLocalScale(0.001, 0.001, 0.001)
     this.treeRoot.addChild(entity)
@@ -360,7 +373,9 @@ export class Tree3DSystem {
       mat.diffuse   = new pc.Color(r, g, b)
       mat.metalness = 0
       mat.gloss     = 0.3
-      mat.emissive  = new pc.Color(r * 0.7, g * 0.7, b * 0.7)
+      mat.emissive  = this.useEmissive
+        ? new pc.Color(r * 0.7, g * 0.7, b * 0.7)
+        : new pc.Color(0, 0, 0)
       mat.update()
       this.matCache.set(key, mat)
     }

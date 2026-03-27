@@ -4,7 +4,7 @@
  * Build order (dependency-driven):
  *   1. Load all needed GLBs via AssetLoader.loadBatch() (single batch)
  *   2. Build environment: sky, ground (independent of data)
- *   3. Build trees from data.repos via TreeSystem
+ *   3. Build procedural trees from data.repos via ProceduralTreeSystem
  *   4. Build buildings (coffee bar, cafeteria, village, pool, pavilion)
  *   4b. Place characters at seats/houses (needs building seats + house map)
  *   5. Build paths between zones + zone signs
@@ -20,12 +20,12 @@ import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { EngineData } from '../types'
 import { AssetLoader } from '../assets/AssetLoader'
 import {
-  getAllTreeGLBs, getAllDecorationGLBs,
+  getAllDecorationGLBs,
   getEnvironmentGLBs, getBuildingGLBs, getMiscGLBs,
 } from '../assets/AssetManifest'
 import { WorldLayout } from '../world/WorldLayout'
 import type { RepoVisualization } from '../world/RepoVisualization'
-import { TreeSystem } from '../world/TreeSystem'
+import { ProceduralTreeSystem } from '../world/ProceduralTreeSystem'
 import { RelationshipArcs } from '../world/RelationshipArcs'
 import { PathSystem } from '../world/PathSystem'
 import { ZoneSign } from '../world/ZoneSign'
@@ -81,9 +81,8 @@ export class SceneManager {
   async build(data: EngineData): Promise<void> {
     const currentBuild = ++this.buildId
 
-    // 1. Batch preload all GLBs
+    // 1. Batch preload all GLBs (trees are now procedural — no tree GLBs needed)
     const allPaths = [
-      ...getAllTreeGLBs(),
       ...getAllDecorationGLBs(),
       ...getEnvironmentGLBs(),
       ...getBuildingGLBs(),
@@ -235,6 +234,7 @@ export class SceneManager {
   update(dt: number): void {
     this.sky?.update(dt)
     this.clouds?.update(dt)
+    this.repoVis?.update?.(dt)
   }
 
   /** Rebuild entire scene with new data. */
@@ -267,7 +267,7 @@ export class SceneManager {
    * (e.g. crystals, planets, buildings) without touching the rest of SceneManager.
    */
   protected createRepoVisualization(): RepoVisualization {
-    return new TreeSystem(this.loader)
+    return new ProceduralTreeSystem(this.materials)
   }
 
   // ─── Cleanup ──────────────────────────────────

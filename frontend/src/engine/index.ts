@@ -24,6 +24,7 @@ import { InputManager } from './input/InputManager'
 import { CameraController } from './camera/CameraController'
 import { MaterialFactory } from './rendering/MaterialFactory'
 import { SceneManager } from './core/SceneManager'
+import { TreePickerSystem } from './interaction/TreePickerSystem'
 
 export { type EngineData, type EngineCallbacks } from './types'
 
@@ -36,6 +37,7 @@ export class GardenEngine {
   private events: EventBus<EngineEvents>
   private canvas: HTMLCanvasElement | null = null
   private callbacks: EngineCallbacks = {}
+  private picker: TreePickerSystem | null = null
 
   constructor() {
     this.events = new EventBus<EngineEvents>()
@@ -78,6 +80,9 @@ export class GardenEngine {
     // Scene manager — orchestrates all Phase 2+ subsystems
     this.sceneManager = new SceneManager(this.app, this.materials)
 
+    // Picking system — hover tooltips + click for repo/feature entities
+    this.picker = new TreePickerSystem()
+
     // Wire up frame update
     this.app.setConfig({
       onUpdate: (dt) => this.onUpdate(dt),
@@ -103,6 +108,11 @@ export class GardenEngine {
   private onUpdate(dt: number): void {
     this.camera?.update(dt)
     this.sceneManager?.update(dt)
+
+    if (this.picker && this.app && this.input) {
+      const pickables = this.sceneManager?.repoVisualization?.getPickableEntities?.() ?? []
+      this.picker.update(this.app.camera, this.input, pickables, this.callbacks)
+    }
   }
 
   /** Toggle relationship arc visibility. Returns new visible state. */
@@ -136,6 +146,7 @@ export class GardenEngine {
   }
 
   destroy(): void {
+    this.picker = null
     this.sceneManager?.destroy()
     this.sceneManager = null
     this.events.clear()
