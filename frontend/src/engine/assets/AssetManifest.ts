@@ -270,5 +270,6 @@ export function getMiscGLBs(): string[] {
     ...Object.values(PAVILION),
     ...Object.values(POOL),
     ...Object.values(PATH),
+    'assets/garden/animal-parrot.glb',
   ]
 }

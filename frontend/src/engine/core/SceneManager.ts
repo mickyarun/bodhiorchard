@@ -42,6 +42,7 @@ import { PoolResortBuilder } from '../buildings/PoolResortBuilder'
 import { BuildingFactory } from '../buildings/BuildingFactory'
 import type { HouseResult } from '../buildings/HouseBuilder'
 import { CharacterSystem } from '../characters/CharacterSystem'
+import { GardenBirdSystem } from '../world/GardenBirdSystem'
 
 export class SceneManager {
   private app: Application
@@ -62,6 +63,7 @@ export class SceneManager {
   private rocks: RockSystem | null = null
   private paths: PathSystem | null = null
   private characterSystem: CharacterSystem | null = null
+  private gardenBirds: GardenBirdSystem | null = null
   private signEntities: pc.Entity[] = []
 
   // Building entities (for destruction)
@@ -110,6 +112,14 @@ export class SceneManager {
     const treeZones = await this.repoVis.build(this.app, data, this.layout)
     if (this.buildId !== currentBuild) return
     this.layout.addExclusionZones(treeZones)
+
+    // 3b. Garden birds — roam between repo trees
+    this.gardenBirds = new GardenBirdSystem(this.app.app)
+    await this.gardenBirds.init(this.loader)
+    if (this.repoVis instanceof ProceduralTreeSystem) {
+      this.gardenBirds.setTrees(this.repoVis.getTreeMap())
+    }
+    if (this.buildId !== currentBuild) return
 
     // 4. Buildings
     const buildingFactory = new BuildingFactory(this.loader, this.materials)
@@ -235,6 +245,7 @@ export class SceneManager {
     this.sky?.update(dt)
     this.clouds?.update(dt)
     this.repoVis?.update?.(dt)
+    this.gardenBirds?.update(dt)
   }
 
   /** Rebuild entire scene with new data. */
@@ -299,6 +310,9 @@ export class SceneManager {
     }
     this.buildingEntities = []
     this._memberHouseMap.clear()
+
+    this.gardenBirds?.destroy()
+    this.gardenBirds = null
 
     this.repoVis?.destroy()
     this.repoVis = null
