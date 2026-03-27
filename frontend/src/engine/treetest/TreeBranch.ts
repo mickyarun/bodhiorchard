@@ -18,30 +18,27 @@ export class TreeBranch {
   color: Color3
   babies: TreeBranch[] = []
 
-  /** Root constructor: position + size + color, identity rotation. */
-  constructor(x: number, y: number, z: number, size: number, color: Color3)
-  /** Child constructor: inherits parent tip, new rotation + size. */
-  constructor(root: Vec3, size: number, rotation: Mat3, color: Color3)
-  constructor(
-    xOrRoot: number | Vec3, yOrSize: number,
-    zOrRotation?: number | Mat3, sizeOrColor?: number | Color3, color?: Color3,
-  ) {
-    if (typeof xOrRoot === 'number') {
-      // Root constructor
-      this.root = new Vec3(xOrRoot, yOrSize, zOrRotation as number)
-      this.size = sizeOrColor as number
-      this.color = color!
-      this.rotation = Mat3.identity()
-      // +Y is up in PlayCanvas (Java used -Y)
-      this.tip = this.rotation.multiplyVec3(new Vec3(0, this.size, 0))
-    } else {
-      // Child constructor
-      this.root = xOrRoot
-      this.size = yOrSize
-      this.rotation = zOrRotation as Mat3
-      this.color = sizeOrColor as Color3
-      this.tip = new Vec3(0, 0, 0) // set by rotateTip after construction
-    }
+  // Static scratch for getGrowTipInto — zero allocation in the hot per-frame update path
+  private static readonly _scratchDir = new Vec3(0, 0, 0)
+
+  private constructor(root: Vec3, size: number, rotation: Mat3, color: Color3) {
+    this.root     = root
+    this.size     = size
+    this.rotation = rotation
+    this.color    = color
+    this.tip      = new Vec3(0, 0, 0)
+  }
+
+  /** Create the root branch at a world position with identity rotation. */
+  static createRoot(x: number, y: number, z: number, size: number, color: Color3): TreeBranch {
+    const b = new TreeBranch(new Vec3(x, y, z), size, Mat3.identity(), color)
+    b.tip = b.rotation.multiplyVec3(new Vec3(0, size, 0))
+    return b
+  }
+
+  /** Create a child branch positioned at a parent tip. */
+  static createChild(root: Vec3, size: number, rotation: Mat3, color: Color3): TreeBranch {
+    return new TreeBranch(root, size, rotation, color)
   }
 
   /** Apply phototropism: rotate tip toward goal direction. */
@@ -64,7 +61,18 @@ export class TreeBranch {
     }
   }
 
-  /** Get tip position during growth animation. */
+  /**
+   * Write the animated grow-tip direction into an existing Vec3 — zero allocation.
+   * Use in the per-frame update path instead of getGrowTip().
+   */
+  getGrowTipInto(out: Vec3): void {
+    TreeBranch._scratchDir.x = 0
+    TreeBranch._scratchDir.y = this.growthSize
+    TreeBranch._scratchDir.z = 0
+    this.rotation.multiplyVec3Into(TreeBranch._scratchDir, out)
+  }
+
+  /** Get tip position during growth animation. Allocates — prefer getGrowTipInto for hot paths. */
   getGrowTip(): Vec3 {
     return this.rotation.multiplyVec3(new Vec3(0, this.growthSize, 0))
   }
@@ -78,9 +86,9 @@ export class TreeBranch {
   makeBaby(rules: TreeRules, goal: Vec3): TreeBranch | null {
     if (this.size < rules.minSize) return null
 
-    const childSize = this.size * rules.size
+    const childSize   = this.size * rules.size
     const newRotation = this.rotation.multiply(getRulesMatrix(rules))
-    const baby = new TreeBranch(
+    const baby = TreeBranch.createChild(
       this.getTip(),
       childSize,
       newRotation,

@@ -62,8 +62,7 @@ export class GroundBuilder {
       imgData.data[i + 1] = Math.max(0, Math.min(255, imgData.data[i + 1] + noise))
       imgData.data[i + 2] = Math.max(0, Math.min(255, imgData.data[i + 2] + noise))
     }
-    ctx.putImageData(imgData, 0, 0)
-
+    // Reuse imgData directly — avoids a second 262KB getImageData allocation
     const texture = new pc.Texture(this.app.graphicsDevice, {
       width: size, height: size,
       format: pc.PIXELFORMAT_RGBA8,
@@ -73,8 +72,7 @@ export class GroundBuilder {
       addressV: pc.ADDRESS_CLAMP_TO_EDGE,
     })
     const source = texture.lock()
-    const pixels = ctx.getImageData(0, 0, size, size).data
-    for (let i = 0; i < pixels.length; i++) source[i] = pixels[i]
+    for (let i = 0; i < imgData.data.length; i++) source[i] = imgData.data[i]
     texture.unlock()
     return texture
   }

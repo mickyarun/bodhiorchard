@@ -18,6 +18,14 @@ export class Vec3 {
     return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z)
   }
 
+  /** Returns a new normalized Vec3 — pure, does not mutate. */
+  normalized(): Vec3 {
+    const len = this.length()
+    if (len === 0) return new Vec3(0, 0, 0)
+    return new Vec3(this.x / len, this.y / len, this.z / len)
+  }
+
+  /** Mutates this vector in place — use only when allocation must be avoided. */
   normalize(): void {
     const len = this.length()
     if (len > 0) { this.x /= len; this.y /= len; this.z /= len }

@@ -5,12 +5,15 @@
  */
 import { Vec3 } from './Vec3'
 
+/** Fixed 9-element tuple — catches wrong-length construction at compile time. */
+type Mat3Elements = [number, number, number, number, number, number, number, number, number]
+
 export class Mat3 {
   /** Row-major 3×3 matrix: [r0c0, r0c1, r0c2, r1c0, ...] */
-  readonly m: number[]
+  readonly m: Mat3Elements
 
-  constructor(m?: number[]) {
-    this.m = m ?? [1, 0, 0, 0, 1, 0, 0, 0, 1] // identity
+  constructor(m?: Mat3Elements) {
+    this.m = m ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
   }
 
   multiply(other: Mat3): Mat3 {
@@ -29,6 +32,17 @@ export class Mat3 {
       a[3]*v.x + a[4]*v.y + a[5]*v.z,
       a[6]*v.x + a[7]*v.y + a[8]*v.z,
     )
+  }
+
+  /**
+   * Zero-allocation variant — writes result into an existing Vec3 instead of allocating.
+   * Use in hot per-frame paths (e.g. getGrowTip) to avoid GC pressure.
+   */
+  multiplyVec3Into(v: Vec3, out: Vec3): void {
+    const a = this.m
+    out.x = a[0]*v.x + a[1]*v.y + a[2]*v.z
+    out.y = a[3]*v.x + a[4]*v.y + a[5]*v.z
+    out.z = a[6]*v.x + a[7]*v.y + a[8]*v.z
   }
 
   static identity(): Mat3 { return new Mat3() }

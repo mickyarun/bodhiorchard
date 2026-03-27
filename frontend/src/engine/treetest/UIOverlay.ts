@@ -8,9 +8,9 @@
  * - Stage indicator label
  * - Progress bar during transitions
  */
-const STAGE_NAMES = ['Seed', 'Growing...', 'Tree'] as const
+import type { Color3 } from './TreeRules'
 
-export type Color3 = [number, number, number]
+const STAGE_NAMES = ['Seed', 'Growing...', 'Tree'] as const
 
 const COLOR_PRESETS: { label: string; color: Color3; hex: string }[] = [
   { label: 'Cyan',    color: [  0, 180, 200], hex: '#00b4c8' },
@@ -34,6 +34,15 @@ export class UIOverlay {
 
   private onGrowCallback: (() => void) | null = null
   private onResetCallback: (() => void) | null = null
+
+  // Stored listener refs for proper removeEventListener in destroy()
+  private _onColorChange!: () => void
+  private _onGrowEnter!: () => void
+  private _onGrowLeave!: () => void
+  private _onGrowClick!: () => void
+  private _onResetEnter!: () => void
+  private _onResetLeave!: () => void
+  private _onResetClick!: () => void
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -141,10 +150,11 @@ export class UIOverlay {
       this.colorSelect.appendChild(opt)
     }
 
-    this.colorSelect.addEventListener('change', () => {
+    this._onColorChange = () => {
       const preset = COLOR_PRESETS.find(p => p.label === this.colorSelect.value)
       if (preset) this.colorSwatch.style.background = preset.hex
-    })
+    }
+    this.colorSelect.addEventListener('change', this._onColorChange)
 
     colorRow.appendChild(this.colorSwatch)
     colorRow.appendChild(this.colorSelect)
@@ -173,17 +183,20 @@ export class UIOverlay {
       transition: 'all 0.2s ease',
       letterSpacing: '0.5px',
     })
-    this.growBtn.addEventListener('mouseenter', () => {
+    this._onGrowEnter = () => {
       if (!this.growBtn.disabled) {
         this.growBtn.style.transform = 'scale(1.05)'
         this.growBtn.style.boxShadow = '0 6px 20px rgba(34, 197, 94, 0.5)'
       }
-    })
-    this.growBtn.addEventListener('mouseleave', () => {
+    }
+    this._onGrowLeave = () => {
       this.growBtn.style.transform = 'scale(1)'
       this.growBtn.style.boxShadow = '0 4px 15px rgba(34, 197, 94, 0.4)'
-    })
-    this.growBtn.addEventListener('click', () => this.onGrowCallback?.())
+    }
+    this._onGrowClick = () => this.onGrowCallback?.()
+    this.growBtn.addEventListener('mouseenter', this._onGrowEnter)
+    this.growBtn.addEventListener('mouseleave', this._onGrowLeave)
+    this.growBtn.addEventListener('click', this._onGrowClick)
 
     // Reset button
     this.resetBtn = document.createElement('button')
@@ -200,13 +213,12 @@ export class UIOverlay {
       backdropFilter: 'blur(8px)',
       transition: 'all 0.2s ease',
     })
-    this.resetBtn.addEventListener('mouseenter', () => {
-      this.resetBtn.style.background = 'rgba(255, 255, 255, 0.25)'
-    })
-    this.resetBtn.addEventListener('mouseleave', () => {
-      this.resetBtn.style.background = 'rgba(255, 255, 255, 0.15)'
-    })
-    this.resetBtn.addEventListener('click', () => this.onResetCallback?.())
+    this._onResetEnter = () => { this.resetBtn.style.background = 'rgba(255, 255, 255, 0.25)' }
+    this._onResetLeave = () => { this.resetBtn.style.background = 'rgba(255, 255, 255, 0.15)' }
+    this._onResetClick = () => this.onResetCallback?.()
+    this.resetBtn.addEventListener('mouseenter', this._onResetEnter)
+    this.resetBtn.addEventListener('mouseleave', this._onResetLeave)
+    this.resetBtn.addEventListener('click', this._onResetClick)
 
     btnRow.appendChild(this.growBtn)
     btnRow.appendChild(this.resetBtn)
@@ -251,7 +263,14 @@ export class UIOverlay {
   }
 
   destroy(): void {
-    this.onGrowCallback = null
+    this.colorSelect.removeEventListener('change', this._onColorChange)
+    this.growBtn.removeEventListener('mouseenter', this._onGrowEnter)
+    this.growBtn.removeEventListener('mouseleave', this._onGrowLeave)
+    this.growBtn.removeEventListener('click', this._onGrowClick)
+    this.resetBtn.removeEventListener('mouseenter', this._onResetEnter)
+    this.resetBtn.removeEventListener('mouseleave', this._onResetLeave)
+    this.resetBtn.removeEventListener('click', this._onResetClick)
+    this.onGrowCallback  = null
     this.onResetCallback = null
     this.panel.remove()
   }

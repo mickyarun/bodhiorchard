@@ -60,10 +60,10 @@ export class TreeTestEngine {
     // Glow mode: near-black scene so emissive branches stand out
     const app = this.application.app
     const cam = this.application.camera.camera!
-    ;(cam as unknown as Record<string, unknown>).clearColor = new pc.Color(0.02, 0.02, 0.04)
+    cam.clearColor = new pc.Color(0.02, 0.02, 0.04)
     app.scene.ambientLight = new pc.Color(0.05, 0.05, 0.08)
-    const fog = (app.scene as unknown as { fog: Record<string, unknown> }).fog
-    fog.type = pc.FOG_NONE
+    // pc.Scene.fog is not fully typed in v2.17 — single cast with version note
+    ;(app.scene as unknown as { fog: { type: string } }).fog.type = pc.FOG_NONE
 
     this.input = new InputManager()
     this.input.init(this.canvas)
