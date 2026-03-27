@@ -45,6 +45,7 @@ import { CharacterSystem } from '../characters/CharacterSystem'
 import { GardenBirdSystem } from '../world/GardenBirdSystem'
 import { GardenAnimalSystem } from '../world/GardenAnimalSystem'
 import { LanternSystem } from '../effects/LanternSystem'
+import { CircularFence } from '../world/CircularFence'
 
 export class SceneManager {
   private app: Application
@@ -251,6 +252,11 @@ export class SceneManager {
     // 8b. Ambient effects — lanterns along paths
     this.lanterns = new LanternSystem(this.app.app)
     this.lanterns.buildAlongRoutes(PathSystem.defaultRoutes([...zones]))
+
+    // 8c. Zone fences — circular wooden fences around each building zone.
+    // Gate angle points toward orchard (0,0) so it aligns with the path entrance.
+    // Orchard is the central hub; it has paths converging from all sides so no fence.
+    this.buildZoneFences(buildingFactory)
   }
 
   /** Per-frame update for animated subsystems. */
@@ -282,6 +288,35 @@ export class SceneManager {
 
   toggleArcs(): boolean {
     return this.arcs?.toggle() ?? false
+  }
+
+  // ─── Zone Fences ──────────────────────────────
+
+  /**
+   * Build a circular wooden fence around each building zone.
+   *
+   * Gate angle is computed so the opening aligns with the path from the
+   * orchard hub (0, 0) into the zone: atan2(-zone.x, -zone.z) gives the
+   * bearing on the ring that faces toward the center of the world.
+   * Gate width (3.0) gives comfortable clearance for path stones + characters.
+   */
+  private buildZoneFences(factory: BuildingFactory): void {
+    if (!factory.materialFactory) return
+    const fence = new CircularFence(factory.materialFactory)
+
+    for (const zone of this.layout.getAllZones()) {
+      if (zone.name === 'orchard') continue  // central hub has paths from all sides
+
+      const gateAngle = Math.atan2(-zone.x, -zone.z)
+      const fenceEntity = fence.build(this.app.root, {
+        radius:    zone.radius,
+        cx:        zone.x,
+        cz:        zone.z,
+        gateAngle,
+        gateWidth: 3.0,
+      })
+      this.buildingEntities.push(fenceEntity)
+    }
   }
 
   // ─── Repo Visualization Factory ─────────────────
@@ -354,6 +389,9 @@ export class SceneManager {
     this.materials.release('umbrella_pole')
     this.materials.release('umbrella_canopy')
     this.materials.release('ground_grass')
+    this.materials.release('fence_post')
+    this.materials.release('fence_panel')
+    this.materials.release('fence_gate')
 
     this.layout.reset()
   }

@@ -13,7 +13,7 @@ import * as pc from 'playcanvas'
 import { BuildingFactory } from '../buildings/BuildingFactory'
 import { PATH } from '../assets/AssetManifest'
 import { WALL_COLLISION } from './SceneConfig'
-import { CircularFence } from './CircularFence'
+import { CircularFence } from '../world/CircularFence'
 import type { CollisionBox } from './CollisionSystem'
 
 const WALL_HEIGHT  = 1.29
