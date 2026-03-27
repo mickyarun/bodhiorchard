@@ -69,7 +69,7 @@ def mark_all_read(db: Session, user_id: int) -> int:
 
 
 def delete_notification(db: Session, notification_id: int, user_id: int) -> bool:
-    """Permanently delete a notification. Returns False if not found."""
+    """Delete a notification (only if owned by user)."""
     notif = (
         db.query(Notification)
         .filter(Notification.id == notification_id, Notification.user_id == user_id)

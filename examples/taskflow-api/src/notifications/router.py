@@ -33,8 +33,8 @@ def index(unread_only: bool = False, user: dict = Depends(get_current_user), db:
             "type": n.type,
             "title": n.title,
             "body": n.body,
-            "link": n.link,
             "is_read": n.is_read,
+            "link": n.link,
             "created_at": n.created_at.isoformat() if n.created_at else None,
         }
         for n in notifs
@@ -55,13 +55,12 @@ def read_all(user: dict = Depends(get_current_user), db: Session = Depends(get_d
     return {"marked": count}
 
 
-@router.delete("/{notification_id}")
+@router.delete("/{notification_id}", status_code=204)
 def delete(notification_id: int, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Delete (dismiss) a notification permanently."""
+    """Delete a single notification."""
     found = delete_notification(db, notification_id, user["user_id"])
     if not found:
         raise HTTPException(status_code=404, detail="Notification not found")
-    return {"detail": "Deleted"}
 
 
 @router.put("/preferences")
