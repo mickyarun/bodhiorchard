@@ -17,13 +17,14 @@
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { Color3 } from './TreeRules'
+import type { WindSystem } from './WindSystem'
 
 const MAX_TIPS        = 160    // cap terminal tips — max entities = 160 * 10 = 1600
 const LEAVES_PER_TIP  = 10
 const LEAF_HEIGHT     = 0.32   // world units — larger leaves for denser canopy appearance
 const LEAF_WIDTH      = 0.70   // width/height ratio
-const WIND_FREQ_BASE  = 1.3    // Hz
-const WIND_AMPLITUDE  = 10     // degrees
+const WIND_FREQ_BASE  = 1.3    // Hz — fallback when no WindSystem connected
+const WIND_AMPLITUDE  = 10     // degrees — fallback amplitude
 const LEAF_SCALE_VARY = 0.50
 
 interface LeafEntry {
@@ -33,6 +34,8 @@ interface LeafEntry {
   baseRoll: number
   phase: number
   freq: number
+  worldX: number
+  worldZ: number
 }
 
 export class LeafSystem {
@@ -43,13 +46,17 @@ export class LeafSystem {
   private leafMesh: pc.Mesh | null = null
   private patchedMaterials = new Set<string>()
   private time = 0
+  private windSystem: WindSystem | null = null
 
-  constructor(app: pc.AppBase, materials: MaterialFactory) {
+  constructor(app: pc.AppBase, materials: MaterialFactory, parent?: pc.Entity) {
     this.app = app
     this.materials = materials
     this.leafRoot = new pc.Entity('LeafRoot')
-    app.root.addChild(this.leafRoot)
+    ;(parent ?? app.root).addChild(this.leafRoot)
   }
+
+  /** Connect a WindSystem for coherent wind across branches and leaves. */
+  setWindSystem(wind: WindSystem): void { this.windSystem = wind }
 
   /**
    * Spawn leaf clusters at terminal branch tip positions.
@@ -75,17 +82,33 @@ export class LeafSystem {
     }
   }
 
-  /** Per-frame wind sway. */
+  /** Per-frame wind sway. Uses WindSystem when connected, else standalone sine fallback. */
   update(dt: number): void {
     this.time += dt
-    for (const leaf of this.leaves) {
-      const sway  = Math.sin(this.time * leaf.freq + leaf.phase)       * WIND_AMPLITUDE
-      const sway2 = Math.cos(this.time * leaf.freq * 0.7 + leaf.phase) * WIND_AMPLITUDE * 0.4
-      leaf.entity.setEulerAngles(
-        leaf.basePitch + sway,
-        leaf.baseYaw,
-        leaf.baseRoll + sway2,
-      )
+
+    if (this.windSystem) {
+      // WindSystem-driven: coherent multi-frequency sway synced with branches
+      for (const leaf of this.leaves) {
+        const [pitchSway, rollSway] = this.windSystem.getLeafSway(
+          leaf.worldX, leaf.worldZ, leaf.phase,
+        )
+        leaf.entity.setEulerAngles(
+          leaf.basePitch + pitchSway,
+          leaf.baseYaw,
+          leaf.baseRoll + rollSway,
+        )
+      }
+    } else {
+      // Standalone fallback — original independent sine sway
+      for (const leaf of this.leaves) {
+        const sway  = Math.sin(this.time * leaf.freq + leaf.phase)       * WIND_AMPLITUDE
+        const sway2 = Math.cos(this.time * leaf.freq * 0.7 + leaf.phase) * WIND_AMPLITUDE * 0.4
+        leaf.entity.setEulerAngles(
+          leaf.basePitch + sway,
+          leaf.baseYaw,
+          leaf.baseRoll + sway2,
+        )
+      }
     }
   }
 
@@ -131,11 +154,14 @@ export class LeafSystem {
     entity.setLocalScale(scale, scale, scale)
 
     this.leafRoot.addChild(entity)
+    const leafPos = entity.getPosition()
     this.leaves.push({
       entity,
       basePitch: pitch, baseYaw: yaw, baseRoll: roll,
       phase: Math.random() * Math.PI * 2,
       freq:  WIND_FREQ_BASE * (0.65 + Math.random() * 0.7),
+      worldX: leafPos.x,
+      worldZ: leafPos.z,
     })
   }
 

@@ -43,6 +43,8 @@ import { BuildingFactory } from '../buildings/BuildingFactory'
 import type { HouseResult } from '../buildings/HouseBuilder'
 import { CharacterSystem } from '../characters/CharacterSystem'
 import { GardenBirdSystem } from '../world/GardenBirdSystem'
+import { GardenAnimalSystem } from '../world/GardenAnimalSystem'
+import { LanternSystem } from '../effects/LanternSystem'
 
 export class SceneManager {
   private app: Application
@@ -64,6 +66,8 @@ export class SceneManager {
   private paths: PathSystem | null = null
   private characterSystem: CharacterSystem | null = null
   private gardenBirds: GardenBirdSystem | null = null
+  private gardenAnimals: GardenAnimalSystem | null = null
+  private lanterns: LanternSystem | null = null
   private signEntities: pc.Entity[] = []
 
   // Building entities (for destruction)
@@ -103,6 +107,7 @@ export class SceneManager {
 
     this.ground = new GroundSystem()
     this.ground.build(this.app, this.materials)
+    this.ground.addZoneOverlays(this.app, this.layout.getAllZones())
 
     this.clouds = new CloudSystem()
     this.clouds.build(this.app, this.materials)
@@ -119,6 +124,10 @@ export class SceneManager {
     if (this.repoVis instanceof ProceduralTreeSystem) {
       this.gardenBirds.setTrees(this.repoVis.getTreeMap())
     }
+
+    // 3c. Garden animals — cube-pets wandering on the ground
+    this.gardenAnimals = new GardenAnimalSystem(this.app.app)
+    await this.gardenAnimals.init(this.loader)
     if (this.buildId !== currentBuild) return
 
     // 4. Buildings
@@ -168,7 +177,7 @@ export class SceneManager {
     }
 
     if (pavilionZone) {
-      const pavilion = new StandupPavilion(this.loader)
+      const pavilion = new StandupPavilion(buildingFactory)
       const pavilionResult = await pavilion.build(this.app, pavilionZone.x, pavilionZone.z)
       if (this.buildId !== currentBuild) return
       this.buildingEntities.push(pavilionResult.entity)
@@ -238,6 +247,10 @@ export class SceneManager {
     // 8. Effects
     // String lights are now built as part of each building's entity tree
     // (created by BuildingFactory.createStringLights in each builder)
+
+    // 8b. Ambient effects — lanterns along paths
+    this.lanterns = new LanternSystem(this.app.app)
+    this.lanterns.buildAlongRoutes(PathSystem.defaultRoutes([...zones]))
   }
 
   /** Per-frame update for animated subsystems. */
@@ -246,6 +259,7 @@ export class SceneManager {
     this.clouds?.update(dt)
     this.repoVis?.update?.(dt)
     this.gardenBirds?.update(dt)
+    this.gardenAnimals?.update(dt)
   }
 
   /** Rebuild entire scene with new data. */
@@ -310,6 +324,12 @@ export class SceneManager {
     }
     this.buildingEntities = []
     this._memberHouseMap.clear()
+
+    this.lanterns?.destroy()
+    this.lanterns = null
+
+    this.gardenAnimals?.destroy()
+    this.gardenAnimals = null
 
     this.gardenBirds?.destroy()
     this.gardenBirds = null

@@ -209,6 +209,14 @@ export const PAVILION = {
   pathStone: `${GARDEN}/path_stone.glb`,
 } as const
 
+export const ANIMALS = {
+  cat:   `${GARDEN}/animal-cat.glb`,
+  dog:   `${GARDEN}/animal-dog.glb`,
+  bunny: `${GARDEN}/animal-bunny.glb`,
+  fox:   `${GARDEN}/animal-fox.glb`,
+  deer:  `${GARDEN}/animal-deer.glb`,
+} as const
+
 export const POOL = {
   pond: `${GARDEN}/pond.glb`,
   umbrellaChairs: `${GARDEN}/umbrella_chairs.glb`,
@@ -271,5 +279,6 @@ export function getMiscGLBs(): string[] {
     ...Object.values(POOL),
     ...Object.values(PATH),
     'assets/garden/animal-parrot.glb',
+    ...Object.values(ANIMALS),
   ]
 }

@@ -10,10 +10,10 @@ import { AssetLoader } from '../assets/AssetLoader'
 import { SCATTER_GRASS, SCATTER_FLOWERS } from '../assets/AssetManifest'
 import { isInsideAnyZone, randRange, type ExclusionZone } from '../utils/MathUtils'
 
-const GRASS_COUNT = 150
-const FLOWER_COUNT = 15
+const GRASS_COUNT = 450
+const FLOWER_COUNT = 40
 const WORLD_HALF = 40 // compact world with TILE_SIZE=1
-const MIN_DISTANCE = 2 // minimum spacing between grass instances
+const MIN_DISTANCE = 1.2 // tighter spacing for lush coverage
 
 export class GrassSystem {
   private root: pc.Entity | null = null
@@ -38,19 +38,19 @@ export class GrassSystem {
       const instance = loader.instance(asset)
       instance.setPosition(pt.x, 0, pt.z)
       instance.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(2, 3.5) // grass models are ~0.25–0.4 units
+      const s = randRange(1.5, 4.0) // wider variety — some tiny, some large
       instance.setLocalScale(s, s, s)
       this.root.addChild(instance)
     }
 
     // Scatter flowers (sparser, scaled up more — flowers are only ~0.16 units wide)
-    const flowerPoints = this.poissonScatter(FLOWER_COUNT, WORLD_HALF, 4, exclusionZones)
+    const flowerPoints = this.poissonScatter(FLOWER_COUNT, WORLD_HALF, 3, exclusionZones)
     for (const pt of flowerPoints) {
       const asset = this.flowerAssets[Math.floor(Math.random() * this.flowerAssets.length)]
       const instance = loader.instance(asset)
       instance.setPosition(pt.x, 0, pt.z)
       instance.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(3, 5)
+      const s = randRange(2.5, 5.5)
       instance.setLocalScale(s, s, s)
       this.root.addChild(instance)
     }

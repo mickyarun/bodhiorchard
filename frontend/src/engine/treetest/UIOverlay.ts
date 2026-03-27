@@ -33,6 +33,8 @@ export class UIOverlay {
   private birdsToggle!: HTMLButtonElement
   private beesToggle!: HTMLButtonElement
   private featureBtns: HTMLButtonElement[] = []
+  private windSlider!: HTMLInputElement
+  private windLabel!: HTMLSpanElement
 
   private birdsEnabled = true
   private beesEnabled  = true
@@ -48,6 +50,7 @@ export class UIOverlay {
   private onToggleBirdsCallback:    ((on: boolean) => void) | null = null
   private onToggleBeesCallback:     ((on: boolean) => void) | null = null
   private onLoadFeaturesCallback:   ((count: number) => void) | null = null
+  private onWindStrengthCallback:   ((strength: number) => void) | null = null
 
   // Stored listener refs for proper removeEventListener in destroy()
   private _onColorChange!:     () => void
@@ -59,6 +62,11 @@ export class UIOverlay {
   private _onResetClick!:      () => void
   private _onBirdsClick!:      () => void
   private _onBeesClick!:       () => void
+  private _onWindInput!:       () => void
+  private _onWindPointerDown!: (e: Event) => void
+  private _onWindPointerMove!: (e: Event) => void
+  private _onWindMouseDown!:   (e: Event) => void
+  private _onWindMouseMove!:   (e: Event) => void
   private _onFeatureClicks:    (() => void)[] = []
 
   constructor(container: HTMLElement) {
@@ -186,6 +194,55 @@ export class UIOverlay {
 
     toggleRow.appendChild(this.birdsToggle)
     toggleRow.appendChild(this.beesToggle)
+
+    // Wind strength slider row
+    const windRow = document.createElement('div')
+    Object.assign(windRow.style, {
+      display:       'flex',
+      alignItems:    'center',
+      gap:           '8px',
+      pointerEvents: 'auto',
+    })
+
+    this.windLabel = document.createElement('span')
+    this.windLabel.textContent = 'Wind 40%'
+    Object.assign(this.windLabel.style, {
+      color:      'rgba(255,255,255,0.6)',
+      fontSize:   '11px',
+      fontWeight: '500',
+      minWidth:   '58px',
+      letterSpacing: '0.3px',
+    })
+
+    this.windSlider = document.createElement('input')
+    this.windSlider.type  = 'range'
+    this.windSlider.min   = '0'
+    this.windSlider.max   = '100'
+    this.windSlider.value = '40'
+    Object.assign(this.windSlider.style, {
+      width:       '100px',
+      accentColor: '#82c8ff',
+      cursor:      'pointer',
+    })
+
+    this._onWindInput = () => {
+      const v = parseInt(this.windSlider.value, 10)
+      this.windLabel.textContent = `Wind ${v}%`
+      this.onWindStrengthCallback?.(v / 100)
+    }
+    this.windSlider.addEventListener('input', this._onWindInput)
+    // Prevent slider drag from reaching the canvas InputManager (which would orbit the camera)
+    this._onWindPointerDown = (e) => e.stopPropagation()
+    this._onWindPointerMove = (e) => e.stopPropagation()
+    this._onWindMouseDown   = (e) => e.stopPropagation()
+    this._onWindMouseMove   = (e) => e.stopPropagation()
+    this.windSlider.addEventListener('pointerdown', this._onWindPointerDown)
+    this.windSlider.addEventListener('pointermove', this._onWindPointerMove)
+    this.windSlider.addEventListener('mousedown',   this._onWindMouseDown)
+    this.windSlider.addEventListener('mousemove',   this._onWindMouseMove)
+
+    windRow.appendChild(this.windLabel)
+    windRow.appendChild(this.windSlider)
 
     // Feature count rows (two rows: small counts and large counts)
     const featRow = document.createElement('div')
@@ -319,6 +376,7 @@ export class UIOverlay {
     this.panel.appendChild(this.progressBar)
     this.panel.appendChild(colorRow)
     this.panel.appendChild(toggleRow)
+    this.panel.appendChild(windRow)
     this.panel.appendChild(featRow)
     this.panel.appendChild(btnRow)
     this.container.appendChild(this.panel)
@@ -364,6 +422,7 @@ export class UIOverlay {
   onToggleBirds(cb: (on: boolean) => void):  void { this.onToggleBirdsCallback   = cb }
   onToggleBees(cb: (on: boolean) => void):   void { this.onToggleBeesCallback    = cb }
   onLoadFeatures(cb: (count: number) => void): void { this.onLoadFeaturesCallback = cb }
+  onWindStrength(cb: (strength: number) => void): void { this.onWindStrengthCallback = cb }
 
   setGrowEnabled(enabled: boolean): void {
     this.growBtn.disabled        = !enabled
@@ -419,6 +478,11 @@ export class UIOverlay {
     this.resetBtn.removeEventListener('click',          this._onResetClick)
     this.birdsToggle.removeEventListener('click',       this._onBirdsClick)
     this.beesToggle.removeEventListener('click',        this._onBeesClick)
+    this.windSlider.removeEventListener('input',        this._onWindInput)
+    this.windSlider.removeEventListener('pointerdown',  this._onWindPointerDown)
+    this.windSlider.removeEventListener('pointermove',  this._onWindPointerMove)
+    this.windSlider.removeEventListener('mousedown',    this._onWindMouseDown)
+    this.windSlider.removeEventListener('mousemove',    this._onWindMouseMove)
     this.featureBtns.forEach((btn, i) => btn.removeEventListener('click', this._onFeatureClicks[i]))
     this.featureBtns     = []
     this._onFeatureClicks = []
@@ -427,6 +491,7 @@ export class UIOverlay {
     this.onToggleBirdsCallback  = null
     this.onToggleBeesCallback   = null
     this.onLoadFeaturesCallback = null
+    this.onWindStrengthCallback = null
     this.tooltipEl.remove()
     this.panel.remove()
   }

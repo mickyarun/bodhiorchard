@@ -23,6 +23,7 @@ import * as pc from 'playcanvas'
 import { Vec3 } from './Vec3'
 import { TreeBranch } from './TreeBranch'
 import { defaultTrunk, defaultBranch, type TreeRules, type Color3, WORLD_SCALE } from './TreeRules'
+import type { WindSystem } from './WindSystem'
 
 const GROW_SPEED             = 200 * WORLD_SCALE
 const DEFAULT_ROOT_COLOR: Color3 = [180, 180, 180]
@@ -77,6 +78,17 @@ export class Tree3DSystem {
   // When false: no emissive component (for use in the main garden engine with PBR lighting)
   private readonly useEmissive: boolean
 
+  // ─── Wind sway state ────────────────────────────────────────────────────────
+  // Whole-tree sway: rotates treeRoot entity at its base, so all branches move together.
+  private windSystem: WindSystem | null = null
+  private windReady = false   // true after growth completes and buildWindEntries() is called
+  private treeWorldX = 0      // world position — used as spatial phase offset for wind
+  private treeWorldZ = 0
+
+  // Static scratch for wind rotation — zero GC in per-frame wind path
+  private static readonly _windQuat = new pc.Quat()
+  private static readonly _windAxis = new pc.Vec3()
+
   constructor(app: pc.AppBase, options?: { useEmissive?: boolean }) {
     this.useEmissive = options?.useEmissive ?? true
     this.trunkRules  = defaultTrunk()
@@ -97,6 +109,10 @@ export class Tree3DSystem {
    */
   startTree(rootColor: Color3 = DEFAULT_ROOT_COLOR, worldX = 0, worldY = 0, worldZ = 0): void {
     this.rootColor = rootColor
+    this.treeWorldX = worldX
+    this.treeWorldZ = worldZ
+    this.windReady = false
+    this.treeRoot.setRotation(new pc.Quat())  // reset rotation before regrow
     this.clearEntities()
     // Destroy old branch materials AFTER entities are gone — safe, explicit, no ref-count issues
     this.destroyMaterials()
@@ -132,6 +148,8 @@ export class Tree3DSystem {
     this.featureBranchCount = 0
     this.featurePrimaryBranches = []
     this.featureEntityMap.clear()
+    this.windReady = false
+    this.treeRoot.setRotation(new pc.Quat())
   }
 
   /** Per-frame update. Returns true while tree is still growing. */
@@ -147,6 +165,9 @@ export class Tree3DSystem {
   }
 
   isGrowing(): boolean { return this.growing }
+
+  /** The root entity that holds all branch entities. Used to parent leaves under the same transform. */
+  getRoot(): pc.Entity { return this.treeRoot }
 
   getRootColor(): Color3 { return this.rootColor }
 
@@ -173,6 +194,44 @@ export class Tree3DSystem {
     const out: Array<{ position: pc.Vec3; size: number }> = []
     this.collectTerminal(this.tree, out, 0)
     return out
+  }
+
+  // ─── Wind ─────────────────────────────────────────────────────────────────────
+
+  /** Connect a WindSystem. Call before or after startTree(). */
+  setWindSystem(wind: WindSystem): void { this.windSystem = wind }
+
+  /**
+   * Enable whole-tree wind sway. Call once after isGrowing() returns false.
+   * The tree sways as a single rigid body by rotating the treeRoot entity
+   * at its base — all branches and sub-entities move together naturally.
+   */
+  buildWindEntries(): void {
+    this.windReady = !!this.tree
+  }
+
+  /**
+   * Apply wind sway to the whole tree. Call every frame after growth is done.
+   * Rotates the treeRoot entity around the wind axis — the entire tree
+   * tilts as one unit, just like a real tree bending at its base.
+   */
+  applyWind(): void {
+    if (!this.windSystem || !this.windReady) return
+
+    const windDir = this.windSystem.getDirection()
+    // Sway axis: perpendicular to wind direction in XZ plane
+    const axis = Tree3DSystem._windAxis.set(
+      -Math.sin(windDir), 0, Math.cos(windDir),
+    )
+
+    // Use tree's actual world position for spatial phase — each tree sways differently
+    const swayDeg = this.windSystem.getBranchSway(
+      this.treeWorldX, this.treeWorldZ, 1.0, 0.0,
+    )
+
+    const windQuat = Tree3DSystem._windQuat
+    windQuat.setFromAxisAngle(axis, swayDeg)
+    this.treeRoot.setRotation(windQuat)
   }
 
   // ─── Rule Scaling ────────────────────────────────────────────────────────────

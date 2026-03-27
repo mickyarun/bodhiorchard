@@ -12,6 +12,7 @@ import { Tree3DSystem } from './Tree3DSystem'
 import { LeafSystem } from './LeafSystem'
 import { BirdSystem } from './BirdSystem'
 import { BeeSystem } from './BeeSystem'
+import { WindSystem } from './WindSystem'
 import { GroundBuilder } from './GroundBuilder'
 import { UIOverlay } from './UIOverlay'
 import { generateFeatures, STATUS_COLOR } from './DemoFeatures'
@@ -53,6 +54,7 @@ export class TreeTestEngine {
   private leaves: LeafSystem | null = null
   private birds: BirdSystem | null = null
   private bees: BeeSystem | null = null
+  private wind: WindSystem | null = null
   private ground: GroundBuilder | null = null
   private ui: UIOverlay | null = null
   private canvas: HTMLCanvasElement | null = null
@@ -101,9 +103,12 @@ export class TreeTestEngine {
     app.root.addChild(groundRoot)
     this.ground.build(groundRoot, 4)
 
-    // Tree + leaf systems
+    // Tree + leaf + wind systems
+    this.wind   = new WindSystem({ strength: 0.4 })
     this.tree   = new Tree3DSystem(app)
-    this.leaves = new LeafSystem(app, this.materials)
+    this.tree.setWindSystem(this.wind)
+    this.leaves = new LeafSystem(app, this.materials, this.tree.getRoot())
+    this.leaves.setWindSystem(this.wind)
 
     // Creature systems — load GLBs in parallel, non-blocking for tree boot
     this.birds = new BirdSystem(app)
@@ -127,6 +132,7 @@ export class TreeTestEngine {
     this.ui.onToggleBirds(enabled => this.birds?.setEnabled(enabled))
     this.ui.onToggleBees(enabled  => this.bees?.setEnabled(enabled))
     this.ui.onLoadFeatures(count  => this.loadFeatures(count))
+    this.ui.onWindStrength(strength => this.wind?.setStrength(strength))
 
     // Start immediately
     this.startGrowth()
@@ -179,6 +185,10 @@ export class TreeTestEngine {
       }
     }
 
+    // Wind: tick global time, then apply sway to branches + leaves
+    this.wind?.update(dt)
+    this.tree?.applyWind()
+
     this.leaves?.update(dt)
     this.birds?.update(dt)
     this.bees?.update(dt)
@@ -195,6 +205,8 @@ export class TreeTestEngine {
 
     // Build entity → feature map for hover hit-testing
     this.tree!.buildFeatureEntityMap()
+    // Build wind sway entries for branch animation
+    this.tree!.buildWindEntries()
 
     if (tips.length === 0) return
 
@@ -322,6 +334,7 @@ export class TreeTestEngine {
     this.birds = null
     this.bees?.destroy()
     this.bees = null
+    this.wind = null
     this.ground?.destroy()
     this.ground = null
     this.ui?.destroy()
