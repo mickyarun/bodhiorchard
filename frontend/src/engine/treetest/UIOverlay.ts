@@ -30,25 +30,28 @@ export class UIOverlay {
   private colorSwatch!: HTMLElement
   private birdsToggle!: HTMLButtonElement
   private beesToggle!: HTMLButtonElement
+  private featureBtns: HTMLButtonElement[] = []
 
   private birdsEnabled = true
   private beesEnabled  = true
 
-  private onGrowCallback:         (() => void) | null = null
-  private onResetCallback:        (() => void) | null = null
-  private onToggleBirdsCallback:  ((on: boolean) => void) | null = null
-  private onToggleBeesCallback:   ((on: boolean) => void) | null = null
+  private onGrowCallback:           (() => void) | null = null
+  private onResetCallback:          (() => void) | null = null
+  private onToggleBirdsCallback:    ((on: boolean) => void) | null = null
+  private onToggleBeesCallback:     ((on: boolean) => void) | null = null
+  private onLoadFeaturesCallback:   ((count: number) => void) | null = null
 
   // Stored listener refs for proper removeEventListener in destroy()
-  private _onColorChange!:  () => void
-  private _onGrowEnter!:    () => void
-  private _onGrowLeave!:    () => void
-  private _onGrowClick!:    () => void
-  private _onResetEnter!:   () => void
-  private _onResetLeave!:   () => void
-  private _onResetClick!:   () => void
-  private _onBirdsClick!:   () => void
-  private _onBeesClick!:    () => void
+  private _onColorChange!:     () => void
+  private _onGrowEnter!:       () => void
+  private _onGrowLeave!:       () => void
+  private _onGrowClick!:       () => void
+  private _onResetEnter!:      () => void
+  private _onResetLeave!:      () => void
+  private _onResetClick!:      () => void
+  private _onBirdsClick!:      () => void
+  private _onBeesClick!:       () => void
+  private _onFeatureClicks:    (() => void)[] = []
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -176,6 +179,71 @@ export class UIOverlay {
     toggleRow.appendChild(this.birdsToggle)
     toggleRow.appendChild(this.beesToggle)
 
+    // Feature count rows (two rows: small counts and large counts)
+    const featRow = document.createElement('div')
+    Object.assign(featRow.style, {
+      display:    'flex',
+      alignItems: 'flex-start',
+      gap:        '6px',
+      pointerEvents: 'auto',
+    })
+
+    const featLabel = document.createElement('span')
+    featLabel.textContent = 'Features'
+    Object.assign(featLabel.style, {
+      color:      'rgba(255,255,255,0.5)',
+      fontSize:   '11px',
+      fontWeight: '500',
+      letterSpacing: '0.4px',
+      paddingTop: '4px',
+    })
+    featRow.appendChild(featLabel)
+
+    const featColumn = document.createElement('div')
+    Object.assign(featColumn.style, {
+      display:       'flex',
+      flexDirection: 'column',
+      gap:           '5px',
+    })
+
+    for (const rowCounts of [[3, 10, 20, 50], [100, 150, 200, 250]] as number[][]) {
+      const row = document.createElement('div')
+      Object.assign(row.style, { display: 'flex', gap: '6px' })
+      for (const count of rowCounts) {
+        const btn = document.createElement('button')
+        btn.textContent = String(count)
+        Object.assign(btn.style, {
+          background:   'rgba(255,255,255,0.1)',
+          color:        '#fff',
+          border:       '1px solid rgba(255,255,255,0.2)',
+          borderRadius: '12px',
+          padding:      '3px 10px',
+          fontSize:     '12px',
+          fontWeight:   '600',
+          cursor:       'pointer',
+          backdropFilter: 'blur(8px)',
+          transition:   'all 0.15s ease',
+          minWidth:     '36px',
+        })
+        const handler = () => {
+          // Highlight active button
+          for (const b of this.featureBtns) {
+            b.style.background = 'rgba(255,255,255,0.1)'
+            b.style.border     = '1px solid rgba(255,255,255,0.2)'
+          }
+          btn.style.background = 'rgba(130,200,255,0.25)'
+          btn.style.border     = '1px solid rgba(130,200,255,0.5)'
+          this.onLoadFeaturesCallback?.(count)
+        }
+        this._onFeatureClicks.push(handler)
+        btn.addEventListener('click', handler)
+        this.featureBtns.push(btn)
+        row.appendChild(btn)
+      }
+      featColumn.appendChild(row)
+    }
+    featRow.appendChild(featColumn)
+
     // Main button row
     const btnRow = document.createElement('div')
     Object.assign(btnRow.style, {
@@ -243,6 +311,7 @@ export class UIOverlay {
     this.panel.appendChild(this.progressBar)
     this.panel.appendChild(colorRow)
     this.panel.appendChild(toggleRow)
+    this.panel.appendChild(featRow)
     this.panel.appendChild(btnRow)
     this.container.appendChild(this.panel)
   }
@@ -251,8 +320,9 @@ export class UIOverlay {
 
   onGrow(callback: () => void): void         { this.onGrowCallback = callback }
   onReset(callback: () => void): void        { this.onResetCallback = callback }
-  onToggleBirds(cb: (on: boolean) => void):  void { this.onToggleBirdsCallback = cb }
-  onToggleBees(cb: (on: boolean) => void):   void { this.onToggleBeesCallback  = cb }
+  onToggleBirds(cb: (on: boolean) => void):  void { this.onToggleBirdsCallback   = cb }
+  onToggleBees(cb: (on: boolean) => void):   void { this.onToggleBeesCallback    = cb }
+  onLoadFeatures(cb: (count: number) => void): void { this.onLoadFeaturesCallback = cb }
 
   setGrowEnabled(enabled: boolean): void {
     this.growBtn.disabled        = !enabled
@@ -283,10 +353,14 @@ export class UIOverlay {
     this.resetBtn.removeEventListener('click',          this._onResetClick)
     this.birdsToggle.removeEventListener('click',       this._onBirdsClick)
     this.beesToggle.removeEventListener('click',        this._onBeesClick)
-    this.onGrowCallback        = null
-    this.onResetCallback       = null
-    this.onToggleBirdsCallback = null
-    this.onToggleBeesCallback  = null
+    this.featureBtns.forEach((btn, i) => btn.removeEventListener('click', this._onFeatureClicks[i]))
+    this.featureBtns     = []
+    this._onFeatureClicks = []
+    this.onGrowCallback         = null
+    this.onResetCallback        = null
+    this.onToggleBirdsCallback  = null
+    this.onToggleBeesCallback   = null
+    this.onLoadFeaturesCallback = null
     this.panel.remove()
   }
 
