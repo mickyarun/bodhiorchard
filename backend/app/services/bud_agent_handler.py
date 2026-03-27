@@ -558,6 +558,52 @@ async def _build_testing_prompt(
     return prompt, working_dir
 
 
+def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Normalize various agent output structures into the expected format.
+
+    The QA agent may produce different key names or nested structures.
+    This function extracts test cases regardless of the format used.
+    """
+    # Try direct keys first (exact match)
+    auto = parsed.get("automation_test_cases", [])
+    manual = parsed.get("manual_test_cases", [])
+    plan = parsed.get("test_execution_plan", "")
+
+    # Fallback: "automation" key with nested sub-keys (e.g. {api: [...], web: [...]})
+    if not auto and "automation" in parsed:
+        auto_section = parsed["automation"]
+        if isinstance(auto_section, list):
+            auto = auto_section
+        elif isinstance(auto_section, dict):
+            # Flatten nested groups: {"api": [...], "web": [...]} → single list
+            for group in auto_section.values():
+                if isinstance(group, list):
+                    auto.extend(group)
+
+    # Fallback: "manual" key
+    if not manual and "manual" in parsed:
+        manual_section = parsed["manual"]
+        if isinstance(manual_section, list):
+            manual = manual_section
+        elif isinstance(manual_section, dict):
+            for group in manual_section.values():
+                if isinstance(group, list):
+                    manual.extend(group)
+
+    # Fallback: "execution_plan" or "test_plan" key
+    if not plan:
+        plan = parsed.get("execution_plan", "") or parsed.get("test_plan", "")
+        if isinstance(plan, dict):
+            # Convert dict plan to markdown
+            plan = str(plan)
+
+    return {
+        "automation_test_cases": auto if isinstance(auto, list) else [],
+        "manual_test_cases": manual if isinstance(manual, list) else [],
+        "test_execution_plan": plan if isinstance(plan, str) else "",
+    }
+
+
 async def _handle_testing_result(
     bud_id: uuid_mod.UUID,
     org_id: uuid_mod.UUID,
@@ -580,11 +626,7 @@ async def _handle_testing_result(
         try:
             parsed = parse_json_response(output)
             if isinstance(parsed, dict):
-                parsed_data = {
-                    "automation_test_cases": parsed.get("automation_test_cases", []),
-                    "manual_test_cases": parsed.get("manual_test_cases", []),
-                    "test_execution_plan": parsed.get("test_execution_plan", ""),
-                }
+                parsed_data = _normalize_testing_output(parsed)
         except Exception:
             logger.warning("testing_output_parse_failed", bud_id=str(bud_id))
 

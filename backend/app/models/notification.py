@@ -20,6 +20,7 @@ class NotificationType(StrEnum):
     APPROVAL_REJECTED = "approval_rejected"
     DEVELOPER_ASSIGNED = "developer_assigned"
     REASSIGNMENT_DONE = "reassignment_done"
+    TESTING_READY = "testing_ready"
 
 
 class Notification(BaseModel):

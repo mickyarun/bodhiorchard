@@ -109,6 +109,15 @@
       <!-- Actions -->
       <div class="d-flex ga-2 mb-4">
         <v-btn
+          v-if="props.testPlanMd"
+          variant="tonal"
+          size="small"
+          prepend-icon="mdi-download"
+          @click="downloadTestPlan"
+        >
+          Download Test Plan
+        </v-btn>
+        <v-btn
           variant="outlined"
           size="small"
           prepend-icon="mdi-content-copy"
@@ -222,6 +231,17 @@ function renderMarkdown(md: string | null): string {
   if (!md) return ''
   const raw = marked.parse(md, { async: false }) as string
   return DOMPurify.sanitize(raw)
+}
+
+function downloadTestPlan(): void {
+  if (!props.testPlanMd) return
+  const budRef = `BUD-${String(props.budNumber ?? 0).padStart(3, '0')}`
+  const blob = new Blob([props.testPlanMd], { type: 'text/markdown' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${budRef}-test-plan.md`
+  a.click()
+  URL.revokeObjectURL(a.href)
 }
 
 function copyBranchName(): void {
