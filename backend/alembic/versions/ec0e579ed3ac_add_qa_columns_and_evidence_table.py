@@ -19,6 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Add testing_ready to notification_type enum
+    op.execute("ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'testing_ready'")
+
     # Add QA columns to bud_documents
     op.add_column('bud_documents', sa.Column('qa_automation_cases', postgresql.JSONB(astext_type=sa.Text()), nullable=True))
     op.add_column('bud_documents', sa.Column('qa_manual_cases', postgresql.JSONB(astext_type=sa.Text()), nullable=True))
