@@ -13,12 +13,25 @@ import * as pc from 'playcanvas'
 import { BuildingFactory } from '../buildings/BuildingFactory'
 import { PATH } from '../assets/AssetManifest'
 import { WALL_COLLISION } from './SceneConfig'
+import { CircularFence } from './CircularFence'
 import type { CollisionBox } from './CollisionSystem'
 
 const WALL_HEIGHT  = 1.29
 const GROUND_SIZE  = 20
 // Linear-space RGB — matches the garden's green ground palette
 const GROUND_COLOR = { r: 0.45, g: 0.65, b: 0.35 }
+
+// ─── Fence config ─────────────────────────────────────────────────────────────
+// Fence ring centered on the 4×4 house mid-point (X=2, Z=2).
+// Radius 4.5 puts the front face at Z≈6.5 — between path end (Z=5.6) and
+// player spawn (Z=7.0), so the player walks through the gate then down the path.
+const FENCE_CENTER_X = 2
+const FENCE_CENTER_Z = 2
+const FENCE_RADIUS   = 4.5
+// Gate angle: shift left to align with the stone path center at X=1.5.
+// sin(θ) = (1.5 − 2) / 4.5  →  θ = arcsin(−0.111) ≈ −0.111 rad
+const FENCE_GATE_ANGLE = Math.asin((1.5 - FENCE_CENTER_X) / FENCE_RADIUS)
+const FENCE_GATE_WIDTH = 1.6   // world-unit gap for player to walk through
 
 /** Door tile is front-wall index=1 → center X=1.5, gap X=1.0–2.0. */
 export const DOOR_ENTER_POS = new pc.Vec3(1.5, 0, 4.7)
@@ -34,6 +47,7 @@ export class ExteriorScene {
     this.buildGround(root)
     await this.buildHouseShell(root)
     await this.buildStonePath(root)
+    this.buildFence(root)
     return this.buildCollisionBoxes()
   }
 
@@ -77,6 +91,18 @@ export class ExteriorScene {
       )
       stone.setLocalScale(1.5, 1.5, 1.5)
     }
+  }
+
+  private buildFence(root: pc.Entity): void {
+    if (!this.factory.materialFactory) return
+    const fence = new CircularFence(this.factory.materialFactory)
+    fence.build(root, {
+      radius:     FENCE_RADIUS,
+      cx:         FENCE_CENTER_X,
+      cz:         FENCE_CENTER_Z,
+      gateAngle:  FENCE_GATE_ANGLE,
+      gateWidth:  FENCE_GATE_WIDTH,
+    })
   }
 
   private buildCollisionBoxes(): CollisionBox[] {
