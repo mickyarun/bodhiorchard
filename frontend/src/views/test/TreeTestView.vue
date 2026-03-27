@@ -3,29 +3,34 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { TreeTestEngine } from '@/engine/treetest'
 
 const containerRef = ref<HTMLElement | null>(null)
-let engine: TreeTestEngine | null = null
+
+// Instantiated outside onMounted so onUnmounted can reference it
+// without needing to register the hook after an await.
+const engine = new TreeTestEngine()
+let observer: ResizeObserver | null = null
+
+// MUST be registered before the first await — Vue loses the active component
+// instance context after any await in setup(), so lifecycle hooks registered
+// after an await silently fail.
+onUnmounted(() => {
+  observer?.disconnect()
+  observer = null
+  engine.destroy()
+})
 
 onMounted(async () => {
   if (!containerRef.value) return
 
-  engine = new TreeTestEngine()
   const rect = containerRef.value.getBoundingClientRect()
   await engine.init(containerRef.value, rect.width, rect.height)
 
-  // Handle resize
-  const observer = new ResizeObserver((entries) => {
+  observer = new ResizeObserver((entries) => {
     for (const entry of entries) {
       const { width, height } = entry.contentRect
-      engine?.resize(width, height)
+      engine.resize(width, height)
     }
   })
   observer.observe(containerRef.value)
-
-  onUnmounted(() => {
-    observer.disconnect()
-    engine?.destroy()
-    engine = null
-  })
 })
 </script>
 

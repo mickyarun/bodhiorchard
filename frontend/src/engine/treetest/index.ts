@@ -10,6 +10,8 @@ import { InputManager } from '../input/InputManager'
 import { MaterialFactory } from '../rendering/MaterialFactory'
 import { Tree3DSystem } from './Tree3DSystem'
 import { LeafSystem } from './LeafSystem'
+import { BirdSystem } from './BirdSystem'
+import { BeeSystem } from './BeeSystem'
 import { GroundBuilder } from './GroundBuilder'
 import { UIOverlay } from './UIOverlay'
 import { clamp, lerp } from '../utils/MathUtils'
@@ -34,6 +36,8 @@ export class TreeTestEngine {
   private materials: MaterialFactory | null = null
   private tree: Tree3DSystem | null = null
   private leaves: LeafSystem | null = null
+  private birds: BirdSystem | null = null
+  private bees: BeeSystem | null = null
   private ground: GroundBuilder | null = null
   private ui: UIOverlay | null = null
   private canvas: HTMLCanvasElement | null = null
@@ -80,15 +84,21 @@ export class TreeTestEngine {
     this.tree   = new Tree3DSystem(app, this.materials)
     this.leaves = new LeafSystem(app, this.materials)
 
+    // Creature systems — load GLBs in parallel, non-blocking for tree boot
+    this.birds = new BirdSystem(app)
+    this.bees  = new BeeSystem(app)
+    await Promise.all([this.birds.init(), this.bees.init()])
+
     this.computeOrbitPosition()
     this.application.setConfig({ onUpdate: (dt) => this.onUpdate(dt) })
 
     // UI
     this.ui = new UIOverlay(container)
-    this.ui.setStage(0)
     this.ui.setGrowLabel('Grow')
     this.ui.onGrow(() => this.startGrowth())
     this.ui.onReset(() => this.resetTree())
+    this.ui.onToggleBirds(enabled => this.birds?.setEnabled(enabled))
+    this.ui.onToggleBees(enabled  => this.bees?.setEnabled(enabled))
 
     // Start immediately
     this.startGrowth()
@@ -108,10 +118,11 @@ export class TreeTestEngine {
     if (!this.tree) return
     this.tree.reset()
     this.leaves?.clear()
+    this.birds?.clear()
+    this.bees?.clear()
     this.leavesSpawned = false
     this.ui?.setGrowEnabled(true)
     this.ui?.setGrowLabel('Grow')
-    this.ui?.setStage(0)
     this.ui?.showProgress(0)
   }
 
@@ -131,11 +142,34 @@ export class TreeTestEngine {
           this.ui?.setGrowEnabled(true)
           this.ui?.setGrowLabel('New Tree')
           this.ui?.showProgress(0)
+
+          // Position creatures at canopy — compute bounding sphere from terminal tips
+          if (tips.length > 0) {
+            let cx = 0, cy = 0, cz = 0
+            let minY = Infinity, maxY = -Infinity
+            for (const t of tips) {
+              cx += t.position.x; cy += t.position.y; cz += t.position.z
+              minY = Math.min(minY, t.position.y)
+              maxY = Math.max(maxY, t.position.y)
+            }
+            cx /= tips.length; cy /= tips.length; cz /= tips.length
+            let maxR = 0
+            for (const t of tips) {
+              const dx = t.position.x - cx, dz = t.position.z - cz
+              maxR = Math.max(maxR, Math.sqrt(dx * dx + dz * dz))
+            }
+            const canopyR      = Math.max(maxR, 1.5)
+            const canopyCenter = new pc.Vec3(cx, cy, cz)
+            this.birds?.setTreeTarget(canopyCenter, canopyR + 1.5, maxY + 0.5)
+            this.bees?.setTreeTarget(canopyCenter,  canopyR,        cy)
+          }
         }
       }
     }
 
     this.leaves?.update(dt)
+    this.birds?.update(dt)
+    this.bees?.update(dt)
     this.handleCamera(dt)
   }
 
@@ -189,6 +223,8 @@ export class TreeTestEngine {
   destroy(): void {
     this.tree?.destroy(); this.tree = null
     this.leaves?.destroy(); this.leaves = null
+    this.birds?.destroy(); this.birds = null
+    this.bees?.destroy(); this.bees = null
     this.ground?.destroy(); this.ground = null
     this.ui?.destroy(); this.ui = null
     this.input?.destroy(); this.input = null
