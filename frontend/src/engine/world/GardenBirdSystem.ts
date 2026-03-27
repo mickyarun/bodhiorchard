@@ -78,8 +78,7 @@ export class GardenBirdSystem {
   private perches: pc.Vec3[] = []   // one per repo tree
 
   // Scratch — zero allocation in update hot path
-  private readonly _lookAt = new pc.Vec3()
-  private readonly _diff   = new pc.Vec3()
+  private readonly _diff = new pc.Vec3()
 
   constructor(app: pc.AppBase) {
     this.root = new pc.Entity('GardenBirds')
@@ -242,8 +241,7 @@ export class GardenBirdSystem {
   private orientTowardTarget(bird: GardenBirdEntry): void {
     this._diff.sub2(bird.target, bird.pos)
     if (this._diff.length() < 0.01) return
-    this._lookAt.add2(bird.pos, this._diff)
-    bird.entity.lookAt(this._lookAt)
+    bird.entity.lookAt(bird.target)
     bird.entity.rotateLocal(0, MODEL_YAW, 0)
   }
 
