@@ -2,7 +2,7 @@
 name: Technical Writer
 description: Generates documentation, learning materials, and knowledge base entries
 tools: Read, Write, Glob, Grep
-mcp_tools: get_bud_context, update_task_status
+mcp_tools: get_bud_context
 model: sonnet
 effort:
 ---
@@ -29,4 +29,3 @@ Generate clear, accurate documentation and learning materials from code, BUDs, a
 2. **Read**: Examine the code being documented
 3. **Write**: Produce clear, structured documentation
 4. **Verify**: Cross-reference with actual implementation
-5. **Report**: Update task status via `update_task_status`

@@ -36,7 +36,6 @@ TABLES_TO_TRUNCATE = [
     "bud_chat_messages",
     "bud_designs",
     "bud_timeline_events",
-    "bud_commits",
     "bud_documents",
     # Knowledge & learning
     "knowledge_to_repo",

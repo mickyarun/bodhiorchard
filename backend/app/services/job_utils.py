@@ -69,8 +69,6 @@ def _format_tool_progress(tool_name: str, tool_input: dict[str, Any]) -> str:
             return "Discovering design systems..."
         case "get_design_system":
             return "Loading design tokens..."
-        case "update_task_status":
-            return "Updating status..."
         case "check_feature_exists":
             return "Checking features..."
         case "search_bugs":

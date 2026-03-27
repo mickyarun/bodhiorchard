@@ -8,6 +8,7 @@ and committing + pushing the result as a PR-ready branch.
 
 import json
 import shutil
+import textwrap
 from pathlib import Path
 
 import structlog
@@ -56,39 +57,25 @@ _BODHIGROVE_CLAUDE_SECTION = """\
 
 This repo is tracked by Bodhigrove. MCP tools are configured in `.mcp.json`.
 
-### IMPORTANT: MCP Setup Required
+### MCP Setup
 
 Before starting any BUD work, verify Bodhigrove MCP is connected:
-1. Check that `update_task_status` tool is available
-2. If NOT available, **STOP** and set up your token:
+1. Check that `get_bud_context` tool is available
+2. If NOT available, set up your token:
    - Go to Bodhigrove Settings → Integrations → MCP Token
    - Copy your token
    - Run: `export BODHIGROVE_MCP_TOKEN="your-token"` in your shell profile
    - Restart Claude Code
 
-**Do NOT proceed with BUD work if MCP tools are unavailable.**
-
 ### Always Do
 
-- **Report progress** via `update_task_status` MCP tool when working on BUD tasks.
-  Use the BUD number as `task_id` (e.g. `"1"` for BUD-001).
 - **Branch naming:** Use `bud-NNN/<description>` branches (e.g. `bud-001/notification-redesign`).
   Pre-commit hooks validate BUD existence.
-- **After each TODO step**, report what you did:
-  ```
-  update_task_status(task_id="1", status="in_progress", message="Implemented auth middleware")
-  ```
-- **On completion**, include effectiveness self-assessment:
-  ```
-  update_task_status(task_id="1", status="completed", message="Done",
-    effectiveness={confidence: 8, complexity: "medium", test_coverage: "partial"})
-  ```
 
 ### Available MCP Tools
 
 | Tool | When to use |
 |------|-------------|
-| `update_task_status` | Report progress on BUD work (in_progress/completed/failed/blocked) |
 | `get_bud_context` | Fetch BUD requirements, tech spec, and designs |
 | `get_knowledge` | Search the organization's knowledge base |
 | `get_design_system` | Fetch design tokens (colors, typography, components) |
@@ -97,11 +84,24 @@ Before starting any BUD work, verify Bodhigrove MCP is connected:
 
 - Commits on `bud-NNN/` branches are automatically tracked by Bodhigrove
 - Post-commit hooks report author, files, and message to the team dashboard
+
+### Claude Code Hooks (Automatic)
+
+Claude Code hooks in `.claude/hooks/` run automatically — no developer action needed:
+- **SessionStart**: Auto-detects your identity and active BUD from branch name
+- **PostToolUse**: Automatically tracks commits and file changes
+- **Stop**: Reports activity summaries after each Claude response
+- **UserPromptSubmit**: Detects BUD references in your prompts
+
+These hooks use your `BODHIGROVE_MCP_TOKEN` for authentication.
+If the token is not set, hooks silently do nothing.
 <!-- bodhigrove:end -->
 """
 
 assert _BODHIGROVE_CLAUDE_SECTION.lstrip().startswith(_BG_START), "Marker mismatch"
 assert _BODHIGROVE_CLAUDE_SECTION.rstrip().endswith(_BG_END), "Marker mismatch"
+
+_CLAUDE_HOOK_MARKER = "# bodhigrove-claude-hook"
 
 _SETUP_FILES = [
     ".claude/settings.json",
@@ -109,6 +109,17 @@ _SETUP_FILES = [
     ".gitignore",
     ".githooks/pre-commit",
     ".githooks/post-commit",
+    ".claude/hooks/_common.sh",
+    ".claude/hooks/session-start.sh",
+    ".claude/hooks/session-end.sh",
+    ".claude/hooks/post-commit-track.sh",
+    ".claude/hooks/file-change-track.sh",
+    ".claude/hooks/tool-error-track.sh",
+    ".claude/hooks/api-error-track.sh",
+    ".claude/hooks/activity-report.sh",
+    ".claude/hooks/detect-bud-prompt.sh",
+    ".claude/hooks/subagent-start.sh",
+    ".claude/hooks/subagent-stop.sh",
     "package.json",
     "CLAUDE.md",
     ".claude/skills/",
@@ -215,7 +226,8 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
 
     # Detect current branch to avoid worktree conflict
     current_branch, _, _ = await run_git(
-        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path,
+        ["rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo_path,
     )
     current_branch = current_branch.strip()
 
@@ -275,7 +287,6 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
         True if the file was written (changed), False if already up to date.
     """
     import contextlib
-    import shutil
 
     repo = Path(repo_path)
     source_bridge = Path(__file__).resolve().parents[1] / "mcp" / "stdio_bridge.py"
@@ -363,52 +374,56 @@ def _build_pre_commit_hook(backend_url: str, org_id: str) -> str:
 def _build_post_commit_hook(backend_url: str, org_id: str) -> str:
     """Build the post-commit hook script content.
 
-    Reports each commit to Bodhigrove for tracking. Fire-and-forget
-    (backgrounded, never blocks the commit). Uses printf for safe JSON
-    construction to avoid shell injection from commit messages.
+    Reports each commit to Bodhigrove via /mcp/dev-activity (authenticated).
+    Sources _common.sh from .claude/hooks/ for shared utilities.
+    Fire-and-forget (backgrounded, never blocks the commit).
 
     Args:
         backend_url: Public URL of the Bodhigrove backend.
-        org_id: Organization UUID string (baked into hook for org scoping).
+        org_id: Organization UUID string (unused, kept for API compat).
 
     Returns:
         Shell script string.
     """
-    # Uses a heredoc-style JSON body via printf to avoid shell injection.
-    # The commit message is truncated and special chars are escaped via sed.
-    return (
-        f"{_HOOK_MARKER} (post-commit)\n"
-        "BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)\n"
-        "BUD_NUM=$(echo \"$BRANCH\" | sed -n 's/^bud-\\([0-9]*\\)\\/.*/\\1/p')\n"
-        '[ -z "$BUD_NUM" ] && exit 0\n'
-        "\n"
-        "SHA=$(git rev-parse HEAD)\n"
-        "# Escape special JSON chars in commit message to prevent injection\n"
-        "MSG=$(git log -1 --format=%s | head -c 400 | "
-        "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
-        "FILES=$(git diff-tree --no-commit-id --name-only -r HEAD | tr '\\n' ',' | "
-        "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
-        "REPO_PATH=$(git rev-parse --show-toplevel | "
-        "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
-        "AUTHOR=$(git log -1 --format='%an' | head -c 200 | "
-        "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
-        "EMAIL=$(git log -1 --format='%ae' | head -c 200 | "
-        "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
-        "BRANCH_ESC=$(echo \"$BRANCH\" | "
-        "sed 's/\\\\\\\\/\\\\\\\\\\\\\\\\/g; s/\"/\\\\\\\\\"/g')\n"
-        "\n"
-        "# Build JSON safely with printf\n"
-        'JSON=$(printf \'{"bud_number":%s,"sha":"%s","message":"%s",'
-        '"files":"%s","repo_path":"%s","branch":"%s",'
-        '"author":"%s","author_email":"%s"}\''
-        ' "$BUD_NUM" "$SHA" "$MSG" "$FILES" "$REPO_PATH" "$BRANCH_ESC"'
-        ' "$AUTHOR" "$EMAIL")\n'
-        "\n"
-        f'curl -s -X POST "{backend_url}/api/v1/public/{org_id}/bud-commit" \\\n'
-        '  -H "Content-Type: application/json" \\\n'
-        '  -d "$JSON" \\\n'
-        "  >/dev/null 2>&1 &\n"
-    )
+    return textwrap.dedent("""\
+        {marker} (post-commit)
+        # Source shared utilities from Claude hooks dir
+        HOOKS_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/hooks"
+        if [ -f "$HOOKS_DIR/_common.sh" ]; then
+          . "$HOOKS_DIR/_common.sh"
+        else
+          exit 0
+        fi
+
+        BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+        BUD_NUM=$(get_bud_from_branch)
+        SHA=$(git rev-parse HEAD)
+        EMAIL=$(get_git_email)
+        MSG=$(git log -1 --format=%s | head -c 400)
+        FILES=$(git diff-tree --no-commit-id --name-only -r HEAD | tr '\\n' ',')
+        REPO=$(git rev-parse --show-toplevel 2>/dev/null)
+
+        # Find active Claude session ID from session temp file
+        ACTIVE_SID=""
+        for SF in /tmp/.bodhigrove-session-*.json; do
+          [ -f "$SF" ] || continue
+          ACTIVE_SID=$(python3 -c "
+import json
+try:
+    d=json.load(open('$SF')); print(d.get('session_id',''))
+except: pass
+" 2>/dev/null)
+          [ -n "$ACTIVE_SID" ] && break
+        done
+        SESSION_ID="${{ACTIVE_SID:-git-hook}}"
+
+        J=$(build_json session_id "$SESSION_ID" event_type commit \\
+          author_email "$EMAIL" branch "$BRANCH" repo_path "$REPO" \\
+          message "$MSG" commit_sha "$SHA" files_changed "$FILES")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+    """).format(marker=_HOOK_MARKER)
 
 
 async def install_hooks(repo_path: str, backend_url: str, org_id: str) -> bool:
@@ -464,6 +479,670 @@ async def install_hooks(repo_path: str, backend_url: str, org_id: str) -> bool:
     await run_git(["config", "core.hooksPath", ".githooks"], cwd=repo_path)
 
     logger.info("hooks_installed", repo=repo_path, changed=changed)
+    return changed
+
+
+# ── Claude Code hook installation ─────────────────────────────────
+
+# Hook scripts are stored as plain text with {backend_url} as the only
+# substitution. This avoids the f-string + shell escaping nightmare that
+# caused 422 errors from malformed JSON.
+
+
+def _build_common_sh(backend_url: str) -> str:
+    """Build the shared utility script sourced by all hooks."""
+    return textwrap.dedent("""\
+        {marker}
+        # Shared utilities for Bodhigrove hooks.
+        # Sourced by individual hook scripts — not executed directly.
+
+        BACKEND_URL="{url}"
+        TOKEN="${{BODHIGROVE_MCP_TOKEN:-}}"
+
+        escape_json() {{
+          printf '%s' "$1" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\\n\\r\\t' '   '
+        }}
+
+        sanitize_path() {{
+          printf '%s' "$1" | tr -cd 'a-zA-Z0-9_-'
+        }}
+
+        get_sid() {{
+          printf '%s' "$1" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4
+        }}
+
+        get_bud_from_branch() {{
+          RAW=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | \\
+            sed -n 's/^bud-\\([0-9][0-9]*\\)\\/.*/\\1/p')
+          # Strip leading zeros for valid JSON numbers (POSIX)
+          [ -n "$RAW" ] && printf '%d' "$RAW" || echo ""
+        }}
+
+        get_git_email() {{
+          git config user.email 2>/dev/null || echo ""
+        }}
+
+        get_git_name() {{
+          git config user.name 2>/dev/null || echo ""
+        }}
+
+        # Build JSON from key=value pairs. Usage: build_json key1 val1 key2 val2 ...
+        build_json() {{
+          J='{{'
+          SEP=""
+          while [ $# -ge 2 ]; do
+            KEY="$1"; VAL="$2"; shift 2
+            if [ "$KEY" = "_int" ]; then
+              # Next pair is an integer field: _int bud_number 42
+              KEY="$VAL"; VAL="$1"; shift
+              J="$J${{SEP}}\\"$KEY\\":$VAL"
+            else
+              J="$J${{SEP}}\\"$KEY\\":\\"$(escape_json "$VAL")\\""
+            fi
+            SEP=","
+          done
+          printf '%s}}' "$J"
+        }}
+
+        # Fire-and-forget POST with Bearer auth. No-op if no token.
+        bg_post() {{
+          [ -z "$TOKEN" ] && return 0
+          curl -s -X POST "$BACKEND_URL/mcp/dev-activity" \\
+            -H "Content-Type: application/json" \\
+            -H "Authorization: Bearer $TOKEN" \\
+            --connect-timeout 5 --max-time 10 \\
+            -d "$1" >/dev/null 2>&1 &
+        }}
+
+        # Read a field from the session context file
+        session_file() {{
+          echo "${{TMPDIR:-/tmp}}/.bodhigrove-session-$1.json"
+        }}
+
+        session_get() {{
+          # session_get <session_id> <field>
+          F=$(session_file "$1")
+          PAT=$(printf '"%s":"[^"]*"' "$2")
+          [ -f "$F" ] && grep -o "$PAT" "$F" | head -1 | cut -d'"' -f4
+        }}
+
+        # Re-detect BUD from current branch and update session file
+        refresh_session_bud() {{
+          SID="$1"
+          SF=$(session_file "$SID")
+          [ -f "$SF" ] || return 0
+          NEW_BUD=$(get_bud_from_branch)
+          OLD_BUD=$(session_get "$SID" bud_number)
+          if [ "$NEW_BUD" != "$OLD_BUD" ] && [ -n "$NEW_BUD" ]; then
+            TMP="$SF.tmp"
+            sed 's/"bud_number":"[^"]*"/"bud_number":"'"$NEW_BUD"'"/' \\
+              "$SF" > "$TMP" 2>/dev/null && mv "$TMP" "$SF"
+            rm -f "$TMP"
+          fi
+          # Also update branch
+          CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+          OLD_BRANCH=$(session_get "$SID" branch)
+          if [ "$CUR_BRANCH" != "$OLD_BRANCH" ]; then
+            TMP="$SF.tmp"
+            sed 's/"branch":"[^"]*"/"branch":"'"$(escape_json "$CUR_BRANCH")"'"/' \\
+              "$SF" > "$TMP" 2>/dev/null && mv "$TMP" "$SF"
+            rm -f "$TMP"
+          fi
+        }}
+    """).format(marker=_CLAUDE_HOOK_MARKER, url=backend_url)
+
+
+def _build_session_start_sh() -> str:
+    """Build the SessionStart hook — injects identity and BUD context."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+        [ -z "$SESSION_ID" ] && exit 0
+
+        NAME=$(get_git_name)
+        EMAIL=$(get_git_email)
+        BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        BUD_NUM=$(get_bud_from_branch)
+
+        # Write session context for later hooks (escape values for safe JSON)
+        ENAME=$(escape_json "$NAME")
+        EEMAIL=$(escape_json "$EMAIL")
+        EBRANCH=$(escape_json "$BRANCH")
+        SF=$(session_file "$SESSION_ID")
+        printf '{{"session_id":"%s","name":"%s","email":"%s","branch":"%s","bud_number":"%s"}}' \\
+          "$SESSION_ID" "$ENAME" "$EEMAIL" "$EBRANCH" "$BUD_NUM" > "$SF"
+
+        # Inject context into Claude
+        echo "Developer: $NAME ($EMAIL)"
+        echo "Branch: $BRANCH"
+        if [ -n "$BUD_NUM" ]; then
+          echo "Active BUD: BUD-$(printf '%03d' "$BUD_NUM")"
+        else
+          echo "No active BUD from branch. Mention a BUD in your prompt if working on one."
+        fi
+
+        # Extract model and source from Claude Code input
+        MODEL=$(printf '%s' "$INPUT" | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('model',''))
+except: pass
+" 2>/dev/null)
+
+        # Report to backend with model in metadata
+        J=$(build_json session_id "$SESSION_ID" event_type session_start \\
+          author_email "$EMAIL" branch "$BRANCH" \\
+          repo_path "$(pwd)" message "Session started")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        [ -n "$MODEL" ] && \\
+          J=$(printf '%s' "$J" | \\
+          sed "s/}}$/,\\"metadata\\":{{\\"model\\":\\"$(escape_json "$MODEL")\\"}}}}/")
+        bg_post "$J"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+def _build_session_end_sh() -> str:
+    """Build the SessionEnd hook — reports session end."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+        [ -z "$SESSION_ID" ] && exit 0
+
+        EMAIL=$(session_get "$SESSION_ID" email)
+        BUD_NUM=$(session_get "$SESSION_ID" bud_number)
+        BRANCH=$(session_get "$SESSION_ID" branch)
+        BRANCH="${{BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}"
+        [ -z "$BUD_NUM" ] && BUD_NUM=$(get_bud_from_branch)
+
+        J=$(build_json session_id "$SESSION_ID" event_type session_end \\
+          author_email "$EMAIL" branch "$BRANCH" \\
+          repo_path "$(pwd)" message "Session ended")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+
+        # Clean up session file
+        rm -f "$(session_file "$SESSION_ID")"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+def _build_post_commit_track_sh() -> str:
+    """Build the PostToolUse(Bash) hook — tracks git commits."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+
+        # Only process git commit commands
+        CMD=$(printf '%s' "$INPUT" | grep -o '"command":"[^"]*"' | head -1 | cut -d'"' -f4)
+        case "$CMD" in *git\\ commit*|*git\\ -c*commit*) ;; *) exit 0 ;; esac
+
+        SHA=$(git rev-parse HEAD 2>/dev/null || exit 0)
+        BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        BUD_NUM=$(get_bud_from_branch)
+        EMAIL=$(get_git_email)
+        MSG=$(git log -1 --format=%s 2>/dev/null | head -c 400)
+        FILES=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | tr '\\n' ',')
+        REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+
+        J=$(build_json session_id "$SESSION_ID" event_type commit \\
+          author_email "$EMAIL" branch "$BRANCH" repo_path "$REPO" \\
+          message "$MSG" commit_sha "$SHA" files_changed "$FILES")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+def _build_file_change_track_sh() -> str:
+    """Build the PostToolUse(Edit|Write) hook — tracks file changes."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+
+        # Extract file_path from tool_input
+        FPATH=$(printf '%s' "$INPUT" | grep -o '"file_path":"[^"]*"' | head -1 | cut -d'"' -f4)
+        [ -z "$FPATH" ] && exit 0
+
+        TOOL=$(printf '%s' "$INPUT" | grep -o '"tool_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+        refresh_session_bud "$SESSION_ID"
+        EMAIL=$(session_get "$SESSION_ID" email)
+        BUD_NUM=$(session_get "$SESSION_ID" bud_number)
+        BRANCH=$(session_get "$SESSION_ID" branch)
+        BRANCH="${{BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}"
+        [ -z "$BUD_NUM" ] && BUD_NUM=$(get_bud_from_branch)
+        REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+        J=$(build_json session_id "$SESSION_ID" event_type file_change \\
+          author_email "$EMAIL" branch "$BRANCH" repo_path "$REPO" \\
+          file_path "$FPATH" message "$TOOL: $FPATH")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+def _build_tool_error_track_sh() -> str:
+    """Build the PostToolUseFailure hook — tracks tool errors."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+
+        TOOL=$(printf '%s' "$INPUT" | grep -o '"tool_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+        ERR=$(printf '%s' "$INPUT" | grep -o '"error":"[^"]*"' | \\
+          head -1 | cut -d'"' -f4 | head -c 500)
+        EMAIL=$(session_get "$SESSION_ID" email)
+        BUD_NUM=$(session_get "$SESSION_ID" bud_number)
+        BRANCH=$(session_get "$SESSION_ID" branch)
+        BRANCH="${{BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}"
+        [ -z "$BUD_NUM" ] && BUD_NUM=$(get_bud_from_branch)
+
+        J=$(build_json session_id "$SESSION_ID" event_type tool_error \\
+          author_email "$EMAIL" branch "$BRANCH" repo_path "$(pwd)" \\
+          message "$TOOL failed: $ERR")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+def _build_api_error_track_sh() -> str:
+    """Build the StopFailure hook — tracks API errors."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+
+        ERR=$(printf '%s' "$INPUT" | grep -o '"error":"[^"]*"' | head -1 | cut -d'"' -f4)
+        EMAIL=$(session_get "$SESSION_ID" email)
+        BRANCH=$(session_get "$SESSION_ID" branch)
+        BRANCH="${{BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}"
+        BUD_NUM=$(session_get "$SESSION_ID" bud_number)
+        [ -z "$BUD_NUM" ] && BUD_NUM=$(get_bud_from_branch)
+
+        J=$(build_json session_id "$SESSION_ID" event_type api_error \\
+          author_email "$EMAIL" branch "$BRANCH" repo_path "$(pwd)" message "API: $ERR")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+def _build_activity_report_sh() -> str:
+    """Build the Stop hook — reports activity summary."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+
+        refresh_session_bud "$SESSION_ID"
+        EMAIL=$(session_get "$SESSION_ID" email)
+        BUD_NUM=$(session_get "$SESSION_ID" bud_number)
+        BRANCH=$(session_get "$SESSION_ID" branch)
+        BRANCH="${{BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}"
+        [ -z "$BUD_NUM" ] && BUD_NUM=$(get_bud_from_branch)
+
+        # Extract summary from last assistant message (handles escapes, newlines)
+        SUMMARY=$(printf '%s' "$INPUT" | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('last_assistant_message','')[:500])
+except: pass
+" 2>/dev/null)
+
+        J=$(build_json session_id "$SESSION_ID" event_type activity_summary \\
+          author_email "$EMAIL" branch "$BRANCH" \\
+          repo_path "$(pwd)" message "$SUMMARY")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+def _build_detect_bud_prompt_sh() -> str:
+    """Build the UserPromptSubmit hook — detects BUD references + captures prompt."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+
+        # Extract prompt text (handles escapes via Python)
+        PROMPT=$(printf '%s' "$INPUT" | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('prompt','')[:500])
+except: pass
+" 2>/dev/null)
+
+        # Detect BUD references in prompt
+        RAW_REF=$(echo "$PROMPT" | grep -ioE 'bud[- #]*([0-9]+)' | head -1 | grep -oE '[0-9]+')
+        BUD_REF=$([ -n "$RAW_REF" ] && printf '%d' "$RAW_REF" || echo "")
+
+        if [ -n "$BUD_REF" ]; then
+          SF=$(session_file "$SESSION_ID")
+          if [ -f "$SF" ]; then
+            TMP="$SF.tmp"
+            sed 's/"bud_number":"[^"]*"/"bud_number":"'"$BUD_REF"'"/' \\
+              "$SF" > "$TMP" 2>/dev/null && mv "$TMP" "$SF"
+            rm -f "$TMP"
+          fi
+        fi
+
+        # Post user prompt event (captures what the developer asked)
+        [ -z "$PROMPT" ] && exit 0
+        EMAIL=$(session_get "$SESSION_ID" email)
+        BUD_NUM=$(session_get "$SESSION_ID" bud_number)
+        [ -z "$BUD_NUM" ] && BUD_NUM="$BUD_REF"
+        BRANCH=$(session_get "$SESSION_ID" branch)
+        BRANCH="${{BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}"
+
+        J=$(build_json session_id "$SESSION_ID" event_type user_prompt \\
+          author_email "$EMAIL" branch "$BRANCH" \\
+          repo_path "$(pwd)" message "$PROMPT")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+def _build_subagent_start_sh() -> str:
+    """Build the SubagentStart hook — tracks when Claude spawns sub-agents."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+
+        AGENT_TYPE=$(printf '%s' "$INPUT" | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('agent_type',''))
+except: pass
+" 2>/dev/null)
+        [ -z "$AGENT_TYPE" ] && exit 0
+
+        EMAIL=$(session_get "$SESSION_ID" email)
+        BUD_NUM=$(session_get "$SESSION_ID" bud_number)
+        BRANCH=$(session_get "$SESSION_ID" branch)
+        BRANCH="${{BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}"
+        [ -z "$BUD_NUM" ] && BUD_NUM=$(get_bud_from_branch)
+
+        J=$(build_json session_id "$SESSION_ID" event_type subagent_start \\
+          author_email "$EMAIL" branch "$BRANCH" \\
+          repo_path "$(pwd)" message "Agent: $AGENT_TYPE")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+def _build_subagent_stop_sh() -> str:
+    """Build the SubagentStop hook — tracks sub-agent completion with summary."""
+    return textwrap.dedent("""\
+        {marker}
+        #!/bin/sh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        . "$SCRIPT_DIR/_common.sh"
+
+        INPUT=$(cat)
+        SESSION_ID=$(sanitize_path "$(get_sid "$INPUT")")
+
+        AGENT_TYPE=$(printf '%s' "$INPUT" | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('agent_type',''))
+except: pass
+" 2>/dev/null)
+        SUMMARY=$(printf '%s' "$INPUT" | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('last_assistant_message','')[:500])
+except: pass
+" 2>/dev/null)
+
+        EMAIL=$(session_get "$SESSION_ID" email)
+        BUD_NUM=$(session_get "$SESSION_ID" bud_number)
+        BRANCH=$(session_get "$SESSION_ID" branch)
+        BRANCH="${{BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}"
+        [ -z "$BUD_NUM" ] && BUD_NUM=$(get_bud_from_branch)
+
+        MSG="Agent $AGENT_TYPE done"
+        [ -n "$SUMMARY" ] && MSG="$SUMMARY"
+
+        J=$(build_json session_id "$SESSION_ID" event_type subagent_stop \\
+          author_email "$EMAIL" branch "$BRANCH" \\
+          repo_path "$(pwd)" message "$MSG")
+        [ -n "$BUD_NUM" ] && \\
+          J=$(printf '%s' "$J" | sed "s/}}$/,\\"bud_number\\":$BUD_NUM}}/")
+        bg_post "$J"
+        exit 0
+    """).format(marker=_CLAUDE_HOOK_MARKER)
+
+
+async def install_claude_hooks(repo_path: str, backend_url: str) -> bool:
+    """Install Claude Code hook scripts in a repository.
+
+    Writes hooks to ``.claude/hooks/`` and configures them in
+    ``.claude/settings.json``. Scripts use ``$BODHIGROVE_MCP_TOKEN``
+    for auth — no org_id baked in.
+
+    Idempotent: checks for marker string before writing.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+        backend_url: Public URL of the Bodhigrove backend.
+
+    Returns:
+        True if hook files were written (changed), False if already up to date.
+    """
+    repo = Path(repo_path)
+    hooks_dir = repo / ".claude" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+
+    scripts = [
+        ("_common.sh", _build_common_sh(backend_url)),
+        ("session-start.sh", _build_session_start_sh()),
+        ("session-end.sh", _build_session_end_sh()),
+        ("post-commit-track.sh", _build_post_commit_track_sh()),
+        ("file-change-track.sh", _build_file_change_track_sh()),
+        ("tool-error-track.sh", _build_tool_error_track_sh()),
+        ("api-error-track.sh", _build_api_error_track_sh()),
+        ("activity-report.sh", _build_activity_report_sh()),
+        ("detect-bud-prompt.sh", _build_detect_bud_prompt_sh()),
+        ("subagent-start.sh", _build_subagent_start_sh()),
+        ("subagent-stop.sh", _build_subagent_stop_sh()),
+    ]
+
+    changed = False
+    for filename, content in scripts:
+        hook_path = hooks_dir / filename
+        if hook_path.exists():
+            existing = hook_path.read_text()
+            if _CLAUDE_HOOK_MARKER in existing and existing.strip() == content.strip():
+                continue
+        hook_path.write_text(content)
+        hook_path.chmod(0o755)
+        changed = True
+
+    # Add hooks configuration to .claude/settings.json
+    import contextlib
+
+    settings_path = repo / ".claude" / "settings.json"
+    settings: dict = {}
+    if settings_path.exists():
+        with contextlib.suppress(json.JSONDecodeError, OSError):
+            settings = json.loads(settings_path.read_text())
+
+    hooks_config = {
+        "SessionStart": [
+            {
+                "matcher": "startup",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/session-start.sh",
+                        "timeout": 10,
+                    },
+                ],
+            },
+        ],
+        "SessionEnd": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/session-end.sh",
+                        "timeout": 10,
+                    },
+                ],
+            },
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/post-commit-track.sh",
+                        "timeout": 15,
+                    },
+                ],
+            },
+            {
+                "matcher": "Edit|Write",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/file-change-track.sh",
+                        "timeout": 10,
+                    },
+                ],
+            },
+        ],
+        "PostToolUseFailure": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/tool-error-track.sh",
+                        "timeout": 10,
+                    },
+                ],
+            },
+        ],
+        "StopFailure": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/api-error-track.sh",
+                        "timeout": 10,
+                    },
+                ],
+            },
+        ],
+        "Stop": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/activity-report.sh",
+                        "timeout": 10,
+                    },
+                ],
+            },
+        ],
+        "UserPromptSubmit": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/detect-bud-prompt.sh",
+                        "timeout": 5,
+                    },
+                ],
+            },
+        ],
+        "SubagentStart": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/subagent-start.sh",
+                        "timeout": 5,
+                    },
+                ],
+            },
+        ],
+        "SubagentStop": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "sh .claude/hooks/subagent-stop.sh",
+                        "timeout": 10,
+                    },
+                ],
+            },
+        ],
+    }
+
+    if settings.get("hooks") != hooks_config:
+        settings["hooks"] = hooks_config
+        settings_path.write_text(json.dumps(settings, indent=2))
+        changed = True
+
+    logger.info("claude_hooks_installed", repo=repo_path, changed=changed)
     return changed
 
 
@@ -664,14 +1343,17 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
 
             await run_git(["checkout", base_branch], cwd=repo_path)
             _, merge_err, merge_rc = await run_git(
-                ["merge", _SETUP_BRANCH, "--no-edit"], cwd=repo_path,
+                ["merge", _SETUP_BRANCH, "--no-edit"],
+                cwd=repo_path,
             )
             if merge_rc == 0:
                 await run_git(["branch", "-d", _SETUP_BRANCH], cwd=repo_path)
                 logger.info("bodhigrove_setup_merged_locally", repo=repo_path)
                 return _SETUP_BRANCH
             logger.warning(
-                "bodhigrove_setup_merge_failed", repo=repo_path, error=merge_err[:200],
+                "bodhigrove_setup_merge_failed",
+                repo=repo_path,
+                error=merge_err[:200],
             )
             return None
 
@@ -686,7 +1368,8 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
         wt_main = Path(repo_path) / ".bodhigrove" / "main"
         if wt_main.exists():
             await run_git(
-                ["worktree", "remove", str(wt_main), "--force"], cwd=repo_path,
+                ["worktree", "remove", str(wt_main), "--force"],
+                cwd=repo_path,
             )
         await run_git(["checkout", base_branch], cwd=repo_path)
 

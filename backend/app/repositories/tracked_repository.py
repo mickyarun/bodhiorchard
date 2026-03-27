@@ -179,6 +179,24 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         )
         return list(result.all())
 
+    async def get_paths_by_ids(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Batch-resolve repo IDs to filesystem paths.
+
+        Args:
+            ids: Set of repository UUIDs.
+
+        Returns:
+            Dict mapping repo UUID → path string.
+        """
+        if not ids:
+            return {}
+        result = await self._db.execute(
+            select(TrackedRepository.id, TrackedRepository.path).where(
+                TrackedRepository.id.in_(ids)
+            )
+        )
+        return {row.id: row.path for row in result.all()}
+
     async def get_active_id_path_name(
         self,
     ) -> list[tuple[uuid.UUID, str, str]]:

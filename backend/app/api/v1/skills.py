@@ -146,6 +146,35 @@ async def get_scan_status(
     return scan_progress
 
 
+@router.post(
+    "/scan/{scan_id}/cancel",
+    response_model=ScanStatus,
+    dependencies=[Depends(require_permissions("org:edit_settings"))],
+)
+async def cancel_scan_endpoint(
+    scan_id: str,
+    current_user: User = Depends(get_current_user),
+) -> ScanStatus:
+    """Cancel a running scan, marking it as failed.
+
+    Args:
+        scan_id: The scan ID to cancel.
+        current_user: The authenticated user.
+
+    Returns:
+        Updated ScanStatus with status='failed'.
+    """
+    from app.services.scan_progress import cancel_scan
+
+    result = await cancel_scan(scan_id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan not found: {scan_id}",
+        )
+    return result
+
+
 @router.get("/profiles", response_model=list[SkillProfileRead])
 async def list_profiles(
     current_user: User = Depends(get_current_user),

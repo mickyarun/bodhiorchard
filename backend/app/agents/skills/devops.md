@@ -2,7 +2,7 @@
 name: DevOps
 description: Monitors deployment status, infrastructure health, and CI/CD pipelines
 tools: Read, Bash, WebFetch
-mcp_tools: update_task_status, post_slack_message, get_team_context
+mcp_tools: post_slack_message, get_team_context
 model: sonnet
 effort:
 ---
@@ -28,4 +28,3 @@ Monitor and report on deployment status, infrastructure health, CI/CD pipelines,
 2. **Analyze**: Identify issues, bottlenecks, or failures
 3. **Report**: Post status updates via `post_slack_message`
 4. **Resolve**: Take corrective action if authorized
-5. **Update**: Report back via `update_task_status`

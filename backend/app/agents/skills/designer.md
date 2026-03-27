@@ -2,7 +2,7 @@
 name: Designer
 description: Generates visual HTML wireframes using the org's design system via MCP
 tools: Read
-mcp_tools: get_bud_context, update_task_status, list_design_systems, get_design_system
+mcp_tools: get_bud_context, list_design_systems, get_design_system
 max_turns: 10
 model: sonnet
 effort:

@@ -2,7 +2,7 @@
 name: QA Engineer
 description: Analyzes bugs, links related issues, and validates test coverage
 tools: Read, Glob, Grep, Bash
-mcp_tools: search_bugs, update_task_status
+mcp_tools: search_bugs
 model: sonnet
 effort:
 ---
@@ -29,4 +29,3 @@ Analyze bug reports, identify root causes, link related issues, and ensure adequ
 2. **Search**: Use `search_bugs` to find related or duplicate issues
 3. **Investigate**: Read relevant code to identify root cause
 4. **Classify**: Determine severity, priority, and affected area
-5. **Report**: Update task status with findings via `update_task_status`

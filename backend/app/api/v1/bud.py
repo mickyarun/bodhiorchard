@@ -475,10 +475,10 @@ async def list_commit_repos(
     a confirmation dialog of which repos have been touched.
     """
 
-    from app.repositories.bud_commit import BUDCommitRepository
+    from app.repositories.dev_activity import DevActivityLogRepository
 
-    commit_repo = BUDCommitRepository(db, org_id=current_user.org_id)
-    summaries = await commit_repo.list_repos_for_bud(bud_id)
+    activity_repo = DevActivityLogRepository(db, org_id=current_user.org_id)
+    summaries = await activity_repo.list_commit_repos_for_bud(bud_id)
 
     return [
         CommitRepoRead(
@@ -512,17 +512,15 @@ async def get_dev_activity(
 ) -> DevActivityResponse:
     """Get development activity summary: commits, MCP updates, and stats."""
 
-    from app.repositories.bud_commit import BUDCommitRepository
     from app.repositories.dev_activity import DevActivityLogRepository
 
-    commit_repo = BUDCommitRepository(db, org_id=current_user.org_id)
     activity_repo = DevActivityLogRepository(db, org_id=current_user.org_id)
     task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
 
     # Sequential — AsyncSession is not safe for concurrent use
-    commits = await commit_repo.list_for_bud(bud_id, limit=50)
+    commits = await activity_repo.list_commits_for_bud(bud_id, limit=50)
     activities = await activity_repo.list_for_bud(bud_id, limit=50)
-    repo_summaries = await commit_repo.list_repos_for_bud(bud_id)
+    repo_summaries = await activity_repo.list_commit_repos_for_bud(bud_id)
     agent_tasks = await task_repo.list_for_bud(bud_id)
 
     # Count unique files across all commits
@@ -531,10 +529,10 @@ async def get_dev_activity(
         if c.files_changed:
             all_files.update(_parse_files_changed(c.files_changed))
 
-    # Calculate AI effectiveness
+    # Calculate AI effectiveness (data-driven, no separate commits list)
     from app.services.dev_stats import calculate_effectiveness
 
-    eff = calculate_effectiveness(activities, commits, agent_tasks)
+    eff = calculate_effectiveness(activities, agent_tasks)
 
     # Build commit reads with user_name resolved
     commit_user_ids = {c.user_id for c in commits if c.user_id}
@@ -545,15 +543,24 @@ async def get_dev_activity(
         user_repo = UserRepository(db)
         user_names = await user_repo.get_names_by_ids(commit_user_ids)
 
+    # Batch-resolve repo_id → path in a single query
+    from app.repositories.tracked_repository import TrackedRepoRepository
+
+    repo_ids = {c.repo_id for c in commits if c.repo_id}
+    repo_id_to_path: dict[uuid.UUID, str] = {}
+    if repo_ids:
+        repo_repo = TrackedRepoRepository(db, org_id=current_user.org_id)
+        repo_id_to_path = await repo_repo.get_paths_by_ids(repo_ids)
+
     commit_reads = [
         DevCommitRead(
-            commit_sha=c.commit_sha,
-            commit_message=c.commit_message,
-            branch_name=c.branch_name,
-            files_changed=c.files_changed,
-            repo_path=c.repo_path,
-            author_name=c.author_name,
-            author_email=c.author_email,
+            commit_sha=c.commit_sha or "",
+            commit_message=c.message or "",
+            branch_name=c.branch or "",
+            files_changed=c.files_changed or "",
+            repo_path=repo_id_to_path.get(c.repo_id, "") if c.repo_id else "",
+            author_name=c.actor_name,
+            author_email=(c.metadata_ or {}).get("author_email"),
             user_id=c.user_id,
             user_name=user_names.get(c.user_id) if c.user_id else None,
             created_at=c.created_at,

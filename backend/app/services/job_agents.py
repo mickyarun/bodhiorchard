@@ -378,7 +378,7 @@ async def handle_code_review_job(job_id: str, raw_payload: dict[str, Any]) -> No
     """Run automated code review + test plan generation for a BUD.
 
     For each confirmed repo, diffs the develop worktree against the last
-    commit SHA from bud_commits, then sends all diffs + tech spec to Claude
+    commit SHA from dev_activity_logs, then sends all diffs + tech spec to Claude
     for review comments and test plan generation.
     """
     payload = CodeReviewJobPayload(**raw_payload)
@@ -388,7 +388,7 @@ async def handle_code_review_job(job_id: str, raw_payload: dict[str, Any]) -> No
 
     from app.database import AsyncSessionLocal
     from app.repositories.bud import BUDRepository
-    from app.repositories.bud_commit import BUDCommitRepository
+    from app.repositories.dev_activity import DevActivityLogRepository
     from app.services.repo_scanner import run_git
 
     # Step 1: Gather diffs for each confirmed repo
@@ -396,8 +396,8 @@ async def handle_code_review_job(job_id: str, raw_payload: dict[str, Any]) -> No
 
     async with AsyncSessionLocal() as db:
         org_id_uuid = uuid_mod.UUID(payload.org_id)
-        commit_repo = BUDCommitRepository(db, org_id=org_id_uuid)
-        last_shas = await commit_repo.get_last_sha_per_repo(uuid_mod.UUID(payload.bud_id))
+        activity_repo = DevActivityLogRepository(db, org_id=org_id_uuid)
+        last_shas = await activity_repo.get_last_sha_per_repo(uuid_mod.UUID(payload.bud_id))
 
     for repo_info in payload.confirmed_repos:
         repo_path = repo_info.get("repo_path", "")

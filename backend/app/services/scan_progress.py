@@ -5,6 +5,7 @@ Provides a single source of truth for scan status that:
   * Falls back gracefully when Redis is unavailable (in-memory dict)
   * Enforces **monotonically increasing** progress (never goes backwards)
   * Publishes every update to the event bus for WebSocket delivery
+  * Auto-detects stuck scans after ``_STALE_TIMEOUT`` seconds of inactivity
 
 Redis key layout:
   ``scan:{scan_id}``      — hash with all ScanStatus fields (TTL 2 h)
@@ -12,6 +13,7 @@ Redis key layout:
 """
 
 import json
+import time
 
 import structlog
 from redis.asyncio import Redis
@@ -22,6 +24,7 @@ from app.services.event_bus import publish
 logger = structlog.get_logger(__name__)
 
 _SCAN_TTL = 7200  # 2 hours
+_STALE_TIMEOUT = 600  # 10 minutes — scan is considered stuck after this
 
 # ── In-memory fallback ──────────────────────────────────────────────
 _fallback: dict[str, dict] = {}
@@ -42,6 +45,7 @@ _HASH_FIELDS = (
     "synthesis_warning",
     "setup_pr_message",
     "error",
+    "updated_at",  # epoch timestamp for stale detection
 )
 
 
@@ -105,6 +109,7 @@ async def create_scan_progress(scan_id: str, org_id: str) -> ScanStatus:
         "synthesis_warning": "",
         "setup_pr_message": "",
         "error": "",
+        "updated_at": str(time.time()),
     }
 
     redis = await get_redis()
@@ -185,6 +190,9 @@ async def _update_redis(
             else:
                 updates[field] = str(value)
 
+    # Always stamp updated_at on every write
+    updates["updated_at"] = str(time.time())
+
     if updates:
         await redis.hset(key, mapping=updates)
 
@@ -222,6 +230,9 @@ def _update_fallback(
                 data[field] = ""
             else:
                 data[field] = str(value)
+
+    # Always stamp updated_at on every write
+    data["updated_at"] = str(time.time())
 
     result = _dict_to_scan_status(data)
     _publish(scan_id, result)
@@ -261,11 +272,39 @@ async def get_scan_progress(scan_id: str) -> ScanStatus | None:
     return None
 
 
+async def cancel_scan(scan_id: str) -> ScanStatus | None:
+    """Force-fail a scan. Used by the cancel endpoint and stale detection.
+
+    Args:
+        scan_id: Scan identifier.
+
+    Returns:
+        Updated ``ScanStatus`` or ``None`` if not found.
+    """
+    return await update_scan_progress(
+        scan_id,
+        status="failed",
+        error="Scan cancelled (timed out or user-cancelled).",
+    )
+
+
+def _is_stale(data: dict) -> bool:
+    """Check if a scan has gone stale (no updates for ``_STALE_TIMEOUT`` seconds)."""
+    updated_at = float(data.get("updated_at", 0))
+    if updated_at == 0:
+        return False  # No timestamp — legacy entry, don't auto-fail
+    return (time.time() - updated_at) > _STALE_TIMEOUT
+
+
 async def get_active_scan_for_org(org_id: str) -> ScanStatus | None:
     """Find the in-progress scan for an organisation.
 
     Used by the setup checklist endpoint to display live progress
     without knowing the specific ``scan_id``.
+
+    Auto-detects stuck scans: if a scan hasn't updated in
+    ``_STALE_TIMEOUT`` seconds (10 min), it is automatically marked
+    as failed so the UI unblocks.
 
     Args:
         org_id: Organisation UUID string.
@@ -279,19 +318,49 @@ async def get_active_scan_for_org(org_id: str) -> ScanStatus | None:
     if redis is not None:
         scan_id = await redis.get(f"scan_active:{org_id}")
         if scan_id:
-            status = await get_scan_progress(scan_id)
-            if status and status.status not in ("completed", "failed"):
-                return status
-            # Scan finished — clean up the index
-            await redis.delete(f"scan_active:{org_id}")
+            raw = await redis.hgetall(f"scan:{scan_id}")
+            if not raw:
+                await redis.delete(f"scan_active:{org_id}")
+                return None
+
+            if raw.get("status") in ("completed", "failed"):
+                await redis.delete(f"scan_active:{org_id}")
+                return None
+
+            # Auto-fail stale scans
+            if _is_stale(raw):
+                logger.warning(
+                    "scan_auto_failed_stale",
+                    scan_id=scan_id,
+                    last_update=raw.get("updated_at"),
+                )
+                await cancel_scan(scan_id)
+                await redis.delete(f"scan_active:{org_id}")
+                return None
+
+            return _dict_to_scan_status(raw)
         return None
 
     # Fallback: check in-memory map
     scan_id = _org_scan_map.get(org_id)
     if scan_id:
         data = _fallback.get(scan_id)
-        if data and data.get("status") not in ("completed", "failed"):
-            return _dict_to_scan_status(data)
-        # Clean up finished scans
-        _org_scan_map.pop(org_id, None)
+        if not data or data.get("status") in ("completed", "failed"):
+            _org_scan_map.pop(org_id, None)
+            return None
+
+        # Auto-fail stale scans
+        if _is_stale(data):
+            logger.warning(
+                "scan_auto_failed_stale",
+                scan_id=scan_id,
+                last_update=data.get("updated_at"),
+            )
+            _update_fallback(scan_id, "failed", None, {
+                "error": "Scan cancelled (timed out — no progress for 10 minutes).",
+            })
+            _org_scan_map.pop(org_id, None)
+            return None
+
+        return _dict_to_scan_status(data)
     return None

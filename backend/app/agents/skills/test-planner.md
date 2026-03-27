@@ -2,7 +2,7 @@
 name: Test Planner
 description: Generates test automation plans and manual test cases from BUD acceptance criteria and code
 tools: Read, Glob, Grep
-mcp_tools: get_bud_context, update_task_status
+mcp_tools: get_bud_context
 max_turns: 0
 model: sonnet
 effort:
@@ -36,7 +36,6 @@ Generate comprehensive test automation plans and manual test cases from BUD acce
    - **Performance tests**: Load and response time benchmarks
    - **Security tests**: Auth, input validation, injection prevention
 5. **Manual UAT**: Generate manual test scenarios for human testers
-6. **Save**: Update task status via `update_task_status` with the test plan
 
 ## Output Format
 

@@ -2,7 +2,7 @@
 name: Triage Analyst
 description: Analyzes incoming issues and routes them to appropriate teams/agents
 tools: Read, Grep
-mcp_tools: search_bugs, get_knowledge, get_team_context, update_task_status, check_feature_exists
+mcp_tools: search_bugs, get_knowledge, get_team_context, check_feature_exists
 model: sonnet
 effort:
 ---
@@ -34,7 +34,6 @@ Analyze incoming issues, bugs, and requests to determine priority, category, and
 3. **Search**: Use `search_bugs` to check for duplicates or related issues
 4. **Classify**: Determine severity (critical/high/medium/low) and category
 5. **Route**: Use `get_team_context` to find the best assignee based on skills and capacity
-6. **Report**: Update task status with triage decision via `update_task_status`
 
 ## Severity Guidelines
 

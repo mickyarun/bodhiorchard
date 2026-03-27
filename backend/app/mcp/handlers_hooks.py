@@ -1,0 +1,225 @@
+"""Handlers for Claude Code hook activity reports.
+
+Processes all activity events from Claude Code hooks and git hooks,
+sent via POST /mcp/dev-activity with MCP token auth. All events are
+stored in a single unified dev_activity_logs table.
+"""
+
+import re
+import uuid
+
+import structlog
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.mcp.auth import MCPAuthResult
+from app.models.dev_activity import DevActivityLog
+from app.repositories.bud import BUDRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
+from app.schemas.dev_activity import DevActivityHookRequest, DevActivityHookResponse
+from app.services.event_bus import publish
+
+logger = structlog.get_logger(__name__)
+
+_BUD_BRANCH_RE = re.compile(r"^bud-(\d+)/")
+
+
+async def handle_dev_activity(
+    db: AsyncSession,
+    auth: MCPAuthResult,
+    body: DevActivityHookRequest,
+) -> DevActivityHookResponse:
+    """Process a Claude Code hook activity report.
+
+    All event types go into a single DevActivityLog table. The handler:
+    1. Resolves user from MCP token (or falls back to email)
+    2. Resolves repo_id from repo_path
+    3. Auto-detects BUD from branch name if not provided
+    4. Creates a DevActivityLog entry
+
+    Args:
+        db: The async database session.
+        auth: The authenticated org + user from MCP token.
+        body: The validated hook request.
+
+    Returns:
+        Response indicating success and resolution details.
+    """
+    org = auth.org
+
+    # 1. Resolve user — token first, email fallback
+    user = auth.user
+    if user is None and body.author_email:
+        from app.services.user_resolution import resolve_user_by_email
+
+        user = await resolve_user_by_email(db, org.id, body.author_email)
+
+    user_id = user.id if user else None
+    actor_name = user.name if user else None
+
+    # 2. Resolve repo_id from repo_path
+    repo_id = await _resolve_repo_id(db, org.id, body.repo_path)
+
+    # 3. Resolve BUD — from request, then from branch name
+    bud_id, bud_number = await _resolve_bud(
+        db,
+        org.id,
+        body.bud_number,
+        body.branch,
+    )
+
+    # 4. Dedup: skip if this commit SHA was already recorded
+    if body.event_type == "commit" and body.commit_sha:
+        dup_stmt = select(DevActivityLog.id).where(
+            DevActivityLog.org_id == org.id,
+            DevActivityLog.event_type == "commit",
+            DevActivityLog.commit_sha == body.commit_sha,
+        ).limit(1)
+        dup = await db.execute(dup_stmt)
+        if dup.scalar_one_or_none() is not None:
+            logger.debug("hook_commit_duplicate", sha=body.commit_sha[:8])
+            return DevActivityHookResponse(
+                success=True,
+                event_type=body.event_type,
+                bud_number=bud_number,
+                user_resolved=user_id is not None,
+            )
+
+    # 5. Merge author_email into metadata for contributor resolution
+    meta = dict(body.metadata) if body.metadata else {}
+    if body.author_email:
+        meta["author_email"] = body.author_email
+
+    # 6. Create unified activity log entry
+    log = DevActivityLog(
+        org_id=org.id,
+        bud_id=bud_id,
+        user_id=user_id,
+        repo_id=repo_id,
+        session_id=body.session_id or None,
+        event_type=body.event_type,
+        status=_infer_status(body.event_type),
+        message=body.message[:2000] if body.message else None,
+        source="claude_hook",
+        actor_name=actor_name,
+        branch=body.branch or None,
+        commit_sha=body.commit_sha or None,
+        file_path=body.file_path or None,
+        files_changed=body.files_changed or None,
+        metadata_=meta or None,
+    )
+    db.add(log)
+    await db.flush()
+    await db.refresh(log)
+
+    # Backfill prior session events that arrived without a bud_id
+    if bud_id and body.session_id:
+        await db.execute(
+            update(DevActivityLog)
+            .where(
+                DevActivityLog.session_id == body.session_id,
+                DevActivityLog.org_id == org.id,
+                DevActivityLog.bud_id.is_(None),
+            )
+            .values(bud_id=bud_id)
+        )
+
+    # Publish for real-time WebSocket updates if BUD-linked
+    if bud_id:
+        publish(
+            f"bud:{bud_id}:activity",
+            {
+                "id": str(log.id),
+                "event_type": body.event_type,
+                "status": log.status,
+                "message": log.message,
+                "source": "claude_hook",
+                "actor_name": actor_name,
+                "user_id": str(user_id) if user_id else None,
+                "file_path": body.file_path,
+                "created_at": log.created_at.isoformat(),
+            },
+        )
+
+    logger.info(
+        "hook_activity_recorded",
+        event_type=body.event_type,
+        bud_number=bud_number,
+        user_id=str(user_id) if user_id else None,
+        repo_id=str(repo_id) if repo_id else None,
+    )
+
+    return DevActivityHookResponse(
+        success=True,
+        event_type=body.event_type,
+        bud_number=bud_number,
+        user_resolved=user_id is not None,
+    )
+
+
+async def _resolve_repo_id(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    repo_path: str,
+) -> uuid.UUID | None:
+    """Resolve a filesystem repo_path to a tracked_repositories.id."""
+    if not repo_path:
+        return None
+    repo_repo = TrackedRepoRepository(db, org_id=org_id)
+    tracked = await repo_repo.get_by_path(repo_path)
+    return tracked.id if tracked else None
+
+
+async def _resolve_bud(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_number: int | None,
+    branch: str,
+) -> tuple[uuid.UUID | None, int | None]:
+    """Resolve BUD from explicit number or branch name pattern.
+
+    Args:
+        db: The async database session.
+        org_id: Organization UUID.
+        bud_number: Explicit BUD number from request (if any).
+        branch: Git branch name (may contain bud-NNN/ pattern).
+
+    Returns:
+        Tuple of (bud_id, bud_number) or (None, None).
+    """
+    bud_repo = BUDRepository(db, org_id=org_id)
+
+    # Try explicit bud_number first
+    if bud_number is not None:
+        bud = await bud_repo.get_by_number(bud_number)
+        if bud:
+            return bud.id, bud.bud_number
+
+    # Auto-detect from branch name: bud-001/feature → 1
+    if branch:
+        match = _BUD_BRANCH_RE.match(branch)
+        if match:
+            detected_num = int(match.group(1))
+            bud = await bud_repo.get_by_number(detected_num)
+            if bud:
+                return bud.id, bud.bud_number
+
+    return None, None
+
+
+def _infer_status(event_type: str) -> str:
+    """Infer a status from event_type for backward compat with existing UI."""
+    status_map: dict[str, str] = {
+        "session_start": "in_progress",
+        "session_end": "completed",
+        "commit": "in_progress",
+        "activity_summary": "in_progress",
+        "file_change": "in_progress",
+        "tool_call": "in_progress",
+        "tool_error": "failed",
+        "api_error": "failed",
+        "user_prompt": "in_progress",
+        "subagent_start": "in_progress",
+        "subagent_stop": "completed",
+    }
+    return status_map.get(event_type, "in_progress")

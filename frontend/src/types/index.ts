@@ -104,10 +104,15 @@ export interface TimelineEvent {
 // ── Dev Activity Types ───────────────────────────────────────────
 export interface DevActivity {
   id: string
-  status: 'in_progress' | 'completed' | 'failed' | 'blocked'
-  message: string
-  source: 'mcp' | 'hook' | 'agent'
+  event_type: string
+  status: string
+  message: string | null
+  source: string
   actor_name: string | null
+  session_id: string | null
+  branch: string | null
+  commit_sha: string | null
+  file_path: string | null
   metadata: Record<string, unknown> | null
   created_at: string
 }

@@ -1,4 +1,8 @@
-"""Developer activity log model for tracking real-time progress via MCP."""
+"""Developer activity log model for tracking all Claude Code events.
+
+Unified table for all activity types: session lifecycle, commits,
+file changes, tool errors, API errors, and activity summaries.
+"""
 
 import uuid
 
@@ -10,30 +14,68 @@ from app.models.base import BaseModel
 
 
 class DevActivityLog(BaseModel):
-    """Developer activity updates reported via MCP or post-commit hooks.
+    """Unified developer activity log for all Claude Code hook events.
 
-    Each row represents a single status update from a developer's Claude Code
-    session. The metadata_ JSONB column stores optional stats, file lists,
-    and AI self-assessment (effectiveness) data.
+    Stores session starts/ends, commits, file changes, tool errors,
+    API errors, and activity summaries in a single table. BUD and repo
+    links are nullable — not all activity is tied to a BUD or tracked repo.
     """
 
     __tablename__ = "dev_activity_logs"
     __table_args__ = (
         Index("ix_dev_activity_bud_id", "bud_id"),
         Index("ix_dev_activity_org_created", "org_id", "created_at"),
+        Index("ix_dev_activity_session_id", "session_id"),
+        Index("ix_dev_activity_repo_id", "repo_id"),
+        Index("ix_dev_activity_event_type", "event_type"),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False,
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id"),
+        nullable=False,
     )
-    bud_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("bud_documents.id", ondelete="CASCADE"), nullable=False,
+    bud_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bud_documents.id", ondelete="CASCADE"),
+        nullable=True,
     )
-    status: Mapped[str] = mapped_column(String(50), nullable=False)
-    message: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    repo_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tracked_repositories.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False)
-    actor_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    actor_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    branch: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
+    )
+    file_path: Mapped[str | None] = mapped_column(
+        String(1000),
+        nullable=True,
+    )
+    files_changed: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
-        return f"<DevActivityLog(bud_id={self.bud_id}, status={self.status!r})>"
+        return (
+            f"<DevActivityLog(event_type={self.event_type!r}, "
+            f"bud_id={self.bud_id}, session_id={self.session_id!r})>"
+        )

@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,10 +21,15 @@ class DevActivityRead(BaseModel):
     """Schema for a single developer activity entry."""
 
     id: uuid.UUID
-    status: str
-    message: str
+    event_type: str
+    status: str | None = None
+    message: str | None = None
     source: str
     actor_name: str | None = None
+    session_id: str | None = None
+    branch: str | None = None
+    commit_sha: str | None = None
+    file_path: str | None = None
     metadata: dict | None = Field(None, validation_alias="metadata_")
     created_at: datetime
 
@@ -83,3 +89,48 @@ class DevActivityResponse(BaseModel):
     contributors: list[ContributorRead] = []
     repos: list[CommitRepoRead] = []
     stats: DevStatsRead = DevStatsRead()
+
+
+# ── Claude Code Hook Schemas ─────────────────────────────────────
+
+
+class DevActivityHookRequest(BaseModel):
+    """Request body for Claude Code hook activity reports.
+
+    Sent by hook scripts (session-start, post-commit-track, activity-report)
+    to POST /mcp/dev-activity with Bearer token auth.
+    """
+
+    session_id: str = Field(default="", max_length=100)
+    event_type: Literal[
+        "session_start",
+        "session_end",
+        "activity_summary",
+        "commit",
+        "file_change",
+        "tool_call",
+        "tool_error",
+        "api_error",
+        "user_prompt",
+        "subagent_start",
+        "subagent_stop",
+    ]
+    bud_number: int | None = None
+    author_email: str = Field(default="", max_length=255)
+    branch: str = Field(default="", max_length=500)
+    repo_path: str = Field(default="", max_length=1000)
+    message: str = Field(default="", max_length=2000)
+    commit_sha: str = Field(default="", max_length=40)
+    file_path: str = Field(default="", max_length=1000)
+    files_changed: str = Field(default="", max_length=5000)
+    metadata: dict | None = None
+
+
+class DevActivityHookResponse(BaseModel):
+    """Response for Claude Code hook activity reports."""
+
+    success: bool
+    event_type: str
+    bud_number: int | None = None
+    user_resolved: bool = False
+    error: str | None = None

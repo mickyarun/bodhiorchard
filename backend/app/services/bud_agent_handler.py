@@ -232,19 +232,12 @@ async def _build_tech_arch_prompt(
     else:
         instructions += "Output the plan as clean markdown."
 
-    # Instruct agent to include dev workflow in its output
+    # Instruct agent to include branch naming in its output
     instructions += (
         "\n## Include in your output\n\n"
         "At the end of the tech spec, add a **Development Workflow** "
-        "section with these instructions for the implementing developer:\n\n"
+        "section with the branch naming convention:\n\n"
         f"- Branch: `bud-{bud.bud_number:03d}/<description>`\n"
-        "- After each TODO step, report progress using "
-        "`update_task_status` MCP tool:\n"
-        f'  - task_id: "{bud.bud_number}"\n'
-        '  - status: "in_progress" | "completed" | "blocked"\n'
-        "  - message: what you just completed\n"
-        "- On completion, include effectiveness self-assessment "
-        "(confidence, complexity, test_coverage, risks)\n"
     )
     prompt += instructions
 
@@ -257,15 +250,15 @@ async def _build_code_review_prompt(
     """Build code review prompt with git diffs from confirmed repos."""
     from pathlib import Path
 
-    from app.repositories.bud_commit import BUDCommitRepository
+    from app.repositories.dev_activity import DevActivityLogRepository
     from app.services.repo_scanner import run_git
 
     bud_ref = f"BUD-{bud.bud_number:03d}"
     meta = bud.metadata_ or {}
     confirmed_repos = meta.get("confirmed_repos", [])
 
-    commit_repo = BUDCommitRepository(db, org_id=org_id)
-    last_shas = await commit_repo.get_last_sha_per_repo(bud.id)
+    activity_repo = DevActivityLogRepository(db, org_id=org_id)
+    last_shas = await activity_repo.get_last_sha_per_repo(bud.id)
 
     all_diffs: list[dict[str, str]] = []
     working_dir: str | None = None

@@ -9,17 +9,17 @@ Mounted at /mcp/ on the main FastAPI app.
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
-from app.mcp.auth import verify_mcp_token
+from app.mcp.auth import MCPAuthResult, verify_mcp_token
 from app.mcp.handlers_bud import (
     handle_get_bud_context,
-    handle_update_task_status,
     handle_write_bud,
 )
+from app.mcp.handlers_hooks import handle_dev_activity
 from app.mcp.handlers_knowledge import (
     handle_check_feature_exists,
     handle_get_knowledge,
@@ -40,7 +40,7 @@ from app.mcp.synthesis_queue import (  # noqa: F401
     remove_from_queue,
     set_synthesis_queue,
 )
-from app.models.organization import Organization
+from app.schemas.dev_activity import DevActivityHookRequest, DevActivityHookResponse
 
 logger = structlog.get_logger(__name__)
 
@@ -228,8 +228,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 "keep_title": {
                     "type": "string",
                     "description": (
-                        "Title of the feature to keep "
-                        "(e.g. 'Feature: Authentication')"
+                        "Title of the feature to keep (e.g. 'Feature: Authentication')"
                     ),
                 },
                 "merge_titles": {
@@ -243,9 +242,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 "repo_names": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": (
-                        "All repo names this merged feature belongs to"
-                    ),
+                    "description": ("All repo names this merged feature belongs to"),
                 },
             },
             "required": ["keep_title", "repo_names"],
@@ -262,72 +259,6 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 "limit": {"type": "integer", "default": 10},
             },
             "required": ["query"],
-        },
-    ),
-    MCPToolDefinition(
-        name="update_task_status",
-        description=(
-            "Report development progress to Bodhigrove. Call this periodically "
-            "to update the team on what you're working on. Use the BUD number "
-            "as task_id (e.g. '1' for BUD-001)."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "BUD number (e.g. '1') or BUD UUID",
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["in_progress", "completed", "failed", "blocked"],
-                },
-                "message": {
-                    "type": "string",
-                    "description": "What you're doing or just completed",
-                },
-                "files_touched": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Files created or modified",
-                },
-                "stats": {
-                    "type": "object",
-                    "properties": {
-                        "lines_added": {"type": "integer"},
-                        "lines_removed": {"type": "integer"},
-                        "tests_added": {"type": "integer"},
-                        "cost_usd": {"type": "number"},
-                        "tokens_used": {"type": "integer"},
-                    },
-                },
-                "effectiveness": {
-                    "type": "object",
-                    "description": "Self-assessment when status is completed",
-                    "properties": {
-                        "confidence": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 10,
-                            "description": "How confident the implementation is correct",
-                        },
-                        "complexity": {
-                            "type": "string",
-                            "enum": ["low", "medium", "high"],
-                        },
-                        "test_coverage": {
-                            "type": "string",
-                            "enum": ["none", "partial", "full"],
-                        },
-                        "risks": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Known risks or concerns",
-                        },
-                    },
-                },
-            },
-            "required": ["task_id", "status", "message"],
         },
     ),
     MCPToolDefinition(
@@ -413,7 +344,7 @@ async def call_tool(
     tool_name: str,
     body: MCPToolCallRequest,
     db: AsyncSession = Depends(get_db),
-    org: Organization = Depends(verify_mcp_token),
+    auth: MCPAuthResult = Depends(verify_mcp_token),
 ) -> dict[str, Any]:
     """Execute an MCP tool call from Claude Code.
 
@@ -421,7 +352,7 @@ async def call_tool(
         tool_name: The name of the tool to execute.
         body: Tool call parameters.
         db: The async database session.
-        org: The authenticated organization.
+        auth: The authenticated org (and optional user) from MCP token.
 
     Returns:
         Tool execution result.
@@ -429,7 +360,8 @@ async def call_tool(
     logger.info(
         "mcp_tool_call",
         tool=tool_name,
-        org_id=str(org.id),
+        org_id=str(auth.org.id),
+        user_id=str(auth.user.id) if auth.user else None,
         params=body.params,
     )
 
@@ -440,7 +372,7 @@ async def call_tool(
             detail=f"Unknown tool: {tool_name}",
         )
 
-    return await handler(db, org, body.params)
+    return await handler(db, auth.org, body.params)
 
 
 # --- Tool handler dispatch ---
@@ -450,7 +382,6 @@ TOOL_HANDLERS: dict[str, Any] = {
     "write_bud": handle_write_bud,
     "get_knowledge": handle_get_knowledge,
     "search_bugs": handle_search_bugs,
-    "update_task_status": handle_update_task_status,
     "post_slack_message": handle_post_slack_message,
     "get_team_context": handle_get_team_context,
     "get_pending_features": handle_get_pending_features,
@@ -460,3 +391,31 @@ TOOL_HANDLERS: dict[str, Any] = {
     "list_design_systems": handle_list_design_systems,
     "get_design_system": handle_get_design_system,
 }
+
+
+# ── Claude Code Hook Endpoint ─────────────────────────────────────
+
+
+@router.post("/dev-activity", response_model=DevActivityHookResponse)
+async def report_dev_activity(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    auth: MCPAuthResult = Depends(verify_mcp_token),
+) -> DevActivityHookResponse:
+    """Receive developer activity reports from Claude Code hooks.
+
+    Authenticated via MCP token (Bearer header). Per-user tokens
+    resolve both the org and the specific developer directly.
+
+    Called by hook scripts: session-start.sh, post-commit-track.sh,
+    activity-report.sh. All calls are fire-and-forget from the hook side.
+    """
+    raw = await request.body()
+    logger.info("dev_activity_raw_body", body=raw.decode("utf-8", errors="replace")[:2000])
+    try:
+        body = DevActivityHookRequest.model_validate_json(raw)
+    except Exception:
+        raw_str = raw.decode("utf-8", errors="replace")[:500]
+        logger.error("dev_activity_validation_failed", body=raw_str)
+        raise
+    return await handle_dev_activity(db, auth, body)

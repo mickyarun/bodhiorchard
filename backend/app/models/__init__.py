@@ -18,7 +18,6 @@ from app.models.bud import (
     BUDTimelineEventType,
 )
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
-from app.models.bud_commit import BUDCommit
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.design_system import DesignSystemRef
 from app.models.dev_activity import DevActivityLog
@@ -40,6 +39,7 @@ from app.models.standup import StandupReport
 from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
+from app.models.user_mcp_token import UserMCPToken
 
 __all__ = [
     "AgentLog",
@@ -56,7 +56,6 @@ __all__ = [
     "BUDStatus",
     "BUDTimelineEvent",
     "BUDTimelineEventType",
-    "BUDCommit",
     "Bug",
     "BugSeverity",
     "BugStatus",
@@ -84,5 +83,6 @@ __all__ = [
     "TriageStatus",
     "User",
     "UserEmailAlias",
+    "UserMCPToken",
     "UserRole",
 ]

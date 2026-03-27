@@ -1,6 +1,6 @@
 """MCP handlers for BUD document operations.
 
-Covers: get_bud_context, write_bud, update_task_status.
+Covers: get_bud_context, write_bud.
 """
 
 from typing import Any
@@ -103,73 +103,6 @@ async def handle_write_bud(
         "feature_created": True,
         "feature_title": feature_item.title,
     }
-
-
-async def handle_update_task_status(
-    db: AsyncSession,
-    org: Organization,
-    params: dict[str, Any],
-) -> dict[str, Any]:
-    """Persist developer activity update and publish for real-time UI."""
-    from app.models.dev_activity import DevActivityLog
-    from app.services.event_bus import publish
-
-    valid_statuses = {"in_progress", "completed", "failed", "blocked"}
-
-    task_id = params.get("task_id", "")
-    task_status = params.get("status", "")
-    message = params.get("message", "")
-
-    if task_status not in valid_statuses:
-        return {"success": False, "error": f"Invalid status: {task_status}"}
-
-    # Resolve BUD from task_id (supports BUD number like "1" or UUID)
-    bud = await _resolve_bud(db, org.id, task_id)
-    if not bud:
-        logger.warning("mcp_update_task_status_bud_not_found", task_id=task_id)
-        return {"success": False, "error": f"BUD not found for task_id: {task_id}"}
-
-    # Build metadata from optional fields
-    metadata: dict[str, Any] = {}
-    if params.get("files_touched"):
-        metadata["files_touched"] = params["files_touched"]
-    if params.get("stats"):
-        metadata["stats"] = params["stats"]
-    if params.get("effectiveness"):
-        metadata["effectiveness"] = params["effectiveness"]
-
-    log = DevActivityLog(
-        org_id=org.id,
-        bud_id=bud.id,
-        status=task_status,
-        message=message[:2000],
-        source="mcp",
-        actor_name=params.get("actor_name"),
-        metadata_=metadata or None,
-    )
-    db.add(log)
-    await db.flush()
-    await db.refresh(log)
-
-    # Publish for real-time WebSocket updates
-    publish(f"bud:{bud.id}:activity", {
-        "id": str(log.id),
-        "status": task_status,
-        "message": message[:2000],
-        "source": "mcp",
-        "metadata": metadata or None,
-        "created_at": log.created_at.isoformat(),
-    })
-
-    logger.info(
-        "mcp_update_task_status",
-        org_id=str(org.id),
-        bud_id=str(bud.id),
-        task_id=task_id,
-        status=task_status,
-        message=message[:200],
-    )
-    return {"success": True, "bud_number": bud.bud_number}
 
 
 async def _resolve_bud(
