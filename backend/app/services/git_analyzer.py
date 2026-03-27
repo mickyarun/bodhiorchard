@@ -18,6 +18,19 @@ logger = structlog.get_logger(__name__)
 # How far back to scan by default
 DEFAULT_SINCE = "6.months.ago"
 
+# Directories/files to skip during skill analysis (tooling, not code)
+_SKIP_SKILL_PATHS = frozenset(
+    {
+        ".claude",
+        ".githooks",
+        ".bodhigrove",
+        ".gitnexus",
+        ".github",
+        ".vscode",
+        ".idea",
+    }
+)
+
 
 # Extension-to-language mapping
 LANG_MAP: dict[str, str] = {
@@ -139,6 +152,16 @@ async def analyze_repo_skills(
         files = await _get_commit_files(repo_path, commit_hash)
 
         for file_path in files:
+            # Skip tooling/config directories and non-code files
+            fp = Path(file_path)
+            top_dir = fp.parts[0] if fp.parts else ""
+            if top_dir in _SKIP_SKILL_PATHS:
+                continue
+            if top_dir.startswith("."):
+                continue  # Skip all dotfile directories
+            if _file_to_language(file_path) is None and len(fp.parts) <= 1:
+                continue  # Skip root-level non-code files
+
             if feature_map:
                 match = _file_to_feature(file_path, feature_map)
                 if match is None:

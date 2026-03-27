@@ -10,6 +10,7 @@ import secrets
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -223,7 +224,11 @@ async def regenerate_mcp_token(
 ) -> MCPTokenResponse:
     """Generate or regenerate the MCP bearer token for Claude Code integration.
 
-    The token is shown only once. The hash is stored in the organization record.
+    Creates a per-user token (stored in user_mcp_tokens) that identifies
+    both the organization and the specific developer. The old org-level
+    token is also updated for backward compatibility.
+
+    The token is shown only once.
 
     Args:
         current_user: The authenticated user.
@@ -232,14 +237,47 @@ async def regenerate_mcp_token(
     Returns:
         MCPTokenResponse with the plaintext token (one-time display).
     """
+    from app.mcp.auth import compute_token_prefix
+    from app.models.user_mcp_token import UserMCPToken
+
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
 
     mcp_token = secrets.token_urlsafe(32)
-    org.mcp_token_hash = hash_password(mcp_token)
+    token_hash = hash_password(mcp_token)
+    token_prefix = compute_token_prefix(mcp_token)
+
+    # Update org-level token (backward compat for existing integrations)
+    org.mcp_token_hash = token_hash
     await db.flush()
 
-    logger.info("mcp_token_regenerated", org_id=str(org.id), user=current_user.email)
+    # Upsert per-user token (one token per user per org)
+    existing = await db.execute(
+        select(UserMCPToken).where(
+            UserMCPToken.user_id == current_user.id,
+            UserMCPToken.org_id == org.id,
+        )
+    )
+    user_token = existing.scalar_one_or_none()
+    if user_token:
+        user_token.token_hash = token_hash
+        user_token.token_prefix = token_prefix
+    else:
+        user_token = UserMCPToken(
+            user_id=current_user.id,
+            org_id=org.id,
+            token_hash=token_hash,
+            token_prefix=token_prefix,
+        )
+        db.add(user_token)
+    await db.flush()
+
+    logger.info(
+        "mcp_token_regenerated",
+        org_id=str(org.id),
+        user=current_user.email,
+        user_token=True,
+    )
 
     return MCPTokenResponse(mcp_token=mcp_token)
 

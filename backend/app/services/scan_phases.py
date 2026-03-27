@@ -140,6 +140,7 @@ async def phase_b1_repo_setup(
         create_setup_pr,
         ensure_repo_worktrees,
         init_bodhigrove_mcp_in_repo,
+        install_claude_hooks,
         install_hooks,
     )
     from app.services.scan_progress import update_scan_progress
@@ -172,7 +173,8 @@ async def phase_b1_repo_setup(
             progress_pct=base_pct + 22,
         )
         mcp_changed = await init_bodhigrove_mcp_in_repo(
-            repo_path, app_settings.public_url,
+            repo_path,
+            app_settings.public_url,
         )
 
         # Install git hooks to .githooks/ + set core.hooksPath
@@ -182,6 +184,12 @@ async def phase_b1_repo_setup(
             progress_pct=base_pct + 25,
         )
         hooks_changed = await install_hooks(repo_path, app_settings.public_url, str(org_id))
+
+        # Install Claude Code hooks (.claude/hooks/ + settings.json)
+        claude_hooks_changed = await install_claude_hooks(
+            repo_path,
+            app_settings.public_url,
+        )
 
         # Ensure hooks are active regardless of commit/push status
         from app.services.git_operations import run_git
@@ -199,8 +207,12 @@ async def phase_b1_repo_setup(
 
         # Branch, commit, push setup files, and create PR
         any_changed = (
-            mcp_changed or hooks_changed or gitignore_changed
-            or prepare_changed or claude_md_changed
+            mcp_changed
+            or hooks_changed
+            or claude_hooks_changed
+            or gitignore_changed
+            or prepare_changed
+            or claude_md_changed
         )
         if any_changed:
             await update_scan_progress(
@@ -352,11 +364,15 @@ async def phase_b2_synthesis(
             from app.services.scan_pipeline import build_direct_scan_prompt
 
             prompt = build_direct_scan_prompt(
-                rname, task["overview"], task["file_tree"],
+                rname,
+                task["overview"],
+                task["file_tree"],
             )
         else:
             prompt = build_synthesis_prompt(
-                rname, task["overview"], is_workspace,
+                rname,
+                task["overview"],
+                is_workspace,
             )
 
         token = create_internal_mcp_token(org_id)
@@ -564,10 +580,24 @@ async def _collect_feature_dicts(
     return [f for f in grouped.values() if f["repo_names"]]
 
 
-_SOURCE_EXTENSIONS = frozenset({
-    ".py", ".ts", ".tsx", ".js", ".jsx", ".vue", ".go", ".rs",
-    ".java", ".kt", ".rb", ".cs", ".swift", ".svelte",
-})
+_SOURCE_EXTENSIONS = frozenset(
+    {
+        ".py",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".vue",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".rb",
+        ".cs",
+        ".swift",
+        ".svelte",
+    }
+)
 _SKIP_DIRS = frozenset({".git", "node_modules", "dist", "__pycache__", ".next", "build"})
 
 
@@ -582,9 +612,7 @@ def _list_repo_files(repo_path: Path, max_files: int = 50) -> list[str]:
         str(p.relative_to(repo_path))
         for p in sorted(repo_path.rglob("*"))
         if (
-            p.is_file()
-            and p.suffix in _SOURCE_EXTENSIONS
-            and not _SKIP_DIRS.intersection(p.parts)
+            p.is_file() and p.suffix in _SOURCE_EXTENSIONS and not _SKIP_DIRS.intersection(p.parts)
         )
     ][:max_files]
 

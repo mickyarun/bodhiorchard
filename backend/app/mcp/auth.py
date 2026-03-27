@@ -1,15 +1,21 @@
 """MCP token verification for Bodhigrove tool calls from Claude Code."""
 
+import hashlib
 import secrets
 import uuid
+from dataclasses import dataclass
 
 import structlog
 from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_db
 from app.core.security import verify_password
 from app.models.organization import Organization
+from app.models.user import User
+from app.models.user_mcp_token import UserMCPToken
 from app.repositories.organization import OrganizationRepository
 
 logger = structlog.get_logger(__name__)
@@ -20,6 +26,34 @@ logger = structlog.get_logger(__name__)
 # eager revocation caused race conditions with the shared token file.
 _internal_tokens: dict[str, uuid.UUID] = {}
 _MAX_INTERNAL_TOKENS = 100
+
+
+def compute_token_prefix(plaintext_token: str) -> str:
+    """Compute a non-secret prefix for indexed token lookup.
+
+    Uses SHA-256 of the plaintext, truncated to 16 hex chars.
+    This is NOT a secret — it's stored in plaintext for fast filtering
+    before the expensive bcrypt verification.
+
+    Args:
+        plaintext_token: The raw token string.
+
+    Returns:
+        16-character hex prefix.
+    """
+    return hashlib.sha256(plaintext_token.encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
+class MCPAuthResult:
+    """Result of MCP token verification.
+
+    Always contains an org. Contains a user when the token is
+    a per-user token (UserMCPToken), None for org-level or internal tokens.
+    """
+
+    org: Organization
+    user: User | None = None
 
 
 def create_internal_mcp_token(org_id: uuid.UUID) -> str:
@@ -48,21 +82,23 @@ def create_internal_mcp_token(org_id: uuid.UUID) -> str:
 async def verify_mcp_token(
     db: AsyncSession = Depends(get_db),
     authorization: str = Header(),
-) -> Organization:
-    """Verify the bearer token from an MCP request against org tokens.
+) -> MCPAuthResult:
+    """Verify the bearer token from an MCP request.
 
-    Checks internal (scan-pipeline) tokens first, then falls back to
-    stored org token hashes.
+    Resolution order:
+    1. Internal tokens (in-memory, scan pipeline) → org only
+    2. Per-user tokens (UserMCPToken table) → org + user
+    3. Org-level tokens (Organization.mcp_token_hash) → org only
 
     Args:
         db: The async database session.
         authorization: The Authorization header value (Bearer <token>).
 
     Returns:
-        The authenticated Organization.
+        MCPAuthResult with the authenticated org and optional user.
 
     Raises:
-        HTTPException: If token is missing, invalid, or no matching org found.
+        HTTPException: If token is missing, invalid, or no match found.
     """
     if not authorization.startswith("Bearer "):
         raise HTTPException(
@@ -80,21 +116,43 @@ async def verify_mcp_token(
 
     org_repo = OrganizationRepository(db)
 
-    # Check internal tokens first (fast, in-memory)
+    # 1. Check internal tokens first (fast, in-memory)
     internal_org_id = _internal_tokens.get(token)
     if internal_org_id is not None:
         org = await org_repo.get_by_id(internal_org_id)
         if org:
             logger.debug("mcp_auth_internal", org_id=str(org.id))
-            return org
+            return MCPAuthResult(org=org)
 
-    # Fall back to stored org token hashes
+    # 2. Check per-user tokens — filter by prefix (indexed), then bcrypt
+    prefix = compute_token_prefix(token)
+    result = await db.execute(
+        select(UserMCPToken)
+        .where(UserMCPToken.token_prefix == prefix)
+        .options(
+            selectinload(UserMCPToken.user),
+            selectinload(UserMCPToken.organization),
+        )
+    )
+    for ut in result.scalars().all():
+        if verify_password(token, ut.token_hash):
+            logger.debug(
+                "mcp_auth_user_token",
+                org_id=str(ut.org_id),
+                user_id=str(ut.user_id),
+            )
+            return MCPAuthResult(org=ut.organization, user=ut.user)
+
+    # 3. Fall back to org-level token hashes
     orgs = await org_repo.get_all_with_mcp_tokens()
-
     for org in orgs:
         if org.mcp_token_hash and verify_password(token, org.mcp_token_hash):
-            logger.debug("mcp_auth_success", org_id=str(org.id), slug=org.slug)
-            return org
+            logger.debug(
+                "mcp_auth_success",
+                org_id=str(org.id),
+                slug=org.slug,
+            )
+            return MCPAuthResult(org=org)
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
