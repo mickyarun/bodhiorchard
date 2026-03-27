@@ -37,6 +37,10 @@ export class BuildingFactory {
     this.materials = materials ?? null
   }
 
+  /** Exposes the shared material cache so subsystems (e.g. ExteriorScene) can create
+   *  properly-lit cached materials without creating a separate MaterialFactory instance. */
+  get materialFactory(): MaterialFactory | null { return this.materials }
+
   /**
    * Create a tiled floor from floorFull GLBs.
    * @param parent Parent entity to add floor tiles to
