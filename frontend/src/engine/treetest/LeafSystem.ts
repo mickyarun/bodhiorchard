@@ -18,13 +18,13 @@ import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { Color3 } from './TreeRules'
 
-const MAX_TIPS        = 160    // cap terminal tips — max entities = 160 * 5 = 800
-const LEAVES_PER_TIP  = 5
-const LEAF_HEIGHT     = 0.20   // world units
-const LEAF_WIDTH      = 0.55   // width/height ratio
+const MAX_TIPS        = 160    // cap terminal tips — max entities = 160 * 10 = 1600
+const LEAVES_PER_TIP  = 10
+const LEAF_HEIGHT     = 0.32   // world units — larger leaves for denser canopy appearance
+const LEAF_WIDTH      = 0.70   // width/height ratio
 const WIND_FREQ_BASE  = 1.3    // Hz
 const WIND_AMPLITUDE  = 10     // degrees
-const LEAF_SCALE_VARY = 0.45
+const LEAF_SCALE_VARY = 0.50
 
 interface LeafEntry {
   entity: pc.Entity
@@ -121,7 +121,7 @@ export class LeafSystem {
     const yaw   = Math.random() * 360
     const roll  = (Math.random() - 0.5) * 30
 
-    const scatter = branchSize * 0.4
+    const scatter = branchSize * 0.65
     entity.setPosition(
       pos.x + (Math.random() - 0.5) * scatter,
       pos.y + (Math.random() - 0.5) * scatter,

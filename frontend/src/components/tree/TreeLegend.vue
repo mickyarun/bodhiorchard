@@ -1,45 +1,60 @@
 <template>
-  <v-card class="tree-legend pa-3" elevation="2" max-width="220">
-    <div class="text-caption font-weight-bold mb-2">Garden Legend</div>
-
-    <div class="text-caption font-weight-bold text-medium-emphasis mt-1 mb-1">Tree Size</div>
-    <div v-for="item in treeSizes" :key="item.label" class="d-flex align-center ga-2 mb-1">
-      <v-icon :icon="item.icon" size="14" :color="item.color" />
-      <span class="text-caption">{{ item.label }}</span>
+  <div class="tree-legend">
+    <!-- Header — always visible -->
+    <div class="legend-header" @click="collapsed = !collapsed">
+      <span class="legend-title">Garden Legend</span>
+      <v-icon
+        :icon="collapsed ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+        size="14"
+        class="legend-toggle"
+      />
     </div>
 
-    <div class="text-caption font-weight-bold text-medium-emphasis mt-2 mb-1">Features</div>
-    <div v-for="item in features" :key="item.label" class="d-flex align-center ga-2 mb-1">
-      <span class="legend-dot" :style="{ backgroundColor: item.color }" />
-      <span class="text-caption">{{ item.label }}</span>
-    </div>
+    <!-- Body — collapsed when minimized -->
+    <div v-if="!collapsed" class="legend-body">
+      <div class="legend-section-label">Tree Size</div>
+      <div v-for="item in treeSizes" :key="item.label" class="legend-row">
+        <v-icon :icon="item.icon" size="13" :color="item.color" />
+        <span>{{ item.label }}</span>
+      </div>
 
-    <div class="text-caption font-weight-bold text-medium-emphasis mt-2 mb-1">Bugs</div>
-    <div v-for="item in bugs" :key="item.label" class="d-flex align-center ga-2 mb-1">
-      <span class="legend-dot legend-dot--square" :style="{ backgroundColor: item.color }" />
-      <span class="text-caption">{{ item.label }}</span>
-    </div>
+      <div class="legend-section-label mt">Features</div>
+      <div v-for="item in features" :key="item.label" class="legend-row">
+        <span class="dot" :style="{ backgroundColor: item.color }" />
+        <span>{{ item.label }}</span>
+      </div>
 
-    <div class="text-caption font-weight-bold text-medium-emphasis mt-2 mb-1">Characters</div>
-    <div v-for="item in characters" :key="item.label" class="d-flex align-center ga-2 mb-1">
-      <v-icon :icon="item.icon" size="14" :color="item.color" />
-      <span class="text-caption">{{ item.label }}</span>
+      <div class="legend-section-label mt">Bugs</div>
+      <div v-for="item in bugs" :key="item.label" class="legend-row">
+        <span class="dot dot--square" :style="{ backgroundColor: item.color }" />
+        <span>{{ item.label }}</span>
+      </div>
+
+      <div class="legend-section-label mt">Characters</div>
+      <div v-for="item in characters" :key="item.label" class="legend-row">
+        <v-icon :icon="item.icon" size="13" :color="item.color" />
+        <span>{{ item.label }}</span>
+      </div>
     </div>
-  </v-card>
+  </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+
+const collapsed = ref(false)
+
 const treeSizes = [
-  { icon: 'mdi-sprout', color: 'green-lighten-2', label: 'Sprout (new repo)' },
-  { icon: 'mdi-tree-outline', color: 'green-lighten-1', label: 'Sapling (< 90 days)' },
-  { icon: 'mdi-tree', color: 'green', label: 'Medium (< 1 year)' },
-  { icon: 'mdi-tree', color: 'green-darken-2', label: 'Mature (1+ years)' },
+  { icon: 'mdi-sprout',       color: 'green-lighten-2', label: 'Small (few features)' },
+  { icon: 'mdi-tree-outline', color: 'green-lighten-1', label: 'Medium (some features)' },
+  { icon: 'mdi-tree',         color: 'green',           label: 'Large (many features)' },
+  { icon: 'mdi-tree',         color: 'green-darken-2',  label: 'Unique color per repo' },
 ]
 
 const features = [
-  { color: '#FF8F00', label: 'Released (fruit)' },
-  { color: '#CE93D8', label: 'In Review (flower)' },
-  { color: '#F48FB1', label: 'Ready (bloom)' },
+  { color: '#4CAF50', label: 'Implemented (with leaves)' },
+  { color: '#FF9800', label: 'In Progress (bare tree)' },
+  { color: '#90CAF9', label: 'Planned (bare tree)' },
 ]
 
 const bugs = [
@@ -50,8 +65,8 @@ const bugs = [
 ]
 
 const characters = [
-  { icon: 'mdi-account', color: 'purple', label: 'Developer' },
-  { icon: 'mdi-robot', color: 'grey-darken-3', label: 'AI Agent (MIB)' },
+  { icon: 'mdi-account', color: 'purple',       label: 'Developer' },
+  { icon: 'mdi-robot',   color: 'grey-darken-3', label: 'AI Agent (MIB)' },
 ]
 </script>
 
@@ -61,16 +76,75 @@ const characters = [
   bottom: 16px;
   right: 16px;
   z-index: 50;
+  min-width: 190px;
+  border-radius: 10px;
+  background: rgba(15, 20, 30, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
 }
 
-.legend-dot {
-  width: 10px;
-  height: 10px;
+.legend-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.legend-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.legend-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.90);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.legend-toggle {
+  opacity: 0.55;
+}
+
+.legend-body {
+  padding: 0 10px 10px;
+}
+
+.legend-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.legend-section-label.mt {
+  margin-top: 10px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 3px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.80);
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.legend-dot--square {
+.dot--square {
   border-radius: 2px;
 }
 </style>

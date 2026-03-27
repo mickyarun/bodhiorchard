@@ -199,9 +199,13 @@ export class ProceduralTreeSystem implements RepoVisualization {
             this.allPickableEntities.push(entity)
           }
 
-          // Spawn leaf clusters at terminal tips
+          // Spawn leaves only if repo has at least one implemented feature.
+          // in_progress / planned repos show bare trees — leaves signal completion.
+          const hasImplemented = [...entry.featuresByTitle.values()].some(f => f.status === 'implemented')
           const tips = entry.tree.getTerminalTips()
-          entry.leaves.spawnLeaves(tips, entry.tree.getRootColor())
+          if (hasImplemented) {
+            entry.leaves.spawnLeaves(tips, entry.tree.getRootColor())
+          }
 
           // Place billboard label just above the canopy
           const labelY = tips.length > 0
