@@ -66,7 +66,7 @@ export class HousingVillage {
       const houseX = zone.x + col * HOUSE_SPACING_X - totalWidth / 2
       const houseZ = zone.z + row * HOUSE_SPACING_Z - totalDepth / 2
 
-      const result = await this.houseBuilder.build(member.name, houseX, houseZ, i)
+      const result = await this.houseBuilder.build(member.user_id, member.name, houseX, houseZ, i)
 
       // Rotate house 90° so front door faces +X instead of +Z.
       // All local-space children (walls, furniture, path) rotate automatically.

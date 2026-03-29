@@ -18,9 +18,20 @@ import { clamp, lerp, easeOutCubic } from '../utils/MathUtils'
 
 export type CameraMode = 'overview' | 'play'
 
+/** Snapshot of camera orbit state for save/restore across scene transitions. */
+export interface CameraState {
+  yaw: number
+  pitch: number
+  distance: number
+  targetDistance: number
+  target: pc.Vec3
+  mode: CameraMode
+}
+
 export class CameraController {
   private cameraEntity!: pc.Entity
   private input!: InputManager
+  private enabled = true
 
   // Orbit state — start near ground, looking across the garden
   private yaw = -20
@@ -112,8 +123,57 @@ export class CameraController {
     this.startTransition(toPos, toTarget)
   }
 
+  /** Disable camera updates — used when interior camera takes over. */
+  disable(): void {
+    this.enabled = false
+    this.yawVelocity = 0
+    this.pitchVelocity = 0
+  }
+
+  /** Re-enable camera updates after interior exit. */
+  enable(): void {
+    this.enabled = true
+  }
+
+  get isEnabled(): boolean { return this.enabled }
+
+  /** Save current orbit state for restoration after interior visit. */
+  saveState(): CameraState {
+    return {
+      yaw: this.yaw,
+      pitch: this.pitch,
+      distance: this.distance,
+      targetDistance: this.targetDistance,
+      target: this.target.clone(),
+      mode: this.mode,
+    }
+  }
+
+  /** Restore a previously saved state with smooth transition. */
+  restoreState(state: CameraState): void {
+    this.yaw = state.yaw
+    this.pitch = state.pitch
+    this.targetDistance = state.targetDistance
+    this.distance = state.distance
+    this.mode = state.mode
+    this.followTarget = null
+    // Copy target immediately so interrupted transitions don't leave drift
+    this.target.copy(state.target)
+
+    const pitchRad = this.pitch * pc.math.DEG_TO_RAD
+    const yawRad = this.yaw * pc.math.DEG_TO_RAD
+    const toPos = new pc.Vec3(
+      state.target.x + this.distance * Math.cos(pitchRad) * Math.sin(yawRad),
+      state.target.y + this.distance * Math.sin(pitchRad),
+      state.target.z + this.distance * Math.cos(pitchRad) * Math.cos(yawRad),
+    )
+    this.startTransition(toPos, state.target)
+  }
+
   /** Per-frame update. */
   update(dt: number): void {
+    if (!this.enabled) return
+
     // Safety: if follow target was destroyed, fall back to overview
     if (this.mode === 'play' && this.followTarget && !this.followTarget.enabled) {
       this.followTarget = null

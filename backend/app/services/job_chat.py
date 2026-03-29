@@ -14,8 +14,10 @@ from typing import Any
 import structlog
 
 from app.agents.skill_mapping import SECTION_SKILL_MAP
+from app.models.agent_activity import AgentActivityLog
 from app.schemas.bud import SECTION_LABELS
 from app.schemas.jobs import ChatJobPayload, JobState
+from app.services.event_bus import publish
 from app.services.job_queue import update_job
 from app.services.job_utils import (
     HISTORY_CHAR_BUDGET,
@@ -117,6 +119,32 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
 
     update_job(job_id, status_message="Waiting for AI response...", progress_pct=20)
 
+    # Log skill_invoked
+    from app.database import AsyncSessionLocal
+
+    skill_name = SECTION_SKILL_MAP.get(payload.section, "product-manager")
+    _chat_org_id = payload.org_id
+    async with AsyncSessionLocal() as log_db:
+        log_db.add(AgentActivityLog(
+            org_id=uuid_mod.UUID(_chat_org_id),
+            bud_id=uuid_mod.UUID(payload.bud_id),
+            event_type="skill_invoked",
+            status="in_progress",
+            message=f"Chat '{skill_name}' invoked for {payload.section}",
+            source="backend",
+            skill_slug=skill_name,
+        ))
+        await log_db.commit()
+    publish(
+        f"agent_activity:{_chat_org_id}",
+        {"event_type": "skill_invoked", "status": "in_progress",
+         "skill_slug": skill_name, "task_id": None,
+         "message": f"Chat '{skill_name}' invoked for {payload.section}",
+         "actor_name": skill_name, "repo_name": None,
+         "bud_number": None, "bud_title": None,
+         "impacted_repo_names": [], "created_at": ""},
+    )
+
     from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
 
     # Read config from the skill definition
@@ -151,6 +179,26 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             p.unlink(missing_ok=True)
 
     if not result.success:
+        async with AsyncSessionLocal() as log_db:
+            log_db.add(AgentActivityLog(
+                org_id=uuid_mod.UUID(_chat_org_id),
+                bud_id=uuid_mod.UUID(payload.bud_id),
+                event_type="skill_failed",
+                status="failed",
+                message=(result.error or "AI unavailable")[:2000],
+                source="backend",
+                skill_slug=skill_name,
+            ))
+            await log_db.commit()
+        publish(
+            f"agent_activity:{_chat_org_id}",
+            {"event_type": "skill_failed", "status": "failed",
+             "skill_slug": skill_name, "task_id": None,
+             "message": (result.error or "AI unavailable")[:200],
+             "actor_name": skill_name, "repo_name": None,
+             "bud_number": None, "bud_title": None,
+             "impacted_repo_names": [], "created_at": ""},
+        )
         update_job(job_id, state=JobState.FAILED, error=result.error or "AI unavailable")
         await record_agent_timeline(
             payload.org_id,
@@ -175,6 +223,26 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             reply_text,
             payload.design_id,
             session_id=payload.session_id,
+        )
+        async with AsyncSessionLocal() as log_db:
+            log_db.add(AgentActivityLog(
+                org_id=uuid_mod.UUID(_chat_org_id),
+                bud_id=uuid_mod.UUID(payload.bud_id),
+                event_type="skill_completed",
+                status="completed",
+                message=f"Chat '{skill_name}' completed for {payload.section}",
+                source="backend",
+                skill_slug=skill_name,
+            ))
+            await log_db.commit()
+        publish(
+            f"agent_activity:{_chat_org_id}",
+            {"event_type": "skill_completed", "status": "completed",
+             "skill_slug": skill_name, "task_id": None,
+             "message": f"Chat '{skill_name}' completed",
+             "actor_name": skill_name, "repo_name": None,
+             "bud_number": None, "bud_title": None,
+             "impacted_repo_names": [], "created_at": ""},
         )
         update_job(
             job_id,
@@ -202,6 +270,28 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         reply_text,
         payload.design_id,
         session_id=payload.session_id,
+    )
+
+    # Log skill_completed
+    async with AsyncSessionLocal() as log_db:
+        log_db.add(AgentActivityLog(
+            org_id=uuid_mod.UUID(_chat_org_id),
+            bud_id=uuid_mod.UUID(payload.bud_id),
+            event_type="skill_completed",
+            status="completed",
+            message=f"Chat '{skill_name}' completed for {payload.section}",
+            source="backend",
+            skill_slug=skill_name,
+        ))
+        await log_db.commit()
+    publish(
+        f"agent_activity:{_chat_org_id}",
+        {"event_type": "skill_completed", "status": "completed",
+         "skill_slug": skill_name, "task_id": None,
+         "message": f"Chat '{skill_name}' completed",
+         "actor_name": skill_name, "repo_name": None,
+         "bud_number": None, "bud_title": None,
+         "impacted_repo_names": [], "created_at": ""},
     )
 
     update_job(

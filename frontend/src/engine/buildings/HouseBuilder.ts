@@ -24,12 +24,14 @@
 import * as pc from 'playcanvas'
 import { BuildingFactory } from './BuildingFactory'
 import { BUILDING, PATH } from '../assets/AssetManifest'
+import { setTreeData } from '../world/TreeNodeData'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 
 const WALL_HEIGHT = 1.29
 
 export interface HouseResult {
   entity: pc.Entity
+  memberId: string
   memberName: string
   bedPosition: { x: number; y: number; z: number }
   seats: InteractionPoint[]
@@ -43,6 +45,7 @@ export class HouseBuilder {
   }
 
   async build(
+    memberId: string,
     memberName: string,
     worldX: number,
     worldZ: number,
@@ -50,6 +53,10 @@ export class HouseBuilder {
   ): Promise<HouseResult> {
     const root = new pc.Entity(`House_${memberName}`)
     root.setPosition(worldX, 0, worldZ)
+
+    // Make house clickable by the picker system
+    root.tags.add('pickable')
+    setTreeData(root, { type: 'tree_house', memberId, memberName })
 
     const seats: InteractionPoint[] = []
 
@@ -111,6 +118,6 @@ export class HouseBuilder {
       stone.setLocalScale(1.5, 1.5, 1.5)
     }
 
-    return { entity: root, memberName, bedPosition: bedPos, seats }
+    return { entity: root, memberId, memberName, bedPosition: bedPos, seats }
   }
 }

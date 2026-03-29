@@ -67,6 +67,14 @@ class AgentActivityItem(BaseModel):
     action: str
     timestamp: str
     status: str
+    skill_slug: str = ""
+    repo_name: str | None = None
+    bud_number: int | None = None
+    session_id: str | None = None
+    event_type: str = ""
+    task_id: str | None = None
+    bud_title: str | None = None
+    impacted_repo_names: list[str] = Field(default_factory=list)
 
 
 class FeatureItem(BaseModel):
@@ -130,6 +138,8 @@ class RepoLimbData(BaseModel):
 
 class TreeData(BaseModel):
     """Complete data payload for the Living Tree visualization."""
+
+    org_id: str = ""
 
     # Soil / roots
     symbol_count: int = 0

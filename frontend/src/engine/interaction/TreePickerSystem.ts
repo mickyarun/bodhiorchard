@@ -23,6 +23,7 @@ export class TreePickerSystem {
   private readonly _rayFrom = new pc.Vec3()
   private readonly _rayTo = new pc.Vec3()
   private readonly _rayDir = new pc.Vec3()
+  private readonly _scratchCenter = new pc.Vec3()
 
   /** Set optional tooltip enricher (called after base tooltip text is computed). */
   setTooltipEnricher(enricher: TreeTooltipEnricher | null): void {
@@ -87,6 +88,20 @@ export class TreePickerSystem {
           sourceRef: data.sourceRef,
         })
         break
+      case 'tree_house':
+        callbacks.onHouseClick?.({
+          memberId: data.memberId,
+          name: data.memberName,
+          activity: 'home',
+        })
+        break
+      case 'tree_agent':
+        callbacks.onAgentClick?.({
+          agentKey: data.agentKey,
+          skillSlug: data.skillSlug,
+          skillName: data.skillName,
+        })
+        break
     }
   }
 
@@ -120,6 +135,8 @@ export class TreePickerSystem {
       case 'tree_bud': return `bud_${data.budNumber}`
       case 'tree_threat': return `threat_${data.id}`
       case 'tree_relationship': return `rel_${data.sourceRepo}_${data.targetRepo}`
+      case 'tree_house': return `house_${data.memberId}`
+      case 'tree_agent': return `agent_${data.agentKey}`
     }
   }
 
@@ -135,6 +152,10 @@ export class TreePickerSystem {
         return `⚠ ${data.title} (${data.severity})`
       case 'tree_relationship':
         return `${data.sourceRepo} → ${data.targetRepo} [${data.relType}]`
+      case 'tree_house':
+        return `Enter ${data.memberName}'s house`
+      case 'tree_agent':
+        return `${data.skillName} (busy)`
     }
   }
 
@@ -158,10 +179,25 @@ export class TreePickerSystem {
 
     for (const entity of pickableEntities) {
       if (!entity.tags.has('pickable')) continue
-      const pos = entity.getPosition()
-      const scale = entity.getLocalScale()
-      // Inflated pick radius for small fruits (1.5× visual radius)
-      const radius = Math.max(scale.x, scale.y, scale.z) / 2 * 1.5
+      let pos = entity.getPosition()
+      const data = getTreeData(entity)
+      // Houses are 4×4 tile buildings rotated 90°. The entity origin is at
+      // the corner, not the visual center. Offset the pick sphere center to
+      // match where the user sees the house. Radius 4 covers the full footprint.
+      let radius: number
+      if (data?.type === 'tree_house') {
+        radius = 4
+      } else if (data?.type === 'tree_agent') {
+        radius = 1.5
+        // Approximate visual center: offset (2,0,2) in local space,
+        // transformed by parent rotation. Use a scratch vec to avoid allocation.
+        this._scratchCenter.copy(pos)
+        this._scratchCenter.y += 0.6 // halfway up the walls for better vertical hit
+        pos = this._scratchCenter
+      } else {
+        const scale = entity.getLocalScale()
+        radius = Math.max(scale.x, scale.y, scale.z) / 2 * 1.5
+      }
       const dist = this.raySphereIntersect(this._rayFrom, this._rayDir, pos, radius)
       if (dist !== null && dist < closestDist) {
         closestDist = dist

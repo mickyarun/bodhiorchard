@@ -12,7 +12,9 @@ from typing import Any
 
 import structlog
 
+from app.models.agent_activity import AgentActivityLog
 from app.schemas.jobs import DesignAgentJobPayload, DesignExtractJobPayload, JobState
+from app.services.event_bus import publish
 from app.services.job_chat import _build_design_prompt, _parse_chat_response, _persist_design
 from app.services.job_queue import update_job
 from app.services.job_utils import (
@@ -86,6 +88,42 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
     except FileNotFoundError:
         designer_skill = None
 
+    # Log skill_invoked to agent_activity_logs
+    from app.database import AsyncSessionLocal
+
+    _skill_uuid = uuid_mod.UUID(payload.skill_id) if payload.skill_id else None
+    _task_uuid = uuid_mod.UUID(payload.task_id) if payload.task_id else None
+
+    _repo_uuid = uuid_mod.UUID(repo_id) if repo_id else None
+    _org_id_str = payload.org_id
+
+    async with AsyncSessionLocal() as log_db:
+        log_db.add(AgentActivityLog(
+            org_id=uuid_mod.UUID(_org_id_str),
+            skill_id=_skill_uuid,
+            task_id=_task_uuid,
+            bud_id=uuid_mod.UUID(payload.bud_id),
+            repo_id=_repo_uuid,
+            event_type="skill_invoked",
+            status="in_progress",
+            message=f"Designer skill invoked for {bud_ref}",
+            source="backend",
+            skill_slug="designer",
+        ))
+        await log_db.commit()
+
+    # Publish immediately so 3D robot appears before Claude runs
+    publish(
+        f"agent_activity:{_org_id_str}",
+        {"event_type": "skill_invoked", "status": "in_progress",
+         "skill_slug": "designer", "task_id": payload.task_id,
+         "message": f"Designer skill invoked for {bud_ref}",
+         "actor_name": "designer", "repo_name": repo_name,
+         "bud_number": payload.bud_number, "bud_title": payload.title,
+         "impacted_repo_names": [repo_name] if repo_name else [],
+         "created_at": ""},
+    )
+
     sys_files = [str(ds_temp_file)] if ds_temp_file else []
     try:
         result = await run_claude_code(
@@ -106,6 +144,29 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
             ds_temp_file.unlink(missing_ok=True)
 
     if not result.success:
+        async with AsyncSessionLocal() as log_db:
+            log_db.add(AgentActivityLog(
+                org_id=uuid_mod.UUID(_org_id_str),
+                skill_id=_skill_uuid,
+                task_id=_task_uuid,
+                bud_id=uuid_mod.UUID(payload.bud_id),
+                repo_id=_repo_uuid,
+                event_type="skill_failed",
+                status="failed",
+                message=(result.error or "AI unavailable")[:2000],
+                source="backend",
+                skill_slug="designer",
+            ))
+            await log_db.commit()
+        publish(
+            f"agent_activity:{_org_id_str}",
+            {"event_type": "skill_failed", "status": "failed",
+             "skill_slug": "designer", "task_id": payload.task_id,
+             "message": (result.error or "AI unavailable")[:200],
+             "actor_name": "designer", "repo_name": repo_name,
+             "bud_number": payload.bud_number, "bud_title": payload.title,
+             "impacted_repo_names": [], "created_at": ""},
+        )
         if design_id:
             await _update_design_status(design_id, payload.org_id, "failed")
         update_job(job_id, state=JobState.FAILED, error=result.error or "AI unavailable")
@@ -152,6 +213,34 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
 
     final_state = JobState.COMPLETED if wireframe_html else JobState.FAILED
     final_error = None if wireframe_html else "AI returned text instead of HTML wireframe"
+
+    # Log skill_completed or skill_failed
+    _final_event = "skill_completed" if wireframe_html else "skill_failed"
+    _final_status = "completed" if wireframe_html else "failed"
+    async with AsyncSessionLocal() as log_db:
+        log_db.add(AgentActivityLog(
+            org_id=uuid_mod.UUID(_org_id_str),
+            skill_id=_skill_uuid,
+            task_id=_task_uuid,
+            bud_id=uuid_mod.UUID(payload.bud_id),
+            repo_id=_repo_uuid,
+            event_type=_final_event,
+            status=_final_status,
+            message=f"Designer {_final_status} for {bud_ref}",
+            source="backend",
+            skill_slug="designer",
+            metadata_={"design_id": design_id, "repo_id": repo_id} if wireframe_html else None,
+        ))
+        await log_db.commit()
+    publish(
+        f"agent_activity:{_org_id_str}",
+        {"event_type": _final_event, "status": _final_status,
+         "skill_slug": "designer", "task_id": payload.task_id,
+         "message": f"Designer {_final_status} for {bud_ref}",
+         "actor_name": "designer", "repo_name": repo_name,
+         "bud_number": payload.bud_number, "bud_title": payload.title,
+         "impacted_repo_names": [], "created_at": ""},
+    )
 
     if wireframe_html:
         event_type = "design_generated"

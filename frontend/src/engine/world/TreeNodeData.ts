@@ -59,12 +59,27 @@ export interface TreeRelNodeData {
   weight: number
 }
 
+export interface TreeHouseNodeData {
+  type: 'tree_house'
+  memberId: string
+  memberName: string
+}
+
+export interface TreeAgentNodeData {
+  type: 'tree_agent'
+  agentKey: string
+  skillSlug: string
+  skillName: string
+}
+
 export type TreeNodeData =
   | TreeRepoNodeData
   | TreeFeatureNodeData
   | TreeBudNodeData
   | TreeThreatNodeData
   | TreeRelNodeData
+  | TreeHouseNodeData
+  | TreeAgentNodeData
 
 // ─── Accessor Functions ──────────────────────────
 

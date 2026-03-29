@@ -271,6 +271,12 @@ export const PATH = {
   stone: `${GARDEN}/path_stone.glb`,
 } as const
 
+/** Agent robot character GLB. */
+export const AGENT_ROBOT = 'assets/agents/robot.glb'
+
+/** Agent spaceship transport GLB. */
+export const AGENT_SPACESHIP = 'assets/agents/spaceship.glb'
+
 /** All campfire + pavilion + pool + path GLBs. */
 export function getMiscGLBs(): string[] {
   return [

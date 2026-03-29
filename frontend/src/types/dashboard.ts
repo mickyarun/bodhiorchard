@@ -52,6 +52,14 @@ export interface AgentActivityItem {
   action: string
   timestamp: string
   status: string
+  skill_slug?: string
+  repo_name?: string | null
+  bud_number?: number | null
+  session_id?: string | null
+  event_type?: string
+  task_id?: string | null
+  bud_title?: string | null
+  impacted_repo_names?: string[]
 }
 
 export interface FeatureItem {
@@ -94,6 +102,7 @@ export interface RepoLimbData {
 }
 
 export interface TreeData {
+  org_id?: string
   symbol_count: number
   relationship_count: number
   total_files: number

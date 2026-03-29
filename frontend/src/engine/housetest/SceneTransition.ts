@@ -27,7 +27,7 @@ export class SceneTransition {
 
   get isActive(): boolean { return this.active }
 
-  async perform(onSwap: () => void): Promise<void> {
+  async perform(onSwap: () => void | Promise<void>): Promise<void> {
     if (this.active || !this.overlay) return
     this.active = true
 
@@ -37,8 +37,8 @@ export class SceneTransition {
     this.overlay.style.opacity = '1'
     await this.wait(FADE_MS)
 
-    // Swap (happens while black)
-    onSwap()
+    // Swap (happens while black — await supports async callbacks like interior build)
+    await onSwap()
 
     // Fade out
     this.overlay.style.opacity = '0'

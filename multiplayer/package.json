@@ -1,0 +1,22 @@
+{
+  "name": "flowdev-multiplayer",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/main.ts",
+    "start:dev": "ts-node-dev --watch \"src/**/*\" --respawn --transpile-only src/main.ts",
+    "start:prod": "node dist/main.js"
+  },
+  "dependencies": {
+    "colyseus": "^0.17.0",
+    "@colyseus/ws-transport": "^0.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "ts-node": "^10.9.0",
+    "ts-node-dev": "^2.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

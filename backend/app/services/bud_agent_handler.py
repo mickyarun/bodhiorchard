@@ -9,10 +9,14 @@ import uuid as uuid_mod
 from typing import Any, Protocol
 
 import structlog
+from sqlalchemy import select
 
+from app.models.agent_activity import AgentActivityLog
 from app.models.bud import BUDDocument
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
+from app.models.tracked_repository import TrackedRepository
 from app.schemas.jobs import BUDAgentTaskPayload, JobState
+from app.services.event_bus import publish
 from app.services.job_queue import update_job
 from app.services.job_utils import make_progress_callback, record_agent_timeline
 from app.services.skill_loader import Skill
@@ -252,10 +256,13 @@ async def _build_code_review_prompt(
     Instead of embedding full diffs and tech specs inline, provides the agent
     with repo paths, branch info, and commit SHAs so it can use tools (Read,
     Bash git diff, gitnexus MCP) to explore code itself.
+
+    When GitHub PRs are linked, uses the PR branch for targeted diffs.
     """
     from pathlib import Path
 
     from app.repositories.dev_activity import DevActivityLogRepository
+    from app.repositories.pull_request import PullRequestRepository
 
     bud_ref = f"BUD-{bud.bud_number:03d}"
     meta = bud.metadata_ or {}
@@ -264,7 +271,16 @@ async def _build_code_review_prompt(
     activity_repo = DevActivityLogRepository(db, org_id=org_id)
     last_shas = await activity_repo.get_last_sha_per_repo(bud.id)
 
-    # Build repo context: paths + last commit SHAs
+    # Load linked PRs for PR-aware diff commands
+    pr_repo = PullRequestRepository(db, org_id=org_id)
+    linked_prs = await pr_repo.list_for_bud(bud.id)
+    pr_branches: dict[str, str] = {}
+    for pr in linked_prs:
+        if pr.state.value == "open":
+            repo_short = pr.github_repo_full_name.split("/")[-1]
+            pr_branches[repo_short] = pr.head_branch
+
+    # Build repo context: paths + PR branches or commit SHAs
     repo_sections: list[str] = []
     working_dir: str | None = None
 
@@ -276,15 +292,25 @@ async def _build_code_review_prompt(
         if working_dir is None:
             working_dir = repo_path
 
-        last_sha = last_shas.get(repo_path, "HEAD")
-        develop_wt = Path(repo_path) / ".bodhigrove" / "develop"
-        diff_base = "develop" if develop_wt.exists() else "HEAD~10"
-
-        repo_sections.append(
-            f"- **{repo_name}**: `{repo_path}`\n"
-            f"  - Last commit: `{last_sha}`\n"
-            f"  - Diff command: `git diff {diff_base}...{last_sha} --stat --patch`"
-        )
+        pr_branch = pr_branches.get(repo_name)
+        if pr_branch:
+            repo_sections.append(
+                f"- **{repo_name}**: `{repo_path}`\n"
+                f"  - PR branch: `{pr_branch}`\n"
+                f"  - First run: `git fetch origin {pr_branch}`\n"
+                f"  - Diff command: `git diff main...origin/{pr_branch}"
+                f" --stat --patch`"
+            )
+        else:
+            last_sha = last_shas.get(repo_path, "HEAD")
+            develop_wt = Path(repo_path) / ".bodhigrove" / "develop"
+            diff_base = "develop" if develop_wt.exists() else "HEAD~10"
+            repo_sections.append(
+                f"- **{repo_name}**: `{repo_path}`\n"
+                f"  - Last commit: `{last_sha}`\n"
+                f"  - Diff command: `git diff {diff_base}...{last_sha}"
+                f" --stat --patch`"
+            )
 
     if not repo_sections:
         raise ValueError("No confirmed repos with commits for code review")
@@ -438,6 +464,12 @@ async def _handle_code_review_result(
             meta["manual_test_plan_md"] = manual_plan
         bud.metadata_ = meta
         comment_count = len(new_comments)
+
+        # Sync review comments to linked GitHub PRs
+        if new_comments:
+            from app.services.github_pr_sync import sync_review_comments_to_github
+
+            await sync_review_comments_to_github(bud_id, org_id, new_comments, db)
 
         # Auto-transition to testing if this was a re-review and no new issues
         if qa_push_requested and comment_count == 0:
@@ -852,6 +884,65 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             if task.task_type == "code_review":
                 config.output_format = "json"
 
+            # Resolve repo_id from working_dir for activity tracking
+            _repo_id = None
+            if working_dir:
+                repo_row = await db.execute(
+                    select(TrackedRepository.id).where(
+                        TrackedRepository.path == working_dir,
+                        TrackedRepository.org_id == org_id,
+                    )
+                )
+                _repo_id = repo_row.scalar_one_or_none()
+
+            # Log skill_invoked in a SEPARATE session so it commits immediately
+            # (the main db session commits only after run_claude_code completes,
+            #  which can take 30-120 seconds — the row must be visible NOW)
+            from app.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as invoke_db:
+                invoke_db.add(AgentActivityLog(
+                    org_id=org_id,
+                    skill_id=task.skill_id,
+                    task_id=task_id,
+                    bud_id=bud_id,
+                    repo_id=_repo_id,
+                    session_id=None,
+                    event_type="skill_invoked",
+                    status="in_progress",
+                    message=f"Skill '{_skill_slug}' invoked for {_task_type}",
+                    source="backend",
+                    skill_slug=_skill_slug,
+                ))
+                await invoke_db.commit()
+
+            # Mark task as RUNNING — commit immediately so it's visible to other sessions
+            task.status = AgentTaskStatus.RUNNING
+            await db.commit()
+
+            # Publish immediately so 3D garden shows the robot BEFORE claude runs
+            _pub_repo_name: str | None = None
+            if _repo_id:
+                _rr = await db.execute(
+                    select(TrackedRepository.name).where(TrackedRepository.id == _repo_id)
+                )
+                _pub_repo_name = _rr.scalar_one_or_none()
+            publish(
+                f"agent_activity:{org_id}",
+                {
+                    "event_type": "skill_invoked",
+                    "status": "in_progress",
+                    "message": f"Skill '{_skill_slug}' invoked for {_task_type}",
+                    "skill_slug": _skill_slug,
+                    "actor_name": _skill_slug,
+                    "task_id": str(task_id),
+                    "repo_name": _pub_repo_name,
+                    "bud_number": bud.bud_number if bud else None,
+                    "bud_title": bud.title if bud else None,
+                    "impacted_repo_names": [],
+                    "created_at": "",
+                },
+            )
+
             result = await run_claude_code(
                 prompt=prompt,
                 working_dir=working_dir,
@@ -861,9 +952,31 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
 
             if not result.success:
                 error_msg = result.error or "Agent execution failed"
+                # Log skill_failed
+                db.add(AgentActivityLog(
+                    org_id=org_id,
+                    skill_id=task.skill_id,
+                    task_id=task_id,
+                    bud_id=bud_id,
+                    repo_id=_repo_id,
+                    event_type="skill_failed",
+                    status="failed",
+                    message=error_msg[:2000],
+                    source="backend",
+                    skill_slug=_skill_slug,
+                ))
                 task.status = AgentTaskStatus.FAILED
                 task.error_message = error_msg[:500]
                 await db.commit()
+                publish(
+                    f"agent_activity:{org_id}",
+                    {"event_type": "skill_failed", "status": "failed",
+                     "skill_slug": _skill_slug, "task_id": str(task_id),
+                     "message": error_msg[:200], "actor_name": _skill_slug,
+                     "repo_name": _pub_repo_name, "bud_number": bud.bud_number if bud else None,
+                     "bud_title": bud.title if bud else None,
+                     "impacted_repo_names": [], "created_at": ""},
+                )
                 update_job(job_id, state=JobState.FAILED, error=error_msg)
                 return
 
@@ -875,21 +988,68 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             if handler:
                 result_summary = await handler(bud_id, org_id, result.output or "", task, db)
 
+            # Log skill_completed
+            db.add(AgentActivityLog(
+                org_id=org_id,
+                skill_id=task.skill_id,
+                task_id=task_id,
+                bud_id=bud_id,
+                repo_id=_repo_id,
+                event_type="skill_completed",
+                status="completed",
+                message=f"Skill '{_skill_slug}' completed for {_task_type}",
+                source="backend",
+                skill_slug=_skill_slug,
+                metadata_=result_summary,
+            ))
+
             # Mark task completed
             task.status = AgentTaskStatus.COMPLETED
             task.result_summary = result_summary
             task.error_message = None
             await db.commit()
 
+            # Publish completion so 3D robot fades out in real-time
+            publish(
+                f"agent_activity:{org_id}",
+                {"event_type": "skill_completed", "status": "completed",
+                 "skill_slug": _skill_slug, "task_id": str(task_id),
+                 "message": f"Skill '{_skill_slug}' completed for {_task_type}",
+                 "actor_name": _skill_slug,
+                 "repo_name": _pub_repo_name, "bud_number": bud.bud_number if bud else None,
+                 "bud_title": bud.title if bud else None,
+                 "impacted_repo_names": [], "created_at": ""},
+            )
+
         except Exception as exc:
             await db.rollback()
-            # Mark task failed
+            # Mark task failed and log skill_failed
             async with AsyncSessionLocal() as err_db:
                 err_task = await err_db.get(BUDAgentTask, task_id)
                 if err_task:
                     err_task.status = AgentTaskStatus.FAILED
                     err_task.error_message = str(exc)[:500]
-                    await err_db.commit()
+                err_db.add(AgentActivityLog(
+                    org_id=org_id,
+                    skill_id=err_task.skill_id if err_task else None,
+                    task_id=task_id,
+                    bud_id=bud_id,
+                    event_type="skill_failed",
+                    status="failed",
+                    message=str(exc)[:2000],
+                    source="backend",
+                    skill_slug=_skill_slug,
+                ))
+                await err_db.commit()
+            publish(
+                f"agent_activity:{org_id}",
+                {"event_type": "skill_failed", "status": "failed",
+                 "skill_slug": _skill_slug, "task_id": str(task_id),
+                 "message": str(exc)[:200],
+                 "actor_name": _skill_slug, "repo_name": None,
+                 "bud_number": None, "bud_title": None,
+                 "impacted_repo_names": [], "created_at": ""},
+            )
             update_job(job_id, state=JobState.FAILED, error=str(exc)[:200])
             logger.exception("bud_agent_job_failed", task_id=str(task_id))
             return

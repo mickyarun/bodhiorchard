@@ -20,9 +20,12 @@ import structlog
 from cachetools import TTLCache
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
+from app.models.agent_activity import AgentActivityLog
 from app.models.agent_log import AgentLog
 from app.models.bud import BUDDocument
+from app.models.bud_agent_task import BUDAgentTask
 from app.models.bug import Bug, BugStatus
 from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
 from app.models.skill_profile import SkillProfile
@@ -75,7 +78,7 @@ async def get_tree_data(
     if not refresh and cache_key in _cache:
         return _cache[cache_key]
 
-    tree = TreeData()
+    tree = TreeData(org_id=str(org_id))
 
     # 1. Collect repo structure — builds tree.repos[] with branches from directories
     file_branch_map = await _collect_repo_structure(tree, tracked_repos)
@@ -709,22 +712,122 @@ async def _collect_bugs(
 
 
 async def _collect_agents(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) -> None:
-    """Collect recent agent activity."""
-    result = await db.execute(
-        select(AgentLog)
-        .where(AgentLog.org_id == org_id)
-        .order_by(AgentLog.created_at.desc())
-        .limit(10)
+    """Collect agent activity for 3D visualization.
+
+    Two queries:
+      A. Active agents — PENDING/RUNNING tasks from bud_agent_tasks (what's working NOW)
+      B. Recent completed — last 10 activity log events (history context)
+
+    Each active task = one robot character in the garden. task_id is the unique key.
+    """
+    # ── Query A: Active agent tasks (currently working) ─────────────────────
+    active_stmt = (
+        select(BUDAgentTask)
+        .options(joinedload(BUDAgentTask.bud))
+        .where(
+            BUDAgentTask.org_id == org_id,
+            BUDAgentTask.status.in_(["pending", "running"]),
+        )
+        .order_by(BUDAgentTask.created_at.desc())
+        .limit(20)
     )
-    for log in result.scalars().all():
+    active_result = await db.execute(active_stmt)
+    for task in active_result.scalars().all():
+        # Resolve repo name from the latest activity log for this task
+        repo_name = await _resolve_task_repo_name(db, task)
+
+        # Extract impacted repo names from BUD's impacted_repos JSONB
+        impacted_repos: list[str] = []
+        if task.bud and task.bud.impacted_repos:
+            for repo_entry in task.bud.impacted_repos:
+                name = repo_entry.get("repo_name") if isinstance(repo_entry, dict) else None
+                if name:
+                    impacted_repos.append(name)
+
         tree.agent_activity.append(
             AgentActivityItem(
-                agent_name=log.agent_name or "unknown",
-                action=log.action or "",
-                timestamp=log.created_at.isoformat() if log.created_at else "",
-                status=log.status or "completed",
+                agent_name=task.skill.name if task.skill else "Agent",
+                action=task.status_message or f"Working on {task.task_type}...",
+                timestamp=task.created_at.isoformat() if task.created_at else "",
+                status=task.status or "running",
+                skill_slug=task.skill.skill_slug if task.skill else "",
+                repo_name=repo_name,
+                bud_number=task.bud.bud_number if task.bud else None,
+                session_id=None,
+                event_type="skill_invoked",
+                task_id=str(task.id),
+                bud_title=task.bud.title if task.bud else None,
+                impacted_repo_names=impacted_repos,
             )
         )
+
+    # ── Query B: Recent completed activity (history context) ────────────────
+    completed_stmt = (
+        select(
+            AgentActivityLog,
+            TrackedRepository.name.label("repo_name"),
+            BUDDocument.bud_number.label("bud_number"),
+            BUDDocument.title.label("bud_title"),
+        )
+        .outerjoin(TrackedRepository, AgentActivityLog.repo_id == TrackedRepository.id)
+        .outerjoin(BUDDocument, AgentActivityLog.bud_id == BUDDocument.id)
+        .where(
+            AgentActivityLog.org_id == org_id,
+            AgentActivityLog.event_type.in_(["skill_completed", "skill_failed"]),
+        )
+        .order_by(AgentActivityLog.created_at.desc())
+        .limit(10)
+    )
+    result = await db.execute(completed_stmt)
+    for row in result.all():
+        log: AgentActivityLog = row[0]
+        tree.agent_activity.append(
+            AgentActivityItem(
+                agent_name=log.actor_name or log.skill_slug or "agent",
+                action=log.message or "",
+                timestamp=log.created_at.isoformat() if log.created_at else "",
+                status=log.status or "completed",
+                skill_slug=log.skill_slug or "",
+                repo_name=row[1],
+                bud_number=row[2],
+                session_id=log.session_id,
+                event_type=log.event_type or "",
+                task_id=str(log.task_id) if log.task_id else None,
+                bud_title=row[3],
+            )
+        )
+
+    # ── Fallback: Legacy AgentLog (backward compat) ─────────────────────────
+    if not tree.agent_activity:
+        legacy = await db.execute(
+            select(AgentLog)
+            .where(AgentLog.org_id == org_id)
+            .order_by(AgentLog.created_at.desc())
+            .limit(10)
+        )
+        for log in legacy.scalars().all():
+            tree.agent_activity.append(
+                AgentActivityItem(
+                    agent_name=log.agent_name or "unknown",
+                    action=log.output_summary or log.input_summary or "",
+                    timestamp=log.created_at.isoformat() if log.created_at else "",
+                    status=log.status or "completed",
+                )
+            )
+
+
+async def _resolve_task_repo_name(
+    db: AsyncSession, task: BUDAgentTask,
+) -> str | None:
+    """Resolve the primary repo name for an agent task from its activity logs."""
+    stmt = (
+        select(TrackedRepository.name)
+        .join(AgentActivityLog, AgentActivityLog.repo_id == TrackedRepository.id)
+        .where(AgentActivityLog.task_id == task.id)
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def _collect_members(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) -> None:

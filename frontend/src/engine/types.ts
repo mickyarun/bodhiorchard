@@ -89,6 +89,14 @@ export interface EngineAgentActivity {
   action: string
   timestamp: string
   status: string
+  skill_slug: string
+  repo_name: string | null
+  bud_number: number | null
+  session_id: string | null
+  event_type: string
+  task_id: string | null
+  bud_title: string | null
+  impacted_repo_names: string[]
 }
 
 // ─── Feature Skills (Bus Factor) ────────────────────
@@ -144,6 +152,7 @@ export interface EngineCharacterInfo {
 }
 
 export interface EngineHouseInfo {
+  memberId: string
   name: string
   activity: ActivityState
 }
@@ -170,6 +179,12 @@ export type ActivityState =
 
 export type DayPeriod = 'weekday' | 'weekend'
 
+export interface EngineAgentInfo {
+  agentKey: string
+  skillSlug: string
+  skillName: string
+}
+
 // ─── Engine Callbacks ───────────────────────────────
 
 export interface EngineCallbacks {
@@ -178,6 +193,7 @@ export interface EngineCallbacks {
   onDeveloperClick?: (info: EngineCharacterInfo) => void
   onHouseClick?: (info: EngineHouseInfo) => void
   onFeatureClick?: (info: EngineFeatureInfo) => void
+  onAgentClick?: (info: EngineAgentInfo) => void
   onHover?: (tooltip: { text: string; screenX: number; screenY: number } | null) => void
 }
 
@@ -192,4 +208,6 @@ export interface EngineEvents {
   'camera:focus': { x: number; y: number; z: number; distance?: number }
   'pick:click': { type: string; id: string; data: Record<string, unknown> }
   'pick:hover': { text: string; screenX: number; screenY: number } | null
+  'interior:enter': { memberId: string; memberName: string }
+  'interior:exit': void
 }

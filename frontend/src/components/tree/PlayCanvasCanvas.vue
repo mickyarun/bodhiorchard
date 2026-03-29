@@ -24,6 +24,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import type { TreeData } from '@/types/dashboard'
 import { GardenEngine } from '@/engine/index'
 import type { EngineData, RepoHealth, ThreatSeverity, BUDStatus, RelType } from '@/engine/types'
+import { subscribe, unsubscribe } from '@/services/socket'
 
 const props = defineProps<{
   treeData: TreeData
@@ -41,6 +42,27 @@ const tooltipText = ref<string | null>(null)
 const tooltipPos = ref({ x: 0, y: 0 })
 
 let engine: GardenEngine | null = null
+let agentTopic: string | null = null
+
+/** Handle real-time agent activity from WebSocket. */
+function onAgentActivity(data: unknown): void {
+  if (!engine) return
+  const raw = data as Record<string, unknown>
+  engine.handleAgentActivity({
+    agent_name: (raw.actor_name as string) || (raw.skill_slug as string) || 'agent',
+    action: (raw.message as string) || '',
+    timestamp: (raw.created_at as string) || '',
+    status: (raw.status as string) || 'in_progress',
+    skill_slug: (raw.skill_slug as string) || '',
+    repo_name: (raw.repo_name as string) || null,
+    bud_number: (raw.bud_number as number) || null,
+    session_id: (raw.session_id as string) || null,
+    event_type: (raw.event_type as string) || '',
+    task_id: (raw.task_id as string) || null,
+    bud_title: (raw.bud_title as string) || null,
+    impacted_repo_names: (raw.impacted_repo_names as string[]) || [],
+  })
+}
 let resizeObserver: ResizeObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -111,6 +133,14 @@ function adaptTreeData(data: TreeData): EngineData {
       action: a.action,
       timestamp: a.timestamp,
       status: a.status,
+      skill_slug: a.skill_slug ?? '',
+      repo_name: a.repo_name ?? null,
+      bud_number: a.bud_number ?? null,
+      session_id: a.session_id ?? null,
+      event_type: a.event_type ?? '',
+      task_id: a.task_id ?? null,
+      bud_title: a.bud_title ?? null,
+      impacted_repo_names: a.impacted_repo_names ?? [],
     })),
     relationships: (data.relationships ?? []).map(r => ({
       source_branch: r.source_branch,
@@ -149,7 +179,10 @@ async function initEngine(): Promise<void> {
       name: info.name,
       modelName: info.modelName,
     }),
-    onHouseClick: (info) => emit('house-click', { name: info.name }),
+    onHouseClick: (info) => {
+      emit('house-click', { name: info.name })
+      if (info.memberId) engine?.enterHouse(info.memberId)
+    },
     onHover: (tip) => {
       if (tip) {
         tooltipText.value = tip.text
@@ -161,6 +194,12 @@ async function initEngine(): Promise<void> {
   })
 
   await engine.setData(adaptTreeData(props.treeData))
+
+  // Subscribe to real-time agent activity events for live robot spawn/update/remove
+  if (props.treeData.org_id) {
+    agentTopic = `agent_activity:${props.treeData.org_id}`
+    subscribe(agentTopic, onAgentActivity)
+  }
 }
 
 function onResize(): void {
@@ -208,9 +247,18 @@ function toggleArcs(): boolean {
   return engine?.toggleArcs() ?? false
 }
 
-defineExpose({ toggleArcs })
+/** Exit house interior back to garden (callable from parent). */
+function exitHouse(): void {
+  engine?.exitHouse()
+}
+
+defineExpose({ toggleArcs, exitHouse })
 
 onUnmounted(() => {
+  if (agentTopic) {
+    unsubscribe(agentTopic, onAgentActivity)
+    agentTopic = null
+  }
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null

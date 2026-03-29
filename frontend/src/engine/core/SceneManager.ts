@@ -22,6 +22,8 @@ import { AssetLoader } from '../assets/AssetLoader'
 import {
   getAllDecorationGLBs,
   getEnvironmentGLBs, getBuildingGLBs, getMiscGLBs,
+  AGENT_ROBOT,
+  AGENT_SPACESHIP,
 } from '../assets/AssetManifest'
 import { WorldLayout } from '../world/WorldLayout'
 import type { RepoVisualization } from '../world/RepoVisualization'
@@ -46,6 +48,7 @@ import { GardenBirdSystem } from '../world/GardenBirdSystem'
 import { GardenAnimalSystem } from '../world/GardenAnimalSystem'
 import { LanternSystem } from '../effects/LanternSystem'
 import { CircularFence } from '../world/CircularFence'
+import { AgentCharacterSystem } from '../agents'
 
 export class SceneManager {
   private app: Application
@@ -69,6 +72,7 @@ export class SceneManager {
   private gardenBirds: GardenBirdSystem | null = null
   private gardenAnimals: GardenAnimalSystem | null = null
   private lanterns: LanternSystem | null = null
+  private agentSystem: AgentCharacterSystem | null = null
   private signEntities: pc.Entity[] = []
 
   // Building entities (for destruction)
@@ -76,6 +80,10 @@ export class SceneManager {
 
   // Shared data for Phase 3+
   private _memberHouseMap = new Map<string, HouseResult>()
+  private _pickableCache: pc.Entity[] | null = null
+
+  // Garden world root — toggled off during interior mode
+  private _gardenRoot: pc.Entity | null = null
 
   constructor(app: Application, materials: MaterialFactory) {
     this.app = app
@@ -94,6 +102,8 @@ export class SceneManager {
       ...getEnvironmentGLBs(),
       ...getBuildingGLBs(),
       ...getMiscGLBs(),
+      AGENT_ROBOT,
+      AGENT_SPACESHIP,
       // Character GLBs loaded on-demand by CharacterFactory (not batch — isolated error handling)
     ]
     const uniquePaths = [...new Set(allPaths)]
@@ -257,6 +267,25 @@ export class SceneManager {
     // Gate angle points toward orchard (0,0) so it aligns with the path entrance.
     // Orchard is the central hub; it has paths converging from all sides so no fence.
     this.buildZoneFences(buildingFactory)
+
+    // 8d. Agent characters — always initialized so live WebSocket events can spawn robots
+    // even if no agents are active at page load time
+    this.agentSystem = new AgentCharacterSystem()
+    await this.agentSystem.build(
+      this.app, this.loader, data.agent_activity,
+      (repoName) => this.getTreePosition(repoName),
+    )
+    if (this.buildId !== currentBuild) return
+
+    // 9. Wrap all garden content under a single root for scene transitions.
+    // When entering a house interior, gardenRoot.enabled = false hides the entire garden.
+    // Camera and lights are kept outside so they work in both modes.
+    this.wrapGardenRoot()
+
+    // Invalidate pickable cache — forces fresh rebuild on next frame now that
+    // all subsystems (trees, houses) are ready. Prevents stale empty cache
+    // from intermediate frames during async build.
+    this._pickableCache = null
   }
 
   /** Per-frame update for animated subsystems. */
@@ -266,6 +295,7 @@ export class SceneManager {
     this.repoVis?.update?.(dt)
     this.gardenBirds?.update(dt)
     this.gardenAnimals?.update(dt)
+    this.agentSystem?.update(dt)
   }
 
   /** Rebuild entire scene with new data. */
@@ -281,6 +311,27 @@ export class SceneManager {
   get memberHouseMap(): Map<string, HouseResult> { return this._memberHouseMap }
   get characterSystemRef(): CharacterSystem | null { return this.characterSystem }
   get worldLayout(): WorldLayout { return this.layout }
+  get gardenRootEntity(): pc.Entity | null { return this._gardenRoot }
+  get agentSystemRef(): AgentCharacterSystem | null { return this.agentSystem }
+
+  /** All pickable entities: repo trees + feature branches + houses + agents. */
+  getPickableEntities(): pc.Entity[] {
+    if (this._pickableCache) return this._pickableCache
+    const treePicks = this.repoVis?.getPickableEntities?.() ?? []
+    const housePicks: pc.Entity[] = []
+    for (const house of this._memberHouseMap.values()) {
+      housePicks.push(house.entity)
+    }
+    // Agent entities are dynamic (spawn/despawn at runtime) — always fresh
+    const agentPicks = this.agentSystem?.getPickableEntities() ?? []
+    const staticPicks = treePicks.concat(housePicks)
+    // Only cache static pickables (trees + houses). Agents are appended fresh each frame.
+    if (staticPicks.length > 0 && !this._pickableCache) {
+      this._pickableCache = staticPicks
+    }
+    const result = (this._pickableCache || staticPicks).concat(agentPicks)
+    return result
+  }
 
   getTreePosition(repoName: string): pc.Vec3 | null {
     return this.repoVis?.getTreePosition(repoName) ?? null
@@ -303,6 +354,30 @@ export class SceneManager {
    *   Closed ring (no gate) at worldRadius + 8 units margin.
    *   Wide post spacing (~4 units) keeps entity count low for a large ring.
    */
+  /**
+   * Wrap all garden world content under a single gardenRoot entity.
+   * Called at the end of build() — re-parents everything except camera/lights.
+   * Enables interior mode to hide the entire garden via gardenRoot.enabled = false.
+   */
+  private wrapGardenRoot(): void {
+    this._gardenRoot = new pc.Entity('GardenRoot')
+    this.app.root.addChild(this._gardenRoot)
+
+    // Entities to keep as direct children of EngineRoot (visible in all modes)
+    const keep = new Set(['Camera', 'Sun', 'FillSky', 'GardenRoot', 'InteriorRoot'])
+    const toMove: pc.Entity[] = []
+
+    for (const child of [...this.app.root.children] as pc.Entity[]) {
+      if (!keep.has(child.name)) {
+        toMove.push(child)
+      }
+    }
+
+    for (const child of toMove) {
+      this._gardenRoot.addChild(child)
+    }
+  }
+
   private buildZoneFences(factory: BuildingFactory): void {
     if (!factory.materialFactory) return
     const fence = new CircularFence(factory.materialFactory)
@@ -383,6 +458,10 @@ export class SceneManager {
     }
     this.buildingEntities = []
     this._memberHouseMap.clear()
+    this._pickableCache = null
+
+    this.agentSystem?.destroy()
+    this.agentSystem = null
 
     this.lanterns?.destroy()
     this.lanterns = null
@@ -416,6 +495,9 @@ export class SceneManager {
     this.materials.release('fence_post')
     this.materials.release('fence_panel')
     this.materials.release('fence_gate')
+
+    this._gardenRoot?.destroy()
+    this._gardenRoot = null
 
     this.layout.reset()
   }
