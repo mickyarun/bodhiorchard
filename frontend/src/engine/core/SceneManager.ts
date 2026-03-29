@@ -80,7 +80,6 @@ export class SceneManager {
 
   // Shared data for Phase 3+
   private _memberHouseMap = new Map<string, HouseResult>()
-  private _pickableCache: pc.Entity[] | null = null
 
   // Garden world root — toggled off during interior mode
   private _gardenRoot: pc.Entity | null = null
@@ -282,10 +281,6 @@ export class SceneManager {
     // Camera and lights are kept outside so they work in both modes.
     this.wrapGardenRoot()
 
-    // Invalidate pickable cache — forces fresh rebuild on next frame now that
-    // all subsystems (trees, houses) are ready. Prevents stale empty cache
-    // from intermediate frames during async build.
-    this._pickableCache = null
   }
 
   /** Per-frame update for animated subsystems. */
@@ -314,23 +309,17 @@ export class SceneManager {
   get gardenRootEntity(): pc.Entity | null { return this._gardenRoot }
   get agentSystemRef(): AgentCharacterSystem | null { return this.agentSystem }
 
-  /** All pickable entities: repo trees + feature branches + houses + agents. */
+  /** All pickable entities: repo trees + feature branches + houses + agents.
+   *  NOT cached — tree features are added asynchronously during growth animation,
+   *  and agent entities spawn/despawn at runtime. */
   getPickableEntities(): pc.Entity[] {
-    if (this._pickableCache) return this._pickableCache
     const treePicks = this.repoVis?.getPickableEntities?.() ?? []
     const housePicks: pc.Entity[] = []
     for (const house of this._memberHouseMap.values()) {
       housePicks.push(house.entity)
     }
-    // Agent entities are dynamic (spawn/despawn at runtime) — always fresh
     const agentPicks = this.agentSystem?.getPickableEntities() ?? []
-    const staticPicks = treePicks.concat(housePicks)
-    // Only cache static pickables (trees + houses). Agents are appended fresh each frame.
-    if (staticPicks.length > 0 && !this._pickableCache) {
-      this._pickableCache = staticPicks
-    }
-    const result = (this._pickableCache || staticPicks).concat(agentPicks)
-    return result
+    return treePicks.concat(housePicks, agentPicks)
   }
 
   getTreePosition(repoName: string): pc.Vec3 | null {
@@ -458,7 +447,6 @@ export class SceneManager {
     }
     this.buildingEntities = []
     this._memberHouseMap.clear()
-    this._pickableCache = null
 
     this.agentSystem?.destroy()
     this.agentSystem = null
