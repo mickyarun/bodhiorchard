@@ -1,6 +1,6 @@
 """Organization model for multi-tenant isolation."""
 
-from sqlalchemy import Index, String, Text, text
+from sqlalchemy import Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,7 +22,10 @@ class Organization(BaseModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    github_pat: Mapped[str | None] = mapped_column(Text, nullable=True)
+    github_app_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    github_app_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    github_app_installation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    github_webhook_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_bot_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_signing_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_team_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)

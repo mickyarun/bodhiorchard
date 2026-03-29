@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, DesignJobCreated, JobCreatedResponse, ChatMessageRead, TimelineEvent } from '@/types'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, DesignJobCreated, JobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem } from '@/types'
 import { BUD_STATUS_ORDER } from '@/types'
 import api from '@/services/api'
 
@@ -224,6 +224,15 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function fetchPRChecklist(budId: string): Promise<PRChecklistItem[]> {
+    try {
+      const { data } = await api.get(`/v1/buds/${budId}/pr-checklist`)
+      return data
+    } catch {
+      return []
+    }
+  }
+
   async function regenerateDesign(budId: string, designId: string): Promise<DesignJobCreated | null> {
     try {
       const { data } = await api.post(`/v1/buds/${budId}/designs/${designId}/regenerate`)
@@ -279,6 +288,7 @@ export const useBUDStore = defineStore('bud', () => {
     regenerateDesign,
     fetchChatHistory,
     fetchTimeline,
+    fetchPRChecklist,
     requestReassignment,
     retryAgentTask,
   }

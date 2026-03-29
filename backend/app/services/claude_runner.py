@@ -6,6 +6,7 @@ Bodhigrove backend via local subprocess execution.
 
 import asyncio
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -62,6 +63,7 @@ class ClaudeRunnerConfig:
     system_prompt_files: list[str] = field(default_factory=list)
     model: str | None = None
     effort: str | None = None
+    env_extra: dict[str, str] | None = None
 
 
 def _find_tool_uses(obj: Any, callback: ProgressCallback) -> None:
@@ -85,6 +87,8 @@ async def _run_with_streaming(
     cwd: str,
     timeout: int,
     progress_callback: ProgressCallback,
+    *,
+    env: dict[str, str] | None = None,
 ) -> ClaudeRunResult:
     """Run Claude CLI with stream-json output, emitting progress on each tool call.
 
@@ -103,6 +107,7 @@ async def _run_with_streaming(
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=cwd,
+            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=10 * 1024 * 1024,  # 10MB — Claude stream-json lines can exceed 64KB default
@@ -336,10 +341,17 @@ async def run_claude_code(
         mcp_enabled=config.mcp is not None,
     )
 
+    # Build subprocess environment with optional extras (e.g. agent context)
+    sub_env: dict[str, str] | None = None
+    if config.env_extra:
+        sub_env = {**os.environ, **config.env_extra}
+
     # Streaming path: read stdout line-by-line for live progress
     if progress_callback is not None:
         try:
-            return await _run_with_streaming(cmd, cwd, config.timeout_seconds, progress_callback)
+            return await _run_with_streaming(
+                cmd, cwd, config.timeout_seconds, progress_callback, env=sub_env,
+            )
         finally:
             if mcp_config_file is not None:
                 mcp_config_file.unlink(missing_ok=True)
@@ -350,6 +362,7 @@ async def run_claude_code(
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=cwd,
+            env=sub_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

@@ -6,7 +6,7 @@
     </div>
 
     <!-- Agent failed -->
-    <div v-else-if="props.activeAgentTask?.status === 'failed' && !hasTestCases" class="empty-state">
+    <div v-else-if="props.activeAgentTask?.task_type === 'testing' && props.activeAgentTask?.status === 'failed' && !hasTestCases" class="empty-state">
       <v-icon icon="mdi-alert-circle" size="48" color="error" class="mb-3 opacity-60" />
       <div class="text-h6 font-weight-medium mb-2">Test case generation failed</div>
       <div class="text-body-2 text-medium-emphasis mb-2" style="max-width: 440px;">
@@ -16,7 +16,7 @@
     </div>
 
     <!-- Agent running -->
-    <div v-else-if="props.activeAgentTask?.status === 'running' || props.activeAgentTask?.status === 'pending'" class="empty-state">
+    <div v-else-if="props.activeAgentTask?.task_type === 'testing' && (props.activeAgentTask?.status === 'running' || props.activeAgentTask?.status === 'pending')" class="empty-state">
       <v-progress-circular indeterminate size="32" width="3" color="purple" class="mb-3" />
       <div class="text-h6 font-weight-medium mb-2">Generating test cases...</div>
       <div class="text-body-2 text-medium-emphasis">

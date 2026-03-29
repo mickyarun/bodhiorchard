@@ -21,6 +21,9 @@ class NotificationType(StrEnum):
     DEVELOPER_ASSIGNED = "developer_assigned"
     REASSIGNMENT_DONE = "reassignment_done"
     TESTING_READY = "testing_ready"
+    PR_OPENED = "pr_opened"
+    PR_MERGED = "pr_merged"
+    ALL_PRS_MERGED = "all_prs_merged"
 
 
 class Notification(BaseModel):

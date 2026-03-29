@@ -9,12 +9,11 @@ from typing import Any
 
 import structlog
 
-from app.models.agent_activity import AgentActivityLog
-from app.services.event_bus import publish
 from app.schemas.jobs import (
     JobState,
     TriageJobPayload,
 )
+from app.services.agent_activity_logger import log_agent_activity
 from app.services.job_queue import update_job
 from app.services.job_utils import (
     get_thread_key,
@@ -53,24 +52,10 @@ async def handle_triage_job(job_id: str, raw_payload: dict[str, Any]) -> None:
                     )
                     return
 
-                # Log skill_invoked
-                db.add(AgentActivityLog(
-                    org_id=org.id,
-                    event_type="skill_invoked",
-                    status="in_progress",
-                    message=f"Triage '{payload.action}' started",
-                    source="backend",
+                await log_agent_activity(
+                    db, org_id=org.id, event_type="skill_invoked",
                     skill_slug="triage",
-                ))
-                await db.flush()
-                publish(
-                    f"agent_activity:{org.id}",
-                    {"event_type": "skill_invoked", "status": "in_progress",
-                     "skill_slug": "triage", "task_id": None,
-                     "message": f"Triage '{payload.action}' started",
-                     "actor_name": "triage", "repo_name": None,
-                     "bud_number": None, "bud_title": None,
-                     "impacted_repo_names": [], "created_at": ""},
+                    message=f"Triage '{payload.action}' started",
                 )
 
                 bot_token = decrypt_secret(org.slack_bot_token or "")
@@ -125,47 +110,19 @@ async def handle_triage_job(job_id: str, raw_payload: dict[str, Any]) -> None:
                         approved=payload.approved or False,
                     )
 
-                # Log skill_completed
-                db.add(AgentActivityLog(
-                    org_id=org.id,
-                    event_type="skill_completed",
-                    status="completed",
-                    message=f"Triage '{payload.action}' completed",
-                    source="backend",
+                await log_agent_activity(
+                    db, org_id=org.id, event_type="skill_completed",
                     skill_slug="triage",
-                ))
-                await db.commit()
-                publish(
-                    f"agent_activity:{org.id}",
-                    {"event_type": "skill_completed", "status": "completed",
-                     "skill_slug": "triage", "task_id": None,
-                     "message": f"Triage '{payload.action}' completed",
-                     "actor_name": "triage", "repo_name": None,
-                     "bud_number": None, "bud_title": None,
-                     "impacted_repo_names": [], "created_at": ""},
+                    message=f"Triage '{payload.action}' completed",
                 )
+                await db.commit()
             except Exception:
                 await db.rollback()
-                # Log skill_failed in a fresh session
                 if org is not None:
-                    async with AsyncSessionLocal() as err_db:
-                        err_db.add(AgentActivityLog(
-                            org_id=org.id,
-                            event_type="skill_failed",
-                            status="failed",
-                            message=f"Triage '{payload.action}' failed",
-                            source="backend",
-                            skill_slug="triage",
-                        ))
-                        await err_db.commit()
-                    publish(
-                        f"agent_activity:{org.id}",
-                        {"event_type": "skill_failed", "status": "failed",
-                         "skill_slug": "triage", "task_id": None,
-                         "message": f"Triage '{payload.action}' failed",
-                         "actor_name": "triage", "repo_name": None,
-                         "bud_number": None, "bud_title": None,
-                         "impacted_repo_names": [], "created_at": ""},
+                    await log_agent_activity(
+                        None, org_id=org.id, event_type="skill_failed",
+                        skill_slug="triage",
+                        message=f"Triage '{payload.action}' failed",
                     )
                 raise
 

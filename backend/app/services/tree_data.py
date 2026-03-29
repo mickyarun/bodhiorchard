@@ -20,7 +20,6 @@ import structlog
 from cachetools import TTLCache
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from app.models.agent_activity import AgentActivityLog
 from app.models.agent_log import AgentLog
@@ -721,9 +720,11 @@ async def _collect_agents(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) -
     Each active task = one robot character in the garden. task_id is the unique key.
     """
     # ── Query A: Active agent tasks (currently working) ─────────────────────
+    from sqlalchemy.orm import selectinload
+
     active_stmt = (
         select(BUDAgentTask)
-        .options(joinedload(BUDAgentTask.bud))
+        .options(selectinload(BUDAgentTask.bud))
         .where(
             BUDAgentTask.org_id == org_id,
             BUDAgentTask.status.in_(["pending", "running"]),
@@ -733,9 +734,6 @@ async def _collect_agents(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) -
     )
     active_result = await db.execute(active_stmt)
     for task in active_result.scalars().all():
-        # Resolve repo name from the latest activity log for this task
-        repo_name = await _resolve_task_repo_name(db, task)
-
         # Extract impacted repo names from BUD's impacted_repos JSONB
         impacted_repos: list[str] = []
         if task.bud and task.bud.impacted_repos:
@@ -751,7 +749,7 @@ async def _collect_agents(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) -
                 timestamp=task.created_at.isoformat() if task.created_at else "",
                 status=task.status or "running",
                 skill_slug=task.skill.skill_slug if task.skill else "",
-                repo_name=repo_name,
+                repo_name=None,
                 bud_number=task.bud.bud_number if task.bud else None,
                 session_id=None,
                 event_type="skill_invoked",

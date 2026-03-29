@@ -13,12 +13,24 @@ class SourceCodeSettings(BaseModel):
 
 
 class GitHubSettings(BaseModel):
-    """GitHub integration settings."""
+    """GitHub App integration settings (read response)."""
 
     enabled: bool = False
-    pat: str = ""
-    org: str = ""
-    pat_expires_at: str | None = Field(None, alias="patExpiresAt")
+    app_id: int | None = Field(None, alias="appId")
+    has_private_key: bool = Field(False, alias="hasPrivateKey")
+    installation_id: int | None = Field(None, alias="installationId")
+    webhook_configured: bool = Field(False, alias="webhookConfigured")
+
+    model_config = {"populate_by_name": True}
+
+
+class GitHubAppUpdate(BaseModel):
+    """GitHub App credentials for PATCH (accepts private key)."""
+
+    app_id: int | None = Field(None, alias="appId")
+    private_key: str | None = Field(None, alias="privateKey")
+    webhook_secret: str | None = Field(None, alias="webhookSecret")
+    installation_id: int | None = Field(None, alias="installationId")
 
     model_config = {"populate_by_name": True}
 
@@ -132,7 +144,7 @@ class ConnectionsUpdate(BaseModel):
     """
 
     source_code: SourceCodeSettings | None = Field(None, alias="sourceCode")
-    github: GitHubSettings | None = None
+    github: GitHubAppUpdate | None = None
     slack: SlackSettings | None = None
     ai_config: AIConfigSettings | None = Field(None, alias="aiConfig")
     scan: ScanSettings | None = None

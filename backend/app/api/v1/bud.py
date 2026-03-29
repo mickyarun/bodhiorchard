@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.bud_chat import router as chat_router
 from app.api.v1.bud_designs import router as designs_router
+from app.api.v1.bud_prs import router as prs_router
 from app.api.v1.bud_qa import router as qa_router
 from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
@@ -63,6 +64,7 @@ router = APIRouter(tags=["buds"])
 
 # ── Sub-routers ───────────────────────────────────────────────────
 router.include_router(designs_router, prefix="/{bud_id}/designs", tags=["bud-designs"])
+router.include_router(prs_router, tags=["bud-prs"])
 router.include_router(qa_router, prefix="/{bud_id}/qa", tags=["bud-qa"])
 router.include_router(workflows_router, prefix="/{bud_id}", tags=["bud-workflows"])
 router.include_router(chat_router, prefix="/{bud_id}", tags=["bud-chat"])
@@ -351,9 +353,15 @@ async def _trigger_status_jobs(
     if new_status != old_status:
         from app.services.bud_agent_trigger import create_agent_task_for_stage
 
+        # Force re-run when going back to code_review from later stages
+        force = (
+            new_status == BUDStatus.CODE_REVIEW
+            and old_status in (BUDStatus.TESTING, BUDStatus.UAT)
+        )
         await create_agent_task_for_stage(
             bud, str(new_status), current_user.org_id, db,
             triggered_by=current_user.id,
+            force=force,
         )
 
 
@@ -526,7 +534,6 @@ async def list_commit_repos(
     Used by the frontend when transitioning to code_review to show
     a confirmation dialog of which repos have been touched.
     """
-
     from app.repositories.dev_activity import DevActivityLogRepository
 
     activity_repo = DevActivityLogRepository(db, org_id=current_user.org_id)

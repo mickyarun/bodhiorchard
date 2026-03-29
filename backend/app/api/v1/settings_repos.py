@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
-from app.core.encryption import decrypt_secret
 from app.models.tracked_repository import RepoStatus
 from app.models.user import User
 from app.repositories.knowledge_item import KnowledgeItemRepository
@@ -362,28 +361,15 @@ async def list_github_org_members(
     """
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
-    if not org.github_pat:
+
+    from app.services.github_app_auth import get_installation_token
+
+    token = await get_installation_token(org)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GitHub is not connected. Add a PAT in Settings.",
+            detail="GitHub App is not configured. Set up a GitHub App in Settings.",
         )
-
-    # Decrypt the stored PAT
-    pat = decrypt_secret(org.github_pat)
-    if not pat:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GitHub PAT could not be decrypted. Please re-enter it in Settings.",
-        )
-
-    # Debug: log PAT details to diagnose auth issues
-    pat_preview = f"{pat[:4]}...{pat[-4:]}" if len(pat) > 8 else "***short***"
-    logger.info(
-        "github_pat_debug",
-        pat_length=len(pat),
-        pat_preview=pat_preview,
-        starts_with_github=pat.startswith("github_pat_"),
-    )
 
     config = org.config or {}
     github_cfg = config.get("integrations", {}).get("github", {})
@@ -394,29 +380,19 @@ async def list_github_org_members(
             detail="GitHub organization name is not configured in Settings.",
         )
 
-    # Fetch org members (paginated, up to 100)
+    # Fetch org members using installation token
     gh_headers = {
         "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     async with httpx.AsyncClient() as client:
-        # Try Bearer first (fine-grained PATs), fall back to token (classic)
-        for auth_prefix in ("Bearer", "token"):
-            gh_headers["Authorization"] = f"{auth_prefix} {pat}"
-            resp = await client.get(
-                f"https://api.github.com/orgs/{github_org}/members",
-                params={"per_page": 100},
-                headers=gh_headers,
-                timeout=15,
-            )
-            logger.info(
-                "github_api_attempt",
-                auth_prefix=auth_prefix,
-                status=resp.status_code,
-                body=resp.text[:300] if resp.text else "",
-            )
-            if resp.status_code != 401:
-                break
+        resp = await client.get(
+            f"https://api.github.com/orgs/{github_org}/members",
+            params={"per_page": 100},
+            headers=gh_headers,
+            timeout=15,
+        )
 
         if resp.status_code == 401:
             gh_msg = resp.json().get("message", "") if resp.text else ""
@@ -469,7 +445,6 @@ async def list_github_org_members(
         return {"name": login, "email": None}
 
     async with httpx.AsyncClient() as profile_client:
-        gh_headers["Authorization"] = f"Bearer {pat}"
         profiles = await asyncio.gather(
             *[_fetch_profile(profile_client, m.get("login", "")) for m in members]
         )

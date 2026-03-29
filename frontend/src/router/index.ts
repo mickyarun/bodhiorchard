@@ -35,7 +35,7 @@ async function checkSetupStatus(): Promise<boolean> {
 }
 
 /** Public routes that don't require authentication. */
-const PUBLIC_ROUTES = new Set(['setup', 'login', 'methodology', 'tree-demo'])
+const PUBLIC_ROUTES = new Set(['setup', 'login', 'methodology', 'tree-demo', 'house-demo'])
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -74,6 +74,11 @@ const router = createRouter({
       path: '/tree-demo',
       name: 'tree-demo',
       component: () => import('@/views/test/TreeTestView.vue'),
+    },
+    {
+      path: '/house-demo',
+      name: 'house-demo',
+      component: () => import('@/views/test/HouseTestView.vue'),
     },
     {
       path: '/',

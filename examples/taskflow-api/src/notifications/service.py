@@ -68,20 +68,6 @@ def mark_all_read(db: Session, user_id: int) -> int:
     return count
 
 
-def delete_notification(db: Session, notification_id: int, user_id: int) -> bool:
-    """Delete a notification (only if owned by user)."""
-    notif = (
-        db.query(Notification)
-        .filter(Notification.id == notification_id, Notification.user_id == user_id)
-        .first()
-    )
-    if not notif:
-        return False
-    db.delete(notif)
-    db.commit()
-    return True
-
-
 def get_preferences(db: Session, user_id: int) -> NotificationPreference | None:
     """Get notification preferences for a user."""
     return db.query(NotificationPreference).filter(NotificationPreference.user_id == user_id).first()

@@ -2,6 +2,7 @@
 
 import uuid
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
@@ -9,6 +10,9 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
+
+if TYPE_CHECKING:
+    from app.models.bud_agent_task import BUDAgentTask
 
 
 class BUDTimelineEventType(StrEnum):
@@ -30,6 +34,9 @@ class BUDTimelineEventType(StrEnum):
     TECH_ARCH_APPROVED = "tech_arch_approved"
     TECH_ARCH_REJECTED = "tech_arch_rejected"
     REASSIGNMENT_REQUESTED = "reassignment_requested"
+    PR_OPENED = "pr_opened"
+    PR_MERGED = "pr_merged"
+    ALL_PRS_MERGED = "all_prs_merged"
 
 
 class BUDStatus(StrEnum):

@@ -5,8 +5,6 @@ parses responses, and persists content updates to the database.
 """
 
 import asyncio
-import os
-import tempfile
 import uuid as uuid_mod
 from pathlib import Path
 from typing import Any
@@ -14,13 +12,13 @@ from typing import Any
 import structlog
 
 from app.agents.skill_mapping import SECTION_SKILL_MAP
-from app.models.agent_activity import AgentActivityLog
 from app.schemas.bud import SECTION_LABELS
 from app.schemas.jobs import ChatJobPayload, JobState
-from app.services.event_bus import publish
+from app.services.agent_activity_logger import log_agent_activity
+from app.services.chat_persistence import persist_chat_message, persist_chat_update, persist_design
+from app.services.chat_prompts import build_chat_prompt, build_design_prompt, fetch_chat_history
 from app.services.job_queue import update_job
 from app.services.job_utils import (
-    HISTORY_CHAR_BUDGET,
     build_mcp_config,
     make_progress_callback,
     record_agent_timeline,
@@ -64,7 +62,7 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     bud_ref = f"BUD-{payload.bud_number:03d}"
 
     # Fetch recent chat history for LLM context
-    history = await _fetch_chat_history(
+    history = await fetch_chat_history(
         bud_id=payload.bud_id,
         org_id=payload.org_id,
         section=payload.section,
@@ -82,7 +80,7 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         mcp_config = build_mcp_config(payload.org_id, tool_names=design_tools)
         use_mcp = mcp_config is not None
 
-        prompt, ds_temp_file = await _build_design_prompt(
+        prompt, ds_temp_file = await build_design_prompt(
             bud_ref,
             payload.title,
             payload.org_id,
@@ -94,7 +92,7 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         )
         repo_path = await resolve_repo_path(payload.repo_id, payload.org_id)
     else:
-        prompt = _build_chat_prompt(
+        prompt = build_chat_prompt(
             bud_ref,
             payload.title,
             section_label,
@@ -119,30 +117,14 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
 
     update_job(job_id, status_message="Waiting for AI response...", progress_pct=20)
 
-    # Log skill_invoked
-    from app.database import AsyncSessionLocal
-
     skill_name = SECTION_SKILL_MAP.get(payload.section, "product-manager")
     _chat_org_id = payload.org_id
-    async with AsyncSessionLocal() as log_db:
-        log_db.add(AgentActivityLog(
-            org_id=uuid_mod.UUID(_chat_org_id),
-            bud_id=uuid_mod.UUID(payload.bud_id),
-            event_type="skill_invoked",
-            status="in_progress",
-            message=f"Chat '{skill_name}' invoked for {payload.section}",
-            source="backend",
-            skill_slug=skill_name,
-        ))
-        await log_db.commit()
-    publish(
-        f"agent_activity:{_chat_org_id}",
-        {"event_type": "skill_invoked", "status": "in_progress",
-         "skill_slug": skill_name, "task_id": None,
-         "message": f"Chat '{skill_name}' invoked for {payload.section}",
-         "actor_name": skill_name, "repo_name": None,
-         "bud_number": None, "bud_title": None,
-         "impacted_repo_names": [], "created_at": ""},
+
+    await log_agent_activity(
+        None, org_id=uuid_mod.UUID(_chat_org_id), event_type="skill_invoked",
+        skill_slug=skill_name,
+        message=f"Chat '{skill_name}' invoked for {payload.section}",
+        bud_id=uuid_mod.UUID(payload.bud_id),
     )
 
     from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
@@ -179,25 +161,11 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             p.unlink(missing_ok=True)
 
     if not result.success:
-        async with AsyncSessionLocal() as log_db:
-            log_db.add(AgentActivityLog(
-                org_id=uuid_mod.UUID(_chat_org_id),
-                bud_id=uuid_mod.UUID(payload.bud_id),
-                event_type="skill_failed",
-                status="failed",
-                message=(result.error or "AI unavailable")[:2000],
-                source="backend",
-                skill_slug=skill_name,
-            ))
-            await log_db.commit()
-        publish(
-            f"agent_activity:{_chat_org_id}",
-            {"event_type": "skill_failed", "status": "failed",
-             "skill_slug": skill_name, "task_id": None,
-             "message": (result.error or "AI unavailable")[:200],
-             "actor_name": skill_name, "repo_name": None,
-             "bud_number": None, "bud_title": None,
-             "impacted_repo_names": [], "created_at": ""},
+        await log_agent_activity(
+            None, org_id=uuid_mod.UUID(_chat_org_id), event_type="skill_failed",
+            skill_slug=skill_name,
+            message=result.error or "AI unavailable",
+            bud_id=uuid_mod.UUID(payload.bud_id),
         )
         update_job(job_id, state=JobState.FAILED, error=result.error or "AI unavailable")
         await record_agent_timeline(
@@ -215,7 +183,7 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     response = _parse_chat_response(result.output)
     if response is None:
         reply_text = result.output[:3000]
-        await _persist_chat_message(
+        await persist_chat_message(
             payload.bud_id,
             payload.org_id,
             payload.section,
@@ -224,25 +192,11 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             payload.design_id,
             session_id=payload.session_id,
         )
-        async with AsyncSessionLocal() as log_db:
-            log_db.add(AgentActivityLog(
-                org_id=uuid_mod.UUID(_chat_org_id),
-                bud_id=uuid_mod.UUID(payload.bud_id),
-                event_type="skill_completed",
-                status="completed",
-                message=f"Chat '{skill_name}' completed for {payload.section}",
-                source="backend",
-                skill_slug=skill_name,
-            ))
-            await log_db.commit()
-        publish(
-            f"agent_activity:{_chat_org_id}",
-            {"event_type": "skill_completed", "status": "completed",
-             "skill_slug": skill_name, "task_id": None,
-             "message": f"Chat '{skill_name}' completed",
-             "actor_name": skill_name, "repo_name": None,
-             "bud_number": None, "bud_title": None,
-             "impacted_repo_names": [], "created_at": ""},
+        await log_agent_activity(
+            None, org_id=uuid_mod.UUID(_chat_org_id), event_type="skill_completed",
+            skill_slug=skill_name,
+            message=f"Chat '{skill_name}' completed for {payload.section}",
+            bud_id=uuid_mod.UUID(payload.bud_id),
         )
         update_job(
             job_id,
@@ -257,12 +211,12 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     updated = response.get("updated_content")
     if updated is not None:
         if payload.section == "design" and payload.design_id:
-            await _persist_design(payload.design_id, payload.org_id, updated)
+            await persist_design(payload.design_id, payload.org_id, updated)
         elif payload.section != "design":
-            await _persist_chat_update(payload.bud_id, payload.org_id, payload.section, updated)
+            await persist_chat_update(payload.bud_id, payload.org_id, payload.section, updated)
 
     reply_text = response.get("reply", "Done.")
-    await _persist_chat_message(
+    await persist_chat_message(
         payload.bud_id,
         payload.org_id,
         payload.section,
@@ -272,26 +226,11 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         session_id=payload.session_id,
     )
 
-    # Log skill_completed
-    async with AsyncSessionLocal() as log_db:
-        log_db.add(AgentActivityLog(
-            org_id=uuid_mod.UUID(_chat_org_id),
-            bud_id=uuid_mod.UUID(payload.bud_id),
-            event_type="skill_completed",
-            status="completed",
-            message=f"Chat '{skill_name}' completed for {payload.section}",
-            source="backend",
-            skill_slug=skill_name,
-        ))
-        await log_db.commit()
-    publish(
-        f"agent_activity:{_chat_org_id}",
-        {"event_type": "skill_completed", "status": "completed",
-         "skill_slug": skill_name, "task_id": None,
-         "message": f"Chat '{skill_name}' completed",
-         "actor_name": skill_name, "repo_name": None,
-         "bud_number": None, "bud_title": None,
-         "impacted_repo_names": [], "created_at": ""},
+    await log_agent_activity(
+        None, org_id=uuid_mod.UUID(_chat_org_id), event_type="skill_completed",
+        skill_slug=skill_name,
+        message=f"Chat '{skill_name}' completed for {payload.section}",
+        bud_id=uuid_mod.UUID(payload.bud_id),
     )
 
     update_job(
@@ -312,229 +251,6 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     )
 
 
-# ── Chat helpers ──────────────────────────────────────────────────
-
-
-async def _fetch_chat_history(
-    bud_id: str,
-    org_id: str,
-    section: str,
-    design_id: str | None = None,
-    session_id: str | None = None,
-    limit: int = 10,
-) -> list[dict[str, str]]:
-    """Fetch recent chat messages for LLM context injection.
-
-    Returns a list of dicts with 'role', 'user_name', 'message', 'created_at'.
-    """
-    from app.database import AsyncSessionLocal
-    from app.repositories.bud import BUDChatMessageRepository
-
-    async with AsyncSessionLocal() as db:
-        chat_repo = BUDChatMessageRepository(db, org_id=uuid_mod.UUID(org_id))
-        messages = await chat_repo.list_recent_messages(
-            bud_id=uuid_mod.UUID(bud_id),
-            section=section,
-            design_id=uuid_mod.UUID(design_id) if design_id else None,
-            session_id=uuid_mod.UUID(session_id) if session_id else None,
-            limit=limit,
-        )
-        return [
-            {
-                "role": m.role,
-                "user_name": m.user.name if m.user else None,
-                "message": m.message,
-                "created_at": m.created_at.strftime("%I:%M %p") if m.created_at else "",
-            }
-            for m in messages
-        ]
-
-
-def _format_history_block(history: list[dict[str, str]]) -> str:
-    """Format chat history into a markdown block for prompt injection.
-
-    Applies a character budget: if history exceeds ~2000 chars,
-    keeps only the last 5 messages and prepends a note.
-    """
-    if not history:
-        return ""
-
-    def _fmt(msg: dict[str, str]) -> str:
-        if msg["role"] == "user":
-            name = msg.get("user_name") or "User"
-            return f"[USER ({name}, {msg['created_at']})]: {msg['message']}"
-        return f"[AI ({msg['created_at']})]: {msg['message']}"
-
-    block = "\n".join(_fmt(m) for m in history)
-    if len(block) > HISTORY_CHAR_BUDGET:
-        block = "Earlier messages omitted.\n" + "\n".join(_fmt(m) for m in history[-5:])
-
-    return f"## Recent Conversation\n\n{block}\n"
-
-
-async def _build_design_prompt(
-    bud_ref: str,
-    title: str,
-    org_id: str,
-    current_content: str,
-    message: str,
-    repo_id: str | None = None,
-    history: list[dict[str, str]] | None = None,
-    *,
-    use_mcp: bool = False,
-) -> tuple[str, Path | None]:
-    """Build the Claude prompt for design wireframe generation.
-
-    When ``use_mcp`` is True, the prompt tells Claude to call the
-    ``get_design_system`` MCP tool instead of injecting the design system
-    as a temp file.  This saves tokens when the DS is large but only
-    partially needed.
-
-    When ``use_mcp`` is False (or MCP is not configured for the run),
-    falls back to the original temp-file approach.
-
-    Returns:
-        (prompt_text, optional_temp_file_path)
-    """
-    ds_content = ""
-    ds_file: Path | None = None
-
-    if not use_mcp:
-        # Legacy: load DS and write to temp file for system prompt injection
-        try:
-            from app.database import AsyncSessionLocal
-            from app.repositories.design_system import DesignSystemRefRepository
-
-            async with AsyncSessionLocal() as db:
-                ds_repo = DesignSystemRefRepository(db, org_id=uuid_mod.UUID(org_id))
-                rid = uuid_mod.UUID(repo_id) if repo_id else None
-                ds = await ds_repo.get_effective(repo_id=rid)
-                if ds:
-                    ds_content = ds.content
-        except Exception:
-            logger.warning("design_system_lookup_failed", org_id=org_id, repo_id=repo_id)
-
-    parts = [
-        f"You are designing a **visual HTML wireframe** for {bud_ref}: *{title}*.\n",
-    ]
-
-    if use_mcp:
-        # MCP-based: Claude queries design systems on-demand
-        if repo_id:
-            mcp_hint = (
-                f'Call `get_design_system` with `repo_id: "{repo_id}"` to get '
-                "this repo's design system (primary).\n\n"
-                "You can also call `list_design_systems` to see all available "
-                "design systems across the organization. If other repos have "
-                "relevant UI patterns, call `get_design_system` with their "
-                "`repo_id` to cross-reference component styles and layouts."
-            )
-        else:
-            mcp_hint = (
-                "Call `list_design_systems` to see all available design systems, "
-                "then call `get_design_system` with each relevant `repo_id` "
-                "to fetch their content. Cross-reference multiple design "
-                "systems to create a cohesive wireframe."
-            )
-        parts.append(
-            "## Design System\n\n"
-            f"{mcp_hint}\n\n"
-            "Your wireframe MUST use the CDN boilerplate and color tokens "
-            "from the primary design system. "
-            "If no design system is available, use Vuetify 3 CDN with a clean "
-            "dark theme as default.\n"
-        )
-    elif ds_content:
-        fd, tmp_path = tempfile.mkstemp(
-            suffix=".md",
-            prefix="bodhigrove_design_system_",
-        )
-        os.close(fd)
-        ds_file = Path(tmp_path)
-        ds_file.write_text(ds_content, encoding="utf-8")
-
-        parts.append(
-            "## Design System\n\n"
-            "The project's design system (colors, typography, component defaults, "
-            "CDN boilerplate, and pattern library) has been loaded into your context. "
-            "Your wireframe MUST use the CDN boilerplate and color tokens from it.\n"
-        )
-    else:
-        parts.append(
-            "## Design System\n\n"
-            "No design system has been extracted for this organization. "
-            "Use Vuetify 3 CDN with a clean dark theme as default.\n"
-        )
-
-    parts.append(
-        "## Existing Application UI\n\n"
-        "Read 2–3 existing Vue components or views from the `src/` directory "
-        "to understand the current visual style, layout patterns, and component usage. "
-        "Match your wireframe to these patterns.\n"
-    )
-
-    if current_content:
-        parts.append(f"## Current Design\n\n```html\n{current_content}\n```\n")
-    else:
-        parts.append("## Current Design\n\nNo design exists yet. Create one from scratch.\n")
-
-    # Inject conversation history for context
-    if history:
-        parts.append(_format_history_block(history))
-
-    parts.append(f"## User Request\n\n{message}\n")
-
-    parts.append(
-        "## Instructions\n\n"
-        f"1. Write the wireframe as a complete, self-contained HTML file to:\n"
-        f"   `.flowdev/wireframes/{bud_ref}/wireframe.html`\n"
-        "   Create the directory if it doesn't exist.\n\n"
-        "2. The HTML file must:\n"
-        "   - Use Vuetify CDN (with Vue 3) — no build step required\n"
-        "   - Apply the project's design system colors and component defaults\n"
-        "   - Include UX considerations as `<!-- UX: ... -->` HTML comments\n"
-        "   - Include accessibility notes as `<!-- A11Y: ... -->` comments\n"
-        "   - Render correctly when opened in any modern browser\n\n"
-        "3. After writing the file, respond with a JSON object (no markdown fences):\n"
-        '   {"reply": "<short explanation of design choices>", '
-        '"updated_content": null}\n\n'
-        "Focus on layout, information architecture, and interaction patterns. "
-        "Use realistic placeholder data."
-    )
-
-    return "\n".join(parts), ds_file
-
-
-def _build_chat_prompt(
-    bud_ref: str,
-    title: str,
-    section_label: str,
-    current_content: str,
-    message: str,
-    history: list[dict[str, str]] | None = None,
-) -> str:
-    """Build the Claude prompt for BUD section editing."""
-    parts = [
-        f"You are editing the **{section_label}** section of {bud_ref}: "
-        f"*{title}*.\n\n"
-        f"## Current Content\n\n```markdown\n{current_content}\n```\n",
-    ]
-
-    if history:
-        parts.append(_format_history_block(history))
-
-    parts.append(
-        f"## User Request\n\n{message}\n\n"
-        "## Instructions\n\n"
-        "Respond with a JSON object (no markdown fences) with two fields:\n"
-        '- `"reply"`: A short conversational explanation of what you changed or suggest.\n'
-        '- `"updated_content"`: The full updated markdown for this section '
-        "incorporating the user's request. If the user is just asking a question "
-        "and no edits are needed, set this to null.\n\n"
-        "Preserve existing content structure. Only modify what the user asked for."
-    )
-
-    return "\n".join(parts)
 
 
 def _parse_chat_response(output: str) -> dict[str, Any] | None:
@@ -547,79 +263,3 @@ def _parse_chat_response(output: str) -> dict[str, Any] | None:
 
     validated = parse_chat_response(output)
     return validated.model_dump() if validated else None
-
-
-async def _persist_chat_message(
-    bud_id: str,
-    org_id: str,
-    section: str,
-    role: str,
-    message: str,
-    design_id: str | None = None,
-    user_id: str | None = None,
-    session_id: str | None = None,
-) -> None:
-    """Save a chat message to the bud_chat_messages table."""
-    from app.database import AsyncSessionLocal
-    from app.repositories.bud import BUDChatMessageRepository
-
-    async with AsyncSessionLocal() as db:
-        chat_repo = BUDChatMessageRepository(db, org_id=uuid_mod.UUID(org_id))
-        await chat_repo.add_message(
-            bud_id=uuid_mod.UUID(bud_id),
-            section=section,
-            role=role,
-            message=message,
-            design_id=uuid_mod.UUID(design_id) if design_id else None,
-            user_id=uuid_mod.UUID(user_id) if user_id else None,
-            session_id=uuid_mod.UUID(session_id) if session_id else None,
-        )
-        await db.commit()
-
-
-async def _persist_chat_update(
-    bud_id: str,
-    org_id: str,
-    section: str,
-    content: str,
-) -> None:
-    """Write updated chat content to the BUD in the database."""
-    from app.database import AsyncSessionLocal
-    from app.repositories.bud import BUDRepository
-
-    async with AsyncSessionLocal() as db:
-        bud_repo = BUDRepository(db, org_id=uuid_mod.UUID(org_id))
-        bud = await bud_repo.get_by_id(uuid_mod.UUID(bud_id))
-        if bud is not None:
-            setattr(bud, section, content)
-            await db.commit()
-            logger.info("chat_content_persisted", bud_id=bud_id, section=section)
-
-
-async def _persist_design(
-    design_id: str,
-    org_id: str,
-    html: str,
-    design_path: str | None = None,
-) -> None:
-    """Write sanitized wireframe HTML to bud_designs row.
-
-    Sanitizes AI-generated HTML to remove scripts and event handlers
-    before storage. The raw file on disk stays unsanitized for developer review.
-    """
-    from app.database import AsyncSessionLocal
-    from app.models.bud import BUDDesignStatus
-    from app.repositories.bud import BUDDesignRepository
-    from app.services.html_sanitizer import sanitize_design_html
-
-    safe_html = sanitize_design_html(html)
-
-    async with AsyncSessionLocal() as db:
-        repo = BUDDesignRepository(db, org_id=uuid_mod.UUID(org_id))
-        design = await repo.get_by_id(uuid_mod.UUID(design_id))
-        if design is not None:
-            design.design_html = safe_html
-            design.design_path = design_path
-            design.status = BUDDesignStatus.READY
-            await db.commit()
-            logger.info("design_persisted", design_id=design_id)

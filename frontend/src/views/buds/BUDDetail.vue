@@ -352,6 +352,10 @@
 
               <!-- Development -->
               <v-tabs-window-item value="development">
+                <BUDPRChecklist
+                  v-if="bud.impacted_repos?.length"
+                  :bud-id="bud.id"
+                />
                 <BUDDevelopmentPanel
                   ref="devPanelRef"
                   :bud-id="bud.id"
@@ -625,6 +629,7 @@ import ChatPanel from '@/components/buds/ChatPanel.vue'
 import BUDTimeline from '@/components/buds/BUDTimeline.vue'
 import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
 import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
+import BUDPRChecklist from '@/components/buds/BUDPRChecklist.vue'
 import BUDQAPanel from '@/components/buds/BUDQAPanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import { marked } from 'marked'
@@ -873,9 +878,15 @@ async function updateStatus(newStatus: string): Promise<void> {
   if (!bud.value) return
 
   // Intercept code_review transition to show repo confirmation
+  // Skip the popup if code review content already exists (e.g. going back from QA)
   if (newStatus === 'code_review') {
-    await workflowRef.value?.showCodeReviewConfirmation()
-    return
+    const meta = bud.value.metadata as Record<string, unknown> | undefined
+    const hasCodeReview = Array.isArray(meta?.code_review_comments)
+      && (meta.code_review_comments as unknown[]).length > 0
+    if (!hasCodeReview) {
+      await workflowRef.value?.showCodeReviewConfirmation()
+      return
+    }
   }
 
   statusChanging.value = true

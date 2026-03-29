@@ -175,104 +175,94 @@
       </div>
 
       <v-row class="mb-6">
-        <!-- GitHub -->
+        <!-- GitHub App -->
         <v-col cols="12" md="6">
           <v-card
             class="pa-5 settings-card"
             :class="{ 'settings-card--active': settingsStore.connections.github.enabled }"
             color="surface"
           >
-            <div class="d-flex align-center justify-space-between mb-1">
+            <div class="d-flex align-center justify-space-between mb-3">
               <div class="d-flex align-center ga-3">
                 <v-avatar size="36" color="surface-variant" rounded="lg">
                   <v-icon icon="mdi-github" size="22" />
                 </v-avatar>
                 <div>
-                  <div class="text-body-2 font-weight-medium">GitHub</div>
-                  <div class="text-caption text-medium-emphasis">PR tracking &amp; issue sync</div>
+                  <div class="text-body-2 font-weight-medium">GitHub App</div>
+                  <div class="text-caption text-medium-emphasis">PR tracking, code review &amp; webhooks</div>
                 </div>
               </div>
-              <v-switch
-                v-model="settingsStore.connections.github.enabled"
-                hide-details
-                density="compact"
-                color="primary"
-              />
+              <v-chip
+                :color="settingsStore.connections.github.enabled ? 'success' : 'grey'"
+                size="x-small"
+                variant="tonal"
+              >
+                {{ settingsStore.connections.github.enabled ? 'Connected' : 'Not set up' }}
+              </v-chip>
             </div>
 
-            <v-expand-transition>
-              <div v-if="settingsStore.connections.github.enabled" class="mt-4">
-                <v-text-field
-                  v-model="settingsStore.connections.github.org"
-                  label="Organization name (optional)"
-                  placeholder="my-company"
-                  prepend-inner-icon="mdi-domain"
-                  density="compact"
-                  variant="outlined"
-                  class="mb-3"
-                  hint="Find it at github.com/orgs/<org-name>. Leave empty for personal accounts — you can still add members manually."
-                  persistent-hint
-                />
-                <v-text-field
-                  v-model="settingsStore.connections.github.pat"
-                  label="Personal Access Token"
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                  prepend-inner-icon="mdi-key-outline"
-                  type="password"
-                  density="compact"
-                  variant="outlined"
-                  hint="Leave unchanged to keep existing token"
-                  persistent-hint
-                />
-                <!-- PAT expiry warning -->
-                <v-alert
-                  v-if="patExpired"
-                  type="error"
-                  variant="tonal"
-                  density="compact"
-                  class="mt-3"
-                  prepend-icon="mdi-key-alert"
-                >
-                  Token expired on {{ formatDate(settingsStore.connections.github.patExpiresAt!) }}.
-                  <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener" class="text-primary font-weight-medium">Generate a new token</a>.
-                </v-alert>
-                <v-alert
-                  v-else-if="patExpiringSoon"
-                  type="warning"
-                  variant="tonal"
-                  density="compact"
-                  class="mt-3"
-                  prepend-icon="mdi-key-alert"
-                >
-                  Token expires {{ patDaysRemaining <= 1 ? 'tomorrow' : `in ${patDaysRemaining} days` }} ({{ formatDate(settingsStore.connections.github.patExpiresAt!) }}).
-                  <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener" class="text-primary font-weight-medium">Renew token</a>.
-                </v-alert>
-                <v-chip
-                  v-else-if="settingsStore.connections.github.patExpiresAt"
-                  size="x-small"
-                  variant="tonal"
-                  color="success"
-                  prepend-icon="mdi-check-circle-outline"
-                  class="mt-3"
-                >
-                  Token valid until {{ formatDate(settingsStore.connections.github.patExpiresAt) }}
-                </v-chip>
+            <v-text-field
+              v-model.number="githubAppId"
+              label="App ID"
+              placeholder="123456"
+              prepend-inner-icon="mdi-identifier"
+              density="compact"
+              variant="outlined"
+              class="mb-3"
+              type="number"
+            />
 
-                <div class="text-caption text-medium-emphasis mt-2">
-                  <v-icon icon="mdi-help-circle-outline" size="14" class="mr-1" />
-                  Go to
-                  <a
-                    href="https://github.com/settings/tokens?type=beta"
-                    target="_blank"
-                    rel="noopener"
-                    class="text-primary"
-                  >GitHub &rarr; Settings &rarr; Developer settings &rarr; Personal access tokens</a>.
-                  Create a fine-grained token with: <strong>Organization permissions</strong> &rarr;
-                  <em>Members: Read</em>, and <strong>Repository permissions</strong> &rarr;
-                  <em>Contents: Read</em>.
-                </div>
-              </div>
-            </v-expand-transition>
+            <v-textarea
+              v-model="githubPrivateKey"
+              label="Private Key (.pem)"
+              placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
+              prepend-inner-icon="mdi-key-outline"
+              density="compact"
+              variant="outlined"
+              rows="3"
+              class="mb-3"
+              :hint="settingsStore.connections.github.hasPrivateKey ? 'Key saved. Leave empty to keep existing.' : 'Paste the .pem file contents'"
+              persistent-hint
+            />
+
+            <v-text-field
+              v-model="githubWebhookSecret"
+              label="Webhook Secret"
+              placeholder="Set during GitHub App creation"
+              prepend-inner-icon="mdi-shield-key-outline"
+              density="compact"
+              variant="outlined"
+              class="mb-3"
+              type="password"
+            />
+
+            <v-chip
+              v-if="settingsStore.connections.github.installationId"
+              size="x-small"
+              variant="tonal"
+              color="success"
+              prepend-icon="mdi-check-circle-outline"
+              class="mb-3"
+            >
+              Installation #{{ settingsStore.connections.github.installationId }} (auto-detected)
+            </v-chip>
+
+            <div class="text-caption text-medium-emphasis setup-steps">
+              <v-icon icon="mdi-help-circle-outline" size="14" class="mr-1" />
+              <strong>How to set up:</strong>
+              <ol class="pl-4 mt-1 mb-0" style="line-height: 1.8;">
+                <li>Go to your GitHub <strong>org settings</strong> &rarr; Developer settings &rarr; GitHub Apps &rarr;
+                  <a href="https://github.com/settings/apps/new" target="_blank" rel="noopener" class="text-primary">New GitHub App</a>
+                </li>
+                <li>Set <strong>Webhook URL</strong> to <code>{{ backendUrl }}/api/v1/webhooks/github</code></li>
+                <li>Set <strong>Webhook Secret</strong> &mdash; generate one with <code>openssl rand -hex 32</code> and paste it in both GitHub and here</li>
+                <li>Under <strong>Permissions</strong>: set <em>Pull requests</em> to <strong>Read &amp; Write</strong>, <em>Contents</em> to <strong>Read</strong></li>
+                <li>Under <strong>Subscribe to events</strong>: check <em>Pull request</em> and <em>Pull request review</em></li>
+                <li>Click <strong>Create GitHub App</strong> &mdash; copy the <strong>App ID</strong> shown at the top and paste it above</li>
+                <li>On the app page, scroll to <strong>Private keys</strong> &rarr; Generate a private key &mdash; paste the downloaded <code>.pem</code> contents above</li>
+                <li>Go to <strong>Install App</strong> (left sidebar) &rarr; install on your org and grant access to your repos</li>
+              </ol>
+            </div>
           </v-card>
         </v-col>
 
@@ -370,23 +360,11 @@ import SettingsAiConfig from './SettingsAiConfig.vue'
 
 const settingsStore = useSettingsStore()
 
-// ─── GitHub PAT expiry ──────────────────────────
-
-const PAT_WARN_DAYS = 14
-
-const patDaysRemaining = computed(() => {
-  const exp = settingsStore.connections.github.patExpiresAt
-  if (!exp) return Infinity
-  const diff = new Date(exp).getTime() - Date.now()
-  return Math.ceil(diff / (1000 * 60 * 60 * 24))
-})
-
-const patExpired = computed(() => patDaysRemaining.value <= 0)
-const patExpiringSoon = computed(() => patDaysRemaining.value > 0 && patDaysRemaining.value <= PAT_WARN_DAYS)
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-}
+// ─── GitHub App state ───────────────────────────
+const githubAppId = ref<number | null>(settingsStore.connections.github.appId)
+const githubPrivateKey = ref('')
+const githubWebhookSecret = ref('')
+const backendUrl = window.location.origin
 
 // MCP token state
 const mcpTokenSet = ref(false)
@@ -427,7 +405,22 @@ onMounted(async () => {
 })
 
 async function save(): Promise<void> {
+  // Inject GitHub App credentials into the payload before saving
+  if (githubAppId.value) {
+    (settingsStore.connections.github as Record<string, unknown>).appId = githubAppId.value
+  }
+  if (githubPrivateKey.value) {
+    (settingsStore.connections.github as Record<string, unknown>).privateKey = githubPrivateKey.value
+  }
+  if (githubWebhookSecret.value) {
+    (settingsStore.connections.github as Record<string, unknown>).webhookSecret = githubWebhookSecret.value
+  }
   await settingsStore.saveConnections()
+  // Clear sensitive fields after save
+  githubPrivateKey.value = ''
+  githubWebhookSecret.value = ''
+  // Sync appId from response
+  githubAppId.value = settingsStore.connections.github.appId
 }
 
 async function checkMcpTokenStatus(): Promise<void> {

@@ -1,0 +1,12 @@
+#!/bin/sh
+# installed-by-bodhigrove (pre-commit)
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+BUD_NUM=$(echo "$BRANCH" | sed -n 's/^bud-\([0-9]*\)\/.*/\1/p')
+[ -z "$BUD_NUM" ] && exit 0
+
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+  "https://backendchat.ngrok.app/api/v1/public/5ebe80a7-8ed3-49c6-bd70-9fdadbad5546/bud-check/$BUD_NUM" 2>/dev/null)
+if [ "$STATUS" = "404" ]; then
+  echo "BUD-$BUD_NUM not found in Bodhigrove. Commit blocked."
+  exit 1
+fi

@@ -89,6 +89,8 @@ class DesignAgentJobPayload(BaseModel):
     requirements_md: str
     repo_id: str | None = None
     design_id: str | None = None
+    skill_id: str | None = None
+    task_id: str | None = None
 
 
 class TechArchJobPayload(BaseModel):

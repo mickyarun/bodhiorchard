@@ -1,0 +1,306 @@
+"""Result handlers for BUD agent tasks.
+
+Each handler processes Claude's output, persists results to the database,
+and optionally triggers follow-up actions (notifications, status transitions).
+"""
+
+import uuid as uuid_mod
+from typing import Any
+
+import structlog
+
+from app.models.bud_agent_task import BUDAgentTask
+
+logger = structlog.get_logger(__name__)
+
+
+async def handle_prd_result(
+    bud_id: uuid_mod.UUID, org_id: uuid_mod.UUID, output: str,
+    task: BUDAgentTask, db: Any,
+) -> dict | None:
+    """PRD result: Claude wrote to BUD via MCP write_bud tool — just log success."""
+    return {"section": "requirements_md", "output_length": len(output)}
+
+
+async def handle_tech_arch_result(
+    bud_id: uuid_mod.UUID, org_id: uuid_mod.UUID, output: str,
+    task: BUDAgentTask, db: Any,
+) -> dict | None:
+    """Tech arch result: save output to tech_spec_md and populate impacted_repos."""
+    from app.repositories.bud import BUDRepository
+    from app.repositories.tracked_repository import TrackedRepoRepository
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud:
+        bud.tech_spec_md = output
+
+        repo_repo = TrackedRepoRepository(db, org_id=org_id)
+        repo_triples = await repo_repo.get_active_id_path_name()
+
+        impacted: list[dict[str, str]] = []
+        design_repo_ids = {d.repo_id for d in (bud.designs or []) if d.repo_id}
+
+        for rid, _path, name in repo_triples:
+            if rid in design_repo_ids:
+                impacted.append({"repo_id": str(rid), "repo_name": name})
+
+        if not impacted:
+            impacted = [
+                {"repo_id": str(rid), "repo_name": name}
+                for rid, _path, name in repo_triples
+            ]
+
+        bud.impacted_repos = impacted
+        await db.flush()
+
+    if bud and bud.assignee_id:
+        from app.services.notification_service import send_lifecycle_notification
+
+        bud_ref = f"BUD-{bud.bud_number:03d}"
+        send_lifecycle_notification(
+            org_id=str(org_id),
+            user_id=str(bud.assignee_id),
+            notification_type="approval_requested",
+            title=f"Tech plan ready for review: {bud_ref}",
+            message=f'The tech architecture for "{bud.title}" needs your approval.',
+            bud_id=str(bud_id),
+        )
+
+    return {"section": "tech_spec_md", "output_length": len(output)}
+
+
+async def handle_code_review_result(
+    bud_id: uuid_mod.UUID, org_id: uuid_mod.UUID, output: str,
+    task: BUDAgentTask, db: Any,
+) -> dict | None:
+    """Code review result: parse JSON, store comments, auto-transition if clean."""
+    from app.repositories.bud import BUDRepository
+
+    review_data = _parse_code_review_output(output)
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    qa_push_requested = False
+    comment_count = 0
+
+    if bud:
+        meta = dict(bud.metadata_ or {})
+        qa_push_requested = meta.pop("qa_push_requested", False)
+        new_comments = review_data.get("code_review_comments", [])
+        meta["code_review_comments"] = new_comments
+        if qa_push_requested:
+            meta.pop("code_review_resolutions", None)
+        auto_plan = review_data.get("automation_test_plan_md", "")
+        manual_plan = review_data.get("manual_test_plan_md", "")
+        if auto_plan or manual_plan:
+            meta["automation_test_plan_md"] = auto_plan
+            meta["manual_test_plan_md"] = manual_plan
+        bud.metadata_ = meta
+        comment_count = len(new_comments)
+
+        if new_comments:
+            from app.services.github_pr_sync import sync_review_comments_to_github
+
+            await sync_review_comments_to_github(bud_id, org_id, new_comments, db)
+
+        if qa_push_requested and comment_count == 0:
+            from app.models.bud import BUDStatus
+            from app.services.bud_assignment import auto_assign_for_phase
+            from app.services.bud_timeline import record_event
+
+            old_status = bud.status
+            bud.status = BUDStatus.TESTING
+            await record_event(
+                db, org_id, bud_id, "status_change",
+                detail={"from": old_status, "to": "testing", "auto": True},
+            )
+            await auto_assign_for_phase(db, org_id, bud, BUDStatus.TESTING)
+
+            from app.services.bud_agent_trigger import create_agent_task_for_stage
+
+            await create_agent_task_for_stage(bud, "testing", org_id, db, force=True)
+
+        await db.flush()
+
+    return {
+        "section": "test_plan_md",
+        "comment_count": comment_count,
+        "auto_transitioned": qa_push_requested and comment_count == 0,
+    }
+
+
+async def handle_testing_result(
+    bud_id: uuid_mod.UUID, org_id: uuid_mod.UUID, output: str,
+    task: BUDAgentTask, db: Any,
+) -> dict | None:
+    """Testing result: parse JSON and store test cases in BUD columns."""
+    from app.repositories.bud import BUDRepository
+    from app.services.json_parser import parse_json_response
+
+    default: dict[str, Any] = {
+        "automation_test_cases": [],
+        "manual_test_cases": [],
+        "test_execution_plan": "",
+    }
+
+    parsed_data = default
+    if output:
+        try:
+            parsed = parse_json_response(output)
+            if isinstance(parsed, dict):
+                parsed_data = _normalize_testing_output(parsed)
+        except Exception:
+            logger.warning("testing_output_parse_failed", bud_id=str(bud_id))
+
+    for case in parsed_data["manual_test_cases"]:
+        if "result" not in case:
+            case["result"] = "pending"
+        if "evidence" not in case:
+            case["evidence"] = []
+        case.setdefault("tester_name", None)
+        case.setdefault("tested_at", None)
+
+    auto_count = len(parsed_data["automation_test_cases"])
+    manual_count = len(parsed_data["manual_test_cases"])
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud:
+        bud.qa_automation_cases = parsed_data["automation_test_cases"]
+        bud.qa_manual_cases = parsed_data["manual_test_cases"]
+        bud.qa_execution_plan_md = parsed_data["test_execution_plan"]
+        bud.test_plan_md = (
+            f"# Test Plan for BUD-{bud.bud_number:03d}\n\n"
+            f"- **{auto_count}** automation test cases\n"
+            f"- **{manual_count}** manual test cases\n\n"
+            f"{parsed_data['test_execution_plan']}"
+        )
+        await db.flush()
+
+    if bud and bud.assignee_id:
+        from app.services.notification_service import send_lifecycle_notification
+
+        bud_ref = f"BUD-{bud.bud_number:03d}"
+        try:
+            send_lifecycle_notification(
+                org_id=str(org_id),
+                user_id=str(bud.assignee_id),
+                notification_type="testing_ready",
+                title=f"Test cases ready: {bud_ref}",
+                message=(
+                    f'Test cases for "{bud.title}" are ready. '
+                    f"{auto_count} automation + {manual_count} manual test cases."
+                ),
+                bud_id=str(bud_id),
+            )
+        except Exception:
+            logger.warning("testing_notification_failed", bud_id=str(bud_id))
+
+    return {
+        "section": "qa_execution_plan_md",
+        "automation_count": auto_count,
+        "manual_count": manual_count,
+    }
+
+
+# ── Output parsing helpers ────────────────────────────────────────
+
+
+def _parse_code_review_output(output: str) -> dict[str, Any]:
+    """Parse code review JSON output from Claude."""
+    from app.services.json_parser import parse_json_response
+
+    try:
+        parsed = parse_json_response(output)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        logger.warning("code_review_output_parse_failed")
+    return {"code_review_comments": []}
+
+
+def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Normalize various agent output structures into expected format."""
+    auto = parsed.get("automation_test_cases", [])
+    manual = parsed.get("manual_test_cases", [])
+    plan = parsed.get("test_execution_plan", "")
+
+    if not auto and "automation" in parsed:
+        auto_section = parsed["automation"]
+        if isinstance(auto_section, list):
+            auto = auto_section
+        elif isinstance(auto_section, dict):
+            for group in auto_section.values():
+                if isinstance(group, list):
+                    auto.extend(group)
+
+    if not manual and "manual" in parsed:
+        manual_section = parsed["manual"]
+        if isinstance(manual_section, list):
+            manual = manual_section
+        elif isinstance(manual_section, dict):
+            for group in manual_section.values():
+                if isinstance(group, list):
+                    manual.extend(group)
+
+    if not plan:
+        plan = parsed.get("execution_plan", "") or parsed.get("test_plan", "")
+
+    if isinstance(plan, dict):
+        plan = _dict_plan_to_markdown(plan)
+    elif isinstance(plan, list):
+        plan = "\n".join(
+            f"- {item}" if isinstance(item, str) else str(item) for item in plan
+        )
+    elif not isinstance(plan, str):
+        plan = ""
+
+    return {
+        "automation_test_cases": auto if isinstance(auto, list) else [],
+        "manual_test_cases": manual if isinstance(manual, list) else [],
+        "test_execution_plan": plan,
+    }
+
+
+def _dict_plan_to_markdown(plan: dict[str, Any]) -> str:
+    """Convert a dict execution plan to readable markdown."""
+    import json
+
+    lines: list[str] = []
+
+    if "strategy" in plan:
+        lines.append(f"## Strategy\n\n{plan['strategy']}\n")
+
+    if "phases" in plan and isinstance(plan["phases"], list):
+        lines.append("## Phases\n")
+        for phase in plan["phases"]:
+            if isinstance(phase, dict):
+                name = phase.get("name", "Phase")
+                order = phase.get("order", "")
+                prefix = f"{order}. " if order else "- "
+                lines.append(f"{prefix}**{name}**")
+                if phase.get("description"):
+                    lines.append(f"  {phase['description']}")
+                if phase.get("command"):
+                    lines.append(f"  ```\n  {phase['command']}\n  ```")
+                if phase.get("rationale"):
+                    lines.append(f"  _{phase['rationale']}_")
+                if phase.get("test_ids") and isinstance(phase["test_ids"], list):
+                    lines.append(f"  Tests: {', '.join(phase['test_ids'][:10])}")
+                if phase.get("tasks") and isinstance(phase["tasks"], list):
+                    for t in phase["tasks"]:
+                        if isinstance(t, dict):
+                            bug = t.get("bug", "")
+                            fix = t.get("fix", "")
+                            lines.append(f"  - {bug}: {fix}" if bug else f"  - {t}")
+                lines.append("")
+            else:
+                lines.append(f"- {phase}")
+    elif not lines:
+        try:
+            lines.append(f"```json\n{json.dumps(plan, indent=2)}\n```")
+        except (TypeError, ValueError):
+            lines.append(str(plan))
+
+    return "\n".join(lines)

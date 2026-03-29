@@ -400,3 +400,29 @@ export interface AppNotification {
   isDismissed: boolean
   createdAt: string
 }
+
+// ── Pull Request Types ──────────────────────────────────────────
+export interface PullRequest {
+  id: string
+  bud_id: string | null
+  repo_id: string | null
+  github_pr_number: number
+  github_repo_full_name: string
+  title: string
+  html_url: string
+  head_branch: string
+  base_branch: string
+  state: 'open' | 'closed' | 'merged'
+  review_status: 'pending' | 'approved' | 'changes_requested'
+  author_github_login: string
+  merged_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PRChecklistItem {
+  repo_id: string
+  repo_name: string
+  pr: PullRequest | null
+  status: 'no_pr' | 'open' | 'merged'
+}

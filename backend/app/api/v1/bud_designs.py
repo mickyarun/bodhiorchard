@@ -64,6 +64,34 @@ async def generate_designs(
         design_rows.append((rid, str(design.id)))
     await db.flush()
 
+    # Resolve skill + create agent task BEFORE enqueuing jobs
+    # so task_id and skill_id are available in the job payload
+    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
+    from app.repositories.agent_skill import AgentSkillRepository
+    from app.repositories.bud_agent_task import BUDAgentTaskRepository
+
+    skill_repo = AgentSkillRepository(db, org_id=current_user.org_id)
+    designer_skill = await skill_repo.get_by_slug("designer")
+    skill_id_str = str(designer_skill.id) if designer_skill else None
+
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    active = await task_repo.get_active_for_bud(bud_id)
+    task_id_str: str | None = str(active.id) if active else None
+
+    if not active and designer_skill:
+        task = BUDAgentTask(
+            org_id=current_user.org_id,
+            bud_id=bud_id,
+            skill_id=designer_skill.id,
+            task_type="design",
+            status=AgentTaskStatus.RUNNING,
+            attempt=1,
+            triggered_by=current_user.id,
+        )
+        db.add(task)
+        await db.flush()
+        task_id_str = str(task.id)
+
     results = []
     for rid, design_id in design_rows:
         payload = DesignAgentJobPayload(
@@ -74,6 +102,8 @@ async def generate_designs(
             requirements_md=bud.requirements_md or "",
             repo_id=str(rid) if rid else None,
             design_id=design_id,
+            skill_id=skill_id_str,
+            task_id=task_id_str,
         )
         job = create_job(
             JOB_DESIGN_AGENT,
@@ -85,6 +115,12 @@ async def generate_designs(
         if design_obj:
             design_obj.job_id = job.job_id
             design_obj.status = BUDDesignStatus.GENERATING
+
+        # Backfill job_id on the task (first job wins)
+        if task_id_str and not active:
+            active_task = await task_repo.get_by_id(uuid.UUID(task_id_str))
+            if active_task and not active_task.job_id:
+                active_task.job_id = job.job_id
 
         results.append(
             {
@@ -100,30 +136,6 @@ async def generate_designs(
             job_id=job.job_id,
             design_id=design_id,
         )
-
-    # Create a BUDAgentTask for unified UI tracking (banner + lock)
-    if results:
-        from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
-        from app.repositories.agent_skill import AgentSkillRepository
-        from app.repositories.bud_agent_task import BUDAgentTaskRepository
-
-        task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
-        active = await task_repo.get_active_for_bud(bud_id)
-        if not active:
-            skill_repo = AgentSkillRepository(db, org_id=current_user.org_id)
-            designer_skill = await skill_repo.get_by_slug("designer")
-            if designer_skill:
-                task = BUDAgentTask(
-                    org_id=current_user.org_id,
-                    bud_id=bud_id,
-                    skill_id=designer_skill.id,
-                    task_type="design",
-                    status=AgentTaskStatus.RUNNING,
-                    attempt=1,
-                    triggered_by=current_user.id,
-                    job_id=results[0]["jobId"],
-                )
-                db.add(task)
 
     await db.commit()
     return results
@@ -186,6 +198,15 @@ async def regenerate_design(
     design.status = BUDDesignStatus.GENERATING
     await db.flush()
 
+    # Resolve skill_id and active task_id for activity logging
+    from app.repositories.agent_skill import AgentSkillRepository
+    from app.repositories.bud_agent_task import BUDAgentTaskRepository
+
+    skill_repo = AgentSkillRepository(db, org_id=current_user.org_id)
+    designer_skill = await skill_repo.get_by_slug("designer")
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    active_task = await task_repo.get_active_for_bud(bud_id)
+
     payload = DesignAgentJobPayload(
         org_id=str(current_user.org_id),
         bud_id=str(bud.id),
@@ -194,6 +215,8 @@ async def regenerate_design(
         requirements_md=bud.requirements_md or "",
         repo_id=str(design.repo_id) if design.repo_id else None,
         design_id=str(design.id),
+        skill_id=str(designer_skill.id) if designer_skill else None,
+        task_id=str(active_task.id) if active_task else None,
     )
     job = create_job(
         JOB_DESIGN_AGENT,

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
 from app.mcp.auth import MCPAuthResult, verify_mcp_token
+from app.mcp.handlers_agent_activity import handle_agent_activity
 from app.mcp.handlers_bud import (
     handle_get_bud_context,
     handle_write_bud,
@@ -39,6 +40,10 @@ from app.mcp.synthesis_queue import (  # noqa: F401
     get_queue_remaining,
     remove_from_queue,
     set_synthesis_queue,
+)
+from app.schemas.agent_activity import (
+    AgentActivityHookRequest,
+    AgentActivityHookResponse,
 )
 from app.schemas.dev_activity import DevActivityHookRequest, DevActivityHookResponse
 
@@ -419,3 +424,26 @@ async def report_dev_activity(
         logger.error("dev_activity_validation_failed", body=raw_str)
         raise
     return await handle_dev_activity(db, auth, body)
+
+
+@router.post("/agent-activity", response_model=AgentActivityHookResponse)
+async def report_agent_activity(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    auth: MCPAuthResult = Depends(verify_mcp_token),
+) -> AgentActivityHookResponse:
+    """Receive agent activity reports from hooks and backend.
+
+    Called by hook scripts in tracked repos when BODHIGROVE_AGENT_SKILL_SLUG
+    env var is set (agent session), and by backend directly for skill
+    lifecycle events. All calls are fire-and-forget from the hook side.
+    """
+    raw = await request.body()
+    logger.info("agent_activity_raw_body", body=raw.decode("utf-8", errors="replace")[:2000])
+    try:
+        body = AgentActivityHookRequest.model_validate_json(raw)
+    except Exception:
+        raw_str = raw.decode("utf-8", errors="replace")[:500]
+        logger.error("agent_activity_validation_failed", body=raw_str)
+        raise
+    return await handle_agent_activity(db, auth, body)

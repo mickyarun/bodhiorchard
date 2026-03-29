@@ -90,7 +90,6 @@ class IntegrationConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
 
-    github_pat: str = Field(default="", alias="GITHUB_PAT")
     slack_bot_token: str = Field(default="", alias="SLACK_BOT_TOKEN")
     slack_signing_secret: str = Field(default="", alias="SLACK_SIGNING_SECRET")
 

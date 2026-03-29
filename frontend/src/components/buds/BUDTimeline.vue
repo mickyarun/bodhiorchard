@@ -175,6 +175,27 @@
               </div>
             </template>
 
+            <!-- PR Events -->
+            <template v-else-if="event.event_type === 'pr_opened' || event.event_type === 'pr_merged'">
+              <div class="tl-primary">
+                <span>PR #{{ event.detail?.pr_number }}</span>
+                <span>{{ event.event_type === 'pr_opened' ? 'opened' : 'merged' }} on</span>
+                <span class="tl-section">{{ event.detail?.repo }}</span>
+              </div>
+              <div v-if="event.detail?.html_url" class="tl-meta">
+                <a :href="String(event.detail.html_url)" target="_blank" class="text-caption">
+                  View on GitHub
+                  <v-icon size="10">mdi-open-in-new</v-icon>
+                </a>
+              </div>
+            </template>
+
+            <template v-else-if="event.event_type === 'all_prs_merged'">
+              <div class="tl-primary">
+                <span>All PRs merged — ready for testing</span>
+              </div>
+            </template>
+
             <!-- Fallback -->
             <template v-else>
               <div class="tl-primary">
@@ -219,6 +240,9 @@ const EVENT_MAP: Record<string, EventConfig> = {
   content_updated: { icon: 'mdi-pencil', color: 'primary', label: 'Content updated' },
   design_generated: { icon: 'mdi-palette', color: 'teal', label: 'Design generated' },
   comment: { icon: 'mdi-comment-text', color: 'grey', label: 'Comment' },
+  pr_opened: { icon: 'mdi-source-pull', color: 'info', label: 'PR opened' },
+  pr_merged: { icon: 'mdi-source-merge', color: 'success', label: 'PR merged' },
+  all_prs_merged: { icon: 'mdi-check-all', color: 'success', label: 'All PRs merged' },
 }
 
 const DEFAULT_CONFIG: EventConfig = { icon: 'mdi-circle-small', color: 'grey', label: 'Event' }

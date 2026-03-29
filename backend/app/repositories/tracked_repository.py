@@ -215,3 +215,19 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
             ).order_by(TrackedRepository.name)
         )
         return list(result.all())
+
+    async def get_by_github_full_name(
+        self, full_name: str,
+    ) -> TrackedRepository | None:
+        """Look up a repo by GitHub full name (owner/repo).
+
+        Uses org scope if set, otherwise searches across all orgs
+        (used by webhook handler to resolve org from repo name).
+        """
+        stmt = self._scoped(
+            select(TrackedRepository).where(
+                TrackedRepository.github_repo_full_name == full_name,
+            )
+        ).limit(1)
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()

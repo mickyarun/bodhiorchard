@@ -64,7 +64,6 @@ async def get_connections(
 
     source_code_cfg = config.get("source_code", {})
     integrations_cfg = config.get("integrations", {})
-    github_cfg = integrations_cfg.get("github", {})
     slack_cfg = integrations_cfg.get("slack", {})
     llm_cfg = config.get("llm", {})
     scan_cfg = config.get("scan", {})
@@ -75,10 +74,11 @@ async def get_connections(
             type=source_code_cfg.get("type", "single-repo"),
         ),
         github=GitHubSettings(
-            enabled=github_cfg.get("enabled", False),
-            pat=_mask_secret(decrypt_secret(org.github_pat or "")),
-            org=github_cfg.get("org", ""),
-            patExpiresAt=github_cfg.get("pat_expires_at"),
+            enabled=bool(org.github_app_id),
+            appId=org.github_app_id,
+            hasPrivateKey=bool(org.github_app_private_key),
+            installationId=org.github_app_installation_id,
+            webhookConfigured=bool(org.github_webhook_secret),
         ),
         slack=SlackSettings(
             enabled=slack_cfg.get("enabled", False),
@@ -132,22 +132,19 @@ async def update_connections(
     # Source code — repos are managed via tracked_repositories table,
     # no longer stored in JSONB config.
 
-    # GitHub
+    # GitHub App
     if body.github is not None:
         config.setdefault("integrations", {})
-        is_new_pat = bool(body.github.pat and not _is_masked(body.github.pat))
-        # Auto-enable when a real PAT is provided
-        enabled = body.github.enabled or is_new_pat
-        # Preserve existing pat_expires_at unless we detect a new one
-        existing_github = config.get("integrations", {}).get("github", {})
-        pat_expires_at = existing_github.get("pat_expires_at")
-        if is_new_pat:
-            org.github_pat = encrypt_secret(body.github.pat) if body.github.pat else None
-            pat_expires_at = await _check_github_pat_expiry(body.github.pat)
+        if body.github.app_id is not None:
+            org.github_app_id = body.github.app_id
+        if body.github.private_key:
+            org.github_app_private_key = encrypt_secret(body.github.private_key)
+        if body.github.webhook_secret:
+            org.github_webhook_secret = encrypt_secret(body.github.webhook_secret)
+        if body.github.installation_id is not None:
+            org.github_app_installation_id = body.github.installation_id
         config["integrations"]["github"] = {
-            "enabled": enabled,
-            "org": body.github.org,
-            "pat_expires_at": pat_expires_at,
+            "enabled": bool(org.github_app_id),
         }
 
     # Slack
@@ -304,6 +301,9 @@ async def mcp_token_status(
     return {"has_token": org.mcp_token_hash is not None}
 
 
+# ── GitHub Webhook Secret ─────────────────────────────────────────
+
+
 # ── Helpers ───────────────────────────────────────────────────────
 
 
@@ -325,42 +325,3 @@ def _is_masked(value: str | None) -> bool:
     return bool(value and "****" in value)
 
 
-async def _check_github_pat_expiry(pat: str) -> str | None:
-    """Call GitHub API to extract the token expiration date from response headers.
-
-    Fine-grained PATs return a ``github-authentication-token-expiration``
-    header (e.g. ``2026-06-15 00:00:00 UTC``). Classic PATs without expiry
-    don't include this header, so None is returned.
-
-    Args:
-        pat: The raw (unencrypted) GitHub Personal Access Token.
-
-    Returns:
-        ISO-8601 expiry string, or None if the token has no expiry.
-    """
-    import httpx
-
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                "https://api.github.com/user",
-                headers={
-                    "Authorization": f"Bearer {pat}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-                timeout=10,
-            )
-        expiry_header = resp.headers.get("github-authentication-token-expiration")
-        if expiry_header:
-            # Header formats vary: "2026-06-15 00:00:00 UTC" or "2027-03-26 11:37:19 +0530"
-            from datetime import datetime
-
-            raw = expiry_header.strip()
-            # Replace timezone name "UTC" with "+0000" so %z handles both formats
-            normalized = raw.replace(" UTC", " +0000")
-            dt = datetime.strptime(normalized, "%Y-%m-%d %H:%M:%S %z")
-            return dt.isoformat()
-    except Exception:
-        logger.warning("github_pat_expiry_check_failed", exc_info=True)
-    return None

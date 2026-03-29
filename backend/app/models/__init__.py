@@ -4,6 +4,7 @@ All models are imported here so that Alembic can discover them for
 auto-generation of migration scripts.
 """
 
+from app.models.agent_activity import AgentActivityLog
 from app.models.agent_log import AgentLog
 from app.models.agent_skill import AgentSkill
 from app.models.agent_skill_bud_stage import AgentSkillBudStage
@@ -34,6 +35,8 @@ from app.models.permission import (
     RolePermission,
     RoleScopeType,
 )
+from app.models.pull_request import PRReviewStatus, PRState, PullRequest
+from app.models.qa_test_evidence import QATestEvidence
 from app.models.skill_profile import SkillProfile
 from app.models.standup import StandupReport
 from app.models.tracked_repository import RepoStatus, TrackedRepository
@@ -42,6 +45,7 @@ from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
 from app.models.user_mcp_token import UserMCPToken
 
 __all__ = [
+    "AgentActivityLog",
     "AgentLog",
     "AgentSkill",
     "AgentSkillBudStage",
@@ -72,6 +76,10 @@ __all__ = [
     "OrgToUser",
     "Permission",
     "PermissionCategory",
+    "PRReviewStatus",
+    "PRState",
+    "PullRequest",
+    "QATestEvidence",
     "RepoStatus",
     "Role",
     "RolePermission",

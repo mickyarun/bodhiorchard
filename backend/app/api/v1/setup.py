@@ -346,7 +346,7 @@ async def get_checklist_status(
         scanInProgress=scan_in_progress,
         scanId=scan_id,
         scanProgress=scan_progress,
-        githubConnected=bool(org.github_pat),
+        githubConnected=bool(org.github_app_id),
         slackConnected=bool(org.slack_bot_token),
         branchesMapped=all(r.main_branch for r in active_repos) if active_repos else False,
         membersImported=len(users) > 1,
