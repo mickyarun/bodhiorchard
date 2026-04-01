@@ -62,7 +62,7 @@ export interface ExclusionZone {
 }
 
 /** Check if a point is inside any circular exclusion zone. */
-export function isInsideAnyZone(px: number, pz: number, zones: ExclusionZone[]): boolean {
+export function isInsideAnyZone(px: number, pz: number, zones: readonly ExclusionZone[]): boolean {
   for (const zone of zones) {
     const dx = px - zone.x
     const dz = pz - zone.z

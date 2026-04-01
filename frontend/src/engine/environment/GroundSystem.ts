@@ -100,62 +100,129 @@ export class GroundSystem {
     canvas.height = S
     const ctx = canvas.getContext('2d')!
 
-    // Base green fill — slightly warmer
-    ctx.fillStyle = 'rgb(62, 120, 42)'
+    // Rich base green — darker, more natural
+    ctx.fillStyle = 'rgb(48, 95, 32)'
     ctx.fillRect(0, 0, S, S)
 
-    // Layer 1: large patches of color variation
-    for (let i = 0; i < 50; i++) {
+    // Layer 1: large natural color patches (light/dark variation like real turf)
+    for (let i = 0; i < 80; i++) {
       const x = Math.random() * S
       const y = Math.random() * S
-      const r = 30 + Math.random() * 70
+      const r = 20 + Math.random() * 80
       const shade = Math.random()
-      const green = shade < 0.4
-        ? `rgba(45, ${90 + Math.random() * 30}, 30, 0.3)`
-        : shade < 0.8
-        ? `rgba(70, ${120 + Math.random() * 25}, 50, 0.25)`
-        : `rgba(55, ${100 + Math.random() * 20}, 35, 0.2)` // mid tone
+      let fill: string
+      if (shade < 0.3) {
+        // Dark shadow patches
+        fill = `rgba(30, ${65 + Math.random() * 20}, 20, 0.35)`
+      } else if (shade < 0.6) {
+        // Mid green
+        fill = `rgba(55, ${100 + Math.random() * 25}, 40, 0.3)`
+      } else if (shade < 0.85) {
+        // Warm yellow-green (sunlit)
+        fill = `rgba(75, ${115 + Math.random() * 20}, 45, 0.25)`
+      } else {
+        // Bright highlights
+        fill = `rgba(90, ${130 + Math.random() * 15}, 55, 0.2)`
+      }
       ctx.beginPath()
       ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fillStyle = green
+      ctx.fillStyle = fill
       ctx.fill()
     }
 
-    // Layer 1b: occasional brown/earth patches for natural variation
-    for (let i = 0; i < 8; i++) {
+    // Layer 1b: earth/soil patches peeking through
+    for (let i = 0; i < 12; i++) {
       const x = Math.random() * S
       const y = Math.random() * S
-      const r = 15 + Math.random() * 30
+      const r = 8 + Math.random() * 20
       ctx.beginPath()
       ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(${100 + Math.random() * 30}, ${85 + Math.random() * 20}, ${50 + Math.random() * 20}, 0.12)`
+      ctx.fillStyle = `rgba(${85 + Math.random() * 25}, ${70 + Math.random() * 15}, ${40 + Math.random() * 15}, 0.1)`
       ctx.fill()
     }
 
-    // Layer 2: dense grass blade strokes
-    for (let i = 0; i < 4000; i++) {
+    // Layer 2: grass clumps — multiple blades from same origin point
+    for (let i = 0; i < 600; i++) {
+      const cx0 = Math.random() * S
+      const cy0 = Math.random() * S
+      const bladeCount = 3 + Math.floor(Math.random() * 5)
+      const baseAngle = -Math.PI / 2 + (Math.random() - 0.5) * 0.4
+
+      for (let b = 0; b < bladeCount; b++) {
+        const angle = baseAngle + (Math.random() - 0.5) * 1.2
+        const len = 4 + Math.random() * 10
+        const g = 70 + Math.random() * 70
+        const r = 25 + Math.random() * 40
+        ctx.strokeStyle = `rgba(${r}, ${g}, ${Math.floor(r * 0.55)}, 0.55)`
+        ctx.lineWidth = 0.5 + Math.random() * 1.2
+        ctx.beginPath()
+        ctx.moveTo(cx0 + (Math.random() - 0.5) * 3, cy0 + (Math.random() - 0.5) * 2)
+        const tipX = cx0 + Math.cos(angle) * len
+        const tipY = cy0 + Math.sin(angle) * len
+        // Slight curve via quadratic bezier for natural blade shape
+        const cpX = cx0 + Math.cos(angle) * len * 0.6 + (Math.random() - 0.5) * 3
+        const cpY = cy0 + Math.sin(angle) * len * 0.6
+        ctx.quadraticCurveTo(cpX, cpY, tipX, tipY)
+        ctx.stroke()
+
+        // Bright tip highlight (sunlit blade tips)
+        if (Math.random() < 0.3) {
+          ctx.strokeStyle = `rgba(${100 + Math.random() * 40}, ${150 + Math.random() * 30}, ${60 + Math.random() * 20}, 0.3)`
+          ctx.lineWidth = 0.3
+          ctx.beginPath()
+          ctx.moveTo(tipX - Math.cos(angle) * 2, tipY - Math.sin(angle) * 2)
+          ctx.lineTo(tipX, tipY)
+          ctx.stroke()
+        }
+      }
+    }
+
+    // Layer 3: scattered individual fine blades for density
+    for (let i = 0; i < 3000; i++) {
       const x = Math.random() * S
       const y = Math.random() * S
-      const len = 2 + Math.random() * 6
-      const angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.8
-      const g = 80 + Math.random() * 60
-      const r = 30 + Math.random() * 35
-      ctx.strokeStyle = `rgba(${r}, ${g}, ${Math.floor(r * 0.6)}, 0.5)`
-      ctx.lineWidth = 0.5 + Math.random() * 1
+      const len = 2 + Math.random() * 5
+      const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.0
+      const g = 75 + Math.random() * 65
+      const r = 28 + Math.random() * 35
+      ctx.strokeStyle = `rgba(${r}, ${g}, ${Math.floor(r * 0.5)}, 0.4)`
+      ctx.lineWidth = 0.3 + Math.random() * 0.7
       ctx.beginPath()
       ctx.moveTo(x, y)
       ctx.lineTo(x + Math.cos(angle) * len, y + Math.sin(angle) * len)
       ctx.stroke()
     }
 
-    // Layer 3: light speckles for sparkle
-    for (let i = 0; i < 1000; i++) {
+    // Layer 4: bright speckles (dew/light catch)
+    for (let i = 0; i < 800; i++) {
       const x = Math.random() * S
       const y = Math.random() * S
-      ctx.fillStyle = `rgba(${100 + Math.random() * 40}, ${140 + Math.random() * 40}, ${60 + Math.random() * 20}, 0.15)`
+      ctx.fillStyle = `rgba(${90 + Math.random() * 50}, ${130 + Math.random() * 50}, ${50 + Math.random() * 30}, 0.12)`
       ctx.fillRect(x, y, 1, 1)
     }
 
+    // Layer 5: radial edge darkening (vignette)
+    const cx = S / 2
+    const cy = S / 2
+    const maxR = S / 2
+    const edgeData = ctx.getImageData(0, 0, S, S)
+    const ed = edgeData.data
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const dx = x - cx
+        const dy = y - cy
+        const dist = Math.sqrt(dx * dx + dy * dy) / maxR
+        if (dist > 0.55) {
+          const t = Math.min((dist - 0.55) / 0.45, 1.0)
+          const darken = 1.0 - t * 0.4
+          const idx = (y * S + x) * 4
+          ed[idx] = Math.floor(ed[idx] * darken)
+          ed[idx + 1] = Math.floor(ed[idx + 1] * darken)
+          ed[idx + 2] = Math.floor(ed[idx + 2] * darken)
+        }
+      }
+    }
+    // Write vignette-modified pixels directly to texture (skip canvas round-trip)
     const texture = new pc.Texture(device, {
       width: S,
       height: S,
@@ -168,8 +235,7 @@ export class GroundSystem {
     })
 
     const pixels = texture.lock()
-    const imageData = ctx.getImageData(0, 0, S, S)
-    pixels.set(imageData.data)
+    pixels.set(ed)
     texture.unlock()
 
     return texture

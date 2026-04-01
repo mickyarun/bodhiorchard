@@ -66,15 +66,32 @@ export class SkySystem {
     ctx.fillStyle = gradient
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-    // Add sun glow near horizon
+    // Sun disc — bright visible sun in the sky
     const sunX = canvas.width * 0.65
-    const sunY = canvas.height * 0.48
-    const sunGlow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 40)
-    sunGlow.addColorStop(0, 'rgba(255, 245, 220, 0.9)')
-    sunGlow.addColorStop(0.3, 'rgba(255, 235, 200, 0.4)')
-    sunGlow.addColorStop(1, 'rgba(255, 235, 200, 0)')
-    ctx.fillStyle = sunGlow
+    const sunY = canvas.height * 0.38 // higher in sky for visibility
+
+    // Outer halo glow (warm orange)
+    const halo = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 60)
+    halo.addColorStop(0, 'rgba(255, 240, 200, 0.6)')
+    halo.addColorStop(0.4, 'rgba(255, 220, 160, 0.2)')
+    halo.addColorStop(1, 'rgba(255, 220, 160, 0)')
+    ctx.fillStyle = halo
     ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    // Inner glow (bright warm)
+    const innerGlow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 20)
+    innerGlow.addColorStop(0, 'rgba(255, 255, 240, 1.0)')
+    innerGlow.addColorStop(0.4, 'rgba(255, 250, 220, 0.9)')
+    innerGlow.addColorStop(0.7, 'rgba(255, 240, 190, 0.4)')
+    innerGlow.addColorStop(1, 'rgba(255, 235, 180, 0)')
+    ctx.fillStyle = innerGlow
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    // Bright sun core disc
+    ctx.beginPath()
+    ctx.arc(sunX, sunY, 6, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(255, 255, 250, 1.0)'
+    ctx.fill()
 
     const texture = new pc.Texture(device, {
       width: canvas.width,

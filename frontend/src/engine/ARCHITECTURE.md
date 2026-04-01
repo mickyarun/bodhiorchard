@@ -85,8 +85,12 @@ frontend/src/engine/
 ├── environment/                # [Phase 2] Natural world
 │   ├── SkySystem.ts            # Procedural sky sphere
 │   ├── GroundSystem.ts         # Textured terrain
-│   ├── GrassSystem.ts          # Instanced grass + flowers
-│   ├── RockSystem.ts           # GLB rocks
+│   ├── PineTreeSystem.ts       # Scattered pine/evergreen GLB trees
+│   ├── BushSystem.ts           # Foliage bushes along paths + zone borders
+│   ├── ForestLake.ts           # Pond with lilies + surrounding pine forest
+│   ├── MountainBackdrop.ts     # Distant mountain range backdrop
+│   ├── GrassSystem.ts          # Instanced grass + flowers (disabled)
+│   ├── RockSystem.ts           # GLB rocks (disabled)
 │   └── CloudSystem.ts          # Cloud billboard planes
 │
 ├── world/                      # [Phase 2] Repo visualization

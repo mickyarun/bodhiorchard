@@ -130,6 +130,30 @@ export const SCATTER_ROCKS: string[] = [
   `${GARDEN}/stone_smallB.glb`,
 ]
 
+export const SCATTER_PINES: string[] = [
+  `${GARDEN}/pine_tree.glb`,
+]
+
+export const FOREST_TREES: string[] = [
+  `${GARDEN}/pine_tree.glb`,
+  `${GARDEN}/tree_round.glb`,
+  `${GARDEN}/tree_tall_green.glb`,
+  `${GARDEN}/tree_leafy.glb`,
+  `${GARDEN}/tree_autumn.glb`,
+]
+
+export const SCATTER_BUSHES: string[] = [
+  `${GARDEN}/bush_green.glb`,
+  `${GARDEN}/bushes_cluster.glb`,
+  `${GARDEN}/bush_round.glb`,
+]
+
+export const MOUNTAINS: string[] = [
+  `${GARDEN}/mountains.glb`,
+  `${GARDEN}/mountain.glb`,
+  `${GARDEN}/mountain_b.glb`,
+]
+
 export const SCATTER_PROPS: string[] = [
   `${GARDEN}/stump_old.glb`,
   `${GARDEN}/stump_round.glb`,
@@ -251,12 +275,16 @@ export const TEXTURES = {
 
 // ─── Batch Preload Helpers ──────────────────────
 
-/** All GLBs needed for the environment (grass, flowers, rocks, props). */
+/** All GLBs needed for the environment (grass, flowers, rocks, pines, bushes, props). */
 export function getEnvironmentGLBs(): string[] {
   return [
     ...SCATTER_GRASS,
     ...SCATTER_FLOWERS,
     ...SCATTER_ROCKS,
+    ...SCATTER_PINES,
+    ...FOREST_TREES,
+    ...SCATTER_BUSHES,
+    ...MOUNTAINS,
     ...SCATTER_PROPS,
   ]
 }

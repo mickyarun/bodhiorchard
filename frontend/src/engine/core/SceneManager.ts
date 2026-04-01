@@ -8,7 +8,7 @@
  *   4. Build buildings (coffee bar, cafeteria, village, pool, pavilion)
  *   4b. Place characters at seats/houses (needs building seats + house map)
  *   5. Build paths between zones + zone signs
- *   6. Scatter grass + rocks (after buildings, so exclusion zones exist)
+ *   6. Scatter pine trees + bushes (after buildings, so exclusion zones exist)
  *   7. Build relationship arcs
  *   8. Add effects (string lights)
  *
@@ -33,9 +33,11 @@ import { PathSystem } from '../world/PathSystem'
 import { ZoneSign } from '../world/ZoneSign'
 import { SkySystem } from '../environment/SkySystem'
 import { GroundSystem } from '../environment/GroundSystem'
-import { GrassSystem } from '../environment/GrassSystem'
-import { RockSystem } from '../environment/RockSystem'
 import { CloudSystem } from '../environment/CloudSystem'
+import { PineTreeSystem } from '../environment/PineTreeSystem'
+import { BushSystem } from '../environment/BushSystem'
+import { ForestLake } from '../environment/ForestLake'
+import { MountainBackdrop } from '../environment/MountainBackdrop'
 import { CoffeeBarBuilder } from '../buildings/CoffeeBarBuilder'
 import { CafeteriaBuilder } from '../buildings/CafeteriaBuilder'
 import { HousingVillage } from '../buildings/HousingVillage'
@@ -65,8 +67,10 @@ export class SceneManager {
   private clouds: CloudSystem | null = null
   private repoVis: RepoVisualization | null = null
   private arcs: RelationshipArcs | null = null
-  private grass: GrassSystem | null = null
-  private rocks: RockSystem | null = null
+  private pines: PineTreeSystem | null = null
+  private bushes: BushSystem | null = null
+  private forestLake: ForestLake | null = null
+  private mountains: MountainBackdrop | null = null
   private paths: PathSystem | null = null
   private characterSystem: CharacterSystem | null = null
   private gardenBirds: GardenBirdSystem | null = null
@@ -235,13 +239,26 @@ export class SceneManager {
       this.signEntities.push(sign)
     }
 
-    // 6. Scatter grass + rocks (after all exclusion zones are registered)
-    this.grass = new GrassSystem()
-    await this.grass.build(this.app, this.loader, this.layout.getExclusionZones())
+    // 6. Scatter pine trees + bushes (after all exclusion zones are registered)
+    this.pines = new PineTreeSystem()
+    await this.pines.build(this.app, this.loader, this.layout.getExclusionZones())
     if (this.buildId !== currentBuild) return
 
-    this.rocks = new RockSystem()
-    await this.rocks.build(this.app, this.loader, this.layout.getExclusionZones())
+    this.bushes = new BushSystem()
+    await this.bushes.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes)
+    if (this.buildId !== currentBuild) return
+
+    // 6b. Forest lake — pond inside a dense forest cluster, opposite the mountains (SE)
+    // Positioned at the far edge of the world, like mountains
+    const FOREST_LAKE_X = 180
+    const FOREST_LAKE_Z = -160
+    this.forestLake = new ForestLake()
+    await this.forestLake.build(this.app, this.loader, FOREST_LAKE_X, FOREST_LAKE_Z)
+    if (this.buildId !== currentBuild) return
+
+    // 6c. Mountain backdrop — Eastern Ghats-style range at the far edge
+    this.mountains = new MountainBackdrop()
+    await this.mountains.build(this.app, this.loader)
     if (this.buildId !== currentBuild) return
 
     // 7. Relationship arcs
@@ -287,6 +304,7 @@ export class SceneManager {
   update(dt: number): void {
     this.sky?.update(dt)
     this.clouds?.update(dt)
+    this.forestLake?.update(dt)
     this.repoVis?.update?.(dt)
     this.gardenBirds?.update(dt)
     this.gardenAnimals?.update(dt)
@@ -425,11 +443,17 @@ export class SceneManager {
     this.arcs?.destroy(this.materials)
     this.arcs = null
 
-    this.rocks?.destroy()
-    this.rocks = null
+    this.mountains?.destroy()
+    this.mountains = null
 
-    this.grass?.destroy()
-    this.grass = null
+    this.forestLake?.destroy()
+    this.forestLake = null
+
+    this.bushes?.destroy()
+    this.bushes = null
+
+    this.pines?.destroy()
+    this.pines = null
 
     for (const sign of this.signEntities) {
       sign.destroy()
