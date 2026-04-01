@@ -189,10 +189,16 @@ export class TreePickerSystem {
         radius = 4
       } else if (data?.type === 'tree_agent') {
         radius = 1.5
-        // Approximate visual center: offset (2,0,2) in local space,
-        // transformed by parent rotation. Use a scratch vec to avoid allocation.
         this._scratchCenter.copy(pos)
-        this._scratchCenter.y += 0.6 // halfway up the walls for better vertical hit
+        this._scratchCenter.y += 0.6
+        pos = this._scratchCenter
+      } else if (data?.type === 'tree_repo') {
+        // Repo tree containers sit at ground level with scale (1,1,1) but
+        // the visual tree (trunk + canopy) extends 5-10 units up. Use a
+        // generous sphere centered at mid-height to cover the full tree.
+        radius = 6
+        this._scratchCenter.copy(pos)
+        this._scratchCenter.y += 4 // mid-height of typical tree
         pos = this._scratchCenter
       } else {
         const scale = entity.getLocalScale()
