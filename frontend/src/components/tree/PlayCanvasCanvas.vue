@@ -252,7 +252,17 @@ function exitHouse(): void {
   engine?.exitHouse()
 }
 
-defineExpose({ toggleArcs, exitHouse })
+/** Focus camera on a repo tree (callable from parent). */
+function focusOnRepo(repoName: string): void {
+  engine?.focusOnRepo(repoName)
+}
+
+/** Clear camera focus back to overview (callable from parent). */
+function clearFocus(): void {
+  engine?.clearFocus()
+}
+
+defineExpose({ toggleArcs, exitHouse, focusOnRepo, clearFocus })
 
 onUnmounted(() => {
   if (agentTopic) {

@@ -93,6 +93,7 @@ function onTreeClick(repoName: string | null): void {
   const repo = props.displayData.repos.find(r => r.repo_name === repoName)
   if (!repo) return
   selectedRepo.value = repo
+  canvasRef.value?.focusOnRepo(repoName)
 }
 
 function onDeveloperClick(info: CharacterInfo): void {
@@ -109,7 +110,10 @@ function onHouseClick(houseInfo: HouseInfo): void {
   selectedHouse.value = houseInfo
 }
 
-function deselectTree(): void { selectedRepo.value = null }
+function deselectTree(): void {
+  selectedRepo.value = null
+  canvasRef.value?.clearFocus()
+}
 function deselectDeveloper(): void { selectedDeveloper.value = null }
 function deselectHouse(): void { selectedHouse.value = null }
 
