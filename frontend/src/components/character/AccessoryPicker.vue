@@ -19,10 +19,13 @@
             v-for="acc in rightHandItems"
             :key="acc.id"
             class="accessory-picker__item"
-            :class="{ 'accessory-picker__item--active': rightHand === acc.id }"
-            @click="emit('update', 'rightHand', acc.id)"
+            :class="{
+              'accessory-picker__item--active': rightHand === acc.id,
+              'accessory-picker__item--locked': acc.locked,
+            }"
+            @click="!acc.locked && emit('update', 'rightHand', acc.id)"
           >
-            <v-icon :icon="acc.icon" size="20" />
+            <v-icon :icon="acc.locked ? 'mdi-lock' : acc.icon" size="20" />
             <span class="text-caption">{{ acc.name }}</span>
           </div>
         </div>
@@ -42,10 +45,13 @@
             v-for="acc in leftHandItems"
             :key="acc.id"
             class="accessory-picker__item"
-            :class="{ 'accessory-picker__item--active': leftHand === acc.id }"
-            @click="emit('update', 'leftHand', acc.id)"
+            :class="{
+              'accessory-picker__item--active': leftHand === acc.id,
+              'accessory-picker__item--locked': acc.locked,
+            }"
+            @click="!acc.locked && emit('update', 'leftHand', acc.id)"
           >
-            <v-icon :icon="acc.icon" size="20" />
+            <v-icon :icon="acc.locked ? 'mdi-lock' : acc.icon" size="20" />
             <span class="text-caption">{{ acc.name }}</span>
           </div>
         </div>
@@ -55,7 +61,9 @@
 </template>
 
 <script setup lang="ts">
-import { getAccessoriesForSlot } from '@/engine/characters/KayKitManifest'
+import { computed } from 'vue'
+import { getAccessoriesWithUnlocks, getAccessoriesForSlot } from '@/engine/characters/KayKitManifest'
+import { useXPStore } from '@/stores/xp'
 
 defineProps<{
   rightHand: string
@@ -66,8 +74,19 @@ const emit = defineEmits<{
   (e: 'update', key: 'rightHand' | 'leftHand', value: string): void
 }>()
 
-const rightHandItems = getAccessoriesForSlot('right_hand')
-const leftHandItems = getAccessoriesForSlot('left_hand')
+const xpStore = useXPStore()
+
+const rightHandItems = computed(() => {
+  const unlocked = xpStore.profile?.unlocked_accessories
+  if (unlocked) return getAccessoriesWithUnlocks('right_hand', new Set(unlocked))
+  return getAccessoriesForSlot('right_hand')
+})
+
+const leftHandItems = computed(() => {
+  const unlocked = xpStore.profile?.unlocked_accessories
+  if (unlocked) return getAccessoriesWithUnlocks('left_hand', new Set(unlocked))
+  return getAccessoriesForSlot('left_hand')
+})
 </script>
 
 <style scoped>
@@ -109,5 +128,10 @@ const leftHandItems = getAccessoriesForSlot('left_hand')
 .accessory-picker__item--active {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.1);
+}
+
+.accessory-picker__item--locked {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 </style>

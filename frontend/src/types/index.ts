@@ -469,3 +469,36 @@ export interface PRChecklistItem {
   pr: PullRequest | null
   status: 'no_pr' | 'open' | 'merged'
 }
+
+// ─── XP / Gamification ─────────────────────────
+
+export interface XPProfile {
+  total_xp: number
+  level: number
+  level_name: string
+  xp_to_next_level: number
+  next_level_threshold: number
+  streak_count: number
+  streak_best: number
+  unlocked_characters: string[]
+  unlocked_accessories: string[]
+}
+
+export interface LeaderboardEntry {
+  user_id: string
+  name: string
+  avatar_url: string | null
+  total_xp: number
+  level: number
+  level_name: string
+  streak_count: number
+}
+
+export interface XPEvent {
+  id: string
+  xp_amount: number
+  source: string
+  source_ref: string | null
+  multiplier: number
+  created_at: string
+}

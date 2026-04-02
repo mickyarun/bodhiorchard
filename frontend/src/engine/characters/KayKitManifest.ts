@@ -42,6 +42,11 @@ export function getAllCharacters(): readonly KayKitCharacterDef[] {
   return CHARACTERS
 }
 
+/** Return characters with lock state based on unlocked IDs from XP system. */
+export function getCharactersWithUnlocks(unlockedIds: Set<string>): KayKitCharacterDef[] {
+  return CHARACTERS.map(c => ({ ...c, locked: !unlockedIds.has(c.id) }))
+}
+
 export function getUnlockedCharacters(): KayKitCharacterDef[] {
   return CHARACTERS.filter(c => !c.locked)
 }
@@ -120,6 +125,16 @@ export function getAccessoryDef(id: string): KayKitAccessoryDef | undefined {
 
 export function getAllAccessories(): readonly KayKitAccessoryDef[] {
   return ACCESSORIES
+}
+
+/** Return accessories with lock state based on unlocked IDs from XP system. */
+export function getAccessoriesWithUnlocks(
+  slot: AccessorySlot,
+  unlockedIds: Set<string>,
+): KayKitAccessoryDef[] {
+  return ACCESSORIES
+    .filter(a => a.slot === slot)
+    .map(a => ({ ...a, locked: !unlockedIds.has(a.id) }))
 }
 
 export function getAccessoriesForSlot(slot: AccessorySlot): KayKitAccessoryDef[] {

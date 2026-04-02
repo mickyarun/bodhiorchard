@@ -34,7 +34,9 @@
 </template>
 
 <script setup lang="ts">
-import { getAllCharacters, type KayKitCharacterDef } from '@/engine/characters/KayKitManifest'
+import { computed } from 'vue'
+import { getCharactersWithUnlocks, getAllCharacters, type KayKitCharacterDef } from '@/engine/characters/KayKitManifest'
+import { useXPStore } from '@/stores/xp'
 
 defineProps<{
   selectedId: string
@@ -44,7 +46,15 @@ const emit = defineEmits<{
   (e: 'select', id: string): void
 }>()
 
-const characters: readonly KayKitCharacterDef[] = getAllCharacters()
+const xpStore = useXPStore()
+
+const characters = computed<KayKitCharacterDef[]>(() => {
+  const unlocked = xpStore.profile?.unlocked_characters
+  if (unlocked) {
+    return getCharactersWithUnlocks(new Set(unlocked))
+  }
+  return [...getAllCharacters()]
+})
 </script>
 
 <style scoped>

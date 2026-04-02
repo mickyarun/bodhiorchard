@@ -8,6 +8,46 @@
         Pick your avatar for the Bodhigrove garden
       </div>
 
+      <!-- XP Progress Bar -->
+      <v-card
+        v-if="xpStore.profile"
+        color="surface"
+        class="pa-4 mb-4 mx-auto"
+        max-width="600"
+      >
+        <div class="d-flex align-center ga-3 mb-2">
+          <v-chip color="primary" variant="tonal" size="small">
+            Lv.{{ xpStore.profile.level }} {{ xpStore.profile.level_name }}
+          </v-chip>
+          <span class="text-body-2 font-weight-medium">
+            {{ xpStore.profile.total_xp }} XP
+          </span>
+          <v-spacer />
+          <v-chip
+            v-if="xpStore.profile.streak_count > 0"
+            color="orange"
+            variant="tonal"
+            size="small"
+            prepend-icon="mdi-fire"
+          >
+            {{ xpStore.profile.streak_count }} day streak
+          </v-chip>
+        </div>
+        <v-progress-linear
+          v-if="xpStore.profile.next_level_threshold > 0"
+          :model-value="xpProgress"
+          color="primary"
+          height="8"
+          rounded
+        />
+        <div
+          v-if="xpStore.profile.next_level_threshold > 0"
+          class="text-caption text-medium-emphasis mt-1"
+        >
+          {{ xpStore.profile.xp_to_next_level }} XP to next level
+        </div>
+      </v-card>
+
       <v-row>
         <!-- Left: Character grid + customization -->
         <v-col cols="12" md="5">
@@ -84,11 +124,25 @@ import {
 } from '@/engine/characters/CharacterConfig'
 import { useMembersStore } from '@/stores/members'
 import { useAuthStore } from '@/stores/auth'
+import { useXPStore } from '@/stores/xp'
+import { onMounted } from 'vue'
 
 const router = useRouter()
 const membersStore = useMembersStore()
 const authStore = useAuthStore()
+const xpStore = useXPStore()
 const saving = ref(false)
+
+// Fetch XP profile on mount (needed for unlock data + progress bar)
+onMounted(() => { xpStore.fetchProfile() })
+
+const xpProgress = computed(() => {
+  const p = xpStore.profile
+  if (!p || p.next_level_threshold === 0) return 100
+  // Progress within current level range
+  const xpIntoLevel = p.next_level_threshold - p.xp_to_next_level
+  return Math.min(100, (xpIntoLevel / p.next_level_threshold) * 100)
+})
 
 // Load current selection from user profile, fallback to defaults
 const existing = parseCharacterModel(authStore.user?.character_model ?? null)
