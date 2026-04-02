@@ -22,7 +22,7 @@
             :class="{ 'accessory-picker__item--active': rightHand === acc.id }"
             @click="emit('update', 'rightHand', acc.id)"
           >
-            <v-icon icon="mdi-sword" size="20" />
+            <v-icon :icon="acc.icon" size="20" />
             <span class="text-caption">{{ acc.name }}</span>
           </div>
         </div>
@@ -45,7 +45,7 @@
             :class="{ 'accessory-picker__item--active': leftHand === acc.id }"
             @click="emit('update', 'leftHand', acc.id)"
           >
-            <v-icon icon="mdi-shield" size="20" />
+            <v-icon :icon="acc.icon" size="20" />
             <span class="text-caption">{{ acc.name }}</span>
           </div>
         </div>
