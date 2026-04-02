@@ -17,7 +17,7 @@ import type { AssetLoader } from '../assets/AssetLoader'
 import type { EngineMember, EngineDevActivity } from '../types'
 import type { InteractionPoint } from './InteractionPoint'
 import { CharacterFactory, type CharacterEntity } from './CharacterFactory'
-import { KayKitCharacterFactory } from './KayKitCharacterFactory'
+import { KayKitCharacterFactory, getClonedMaterials } from './KayKitCharacterFactory'
 import { parseCharacterModel, isKayKitConfig } from './CharacterConfig'
 import type { HouseResult } from '../buildings/HouseBuilder'
 import { AgentLabel } from '../agents/AgentLabel'
@@ -475,8 +475,8 @@ export class CharacterSystem {
       if (labelEntity?.render?.meshInstances[0]) {
         disposeMaterial(labelEntity.render.meshInstances[0].material)
       }
-      // Dispose KayKit cloned tinting materials (stored by KayKitCharacterFactory)
-      const clonedMats = (char.entity as unknown as { _clonedMaterials?: pc.StandardMaterial[] })._clonedMaterials
+      // Dispose KayKit cloned tinting materials (type-safe WeakMap lookup)
+      const clonedMats = getClonedMaterials(char.entity)
       if (clonedMats) {
         for (const mat of clonedMats) disposeMaterial(mat)
       }

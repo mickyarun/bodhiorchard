@@ -13,7 +13,7 @@
  */
 import * as pc from 'playcanvas'
 import type { CharacterConfig } from './CharacterConfig'
-import { KayKitCharacterFactory } from './KayKitCharacterFactory'
+import { KayKitCharacterFactory, getClonedMaterials } from './KayKitCharacterFactory'
 import type { CharacterEntity } from './CharacterFactory'
 import { AssetLoader } from '../assets/AssetLoader'
 
@@ -119,8 +119,12 @@ export class CharacterPreviewScene {
   async setCharacter(config: CharacterConfig): Promise<void> {
     if (!this.app || !this.factory) return
 
-    // Remove previous character
+    // Remove previous character — dispose cloned materials to prevent GPU leak
     if (this.character) {
+      const mats = getClonedMaterials(this.character.entity)
+      if (mats) {
+        for (const mat of mats) mat.destroy()
+      }
       this.character.entity.destroy()
       this.character = null
     }

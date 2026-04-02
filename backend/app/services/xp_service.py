@@ -13,87 +13,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.developer_xp import DeveloperXPRepository, XPEventRepository
 from app.services.event_bus import publish
+from app.services.xp_rules import (
+    UnlockedItems,
+    compute_level,
+    get_unlocked_items_for_level,
+    streak_multiplier,
+    xp_for_next_level,
+)
 
 logger = structlog.get_logger(__name__)
 
-# ─── Level Thresholds ───────────────────────────
-
-LEVELS: list[tuple[int, int, str]] = [
-    (1, 0,    "seedling"),
-    (2, 100,  "sprout"),
-    (3, 500,  "sapling"),
-    (4, 1500, "tree"),
-    (5, 5000, "ancient_oak"),
+# Re-export for callers that import from xp_service
+__all__ = [
+    "award_xp",
+    "check_and_award_streak",
+    "award_quality_bonus",
+    "get_unlocked_items",
+    "compute_level",
+    "xp_for_next_level",
+    "UnlockedItems",
+    "XPAwardResult",
 ]
-
-
-def compute_level(total_xp: int) -> tuple[int, str]:
-    """Pure function: XP → (level_number, level_name)."""
-    result_level, result_name = 1, "seedling"
-    for level, threshold, name in LEVELS:
-        if total_xp >= threshold:
-            result_level, result_name = level, name
-    return result_level, result_name
-
-
-def xp_for_next_level(total_xp: int) -> tuple[int, int]:
-    """Return (xp_remaining, next_threshold). (0, 0) if max level."""
-    for _, threshold, _ in LEVELS:
-        if total_xp < threshold:
-            return threshold - total_xp, threshold
-    return 0, 0
-
-
-# ─── Streak Multiplier ─────────────────────────
-
-def streak_multiplier(streak_days: int) -> float:
-    """Multiplier for daily streak XP based on consecutive active days."""
-    if streak_days >= 30:
-        return 2.5
-    if streak_days >= 14:
-        return 2.0
-    if streak_days >= 7:
-        return 1.5
-    return 1.0
-
-
-# ─── Character / Accessory Unlock Rules ────────
-
-CHARACTER_UNLOCKS: dict[str, int] = {
-    "barbarian": 1,
-    "knight": 1,
-    "mage": 2,
-    "ranger": 3,
-    "rogue": 4,
-    "rogue_hooded": 5,
-}
-
-ACCESSORY_UNLOCKS: dict[str, int] = {
-    "sword": 1,
-    "mug": 1,
-    "axe": 2,
-    "dagger": 2,
-    "staff": 3,
-    "wand": 3,
-    "bow": 4,
-    "shield": 5,
-}
-
-
-@dataclass
-class UnlockedItems:
-    """Characters and accessories available at a given level."""
-
-    characters: list[str]
-    accessories: list[str]
-
-
-def get_unlocked_items_for_level(level: int) -> UnlockedItems:
-    """Return unlocked character/accessory IDs for a given level."""
-    return UnlockedItems(
-        characters=[k for k, v in CHARACTER_UNLOCKS.items() if v <= level],
-        accessories=[k for k, v in ACCESSORY_UNLOCKS.items() if v <= level],
-    )
 
 
 # ─── XP Award Result ───────────────────────────
@@ -152,19 +92,19 @@ async def award_xp(
     row.level = new_level
     row.level_name = new_name
 
-    # Record audit event (DB unique constraint on source_ref catches races)
+    # Record audit event — SAVEPOINT scopes the IntegrityError so it doesn't
+    # roll back the caller's uncommitted work (DevActivityLog, PullRequest, etc.)
     try:
-        await event_repo.create(
-            user_id=user_id,
-            xp_amount=effective_xp,
-            source=source,
-            source_ref=source_ref,
-            multiplier=multiplier,
-            metadata=metadata,
-        )
-        await db.flush()
+        async with db.begin_nested():
+            await event_repo.create(
+                user_id=user_id,
+                xp_amount=effective_xp,
+                source=source,
+                source_ref=source_ref,
+                multiplier=multiplier,
+                metadata=metadata,
+            )
     except IntegrityError:
-        await db.rollback()
         logger.debug("xp_dedup_integrity", source_ref=source_ref)
         return None
 
@@ -251,14 +191,17 @@ async def check_and_award_streak(
 
         from sqlalchemy.exc import IntegrityError
 
+        # Flush streak mutations first so they survive a nested rollback
+        await db.flush()
+
         try:
-            await event_repo.create(
-                user_id=user_id, xp_amount=effective_xp,
-                source="streak", source_ref=source_ref, multiplier=mult,
-            )
-            await db.flush()
+            async with db.begin_nested():
+                await event_repo.create(
+                    user_id=user_id, xp_amount=effective_xp,
+                    source="streak", source_ref=source_ref, multiplier=mult,
+                )
         except IntegrityError:
-            await db.rollback()
+            logger.debug("xp_streak_dedup", source_ref=source_ref)
 
         if new_level != old_level:
             publish(f"xp:{user_id}", {

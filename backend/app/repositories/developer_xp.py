@@ -35,11 +35,11 @@ class DeveloperXPRepository:
 
         if row is None:
             try:
-                row = DeveloperXP(user_id=user_id, org_id=self.org_id)
-                self.db.add(row)
-                await self.db.flush()
+                async with self.db.begin_nested():
+                    row = DeveloperXP(user_id=user_id, org_id=self.org_id)
+                    self.db.add(row)
             except IntegrityError:
-                await self.db.rollback()
+                # Concurrent insert won — re-fetch with lock
                 result = await self.db.execute(stmt)
                 row = result.scalar_one_or_none()
 

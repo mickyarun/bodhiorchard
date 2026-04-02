@@ -68,6 +68,14 @@ function hexToColor(hex: string): pc.Color {
 
 // ─── Factory ───────────────────────────────────
 
+/** Type-safe storage for cloned materials per entity (avoids monkey-patching). */
+const clonedMaterialsMap = new WeakMap<pc.Entity, pc.StandardMaterial[]>()
+
+/** Retrieve cloned tinting materials for cleanup. Used by CharacterSystem.destroy(). */
+export function getClonedMaterials(entity: pc.Entity): pc.StandardMaterial[] | undefined {
+  return clonedMaterialsMap.get(entity)
+}
+
 export class KayKitCharacterFactory {
   private loader: AssetLoader
   private containerCache = new Map<string, ContainerWithAnims>()
@@ -112,7 +120,7 @@ export class KayKitCharacterFactory {
 
     // Apply flat color tinting per body region (removes texture, sets solid color)
     const clonedMats = this.applyColorTinting(renderEntity, config)
-    ;(wrapper as unknown as { _clonedMaterials: pc.StandardMaterial[] })._clonedMaterials = clonedMats
+    clonedMaterialsMap.set(wrapper, clonedMats)
 
     // Set up animation component with shared locomotion state graph
     wrapper.addComponent('anim', { activate: true })
