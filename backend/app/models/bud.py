@@ -1,11 +1,21 @@
 """BUD (Business Understanding Document) model."""
 
 import uuid
+from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,6 +47,8 @@ class BUDTimelineEventType(StrEnum):
     PR_OPENED = "pr_opened"
     PR_MERGED = "pr_merged"
     ALL_PRS_MERGED = "all_prs_merged"
+    ESTIMATE_GENERATED = "estimate_generated"
+    ESTIMATE_OVERRIDDEN = "estimate_overridden"
 
 
 class BUDStatus(StrEnum):
@@ -61,6 +73,8 @@ class BUDDocument(BaseModel):
     __table_args__ = (
         UniqueConstraint("org_id", "bud_number", name="uq_bud_org_number"),
         Index("ix_bud_org_status", "org_id", "status"),
+        Index("ix_bud_prod_p70", "org_id", "prod_p70_date"),
+        Index("ix_bud_phase_deadline", "org_id", "current_phase_deadline"),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -82,6 +96,12 @@ class BUDDocument(BaseModel):
     embedding = mapped_column(Vector(384), nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
     impacted_repos: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    estimated_dates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    complexity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prod_p70_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_phase_deadline: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

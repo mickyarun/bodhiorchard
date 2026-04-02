@@ -74,10 +74,41 @@
               color="surface"
               @click="openBUD(bud.id)"
             >
-              <div class="text-caption text-medium-emphasis mb-1">
-                BUD-{{ String(bud.bud_number).padStart(3, '0') }}
+              <!-- Row 1: BUD number + complexity dots -->
+              <div class="d-flex align-center justify-space-between mb-1">
+                <div class="text-caption text-medium-emphasis">
+                  BUD-{{ String(bud.bud_number).padStart(3, '0') }}
+                </div>
+                <div v-if="bud.complexity" class="d-flex ga-1">
+                  <span
+                    v-for="i in 5"
+                    :key="i"
+                    class="complexity-dot"
+                    :class="i <= (bud.complexity ?? 0) ? 'dot-filled' : 'dot-empty'"
+                  />
+                </div>
               </div>
+
+              <!-- Row 2: Title -->
               <div class="text-body-2 font-weight-medium mb-2">{{ bud.title }}</div>
+
+              <!-- Row 3: Phase deadline + go-live (only if estimates exist) -->
+              <div v-if="bud.current_phase_deadline" class="text-caption mb-1" :class="deadlineColor(bud.current_phase_deadline)">
+                ▸ Phase: {{ formatDate(bud.current_phase_deadline) }}
+              </div>
+              <div v-if="bud.prod_p70_date" class="text-caption text-medium-emphasis mb-2">
+                ▸ Live: {{ formatDate(bud.prod_p70_date) }} (70%)
+              </div>
+
+              <!-- Row 4: Progress bar + date/avatar -->
+              <v-progress-linear
+                :model-value="phaseProgress(bud.status)"
+                height="3"
+                rounded
+                color="primary"
+                bg-color="surface-variant"
+                class="mb-2"
+              />
               <div class="d-flex align-center justify-space-between">
                 <div class="text-caption text-medium-emphasis">
                   {{ formatDate(bud.updated_at) }}
@@ -149,6 +180,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS } from '@/types'
+import type { BUDStatus } from '@/types'
 
 const router = useRouter()
 const budStore = useBUDStore()
@@ -189,6 +221,22 @@ function formatDate(dateStr: string): string {
 function initials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
 }
+
+const ACTIVE_PHASE_COUNT = BUD_STATUS_ORDER.filter(
+  s => s !== 'discarded' && s !== 'closed',
+).length
+
+function phaseProgress(status: BUDStatus): number {
+  const idx = BUD_STATUS_ORDER.indexOf(status)
+  return idx >= 0 ? Math.min(100, ((idx + 1) / ACTIVE_PHASE_COUNT) * 100) : 0
+}
+
+function deadlineColor(deadline: string): string {
+  const days = (new Date(deadline).getTime() - Date.now()) / 86400000
+  if (days < 0) return 'text-error'
+  if (days < 2) return 'text-warning'
+  return 'text-medium-emphasis'
+}
 </script>
 
 <style scoped>
@@ -225,5 +273,20 @@ function initials(name: string): string {
 
 .bud-card:hover {
   border-color: rgba(var(--v-theme-primary), 0.4);
+}
+
+.complexity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-filled {
+  background: rgb(var(--v-theme-primary));
+}
+
+.dot-empty {
+  background: rgba(255, 255, 255, 0.12);
 }
 </style>

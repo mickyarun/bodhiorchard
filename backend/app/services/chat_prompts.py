@@ -76,6 +76,7 @@ async def build_design_prompt(
     history: list[dict[str, str]] | None = None,
     *,
     use_mcp: bool = False,
+    repo_name: str | None = None,
 ) -> tuple[str, Path | None]:
     """Build the Claude prompt for design wireframe generation."""
     ds_content = ""
@@ -156,7 +157,7 @@ async def build_design_prompt(
     parts.append(
         "## Instructions\n\n"
         f"1. Write the wireframe as a complete HTML file to:\n"
-        f"   `.flowdev/wireframes/{bud_ref}/wireframe.html`\n"
+        f"   `.bodhigrove/wireframes/{bud_ref}/wireframe.html`\n"
         "   Create the directory if it doesn't exist.\n\n"
         "2. The HTML file must:\n"
         "   - Use Vuetify CDN (with Vue 3)\n"

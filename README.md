@@ -315,7 +315,7 @@ npm run dev
 
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | PostgreSQL connection | `postgresql+asyncpg://flowdev:flowdev@localhost:5432/flowdev` |
+| `DATABASE_URL` | PostgreSQL connection | `postgresql+asyncpg://bodhigrove:bodhigrove@localhost:5432/bodhigrove` |
 | `SECRET_KEY` | JWT signing key | `change-me-in-production` |
 | `ENCRYPTION_KEY` | AES key for secrets at rest | (generated) |
 | `LLM_PROVIDER` | LLM provider | `ollama` |
@@ -355,7 +355,7 @@ bodhigrove/
 │   │   └── data/            # Shared data (agent definitions)
 │   └── package.json
 │
-├── FLOWDEV-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
+├── BODHIGROVE-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
 ├── AGENTS.md                # Agent capabilities documentation
 ├── TODO.md                  # Roadmap and progress tracking
 └── LICENSE                  # AGPL-3.0 + Commercial dual license

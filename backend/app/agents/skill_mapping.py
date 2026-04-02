@@ -10,11 +10,11 @@ AGENT_SKILL_MAP: dict[str, str] = {
     "status": "devops",
     "standup": "product-manager",
     "learning": "technical-writer",
-    "bugLinker": "qa-engineer",
+    "bugLinker": "testing",
     "reassignment": "product-manager",
     "skill": "code-reviewer",
     "techPlan": "tech-planner",
-    "testPlan": "test-planner",
+    "testPlan": "testing",
     "design": "designer",
     "slackTriage": "slack-triage",
 }
@@ -24,7 +24,7 @@ AGENT_SKILL_MAP: dict[str, str] = {
 SECTION_SKILL_MAP: dict[str, str] = {
     "requirements_md": "product-manager",
     "tech_spec_md": "tech-planner",
-    "test_plan_md": "test-planner",
+    "test_plan_md": "testing",
     "design": "designer",
 }
 

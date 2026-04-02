@@ -101,6 +101,21 @@ RESULT_HANDLERS: dict[str, ResultHandler] = {
 }
 
 
+async def _fail_designs_for_bud(
+    db: Any, bud_id: uuid_mod.UUID,
+) -> None:
+    """Mark all 'generating' design rows for a BUD as 'failed'."""
+    from sqlalchemy import update as sql_update
+
+    from app.models.bud import BUDDesign
+
+    await db.execute(
+        sql_update(BUDDesign)
+        .where(BUDDesign.bud_id == bud_id, BUDDesign.status == "generating")
+        .values(status="failed")
+    )
+
+
 # ── Unified handler ───────────────────────────────────────────────
 
 
@@ -154,6 +169,8 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             # Capture scalar values for use after session closes
             _skill_slug = skill_row.skill_slug
             _task_type = task.task_type
+            _bud_number = bud.bud_number if bud else None
+            _bud_title = bud.title if bud else None
 
             skill = Skill(
                 name=skill_row.name,
@@ -172,6 +189,9 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             if not builder:
                 task.status = AgentTaskStatus.FAILED
                 task.error_message = f"No prompt builder for task type: {task.task_type}"
+                # Mark any associated design rows as failed so the UI stops spinning
+                if task.task_type == "design":
+                    await _fail_designs_for_bud(db, bud_id)
                 await db.commit()
                 update_job(job_id, state=JobState.FAILED, error=task.error_message)
                 return
@@ -310,4 +330,34 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
         state=JobState.COMPLETED,
         status_message="Done",
         progress_pct=100,
+    )
+
+    # Re-publish skill_completed as a resilience measure.
+    # The first publish (inside log_agent_activity) can be lost if the WS
+    # connection briefly dropped during the long-running Claude task.
+    # By this point update_job already published to job:{id}, proving the
+    # WS is alive — so this second attempt is very likely to be delivered.
+    # character.complete() on the frontend is idempotent, so duplicates are safe.
+    from app.services.event_bus import publish as _eb_publish
+
+    logger.info(
+        "agent_activity_republish",
+        topic=f"agent_activity:{org_id}",
+        task_id=str(task_id),
+    )
+    _eb_publish(
+        f"agent_activity:{org_id}",
+        {
+            "event_type": "skill_completed",
+            "status": "completed",
+            "message": f"Skill '{_skill_slug}' completed for {_task_type}",
+            "skill_slug": _skill_slug,
+            "actor_name": _skill_slug,
+            "task_id": str(task_id),
+            "repo_name": None,
+            "bud_number": _bud_number,
+            "bud_title": _bud_title,
+            "impacted_repo_names": [],
+            "created_at": "",
+        },
     )

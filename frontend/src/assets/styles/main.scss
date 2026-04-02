@@ -5,7 +5,7 @@ body {
 }
 
 .setup-gradient {
-  background: linear-gradient(135deg, #0f1117 0%, #1a1d2e 50%, #1e1b4b 100%);
+  background: linear-gradient(135deg, #0D1B0F 0%, #152415 50%, #1E3220 100%);
   min-height: 100vh;
 }
 
@@ -14,7 +14,7 @@ body {
 }
 
 .step-glow {
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.25);
 }
 
 .fade-slide-enter-active,
@@ -280,8 +280,8 @@ body {
   // Active state
   &--active {
     .cycle-node__icon {
-      box-shadow: 0 0 20px rgba(99, 102, 241, 0.5), 0 0 40px rgba(99, 102, 241, 0.2);
-      border-color: rgba(99, 102, 241, 0.6);
+      box-shadow: 0 0 20px rgba(46, 125, 50, 0.5), 0 0 40px rgba(46, 125, 50, 0.2);
+      border-color: rgba(46, 125, 50, 0.6);
       transform: scale(1.15);
     }
 
@@ -301,7 +301,7 @@ body {
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 
   &:hover {
-    border-color: rgba(37, 99, 235, 0.3) !important;
+    border-color: rgba(46, 125, 50, 0.3) !important;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     transform: translateY(-2px);
   }

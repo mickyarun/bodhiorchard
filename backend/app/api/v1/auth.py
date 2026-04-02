@@ -266,6 +266,7 @@ async def get_me(
         permissions=sorted(perms),
         slack_id=current_user.slack_id,
         github_username=current_user.github_username,
+        character_model=current_user.character_model,
         created_at=current_user.created_at,
         updated_at=current_user.updated_at,
     )

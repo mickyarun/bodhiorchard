@@ -1,6 +1,6 @@
-# FlowDev Multiplayer Server
+# Bodhigrove Multiplayer Server
 
-Real-time multiplayer server using [Colyseus](https://colyseus.io/) for the FlowDev 3D garden.
+Real-time multiplayer server using [Colyseus](https://colyseus.io/) for the Bodhigrove 3D garden.
 
 ## Quick Start
 

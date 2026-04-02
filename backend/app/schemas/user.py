@@ -29,6 +29,7 @@ class UserRead(BaseModel):
     permissions: list[str] = []
     slack_id: str | None = None
     github_username: str | None = None
+    character_model: str | None = None
     created_at: datetime
     updated_at: datetime
 

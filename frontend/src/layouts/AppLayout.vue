@@ -3,7 +3,7 @@
     <!-- Sidebar -->
     <v-navigation-drawer permanent color="surface" width="240" class="app-sidebar">
       <div class="pa-4 pb-2 d-flex align-center justify-space-between">
-        <FlowDevLogo :size="28" />
+        <BodhigroveLogo :size="28" />
         <NotificationBell v-if="authStore.user?.id" :user-id="authStore.user.id" />
       </div>
 
@@ -115,6 +115,11 @@
 
             <v-list density="compact" min-width="200">
               <v-list-item
+                prepend-icon="mdi-account-edit-outline"
+                title="Customize Character"
+                to="/character-select"
+              />
+              <v-list-item
                 prepend-icon="mdi-logout"
                 title="Sign out"
                 @click="handleLogout"
@@ -138,7 +143,7 @@
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import FlowDevLogo from '@/components/common/FlowDevLogo.vue'
+import BodhigroveLogo from '@/components/common/BodhigroveLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
 import { usePermissions } from '@/composables/usePermissions'
 

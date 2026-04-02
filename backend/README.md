@@ -1,4 +1,4 @@
-# FlowDev Backend
+# Bodhigrove Backend
 
 AI-powered software development platform backend built with FastAPI, SQLAlchemy 2.0, and PostgreSQL with pgvector.
 
@@ -76,7 +76,7 @@ See `.env.example` for the full list. Key variables:
 
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://flowdev:flowdev@localhost:5432/flowdev` |
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://bodhigrove:bodhigrove@localhost:5432/bodhigrove` |
 | `SECRET_KEY` | JWT signing key | `change-me-in-production` |
 | `LLM_PROVIDER` | LLM provider | `ollama` |
 | `EMBEDDING_PROVIDER` | Embedding provider | `ollama` |

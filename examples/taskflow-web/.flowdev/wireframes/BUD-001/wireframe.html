@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BUD-001 Wireframe — Notification Bell Improvement</title>
+
+  <!-- Vue 3.4 CDN (matches package.json) -->
+  <script src="https://unpkg.com/vue@3.4.0/dist/vue.global.prod.js"></script>
+
+  <style>
+    /* ── Design Tokens (from design system) ── */
+    :root {
+      --color-accent:      #4f46e5;
+      --color-surface:     #ffffff;
+      --color-surface-alt: #f5f5f5;
+      --color-text:        #1a1a2e;
+      --color-text-muted:  #6b7280;
+      --color-danger:      #ef4444;
+      --radius-panel:      12px;
+      --shadow-panel:      0 8px 32px rgba(0, 0, 0, 0.12);
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      color: var(--color-text);
+      background: #f0f2f5;
+      line-height: 1.5;
+    }
+    button { font: inherit; cursor: pointer; border: none; background: none; }
+    button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+    code {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      background: rgba(0,0,0,0.06);
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+
+    /* ── Page layout ── */
+    .wf-page { padding: 32px 24px 80px; max-width: 1100px; margin: 0 auto; }
+
+    .wf-header { margin-bottom: 36px; }
+    .wf-bud-tag {
+      display: inline-block;
+      background: var(--color-accent); color: #fff;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 20px; margin-bottom: 8px;
+    }
+    .wf-title    { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+    .wf-subtitle { font-size: 14px; color: var(--color-text-muted); }
+
+    .wf-section { margin-bottom: 60px; }
+    .wf-section-header {
+      display: flex; align-items: baseline; gap: 12px;
+      padding-bottom: 10px; margin-bottom: 18px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .wf-section-title { font-size: 16px; font-weight: 700; }
+    .wf-section-desc  { font-size: 13px; color: var(--color-text-muted); }
+
+    /* ── App shell chrome ── */
+    .app-shell { border-radius: 12px; overflow: visible; border: 1px solid #d1d5db; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .app-header {
+      background: #1a1a2e;
+      display: flex; align-items: center;
+      padding: 0 20px; height: 56px;
+      border-radius: 12px 12px 0 0;
+    }
+    .app-brand { font-size: 17px; font-weight: 700; color: #fff; margin-right: 28px; }
+    .app-nav { display: flex; gap: 20px; flex: 1; }
+    .app-nav a { color: #e0e0e0; font-size: 14px; text-decoration: none; }
+    .app-nav a.active { color: #fff; font-weight: 600; }
+    /* UX: position:relative on header-right establishes stacking context for the dropdown */
+    .app-header-right { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+    .app-body {
+      background: #f5f5f5; padding: 24px;
+      min-height: 200px; border-radius: 0 0 12px 12px;
+    }
+    .app-body-placeholder {
+      height: 150px; background: #fff; border-radius: 8px;
+      border: 1px dashed #d1d5db;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--color-text-muted); font-size: 13px;
+    }
+
+    /* ── Bell button ── */
+    /* A11Y: bell-wrapper with position:relative is the anchor for the absolute panel */
+    .bell-wrapper { position: relative; }
+    .bell-btn {
+      display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px;
+      border-radius: 8px; border: none; background: none;
+      color: #e0e0e0; cursor: pointer;
+      transition: background 0.15s;
+      position: relative;
+    }
+    .bell-btn:hover  { background: rgba(255,255,255,0.12); }
+    /* A11Y: lighter focus ring for dark header background */
+    .bell-btn:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
+
+    /* AC-1: Badge positioned outside button hit-target using position:absolute */
+    .bell-badge {
+      position: absolute;
+      top: 1px; right: 1px;
+      background: var(--color-danger); color: #fff;
+      font-size: 10px; font-weight: 700;
+      min-width: 16px; height: 16px;
+      padding: 0 4px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      /* UX: border in header bg color prevents "clipped into button" appearance */
+      border: 2px solid #1a1a2e;
+      pointer-events: none; line-height: 1;
+    }
+
+    /* ── Notification panel ── */
+    /* AC-2 FIX: top: calc(100% + 10px) = BELOW trigger; right: 0 = END alignment */
+    /* Previous bug: location="top start" opened above-left, clipping behind sticky header */
+    .notif-panel {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      width: 380px;
+      background: var(--color-surface);
+      border-radius: var(--radius-panel);
+      box-shadow: var(--shadow-panel);
+      border: 1px solid #e5e7eb;
+      z-index: 1000;
+      overflow: hidden;
+      animation: panelIn 0.15s ease-out;
+    }
+    @keyframes panelIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .panel-header {
+      display: flex; align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .panel-header-title {
+      font-size: 15px; font-weight: 700; flex: 1;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .panel-count-badge {
+      background: var(--color-accent); color: #fff;
+      font-size: 11px; font-weight: 700;
+      min-width: 18px; height: 18px; padding: 0 5px;
+      border-radius: 9px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .mark-all-btn {
+      font-size: 12px; font-weight: 500;
+      color: var(--color-accent);
+      padding: 4px 8px; border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .mark-all-btn:hover    { background: #eeebff; }
+    .mark-all-btn:disabled { color: var(--color-text-muted); cursor: default; background: none; }
+
+    /* UX: max-height + overflow-y keeps panel in viewport for long notification lists */
+    .panel-list { overflow-y: auto; max-height: 360px; }
+    .panel-list::-webkit-scrollbar       { width: 4px; }
+    .panel-list::-webkit-scrollbar-track { background: transparent; }
+    .panel-list::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 2px; }
+
+    /* ── Notification item ── */
+    /* UX: left border + alt-bg on unread creates scannable visual hierarchy at a glance */
+    .notif-item {
+      display: flex; gap: 10px;
+      padding: 11px 10px 11px 16px;
+      border-bottom: 1px solid #f3f4f6;
+      cursor: pointer;
+      transition: background 0.15s;
+      align-items: flex-start;
+    }
+    .notif-item:last-child { border-bottom: none; }
+    .notif-item:hover      { background: #f9f9ff; }
+    .notif-item.is-unread  {
+      background: var(--color-surface-alt);
+      border-left: 3px solid var(--color-accent);
+      padding-left: 13px;
+    }
+    .notif-item.is-unread:hover { background: #ececfb; }
+
+    .type-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+
+    .notif-content { flex: 1; min-width: 0; }
+    .notif-title   { font-size: 13px; color: var(--color-text); margin-bottom: 2px; }
+    .notif-item.is-unread .notif-title { font-weight: 700; }
+    .notif-body    {
+      font-size: 12px; color: var(--color-text-muted);
+      display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+      margin-bottom: 3px;
+    }
+    .notif-time    { font-size: 11px; font-weight: 700; color: var(--color-text-muted); }
+
+    /* ── Per-item action buttons ── */
+    /* A11Y: Always visible (never hover-only) — keyboard and AT users can reach them */
+    /* AC-3: mark-as-read; AC-4: delete */
+    .notif-actions {
+      display: flex; flex-direction: column; gap: 2px;
+      flex-shrink: 0; align-items: center;
+    }
+    .action-btn {
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 6px; border: 1px solid transparent;
+      background: none; cursor: pointer;
+      color: var(--color-text-muted);
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .action-btn:hover      { background: #f0f0f0; color: var(--color-text); border-color: #e5e7eb; }
+    /* AC-4: Error color on hover for delete button to signal destructive intent */
+    .action-btn.is-delete:hover { background: #fef2f2; color: var(--color-danger); border-color: #fecaca; }
+    .action-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+    /* ── Panel footer ── */
+    .panel-footer { padding: 10px 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; }
+
+    /* AC-5: clear-btn transitions neutral → danger on first click */
+    .clear-btn {
+      font-size: 12px; font-weight: 500;
+      color: var(--color-text-muted);
+      padding: 5px 12px; border-radius: 6px;
+      border: 1px solid #e5e7eb;
+      transition: all 0.15s;
+    }
+    .clear-btn:hover:not(.is-confirming) { border-color: #fca5a5; color: var(--color-danger); }
+    .clear-btn.is-confirming {
+      background: var(--color-danger); border-color: var(--color-danger);
+      color: #fff; font-weight: 600;
+    }
+
+    /* ── Empty state ── */
+    .empty-state { padding: 48px 16px; text-align: center; color: var(--color-text-muted); }
+    .empty-icon  { display: block; margin-bottom: 8px; }
+    .empty-text  { font-size: 14px; }
+
+    /* ── Annotation callouts ── */
+    .annot-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .annot {
+      display: inline-flex; align-items: flex-start; gap: 6px;
+      padding: 7px 10px; border-radius: 8px;
+      font-size: 12px; line-height: 1.4;
+    }
+    .annot.fix { background: #dbeafe; border: 1px solid #93c5fd; color: #1e40af; }
+    .annot.new { background: #d1fae5; border: 1px solid #6ee7b7; color: #065f46; }
+    .annot.ac  { background: #ede9fe; border: 1px solid #c4b5fd; color: #4c1d95; }
+    .annot-tag { font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 1px; flex-shrink: 0; }
+
+    /* ── Bell states ── */
+    .bell-states-row { display: flex; gap: 36px; align-items: flex-end; flex-wrap: wrap; }
+    .bell-state-item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .bell-state-demo { background: #1a1a2e; padding: 10px; border-radius: 8px; display: inline-flex; position: relative; }
+    .bell-state-label { font-size: 11px; color: var(--color-text-muted); text-align: center; }
+    .bell-state-ac { font-size: 10px; font-weight: 700; color: #4c1d95; background: #ede9fe; padding: 2px 6px; border-radius: 4px; }
+
+    /* ── AC checklist ── */
+    .ac-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .ac-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; }
+    .ac-card-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+    .ac-tag { background: var(--color-accent); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
+    .ac-item { display: flex; gap: 8px; font-size: 12px; color: var(--color-text-muted); margin-bottom: 4px; line-height: 1.4; }
+    .ac-check { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid #d1d5db; flex-shrink: 0; margin-top: 1px; }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+const { createApp, ref, computed } = Vue
+
+/* ── Type dot color map (from design system pattern library) ── */
+const TYPE_COLORS = {
+  task_assigned:       '#4f46e5',
+  task_comment:        '#0ea5e9',
+  task_status_changed: '#f59e0b',
+  invoice_ready:       '#10b981',
+  reminder:            '#8b5cf6',
+}
+
+/* ── Mock notification data ── */
+const SEED = [
+  {
+    id: 1, type: 'task_assigned',
+    title: 'Task assigned to you',
+    body:  'Arun assigned "Redesign login flow" to you in Sprint 12.',
+    createdAt: '2 hours ago', isRead: false, deepLink: '/tasks/42',
+  },
+  {
+    id: 2, type: 'task_comment',
+    title: 'Sarah commented on Login Bug',
+    body:  'Sarah: "I think the issue is in the token refresh logic, not the form validation."',
+    createdAt: '4 hours ago', isRead: false, deepLink: '/tasks/38',
+  },
+  {
+    id: 3, type: 'invoice_ready',
+    title: 'Invoice #1042 is ready',
+    body:  'Your invoice for March 2026 (£2,400) is available to download.',
+    createdAt: '1 day ago', isRead: false, deepLink: '/billing',
+  },
+  {
+    id: 4, type: 'reminder',
+    title: 'Reminder: Sprint planning tomorrow',
+    body:  'Sprint 13 planning is scheduled for tomorrow at 10:00 AM.',
+    createdAt: '1 day ago', isRead: true, deepLink: null,
+  },
+  {
+    id: 5, type: 'task_status_changed',
+    title: 'Design Review moved to Done',
+    body:  'The task "Design Review" was moved from In Review to Done by Sarah.',
+    createdAt: '2 days ago', isRead: true, deepLink: '/tasks/29',
+  },
+]
+
+/* ── Inline SVG icons (no icon library in this project — hand-crafted SVGs) ── */
+const IC = {
+  bellFilled:
+    `<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24" aria-hidden="true">
+      <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
+    </svg>`,
+  bellOutline:
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+    </svg>`,
+  bellCheck:
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="32" height="32" aria-hidden="true">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      <polyline points="9 12 11 14 15 10"/>
+    </svg>`,
+  /* AC-3: mdi-email-open-outline equivalent */
+  emailOpen:
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true">
+      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
+      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+    </svg>`,
+  /* AC-4: mdi-delete-outline equivalent */
+  trash:
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+    </svg>`,
+}
+
+const App = {
+  setup() {
+    const notifications   = ref(SEED.map(n => ({ ...n })))
+    const isOpen          = ref(false)
+    const clearConfirming = ref(false)
+
+    const unreadCount = computed(() => notifications.value.filter(n => !n.isRead).length)
+    const hasUnread   = computed(() => unreadCount.value > 0)
+    const allRead     = computed(() => unreadCount.value === 0)
+
+    function togglePanel() {
+      isOpen.value = !isOpen.value
+      if (!isOpen.value) clearConfirming.value = false
+    }
+    function closePanel() { isOpen.value = false; clearConfirming.value = false }
+
+    /* AC-3 */
+    function markRead(id) {
+      const n = notifications.value.find(n => n.id === id)
+      if (n) n.isRead = true
+    }
+    /* AC-4 */
+    function dismiss(id) {
+      notifications.value = notifications.value.filter(n => n.id !== id)
+    }
+    /* AC-6 */
+    function markAllRead() { notifications.value.forEach(n => { n.isRead = true }) }
+    /* AC-5 */
+    function handleClearAll() {
+      if (!clearConfirming.value) { clearConfirming.value = true }
+      else { notifications.value = []; clearConfirming.value = false; isOpen.value = false }
+    }
+    /* AC-6: item click marks read + navigates (navigation stubbed in wireframe) */
+    function handleItemClick(notif) { markRead(notif.id) }
+
+    function dotColor(type) { return TYPE_COLORS[type] || '#6b7280' }
+    function resetDemo() {
+      notifications.value = SEED.map(n => ({ ...n }))
+      isOpen.value = false; clearConfirming.value = false
+    }
+
+    return {
+      notifications, isOpen, clearConfirming,
+      unreadCount, hasUnread, allRead,
+      togglePanel, closePanel, markRead, dismiss,
+      markAllRead, handleClearAll, handleItemClick,
+      dotColor, resetDemo, IC,
+    }
+  },
+
+  template: `
+    <div class="wf-page">
+
+      <!-- Page header -->
+      <div class="wf-header">
+        <div class="wf-bud-tag">BUD-001</div>
+        <h1 class="wf-title">Notification Bell Improvement</h1>
+        <p class="wf-subtitle">Wireframe · taskflow-web · Design System v1 · 2026-04-01</p>
+      </div>
+
+      <!-- ══════════════════════════════════════
+           § 1  INTERACTIVE DEMO
+           All 5 ACs live in context of app shell
+           ══════════════════════════════════════ -->
+      <section class="wf-section">
+        <div class="wf-section-header">
+          <h2 class="wf-section-title">§1 Interactive Demo</h2>
+          <span class="wf-section-desc">Click the bell — all acceptance criteria are interactive</span>
+        </div>
+
+        <div class="app-shell">
+          <header class="app-header">
+            <span class="app-brand">TaskFlow</span>
+            <nav class="app-nav">
+              <a href="#" class="active">Dashboard</a>
+              <a href="#">Tasks</a>
+              <a href="#">Billing</a>
+            </nav>
+
+            <!-- UX: bell-wrapper provides the positioning context for the dropdown -->
+            <div class="app-header-right">
+              <div class="bell-wrapper">
+
+                <!-- A11Y: aria-label reflects current state; aria-expanded communicates panel open/closed to AT -->
+                <button
+                  class="bell-btn"
+                  :aria-label="isOpen
+                    ? 'Close notifications'
+                    : (hasUnread ? unreadCount + ' unread notifications, open panel' : 'Notifications, none unread')"
+                  :aria-expanded="isOpen"
+                  aria-haspopup="dialog"
+                  @click="togglePanel"
+                >
+                  <!-- AC-1: Filled bell when unread (24px), outline when all-read -->
+                  <span v-if="hasUnread" v-html="IC.bellFilled"></span>
+                  <span v-else           v-html="IC.bellOutline"></span>
+
+                  <!-- AC-1: Badge not clipped — absolute position + border separation -->
+                  <span v-if="hasUnread" class="bell-badge" aria-hidden="true">
+                    {{ unreadCount > 99 ? '99+' : unreadCount }}
+                  </span>
+                </button>
+
+                <!-- AC-2: Panel anchored below-right: top=calc(100%+10px), right=0 -->
+                <div
+                  v-if="isOpen"
+                  class="notif-panel"
+                  role="dialog"
+                  aria-label="Notifications"
+                  aria-modal="false"
+                >
+                  <!-- Panel header -->
+                  <div class="panel-header">
+                    <!-- A11Y: aria-live announces count changes to screen readers -->
+                    <h3 class="panel-header-title" aria-live="polite">
+                      Notifications
+                      <span v-if="hasUnread" class="panel-count-badge">{{ unreadCount }}</span>
+                    </h3>
+                    <!-- AC-6: Mark all read still functional -->
+                    <button class="mark-all-btn" :disabled="allRead" @click="markAllRead">
+                      Mark all read
+                    </button>
+                  </div>
+
+                  <!-- Scrollable list — max-height 360px handles 8+ notifications edge case -->
+                  <div class="panel-list" role="list">
+
+                    <!-- AC-6: Empty state when items.length === 0 -->
+                    <div v-if="notifications.length === 0" class="empty-state">
+                      <span class="empty-icon" v-html="IC.bellCheck"></span>
+                      <span class="empty-text">You're all caught up!</span>
+                    </div>
+
+                    <div
+                      v-for="notif in notifications"
+                      :key="notif.id"
+                      class="notif-item"
+                      :class="{ 'is-unread': !notif.isRead }"
+                      role="listitem"
+                      @click="handleItemClick(notif)"
+                    >
+                      <span class="type-dot" :style="{ background: dotColor(notif.type) }" :title="notif.type.replace(/_/g,' ')"></span>
+
+                      <div class="notif-content">
+                        <div class="notif-title">{{ notif.title }}</div>
+                        <div class="notif-body">{{ notif.body }}</div>
+                        <time class="notif-time">{{ notif.createdAt }}</time>
+                      </div>
+
+                      <!-- Per-item actions — always visible, @click.stop prevents row navigation -->
+                      <div class="notif-actions" @click.stop>
+
+                        <!-- AC-3: Mark as read — only on unread; disappears after click -->
+                        <button
+                          v-if="!notif.isRead"
+                          class="action-btn"
+                          :aria-label="'Mark as read: ' + notif.title"
+                          title="Mark as read"
+                          @click="markRead(notif.id)"
+                        >
+                          <span v-html="IC.emailOpen"></span>
+                        </button>
+
+                        <!-- AC-4: Delete — always shown, error color on hover -->
+                        <button
+                          class="action-btn is-delete"
+                          :aria-label="'Delete: ' + notif.title"
+                          title="Delete"
+                          @click="dismiss(notif.id)"
+                        >
+                          <span v-html="IC.trash"></span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Footer — hidden when list empty -->
+                  <div v-if="notifications.length > 0" class="panel-footer">
+                    <!-- AC-5: Two-step clear all -->
+                    <button
+                      class="clear-btn"
+                      :class="{ 'is-confirming': clearConfirming }"
+                      :aria-label="clearConfirming ? 'Confirm: clear all notifications' : 'Clear all notifications'"
+                      @click="handleClearAll"
+                    >
+                      {{ clearConfirming ? 'Confirm clear?' : 'Clear all' }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Click-outside overlay; also resets AC-5 confirming state on close -->
+                <div v-if="isOpen" style="position:fixed;inset:0;z-index:999" @click="closePanel" aria-hidden="true"></div>
+              </div>
+            </div>
+          </header>
+
+          <div class="app-body">
+            <div class="app-body-placeholder">Task board content area</div>
+          </div>
+        </div>
+
+        <div class="annot-row">
+          <div class="annot fix">
+            <span class="annot-tag">FIX</span>
+            <span>Panel direction: <strong>bottom-end</strong> (was <code>top start</code>) — opens below bell into content area</span>
+          </div>
+          <div class="annot new">
+            <span class="annot-tag">NEW</span>
+            <span>Per-item <strong>Mark as read</strong> + <strong>Delete</strong> — always visible, never hover-only</span>
+          </div>
+          <div class="annot new">
+            <span class="annot-tag">NEW</span>
+            <span><strong>Filled bell</strong> when unread, outline when empty — Gmail/GitHub convention</span>
+          </div>
+          <div class="annot ac">
+            <span class="annot-tag">AC-5</span>
+            <span><strong>Two-step Clear all</strong>: first click → red + "Confirm clear?"; second → executes; resets on close</span>
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <button @click="resetDemo" style="font-size:12px;color:var(--color-text-muted);padding:6px 12px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;">
+            ↺ Reset demo
+          </button>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           § 2  AC-1: Bell Icon States
+           ══════════════════════════════════════ -->
+      <section class="wf-section">
+        <div class="wf-section-header">
+          <h2 class="wf-section-title">§2 AC-1 — Bell Icon States</h2>
+          <span class="wf-section-desc">Icon + badge behaviour driven by unreadCount</span>
+        </div>
+
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:24px 28px;">
+          <div class="bell-states-row">
+
+            <div class="bell-state-item">
+              <div class="bell-state-demo">
+                <button class="bell-btn" style="pointer-events:none;" aria-hidden="true">
+                  <span v-html="IC.bellOutline"></span>
+                </button>
+              </div>
+              <div class="bell-state-label"><strong>mdi-bell-outline</strong><br>unreadCount === 0<br>no badge</div>
+              <span class="bell-state-ac">AC-1 ✓</span>
+            </div>
+
+            <div class="bell-state-item">
+              <div class="bell-state-demo">
+                <button class="bell-btn" style="pointer-events:none;position:relative;" aria-hidden="true">
+                  <span v-html="IC.bellFilled"></span>
+                  <span class="bell-badge">3</span>
+                </button>
+              </div>
+              <div class="bell-state-label"><strong>mdi-bell (filled)</strong><br>unreadCount > 0<br>badge visible, not clipped</div>
+              <span class="bell-state-ac">AC-1 ✓</span>
+            </div>
+
+            <div class="bell-state-item">
+              <div class="bell-state-demo">
+                <button class="bell-btn" style="pointer-events:none;position:relative;" aria-hidden="true">
+                  <span v-html="IC.bellFilled"></span>
+                  <span class="bell-badge" style="min-width:20px;font-size:9px;">99+</span>
+                </button>
+              </div>
+              <div class="bell-state-label"><strong>mdi-bell (filled)</strong><br>unreadCount > 99<br>truncated badge</div>
+              <span class="bell-state-ac">Edge case</span>
+            </div>
+          </div>
+
+          <div class="annot-row" style="margin-top:20px;">
+            <div class="annot fix">
+              <span class="annot-tag">FIX</span>
+              <span>Badge uses <code>position:absolute; top:1px; right:1px</code> with <code>border:2px solid #1a1a2e</code> — visual separation prevents "clipped into button" appearance on dark header</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           § 3  AC-2: Panel Direction — before/after
+           ══════════════════════════════════════ -->
+      <section class="wf-section">
+        <div class="wf-section-header">
+          <h2 class="wf-section-title">§3 AC-2 — Panel Direction Fix</h2>
+          <span class="wf-section-desc">Before/after of anchor point — was top-start, now bottom-end</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+          <div style="background:#fff;border:1.5px solid #fecaca;border-radius:12px;overflow:hidden;">
+            <div style="padding:8px 12px;background:#fef2f2;border-bottom:1px solid #fecaca;font-size:11px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:0.06em;">✗ Before — location="top start"</div>
+            <div style="padding:0 16px;background:#1a1a2e;height:56px;display:flex;align-items:center;position:relative;overflow:visible;">
+              <span style="color:#fff;font-size:14px;font-weight:700;">TaskFlow</span>
+              <div style="margin-left:auto;position:relative;">
+                <div style="position:absolute;bottom:calc(100% + 8px);left:0;width:220px;background:#fff;border-radius:8px;box-shadow:0 -4px 16px rgba(0,0,0,0.15);border:2px solid #fca5a5;padding:12px;font-size:11px;color:#dc2626;z-index:10;line-height:1.5;">
+                  Panel opens <strong>above + left</strong><br>→ clips behind sticky header
+                </div>
+                <button class="bell-btn" style="pointer-events:none;color:#e0e0e0;position:relative;" aria-hidden="true">
+                  <span v-html="IC.bellFilled"></span>
+                  <span class="bell-badge">3</span>
+                </button>
+              </div>
+            </div>
+            <div style="padding:12px 16px;font-size:12px;color:#991b1b;background:#fef2f2;">
+              <code>location="top start"</code> opens the panel upward/left — clips behind the sticky header when bell is in the top bar.
+            </div>
+          </div>
+
+          <div style="background:#fff;border:1.5px solid #6ee7b7;border-radius:12px;overflow:hidden;">
+            <div style="padding:8px 12px;background:#d1fae5;border-bottom:1px solid #6ee7b7;font-size:11px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:0.06em;">✓ After — location="bottom end"</div>
+            <div style="padding:0 16px;background:#1a1a2e;height:56px;display:flex;align-items:center;position:relative;overflow:visible;">
+              <span style="color:#fff;font-size:14px;font-weight:700;">TaskFlow</span>
+              <div style="margin-left:auto;position:relative;">
+                <button class="bell-btn" style="pointer-events:none;color:#e0e0e0;position:relative;" aria-hidden="true">
+                  <span v-html="IC.bellFilled"></span>
+                  <span class="bell-badge">3</span>
+                </button>
+                <div style="position:absolute;top:calc(100% + 8px);right:0;width:220px;background:#fff;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);border:2px solid #6ee7b7;padding:12px;font-size:11px;color:#065f46;z-index:10;line-height:1.5;">
+                  Panel opens <strong>below + right-aligned</strong><br>→ drops into content area ✓
+                </div>
+              </div>
+            </div>
+            <div style="padding:12px 16px;font-size:12px;color:#065f46;background:#d1fae5;margin-top:40px;">
+              <code>top:calc(100% + 10px); right:0</code> — panel drops below trigger, right-aligned. Vuetify's overflow correction handles narrow viewports.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           § 4  AC-3 + AC-4: Per-item actions
+           ══════════════════════════════════════ -->
+      <section class="wf-section">
+        <div class="wf-section-header">
+          <h2 class="wf-section-title">§4 AC-3 + AC-4 — Per-Item Action Buttons</h2>
+          <span class="wf-section-desc">Always-visible append-slot buttons — never hover-only</span>
+        </div>
+
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+
+          <div style="padding:7px 12px;background:#fafafa;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.06em;">
+            Unread — shows Mark as Read AND Delete
+          </div>
+          <div class="notif-item is-unread" style="pointer-events:none;">
+            <span class="type-dot" style="background:#4f46e5;"></span>
+            <div class="notif-content">
+              <div class="notif-title">Task assigned to you</div>
+              <div class="notif-body">Arun assigned "Redesign login flow" to you in Sprint 12.</div>
+              <time class="notif-time">2 hours ago</time>
+            </div>
+            <div class="notif-actions">
+              <!-- Shown in active/highlighted state for clarity -->
+              <button class="action-btn" title="Mark as read" style="background:#eeebff;color:var(--color-accent);border-color:#c7d2fe;">
+                <span v-html="IC.emailOpen"></span>
+              </button>
+              <button class="action-btn is-delete" title="Delete">
+                <span v-html="IC.trash"></span>
+              </button>
+            </div>
+          </div>
+          <div style="padding:8px 16px;background:#eff6ff;border-bottom:1px solid #e5e7eb;font-size:12px;color:#1e40af;">
+            <strong>AC-3:</strong> <code>mdi-email-open-outline</code> shown only when <code>!notif.isRead</code> → calls <code>store.markRead(id)</code>. Disappears when item transitions to read.
+          </div>
+
+          <div style="padding:7px 12px;background:#fafafa;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.06em;">
+            Read — shows Delete only
+          </div>
+          <div class="notif-item" style="pointer-events:none;">
+            <span class="type-dot" style="background:#8b5cf6;"></span>
+            <div class="notif-content">
+              <div class="notif-title">Reminder: Sprint planning tomorrow</div>
+              <div class="notif-body">Sprint 13 planning is scheduled for tomorrow at 10:00 AM.</div>
+              <time class="notif-time">1 day ago</time>
+            </div>
+            <div class="notif-actions">
+              <!-- Shown in hover/error state to illustrate AC-4 -->
+              <button class="action-btn is-delete" title="Delete" style="background:#fef2f2;color:var(--color-danger);border-color:#fecaca;">
+                <span v-html="IC.trash"></span>
+              </button>
+            </div>
+          </div>
+          <div style="padding:8px 16px;background:#fef2f2;font-size:12px;color:#991b1b;">
+            <strong>AC-4:</strong> <code>mdi-delete-outline</code> always present → calls <code>store.dismiss(id)</code>. <code>color="error"</code> on hover signals destructive action. Renders even when <code>deepLink</code> is null.
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           § 5  AC-5: Clear all confirmation
+           ══════════════════════════════════════ -->
+      <section class="wf-section">
+        <div class="wf-section-header">
+          <h2 class="wf-section-title">§5 AC-5 — Clear All Confirmation Flow</h2>
+          <span class="wf-section-desc">Two-step prevents accidental data loss</span>
+        </div>
+
+        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+            <div style="padding:7px 12px;background:#fafafa;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.06em;">Step 1 — Default</div>
+            <div style="padding:12px 16px;">
+              <div class="panel-footer" style="border:none;padding:0;"><button class="clear-btn">Clear all</button></div>
+              <p style="font-size:12px;color:var(--color-text-muted);margin-top:8px;">First click sets <code>clearConfirming = true</code>.</p>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;font-size:18px;color:var(--color-text-muted);padding-top:44px;">→</div>
+          <div style="flex:1;min-width:200px;background:#fff;border:1.5px solid #fecaca;border-radius:12px;overflow:hidden;">
+            <div style="padding:7px 12px;background:#fef2f2;border-bottom:1px solid #fecaca;font-size:11px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:0.06em;">Step 2 — Confirming</div>
+            <div style="padding:12px 16px;">
+              <div class="panel-footer" style="border:none;padding:0;"><button class="clear-btn is-confirming">Confirm clear?</button></div>
+              <p style="font-size:12px;color:var(--color-text-muted);margin-top:8px;">Second click executes <code>store.dismissAll()</code> and closes panel.</p>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;font-size:13px;color:var(--color-text-muted);padding-top:44px;">→ close without confirm</div>
+          <div style="flex:1;min-width:200px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+            <div style="padding:7px 12px;background:#fafafa;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.06em;">Reset — panel closed</div>
+            <div style="padding:12px 16px;">
+              <div class="panel-footer" style="border:none;padding:0;"><button class="clear-btn">Clear all</button></div>
+              <p style="font-size:12px;color:var(--color-text-muted);margin-top:8px;"><code>clearConfirming = false</code> on close — next open starts from Step 1.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           § 6  Edge Cases
+           ══════════════════════════════════════ -->
+      <section class="wf-section">
+        <div class="wf-section-header">
+          <h2 class="wf-section-title">§6 Edge Cases</h2>
+          <span class="wf-section-desc">Boundary conditions from the BUD spec</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;">
+            <div style="font-size:12px;font-weight:700;margin-bottom:8px;">Last item deleted → empty state</div>
+            <div class="empty-state" style="padding:20px 8px;">
+              <span class="empty-icon" v-html="IC.bellCheck"></span>
+              <span class="empty-text">You're all caught up!</span>
+            </div>
+            <div style="font-size:11px;color:var(--color-text-muted);">Renders immediately on last <code>dismiss()</code>. Footer hidden when <code>notifications.length === 0</code>.</div>
+          </div>
+
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;">
+            <div style="font-size:12px;font-weight:700;margin-bottom:8px;">No deepLink — per-item actions still render</div>
+            <div class="notif-item" style="pointer-events:none;border:1px solid #f3f4f6;border-radius:8px;">
+              <span class="type-dot" style="background:#8b5cf6;"></span>
+              <div class="notif-content">
+                <div class="notif-title">Reminder: Sprint planning tomorrow</div>
+                <div class="notif-body">No deepLink — navigation arrow hidden via v-if.</div>
+                <time class="notif-time">1 day ago</time>
+              </div>
+              <div class="notif-actions">
+                <button class="action-btn is-delete" title="Delete"><span v-html="IC.trash"></span></button>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--color-text-muted);margin-top:8px;"><code>v-if="notif.deepLink"</code> hides arrow only. Delete always renders regardless.</div>
+          </div>
+
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;">
+            <div style="font-size:12px;font-weight:700;margin-bottom:8px;">8+ notifications — list scrolls</div>
+            <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+              <div class="panel-list" style="max-height:110px;">
+                <div v-for="i in 5" :key="i" class="notif-item" style="pointer-events:none;">
+                  <span class="type-dot" style="background:#4f46e5;"></span>
+                  <div class="notif-content">
+                    <div class="notif-title" style="font-weight:700;">Notification {{ i }}</div>
+                    <time class="notif-time">{{ i }}h ago</time>
+                  </div>
+                  <div class="notif-actions">
+                    <button class="action-btn" title="Mark as read"><span v-html="IC.emailOpen"></span></button>
+                    <button class="action-btn is-delete" title="Delete"><span v-html="IC.trash"></span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--color-text-muted);margin-top:8px;">Scrolls within <code>max-height:360px</code>. Action buttons stay accessible in each row.</div>
+          </div>
+
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;">
+            <div style="font-size:12px;font-weight:700;margin-bottom:8px;">99+ badge overflow</div>
+            <div style="display:flex;align-items:center;gap:16px;padding:8px 0;">
+              <div style="background:#1a1a2e;padding:8px;border-radius:8px;">
+                <button class="bell-btn" style="pointer-events:none;color:#e0e0e0;position:relative;" aria-hidden="true">
+                  <span v-html="IC.bellFilled"></span>
+                  <span class="bell-badge" style="min-width:22px;font-size:9px;">99+</span>
+                </button>
+              </div>
+              <div style="font-size:12px;color:var(--color-text-muted);">
+                When <code>unreadCount &gt; 99</code>, render <code>"99+"</code>. The 2px border keeps badge legible on dark header.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           § 7  Acceptance Criteria Checklist
+           ══════════════════════════════════════ -->
+      <section class="wf-section">
+        <div class="wf-section-header">
+          <h2 class="wf-section-title">§7 Acceptance Criteria Checklist</h2>
+          <span class="wf-section-desc">For implementation sign-off</span>
+        </div>
+
+        <div class="ac-grid">
+          <div class="ac-card">
+            <div class="ac-card-title"><span class="ac-tag">AC-1</span> Bell Icon</div>
+            <div class="ac-item"><span class="ac-check"></span><span>mdi-bell-outline at 24px when unreadCount === 0</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>mdi-bell (filled) at 24px when unreadCount > 0</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>Badge fully visible — not clipped by button boundary</span></div>
+          </div>
+          <div class="ac-card">
+            <div class="ac-card-title"><span class="ac-tag">AC-2</span> Panel Direction</div>
+            <div class="ac-item"><span class="ac-check"></span><span>Panel appears below and right of trigger in any app bar</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>No clip at top/right of viewport at 1280px width</span></div>
+          </div>
+          <div class="ac-card">
+            <div class="ac-card-title"><span class="ac-tag">AC-3</span> Mark as Read</div>
+            <div class="ac-item"><span class="ac-check"></span><span>mdi-email-open-outline button visible on unread items</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>Calls markRead(id), button disappears on state change</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>Hidden on already-read notifications</span></div>
+          </div>
+          <div class="ac-card">
+            <div class="ac-card-title"><span class="ac-tag">AC-4</span> Per-Item Delete</div>
+            <div class="ac-item"><span class="ac-check"></span><span>mdi-delete-outline on every notification (read + unread)</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>Calls dismiss(id), removes item immediately</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>color="error" on hover signals destructive action</span></div>
+          </div>
+          <div class="ac-card">
+            <div class="ac-card-title"><span class="ac-tag">AC-5</span> Clear All Confirmation</div>
+            <div class="ac-item"><span class="ac-check"></span><span>First click → "Confirm clear?" label + danger red button</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>Second click → dismissAll() + panel closes</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>State resets when panel closes without confirming</span></div>
+          </div>
+          <div class="ac-card">
+            <div class="ac-card-title"><span class="ac-tag">AC-6</span> No Regression</div>
+            <div class="ac-item"><span class="ac-check"></span><span>"Mark all read" header button still functional</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>Item click marks as read + navigates to deepLink if present</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>Empty state renders when items.length === 0</span></div>
+            <div class="ac-item"><span class="ac-check"></span><span>useNotificationSocket unaffected (no socket template changes)</span></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  `,
+}
+
+createApp(App).mount('#app')
+</script>
+</body>
+</html>

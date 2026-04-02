@@ -45,7 +45,7 @@ npm run dev -- --port 9002
 
 ## Testing the Scan Pipeline
 
-1. Start FlowDev (`uvicorn` on default port 8000)
+1. Start Bodhigrove (`uvicorn` on default port 8000)
 2. In Settings > Repositories, add all 3 repos:
    - `/path/to/examples/taskflow-api`
    - `/path/to/examples/taskflow-worker`

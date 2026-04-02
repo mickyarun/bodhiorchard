@@ -14,7 +14,10 @@ from app.services.skill_loader import Skill
 
 
 async def build_prd_prompt(
-    bud: BUDDocument, skill: Skill, org_id: uuid_mod.UUID, db: Any,
+    bud: BUDDocument,
+    skill: Skill,
+    org_id: uuid_mod.UUID,
+    db: Any,
 ) -> tuple[str, str | None]:
     """Build PRD enrichment prompt from triage context."""
     from app.services.prompt_builder import build_prd_prompt as _build
@@ -43,7 +46,10 @@ async def build_prd_prompt(
 
 
 async def build_tech_arch_prompt(
-    bud: BUDDocument, skill: Skill, org_id: uuid_mod.UUID, db: Any,
+    bud: BUDDocument,
+    skill: Skill,
+    org_id: uuid_mod.UUID,
+    db: Any,
 ) -> tuple[str, str | None]:
     """Build tech architecture prompt with design context and repo info."""
     from app.repositories.design_system import DesignSystemRefRepository
@@ -70,7 +76,7 @@ async def build_tech_arch_prompt(
     repo_context = _build_repo_context(repo_pairs)
 
     prompt = (
-        f"Generate a detailed technical implementation plan for {bud_ref}: {bud.title}.\n\n"
+        f"Generate a concise tech spec for {bud_ref}: {bud.title}.\n\n"
         f"## Requirements\n\n{bud.requirements_md or ''}\n"
     )
     if design_context:
@@ -91,7 +97,10 @@ async def build_tech_arch_prompt(
 
 
 async def build_code_review_prompt(
-    bud: BUDDocument, skill: Skill, org_id: uuid_mod.UUID, db: Any,
+    bud: BUDDocument,
+    skill: Skill,
+    org_id: uuid_mod.UUID,
+    db: Any,
 ) -> tuple[str, str | None]:
     """Build code review prompt with repo locations and PR-aware diffs."""
     from app.repositories.dev_activity import DevActivityLogRepository
@@ -113,7 +122,9 @@ async def build_code_review_prompt(
             pr_branches[repo_short] = pr.head_branch
 
     repo_sections, working_dir = _build_repo_diff_sections(
-        confirmed_repos, last_shas, pr_branches,
+        confirmed_repos,
+        last_shas,
+        pr_branches,
     )
 
     if not repo_sections:
@@ -129,10 +140,14 @@ async def build_code_review_prompt(
         snippet = bud.tech_spec_md[:500].rsplit("\n", 1)[0]
         bud_context += f"\nTech spec preview (use MCP for full version):\n{snippet}...\n"
 
+    repo_path_map = {r.get("repo_id", ""): r.get("repo_path", "") for r in confirmed_repos}
+    design_refs = _build_design_refs(bud, repo_path_map)
+
     prompt = (
         f"You are performing an automated code review for {bud_ref}: {bud.title}.\n\n"
         f"## Repositories to Review\n\n{repo_list}\n\n"
         f"## BUD Context\n\n{bud_context}\n\n"
+        f"{design_refs}"
         "## How to Review\n\n"
         "1. Run `git diff` in each repo to see the actual code changes\n"
         "2. Read the modified files to understand context\n"
@@ -159,7 +174,10 @@ async def build_code_review_prompt(
 
 
 async def build_testing_prompt(
-    bud: BUDDocument, skill: Skill, org_id: uuid_mod.UUID, db: Any,
+    bud: BUDDocument,
+    skill: Skill,
+    org_id: uuid_mod.UUID,
+    db: Any,
 ) -> tuple[str, str | None]:
     """Build QA testing prompt with repo locations and commit refs."""
     from app.repositories.dev_activity import DevActivityLogRepository
@@ -172,7 +190,9 @@ async def build_testing_prompt(
     last_shas = await activity_repo.get_last_sha_per_repo(bud.id)
 
     repo_sections, working_dir = _build_repo_diff_sections(
-        confirmed_repos, last_shas, pr_branches={},
+        confirmed_repos,
+        last_shas,
+        pr_branches={},
     )
     repo_list = "\n".join(repo_sections) if repo_sections else "(no repos confirmed)"
 
@@ -186,11 +206,17 @@ async def build_testing_prompt(
             draft_context += f"### Automation\n\n{draft_auto}\n\n"
         if draft_manual:
             draft_context += f"### Manual\n\n{draft_manual}\n\n"
-        draft_context += "Expand these drafts into detailed test cases.\n\n"
+        draft_context += (
+            "Refine these drafts into structured test cases. Do not pad — improve precision.\n\n"
+        )
+
+    repo_path_map = {r.get("repo_id", ""): r.get("repo_path", "") for r in confirmed_repos}
+    design_refs = _build_design_refs(bud, repo_path_map)
 
     prompt = (
-        f"You are generating comprehensive test cases for {bud_ref}: {bud.title}.\n\n"
+        f"You are generating structured test cases for {bud_ref}: {bud.title}.\n\n"
         f"## Repositories\n\n{repo_list}\n\n"
+        f"{design_refs}"
         "## How to Get Context\n\n"
         "1. Use `get_bud_context` MCP tool to fetch the full tech spec\n"
         "2. Run `git diff` in each repo to see code changes\n"
@@ -201,6 +227,8 @@ async def build_testing_prompt(
         prompt += draft_context
     prompt += (
         "## Instructions\n\n"
+        "Target 15-25 test cases total. Cover: functional, negative, boundary, "
+        "stress, non-functional (a11y, perf), and impact (regression).\n"
         "Produce automation test cases (Playwright/Cucumber), "
         "manual test cases, and a test execution plan.\n"
         "Output ONLY the JSON — no markdown wrapper, no explanation.\n"
@@ -248,6 +276,34 @@ def _build_repo_diff_sections(
             )
 
     return sections, working_dir
+
+
+def _build_design_refs(
+    bud: BUDDocument,
+    repo_paths: dict[str, str] | None = None,
+) -> str:
+    """Build a compact wireframe reference block from BUD designs.
+
+    Used by code review and testing prompts so agents can verify
+    implementation matches the approved wireframes.
+    """
+    if not bud.designs:
+        return ""
+    repo_paths = repo_paths or {}
+    refs: list[str] = []
+    for d in bud.designs:
+        if d.design_path:
+            base = repo_paths.get(str(d.repo_id), "") if d.repo_id else ""
+            full = f"{base}/{d.design_path}" if base else d.design_path
+            refs.append(f"- `{full}`")
+        if d.notes:
+            refs.append(f"  Notes: {d.notes[:200]}")
+    if not refs:
+        return ""
+    return (
+        "\n## Design References\n\n"
+        "Approved wireframes (read to verify implementation matches):\n" + "\n".join(refs) + "\n"
+    )
 
 
 def _build_design_context(
@@ -307,43 +363,75 @@ def _build_tech_arch_instructions(
 ) -> str:
     """Build the instructions section for tech arch prompt."""
     instructions = "\n## Instructions\n\n"
+    instructions += (
+        "**Target 3,000-6,000 characters.** Developers use Claude Code and generate "
+        "implementation from this plan. No code examples, no CSS tokens, no template "
+        "pseudocode, no function signatures. Every sentence must carry new information.\n\n"
+    )
+
     if has_designs:
         instructions += (
-            "Create a tech spec that **aligns with the designs**.\n\n"
-            "The tech spec MUST:\n"
-            "- Read wireframe HTML files for UI layout\n"
-            "- Reference UI components and screens from wireframes\n"
-            "- Use design system tokens\n"
-            "- Map wireframe screens to files/routes\n"
-            "- Include data model changes for the UI\n\n"
+            "Align with the designs: READ the wireframe HTML file paths listed in the "
+            "**Design Wireframes & Notes** section above (use the Read tool with the "
+            "full path). Map wireframe screens to files/routes. Reference design system "
+            "tokens by name (not values).\n"
+            "**Include the wireframe file paths in your output** under a "
+            "'Design References' section so developers can find them.\n\n"
         )
-    else:
-        instructions += "Create a comprehensive tech spec.\n\n"
 
-    instructions += (
-        "Cover:\n"
-        "- Architecture approach and key decisions\n"
-        "- Files to create or modify (full paths)\n"
-        "- Data model changes, API endpoints, frontend components\n"
-        "- Dependencies, integration points, risks\n\n"
+    sections_list = (
+        "Sections (strict format):\n"
+        "- **Executive Summary**: 2-3 sentences.\n"
+        "- **Architecture Approach**: Key decisions, 1 paragraph max.\n"
+        "- **Files to Create or Modify**: Table (action | path | notes).\n"
+        "- **API Changes**: Table (verb | path | description). Only if endpoints change.\n"
+        "- **Data Model Changes**: One sentence per change. Only if schema changes.\n"
     )
+    if has_designs:
+        sections_list += "- **Design References**: List wireframe file paths you read.\n"
+    sections_list += (
+        "- **Dependencies & Risks**: Bullet points, real blockers only.\n"
+        "- **Development Workflow**: Branch name + implementation order.\n"
+        "- **Implementation TODO**: Numbered checklist of tasks in order. "
+        "Each task = one file or logical unit. Include a code review checkpoint "
+        "after each phase.\n"
+        "- **Code Review Standards**: Include this exact checklist at the end — "
+        "developers must verify at each phase:\n"
+        "  - [ ] Modularity: each function <50 lines, each file <300 lines\n"
+        "  - [ ] Security: org-scoped queries, auth on endpoints, no PII leaks, "
+        "input validation at boundaries\n"
+        "  - [ ] Reusability: reuse existing patterns/utilities, no duplicated code\n"
+        "  - [ ] No large files: split if >300 lines backend / >250 lines frontend\n"
+        "  - [ ] No hacks: no hardcoded values, no TODO/FIXME left behind, "
+        "no bypassed validations\n"
+        "  - [ ] Standards: type hints, docstrings on public functions, "
+        "lint clean (ruff/eslint)\n\n"
+    )
+    instructions += sections_list
+
     if repo_pairs:
         steps = []
         if has_designs:
-            steps.append("Read the wireframe files listed in the Design section.")
-        steps.append("Read `gitnexus://repo/*/context` for a codebase overview.")
+            steps.append("Read wireframe files from the Design section.")
+        steps.append("Read `gitnexus://repo/*/context` for codebase overview.")
         steps.append("Use `gitnexus_query` to find related code.")
         steps.append("Use `gitnexus_context` on key symbols.")
         steps.append("Output the plan as clean markdown.")
         for i, step in enumerate(steps, 1):
             instructions += f"{i}. {step}\n"
-        instructions += "\nREMEMBER: Use gitnexus MCP tools, NOT bash find/grep/ls.\n"
-    else:
-        instructions += "Output the plan as clean markdown."
+        instructions += "\nUse gitnexus MCP tools, NOT bash find/grep/ls.\n"
+
+    repo_names = [name for _, name in repo_pairs]
+    repo_names_str = ", ".join(f'"{n}"' for n in repo_names)
 
     instructions += (
-        "\n## Include in your output\n\n"
-        "At the end, add a **Development Workflow** section:\n\n"
-        f"- Branch: `bud-{bud.bud_number:03d}/<description>`\n"
+        f"\nBranch: `bud-{bud.bud_number:03d}/<description>`\n"
+        "\n## REQUIRED: Impacted Repos JSON\n\n"
+        "End your response with a fenced JSON block listing repos that need changes.\n\n"
+        f"Available repos: {repo_names_str}\n\n"
+        "```json\n"
+        '{"impacted_repos": ["repo-name-1"], "summary": "Why each repo is impacted"}\n'
+        "```\n\n"
+        "Only repos with actual code changes. Parsed programmatically — do NOT omit.\n"
     )
     return instructions

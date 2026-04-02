@@ -652,7 +652,7 @@ onMounted(async () => {
   settingsStore.fetchRepos()
 
   // Resume tracking if a scan is running (from this page or setup)
-  const savedScanId = localStorage.getItem('flowdev_scan_id')
+  const savedScanId = localStorage.getItem('bodhigrove_scan_id')
   if (savedScanId && scanStatus.value === 'idle') {
     currentScanId = savedScanId
     scanStatus.value = 'running'
@@ -667,7 +667,7 @@ onMounted(async () => {
       const { data } = await api.get('/setup/checklist-status')
       if (data.scanInProgress && data.scanId) {
         currentScanId = data.scanId
-        localStorage.setItem('flowdev_scan_id', currentScanId)
+        localStorage.setItem('bodhigrove_scan_id', currentScanId)
         scanStatus.value = 'running'
         scanProgress.value = data.scanProgress || 0
         scanStatusLabel.value = 'Scanning...'
@@ -816,7 +816,7 @@ async function triggerScan(fullRescan: boolean = false): Promise<void> {
     scanStatusLabel.value = 'Starting'
     const { data } = await api.post('/v1/skills/scan', { fullRescan: Boolean(fullRescan) })
     currentScanId = data.scanId
-    localStorage.setItem('flowdev_scan_id', currentScanId)
+    localStorage.setItem('bodhigrove_scan_id', currentScanId)
     startPolling()
   } catch (err: unknown) {
     scanStatus.value = 'failed'
@@ -846,7 +846,7 @@ function startPolling(): void {
       unmatchedAuthors: data.unmatchedAuthors || [],
       synthesisWarning: data.synthesisWarning || '',
     }
-    localStorage.removeItem('flowdev_scan_id')
+    localStorage.removeItem('bodhigrove_scan_id')
     fetchIndexStats()
     notifyScanDone(true, data.featuresIndexed || 0, data.profilesFound || 0)
   }
@@ -854,7 +854,7 @@ function startPolling(): void {
   function handleError(error: string): void {
     scanStatus.value = 'failed'
     scanError.value = error || 'Scan failed.'
-    localStorage.removeItem('flowdev_scan_id')
+    localStorage.removeItem('bodhigrove_scan_id')
     notifyScanDone(false)
   }
 

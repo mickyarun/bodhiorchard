@@ -252,6 +252,7 @@ function copyBranchName(): void {
 }
 
 async function handleUpdateResult(testCaseId: string, result: ManualTestCase['result']): Promise<void> {
+  if (result === 'pending') return
   await updateManualResult(testCaseId, result)
 }
 

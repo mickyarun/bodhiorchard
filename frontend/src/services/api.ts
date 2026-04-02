@@ -10,7 +10,7 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('flowdev_token')
+  const token = localStorage.getItem('bodhigrove_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -63,7 +63,7 @@ api.interceptors.response.use(
     }
 
     // Try to refresh the token
-    const refreshToken = localStorage.getItem('flowdev_refresh_token')
+    const refreshToken = localStorage.getItem('bodhigrove_refresh_token')
     if (!refreshToken) {
       clearAuthAndRedirect()
       return Promise.reject(error)
@@ -89,8 +89,8 @@ api.interceptors.response.use(
         { headers: { 'Content-Type': 'application/json' } },
       )
 
-      localStorage.setItem('flowdev_token', data.access_token)
-      localStorage.setItem('flowdev_refresh_token', data.refresh_token)
+      localStorage.setItem('bodhigrove_token', data.access_token)
+      localStorage.setItem('bodhigrove_refresh_token', data.refresh_token)
 
       processQueue(null, data.access_token)
 
@@ -107,8 +107,8 @@ api.interceptors.response.use(
 )
 
 function clearAuthAndRedirect(): void {
-  localStorage.removeItem('flowdev_token')
-  localStorage.removeItem('flowdev_refresh_token')
+  localStorage.removeItem('bodhigrove_token')
+  localStorage.removeItem('bodhigrove_refresh_token')
   // Only redirect if not already on login/setup pages
   if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/setup')) {
     window.location.href = '/login'

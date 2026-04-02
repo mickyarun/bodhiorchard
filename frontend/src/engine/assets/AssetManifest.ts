@@ -250,13 +250,16 @@ export const POOL = {
 
 // ─── Character GLBs ─────────────────────────────
 
+/** Legacy Kenney Blocky Characters (18 variants, moved to legacy/ subfolder). */
+const LEGACY_CHARACTERS = `${CHARACTERS}/legacy`
+
 const CHARACTER_MODELS = [
   'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
   'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
 ] as const
 
 export function getCharacterGLB(variant: string): string {
-  return `${CHARACTERS}/character-${variant}.glb`
+  return `${LEGACY_CHARACTERS}/character-${variant}.glb`
 }
 
 export function getAllCharacterGLBs(): string[] {

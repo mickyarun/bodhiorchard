@@ -16,7 +16,6 @@ import { AgentCharacter } from './AgentCharacter'
 const TREE_OFFSET_X = 1.5
 const TREE_OFFSET_Z = 1.5
 const STACK_OFFSET = 1.2
-const SHUFFLE_INTERVAL = 8
 
 /** Tracked state for one active agent robot. */
 interface AgentEntry {

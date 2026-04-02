@@ -136,7 +136,7 @@ async def sync_slack_members(
 
         if not matched_user and display_name:
             # Match by name tokens (case-insensitive):
-            # any Slack name token matching any FlowDev user name token
+            # any Slack name token matching any Bodhigrove user name token
             slack_tokens = {t.lower() for t in display_name.split() if len(t) >= 3}
             for user in users:
                 if not user.name:

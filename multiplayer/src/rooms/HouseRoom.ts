@@ -47,11 +47,12 @@ export class HouseRoom extends Room<HouseRoomState> {
     })
   }
 
-  onJoin(client: Client, options: { userId: string; name: string }) {
+  onJoin(client: Client, options: { userId: string; name: string; characterModel?: string }) {
     console.log(`[HouseRoom] ${options.name} (${client.sessionId}) joined`)
     const player = new PlayerState()
     player.userId = options.userId || client.sessionId
     player.name = options.name || "Visitor"
+    player.characterModel = options.characterModel || ""
     player.connected = true
     this.state.players.set(client.sessionId, player)
   }

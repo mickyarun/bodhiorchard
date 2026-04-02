@@ -11,16 +11,19 @@
         v-bind="menuProps"
         icon
         variant="text"
-        size="small"
+        size="default"
         density="comfortable"
+        class="notification-bell-btn"
       >
         <v-badge
           :content="store.unreadCount"
           :model-value="store.unreadCount > 0"
           color="error"
-          floating
+          dot-margin="-2px"
+          offset-x="2"
+          offset-y="2"
         >
-          <v-icon icon="mdi-bell-outline" size="20" />
+          <v-icon icon="mdi-bell-outline" size="22" />
         </v-badge>
       </v-btn>
     </template>
@@ -209,6 +212,10 @@ function relativeTime(isoString: string): string {
 </script>
 
 <style scoped>
+.notification-bell-btn {
+  overflow: visible !important;
+}
+
 .notification-panel {
   max-height: 480px;
   display: flex;

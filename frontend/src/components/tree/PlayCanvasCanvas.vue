@@ -43,6 +43,23 @@ const tooltipPos = ref({ x: 0, y: 0 })
 
 let engine: GardenEngine | null = null
 let agentTopic: string | null = null
+let devActivityTopic: string | null = null
+
+/** Handle real-time dev activity from WebSocket (developer characters). */
+function onDevActivity(data: unknown): void {
+  if (!engine) return
+  const raw = data as Record<string, unknown>
+  engine.handleDevActivity({
+    user_id: (raw.user_id as string) || '',
+    actor_name: (raw.actor_name as string) || 'Developer',
+    event_type: (raw.event_type as string) || '',
+    status: (raw.status as string) || 'in_progress',
+    message: (raw.message as string) || null,
+    repo_name: (raw.repo_name as string) || null,
+    file_path: (raw.file_path as string) || null,
+    created_at: (raw.created_at as string) || '',
+  })
+}
 
 /** Handle real-time agent activity from WebSocket. */
 function onAgentActivity(data: unknown): void {
@@ -199,6 +216,10 @@ async function initEngine(): Promise<void> {
   if (props.treeData.org_id) {
     agentTopic = `agent_activity:${props.treeData.org_id}`
     subscribe(agentTopic, onAgentActivity)
+
+    // Subscribe to dev activity events for live developer character movement
+    devActivityTopic = `dev_activity:${props.treeData.org_id}`
+    subscribe(devActivityTopic, onDevActivity)
   }
 }
 
@@ -268,6 +289,10 @@ onUnmounted(() => {
   if (agentTopic) {
     unsubscribe(agentTopic, onAgentActivity)
     agentTopic = null
+  }
+  if (devActivityTopic) {
+    unsubscribe(devActivityTopic, onDevActivity)
+    devActivityTopic = null
   }
   if (resizeObserver) {
     resizeObserver.disconnect()

@@ -2,10 +2,11 @@
   <div class="methodology-page">
     <!-- Section 1: Header -->
     <div class="d-flex flex-column align-center text-center mb-10">
-      <v-icon
-        icon="mdi-book-open-page-variant-outline"
-        size="48"
-        color="secondary"
+      <img
+        src="/assets/bodhigrove-logo-sm.png"
+        width="48"
+        height="48"
+        alt="Bodhigrove"
         class="mb-4"
       />
       <h1 class="text-h4 font-weight-bold mb-2">
@@ -149,30 +150,34 @@
         <v-card class="pa-5 card-border-dark h-100" color="surface">
           <div class="d-flex align-center mb-3">
             <v-icon icon="mdi-chart-timeline-variant-shimmer" color="primary" class="mr-2" />
-            <div class="text-subtitle-1 font-weight-medium">AI-Predicted Cycle Time</div>
+            <div class="text-subtitle-1 font-weight-medium">AI-PERT + Monte Carlo Estimation</div>
           </div>
           <div class="text-body-2 text-medium-emphasis mb-3">
             <span class="text-decoration-line-through text-error mr-1">Story points</span>
             <span class="text-decoration-line-through text-error mr-1">Planning poker</span>
-            — replaced by data-driven predictions.
+            — replaced by probabilistic, per-phase delivery predictions that improve automatically.
           </div>
           <p class="text-body-2 text-medium-emphasis mb-3">
-            The Learning Agent analyzes completed features — complexity, code changes, review cycles,
-            similar past features — to predict how long new work will take.
+            AI generates optimistic, likely, and pessimistic estimates (PERT) for each phase.
+            10,000 Monte Carlo simulations produce P50/P70/P85 confidence dates.
+            Developer skill profiles, backlog depth, and workload are factored in.
           </p>
           <v-card variant="outlined" class="pa-3 mb-3" color="surface-variant">
             <div class="text-caption text-medium-emphasis mb-1">Example Prediction</div>
             <div class="text-body-2">
-              <strong>Feature:</strong> User Settings Page
+              <strong>Feature:</strong> Notification Redesign (Complexity: 3/5)
             </div>
             <div class="text-body-2 text-medium-emphasis">
-              Predicted: 3–5 days (based on 4 similar UI features, team expertise: 0.92)
+              Developer: Alice (backend: 0.92, frontend: 0.35)
+            </div>
+            <div class="text-body-2 text-medium-emphasis">
+              Go-live: 70% by Apr 25 | 85% by May 2
             </div>
           </v-card>
           <div class="d-flex flex-wrap ga-2">
-            <v-chip color="primary" variant="tonal" size="small">Expected: 2–4 days</v-chip>
-            <v-chip color="secondary" variant="tonal" size="small">Confidence: 85%</v-chip>
-            <v-chip color="success" variant="tonal" size="small">Based on 3 similar features</v-chip>
+            <v-chip color="primary" variant="tonal" size="small">PERT Analysis</v-chip>
+            <v-chip color="secondary" variant="tonal" size="small">10K Simulations</v-chip>
+            <v-chip color="success" variant="tonal" size="small">Skill-Aware</v-chip>
           </div>
         </v-card>
       </v-col>
@@ -332,7 +337,7 @@
     <!-- Section 11: Why Bodhigrove -->
     <v-card class="pa-8 mb-8 card-border-dark" color="surface">
       <div class="d-flex flex-column align-center text-center mb-6">
-        <v-icon icon="mdi-tree-outline" size="40" color="success" class="mb-3" />
+        <img src="/assets/bodhigrove-logo-sm.png" width="40" height="40" alt="" class="mb-3" style="border-radius: 50%;" />
         <div class="text-h6 font-weight-medium">Why "Bodhigrove"?</div>
       </div>
 
@@ -416,7 +421,7 @@ const principles = [
 
 const comparisonRows = [
   { phase: 'Intake', agile: 'Ticket in Jira, manual triage, sprint planning', bodhigrove: 'Chat message → Triage Agent analyzes, finds duplicates, estimates capacity' },
-  { phase: 'Estimation', agile: 'Story points, planning poker, team debate', bodhigrove: 'AI predicts cycle time from historical features, 85% confidence' },
+  { phase: 'Estimation', agile: 'Story points, planning poker, team debate', bodhigrove: 'AI-PERT + Monte Carlo simulation — per-phase dates with P50/P70/P85 confidence, factoring developer skill profiles, backlog depth, and workload' },
   { phase: 'Specification', agile: 'PM writes BUD manually, reviews in meetings', bodhigrove: 'BUD Agent drafts spec with codebase context, enterprise rules, prior art' },
   { phase: 'Design', agile: 'Designer creates in Figma, hands off specs', bodhigrove: 'AI generates wireframes; Designer reviews, edits, and advances to Tech Architecture' },
   { phase: 'Tech Arch', agile: 'Architect writes design doc, reviews in meetings', bodhigrove: 'AI generates tech plan; Tech Lead reviews; Smart Assignment Agent suggests developer' },
@@ -513,7 +518,7 @@ const aiHandles = [
   'Pattern recognition & retrospectives',
   'Skill profiling & assignment recommendations',
   'Knowledge sync (code → docs → vector DB)',
-  'Capacity planning & workload balancing',
+  'AI-PERT estimation with Monte Carlo confidence intervals',
   'Smart developer assignment based on skills & capacity',
 ]
 

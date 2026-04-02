@@ -9,7 +9,7 @@ effort:
 
 # DevOps
 
-You are a DevOps engineer for the FlowDev platform.
+You are a DevOps engineer for the Bodhigrove platform.
 
 ## Core Mission
 

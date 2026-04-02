@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BUD-001 Wireframe — Notification Bell Improvement</title>
+
+  <!-- Vuetify 3 -->
+  <link href="https://cdn.jsdelivr.net/npm/vuetify@3.4.0/dist/vuetify.min.css" rel="stylesheet" />
+  <!-- MDI Icons — matching the app's icon set -->
+  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet" />
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3.4.0/dist/vue.global.prod.js"></script>
+  <!-- Vuetify 3 -->
+  <script src="https://cdn.jsdelivr.net/npm/vuetify@3.4.0/dist/vuetify.min.js"></script>
+
+  <style>
+    /* ── Design Tokens (from design system) ── */
+    :root {
+      --color-accent:       #4f46e5;
+      --color-surface:      #ffffff;
+      --color-surface-alt:  #f5f5f5;
+      --color-text:         #1a1a2e;
+      --color-text-muted:   #6b7280;
+      --color-danger:       #ef4444;
+      --color-success:      #10b981;
+      --color-warning:      #f59e0b;
+      --color-info:         #0ea5e9;
+      --color-secondary:    #8b5cf6;
+      --color-header-bg:    #1a1a2e;
+      --color-nav-text:     #e0e0e0;
+      --color-border:       #e5e7eb;
+      --radius-panel:       12px;
+      --shadow-panel:       0 8px 32px rgba(0,0,0,0.12);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f0f2f5;
+      color: var(--color-text);
+    }
+
+    /* ── Wireframe chrome ── */
+    .wf-header {
+      background: var(--color-header-bg);
+      color: #fff;
+      padding: 12px 24px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .wf-header-title { font-size: 15px; font-weight: 700; }
+    .wf-header-badge {
+      background: var(--color-accent);
+      color: #fff;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 9px;
+      font-weight: 700;
+    }
+    .wf-section { padding: 24px; }
+    .wf-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-muted);
+      margin-bottom: 16px;
+    }
+    .wf-grid {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+    .wf-card {
+      background: var(--color-surface);
+      border-radius: var(--radius-panel);
+      box-shadow: var(--shadow-panel);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .wf-label {
+      font-size: 11px;
+      color: var(--color-text-muted);
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    /* ── Annotation helpers ── */
+    .ann {
+      font-size: 11px;
+      color: var(--color-accent);
+      margin-top: 4px;
+      font-style: italic;
+    }
+
+    /* ── Sidebar (mirroring AppLayout.vue) ── */
+    .app-shell {
+      display: flex;
+      height: 580px;
+      background: #f0f2f5;
+      border-radius: var(--radius-panel);
+      overflow: hidden;
+      box-shadow: var(--shadow-panel);
+    }
+    .app-sidebar {
+      width: 240px;
+      background: var(--color-surface);
+      border-right: 1px solid rgba(0,0,0,0.06);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .sidebar-top {
+      padding: 14px 16px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--color-text);
+    }
+    .logo-icon {
+      width: 28px;
+      height: 28px;
+      background: var(--color-accent);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 14px;
+    }
+    .sidebar-nav {
+      flex: 1;
+      padding: 8px;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--color-text);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .nav-item:hover { background: var(--color-surface-alt); }
+    .nav-item.active {
+      background: rgba(79,70,229,0.08);
+      color: var(--color-accent);
+      font-weight: 600;
+    }
+    .app-content {
+      flex: 1;
+      padding: 24px;
+      overflow: auto;
+    }
+
+    /* ── Bell Button (redesigned) ── */
+    .bell-btn {
+      position: relative;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+      border: none;
+      background: none;
+      color: var(--color-text);
+    }
+    .bell-btn:hover { background: var(--color-surface-alt); }
+    .bell-btn:focus-visible {
+      /* A11Y: visible focus ring matching design system */
+      outline: 2px solid var(--color-accent);
+      outline-offset: 2px;
+    }
+
+    /* ── Badge (from design system pattern library) ── */
+    .notif-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      background: var(--color-danger);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid var(--color-surface);
+      /* UX: border creates visual separation from sidebar bg */
+      pointer-events: none;
+    }
+
+    /* ── Notification Panel ── */
+    .notif-panel {
+      width: 360px;
+      max-height: 480px;
+      background: var(--color-surface);
+      border-radius: var(--radius-panel);
+      box-shadow: var(--shadow-panel);
+      border: 1px solid var(--color-border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      /* UX: positioned below+right of bell, stays inside viewport */
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      z-index: 1000;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--color-border);
+      flex-shrink: 0;
+    }
+    .panel-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--color-text);
+    }
+    .mark-all-btn {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--color-accent);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .mark-all-btn:hover { background: rgba(79,70,229,0.08); }
+    .mark-all-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+    /* ── Notification List ── */
+    .notif-list {
+      overflow-y: auto;
+      flex: 1;
+      /* UX: custom scrollbar for subtlety */
+    }
+    .notif-list::-webkit-scrollbar { width: 4px; }
+    .notif-list::-webkit-scrollbar-track { background: transparent; }
+    .notif-list::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 2px; }
+
+    /* ── Notification Item ── */
+    .notif-item {
+      display: flex;
+      gap: 10px;
+      padding: 11px 16px;
+      border-bottom: 1px solid var(--color-border);
+      cursor: pointer;
+      position: relative;
+      transition: background 0.15s;
+      /* UX: entire row clickable for navigation */
+    }
+    .notif-item:hover { background: #f9f9ff; }
+    .notif-item:last-child { border-bottom: none; }
+
+    /* UX: unread indicator — left border accent + tinted background */
+    .notif-item.unread {
+      background: rgba(79,70,229,0.03);
+      border-left: 3px solid var(--color-accent);
+      padding-left: 13px;
+    }
+    .notif-item.unread:hover { background: rgba(79,70,229,0.06); }
+
+    .notif-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-top: 5px;
+      flex-shrink: 0;
+      /* UX: dot color communicates notification type at a glance */
+    }
+    .notif-body { flex: 1; min-width: 0; }
+    .notif-title {
+      font-size: 13px;
+      color: var(--color-text);
+      /* UX: truncated at 2 lines with ellipsis */
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      line-height: 1.4;
+    }
+    .notif-item.unread .notif-title { font-weight: 700; }
+    .notif-item:not(.unread) .notif-title { font-weight: 400; }
+
+    .notif-message {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      margin-top: 2px;
+      /* UX: body capped at 1 line — hover/focus reveals full text */
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .notif-time {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--color-text-muted);
+      margin-top: 4px;
+    }
+
+    /* ── Inline action buttons (appear on hover) ── */
+    .notif-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      align-items: center;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.12s;
+    }
+    .notif-item:hover .notif-actions,
+    .notif-item:focus-within .notif-actions {
+      /* A11Y: also visible when any child has focus (keyboard nav) */
+      opacity: 1;
+    }
+    .action-btn {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      border: none;
+      background: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-text-muted);
+      transition: background 0.12s, color 0.12s;
+      font-size: 13px;
+    }
+    .action-btn:hover { background: var(--color-surface-alt); }
+    .action-btn.read-btn:hover { color: var(--color-accent); }
+    .action-btn.delete-btn:hover { color: var(--color-danger); }
+    .action-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+
+    /* ── Loading Skeleton ── */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.35; }
+    }
+    .skel-row {
+      display: flex;
+      gap: 10px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .skel-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #e5e7eb;
+      margin-top: 5px;
+      flex-shrink: 0;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .skel-lines { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .skel-line {
+      height: 11px;
+      background: #e5e7eb;
+      border-radius: 4px;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .skel-line.w60 { width: 60%; }
+    .skel-line.w40 { width: 40%; }
+    .skel-line.w80 { width: 80%; }
+
+    /* ── Empty State ── */
+    .empty-state {
+      padding: 48px 16px;
+      text-align: center;
+      color: var(--color-text-muted);
+    }
+    .empty-icon {
+      font-size: 32px;
+      display: block;
+      margin-bottom: 10px;
+      color: var(--color-text-muted);
+      opacity: 0.6;
+    }
+    .empty-title { font-size: 14px; font-weight: 600; color: var(--color-text); margin-bottom: 4px; }
+    .empty-sub   { font-size: 13px; }
+
+    /* ── Error State ── */
+    .error-state {
+      padding: 20px 16px;
+      text-align: center;
+      background: #fef2f2;
+      color: var(--color-danger);
+      font-size: 12px;
+    }
+    .retry-btn {
+      margin-top: 8px;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--color-danger);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .retry-btn:hover { opacity: 0.85; }
+
+    /* ── Offline Banner ── */
+    .offline-banner {
+      padding: 8px 16px;
+      background: #fff7ed;
+      border-bottom: 1px solid #fed7aa;
+      font-size: 11px;
+      color: #92400e;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    /* ── Load More ── */
+    .load-more {
+      padding: 10px;
+      text-align: center;
+      flex-shrink: 0;
+      border-top: 1px solid var(--color-border);
+    }
+    .load-more-btn {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--color-accent);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 5px 12px;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .load-more-btn:hover { background: rgba(79,70,229,0.08); }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1a1a2e;
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 240px;
+      justify-content: center;
+    }
+    .toast.error { background: var(--color-danger); }
+    .toast.success { background: var(--color-success); }
+
+    /* ── State reference panels ── */
+    .state-ref-panel {
+      width: 300px;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Wireframe Header ── -->
+  <div class="wf-header">
+    <div class="wf-header-title">BUD-001 Wireframe</div>
+    <div class="wf-header-badge">Notification Bell Improvement</div>
+    <div style="margin-left:auto; font-size:11px; opacity:0.6;">Bodhigrove · April 2026</div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       SECTION 1 — Interactive Live Demo
+  ═══════════════════════════════════════════════ -->
+  <div class="wf-section">
+    <div class="wf-section-title">1 — Interactive Demo (click the bell)</div>
+
+    <div class="wf-grid">
+      <!-- App Shell with redesigned bell -->
+      <div style="position: relative;">
+        <div class="wf-label">Redesigned bell in sidebar context</div>
+        <div class="app-shell wf-card">
+
+          <!-- Sidebar -->
+          <aside class="app-sidebar">
+            <div class="sidebar-top">
+              <!-- Logo -->
+              <div class="logo">
+                <div class="logo-icon">
+                  <span class="mdi mdi-leaf" style="font-size:15px;"></span>
+                </div>
+                Bodhigrove
+              </div>
+
+              <!--
+                UX: Bell button lives next to logo in sidebar header — matching
+                AppLayout.vue placement. Relative container anchors the dropdown.
+                A11Y: aria-label="Notifications", aria-expanded reflects open state
+              -->
+              <div style="position: relative;">
+                <button
+                  class="bell-btn"
+                  :aria-label="'Notifications' + (unreadCount > 0 ? ', ' + unreadCount + ' unread' : '')"
+                  :aria-expanded="panelOpen.toString()"
+                  aria-haspopup="true"
+                  @click="togglePanel"
+                >
+                  <span class="mdi mdi-bell-outline" style="font-size:18px;"></span>
+                  <!-- A11Y: badge is aria-hidden; count is in aria-label above -->
+                  <span
+                    v-if="unreadCount > 0"
+                    class="notif-badge"
+                    aria-hidden="true"
+                  >{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+                </button>
+
+                <!--
+                  UX: Panel anchors top-left of bell container, flows downward-right.
+                  This fixes the `location="top start"` bug in the current component
+                  where the panel opened upward and off-screen.
+                  A11Y: role="dialog", aria-label, focus trap on open
+                -->
+                <div
+                  v-if="panelOpen"
+                  class="notif-panel"
+                  role="dialog"
+                  aria-label="Notifications panel"
+                  @keydown.esc="panelOpen = false"
+                >
+                  <!-- Offline banner (shown when WS/fetch fails) -->
+                  <!-- UX: Allows viewing cached data without blocking access -->
+                  <div v-if="showOffline" class="offline-banner">
+                    <span class="mdi mdi-wifi-off" style="font-size:13px;"></span>
+                    Could not refresh — showing cached data
+                  </div>
+
+                  <!-- Panel Header -->
+                  <div class="panel-header">
+                    <span class="panel-title">Notifications</span>
+                    <button
+                      v-if="unreadCount > 0"
+                      class="mark-all-btn"
+                      @click="markAllRead"
+                    >Mark all as read</button>
+                  </div>
+
+                  <!-- Loading skeleton -->
+                  <!-- UX: skeleton prevents layout shift vs spinner -->
+                  <template v-if="panelState === 'loading'">
+                    <div class="skel-row" v-for="i in 3" :key="i">
+                      <span class="skel-dot"></span>
+                      <div class="skel-lines">
+                        <div class="skel-line w60"></div>
+                        <div class="skel-line w80"></div>
+                        <div class="skel-line w40"></div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- Error state -->
+                  <!-- UX: non-destructive — user can retry without losing page context -->
+                  <div v-else-if="panelState === 'error'" class="error-state">
+                    <span class="mdi mdi-alert-circle-outline" style="font-size:24px; display:block; margin-bottom:6px;"></span>
+                    <div>Failed to load notifications</div>
+                    <button class="retry-btn" @click="retryFetch">Retry</button>
+                  </div>
+
+                  <!-- Empty state -->
+                  <div v-else-if="notifications.length === 0" class="empty-state">
+                    <span class="mdi mdi-bell-check-outline empty-icon"></span>
+                    <!-- UX: positive framing avoids "nothing here" feeling -->
+                    <div class="empty-title">You're all caught up!</div>
+                    <div class="empty-sub">No new notifications right now.</div>
+                  </div>
+
+                  <!-- Notification list -->
+                  <!--
+                    A11Y: role="list" with role="listitem" children;
+                    keyboard: Tab to navigate items, Enter/Space activates
+                  -->
+                  <ul v-else class="notif-list" role="list" style="padding:0; margin:0; list-style:none;">
+                    <li
+                      v-for="notif in notifications"
+                      :key="notif.id"
+                      class="notif-item"
+                      :class="{ unread: !notif.isRead }"
+                      role="listitem"
+                      tabindex="0"
+                      @click="handleItemClick(notif)"
+                      @keydown.enter="handleItemClick(notif)"
+                    >
+                      <!-- Type dot — color encodes notification category -->
+                      <span
+                        class="notif-dot"
+                        :style="{ background: typeColor(notif.type) }"
+                        :aria-label="notif.type.replace(/_/g, ' ')"
+                      ></span>
+
+                      <!-- Content -->
+                      <div class="notif-body">
+                        <div class="notif-title">{{ notif.title }}</div>
+                        <div class="notif-message" :title="notif.message">{{ notif.message }}</div>
+                        <time class="notif-time">{{ relTime(notif.createdAt) }}</time>
+                      </div>
+
+                      <!--
+                        UX: Actions only visible on hover/focus to reduce visual noise.
+                        A11Y: Shown on :focus-within so keyboard users can reach them.
+                        UX: Icon-only buttons have tooltips via title attr.
+                      -->
+                      <div class="notif-actions" role="group" :aria-label="'Actions for: ' + notif.title">
+                        <!-- Mark as read (only on unread items) -->
+                        <button
+                          v-if="!notif.isRead"
+                          class="action-btn read-btn"
+                          title="Mark as read"
+                          :aria-label="'Mark as read: ' + notif.title"
+                          @click.stop="markRead(notif.id)"
+                        >
+                          <span class="mdi mdi-check" style="font-size:13px;"></span>
+                        </button>
+                        <!-- Navigate to source (deep link) -->
+                        <button
+                          class="action-btn"
+                          title="Go to source"
+                          :aria-label="'Open: ' + notif.title"
+                          @click.stop="openLink(notif)"
+                        >
+                          <span class="mdi mdi-arrow-top-right" style="font-size:12px;"></span>
+                        </button>
+                        <!-- Delete -->
+                        <button
+                          class="action-btn delete-btn"
+                          title="Delete notification"
+                          :aria-label="'Delete: ' + notif.title"
+                          @click.stop="deleteNotif(notif.id)"
+                        >
+                          <span class="mdi mdi-close" style="font-size:12px;"></span>
+                        </button>
+                      </div>
+                    </li>
+                  </ul>
+
+                  <!-- Load more (appears when 100+ notifications, first page = 20) -->
+                  <!-- UX: triggered by scroll-to-bottom or explicit button -->
+                  <div v-if="hasMore && panelState === 'loaded'" class="load-more">
+                    <button class="load-more-btn" @click="loadMore">
+                      <span class="mdi mdi-chevron-down" style="font-size:13px;"></span>
+                      Load more notifications
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Nav items (decorative) -->
+            <nav class="sidebar-nav">
+              <div class="nav-item active">
+                <span class="mdi mdi-view-dashboard-outline"></span> Dashboard
+              </div>
+              <div class="nav-item">
+                <span class="mdi mdi-seed-outline"></span> BUDs
+              </div>
+              <div class="nav-item">
+                <span class="mdi mdi-lightbulb-outline"></span> Features
+              </div>
+              <div class="nav-item">
+                <span class="mdi mdi-account-cog-outline"></span> Skills
+              </div>
+            </nav>
+          </aside>
+
+          <!-- Main app content -->
+          <div class="app-content">
+            <div style="font-size:13px; color:var(--color-text-muted); margin-bottom:16px;">
+              Dashboard content area
+            </div>
+            <div style="display:flex; gap:12px; flex-direction:column;">
+              <div style="height:60px; background:var(--color-surface-alt); border-radius:8px;"></div>
+              <div style="height:80px; background:var(--color-surface-alt); border-radius:8px;"></div>
+              <div style="height:120px; background:var(--color-surface-alt); border-radius:8px;"></div>
+            </div>
+
+            <!-- Demo controls -->
+            <div style="margin-top: 20px; padding: 12px; background:#f9f9ff; border-radius:8px; border: 1px dashed var(--color-accent);">
+              <div style="font-size:11px; font-weight:700; color:var(--color-accent); margin-bottom:8px; text-transform:uppercase; letter-spacing:.05em;">
+                Demo Controls
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button @click="simulateNewNotif" style="font-size:11px; padding:5px 10px; background:var(--color-accent); color:#fff; border:none; border-radius:6px; cursor:pointer;">
+                  + Simulate new notification
+                </button>
+                <button @click="panelState='loading'; setTimeout(()=>panelState='loaded', 1500)" style="font-size:11px; padding:5px 10px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:6px; cursor:pointer;">
+                  Show loading state
+                </button>
+                <button @click="panelState='error'" style="font-size:11px; padding:5px 10px; background:#fef2f2; border:1px solid #fca5a5; color:var(--color-danger); border-radius:6px; cursor:pointer;">
+                  Show error state
+                </button>
+                <button @click="notifications=[]; panelState='loaded'" style="font-size:11px; padding:5px 10px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:6px; cursor:pointer;">
+                  Show empty state
+                </button>
+                <button @click="showOffline=!showOffline" style="font-size:11px; padding:5px 10px; background:#fff7ed; border:1px solid #fed7aa; color:#92400e; border-radius:6px; cursor:pointer;">
+                  Toggle offline banner
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Click-outside overlay to close panel -->
+        <div
+          v-if="panelOpen"
+          style="position:fixed; inset:0; z-index:999;"
+          @click="panelOpen = false"
+          aria-hidden="true"
+        ></div>
+      </div>
+
+      <!-- Annotations -->
+      <div style="max-width:220px;">
+        <div class="wf-label">Key changes from current component</div>
+        <div style="font-size:12px; line-height:1.6; color:var(--color-text);">
+          <div style="margin-bottom:10px;">
+            <span style="color:var(--color-danger); font-weight:700;">Bug fix:</span>
+            Panel now opens <strong>downward</strong> (was <code>location="top start"</code> → off-screen).
+          </div>
+          <div style="margin-bottom:10px;">
+            <span style="color:var(--color-accent); font-weight:700;">New:</span>
+            Per-item <strong>Mark as read</strong> action (check icon).
+          </div>
+          <div style="margin-bottom:10px;">
+            <span style="color:var(--color-accent); font-weight:700;">New:</span>
+            Unread items visually distinct — <strong>bold title</strong> + left accent border.
+          </div>
+          <div style="margin-bottom:10px;">
+            <span style="color:var(--color-accent); font-weight:700;">New:</span>
+            Badge hidden when unread = 0; shows <strong>99+</strong> cap.
+          </div>
+          <div style="margin-bottom:10px;">
+            <span style="color:var(--color-accent); font-weight:700;">New:</span>
+            Loading skeleton, error state, offline banner.
+          </div>
+          <div>
+            <span style="color:var(--color-accent); font-weight:700;">New:</span>
+            Load more for 100+ notifications (paged).
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       SECTION 2 — State Reference (static panels)
+  ═══════════════════════════════════════════════ -->
+  <div class="wf-section" style="background: #f8f8fc;">
+    <div class="wf-section-title">2 — State Reference (all panel states)</div>
+    <div class="wf-grid">
+
+      <!-- State: Loaded with mixed items -->
+      <div>
+        <div class="wf-label">State A — Loaded (unread + read mix)</div>
+        <div class="wf-card state-ref-panel">
+          <div class="panel-header">
+            <span class="panel-title">Notifications</span>
+            <button class="mark-all-btn">Mark all as read</button>
+          </div>
+          <!-- Unread item -->
+          <div class="notif-item unread">
+            <span class="notif-dot" style="background:#ef4444;"></span>
+            <div class="notif-body">
+              <div class="notif-title">Job failed: deploy-staging</div>
+              <div class="notif-message">Build step 3 exited with code 1</div>
+              <time class="notif-time">2 min ago</time>
+            </div>
+            <div class="notif-actions" style="opacity:1;">
+              <button class="action-btn read-btn" title="Mark as read"><span class="mdi mdi-check" style="font-size:13px;"></span></button>
+              <button class="action-btn" title="Go to source"><span class="mdi mdi-arrow-top-right" style="font-size:12px;"></span></button>
+              <button class="action-btn delete-btn" title="Delete"><span class="mdi mdi-close" style="font-size:12px;"></span></button>
+            </div>
+          </div>
+          <!-- Unread item 2 -->
+          <div class="notif-item unread">
+            <span class="notif-dot" style="background:#f59e0b;"></span>
+            <div class="notif-body">
+              <div class="notif-title">Approval requested: BUD-047</div>
+              <div class="notif-message">Sarah requested your review on PR #102</div>
+              <time class="notif-time">15 min ago</time>
+            </div>
+            <div class="notif-actions" style="opacity:1;">
+              <button class="action-btn read-btn" title="Mark as read"><span class="mdi mdi-check" style="font-size:13px;"></span></button>
+              <button class="action-btn" title="Go to source"><span class="mdi mdi-arrow-top-right" style="font-size:12px;"></span></button>
+              <button class="action-btn delete-btn" title="Delete"><span class="mdi mdi-close" style="font-size:12px;"></span></button>
+            </div>
+          </div>
+          <!-- Read item -->
+          <div class="notif-item">
+            <span class="notif-dot" style="background:#10b981;"></span>
+            <div class="notif-body">
+              <div class="notif-title">Approval granted: BUD-044</div>
+              <div class="notif-message">PR #98 was merged by Jamie</div>
+              <time class="notif-time">2h ago</time>
+            </div>
+            <div class="notif-actions" style="opacity:1;">
+              <button class="action-btn" title="Go to source"><span class="mdi mdi-arrow-top-right" style="font-size:12px;"></span></button>
+              <button class="action-btn delete-btn" title="Delete"><span class="mdi mdi-close" style="font-size:12px;"></span></button>
+            </div>
+          </div>
+          <!-- Read item 2 -->
+          <div class="notif-item">
+            <span class="notif-dot" style="background:#0ea5e9;"></span>
+            <div class="notif-body">
+              <div class="notif-title">Developer assigned: BUD-039</div>
+              <div class="notif-message">Alex has been assigned as developer</div>
+              <time class="notif-time">1d ago</time>
+            </div>
+            <div class="notif-actions" style="opacity:1;">
+              <button class="action-btn" title="Go to source"><span class="mdi mdi-arrow-top-right" style="font-size:12px;"></span></button>
+              <button class="action-btn delete-btn" title="Delete"><span class="mdi mdi-close" style="font-size:12px;"></span></button>
+            </div>
+          </div>
+          <!-- Load more footer -->
+          <div class="load-more">
+            <button class="load-more-btn">
+              <span class="mdi mdi-chevron-down" style="font-size:13px;"></span>
+              Load more notifications
+            </button>
+          </div>
+        </div>
+        <div class="ann">Hover rows to reveal action buttons</div>
+      </div>
+
+      <!-- State: Loading skeleton -->
+      <div>
+        <div class="wf-label">State B — Loading skeleton</div>
+        <div class="wf-card state-ref-panel">
+          <div class="panel-header">
+            <span class="panel-title">Notifications</span>
+          </div>
+          <div class="skel-row" v-for="i in 4" :key="i">
+            <span class="skel-dot"></span>
+            <div class="skel-lines">
+              <div class="skel-line" :class="i%2===0?'w60':'w80'"></div>
+              <div class="skel-line w40"></div>
+            </div>
+          </div>
+        </div>
+        <div class="ann">Shown on first open; prevents layout shift</div>
+      </div>
+
+      <!-- State: Empty -->
+      <div>
+        <div class="wf-label">State C — Empty state</div>
+        <div class="wf-card state-ref-panel">
+          <div class="panel-header">
+            <span class="panel-title">Notifications</span>
+          </div>
+          <div class="empty-state">
+            <span class="mdi mdi-bell-check-outline empty-icon"></span>
+            <div class="empty-title">You're all caught up!</div>
+            <div class="empty-sub">No new notifications right now.</div>
+          </div>
+        </div>
+        <div class="ann">Badge hidden on bell when count = 0</div>
+      </div>
+
+      <!-- State: Error -->
+      <div>
+        <div class="wf-label">State D — Error state</div>
+        <div class="wf-card state-ref-panel">
+          <div class="panel-header">
+            <span class="panel-title">Notifications</span>
+          </div>
+          <div class="error-state">
+            <span class="mdi mdi-alert-circle-outline" style="font-size:24px; display:block; margin-bottom:6px;"></span>
+            <div>Failed to load notifications</div>
+            <div style="font-size:11px; opacity:0.8; margin-top:2px;">Server returned 500</div>
+            <button class="retry-btn">Retry</button>
+          </div>
+        </div>
+        <div class="ann">Page does not crash; retry is in-panel</div>
+      </div>
+
+      <!-- State: Offline banner + cached -->
+      <div>
+        <div class="wf-label">State E — Offline (cached data)</div>
+        <div class="wf-card state-ref-panel">
+          <div class="offline-banner">
+            <span class="mdi mdi-wifi-off" style="font-size:13px;"></span>
+            Could not refresh — showing cached data
+          </div>
+          <div class="panel-header">
+            <span class="panel-title">Notifications</span>
+          </div>
+          <div class="notif-item unread">
+            <span class="notif-dot" style="background:#4f46e5;"></span>
+            <div class="notif-body">
+              <div class="notif-title">Reassignment: BUD-051</div>
+              <div class="notif-message">Task moved to another developer</div>
+              <time class="notif-time">5 min ago</time>
+            </div>
+          </div>
+          <div class="notif-item">
+            <span class="notif-dot" style="background:#10b981;"></span>
+            <div class="notif-body">
+              <div class="notif-title">Approval granted: BUD-048</div>
+              <div class="notif-message">PR merged successfully</div>
+              <time class="notif-time">1h ago</time>
+            </div>
+          </div>
+        </div>
+        <div class="ann">User can still see/act on cached items</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       SECTION 3 — Badge Variants
+  ═══════════════════════════════════════════════ -->
+  <div class="wf-section">
+    <div class="wf-section-title">3 — Bell Icon & Badge Variants</div>
+    <div class="wf-grid" style="align-items:center;">
+
+      <div style="text-align:center;">
+        <div class="wf-label" style="text-align:center;">0 unread</div>
+        <div style="padding:12px; background:var(--color-surface); border-radius:8px; display:inline-block; box-shadow:var(--shadow-panel);">
+          <!-- A11Y: badge hidden entirely when count = 0 -->
+          <button class="bell-btn" style="position:relative;" aria-label="Notifications">
+            <span class="mdi mdi-bell-outline" style="font-size:20px;"></span>
+          </button>
+        </div>
+        <div class="ann">No badge rendered</div>
+      </div>
+
+      <div style="text-align:center;">
+        <div class="wf-label" style="text-align:center;">3 unread</div>
+        <div style="padding:12px; background:var(--color-surface); border-radius:8px; display:inline-block; box-shadow:var(--shadow-panel);">
+          <button class="bell-btn" style="position:relative;" aria-label="Notifications, 3 unread">
+            <span class="mdi mdi-bell-outline" style="font-size:20px;"></span>
+            <span class="notif-badge" aria-hidden="true">3</span>
+          </button>
+        </div>
+        <div class="ann">Accent-red badge, 1–99 range</div>
+      </div>
+
+      <div style="text-align:center;">
+        <div class="wf-label" style="text-align:center;">99 unread</div>
+        <div style="padding:12px; background:var(--color-surface); border-radius:8px; display:inline-block; box-shadow:var(--shadow-panel);">
+          <button class="bell-btn" style="position:relative;" aria-label="Notifications, 99 unread">
+            <span class="mdi mdi-bell-outline" style="font-size:20px;"></span>
+            <span class="notif-badge" aria-hidden="true">99</span>
+          </button>
+        </div>
+        <div class="ann">Max numeric value</div>
+      </div>
+
+      <div style="text-align:center;">
+        <div class="wf-label" style="text-align:center;">100+ unread</div>
+        <div style="padding:12px; background:var(--color-surface); border-radius:8px; display:inline-block; box-shadow:var(--shadow-panel);">
+          <button class="bell-btn" style="position:relative;" aria-label="Notifications, 99 or more unread">
+            <span class="mdi mdi-bell-outline" style="font-size:20px;"></span>
+            <span class="notif-badge" style="min-width:20px;" aria-hidden="true">99+</span>
+          </button>
+        </div>
+        <div class="ann">Cap display at 99+</div>
+      </div>
+
+      <div style="text-align:center;">
+        <div class="wf-label" style="text-align:center;">In dark sidebar</div>
+        <div style="padding:12px; background:var(--color-header-bg); border-radius:8px; display:inline-block; box-shadow:var(--shadow-panel);">
+          <!--
+            UX: white border on badge separates it from dark background.
+            The `border: 2px solid ...` adapts to the parent bg color.
+            In sidebar context, this needs to match the surface color.
+          -->
+          <button class="bell-btn" style="position:relative; color:#e0e0e0;" aria-label="Notifications, 5 unread">
+            <span class="mdi mdi-bell-outline" style="font-size:20px;"></span>
+            <span class="notif-badge" style="border-color:var(--color-header-bg);" aria-hidden="true">5</span>
+          </button>
+        </div>
+        <div class="ann">Badge border matches parent bg</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       SECTION 4 — Notification Type Legend
+  ═══════════════════════════════════════════════ -->
+  <div class="wf-section" style="background: #f8f8fc;">
+    <div class="wf-section-title">4 — Notification Type Colours (type dots)</div>
+    <div class="wf-grid">
+      <div v-for="t in notifTypes" :key="t.type" style="display:flex; align-items:center; gap:8px; background:var(--color-surface); padding:10px 14px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.06); min-width:200px;">
+        <span class="notif-dot" :style="{background: t.color, width:'10px', height:'10px', marginTop:0}"></span>
+        <div>
+          <div style="font-size:12px; font-weight:600; color:var(--color-text);">{{ t.label }}</div>
+          <div style="font-size:11px; color:var(--color-text-muted);">{{ t.type }}</div>
+        </div>
+        <span class="mdi" :class="t.icon" style="margin-left:auto; color:var(--color-text-muted); font-size:16px;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notification (for demo feedback) -->
+  <transition name="fade">
+    <div v-if="toast.show" :class="['toast', toast.type]">
+      <span class="mdi" :class="toast.type==='error'?'mdi-alert':'mdi-check-circle'"></span>
+      {{ toast.message }}
+    </div>
+  </transition>
+
+</div>
+
+<script>
+const { createApp, ref, computed } = Vue
+
+createApp({
+  data() {
+    return {
+      panelOpen: false,
+      panelState: 'loaded', // 'loading' | 'loaded' | 'error'
+      showOffline: false,
+      hasMore: false,
+      toast: { show: false, message: '', type: 'success' },
+      nextId: 100,
+
+      notifications: [
+        {
+          id: 1, isRead: false, type: 'job_failed',
+          title: 'Job failed: deploy-staging',
+          message: 'Build step 3 exited with code 1. Check logs for details.',
+          createdAt: new Date(Date.now() - 2*60000).toISOString(),
+          deepLink: '/buds/1'
+        },
+        {
+          id: 2, isRead: false, type: 'approval_requested',
+          title: 'Approval requested: BUD-047 — Notification Bell Improvement',
+          message: 'Sarah requested your review on PR #102',
+          createdAt: new Date(Date.now() - 15*60000).toISOString(),
+          deepLink: '/buds/47'
+        },
+        {
+          id: 3, isRead: false, type: 'reassignment_done',
+          title: 'Reassignment: BUD-051',
+          message: 'Task moved to another developer due to capacity',
+          createdAt: new Date(Date.now() - 45*60000).toISOString(),
+          deepLink: '/buds/51'
+        },
+        {
+          id: 4, isRead: true, type: 'approval_granted',
+          title: 'Approval granted: BUD-044',
+          message: 'PR #98 was merged by Jamie',
+          createdAt: new Date(Date.now() - 2*3600000).toISOString(),
+          deepLink: '/buds/44'
+        },
+        {
+          id: 5, isRead: true, type: 'developer_assigned',
+          title: 'Developer assigned: BUD-039',
+          message: 'Alex has been assigned as developer for this BUD',
+          createdAt: new Date(Date.now() - 24*3600000).toISOString(),
+          deepLink: '/buds/39'
+        }
+      ],
+
+      notifTypes: [
+        { type: 'job_failed',          label: 'Job failed',          color: '#ef4444', icon: 'mdi-alert-circle' },
+        { type: 'approval_requested',  label: 'Approval requested',  color: '#f59e0b', icon: 'mdi-bell-ring-outline' },
+        { type: 'approval_granted',    label: 'Approval granted',    color: '#10b981', icon: 'mdi-check-decagram' },
+        { type: 'approval_rejected',   label: 'Approval rejected',   color: '#ef4444', icon: 'mdi-close-circle-outline' },
+        { type: 'developer_assigned',  label: 'Developer assigned',  color: '#0ea5e9', icon: 'mdi-account-check' },
+        { type: 'reassignment_done',   label: 'Reassignment',        color: '#4f46e5', icon: 'mdi-swap-horizontal' },
+      ]
+    }
+  },
+
+  computed: {
+    unreadCount() {
+      return this.notifications.filter(n => !n.isRead).length
+    }
+  },
+
+  methods: {
+    togglePanel() {
+      this.panelOpen = !this.panelOpen
+      // UX: fetch on open if not already loaded
+      if (this.panelOpen && this.panelState !== 'loaded') {
+        this.simulateFetch()
+      }
+    },
+
+    simulateFetch() {
+      this.panelState = 'loading'
+      setTimeout(() => { this.panelState = 'loaded' }, 1500)
+    },
+
+    retryFetch() {
+      this.simulateFetch()
+    },
+
+    // UX: Optimistic — update immediately, revert on error
+    markRead(id) {
+      const notif = this.notifications.find(n => n.id === id)
+      if (notif) {
+        notif.isRead = true
+        this.showToast('Marked as read', 'success')
+        // In real impl: PATCH /notifications/:id/read; revert on error
+      }
+    },
+
+    // UX: Mark all with debounce — debounce prevents duplicate API calls on rapid clicks
+    markAllRead() {
+      this.notifications.forEach(n => { n.isRead = true })
+      this.showToast('All notifications marked as read', 'success')
+    },
+
+    // UX: Optimistic delete — item removed instantly, readded on API failure
+    deleteNotif(id) {
+      const idx = this.notifications.findIndex(n => n.id === id)
+      if (idx !== -1) {
+        const removed = this.notifications.splice(idx, 1)[0]
+        this.showToast('Notification deleted', 'success')
+        // In real impl: DELETE /notifications/:id
+        // On failure: this.notifications.splice(idx, 0, removed); showToast error
+      }
+    },
+
+    handleItemClick(notif) {
+      if (!notif.isRead) this.markRead(notif.id)
+      // In real impl: router.push(notif.deepLink)
+      this.showToast(`Opening: ${notif.title.substring(0, 30)}…`, 'success')
+    },
+
+    openLink(notif) {
+      if (!notif.isRead) this.markRead(notif.id)
+      this.panelOpen = false
+      this.showToast(`Navigating to ${notif.deepLink}`, 'success')
+    },
+
+    loadMore() {
+      this.showToast('Loading next page…', 'success')
+    },
+
+    // Simulates a real-time WebSocket `notification.new` event
+    simulateNewNotif() {
+      const types = [
+        { type: 'job_failed',         title: 'Job failed: lint-check',           message: 'ESLint found 3 errors in src/components' },
+        { type: 'approval_requested', title: 'Approval requested: BUD-055',      message: 'New PR needs your review' },
+        { type: 'developer_assigned', title: 'Developer assigned: BUD-060',      message: 'You have been assigned a new task' },
+        { type: 'reassignment_done',  title: 'Reassignment: BUD-042',            message: 'Task ownership transferred' },
+      ]
+      const pick = types[Math.floor(Math.random() * types.length)]
+      const notif = {
+        id: ++this.nextId,
+        isRead: false,
+        type: pick.type,
+        title: pick.title,
+        message: pick.message,
+        createdAt: new Date().toISOString(),
+        deepLink: `/buds/${this.nextId}`
+      }
+      // UX: prepend to list so newest is at top; badge auto-increments via computed
+      this.notifications.unshift(notif)
+      if (this.panelState !== 'loaded') this.panelState = 'loaded'
+      this.showToast('New notification received!', 'success')
+    },
+
+    typeColor(type) {
+      const map = {
+        job_failed: '#ef4444',
+        approval_rejected: '#ef4444',
+        approval_requested: '#f59e0b',
+        approval_granted: '#10b981',
+        developer_assigned: '#0ea5e9',
+        reassignment_done: '#4f46e5',
+      }
+      return map[type] || '#6b7280'
+    },
+
+    relTime(iso) {
+      const diffSec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+      if (diffSec < 60)  return 'just now'
+      const m = Math.floor(diffSec / 60)
+      if (m < 60)        return `${m}m ago`
+      const h = Math.floor(m / 60)
+      if (h < 24)        return `${h}h ago`
+      return `${Math.floor(h / 24)}d ago`
+    },
+
+    showToast(message, type = 'success') {
+      this.toast = { show: true, message, type }
+      setTimeout(() => { this.toast.show = false }, 2500)
+    }
+  }
+}).mount('#app')
+</script>
+
+<style>
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s, transform 0.2s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(8px); }
+</style>
+
+</body>
+</html>

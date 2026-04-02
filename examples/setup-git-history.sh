@@ -64,4 +64,4 @@ echo "  Done ($(git rev-list --count HEAD) commits)"
 
 cd ..
 echo ""
-echo "All 3 repos ready. Add them as tracked repositories in FlowDev settings."
+echo "All 3 repos ready. Add them as tracked repositories in Bodhigrove settings."

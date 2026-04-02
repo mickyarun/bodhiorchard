@@ -47,8 +47,17 @@ def publish(topic: str, data: dict) -> None:
     """
     subs = _subscribers.get(topic)
     if not subs:
+        logger.info("event_bus_no_subscribers", topic=topic)
         return
     envelope = {"topic": topic, "data": data}
+    event_type = data.get("event_type", "")
+    if "agent_activity" in topic:
+        logger.info(
+            "event_bus_publish_agent",
+            topic=topic,
+            event_type=event_type,
+            subscriber_count=len(subs),
+        )
     for queue in subs:
         try:
             queue.put_nowait(envelope)

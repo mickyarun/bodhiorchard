@@ -80,6 +80,8 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         mcp_config = build_mcp_config(payload.org_id, tool_names=design_tools)
         use_mcp = mcp_config is not None
 
+        repo_path = await resolve_repo_path(payload.repo_id, payload.org_id)
+        _repo_name = Path(repo_path).name if repo_path else None
         prompt, ds_temp_file = await build_design_prompt(
             bud_ref,
             payload.title,
@@ -89,8 +91,8 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             repo_id=payload.repo_id,
             history=history,
             use_mcp=use_mcp,
+            repo_name=_repo_name,
         )
-        repo_path = await resolve_repo_path(payload.repo_id, payload.org_id)
     else:
         prompt = build_chat_prompt(
             bud_ref,

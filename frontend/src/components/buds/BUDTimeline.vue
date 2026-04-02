@@ -196,6 +196,27 @@
               </div>
             </template>
 
+            <!-- Estimation events -->
+            <template v-else-if="event.event_type === 'estimate_generated'">
+              <div class="tl-primary">
+                <span>AI estimated PROD by {{ formatShortDate(event.detail?.prod_p70 as string | null | undefined) }}</span>
+                <span class="tl-meta">({{ event.detail?.trigger }})</span>
+              </div>
+              <div v-if="event.detail?.complexity" class="tl-meta">
+                Complexity: {{ event.detail.complexity }}/5
+              </div>
+            </template>
+
+            <template v-else-if="event.event_type === 'estimate_overridden'">
+              <div class="tl-primary">
+                <span v-if="event.actor_name" class="tl-actor">{{ event.actor_name }}</span>
+                <span>overrode {{ event.detail?.phase }} deadline to {{ formatShortDate(event.detail?.new_date as string | null | undefined) }}</span>
+              </div>
+              <div v-if="event.detail?.reason" class="tl-meta">
+                Reason: {{ event.detail.reason }}
+              </div>
+            </template>
+
             <!-- Fallback -->
             <template v-else>
               <div class="tl-primary">
@@ -243,6 +264,8 @@ const EVENT_MAP: Record<string, EventConfig> = {
   pr_opened: { icon: 'mdi-source-pull', color: 'info', label: 'PR opened' },
   pr_merged: { icon: 'mdi-source-merge', color: 'success', label: 'PR merged' },
   all_prs_merged: { icon: 'mdi-check-all', color: 'success', label: 'All PRs merged' },
+  estimate_generated: { icon: 'mdi-chart-timeline-variant', color: 'blue', label: 'Estimate updated' },
+  estimate_overridden: { icon: 'mdi-calendar-edit', color: 'orange', label: 'Estimate overridden' },
 }
 
 const DEFAULT_CONFIG: EventConfig = { icon: 'mdi-circle-small', color: 'grey', label: 'Event' }
@@ -297,6 +320,11 @@ function formatSection(section: string): string {
 
 function formatAgent(agent: string): string {
   return AGENT_LABELS[agent] ?? agent
+}
+
+function formatShortDate(dateStr: string | undefined | null): string {
+  if (!dateStr) return '—'
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 function formatTime(dateStr: string): string {

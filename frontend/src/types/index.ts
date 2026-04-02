@@ -19,6 +19,7 @@ export interface User {
   role: UserRoleName
   permissions: string[]
   organizationId: string
+  character_model: string | null
 }
 
 export interface Organization {
@@ -42,7 +43,7 @@ export const BUD_SECTIONS = {
   tech_spec_md: { tab: 'tech-spec', label: 'Tech Spec', exportable: true },
   development: { tab: 'development', label: 'Development', exportable: false },
   code_review: { tab: 'code-review', label: 'Code Review', exportable: false },
-  qa: { tab: 'qa', label: 'QA', exportable: false },
+  testing: { tab: 'testing', label: 'Testing', exportable: false },
   design: { tab: 'design', label: 'Design', exportable: false },
 } as const
 
@@ -63,6 +64,9 @@ export interface BUDListItem {
   bud_number: number
   title: string
   status: BUDStatus
+  complexity: number | null
+  prod_p70_date: string | null
+  current_phase_deadline: string | null
   assignee_id: string | null
   assignee_name: string | null
   created_at: string
@@ -93,7 +97,46 @@ export interface BUDDocument extends BUDListItem {
   designs: BUDDesign[]
   metadata: Record<string, unknown> | null
   impacted_repos: { repo_id: string; repo_name: string }[] | null
+  estimated_dates: Record<string, PhaseEstimateData> | null
   active_agent_task: BUDAgentTask | null
+}
+
+// ── Estimation Types ──────────────────────────────────────
+
+export interface PhaseEstimateData {
+  estimated_completion: string
+  p50_date: string | null
+  p70_date: string | null
+  p85_date: string | null
+  expected_days: number | null
+  std_dev_days: number | null
+  source: 'ai_pert' | 'override'
+  confidence: number
+  override_reason: string | null
+}
+
+export interface BUDEstimates {
+  bud_id: string
+  complexity: number | null
+  phases: PhaseEstimate[]
+  prod_p50: string | null
+  prod_p70: string | null
+  prod_p85: string | null
+  generated_at: string | null
+  trigger: string | null
+}
+
+export interface PhaseEstimate {
+  phase: string
+  estimated_completion: string
+  p50_date: string | null
+  p70_date: string | null
+  p85_date: string | null
+  expected_days: number | null
+  std_dev_days: number | null
+  source: string
+  confidence: number
+  override_reason: string | null
 }
 
 // ── QA Test Case Types ─────────────────────────────────────

@@ -1,5 +1,5 @@
 /**
- * FlowDev Multiplayer Server — Colyseus WebSocket server.
+ * Bodhigrove Multiplayer Server — Colyseus WebSocket server.
  *
  * Rooms:
  *   "house" — House interior (one per house, max 10 players)
@@ -35,4 +35,4 @@ const server = defineServer({
 })
 
 server.listen(port)
-console.log(`[FlowDev Multiplayer] Listening on ws://localhost:${port}`)
+console.log(`[Bodhigrove Multiplayer] Listening on ws://localhost:${port}`)

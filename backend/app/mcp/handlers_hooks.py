@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.auth import MCPAuthResult
 from app.models.dev_activity import DevActivityLog
+from app.models.tracked_repository import TrackedRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.dev_activity import DevActivityHookRequest, DevActivityHookResponse
@@ -124,6 +125,14 @@ async def handle_dev_activity(
             .values(bud_id=bud_id)
         )
 
+    # Resolve repo_name for real-time payloads (same pattern as handle_agent_activity)
+    _pub_repo_name: str | None = None
+    if repo_id:
+        _repo_row = await db.execute(
+            select(TrackedRepository.name).where(TrackedRepository.id == repo_id)
+        )
+        _pub_repo_name = _repo_row.scalar_one_or_none()
+
     # Publish for real-time WebSocket updates if BUD-linked
     if bud_id:
         publish(
@@ -136,10 +145,28 @@ async def handle_dev_activity(
                 "source": "claude_hook",
                 "actor_name": actor_name,
                 "user_id": str(user_id) if user_id else None,
+                "repo_name": _pub_repo_name,
                 "file_path": body.file_path,
                 "created_at": log.created_at.isoformat(),
             },
         )
+
+    # Publish org-scoped dev activity for live 3D garden character updates
+    publish(
+        f"dev_activity:{org.id}",
+        {
+            "id": str(log.id),
+            "event_type": body.event_type,
+            "status": log.status,
+            "message": log.message,
+            "source": "claude_hook",
+            "actor_name": actor_name,
+            "user_id": str(user_id) if user_id else None,
+            "repo_name": _pub_repo_name,
+            "file_path": body.file_path,
+            "created_at": log.created_at.isoformat(),
+        },
+    )
 
     logger.info(
         "hook_activity_recorded",

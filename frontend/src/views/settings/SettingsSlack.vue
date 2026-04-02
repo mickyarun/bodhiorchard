@@ -212,7 +212,7 @@
           </div>
 
           <div class="text-caption text-medium-emphasis mb-3">
-            Link Slack workspace users to FlowDev members, or import them as new members.
+            Link Slack workspace users to Bodhigrove members, or import them as new members.
             <br />
             <strong>Required scopes:</strong>
             <v-chip size="x-small" variant="tonal" color="primary" class="ml-1">users:read</v-chip>
@@ -293,7 +293,7 @@
                 <v-autocomplete
                   v-if="getAction(member.slack_id) === 'link'"
                   :model-value="slackLinkMap[member.slack_id] ?? null"
-                  :items="flowdevMemberOptions"
+                  :items="memberOptions"
                   item-title="name"
                   item-value="id"
                   density="compact"
@@ -463,7 +463,7 @@ const slackLinkLoading = ref(false)
 const slackImportLoading = ref(false)
 const slackLinkSuccess = ref('')
 
-const flowdevMemberOptions = computed(() =>
+const memberOptions = computed(() =>
   membersStore.members
     .filter(m => m.isActive)
     .map(m => ({ id: m.id, name: `${m.name} (${m.email})` })),

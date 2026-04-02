@@ -15,44 +15,80 @@ logger = structlog.get_logger(__name__)
 
 
 async def handle_prd_result(
-    bud_id: uuid_mod.UUID, org_id: uuid_mod.UUID, output: str,
-    task: BUDAgentTask, db: Any,
+    bud_id: uuid_mod.UUID,
+    org_id: uuid_mod.UUID,
+    output: str,
+    task: BUDAgentTask,
+    db: Any,
 ) -> dict | None:
-    """PRD result: Claude wrote to BUD via MCP write_bud tool — just log success."""
+    """PRD result: Claude wrote to BUD via MCP write_bud tool — trigger first estimation."""
+    # Generate initial delivery estimates now that PRD content exists
+    try:
+        from app.repositories.bud import BUDRepository
+        from app.services.bud_estimation import estimate_bud_dates
+
+        bud_repo = BUDRepository(db, org_id=org_id)
+        bud = await bud_repo.get_by_id(bud_id)
+        if bud:
+            await estimate_bud_dates(db, org_id, bud, trigger="prd_completed")
+    except Exception:
+        logger.warning("estimation_failed_after_prd", bud_id=str(bud_id))
+
     return {"section": "requirements_md", "output_length": len(output)}
 
 
 async def handle_tech_arch_result(
-    bud_id: uuid_mod.UUID, org_id: uuid_mod.UUID, output: str,
-    task: BUDAgentTask, db: Any,
+    bud_id: uuid_mod.UUID,
+    org_id: uuid_mod.UUID,
+    output: str,
+    task: BUDAgentTask,
+    db: Any,
 ) -> dict | None:
-    """Tech arch result: save output to tech_spec_md and populate impacted_repos."""
+    """Tech arch result: save output to tech_spec_md and populate impacted_repos.
+
+    The agent outputs markdown followed by a JSON block with impacted_repos.
+    We parse that JSON to determine which repos actually need changes,
+    then strip the JSON block before storing the markdown.
+    """
     from app.repositories.bud import BUDRepository
     from app.repositories.tracked_repository import TrackedRepoRepository
 
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud:
-        bud.tech_spec_md = output
+        # Extract impacted repos from the last JSON fence, then strip it
+        impacted_names, clean_output = _extract_impacted_repos_json(output)
+        bud.tech_spec_md = clean_output
 
         repo_repo = TrackedRepoRepository(db, org_id=org_id)
         repo_triples = await repo_repo.get_active_id_path_name()
+        name_to_repo = {name.lower(): (rid, name) for rid, _path, name in repo_triples}
 
+        # Match agent-declared repo names against tracked repos
         impacted: list[dict[str, str]] = []
-        design_repo_ids = {d.repo_id for d in (bud.designs or []) if d.repo_id}
-
-        for rid, _path, name in repo_triples:
-            if rid in design_repo_ids:
+        for declared_name in impacted_names:
+            match = name_to_repo.get(declared_name.lower())
+            if match:
+                rid, name = match
                 impacted.append({"repo_id": str(rid), "repo_name": name})
 
         if not impacted:
-            impacted = [
-                {"repo_id": str(rid), "repo_name": name}
-                for rid, _path, name in repo_triples
-            ]
+            logger.warning(
+                "tech_arch_no_impacted_repos_parsed",
+                bud_id=str(bud_id),
+                raw_names=impacted_names,
+            )
 
         bud.impacted_repos = impacted
         await db.flush()
+
+        # Re-estimate with richer context (now has tech spec + impacted repos)
+        try:
+            from app.services.bud_estimation import estimate_bud_dates
+
+            await estimate_bud_dates(db, org_id, bud, trigger="tech_arch_completed")
+        except Exception:
+            logger.warning("estimation_failed_after_tech_arch", bud_id=str(bud_id))
 
     if bud and bud.assignee_id:
         from app.services.notification_service import send_lifecycle_notification
@@ -71,8 +107,11 @@ async def handle_tech_arch_result(
 
 
 async def handle_code_review_result(
-    bud_id: uuid_mod.UUID, org_id: uuid_mod.UUID, output: str,
-    task: BUDAgentTask, db: Any,
+    bud_id: uuid_mod.UUID,
+    org_id: uuid_mod.UUID,
+    output: str,
+    task: BUDAgentTask,
+    db: Any,
 ) -> dict | None:
     """Code review result: parse JSON, store comments, auto-transition if clean."""
     from app.repositories.bud import BUDRepository
@@ -112,7 +151,10 @@ async def handle_code_review_result(
             old_status = bud.status
             bud.status = BUDStatus.TESTING
             await record_event(
-                db, org_id, bud_id, "status_change",
+                db,
+                org_id,
+                bud_id,
+                "status_change",
                 detail={"from": old_status, "to": "testing", "auto": True},
             )
             await auto_assign_for_phase(db, org_id, bud, BUDStatus.TESTING)
@@ -121,6 +163,13 @@ async def handle_code_review_result(
 
             await create_agent_task_for_stage(bud, "testing", org_id, db, force=True)
 
+        # Re-estimate with code review context
+        try:
+            from app.services.bud_estimation import estimate_bud_dates
+
+            await estimate_bud_dates(db, org_id, bud, trigger="code_review_completed")
+        except Exception:
+            logger.warning("estimation_failed_after_code_review", bud_id=str(bud_id))
         await db.flush()
 
     return {
@@ -131,8 +180,11 @@ async def handle_code_review_result(
 
 
 async def handle_testing_result(
-    bud_id: uuid_mod.UUID, org_id: uuid_mod.UUID, output: str,
-    task: BUDAgentTask, db: Any,
+    bud_id: uuid_mod.UUID,
+    org_id: uuid_mod.UUID,
+    output: str,
+    task: BUDAgentTask,
+    db: Any,
 ) -> dict | None:
     """Testing result: parse JSON and store test cases in BUD columns."""
     from app.repositories.bud import BUDRepository
@@ -176,6 +228,13 @@ async def handle_testing_result(
             f"- **{manual_count}** manual test cases\n\n"
             f"{parsed_data['test_execution_plan']}"
         )
+        # Re-estimate with QA test case context
+        try:
+            from app.services.bud_estimation import estimate_bud_dates
+
+            await estimate_bud_dates(db, org_id, bud, trigger="testing_completed")
+        except Exception:
+            logger.warning("estimation_failed_after_testing", bud_id=str(bud_id))
         await db.flush()
 
     if bud and bud.assignee_id:
@@ -205,6 +264,47 @@ async def handle_testing_result(
 
 
 # ── Output parsing helpers ────────────────────────────────────────
+
+
+def _extract_impacted_repos_json(output: str) -> tuple[list[str], str]:
+    """Extract impacted repo names from the last JSON fence and return cleaned markdown.
+
+    Returns:
+        (impacted_names, clean_output) — list of repo name strings and
+        the markdown with the JSON block (and its heading) stripped.
+    """
+    import json
+    import re
+
+    impacted_names: list[str] = []
+    clean = output
+
+    # Find the *last* ```json ... ``` fence (agent appends it at the end)
+    fences = list(re.finditer(r"```json\s*\n(.*?)\n\s*```", output, re.DOTALL))
+    if fences:
+        last_fence = fences[-1]
+        try:
+            parsed = json.loads(last_fence.group(1))
+            if isinstance(parsed, dict) and isinstance(parsed.get("impacted_repos"), list):
+                impacted_names = parsed["impacted_repos"]
+        except json.JSONDecodeError:
+            logger.warning("tech_arch_impacted_json_parse_failed")
+
+        # Strip the JSON block and its section heading from stored markdown
+        strip_start = last_fence.start()
+        # Also remove the heading above the fence if present
+        heading_pattern = re.compile(
+            r"#{1,3}\s*(?:REQUIRED:\s*)?Impacted Repos JSON\s*\n+",
+            re.IGNORECASE,
+        )
+        before = clean[:strip_start]
+        heading_match = heading_pattern.search(before)
+        if heading_match and heading_match.end() >= len(before.rstrip()):
+            strip_start = heading_match.start()
+
+        clean = output[:strip_start].rstrip() + "\n"
+
+    return impacted_names, clean
 
 
 def _parse_code_review_output(output: str) -> dict[str, Any]:
@@ -250,9 +350,7 @@ def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
     if isinstance(plan, dict):
         plan = _dict_plan_to_markdown(plan)
     elif isinstance(plan, list):
-        plan = "\n".join(
-            f"- {item}" if isinstance(item, str) else str(item) for item in plan
-        )
+        plan = "\n".join(f"- {item}" if isinstance(item, str) else str(item) for item in plan)
     elif not isinstance(plan, str):
         plan = ""
 

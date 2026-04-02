@@ -250,20 +250,20 @@ async def build_prd_prompt(
     # 3. Instructions
     sections.append("\n---\n\n## Instructions\n")
     sections.append(
-        f"Enrich {bud_ref} with a complete initial PRD. Use `get_bud_context` to "
-        "read the current BUD, then `get_knowledge` to find related features and "
-        "organizational context. Write the enriched content back using `write_bud` "
-        f"with `bud_number: {bud_number}` to UPDATE the existing BUD.\n\n"
-        "**IMPORTANT:** You MUST pass `bud_number` to `write_bud` to update the "
-        "existing BUD. Do NOT omit it — omitting it creates a duplicate.\n\n"
-        "The PRD should include:\n"
-        "- **Problem Statement**: What problem does this solve?\n"
-        "- **Proposed Solution**: High-level approach\n"
-        "- **Acceptance Criteria**: Specific, testable criteria\n"
-        "- **Edge Cases & Error Scenarios**: What could go wrong?\n"
-        "- **Dependencies & Risks**: External factors\n\n"
-        "Preserve the existing triage origin information. Do not overwrite it — "
-        "append the PRD sections below the existing content."
+        f"Enrich {bud_ref} with a focused PRD. Use `get_bud_context` to "
+        "read the current BUD, then `get_knowledge` to find related features. "
+        f"Write back using `write_bud` with `bud_number: {bud_number}` to UPDATE.\n\n"
+        "**IMPORTANT:** Pass `bud_number` to `write_bud` — omitting it creates a duplicate.\n\n"
+        "**Keep it crisp — target 1,500-3,000 characters total.** "
+        "Developers use Claude Code and need scope and decisions, not verbose explanations.\n\n"
+        "Sections (strict format):\n"
+        "- **Problem Statement**: 2-3 sentences. What's broken and why.\n"
+        "- **Proposed Solution**: Bullet points. What to build, not how.\n"
+        "- **Acceptance Criteria**: Checklist, one line each, max 8 items.\n"
+        "- **Edge Cases**: Table (scenario | expected behavior), max 6 rows.\n"
+        "- **Dependencies & Risks**: Bullet points, real blockers only.\n\n"
+        "No code examples. No implementation details. No preamble.\n"
+        "Preserve the existing triage origin — append sections below it."
     )
 
     prompt = "\n".join(sections)

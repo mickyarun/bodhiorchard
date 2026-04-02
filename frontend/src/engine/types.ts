@@ -84,6 +84,17 @@ export interface EngineMember {
   presence?: PresenceState
 }
 
+export interface EngineDevActivity {
+  user_id: string
+  actor_name: string
+  event_type: string       // session_start, commit, file_change, tool_call, session_end, etc.
+  status: string           // in_progress, completed, failed
+  message: string | null
+  repo_name: string | null
+  file_path: string | null
+  created_at: string
+}
+
 export interface EngineAgentActivity {
   agent_name: string
   action: string

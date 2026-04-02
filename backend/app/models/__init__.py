@@ -19,6 +19,7 @@ from app.models.bud import (
     BUDTimelineEventType,
 )
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
+from app.models.bud_estimate_snapshot import BUDEstimateSnapshot
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.design_system import DesignSystemRef
 from app.models.dev_activity import DevActivityLog
@@ -57,6 +58,7 @@ __all__ = [
     "BUDDesign",
     "BUDDesignStatus",
     "BUDDocument",
+    "BUDEstimateSnapshot",
     "BUDStatus",
     "BUDTimelineEvent",
     "BUDTimelineEventType",

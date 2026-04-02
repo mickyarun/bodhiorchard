@@ -19,6 +19,8 @@ import * as pc from 'playcanvas'
 import type { AssetLoader } from '../assets/AssetLoader'
 import { getCharacterGLB, CHARACTER_COUNT } from '../assets/AssetManifest'
 import { hashString } from '../utils/MathUtils'
+import { createNameLabel } from './NameLabel'
+import { type ContainerWithAnims, findAnimTrack, LOCOMOTION_STATE_GRAPH } from './AnimUtils'
 
 // ─── Character model known constants ─────────────
 //
@@ -43,74 +45,10 @@ const CHARACTER_SCALE = CHARACTER_TARGET_HEIGHT / CHARACTER_NATIVE_HEIGHT
  */
 const CHARACTER_Y_OFFSET = 1.0 * CHARACTER_SCALE
 
-/** State graph definition for character locomotion. */
-const CHARACTER_STATE_GRAPH = {
-  layers: [{
-    name: 'locomotion',
-    states: [
-      { name: 'START' },
-      { name: 'Idle', speed: 1.0 },
-      { name: 'Walk', speed: 1.0 },
-      { name: 'Sit', speed: 1.0 },
-    ],
-    transitions: [
-      { from: 'START', to: 'Idle', time: 0, priority: 0 },
-      {
-        from: 'Idle', to: 'Walk', time: 0.2, priority: 0,
-        conditions: [{ parameterName: 'speed', predicate: pc.ANIM_GREATER_THAN, value: 0 }],
-      },
-      {
-        from: 'Walk', to: 'Idle', time: 0.2, priority: 0,
-        conditions: [{ parameterName: 'speed', predicate: pc.ANIM_LESS_THAN_EQUAL_TO, value: 0 }],
-      },
-      {
-        from: 'Idle', to: 'Sit', time: 0.3, priority: 0,
-        conditions: [{ parameterName: 'sitting', predicate: pc.ANIM_EQUAL_TO, value: true }],
-      },
-      {
-        from: 'Sit', to: 'Idle', time: 0.3, priority: 0,
-        conditions: [{ parameterName: 'sitting', predicate: pc.ANIM_EQUAL_TO, value: false }],
-      },
-    ],
-  }],
-  parameters: {
-    speed: { name: 'speed', type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
-    sitting: { name: 'sitting', type: pc.ANIM_PARAMETER_BOOLEAN, value: false },
-  },
-}
-
-/** Container.animations exists at runtime but is missing from TS declarations. */
-interface ContainerWithAnims extends pc.ContainerResource {
-  animations: pc.Asset[]
-}
-
-/**
- * Find an animation track by partial name match in a container's animations.
- * Checks both the Asset.name (path-based, e.g. "file.glb/animation/0") and
- * the AnimTrack.name (original GLTF name, e.g. "idle", "sit").
- */
-function findAnimTrack(
-  container: ContainerWithAnims,
-  keyword: string,
-): pc.AnimTrack | null {
-  const lower = keyword.toLowerCase()
-  for (const animAsset of container.animations) {
-    if (animAsset.name.toLowerCase().includes(lower)) {
-      return animAsset.resource as pc.AnimTrack
-    }
-    const track = animAsset.resource as pc.AnimTrack | null
-    if (track?.name?.toLowerCase().includes(lower)) {
-      return track
-    }
-  }
-  return null
-}
+// State graph and animation utilities imported from shared modules (AnimUtils.ts)
 
 /** Height of the name label above the character's head (in world units). */
 const LABEL_HEIGHT = CHARACTER_TARGET_HEIGHT + 0.25
-const LABEL_WIDTH = 1.2
-const LABEL_CANVAS_W = 256
-const LABEL_CANVAS_H = 64
 
 export interface CharacterEntity {
   entity: pc.Entity
@@ -181,7 +119,7 @@ export class CharacterFactory {
     wrapper.addComponent('anim', { activate: true })
 
     // Load state graph and assign tracks before the entity enters the scene
-    wrapper.anim!.loadStateGraph(CHARACTER_STATE_GRAPH)
+    wrapper.anim!.loadStateGraph(LOCOMOTION_STATE_GRAPH)
     const layer = wrapper.anim!.baseLayer
 
     const idleTrack = findAnimTrack(container, 'idle')
@@ -200,88 +138,14 @@ export class CharacterFactory {
     }
 
     // Name label billboard above character head
-    const label = CharacterFactory.createNameLabel(
+    const label = createNameLabel(
       memberName,
       this.loader.app.graphicsDevice,
+      LABEL_HEIGHT,
     )
     wrapper.addChild(label)
 
     return { entity: wrapper, memberId, memberName }
-  }
-
-  /** Create a billboard name label using a canvas-textured plane. */
-  private static createNameLabel(
-    name: string,
-    device: pc.GraphicsDevice,
-  ): pc.Entity {
-    const canvas = document.createElement('canvas')
-    canvas.width = LABEL_CANVAS_W
-    canvas.height = LABEL_CANVAS_H
-    const ctx = canvas.getContext('2d')!
-
-    ctx.clearRect(0, 0, LABEL_CANVAS_W, LABEL_CANVAS_H)
-
-    // Semi-transparent background pill (arcTo for universal browser support)
-    const padding = 8
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
-    const textWidth = LABEL_CANVAS_W - padding * 2
-    const rx = (LABEL_CANVAS_W - textWidth) / 2
-    const r = 12
-    const left = rx, top = 4, w = textWidth, h = LABEL_CANVAS_H - 8
-    ctx.beginPath()
-    ctx.moveTo(left + r, top)
-    ctx.arcTo(left + w, top, left + w, top + h, r)
-    ctx.arcTo(left + w, top + h, left, top + h, r)
-    ctx.arcTo(left, top + h, left, top, r)
-    ctx.arcTo(left, top, left + w, top, r)
-    ctx.closePath()
-    ctx.fill()
-
-    // White text
-    ctx.fillStyle = '#ffffff'
-    ctx.font = 'bold 28px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(name, LABEL_CANVAS_W / 2, LABEL_CANVAS_H / 2, LABEL_CANVAS_W - padding * 2)
-
-    // Create texture from canvas using setSource (handles GPU upload internally)
-    const texture = new pc.Texture(device, {
-      width: LABEL_CANVAS_W,
-      height: LABEL_CANVAS_H,
-      minFilter: pc.FILTER_LINEAR,
-      magFilter: pc.FILTER_LINEAR,
-      addressU: pc.ADDRESS_CLAMP_TO_EDGE,
-      addressV: pc.ADDRESS_CLAMP_TO_EDGE,
-      mipmaps: false,
-    })
-    texture.setSource(canvas)
-
-    // Emissive material — self-lit text without disabling the PBR pipeline.
-    // Diffuse black + full emissive means lighting doesn't darken the label.
-    const material = new pc.StandardMaterial()
-    material.diffuse = new pc.Color(0, 0, 0)
-    material.emissiveMap = texture
-    material.emissive = new pc.Color(1, 1, 1)
-    material.opacityMap = texture
-    material.opacityMapChannel = 'a'
-    material.blendType = pc.BLEND_NORMAL
-    material.depthWrite = false
-    material.cull = pc.CULLFACE_NONE
-    material.update()
-
-    // Plane entity positioned above head
-    const entity = new pc.Entity('NameLabel')
-    entity.addComponent('render', { type: 'plane' })
-    entity.render!.meshInstances[0].material = material
-    entity.setLocalPosition(0, LABEL_HEIGHT, 0)
-    // Negative X scale corrects the mirror effect from lookAt() billboard rotation
-    entity.setLocalScale(-LABEL_WIDTH, 1, LABEL_WIDTH * (LABEL_CANVAS_H / LABEL_CANVAS_W))
-    entity.setLocalEulerAngles(90, 0, 0)
-
-    // Tag for billboard update in Application.update()
-    entity.tags.add('billboard')
-
-    return entity
   }
 
   /** Clear cached containers (call on scene teardown). */

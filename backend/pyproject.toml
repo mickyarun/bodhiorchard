@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "flowdev-backend"
+name = "bodhigrove-backend"
 version = "0.1.0"
-description = "FlowDev AI-powered software development platform backend"
+description = "Bodhigrove AI-powered software development platform backend"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"

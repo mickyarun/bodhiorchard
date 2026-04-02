@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.bud_chat import router as chat_router
 from app.api.v1.bud_designs import router as designs_router
+from app.api.v1.bud_estimates import router as estimates_router
 from app.api.v1.bud_prs import router as prs_router
 from app.api.v1.bud_qa import router as qa_router
 from app.api.v1.bud_workflows import router as workflows_router
@@ -41,7 +42,9 @@ logger = structlog.get_logger(__name__)
 
 
 async def _bud_response(
-    bud: BUDDocument, org_id: uuid.UUID, db: AsyncSession,
+    bud: BUDDocument,
+    org_id: uuid.UUID,
+    db: AsyncSession,
 ) -> BUDRead:
     """Build BUDRead with active (or last-failed) agent task attached."""
     task_repo = BUDAgentTaskRepository(db, org_id=org_id)
@@ -64,6 +67,7 @@ router = APIRouter(tags=["buds"])
 
 # ── Sub-routers ───────────────────────────────────────────────────
 router.include_router(designs_router, prefix="/{bud_id}/designs", tags=["bud-designs"])
+router.include_router(estimates_router, prefix="/{bud_id}", tags=["bud-estimates"])
 router.include_router(prs_router, tags=["bud-prs"])
 router.include_router(qa_router, prefix="/{bud_id}/qa", tags=["bud-qa"])
 router.include_router(workflows_router, prefix="/{bud_id}", tags=["bud-workflows"])
@@ -160,10 +164,15 @@ async def create_bud(
     from app.services.bud_agent_trigger import create_agent_task_for_stage
 
     await create_agent_task_for_stage(
-        bud, "bud", current_user.org_id, db,
+        bud,
+        "bud",
+        current_user.org_id,
+        db,
         triggered_by=current_user.id,
         force=True,
     )
+
+    # Estimation deferred — triggers after PRD agent completes (via agent_result_handlers)
 
     return await _bud_response(bud, current_user.org_id, db)
 
@@ -343,9 +352,7 @@ async def _trigger_status_jobs(
 
     # Design phase: only prompt for generation if no designs exist yet
     if new_status == BUDStatus.DESIGN and old_status != BUDStatus.DESIGN:
-        has_designs = bud.designs and any(
-            d.status == "ready" for d in bud.designs
-        )
+        has_designs = bud.designs and any(d.status == "ready" for d in bud.designs)
         if not has_designs:
             response.headers["X-Design-Available"] = "true"
 
@@ -354,12 +361,15 @@ async def _trigger_status_jobs(
         from app.services.bud_agent_trigger import create_agent_task_for_stage
 
         # Force re-run when going back to code_review from later stages
-        force = (
-            new_status == BUDStatus.CODE_REVIEW
-            and old_status in (BUDStatus.TESTING, BUDStatus.UAT)
+        force = new_status == BUDStatus.CODE_REVIEW and old_status in (
+            BUDStatus.TESTING,
+            BUDStatus.UAT,
         )
         await create_agent_task_for_stage(
-            bud, str(new_status), current_user.org_id, db,
+            bud,
+            str(new_status),
+            current_user.org_id,
+            db,
             triggered_by=current_user.id,
             force=force,
         )
@@ -397,8 +407,12 @@ async def trigger_re_review(
         raise HTTPException(status_code=409, detail="Another task is already running")
 
     await create_agent_task_for_stage(
-        bud, "code_review", current_user.org_id, db,
-        triggered_by=current_user.id, force=True,
+        bud,
+        "code_review",
+        current_user.org_id,
+        db,
+        triggered_by=current_user.id,
+        force=True,
     )
     await db.commit()
 
@@ -467,16 +481,74 @@ async def retry_agent_task(
     db.add(new_task)
     await db.flush()
 
-    # Enqueue job
-    job = create_job(
-        JOB_BUD_AGENT,
-        payload=BUDAgentTaskPayload(
-            org_id=str(current_user.org_id),
-            bud_id=str(bud_id),
-            task_id=str(new_task.id),
-        ).model_dump(),
-        user_id=str(current_user.id),
-    )
+    # Route to the correct job handler based on task type
+    if old_task.task_type == "design":
+        from app.models.bud import BUDDesignStatus
+        from app.repositories.bud import BUDDesignRepository, BUDRepository
+        from app.schemas.jobs import DesignAgentJobPayload
+        from app.services.job_queue import JOB_DESIGN_AGENT
+
+        bud_repo = BUDRepository(db, org_id=current_user.org_id)
+        bud = await bud_repo.get_by_id(bud_id)
+        if not bud:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+
+        design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
+        designs = await design_repo.list_for_bud(bud_id)
+        if not designs:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No design rows found. Use Generate instead of Retry.",
+            )
+
+        # Re-enqueue each failed/stuck design (same pattern as regenerate_design)
+        first_job_id: str | None = None
+        for design in designs:
+            if design.status not in (BUDDesignStatus.FAILED, BUDDesignStatus.GENERATING):
+                continue
+            design.status = BUDDesignStatus.GENERATING
+
+            payload = DesignAgentJobPayload(
+                org_id=str(current_user.org_id),
+                bud_id=str(bud_id),
+                bud_number=bud.bud_number,
+                title=bud.title,
+                requirements_md=bud.requirements_md or "",
+                repo_id=str(design.repo_id) if design.repo_id else None,
+                design_id=str(design.id),
+                skill_id=str(old_task.skill_id) if old_task.skill_id else None,
+                task_id=str(new_task.id),
+            )
+            job = create_job(
+                JOB_DESIGN_AGENT,
+                payload=payload.model_dump(),
+                user_id=str(current_user.id),
+            )
+            design.job_id = job.job_id
+            if first_job_id is None:
+                first_job_id = job.job_id
+
+        if first_job_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No failed designs to retry.",
+            )
+        new_task.job_id = first_job_id
+        new_task.status = AgentTaskStatus.RUNNING
+        await db.commit()
+        await db.refresh(new_task)
+        return BUDAgentTaskRead.model_validate(new_task)
+    else:
+        job = create_job(
+            JOB_BUD_AGENT,
+            payload=BUDAgentTaskPayload(
+                org_id=str(current_user.org_id),
+                bud_id=str(bud_id),
+                task_id=str(new_task.id),
+            ).model_dump(),
+            user_id=str(current_user.id),
+        )
+
     new_task.job_id = job.job_id
     new_task.status = AgentTaskStatus.RUNNING
 

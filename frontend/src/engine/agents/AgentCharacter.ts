@@ -96,12 +96,10 @@ type AgentState = 'spawning' | 'working' | 'walking' | 'completing' | 'fading' |
 export class AgentCharacter {
   private wrapper: pc.Entity | null = null
   private appRef: Application | null = null
-  private loader: AssetLoader | null = null
   private label: AgentLabel | null = null
   private labelEntity: pc.Entity | null = null
   private spaceship: SpaceshipTransport
   private renderEntities: pc.Entity[] = []
-  private parentEntity: pc.Entity | null = null
 
   // State machine
   private state: AgentState = 'spawning'
@@ -201,8 +199,6 @@ export class AgentCharacter {
     })
 
     parent.addChild(this.wrapper)
-    this.parentEntity = parent
-    this.loader = loader
     this.currentAction = action
 
     // Start spawn: spaceship flies in, robot hidden until drop
@@ -319,7 +315,7 @@ export class AgentCharacter {
       case 'completing':
         this.stateTimer += dt * 1000
         if (this.stateTimer >= COMPLETE_PAUSE_MS) {
-          // Spaceship comes back for pickup
+          // Spaceship comes back for pickup — hold hover while robot beams up
           this.state = 'fading'
           this.wrapper.anim?.setInteger('jumping', 0)
           const pos = this.wrapper.getPosition()
@@ -328,7 +324,7 @@ export class AgentCharacter {
             // Ship hovering — beam up the robot
             this.fadeDirection = 'out'
             this.fadeTimer = 0
-          })
+          }, true)
         }
         break
 
@@ -351,8 +347,6 @@ export class AgentCharacter {
     this.wrapper?.destroy()
     this.wrapper = null
     this.appRef = null
-    this.loader = null
-    this.parentEntity = null
     this.renderEntities = []
   }
 
@@ -402,6 +396,13 @@ export class AgentCharacter {
     } else {
       const t = Math.min(this.fadeTimer / TELEPORT_MS, 1)
       this.setOpacity(1 - t)
+      if (t >= 1) {
+        this.fadeDirection = 'none'
+        // Hide label so it doesn't linger after robot fades out
+        if (this.labelEntity) this.labelEntity.enabled = false
+        // Robot beamed up — now ship can fly away
+        this.spaceship.flyOut(() => {})
+      }
     }
   }
 
@@ -424,17 +425,6 @@ export class AgentCharacter {
     }
   }
 
-  private measureHeight(renderEntity: pc.Entity): number {
-    let maxY = 1.0 // fallback
-    const renders = renderEntity.findComponents('render') as pc.RenderComponent[]
-    for (const r of renders) {
-      for (const mi of r.meshInstances) {
-        const top = mi.aabb.getMax().y * ROBOT_SCALE
-        if (top > maxY) maxY = top
-      }
-    }
-    return maxY
-  }
 
   private collectRenderEntities(root: pc.Entity): void {
     if (root.render) this.renderEntities.push(root)

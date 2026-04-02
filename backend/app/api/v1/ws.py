@@ -66,6 +66,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         try:
             while True:
                 envelope = await bus_queue.get()
+                if "agent_activity" in topic:
+                    evt = envelope.get("data", {}).get("event_type", "")
+                    logger.info("ws_forwarding_agent_event", topic=topic, event_type=evt)
                 try:
                     send_queue.put_nowait(envelope)
                 except asyncio.QueueFull:

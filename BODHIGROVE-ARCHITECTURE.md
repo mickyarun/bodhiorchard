@@ -1,4 +1,4 @@
-# FlowDev Technical Architecture Document
+# Bodhigrove Technical Architecture Document
 
 **Version**: 2.1
 **Last Updated**: 2026-03-17
@@ -35,7 +35,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        FlowDev Platform                             │
+│                        Bodhigrove Platform                             │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ┌──────────────────────┐  ┌──────────────────────┐                │
@@ -384,14 +384,14 @@ LIMIT 5;
 ### 2.5 GitHub Apps for Integration
 
 **Installation Flow:**
-1. Org admin visits FlowDev dashboard
+1. Org admin visits Bodhigrove dashboard
 2. Clicks "Connect GitHub Organization"
 3. Redirected to GitHub OAuth approval
-4. User grants FlowDev app access to:
+4. User grants Bodhigrove app access to:
    - Code repos (read access)
    - PR/merge events (webhooks)
    - Workflow runs (check status)
-5. FlowDev stores GitHub App installation token in `organizations.github_app_token`
+5. Bodhigrove stores GitHub App installation token in `organizations.github_app_token`
 
 **Webhook Events:**
 ```python
@@ -436,10 +436,10 @@ Event Subscriptions:
   - app_mention (questions/updates)
 
 Slash Commands:
-  - /flowdev-request (submit feature request)
-  - /flowdev-status (check PRD status)
-  - /flowdev-assign (manually assign dev)
-  - /flowdev-capacity (view team capacity)
+  - /bodhigrove-request (submit feature request)
+  - /bodhigrove-status (check PRD status)
+  - /bodhigrove-assign (manually assign dev)
+  - /bodhigrove-capacity (view team capacity)
 ```
 
 **Request Signing Validation:**
@@ -3782,7 +3782,7 @@ PRD Repo:
 ```yaml
 # .github/workflows/status-update.yml
 
-name: FlowDev Status Update
+name: Bodhigrove Status Update
 on:
   pull_request:
     types: [closed]
@@ -3802,10 +3802,10 @@ jobs:
           fi
           echo "prd_ref=$PRD" >> $GITHUB_OUTPUT
 
-      - name: Call FlowDev API
+      - name: Call Bodhigrove API
         if: steps.extract_prd.outputs.prd_ref != ''
         run: |
-          curl -X POST https://flowdev.your-domain.com/api/webhooks/github \
+          curl -X POST https://bodhigrove.your-domain.com/api/webhooks/github \
             -H "Content-Type: application/json" \
             -H "X-GitHub-Event: pull_request" \
             -d '{
@@ -3843,11 +3843,11 @@ jobs:
           AFFECTED=$(git diff origin/main --name-only | grep -E '^src/(billing|payment)' || echo "")
           [ ! -z "$AFFECTED" ] && echo "needs_rule_update=true" >> $GITHUB_OUTPUT
 
-      - name: Trigger FlowDev Rule Update
+      - name: Trigger Bodhigrove Rule Update
         if: steps.check_rules.outputs.needs_rule_update == 'true'
         run: |
-          curl -X POST https://flowdev.your-domain.com/api/agents/status/trigger \
-            -H "Authorization: Bearer ${{ secrets.FLOWDEV_API_KEY }}" \
+          curl -X POST https://bodhigrove.your-domain.com/api/agents/status/trigger \
+            -H "Authorization: Bearer ${{ secrets.BODHIGROVE_API_KEY }}" \
             -d '{"pr_number": ${{ github.event.pull_request.number }}}'
 
       - name: Post PR Comment
@@ -3870,7 +3870,7 @@ jobs:
 ### 10.1 Event Subscriptions & Commands
 
 ```yaml
-app_display_name: FlowDev
+app_display_name: Bodhigrove
 
 scopes:
   - chat:write
@@ -3885,13 +3885,13 @@ events:
   - reaction_added
 
 slash_commands:
-  - /flowdev-request     # Submit feature request
-  - /flowdev-status      # Check PRD status
-  - /flowdev-assign      # Assign dev
-  - /flowdev-capacity    # View team capacity
-  - /flowdev-prd         # Generate PRD via Claude Agent SDK
-  - /flowdev-standup     # Trigger standup generation
-  - /flowdev-triage      # Trigger triage on a Slack thread
+  - /bodhigrove-request     # Submit feature request
+  - /bodhigrove-status      # Check PRD status
+  - /bodhigrove-assign      # Assign dev
+  - /bodhigrove-capacity    # View team capacity
+  - /bodhigrove-prd         # Generate PRD via Claude Agent SDK
+  - /bodhigrove-standup     # Trigger standup generation
+  - /bodhigrove-triage      # Trigger triage on a Slack thread
 ```
 
 ### 10.2 Slash Commands Implementation
@@ -3905,7 +3905,7 @@ async def slack_slash_command(request: Request):
     user_id = payload['user_id']
     channel_id = payload['channel_id']
 
-    if command == '/flowdev-request':
+    if command == '/bodhigrove-request':
         background_tasks.add_task(
             triage_agent.process_slack_message,
             message_text=text,
@@ -3914,13 +3914,13 @@ async def slack_slash_command(request: Request):
         )
         return {"response_type": "in_channel", "text": f"📋 Processing: {text}"}
 
-    elif command == '/flowdev-status':
+    elif command == '/bodhigrove-status':
         prd_num = extract_prd_number(text)
         prd = await prd_service.get_prd_by_number(prd_num)
         blocks = format_prd_status_blocks(prd)
         return {"response_type": "in_channel", "blocks": blocks}
 
-    elif command == '/flowdev-capacity':
+    elif command == '/bodhigrove-capacity':
         capacity = await capacity_service.get_team_capacity()
         blocks = format_capacity_blocks(capacity)
         return {"response_type": "in_channel", "blocks": blocks}
@@ -4006,7 +4006,7 @@ API_PORT=8000
 ENV=production
 
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/flowdev
+DATABASE_URL=postgresql://user:password@localhost:5432/bodhigrove
 DATABASE_POOL_SIZE=20
 
 # Authentication
@@ -4045,7 +4045,7 @@ AGNO_MODEL_PROVIDER=ollama
 AGNO_MODEL=llama3:8b
 
 # Public URL (set when using Cloudflare Tunnel or any reverse proxy)
-PUBLIC_URL=https://api.flowdev.yourdomain.com
+PUBLIC_URL=https://api.bodhigrove.yourdomain.com
 
 # Cloudflare Tunnel (only needed with docker compose --profile tunnel)
 CLOUDFLARE_TUNNEL_TOKEN=your-tunnel-token
@@ -4064,7 +4064,7 @@ version: '3.9'
 services:
   ollama:
     image: ollama/ollama:latest
-    container_name: flowdev-ollama
+    container_name: bodhigrove-ollama
     ports:
       - "11434:11434"
     volumes:
@@ -4082,7 +4082,7 @@ services:
 
   ollama-init:
     image: ollama/ollama:latest
-    container_name: flowdev-ollama-init
+    container_name: bodhigrove-ollama-init
     depends_on:
       ollama:
         condition: service_healthy
@@ -4094,24 +4094,24 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg16-latest
-    container_name: flowdev-postgres
+    container_name: bodhigrove-postgres
     environment:
-      POSTGRES_USER: flowdev
-      POSTGRES_PASSWORD: flowdev_password
-      POSTGRES_DB: flowdev
+      POSTGRES_USER: bodhigrove
+      POSTGRES_PASSWORD: bodhigrove_password
+      POSTGRES_DB: bodhigrove
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flowdev"]
+      test: ["CMD-SHELL", "pg_isready -U bodhigrove"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: flowdev-redis
+    container_name: bodhigrove-redis
     ports:
       - "6379:6379"
     healthcheck:
@@ -4123,9 +4123,9 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: flowdev-backend
+    container_name: bodhigrove-backend
     environment:
-      DATABASE_URL: postgresql://flowdev:flowdev_password@postgres:5432/flowdev
+      DATABASE_URL: postgresql://bodhigrove:bodhigrove_password@postgres:5432/bodhigrove
       REDIS_URL: redis://redis:6379/0
       ENV: development
       LLM_PROVIDER: ollama
@@ -4153,7 +4153,7 @@ services:
   frontend:
     build:
       context: ./frontend
-    container_name: flowdev-frontend
+    container_name: bodhigrove-frontend
     environment:
       VITE_API_URL: http://localhost:8000/api
     ports:
@@ -4239,7 +4239,7 @@ def verify_slack_signature(signature: str, timestamp: str, body: str, secret: st
 
 ### 12.3 Role-Based Access Control (9 Roles, 9 Permission Categories)
 
-FlowDev uses a **granular RBAC model** with 9 system roles, 9 permission categories, and support for custom org-level roles.
+Bodhigrove uses a **granular RBAC model** with 9 system roles, 9 permission categories, and support for custom org-level roles.
 
 **Role Hierarchy:**
 
@@ -4516,7 +4516,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  FlowDev                                    Arun • Atoa • ⚙    │
+│  Bodhigrove                                    Arun • Atoa • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Good morning, Arun                          Thu, Mar 5 2026    │
@@ -4566,7 +4566,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  FlowDev                                   Sarah • Atoa • ⚙    │
+│  Bodhigrove                                   Sarah • Atoa • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Good morning, Sarah                         Thu, Mar 5 2026    │
@@ -4623,7 +4623,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  FlowDev                                   James • Atoa • ⚙    │
+│  Bodhigrove                                   James • Atoa • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Good morning, James                         Thu, Mar 5 2026    │
@@ -4675,7 +4675,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  FlowDev                                    Alex • Atoa • ⚙    │
+│  Bodhigrove                                    Alex • Atoa • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─── OPEN TICKETS ──────────────────────────────────────┐     │
@@ -5443,22 +5443,22 @@ async def get_org_context(
 
 ```python
 # Domain exceptions
-class FlowDevError(Exception):
-    """Base exception for all FlowDev errors."""
+class BodhigroveError(Exception):
+    """Base exception for all Bodhigrove errors."""
     def __init__(self, message: str, code: str, status_code: int = 400):
         self.message = message
         self.code = code
         self.status_code = status_code
 
-class PRDNotFoundError(FlowDevError):
+class PRDNotFoundError(BodhigroveError):
     def __init__(self, prd_id: str):
         super().__init__(f"PRD {prd_id} not found", "PRD_NOT_FOUND", 404)
 
-class PermissionDeniedError(FlowDevError):
+class PermissionDeniedError(BodhigroveError):
     def __init__(self, permission: str):
         super().__init__(f"Permission denied: {permission}", "PERMISSION_DENIED", 403)
 
-class PRDTransitionError(FlowDevError):
+class PRDTransitionError(BodhigroveError):
     def __init__(self, current: str, target: str):
         super().__init__(
             f"Cannot transition from '{current}' to '{target}'",
@@ -5466,8 +5466,8 @@ class PRDTransitionError(FlowDevError):
         )
 
 # Global exception handler
-@app.exception_handler(FlowDevError)
-async def flowdev_error_handler(request: Request, exc: FlowDevError):
+@app.exception_handler(BodhigroveError)
+async def bodhigrove_error_handler(request: Request, exc: BodhigroveError):
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -5546,14 +5546,14 @@ event_bus.subscribe(Events.BUG_THRESHOLD_EXCEEDED, on_bug_threshold)
 
 ## 15. Support Integration
 
-This addendum covers features F13–F15 which extend the core FlowDev platform with customer-facing support ticket integration, customer revenue-based profiling, and a PRD reopening lifecycle.
+This addendum covers features F13–F15 which extend the core Bodhigrove platform with customer-facing support ticket integration, customer revenue-based profiling, and a PRD reopening lifecycle.
 
 ---
 
 ### 15.1 New Features (F13-F15)
 
 ### F13. Support Ticket Integration (Customer Bugs → Dev Lifecycle)
-- Support tickets (from Freshdesk, Zendesk, Intercom, or Slack) feed into the FlowDev lifecycle as **customer bugs**
+- Support tickets (from Freshdesk, Zendesk, Intercom, or Slack) feed into the Bodhigrove lifecycle as **customer bugs**
 - **Support Agent** (new Agent #9) triages incoming tickets:
   - Semantic search: is this a known bug? Is there already a PRD for this feature?
   - If known bug → link ticket to existing bug → notify customer with status/ETA
@@ -6377,7 +6377,7 @@ The extension connects to the **same FastAPI REST API** as the web app. Zero bac
 | **File Bug** | Command palette + quick input | `POST /api/bugs` |
 | **View Standup** | Webview panel | `GET /api/standups/today` |
 | **PRD Status Change** | Notification | WebSocket subscription |
-| **Deep Link to Web** | Open in browser | `https://app.flowdev.io/prds/{id}` |
+| **Deep Link to Web** | Open in browser | `https://app.bodhigrove.io/prds/{id}` |
 
 ### 16.4 Status Bar Context
 
@@ -6395,7 +6395,7 @@ async function updateStatusBar() {
     const prd = prds[0];
     statusBarItem.text = `$(file-code) PRD-${prd.prd_number}: ${prd.title} [${prd.status}]`;
     statusBarItem.tooltip = `Complexity: ${prd.metadata.complexity_score}/10\nEstimated: ${prd.metadata.estimated_days} days`;
-    statusBarItem.command = 'flowdev.openPRD';
+    statusBarItem.command = 'bodhigrove.openPRD';
   }
   statusBarItem.show();
 }
@@ -6404,23 +6404,23 @@ async function updateStatusBar() {
 ### 16.5 Command Palette Commands
 
 ```
-FlowDev: Show My PRDs
-FlowDev: Show My Bugs
-FlowDev: File a Bug (opens quick input)
-FlowDev: Trigger Triage Agent
-FlowDev: View Today's Standup
-FlowDev: Open PRD Board (opens web app)
-FlowDev: Search PRDs (semantic search)
-FlowDev: View Capacity
+Bodhigrove: Show My PRDs
+Bodhigrove: Show My Bugs
+Bodhigrove: File a Bug (opens quick input)
+Bodhigrove: Trigger Triage Agent
+Bodhigrove: View Today's Standup
+Bodhigrove: Open PRD Board (opens web app)
+Bodhigrove: Search PRDs (semantic search)
+Bodhigrove: View Capacity
 ```
 
 ### 16.6 Authentication
 
 The extension uses the same JWT tokens as the web app. On first launch:
-1. User clicks "Sign in to FlowDev"
-2. Extension opens browser to `https://app.flowdev.io/vscode-auth`
+1. User clicks "Sign in to Bodhigrove"
+2. Extension opens browser to `https://app.bodhigrove.io/vscode-auth`
 3. User logs in, app generates a device token
-4. Token is passed back to VSCode via URI handler (`vscode://flowdev/auth?token=...`)
+4. Token is passed back to VSCode via URI handler (`vscode://bodhigrove/auth?token=...`)
 5. Extension stores token in VSCode SecretStorage
 
 ### 16.7 Timeline
@@ -6436,7 +6436,7 @@ The extension uses the same JWT tokens as the web app. On first launch:
 
 ### 17.1 LLM Provider Abstraction
 
-FlowDev uses **LiteLLM** as the LLM abstraction layer, enabling seamless switching between local and cloud providers.
+Bodhigrove uses **LiteLLM** as the LLM abstraction layer, enabling seamless switching between local and cloud providers.
 
 ```python
 # backend/app/services/llm_service.py
@@ -6521,16 +6521,16 @@ Each agent is assigned a model tier based on task complexity:
 
 ### 17.4 Codebase-Aware Agent Execution (Local Claude Code / API)
 
-Agents that generate PRDs, technical plans, and retrospectives need deep codebase awareness — they must read source files, grep patterns, understand git history, and apply org-level design guidelines. Direct API calls lack this context. Claude Code CLI running on the same machine as FlowDev with the source code accessible locally solves this.
+Agents that generate PRDs, technical plans, and retrospectives need deep codebase awareness — they must read source files, grep patterns, understand git history, and apply org-level design guidelines. Direct API calls lack this context. Claude Code CLI running on the same machine as Bodhigrove with the source code accessible locally solves this.
 
-> **Note**: FlowDev runs directly on the machine where the source code lives. There is no separate Mac Mini, remote node, or network discovery — agents execute locally via Claude Code CLI or cloud API calls.
+> **Note**: Bodhigrove runs directly on the machine where the source code lives. There is no separate Mac Mini, remote node, or network discovery — agents execute locally via Claude Code CLI or cloud API calls.
 
 #### 17.4.1 Two Execution Modes (Configurable at Setup)
 
 | Mode | Execution | Codebase Access | Quality | Cost | Complexity |
 |------|-----------|----------------|---------|------|------------|
-| **A: Local Claude Code** | `claude -p "..."` via subprocess on the FlowDev host | Full filesystem (Read/Glob/Grep/Bash) + Skills + CLAUDE.md | Highest | API key billing | Low |
-| **B: Direct API** | `litellm` from FlowDev backend | Limited (prompt-only, no filesystem) | Good | API key billing | Lowest |
+| **A: Local Claude Code** | `claude -p "..."` via subprocess on the Bodhigrove host | Full filesystem (Read/Glob/Grep/Bash) + Skills + CLAUDE.md | Highest | API key billing | Low |
+| **B: Direct API** | `litellm` from Bodhigrove backend | Limited (prompt-only, no filesystem) | Good | API key billing | Lowest |
 
 Mode A is recommended. Mode B is the fallback when Claude Code is not installed.
 
@@ -6538,11 +6538,11 @@ Mode A is recommended. Mode B is the fallback when Claude Code is not installed.
 
 ```
 SLACK / GITHUB
-  /flowdev-prd "payment retry"
-  /flowdev-triage "thread URL"
+  /bodhigrove-prd "payment retry"
+  /bodhigrove-triage "thread URL"
                | webhook (via Cloudflare Tunnel or localhost)
                v
-  FlowDev Host Machine (Backend + Agents + Source Code)
+  Bodhigrove Host Machine (Backend + Agents + Source Code)
 
   ┌─────────────────────────────────────────┐
   │  FastAPI Backend                         │
@@ -6568,7 +6568,7 @@ SLACK / GITHUB
   │    service-payments/                     │
   │    frontend-app/                         │
   │                                          │
-  │  MCP Writeback --> FlowDev API (localhost)│
+  │  MCP Writeback --> Bodhigrove API (localhost)│
   │    - write_prd(title, content, metadata) │
   │    - update_task_status(task_id, status)  │
   │    - post_slack_message(channel, text)    │
@@ -6589,45 +6589,45 @@ SLACK / GITHUB
       CLAUDE.md
     frontend-app/
       CLAUDE.md
-    flowdev/                      # FlowDev itself
+    bodhigrove/                      # Bodhigrove itself
       CLAUDE.md
   .claude/
     CLAUDE.md                     # Org-level context (loaded in ALL sessions)
     settings.json                 # Claude Code settings
-    .mcp.json                     # MCP server config (FlowDev writeback)
+    .mcp.json                     # MCP server config (Bodhigrove writeback)
 ```
 
 **Networking: Cloudflare Tunnel (optional)**
 
-Public access is provided via Cloudflare Tunnel (see Section 17.5). For local-only deployments, no networking setup is needed — FlowDev runs on `localhost:8000` (API) and `localhost:3000` (UI).
+Public access is provided via Cloudflare Tunnel (see Section 17.5). For local-only deployments, no networking setup is needed — Bodhigrove runs on `localhost:8000` (API) and `localhost:3000` (UI).
 
 **Process management (launchd on macOS):**
 
 ```xml
-<!-- ~/Library/LaunchAgents/com.flowdev.runner.plist -->
+<!-- ~/Library/LaunchAgents/com.bodhigrove.runner.plist -->
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.flowdev.runner</string>
+    <string>com.bodhigrove.runner</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/python3</string>
-        <string>/Users/flowdev/flowdev-runner/runner.py</string>
+        <string>/Users/bodhigrove/bodhigrove-runner/runner.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/flowdev/flowdev-runner/logs/stdout.log</string>
+    <string>/Users/bodhigrove/bodhigrove-runner/logs/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/flowdev/flowdev-runner/logs/stderr.log</string>
+    <string>/Users/bodhigrove/bodhigrove-runner/logs/stderr.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>ANTHROPIC_API_KEY</key>
         <string>from-keychain</string>
-        <key>FLOWDEV_API_URL</key>
+        <key>BODHIGROVE_API_URL</key>
         <string>http://localhost:8000</string>
     </dict>
 </dict>
@@ -6636,10 +6636,10 @@ Public access is provided via Cloudflare Tunnel (see Section 17.5). For local-on
 
 #### 17.4.4 Task Runner Daemon
 
-The daemon runs on the Mac Mini, polls a Redis queue for tasks, and runs the configured CLI tool. On startup, it **self-registers** with the FlowDev backend and waits for admin approval before accepting tasks. It also sends **heartbeats** every 30 seconds.
+The daemon runs on the Mac Mini, polls a Redis queue for tasks, and runs the configured CLI tool. On startup, it **self-registers** with the Bodhigrove backend and waits for admin approval before accepting tasks. It also sends **heartbeats** every 30 seconds.
 
 ```python
-# flowdev-runner/runner.py
+# bodhigrove-runner/runner.py
 import asyncio, json, platform, psutil, httpx
 from pathlib import Path
 from enum import Enum
@@ -6660,7 +6660,7 @@ class TaskRunner:
         self.semaphore = asyncio.Semaphore(self.max_concurrent)
         self.mcp_config = config.get("mcp_config", "~/.claude/.mcp.json")
         # Node registration (see 17.4.10)
-        self.backend_url = config["flowdev_api_url"]
+        self.backend_url = config["bodhigrove_api_url"]
         self.org_token = config.get("org_token")
         self.node_id = config.get("node_id")          # Populated after registration
         self.node_token = config.get("node_token")      # Populated after registration
@@ -6676,7 +6676,7 @@ class TaskRunner:
         asyncio.create_task(self._heartbeat_loop())
 
         # Step 5: Main task loop — poll node-specific Redis queue
-        queue_key = f"flowdev:tasks:{self.node_id}"
+        queue_key = f"bodhigrove:tasks:{self.node_id}"
         while True:
             task_json = await self.redis.brpop(queue_key, timeout=5)
             if task_json:
@@ -6685,7 +6685,7 @@ class TaskRunner:
                 asyncio.create_task(self._execute_with_semaphore(task))
 
     async def _register_with_backend(self):
-        """Self-register with the FlowDev backend. See 17.4.10."""
+        """Self-register with the Bodhigrove backend. See 17.4.10."""
         if self.node_id and self.node_token:
             # Already registered (re-registration with existing creds)
             async with httpx.AsyncClient() as client:
@@ -6808,18 +6808,18 @@ class TaskRunner:
 
 #### 17.4.5 MCP Server for Claude Code Writeback
 
-Claude Code on the Mac Mini connects to a FlowDev MCP server to write PRDs, update statuses, and post to Slack while generating content.
+Claude Code on the Mac Mini connects to a Bodhigrove MCP server to write PRDs, update statuses, and post to Slack while generating content.
 
 **MCP config on Mac Mini (`~/.claude/.mcp.json`):**
 
 ```json
 {
   "mcpServers": {
-    "flowdev": {
+    "bodhigrove": {
       "type": "http",
-      "url": "http://flowdev-backend.tailnet:8000/mcp",
+      "url": "http://bodhigrove-backend.tailnet:8000/mcp",
       "headers": {
-        "Authorization": "Bearer ${FLOWDEV_INTERNAL_TOKEN}"
+        "Authorization": "Bearer ${BODHIGROVE_INTERNAL_TOKEN}"
       }
     }
   }
@@ -6957,14 +6957,14 @@ user-invocable: false
 <!-- ~/.claude/skills/prd-template/SKILL.md -->
 ---
 name: prd-template
-description: Standard PRD template for FlowDev feature requests
+description: Standard PRD template for Bodhigrove feature requests
 user-invocable: true
 argument-hint: "[feature description]"
 allowed-tools: Read, Glob, Grep, Bash
 ---
 
 Generate a PRD using this template. Read relevant repos for technical context.
-Use the FlowDev MCP tools to save the PRD when complete.
+Use the Bodhigrove MCP tools to save the PRD when complete.
 
 # PRD: [Feature Title]
 ## 1. Overview
@@ -7037,13 +7037,13 @@ Python 3.12, FastAPI, SQLAlchemy 2.0, PostgreSQL 16, Redis 7, Stripe SDK v8
 The setup flow configures the execution mode, registers repos, installs skills, and configures connectivity during first installation.
 
 ```python
-# flowdev-runner/setup.py
-"""FlowDev AI Execution Node Setup Wizard"""
+# bodhigrove-runner/setup.py
+"""Bodhigrove AI Execution Node Setup Wizard"""
 import questionary, yaml
 from pathlib import Path
 
 def run_setup():
-    print("FlowDev AI Execution Node Setup")
+    print("Bodhigrove AI Execution Node Setup")
     print("=" * 40)
 
     # Step 1: Choose execution mode
@@ -7060,10 +7060,10 @@ def run_setup():
 
     if mode in ("claude_code", "codex"):
         # Step 2: Org registration token (see 17.4.10)
-        # Admin generates this in FlowDev UI → Settings → Execution Nodes → "Generate Token"
+        # Admin generates this in Bodhigrove UI → Settings → Execution Nodes → "Generate Token"
         print("\nStep 2: Organization Registration")
         org_token = questionary.password(
-            "Enter your org registration token (from FlowDev admin panel):"
+            "Enter your org registration token (from Bodhigrove admin panel):"
         ).ask()
         config["org_token"] = org_token
 
@@ -7071,9 +7071,9 @@ def run_setup():
         backend_url = _discover_backend(org_token)
         if not backend_url:
             backend_url = questionary.text(
-                "FlowDev backend URL:", default="http://flowdev-backend.tailnet:8000"
+                "Bodhigrove backend URL:", default="http://bodhigrove-backend.tailnet:8000"
             ).ask()
-        config["flowdev_api_url"] = backend_url
+        config["bodhigrove_api_url"] = backend_url
         print(f"  ✓ Backend: {backend_url}")
 
         # Step 3: Register this machine with backend (17.4.10 L1)
@@ -7090,7 +7090,7 @@ def run_setup():
 
         if reg_result["status"] == "pending":
             print("  ⏳ Waiting for admin approval...")
-            print("  (Ask your admin to approve in FlowDev → Settings → Execution Nodes)")
+            print("  (Ask your admin to approve in Bodhigrove → Settings → Execution Nodes)")
             _wait_for_approval(config)
             print("  ✓ Approved! Node is now active.")
 
@@ -7120,7 +7120,7 @@ def run_setup():
         _install_default_skills(Path.home() / ".claude" / "skills")
 
         # Step 10: Configure MCP server writeback
-        _setup_mcp_config(config["flowdev_api_url"], config["node_token"])
+        _setup_mcp_config(config["bodhigrove_api_url"], config["node_token"])
 
         # Step 11: Generate org-level CLAUDE.md
         org_name = questionary.text("Organization name:").ask()
@@ -7177,8 +7177,8 @@ Keep repos up-to-date on the Mac Mini automatically.
 
 ```bash
 #!/bin/bash
-# ~/flowdev-runner/sync-repos.sh
-# Cron: */15 * * * * ~/flowdev-runner/sync-repos.sh
+# ~/bodhigrove-runner/sync-repos.sh
+# Cron: */15 * * * * ~/bodhigrove-runner/sync-repos.sh
 REPOS_DIR="$HOME/repos"
 for repo in "$REPOS_DIR"/*/; do
     if [ -d "$repo/.git" ]; then
@@ -7189,7 +7189,7 @@ done
 
 #### 17.4.10 Node Discovery & Registration Protocol
 
-The architecture assumes the FlowDev backend and Mac Mini(s) need to find each other, authenticate, and maintain a persistent connection. This section defines how that works across three discovery layers.
+The architecture assumes the Bodhigrove backend and Mac Mini(s) need to find each other, authenticate, and maintain a persistent connection. This section defines how that works across three discovery layers.
 
 **Problem**: The backend needs to know which execution nodes exist, whether they're healthy, and how to route tasks to them — without requiring manual IP entry.
 
@@ -7198,8 +7198,8 @@ The architecture assumes the FlowDev backend and Mac Mini(s) need to find each o
 | Layer | Mechanism | Scope | Setup | Best For |
 |-------|-----------|-------|-------|----------|
 | **L1: Self-Registration** | Runner calls `POST /api/nodes/register` on startup | Any network (LAN, Tailscale, internet) | Runner needs backend URL | Primary — always works |
-| **L2: mDNS/Bonjour** | Runner advertises `_flowdev-runner._tcp.local` | Same LAN only | Zero-config | Local dev, small teams |
-| **L3: Tailscale Tags** | Backend queries Tailscale API for `tag:flowdev-runner` devices | Tailscale mesh | Tag nodes in Tailscale ACLs | Cross-network, multi-site |
+| **L2: mDNS/Bonjour** | Runner advertises `_bodhigrove-runner._tcp.local` | Same LAN only | Zero-config | Local dev, small teams |
+| **L3: Tailscale Tags** | Backend queries Tailscale API for `tag:bodhigrove-runner` devices | Tailscale mesh | Tag nodes in Tailscale ACLs | Cross-network, multi-site |
 
 All three layers feed into the same `execution_nodes` table. Discovered nodes always start in `pending` status — an admin must approve before the node receives tasks.
 
@@ -7257,7 +7257,7 @@ class ExecutionNode(Base):
 This is the **always-on** discovery method. The runner daemon registers itself with the backend on every startup.
 
 ```
-Mac Mini (runner daemon startup)              FlowDev Backend
+Mac Mini (runner daemon startup)              Bodhigrove Backend
         |                                            |
   1.    |--- POST /api/nodes/register -------------->|
         |    {                                       |
@@ -7464,19 +7464,19 @@ async def pause_node(node_id: UUID, user=Depends(require_role("admin", "org_owne
 
 ##### L2: mDNS/Bonjour Auto-Discovery (Same LAN)
 
-For teams where the FlowDev backend and Mac Mini are on the same local network, zero-config discovery via Bonjour eliminates all manual setup.
+For teams where the Bodhigrove backend and Mac Mini are on the same local network, zero-config discovery via Bonjour eliminates all manual setup.
 
 **On the Mac Mini** (runner daemon advertises itself):
 
 ```python
-# flowdev-runner/discovery.py
+# bodhigrove-runner/discovery.py
 import socket
 from zeroconf import ServiceInfo, Zeroconf
 
 class BonjourAdvertiser:
     """Advertises this runner on the local network via mDNS/Bonjour."""
 
-    SERVICE_TYPE = "_flowdev-runner._tcp.local."
+    SERVICE_TYPE = "_bodhigrove-runner._tcp.local."
 
     def __init__(self, hostname: str, port: int, org_id: str, mode: str):
         self.zeroconf = Zeroconf()
@@ -7513,16 +7513,16 @@ class BonjourAdvertiser:
             s.close()
 ```
 
-**On the FlowDev backend** (discovers Mac Minis on the LAN):
+**On the Bodhigrove backend** (discovers Mac Minis on the LAN):
 
 ```python
 # backend/app/services/node_discovery.py
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 
 class LanNodeDiscovery(ServiceListener):
-    """Listens for FlowDev runner nodes on the local network via mDNS."""
+    """Listens for Bodhigrove runner nodes on the local network via mDNS."""
 
-    SERVICE_TYPE = "_flowdev-runner._tcp.local."
+    SERVICE_TYPE = "_bodhigrove-runner._tcp.local."
 
     def __init__(self, db_session_factory, org_id: str):
         self.db_factory = db_session_factory
@@ -7592,13 +7592,13 @@ For multi-site deployments where Mac Minis are on different networks but share a
 ```json
 {
   "tagOwners": {
-    "tag:flowdev-runner": ["autogroup:admin"]
+    "tag:bodhigrove-runner": ["autogroup:admin"]
   },
   "acls": [
     {
       "action": "accept",
-      "src": ["tag:flowdev-backend"],
-      "dst": ["tag:flowdev-runner:*"]
+      "src": ["tag:bodhigrove-backend"],
+      "dst": ["tag:bodhigrove-runner:*"]
     }
   ]
 }
@@ -7608,7 +7608,7 @@ For multi-site deployments where Mac Minis are on different networks but share a
 
 ```bash
 # On Mac Mini
-sudo tailscale up --ssh --advertise-tags=tag:flowdev-runner
+sudo tailscale up --ssh --advertise-tags=tag:bodhigrove-runner
 ```
 
 **Backend periodically queries Tailscale API for tagged devices:**
@@ -7618,7 +7618,7 @@ sudo tailscale up --ssh --advertise-tags=tag:flowdev-runner
 import httpx
 
 class TailscaleNodeDiscovery:
-    """Discovers FlowDev runner nodes via Tailscale device API."""
+    """Discovers Bodhigrove runner nodes via Tailscale device API."""
 
     def __init__(self, api_key: str, tailnet: str, db_session_factory):
         self.api_key = api_key          # Tailscale API key
@@ -7627,7 +7627,7 @@ class TailscaleNodeDiscovery:
         self.base_url = f"https://api.tailscale.com/api/v2/tailnet/{tailnet}"
 
     async def discover(self):
-        """Poll Tailscale API for devices tagged 'flowdev-runner'."""
+        """Poll Tailscale API for devices tagged 'bodhigrove-runner'."""
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.base_url}/devices",
@@ -7638,7 +7638,7 @@ class TailscaleNodeDiscovery:
 
         for device in devices:
             tags = device.get("tags", [])
-            if "tag:flowdev-runner" not in tags:
+            if "tag:bodhigrove-runner" not in tags:
                 continue
 
             hostname = device["hostname"]
@@ -7723,7 +7723,7 @@ class NodeHealthMonitor:
             .where(agent_tasks.c.status == "in_progress")
         )
         for task in orphaned:
-            await self.redis.lpush("flowdev:tasks", json.dumps({
+            await self.redis.lpush("bodhigrove:tasks", json.dumps({
                 "task_id": str(task.id),
                 "type": task.type,
                 "prompt": task.prompt,
@@ -7813,7 +7813,7 @@ class NodeRouter:
 
         if node:
             # Push to node-specific Redis queue
-            queue_key = f"flowdev:tasks:{node.id}"
+            queue_key = f"bodhigrove:tasks:{node.id}"
             await self.redis.lpush(queue_key, json.dumps(task))
             await self.db.execute(
                 update(agent_tasks)
@@ -7874,7 +7874,7 @@ Discovery: mDNS active ● | Tailscale polling: every 5m ●
 
 ##### Org Registration Token
 
-To prevent unauthorized nodes from registering, the admin generates a one-time (or reusable) **org registration token** in the FlowDev UI. This token is entered during the Mac Mini setup wizard.
+To prevent unauthorized nodes from registering, the admin generates a one-time (or reusable) **org registration token** in the Bodhigrove UI. This token is entered during the Mac Mini setup wizard.
 
 ```python
 # backend/app/api/org_tokens.py
@@ -7901,14 +7901,14 @@ async def create_registration_token(
 **Setup wizard uses this token:**
 
 ```
-FlowDev AI Execution Node Setup
+Bodhigrove AI Execution Node Setup
 ========================================
 Step 1: Organization Registration
-  Enter your org registration token (from FlowDev admin panel):
+  Enter your org registration token (from Bodhigrove admin panel):
   > ot_a1b2c3d4e5f6...
 
   ✓ Token valid. Organization: "Acme Corp"
-  ✓ Backend: https://flowdev.acme.corp
+  ✓ Backend: https://bodhigrove.acme.corp
 
 Step 2: Registering this machine...
   Hostname: mac-mini-01
@@ -7917,7 +7917,7 @@ Step 2: Registering this machine...
 
   ✓ Registered! Status: PENDING
   ⏳ Waiting for admin approval...
-  (Ask your admin to approve this node in FlowDev → Settings → Execution Nodes)
+  (Ask your admin to approve this node in Bodhigrove → Settings → Execution Nodes)
 
   ✓ Approved! Node is now active.
 
@@ -7936,7 +7936,7 @@ async def handle_slash_command(request: Request, bg: BackgroundTasks):
     command, text = payload["command"], payload["text"]
     user_id, channel_id = payload["user_id"], payload["channel_id"]
 
-    if command == "/flowdev-prd":
+    if command == "/bodhigrove-prd":
         task_id = str(uuid4())
         mode = get_org_config().execution_mode
 
@@ -7949,7 +7949,7 @@ async def handle_slash_command(request: Request, bg: BackgroundTasks):
                     f"Generate a PRD for: {text}. "
                     f"Use /prd-template skill. "
                     f"Read relevant repos for technical context. "
-                    f"Use the flowdev MCP tools to save the PRD."
+                    f"Use the bodhigrove MCP tools to save the PRD."
                 ),
                 "repo": None,
                 "requested_by": user_id,
@@ -7992,7 +7992,7 @@ async def handle_slash_command(request: Request, bg: BackgroundTasks):
 | API key on Mac Mini | Stored in macOS Keychain, injected via launchd env vars. Never in config files. |
 | Tailscale network | Private mesh, not exposed to internet. ACLs restrict node access. |
 | MCP token | Short-lived, scoped to internal API. Rotated via setup wizard. |
-| Repo access | Read-only clones. Writes go through MCP to FlowDev API only. |
+| Repo access | Read-only clones. Writes go through MCP to Bodhigrove API only. |
 | Budget control | `--max-budget-usd` prevents runaway API costs per task. |
 
 ### 17.6 Deployment Modes Matrix
@@ -8022,7 +8022,7 @@ async def handle_slash_command(request: Request, bg: BackgroundTasks):
 
 ### 17.5 Public Access via Cloudflare Tunnel (Optional)
 
-FlowDev works fully on localhost. For orgs needing Slack webhooks (require public HTTPS) or remote access, **Cloudflare Tunnel** provides a free, zero-VPS solution.
+Bodhigrove works fully on localhost. For orgs needing Slack webhooks (require public HTTPS) or remote access, **Cloudflare Tunnel** provides a free, zero-VPS solution.
 
 | Requirement | Cloudflare Tunnel |
 |---|---|
@@ -8058,7 +8058,7 @@ cloudflared:
 
 ### Why this matters
 
-AI agents hallucinate when they lack context. FlowDev solves this with a
+AI agents hallucinate when they lack context. Bodhigrove solves this with a
 four-layer knowledge architecture that keeps all organizational knowledge
 current, structured, and accessible to every agent.
 
@@ -8137,7 +8137,7 @@ content: |
   - Async everywhere (no sync DB calls)
 
   ## Error Handling
-  - Custom exception hierarchy: FlowDevError > DomainError > ...
+  - Custom exception hierarchy: BodhigroveError > DomainError > ...
   - Never catch bare Exception
   - Always log with structlog
 
@@ -8366,7 +8366,7 @@ Setup Wizard Step: Knowledge Seeding
 - **MCP server** for Claude Code writeback (write_prd, update_status, post_slack)
 - **Setup wizard** (org token, node registration + approval, repo cloning, knowledge seeding)
 - **Knowledge Sync Agent** (L1↔L3 sync, stale detection)
-- **Slack slash commands** for agent triggers (`/flowdev-prd`, `/flowdev-triage`)
+- **Slack slash commands** for agent triggers (`/bodhigrove-prd`, `/bodhigrove-triage`)
 
 ### Phase 4: Advanced Agents (Week 7-8)
 - Learning, Skill, Standup, Bug Linker, Reassignment agents
@@ -8414,4 +8414,4 @@ Total: 17 features, 11 agents
 
 ---
 
-**This document is implementation-ready and provides all technical details needed for a senior engineer to build FlowDev from scratch.**
+**This document is implementation-ready and provides all technical details needed for a senior engineer to build Bodhigrove from scratch.**

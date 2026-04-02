@@ -45,11 +45,12 @@ export class GardenRoom extends Room<GardenRoomState> {
     })
   }
 
-  onJoin(client: Client, options: { userId: string; name: string }) {
+  onJoin(client: Client, options: { userId: string; name: string; characterModel?: string }) {
     console.log(`[GardenRoom] ${options.name} joined`)
     const player = new PlayerState()
     player.userId = options.userId || client.sessionId
     player.name = options.name || "Visitor"
+    player.characterModel = options.characterModel || ""
     player.connected = true
     this.state.players.set(client.sessionId, player)
   }

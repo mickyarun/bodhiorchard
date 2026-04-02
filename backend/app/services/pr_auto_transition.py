@@ -63,13 +63,23 @@ async def check_all_repos_have_prs(
         bud.status = BUDStatus.CODE_REVIEW
 
         await record_event(
-            db, org_id, bud.id, "status_change",
+            db,
+            org_id,
+            bud.id,
+            "status_change",
             detail={"from": "development", "to": "code_review", "auto": True},
         )
 
         from app.services.bud_agent_trigger import create_agent_task_for_stage
 
         await create_agent_task_for_stage(bud, "code_review", org_id, db)
+
+        try:
+            from app.services.bud_estimation import estimate_bud_dates
+
+            await estimate_bud_dates(db, org_id, bud, trigger="prs_opened")
+        except Exception:
+            logger.warning("estimation_failed_after_prs_opened", bud_id=str(bud.id))
         logger.info("auto_transition_to_code_review", bud_id=str(bud.id))
 
 
@@ -91,15 +101,28 @@ async def check_all_prs_merged(
     bud.status = BUDStatus.TESTING
 
     await record_event(
-        db, org_id, bud.id, "all_prs_merged",
+        db,
+        org_id,
+        bud.id,
+        "all_prs_merged",
         detail={"from": "code_review", "to": "testing", "auto": True},
     )
     await record_event(
-        db, org_id, bud.id, "status_change",
+        db,
+        org_id,
+        bud.id,
+        "status_change",
         detail={"from": "code_review", "to": "testing", "auto": True},
     )
 
     from app.services.bud_agent_trigger import create_agent_task_for_stage
 
     await create_agent_task_for_stage(bud, "testing", org_id, db, force=True)
+
+    try:
+        from app.services.bud_estimation import estimate_bud_dates
+
+        await estimate_bud_dates(db, org_id, bud, trigger="prs_merged")
+    except Exception:
+        logger.warning("estimation_failed_after_prs_merged", bud_id=str(bud_id))
     logger.info("auto_transition_to_testing", bud_id=str(bud_id))

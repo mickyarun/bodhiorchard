@@ -112,6 +112,12 @@ async def _write_and_publish(
         )
         repo_name = row.scalar_one_or_none()
 
+    logger.info(
+        "agent_activity_publish",
+        topic=f"agent_activity:{org_id}",
+        event_type=event_type,
+        task_id=str(task_id) if task_id else None,
+    )
     publish(
         f"agent_activity:{org_id}",
         {

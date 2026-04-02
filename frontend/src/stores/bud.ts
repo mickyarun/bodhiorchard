@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, DesignJobCreated, JobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem } from '@/types'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, JobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem } from '@/types'
 import { BUD_STATUS_ORDER } from '@/types'
 import api from '@/services/api'
 
@@ -266,6 +266,42 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function fetchEstimates(budId: string): Promise<BUDEstimates | null> {
+    try {
+      const { data } = await api.get(`/v1/buds/${budId}/estimates`)
+      return data
+    } catch {
+      error.value = 'Failed to load estimates'
+      return null
+    }
+  }
+
+  async function recalculateEstimates(budId: string): Promise<BUDEstimates | null> {
+    try {
+      const { data } = await api.post(`/v1/buds/${budId}/estimates/recalculate`)
+      return data
+    } catch {
+      error.value = 'Failed to recalculate estimates'
+      return null
+    }
+  }
+
+  async function overrideEstimate(
+    budId: string,
+    phase: string,
+    estimatedCompletion: string,
+    reason: string,
+  ): Promise<void> {
+    try {
+      await api.patch(`/v1/buds/${budId}/estimates/${phase}`, {
+        estimated_completion: estimatedCompletion,
+        reason,
+      })
+    } catch {
+      error.value = 'Failed to override estimate'
+    }
+  }
+
   return {
     buds,
     currentBUD,
@@ -291,5 +327,8 @@ export const useBUDStore = defineStore('bud', () => {
     fetchPRChecklist,
     requestReassignment,
     retryAgentTask,
+    fetchEstimates,
+    recalculateEstimates,
+    overrideEstimate,
   }
 })

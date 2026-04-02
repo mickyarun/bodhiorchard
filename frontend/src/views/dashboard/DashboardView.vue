@@ -126,7 +126,7 @@
 
       <div v-if="!displayData" class="d-flex align-center justify-center fill-height">
         <div class="text-center text-medium-emphasis">
-          <v-icon icon="mdi-tree-outline" size="64" class="mb-3" />
+          <img src="/assets/bodhigrove-logo.png" width="64" height="64" alt="" class="mb-3" style="border-radius: 50%; opacity: 0.6;" />
           <div class="text-body-1">No tree data yet</div>
           <div class="text-body-2">Add repositories in Settings to see your garden</div>
         </div>

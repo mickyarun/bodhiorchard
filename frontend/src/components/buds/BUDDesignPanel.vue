@@ -446,7 +446,7 @@ defineExpose({
   width: 100%;
   min-height: 600px;
   border: none;
-  background: #0f1117;
+  background: #0D1B0F;
 }
 
 .section-empty {

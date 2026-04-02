@@ -9,7 +9,7 @@ effort:
 
 # Code Reviewer
 
-You are a senior code reviewer for the FlowDev platform.
+You are a senior code reviewer for the Bodhigrove platform.
 
 ## Core Mission
 

@@ -172,6 +172,21 @@ async def approve_tech_arch(
             bud_id=str(bud.id),
         )
 
+    # Re-estimate with developer skills now available
+    try:
+        from app.services.bud_estimation import estimate_bud_dates
+
+        await estimate_bud_dates(
+            db,
+            current_user.org_id,
+            bud,
+            trigger="tech_arch_approved",
+            actor_id=current_user.id,
+            actor_name=current_user.name,
+        )
+    except Exception:
+        logger.warning("estimation_failed_after_approval", bud_id=str(bud.id))
+
     await db.flush()
     await db.refresh(bud)
     return bud

@@ -9,7 +9,7 @@ export interface ConnectionsState {
     localPath: string
     type: 'workspace' | 'single-repo'
   }
-  github: { enabled: boolean; appId: number | null; hasPrivateKey: boolean; installationId: number | null; webhookConfigured: boolean }
+  github: { enabled: boolean; appId: number | null; hasPrivateKey: boolean; installationId: number | null; webhookConfigured: boolean; org?: string | null }
   slack: { enabled: boolean; botToken: string; signingSecret: string; teamId: string }
   aiConfig: {
     preset: string

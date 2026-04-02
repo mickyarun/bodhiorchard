@@ -216,7 +216,7 @@ const nodes: PhaseNode[] = [
     agentNames: ['Test Plan Agent'],
   },
   {
-    id: 'qa', icon: 'mdi-clipboard-check-outline', label: 'QA Takeover',
+    id: 'testing', icon: 'mdi-clipboard-check-outline', label: 'Testing',
     agent: 'QA + Test Agent', color: 'error',
     centerDesc: 'QA reviews automation plan, executes manual tests, signs off',
     agentNames: ['Test Plan Agent'],

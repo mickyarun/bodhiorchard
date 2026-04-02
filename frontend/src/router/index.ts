@@ -21,13 +21,13 @@ async function checkSetupStatus(): Promise<boolean> {
     isSetupComplete = data.is_setup_complete === true
     // Sync localStorage with backend truth
     if (isSetupComplete) {
-      localStorage.setItem('flowdev_setup_complete', 'true')
+      localStorage.setItem('bodhigrove_setup_complete', 'true')
     } else {
-      localStorage.removeItem('flowdev_setup_complete')
+      localStorage.removeItem('bodhigrove_setup_complete')
     }
   } catch {
     // Backend unreachable — fall back to localStorage as last resort
-    isSetupComplete = localStorage.getItem('flowdev_setup_complete') === 'true'
+    isSetupComplete = localStorage.getItem('bodhigrove_setup_complete') === 'true'
   }
 
   setupChecked = true
@@ -69,6 +69,11 @@ const router = createRouter({
       path: '/methodology',
       name: 'methodology',
       component: () => import('@/views/methodology/MethodologyView.vue'),
+    },
+    {
+      path: '/character-select',
+      name: 'character-select',
+      component: () => import('@/views/character/CharacterSelectView.vue'),
     },
     {
       path: '/tree-demo',
@@ -159,14 +164,14 @@ router.beforeEach(async (to) => {
 
   // Auth guard — require token for protected routes
   if (done && !PUBLIC_ROUTES.has(to.name as string)) {
-    const hasToken = !!localStorage.getItem('flowdev_token')
+    const hasToken = !!localStorage.getItem('bodhigrove_token')
     if (!hasToken) {
       return { name: 'login' }
     }
   }
 
   // Already logged in — redirect away from login
-  if (to.name === 'login' && localStorage.getItem('flowdev_token')) {
+  if (to.name === 'login' && localStorage.getItem('bodhigrove_token')) {
     return { name: 'methodology' }
   }
 
@@ -175,7 +180,7 @@ router.beforeEach(async (to) => {
   if (requiredPerm) {
     const authStore = useAuthStore()
     // On page refresh, user is null but token exists — load profile first
-    if (!authStore.user && localStorage.getItem('flowdev_token')) {
+    if (!authStore.user && localStorage.getItem('bodhigrove_token')) {
       try {
         await authStore.fetchUser()
       } catch {

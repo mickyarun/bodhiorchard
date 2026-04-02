@@ -209,6 +209,10 @@ export class SceneManager {
           this._memberHouseMap,
           [...this.layout.getSeats()],
         )
+        // Wire tree position lookup for dev activity character movement
+        this.characterSystem.setTreePositionLookup(
+          (repoName) => this.getTreePosition(repoName),
+        )
       } catch (err) {
         console.warn('[SceneManager] Character loading failed (scene continues):', err)
         this.characterSystem = null
@@ -309,6 +313,7 @@ export class SceneManager {
     this.gardenBirds?.update(dt)
     this.gardenAnimals?.update(dt)
     this.agentSystem?.update(dt)
+    this.characterSystem?.update(dt)
   }
 
   /** Rebuild entire scene with new data. */

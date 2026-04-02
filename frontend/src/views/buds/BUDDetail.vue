@@ -161,7 +161,7 @@
             :can-approve="canApprove"
             :is-current-assignee="isCurrentAssignee"
             @status-change="updateStatus"
-            @reload-timeline="loadTimeline"
+            @reload-timeline="loadTimeline(); loadEstimates()"
           />
 
           <!-- Status change progress -->
@@ -173,7 +173,7 @@
               <v-icon icon="mdi-swap-horizontal" size="20" color="primary" />
               <div class="d-flex flex-column agent-banner__text">
                 <span class="text-body-2 font-weight-medium">Updating status...</span>
-                <span class="text-caption text-medium-emphasis">Assigning developer</span>
+                <span class="text-caption text-medium-emphasis">Assigning {{ PHASE_ROLE_LABELS[statusChangeTarget] || 'team member' }}</span>
               </div>
               <v-spacer />
               <v-progress-linear
@@ -250,9 +250,9 @@
               <v-tab value="tech-spec">Tech Spec</v-tab>
               <v-tab value="development">Development</v-tab>
               <v-tab value="code-review">Code Review</v-tab>
-              <v-tab value="qa">QA</v-tab>
+              <v-tab value="testing">Testing</v-tab>
             </v-tabs>
-            <div v-if="activeTab !== 'development' && activeTab !== 'code-review' && activeTab !== 'qa'" class="toolbar-actions">
+            <div v-if="activeTab !== 'development' && activeTab !== 'code-review' && activeTab !== 'testing'" class="toolbar-actions">
               <v-btn
                 variant="text"
                 size="small"
@@ -440,7 +440,7 @@
                             :model-value="workflowRef.resolutions[idx]?.done ?? false"
                             density="compact"
                             color="success"
-                            @update:model-value="(val: boolean) => workflowRef.updateResolution(idx, val)"
+                            @update:model-value="(val: boolean) => workflowRef?.updateResolution(idx, val)"
                           />
                         </template>
                         <v-list-item-title class="text-body-2">
@@ -545,8 +545,8 @@
                 </div>
               </v-tabs-window-item>
 
-              <!-- QA -->
-              <v-tabs-window-item value="qa">
+              <!-- Testing -->
+              <v-tabs-window-item value="testing">
                 <BUDQAPanel
                   :bud-id="bud.id"
                   :bud-number="bud.bud_number"
@@ -559,6 +559,50 @@
               <!-- Test Plan tab removed — test plan content is now part of QA tab -->
             </v-tabs-window>
           </div>
+
+          <!-- Delivery Estimates -->
+          <BUDEstimateTimeline
+            :estimates="budEstimates"
+            :current-phase="bud.status"
+            :loading="estimatesLoading"
+            :recalculating="recalculating"
+            @recalculate="handleRecalculate"
+            @override-phase="openOverrideDialog"
+            class="mt-4"
+          />
+
+          <!-- Override Dialog -->
+          <v-dialog v-model="overrideDialogOpen" max-width="420">
+            <v-card color="surface" class="pa-5">
+              <div class="text-subtitle-1 font-weight-medium mb-3">
+                Override {{ overridePhase }} deadline
+              </div>
+              <v-text-field
+                v-model="overrideDate"
+                label="New deadline"
+                type="date"
+                class="mb-3"
+              />
+              <v-textarea
+                v-model="overrideReason"
+                label="Reason (required)"
+                rows="3"
+                :rules="[v => !!v?.trim() || 'Reason is required']"
+              />
+              <v-card-actions class="pa-0 mt-2">
+                <v-spacer />
+                <v-btn variant="text" @click="overrideDialogOpen = false">Cancel</v-btn>
+                <v-btn
+                  color="warning"
+                  variant="flat"
+                  :disabled="!overrideDate || !overrideReason.trim()"
+                  @click="submitOverride"
+                >
+                  Override
+                </v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-dialog>
 
           <!-- Activity Timeline (collapsible) -->
           <div class="timeline-section mt-4">
@@ -625,7 +669,9 @@ import { useJobSocket } from '@/composables/useJobSocket'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
 import type { BUDSectionKey, TimelineEvent } from '@/types'
+import { useEstimates } from '@/composables/useEstimates'
 import ChatPanel from '@/components/buds/ChatPanel.vue'
+import BUDEstimateTimeline from '@/components/buds/BUDEstimateTimeline.vue'
 import BUDTimeline from '@/components/buds/BUDTimeline.vue'
 import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
 import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
@@ -728,6 +774,13 @@ const timelineLoading = ref(false)
 const timelineOpen = ref(false)
 const assigneeSearch = ref('')
 
+// Estimation (composable)
+const {
+  budEstimates, estimatesLoading, recalculating,
+  overrideDialogOpen, overridePhase, overrideDate, overrideReason,
+  loadEstimates, handleRecalculate, openOverrideDialog, submitOverride,
+} = useEstimates(() => bud.value?.id)
+
 // Title editing
 const editingTitle = ref(false)
 const editTitle = ref('')
@@ -737,7 +790,7 @@ const { editing: editingContent, editValue: editContent, toggle: toggleContentEd
   useMarkdownSection('requirements_md', bud)
 const { editing: editingTechSpec, editValue: editTechSpec, toggle: toggleTechSpecEdit, save: saveTechSpec } =
   useMarkdownSection('tech_spec_md', bud)
-const { editing: editingTestPlan, editValue: editTestPlan, toggle: toggleTestPlanEdit, save: saveTestPlan } =
+const { editing: editingTestPlan, toggle: toggleTestPlanEdit } =
   useMarkdownSection('test_plan_md', bud)
 
 // Chat state
@@ -805,7 +858,7 @@ onMounted(async () => {
       tech_arch: 'tech-spec',
       development: 'development',
       code_review: 'code-review',
-      testing: 'qa',
+      testing: 'testing',
     }
     const defaultTab = statusTabMap[bud.value.status]
     if (defaultTab) activeTab.value = defaultTab
@@ -814,6 +867,7 @@ onMounted(async () => {
   await loadChatHistory()
   membersStore.fetchMembers()
   loadTimeline()
+  loadEstimates()
 })
 
 // Track active agent task. Watches both the task data and the component ref
@@ -830,7 +884,10 @@ watch(
 // Auto-close chat panel when agent starts; reload timeline when agent finishes
 watch(agentLocked, (locked, wasLocked) => {
   if (locked && chatOpen.value) chatOpen.value = false
-  if (!locked && wasLocked) loadTimeline()
+  if (!locked && wasLocked) {
+    loadTimeline()
+    loadEstimates()
+  }
 })
 
 // Load chat history when switching tabs
@@ -873,6 +930,17 @@ async function saveTitle(): Promise<void> {
 }
 
 const statusChanging = ref(false)
+const statusChangeTarget = ref('')
+
+const PHASE_ROLE_LABELS: Record<string, string> = {
+  bud: 'product manager',
+  design: 'designer',
+  tech_arch: 'tech lead',
+  development: 'developer',
+  code_review: 'reviewer',
+  testing: 'QA engineer',
+  uat: 'product manager',
+}
 
 async function updateStatus(newStatus: string): Promise<void> {
   if (!bud.value) return
@@ -889,6 +957,7 @@ async function updateStatus(newStatus: string): Promise<void> {
     }
   }
 
+  statusChangeTarget.value = newStatus
   statusChanging.value = true
   try {
     await budStore.updateBUD(bud.value.id, { status: newStatus } as never)
@@ -896,10 +965,21 @@ async function updateStatus(newStatus: string): Promise<void> {
     statusChanging.value = false
   }
 
-  // If entering design phase, switch to design tab and open repo picker
+  // Switch tab to match the new status phase
+  const STATUS_TO_TAB: Record<string, string> = {
+    bud: 'requirements',
+    design: 'design',
+    tech_arch: 'tech-spec',
+    development: 'development',
+    code_review: 'code-review',
+    testing: 'testing',
+  }
+  const targetTab = STATUS_TO_TAB[newStatus]
+  if (targetTab) activeTab.value = targetTab
+
+  // If entering design phase, open repo picker for generation
   if (budStore.designAvailable) {
     budStore.designAvailable = false
-    activeTab.value = 'design'
     await nextTick()
     designPanelRef.value?.triggerDesignGeneration()
   }
@@ -956,8 +1036,6 @@ async function handleChatSend(msg: string, images: string[] = []): Promise<void>
           editContent.value = updated_content
         } else if (currentSection.value === 'tech_spec_md' && editingTechSpec.value) {
           editTechSpec.value = updated_content
-        } else if (currentSection.value === 'test_plan_md' && editingTestPlan.value) {
-          editTestPlan.value = updated_content
         } else if (currentSection.value === 'design') {
           if (bud.value) await designPanelRef.value?.loadDesigns()
           designPanelRef.value?.refreshDesignPreview()
@@ -993,6 +1071,7 @@ function downloadSection(section: string): void {
 
   const content = (bud.value as Record<string, unknown>)[section] as string || ''
   const suffix = section.replace('_md', '').replace('_', '-')
+
   const blob = new Blob([content], { type: 'text/markdown' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)

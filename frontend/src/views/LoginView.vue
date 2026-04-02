@@ -2,7 +2,7 @@
   <div class="setup-gradient d-flex flex-column" style="min-height: 100vh;">
     <v-container class="d-flex flex-column align-center justify-center flex-grow-1 py-8">
       <div class="mb-8">
-        <FlowDevLogo />
+        <BodhigroveLogo />
       </div>
 
       <v-card color="surface" class="pa-8 w-100" max-width="420">
@@ -70,7 +70,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/services/api'
-import FlowDevLogo from '@/components/common/FlowDevLogo.vue'
+import BodhigroveLogo from '@/components/common/BodhigroveLogo.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -109,6 +109,8 @@ async function handleLogin(): Promise<void> {
   if (success) {
     if (authStore.mustChangePassword) {
       router.push({ name: 'change-password' })
+    } else if (!authStore.user?.character_model) {
+      router.push({ name: 'character-select' })
     } else {
       router.push({ name: 'methodology' })
     }

@@ -81,7 +81,7 @@ async function handleSubmit() {
   const err = await authStore.changePassword(newPassword.value)
   loading.value = false
   if (err === null) {
-    router.push({ name: 'methodology' })
+    router.push({ name: 'character-select' })
   } else {
     errorMsg.value = err
   }

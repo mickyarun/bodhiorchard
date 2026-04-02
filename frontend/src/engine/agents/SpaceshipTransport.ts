@@ -36,6 +36,7 @@ export class SpaceshipTransport {
 
   private onHoverCb: (() => void) | null = null
   private onGoneCb: (() => void) | null = null
+  private _holdHover = false
 
   async init(parent: pc.Entity, loader: AssetLoader): Promise<void> {
     const asset = await loader.load(AGENT_SPACESHIP)
@@ -50,10 +51,12 @@ export class SpaceshipTransport {
     parent.addChild(this.entity)
   }
 
-  /** Fly in from random sky direction to hover above target. */
-  flyIn(targetX: number, targetZ: number, onHover: () => void): void {
+  /** Fly in from random sky direction to hover above target.
+   *  When holdHover is true, ship stays hovering after callback until flyOut() is called. */
+  flyIn(targetX: number, targetZ: number, onHover: () => void, holdHover = false): void {
     if (!this.entity) return
     this.onHoverCb = onHover
+    this._holdHover = holdHover
 
     const angle = Math.random() * Math.PI * 2
     const dx = Math.cos(angle) * SKY_OFFSET
@@ -97,11 +100,13 @@ export class SpaceshipTransport {
         break
       }
       case 'hovering':
-        if (this.timer >= HOVER_SECS) {
-          this.onHoverCb?.()
+        if (this.timer >= HOVER_SECS && this.onHoverCb) {
+          this.onHoverCb()
           this.onHoverCb = null
-          this.phase = 'fly_out'
-          this.timer = 0
+          if (!this._holdHover) {
+            this.phase = 'fly_out'
+            this.timer = 0
+          }
         }
         break
       case 'fly_out': {

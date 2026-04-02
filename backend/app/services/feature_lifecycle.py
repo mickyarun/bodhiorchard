@@ -269,4 +269,67 @@ async def transition_feature_for_bud(
     elif new_status_str == BUDStatus.DEVELOPMENT and item.feature_status == "planned":
         item.feature_status = "in_progress"
         logger.info("feature_in_progress", bud_ref=bud_ref)
+    elif new_status_str in (BUDStatus.PROD, BUDStatus.CLOSED):
+        await _record_feature_learning(db, org_id, bud_number, bud_ref)
     # Other statuses: no change (scan pipeline handles "implemented")
+
+
+async def _record_feature_learning(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_number: int,
+    bud_ref: str,
+) -> None:
+    """Populate FeatureLearning with actual cycle time when a BUD completes.
+
+    Seeds the historical calibration layer so future estimates improve.
+    """
+    from app.models.feature_learning import FeatureLearning
+    from app.repositories.bud import BUDRepository
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_number(bud_number)
+    if not bud:
+        return
+
+    # Skip if already recorded (PROD → CLOSED would call twice)
+    from sqlalchemy import select
+
+    existing = await db.execute(
+        select(FeatureLearning).where(
+            FeatureLearning.org_id == org_id,
+            FeatureLearning.bud_id == bud.id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        logger.debug("feature_learning_already_exists", bud_ref=bud_ref)
+        return
+
+    # Actual cycle time from created_at to now
+    cycle_days = (bud.updated_at - bud.created_at).days if bud.created_at else None
+
+    # Estimated days from original AI estimate (if it existed)
+    estimated_days = None
+    summary = (bud.estimated_dates or {}).get("_summary", {})
+    if summary.get("prod_p70"):
+        try:
+            from datetime import datetime as dt
+
+            p70 = dt.fromisoformat(summary["prod_p70"]).date()
+            generated = dt.fromisoformat(summary["generated_at"]).date()
+            estimated_days = float((p70 - generated).days)
+        except (ValueError, KeyError, TypeError):
+            pass
+
+    qa_count = len(bud.qa_automation_cases or []) + len(bud.qa_manual_cases or [])
+
+    learning = FeatureLearning(
+        org_id=org_id,
+        bud_id=bud.id,
+        cycle_time_days=float(cycle_days) if cycle_days else None,
+        estimated_days=estimated_days,
+        bug_count=qa_count,
+    )
+    db.add(learning)
+    await db.flush()
+    logger.info("feature_learning_recorded", bud_ref=bud_ref, cycle_days=cycle_days)

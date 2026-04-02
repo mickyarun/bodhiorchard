@@ -10,7 +10,7 @@
  * can check `isConnected()` and use polling if WS is unavailable.
  */
 
-const TOKEN_KEY = 'flowdev_token'
+const TOKEN_KEY = 'bodhigrove_token'
 const MAX_RETRIES = 5
 const BASE_DELAY_MS = 2000
 

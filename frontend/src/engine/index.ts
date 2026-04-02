@@ -222,6 +222,11 @@ export class GardenEngine {
     this.sceneManager?.agentSystemRef?.handleLiveEvent(activity)
   }
 
+  /** Handle a real-time dev activity event from WebSocket. */
+  handleDevActivity(activity: import('./types').EngineDevActivity): void {
+    this.sceneManager?.characterSystemRef?.handleDevActivity(activity)
+  }
+
   /** Toggle relationship arc visibility. Returns new visible state. */
   toggleArcs(): boolean {
     return this.sceneManager?.toggleArcs() ?? false

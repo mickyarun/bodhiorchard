@@ -413,7 +413,6 @@ async def _send_credentials_slack(
 @router.patch(
     "/members/{user_id}/character",
     response_model=MemberRead,
-    dependencies=[Depends(require_permissions("team:manage"))],
 )
 async def update_character(
     user_id: uuid.UUID,

@@ -66,13 +66,14 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
             f"Generate an initial wireframe for {bud_ref}: {payload.title}.\n\n"
             "## BUD Requirements\n\n"
             f"{payload.requirements_md}\n\n"
-            "Create a comprehensive wireframe that covers all the key screens "
-            "and interactions described in the requirements. Focus on layout, "
-            "information architecture, and user flow."
+            "Create a wireframe covering the key screens and interactions "
+            "described in the requirements. Focus on layout, information "
+            "architecture, and user flow."
             f"{scope_note}"
         ),
         repo_id=repo_id,
         use_mcp=use_mcp,
+        repo_name=repo_name,
     )
 
     update_job(
@@ -95,11 +96,17 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
     _org_uuid = uuid_mod.UUID(payload.org_id)
 
     await log_agent_activity(
-        None, org_id=_org_uuid, event_type="skill_invoked",
-        skill_slug="designer", message=f"Designer skill invoked for {bud_ref}",
-        bud_id=uuid_mod.UUID(payload.bud_id), skill_id=_skill_uuid,
-        task_id=_task_uuid, repo_id=_repo_uuid,
-        bud_number=payload.bud_number, bud_title=payload.title,
+        None,
+        org_id=_org_uuid,
+        event_type="skill_invoked",
+        skill_slug="designer",
+        message=f"Designer skill invoked for {bud_ref}",
+        bud_id=uuid_mod.UUID(payload.bud_id),
+        skill_id=_skill_uuid,
+        task_id=_task_uuid,
+        repo_id=_repo_uuid,
+        bud_number=payload.bud_number,
+        bud_title=payload.title,
     )
 
     sys_files = [str(ds_temp_file)] if ds_temp_file else []
@@ -123,14 +130,21 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
 
     if not result.success:
         await log_agent_activity(
-            None, org_id=_org_uuid, event_type="skill_failed",
-            skill_slug="designer", message=result.error or "AI unavailable",
-            bud_id=uuid_mod.UUID(payload.bud_id), skill_id=_skill_uuid,
-            task_id=_task_uuid, repo_id=_repo_uuid,
-            bud_number=payload.bud_number, bud_title=payload.title,
+            None,
+            org_id=_org_uuid,
+            event_type="skill_failed",
+            skill_slug="designer",
+            message=result.error or "AI unavailable",
+            bud_id=uuid_mod.UUID(payload.bud_id),
+            skill_id=_skill_uuid,
+            task_id=_task_uuid,
+            repo_id=_repo_uuid,
+            bud_number=payload.bud_number,
+            bud_title=payload.title,
         )
         if design_id:
             await _update_design_status(design_id, payload.org_id, "failed")
+        await _maybe_complete_design_task(payload.bud_id, payload.org_id)
         update_job(job_id, state=JobState.FAILED, error=result.error or "AI unavailable")
         return
 
@@ -141,14 +155,14 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
     reply = "Design wireframe generated."
     rel_path: str | None = None
     expected_path = (
-        Path(repo_path) / ".flowdev" / "wireframes" / bud_ref / "wireframe.html"
+        Path(repo_path) / ".bodhigrove" / "wireframes" / bud_ref / "wireframe.html"
         if repo_path
         else None
     )
 
     if expected_path and expected_path.exists():
         wireframe_html = expected_path.read_text(encoding="utf-8")
-        rel_path = f".flowdev/wireframes/{bud_ref}/wireframe.html"
+        rel_path = f".bodhigrove/wireframes/{bud_ref}/wireframe.html"
         # Try to get reply from Claude's JSON response
         response = _parse_chat_response(result.output)
         if response and response.get("reply"):
@@ -178,14 +192,26 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
 
     _final_event = "skill_completed" if wireframe_html else "skill_failed"
     await log_agent_activity(
-        None, org_id=_org_uuid, event_type=_final_event,
+        None,
+        org_id=_org_uuid,
+        event_type=_final_event,
         skill_slug="designer",
         message=f"Designer {'completed' if wireframe_html else 'failed'} for {bud_ref}",
-        bud_id=uuid_mod.UUID(payload.bud_id), skill_id=_skill_uuid,
-        task_id=_task_uuid, repo_id=_repo_uuid,
+        bud_id=uuid_mod.UUID(payload.bud_id),
+        skill_id=_skill_uuid,
+        task_id=_task_uuid,
+        repo_id=_repo_uuid,
         metadata_={"design_id": design_id, "repo_id": repo_id} if wireframe_html else None,
-        bud_number=payload.bud_number, bud_title=payload.title,
+        bud_number=payload.bud_number,
+        bud_title=payload.title,
     )
+
+    # Re-estimate with design complexity context
+    if wireframe_html:
+        try:
+            await _estimate_after_design(payload.bud_id, payload.org_id)
+        except Exception:
+            logger.warning("design_estimation_failed", bud_id=payload.bud_id)
 
     if wireframe_html:
         event_type = "design_generated"
@@ -220,7 +246,7 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
 
 
 async def _maybe_complete_design_task(bud_id: str, org_id: str) -> None:
-    """Mark design BUDAgentTask as complete if no designs are still generating."""
+    """Mark design BUDAgentTask as complete/failed when no designs are still generating."""
     from app.database import AsyncSessionLocal
     from app.models.bud import BUDDesignStatus
     from app.models.bud_agent_task import AgentTaskStatus
@@ -230,7 +256,8 @@ async def _maybe_complete_design_task(bud_id: str, org_id: str) -> None:
     async with AsyncSessionLocal() as db:
         design_repo = BUDDesignRepository(db, org_id=uuid_mod.UUID(org_id))
         still_generating = await design_repo.count_by_status(
-            uuid_mod.UUID(bud_id), BUDDesignStatus.GENERATING,
+            uuid_mod.UUID(bud_id),
+            BUDDesignStatus.GENERATING,
         )
         if still_generating > 0:
             return
@@ -238,7 +265,15 @@ async def _maybe_complete_design_task(bud_id: str, org_id: str) -> None:
         task_repo = BUDAgentTaskRepository(db, org_id=uuid_mod.UUID(org_id))
         task = await task_repo.get_active_for_bud(uuid_mod.UUID(bud_id))
         if task and task.task_type == "design":
-            task.status = AgentTaskStatus.COMPLETED
+            ready_count = await design_repo.count_by_status(
+                uuid_mod.UUID(bud_id),
+                BUDDesignStatus.READY,
+            )
+            if ready_count > 0:
+                task.status = AgentTaskStatus.COMPLETED
+            else:
+                task.status = AgentTaskStatus.FAILED
+                task.error_message = "Design generation failed"
             await db.commit()
 
 
@@ -402,4 +437,18 @@ async def _update_design_status(
         design = await repo.get_by_id(uuid_mod.UUID(design_id))
         if design is not None:
             design.status = BUDDesignStatus(status_str)
+            await db.commit()
+
+
+async def _estimate_after_design(bud_id: str, org_id: str) -> None:
+    """Re-estimate delivery dates after a design wireframe is generated."""
+    from app.database import AsyncSessionLocal
+    from app.repositories.bud import BUDRepository
+    from app.services.bud_estimation import estimate_bud_dates
+
+    async with AsyncSessionLocal() as db:
+        bud_repo = BUDRepository(db, org_id=uuid_mod.UUID(org_id))
+        bud = await bud_repo.get_by_id(uuid_mod.UUID(bud_id))
+        if bud:
+            await estimate_bud_dates(db, uuid_mod.UUID(org_id), bud, trigger="design_completed")
             await db.commit()

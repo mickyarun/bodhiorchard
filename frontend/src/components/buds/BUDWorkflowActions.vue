@@ -90,8 +90,6 @@ import { ref, computed, watch } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useJobSocket } from '@/composables/useJobSocket'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import type { BUDDocument } from '@/types'
 
 const props = defineProps<{
@@ -137,6 +135,7 @@ interface CodeReviewComment {
   severity: 'error' | 'warning' | 'suggestion'
   comment: string
   deviates_from_spec: boolean
+  source?: 'ai' | 'manual'
   status?: 'pending' | 'accepted' | 'skipped'
   skip_reason?: string
 }
@@ -215,22 +214,6 @@ async function handlePushToQA(): Promise<void> {
     await budStore.fetchBUD(props.bud.id)
   }
   emit('reload-timeline')
-}
-
-const automationTestPlan = computed(() => {
-  const meta = props.bud?.metadata as Record<string, unknown> | null
-  return (meta?.automation_test_plan_md as string | undefined) ?? ''
-})
-
-const manualTestPlan = computed(() => {
-  const meta = props.bud?.metadata as Record<string, unknown> | null
-  return (meta?.manual_test_plan_md as string | undefined) ?? ''
-})
-
-function renderMarkdown(md: string | null): string {
-  if (!md) return ''
-  const raw = marked.parse(md, { async: false }) as string
-  return DOMPurify.sanitize(raw)
 }
 
 async function handleReassignment(): Promise<void> {

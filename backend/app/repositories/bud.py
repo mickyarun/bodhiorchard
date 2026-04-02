@@ -137,7 +137,9 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         ]
 
     async def count_by_status(
-        self, bud_id: uuid.UUID, status: BUDDesignStatus,
+        self,
+        bud_id: uuid.UUID,
+        status: BUDDesignStatus,
     ) -> int:
         """Count designs for a BUD with a given status."""
         from sqlalchemy import func

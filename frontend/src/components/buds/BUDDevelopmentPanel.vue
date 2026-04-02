@@ -68,6 +68,28 @@
 
     <!-- Has activity -->
     <template v-else>
+      <!-- Action bar — always accessible -->
+      <div class="d-flex ga-2 mb-4">
+        <v-btn
+          v-if="hasTechSpec"
+          variant="tonal"
+          size="small"
+          prepend-icon="mdi-download"
+          @click="$emit('download-tech-spec')"
+        >
+          Download Tech Spec
+        </v-btn>
+        <v-btn
+          variant="outlined"
+          size="small"
+          prepend-icon="mdi-content-copy"
+          @click="copyBranchName"
+        >
+          Copy Branch Name
+        </v-btn>
+        <div v-if="branchCopied" class="text-caption text-success d-flex align-center ml-1">Copied!</div>
+      </div>
+
       <!-- Stats Row: only real, useful numbers -->
       <div class="stats-row mb-5">
         <div class="stat-card">
