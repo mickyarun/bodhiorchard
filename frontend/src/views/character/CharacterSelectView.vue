@@ -18,9 +18,6 @@
             />
           </v-card>
 
-          <!-- Color customizer disabled for V1 — KayKit uses pre-colored textures.
-               Will be re-enabled in V2 with canvas-based texture manipulation. -->
-          <!--
           <v-card color="surface" class="pa-5">
             <ColorCustomizer
               :shirt-color="config.shirtColor"
@@ -29,7 +26,6 @@
               @update="onColorUpdate"
             />
           </v-card>
-          -->
         </v-col>
 
         <!-- Right: 3D preview -->

@@ -39,8 +39,13 @@ const LABEL_HEIGHT = KAYKIT_TARGET_HEIGHT + 0.2
 
 type BodyRegion = 'shirt' | 'pants' | 'skin'
 
+/** Maps body regions to mesh name substrings. Covers all KayKit mesh parts:
+ *  shirt: Body, Cape, Helmet, HelmetVisor, BearHat (accessories follow shirt color)
+ *  pants: LegLeft, LegRight
+ *  skin: Head, ArmLeft, ArmRight
+ */
 const REGION_MESH_PATTERNS: Record<BodyRegion, string[]> = {
-  shirt: ['Body'],
+  shirt: ['Body', 'Cape', 'Helmet', 'Visor', 'Hat'],
   pants: ['LegLeft', 'LegRight'],
   skin:  ['Head', 'ArmLeft', 'ArmRight'],
 }
@@ -105,11 +110,9 @@ export class KayKitCharacterFactory {
     renderEntity.setLocalPosition(0, sitting ? 0 : KAYKIT_Y_OFFSET, 0)
     wrapper.addChild(renderEntity)
 
-    // Color tinting disabled for V1 — KayKit uses pre-colored gradient atlas textures.
-    // Multiplying diffuse color with the texture produces muddy results.
-    // V2 will use canvas-based texture manipulation for proper per-region recoloring.
-    // const clonedMats = this.applyColorTinting(renderEntity, config)
-    // ;(wrapper as unknown as { _clonedMaterials: pc.StandardMaterial[] })._clonedMaterials = clonedMats
+    // Apply flat color tinting per body region (removes texture, sets solid color)
+    const clonedMats = this.applyColorTinting(renderEntity, config)
+    ;(wrapper as unknown as { _clonedMaterials: pc.StandardMaterial[] })._clonedMaterials = clonedMats
 
     // Set up animation component with shared locomotion state graph
     wrapper.addComponent('anim', { activate: true })
@@ -132,7 +135,12 @@ export class KayKitCharacterFactory {
   // ─── Color Tinting ─────────────────────────
 
   /**
-   * Apply per-region color tinting to mesh instances.
+   * Apply flat solid color per body region.
+   *
+   * Removes the diffuseMap (gradient atlas texture) and sets a clean flat color.
+   * This gives Roblox-style solid-colored body parts — clear POC for customization.
+   * V2 will use canvas-based texture manipulation to preserve the gradient shading.
+   *
    * Returns cloned materials so the caller can dispose them on cleanup.
    */
   private applyColorTinting(renderEntity: pc.Entity, config: CharacterConfig): pc.StandardMaterial[] {
@@ -151,6 +159,8 @@ export class KayKitCharacterFactory {
         if (!region) continue
 
         const mat = (mi.material as pc.StandardMaterial).clone()
+        // Remove texture to avoid color multiplication — flat solid color instead
+        mat.diffuseMap = null
         mat.diffuse = colors[region]
         mat.update()
         mi.material = mat
