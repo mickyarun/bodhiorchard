@@ -105,9 +105,11 @@ export class KayKitCharacterFactory {
     renderEntity.setLocalPosition(0, sitting ? 0 : KAYKIT_Y_OFFSET, 0)
     wrapper.addChild(renderEntity)
 
-    // Apply color tinting per body region — store cloned materials for cleanup
-    const clonedMats = this.applyColorTinting(renderEntity, config)
-    ;(wrapper as unknown as { _clonedMaterials: pc.StandardMaterial[] })._clonedMaterials = clonedMats
+    // Color tinting disabled for V1 — KayKit uses pre-colored gradient atlas textures.
+    // Multiplying diffuse color with the texture produces muddy results.
+    // V2 will use canvas-based texture manipulation for proper per-region recoloring.
+    // const clonedMats = this.applyColorTinting(renderEntity, config)
+    // ;(wrapper as unknown as { _clonedMaterials: pc.StandardMaterial[] })._clonedMaterials = clonedMats
 
     // Set up animation component with shared locomotion state graph
     wrapper.addComponent('anim', { activate: true })
