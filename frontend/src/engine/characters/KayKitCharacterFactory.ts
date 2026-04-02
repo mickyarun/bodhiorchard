@@ -22,8 +22,8 @@ import { type ContainerWithAnims, findAnimTrack, LOCOMOTION_STATE_GRAPH } from '
 
 // ─── Model Constants (measured from GLB AABB) ──
 
-/** KayKit characters are ~2.0 units tall (model space). */
-const KAYKIT_NATIVE_HEIGHT = 2.0
+/** KayKit characters are ~2.4 units tall (measured AABB Y: 0 to 2.398). */
+const KAYKIT_NATIVE_HEIGHT = 2.4
 const KAYKIT_TARGET_HEIGHT = 1.0
 const KAYKIT_SCALE = KAYKIT_TARGET_HEIGHT / KAYKIT_NATIVE_HEIGHT
 const KAYKIT_Y_OFFSET = 0.0
