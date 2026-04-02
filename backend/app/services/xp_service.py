@@ -128,10 +128,12 @@ async def award_xp(
     Returns None if deduped (source_ref already awarded). Otherwise returns
     XPAwardResult with old/new level and whether a level-up occurred.
     """
+    from sqlalchemy.exc import IntegrityError
+
     xp_repo = DeveloperXPRepository(db, org_id=org_id)
     event_repo = XPEventRepository(db, org_id=org_id)
 
-    # Dedup via source_ref
+    # Dedup via source_ref (app-level check + DB unique constraint as safety net)
     if source_ref and await event_repo.has_source_ref(source_ref):
         logger.debug("xp_dedup_skip", source_ref=source_ref, user_id=str(user_id))
         return None
@@ -150,17 +152,21 @@ async def award_xp(
     row.level = new_level
     row.level_name = new_name
 
-    # Record audit event
-    await event_repo.create(
-        user_id=user_id,
-        xp_amount=effective_xp,
-        source=source,
-        source_ref=source_ref,
-        multiplier=multiplier,
-        metadata=metadata,
-    )
-
-    await db.flush()
+    # Record audit event (DB unique constraint on source_ref catches races)
+    try:
+        await event_repo.create(
+            user_id=user_id,
+            xp_amount=effective_xp,
+            source=source,
+            source_ref=source_ref,
+            multiplier=multiplier,
+            metadata=metadata,
+        )
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        logger.debug("xp_dedup_integrity", source_ref=source_ref)
+        return None
 
     level_changed = new_level != old_level
     result = XPAwardResult(

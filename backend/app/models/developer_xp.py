@@ -56,7 +56,13 @@ class XPEvent(BaseModel):
     __table_args__ = (
         Index("ix_xp_events_user_org_time", "user_id", "org_id", "created_at"),
         Index("ix_xp_events_org_time", "org_id", "created_at"),
-        Index("ix_xp_events_source_ref", "source_ref"),
+        # Partial unique index: prevents duplicate awards for the same source_ref
+        Index(
+            "uq_xp_events_source_ref",
+            "source_ref", "org_id",
+            unique=True,
+            postgresql_where="source_ref IS NOT NULL",
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
