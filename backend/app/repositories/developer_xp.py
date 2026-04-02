@@ -20,8 +20,11 @@ class DeveloperXPRepository:
         """Get the XP row for a user, creating one with defaults if absent.
 
         Uses SELECT ... FOR UPDATE to prevent race conditions when two
-        concurrent events try to award XP to the same user.
+        concurrent events try to award XP to the same user. Handles the
+        INSERT race (first-ever award) via IntegrityError retry.
         """
+        from sqlalchemy.exc import IntegrityError
+
         stmt = (
             select(DeveloperXP)
             .where(DeveloperXP.user_id == user_id, DeveloperXP.org_id == self.org_id)
@@ -31,9 +34,14 @@ class DeveloperXPRepository:
         row = result.scalar_one_or_none()
 
         if row is None:
-            row = DeveloperXP(user_id=user_id, org_id=self.org_id)
-            self.db.add(row)
-            await self.db.flush()
+            try:
+                row = DeveloperXP(user_id=user_id, org_id=self.org_id)
+                self.db.add(row)
+                await self.db.flush()
+            except IntegrityError:
+                await self.db.rollback()
+                result = await self.db.execute(stmt)
+                row = result.scalar_one_or_none()
 
         return row
 

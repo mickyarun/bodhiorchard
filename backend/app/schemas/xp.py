@@ -18,6 +18,8 @@ class XPProfileRead(BaseModel):
     unlocked_characters: list[str]
     unlocked_accessories: list[str]
 
+    model_config = {"from_attributes": True}
+
 
 class LeaderboardEntry(BaseModel):
     """Single entry in the org XP leaderboard."""
@@ -29,6 +31,8 @@ class LeaderboardEntry(BaseModel):
     level: int
     level_name: str
     streak_count: int
+
+    model_config = {"from_attributes": True}
 
 
 class XPEventRead(BaseModel):

@@ -6,7 +6,7 @@ detection, and WebSocket notification. Streak logic is in check_and_award_streak
 
 import uuid
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -218,7 +218,7 @@ async def check_and_award_streak(
     xp_repo = DeveloperXPRepository(db, org_id=org_id)
     row = await xp_repo.get_or_create(user_id)
 
-    today = date.today()
+    today = datetime.now(UTC).date()
 
     # Already counted today
     if row.last_active_date == today:
@@ -236,17 +236,37 @@ async def check_and_award_streak(
     row.last_active_date = today
     row.streak_best = max(row.streak_best, row.streak_count)
 
-    # Award streak XP with multiplier
+    # Award streak XP directly on the already-locked row (avoids double FOR UPDATE)
     mult = streak_multiplier(row.streak_count)
-    await award_xp(
-        db,
-        user_id=user_id,
-        org_id=org_id,
-        xp_amount=10,
-        source="streak",
-        source_ref=f"streak:{today.isoformat()}",
-        multiplier=mult,
-    )
+    effective_xp = max(0, int(10 * mult))
+    source_ref = f"streak:{user_id}:{today.isoformat()}"
+
+    event_repo = XPEventRepository(db, org_id=org_id)
+    if not await event_repo.has_source_ref(source_ref):
+        old_level = row.level
+        row.total_xp += effective_xp
+        new_level, new_name = compute_level(row.total_xp)
+        row.level = new_level
+        row.level_name = new_name
+
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            await event_repo.create(
+                user_id=user_id, xp_amount=effective_xp,
+                source="streak", source_ref=source_ref, multiplier=mult,
+            )
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+
+        if new_level != old_level:
+            publish(f"xp:{user_id}", {
+                "event_type": "level_up", "xp_amount": effective_xp,
+                "source": "streak", "new_total": row.total_xp,
+                "level": new_level, "level_name": new_name,
+                "level_changed": True, "streak_count": row.streak_count,
+            })
 
     return row.streak_count
 
@@ -302,7 +322,7 @@ async def award_quality_bonus(
         org_id=org_id,
         xp_amount=bonus_xp,
         source="quality_bonus",
-        source_ref=f"quality:{bud_id}",
+        source_ref=f"quality:{user_id}:{bud_id}",
         metadata={"effectiveness_score": score},
     )
 
