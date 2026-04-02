@@ -20,6 +20,7 @@ import { getCharacterGLB } from '../assets/AssetManifest'
 import { parseCharacterModel, isKayKitConfig } from '../characters/CharacterConfig'
 import { KayKitCharacterFactory } from '../characters/KayKitCharacterFactory'
 import { CharacterFactory } from '../characters/CharacterFactory'
+import { type ContainerWithAnims, findAnimTrack } from '../characters/AnimUtils'
 import { tryMove, type CollisionBox } from './CollisionSystem'
 
 // ─── Character model constants (matches CharacterFactory) ────
@@ -33,8 +34,10 @@ const CHAR_Y_OFFSET = 1.0 * CHAR_SCALE
 const MOVE_SPEED = 3.0  // world units per second
 
 // ─── Animation state graph ──────────────────────────────────
-// Parameters drive all state transitions — no direct state forcing.
-// 'sitting' and 'sleeping' are mutually exclusive (only one set at a time).
+// Extended from LOCOMOTION_STATE_GRAPH (AnimUtils.ts) with Sleep state for house interiors.
+// NOTE: uses INTEGER parameters (sitting=0/1, sleeping=0/1) vs BOOLEAN in LOCOMOTION_STATE_GRAPH.
+// This is intentional — the house interior needs integer tri-state (idle/sit/sleep) logic.
+// KayKit characters in houses use their own factory animations (Sit_Chair_Idle, Lie_Idle).
 const STATE_GRAPH = {
   layers: [{
     name: 'locomotion',
@@ -80,19 +83,7 @@ const STATE_GRAPH = {
   },
 }
 
-interface ContainerWithAnims extends pc.ContainerResource {
-  animations: pc.Asset[]
-}
-
-function findTrack(container: ContainerWithAnims, keyword: string): pc.AnimTrack | null {
-  const lower = keyword.toLowerCase()
-  for (const a of container.animations) {
-    if (a.name.toLowerCase().includes(lower)) return a.resource as pc.AnimTrack
-    const track = a.resource as pc.AnimTrack | null
-    if (track?.name?.toLowerCase().includes(lower)) return track
-  }
-  return null
-}
+// ContainerWithAnims and findAnimTrack imported from shared AnimUtils
 
 export class PlayerController {
   private loader: AssetLoader
@@ -158,11 +149,11 @@ export class PlayerController {
     wrapper.anim!.loadStateGraph(STATE_GRAPH)
     const layer = wrapper.anim!.baseLayer
     if (layer) {
-      const idle = findTrack(container, 'idle')
-      const walk = findTrack(container, 'walk')
+      const idle = findAnimTrack(container, 'idle')
+      const walk = findAnimTrack(container, 'walk')
       // Fallback chain: try common keyword variants, then fall back to idle.
-      const sit   = findTrack(container, 'sit')   ?? idle
-      const sleep = findTrack(container, 'sleep') ?? findTrack(container, 'lie') ?? findTrack(container, 'death') ?? idle
+      const sit   = findAnimTrack(container, 'sit')   ?? idle
+      const sleep = findAnimTrack(container, 'sleep') ?? findAnimTrack(container, 'lie') ?? findAnimTrack(container, 'death') ?? idle
       if (idle)  layer.assignAnimation('Idle',  idle)
       if (walk)  layer.assignAnimation('Walk',  walk)
       if (sit)   layer.assignAnimation('Sit',   sit)

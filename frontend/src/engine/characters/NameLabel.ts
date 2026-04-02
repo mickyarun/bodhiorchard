@@ -59,6 +59,8 @@ export function createNameLabel(
   })
   texture.setSource(canvas)
 
+  // Ad-hoc material — each label has a unique emissive texture (per-member name),
+  // so MaterialFactory caching does not apply here.
   const material = new pc.StandardMaterial()
   material.diffuse = new pc.Color(0, 0, 0)
   material.emissiveMap = texture

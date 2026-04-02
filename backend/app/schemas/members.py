@@ -53,7 +53,8 @@ class UpdateCharacterRequest(BaseModel):
         None,
         alias="characterModel",
         max_length=100,
-        description="GLB filename (e.g. 'developer.glb') or null to reset to random",
+        pattern=r"^([a-r]|kaykit:[a-z_]+:[0-9A-Fa-f]{6}:[0-9A-Fa-f]{6}:[0-9A-Fa-f]{6})$",
+        description="Character model: single letter 'a'-'r' (legacy) or 'kaykit:id:hex:hex:hex'",
     )
 
     model_config = {"populate_by_name": True}

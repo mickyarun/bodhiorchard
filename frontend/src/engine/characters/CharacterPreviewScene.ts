@@ -86,7 +86,8 @@ export class CharacterPreviewScene {
     this.updateCameraPosition()
     this.app.root.addChild(this.camera)
 
-    // Ground plane
+    // Ground plane — ad-hoc material is intentional: this is a standalone mini
+    // PlayCanvas app separate from GardenEngine, so MaterialFactory is unavailable.
     this.ground = new pc.Entity('Ground')
     this.ground.addComponent('render', { type: 'plane' })
     this.ground.setLocalScale(GROUND_SIZE, 1, GROUND_SIZE)
@@ -125,17 +126,10 @@ export class CharacterPreviewScene {
     }
 
     this.character = await this.factory.create(
-      'preview',
-      '',
-      config,
-      0, 0, 0,
-      0,
-      false,
+      'preview', '', config,
+      0, 0, 0, 0, false,
+      true, // skipLabel — preview doesn't need name billboard
     )
-
-    // Remove name label for preview (we don't need it here)
-    const label = this.character.entity.findByTag('billboard')[0] as pc.Entity | undefined
-    if (label) label.destroy()
 
     this.app.root.addChild(this.character.entity)
   }

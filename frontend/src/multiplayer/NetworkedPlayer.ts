@@ -43,12 +43,13 @@ export class NetworkedPlayer {
     loader: AssetLoader,
     app: Application,
     initial: PlayerData,
+    kayKitFactory?: KayKitCharacterFactory,
   ): Promise<void> {
     const config = parseCharacterModel(initial.characterModel || null)
 
     if (isKayKitConfig(config)) {
-      // KayKit character — use factory for correct model + colors
-      const factory = new KayKitCharacterFactory(loader)
+      // KayKit character — reuse shared factory for GLB cache sharing
+      const factory = kayKitFactory ?? new KayKitCharacterFactory(loader)
       const result = await factory.create(
         initial.userId, this.name, config,
         initial.x, 0, initial.z,

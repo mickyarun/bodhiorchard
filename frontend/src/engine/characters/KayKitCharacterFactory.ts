@@ -66,7 +66,10 @@ export class KayKitCharacterFactory {
     this.loader = loader
   }
 
-  /** Create a KayKit character entity with animations, color tinting, and name label. */
+  /**
+   * Create a KayKit character entity with animations, color tinting, and name label.
+   * @param skipLabel - If true, omit the name label (used in preview scenes).
+   */
   async create(
     memberId: string,
     memberName: string,
@@ -76,6 +79,7 @@ export class KayKitCharacterFactory {
     z: number,
     yaw = 0,
     sitting = false,
+    skipLabel = false,
   ): Promise<CharacterEntity> {
     const def = getCharacterDef(config.characterId)
     if (!def) {
@@ -95,8 +99,9 @@ export class KayKitCharacterFactory {
     renderEntity.setLocalPosition(0, sitting ? 0 : KAYKIT_Y_OFFSET, 0)
     wrapper.addChild(renderEntity)
 
-    // Apply color tinting per body region
-    this.applyColorTinting(renderEntity, config)
+    // Apply color tinting per body region — store cloned materials for cleanup
+    const clonedMats = this.applyColorTinting(renderEntity, config)
+    ;(wrapper as unknown as { _clonedMaterials: pc.StandardMaterial[] })._clonedMaterials = clonedMats
 
     // Set up animation component with shared locomotion state graph
     wrapper.addComponent('anim', { activate: true })
@@ -107,22 +112,29 @@ export class KayKitCharacterFactory {
       wrapper.anim!.setBoolean('sitting', true)
     }
 
-    // Name label billboard (shared utility)
-    const label = createNameLabel(memberName, this.loader.app.graphicsDevice, LABEL_HEIGHT)
-    wrapper.addChild(label)
+    // Name label billboard (shared utility) — skip in preview mode
+    if (!skipLabel && memberName) {
+      const label = createNameLabel(memberName, this.loader.app.graphicsDevice, LABEL_HEIGHT)
+      wrapper.addChild(label)
+    }
 
     return { entity: wrapper, memberId, memberName }
   }
 
   // ─── Color Tinting ─────────────────────────
 
-  private applyColorTinting(renderEntity: pc.Entity, config: CharacterConfig): void {
+  /**
+   * Apply per-region color tinting to mesh instances.
+   * Returns cloned materials so the caller can dispose them on cleanup.
+   */
+  private applyColorTinting(renderEntity: pc.Entity, config: CharacterConfig): pc.StandardMaterial[] {
     const colors: Record<BodyRegion, pc.Color> = {
       shirt: hexToColor(config.shirtColor),
       pants: hexToColor(config.pantsColor),
       skin: hexToColor(config.skinColor),
     }
 
+    const clonedMaterials: pc.StandardMaterial[] = []
     const renderComponents = renderEntity.findComponents('render') as pc.RenderComponent[]
     for (const rc of renderComponents) {
       for (const mi of rc.meshInstances) {
@@ -134,8 +146,10 @@ export class KayKitCharacterFactory {
         mat.diffuse = colors[region]
         mat.update()
         mi.material = mat
+        clonedMaterials.push(mat)
       }
     }
+    return clonedMaterials
   }
 
   private getRegionForMesh(meshName: string): BodyRegion | null {

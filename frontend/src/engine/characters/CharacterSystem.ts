@@ -168,24 +168,8 @@ export class CharacterSystem {
     )
     state.idleTimer = 0
 
-    // If repo changed, walk to new tree
+    // If repo changed (or first event with a repo), walk to the tree
     if (activity.repo_name && activity.repo_name !== state.currentRepoName) {
-      const treePos = this.getTreePos(activity.repo_name)
-      if (treePos) {
-        state.currentRepoName = activity.repo_name
-        state.targetX = treePos.x + DEV_TREE_OFFSET_X
-        state.targetZ = treePos.z + DEV_TREE_OFFSET_Z
-        state.moveState = 'walking_to_tree'
-
-        // Start walk animation
-        const anim = character.entity.anim
-        if (anim) {
-          anim.setBoolean('sitting', false)
-          anim.setInteger('speed', 1)
-        }
-      }
-    } else if (!state.currentRepoName && activity.repo_name) {
-      // First event with a repo
       const treePos = this.getTreePos(activity.repo_name)
       if (treePos) {
         state.currentRepoName = activity.repo_name
@@ -476,6 +460,11 @@ export class CharacterSystem {
       const labelEntity = char.entity.findByName('NameLabel') as pc.Entity | null
       if (labelEntity?.render?.meshInstances[0]) {
         disposeMaterial(labelEntity.render.meshInstances[0].material)
+      }
+      // Dispose KayKit cloned tinting materials (stored by KayKitCharacterFactory)
+      const clonedMats = (char.entity as unknown as { _clonedMaterials?: pc.StandardMaterial[] })._clonedMaterials
+      if (clonedMats) {
+        for (const mat of clonedMats) disposeMaterial(mat)
       }
       char.entity.destroy()
     }
