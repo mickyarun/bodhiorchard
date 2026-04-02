@@ -71,6 +71,7 @@ import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import ColorCustomizer from '@/components/character/ColorCustomizer.vue'
 import {
   type CharacterConfig,
+  parseCharacterModel,
   serializeCharacterConfig,
   DEFAULT_SHIRT_COLOR,
   DEFAULT_PANTS_COLOR,
@@ -84,13 +85,14 @@ const membersStore = useMembersStore()
 const authStore = useAuthStore()
 const saving = ref(false)
 
-// Reactive config — drives both the grid selection and the 3D preview
+// Load current selection from user profile, fallback to defaults
+const existing = parseCharacterModel(authStore.user?.character_model ?? null)
 const config = reactive<CharacterConfig>({
-  pack: 'kaykit',
-  characterId: 'barbarian',
-  shirtColor: DEFAULT_SHIRT_COLOR,
-  pantsColor: DEFAULT_PANTS_COLOR,
-  skinColor: DEFAULT_SKIN_COLOR,
+  pack: existing.pack === 'kaykit' ? 'kaykit' : 'kaykit',
+  characterId: existing.pack === 'kaykit' ? existing.characterId : 'barbarian',
+  shirtColor: existing.shirtColor || DEFAULT_SHIRT_COLOR,
+  pantsColor: existing.pantsColor || DEFAULT_PANTS_COLOR,
+  skinColor: existing.skinColor || DEFAULT_SKIN_COLOR,
 })
 
 // Computed shallow copy for the preview (triggers reactivity on any change)
@@ -127,7 +129,8 @@ async function handleSave(): Promise<void> {
     await membersStore.updateCharacter(userId, serialized)
     // Refresh user so character_model is up to date for downstream checks
     await authStore.fetchUser()
-    router.push({ name: 'methodology' })
+    // Navigate to dashboard — triggers fresh tree data fetch with updated character
+    router.push({ name: 'dashboard' })
   } catch (err) {
     console.error('[CharacterSelect] Failed to save:', err)
   } finally {
