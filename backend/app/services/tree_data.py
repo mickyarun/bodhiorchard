@@ -830,6 +830,8 @@ async def _resolve_task_repo_name(
 
 async def _collect_members(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) -> None:
     """Collect team members with their contribution percentages."""
+    from app.models.developer_xp import DeveloperXP
+
     result = await db.execute(
         select(
             User.id,
@@ -839,8 +841,14 @@ async def _collect_members(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) 
             User.character_model,
             User.slack_id,
             func.sum(SkillProfile.touch_count).label("total_touches"),
+            DeveloperXP.level,
+            DeveloperXP.level_name,
         )
         .join(SkillProfile, SkillProfile.user_id == User.id)
+        .outerjoin(
+            DeveloperXP,
+            (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == org_id),
+        )
         .where(SkillProfile.org_id == org_id)
         .where(User.is_active.is_(True))
         .where(~User.name.ilike("%[bot]%"))
@@ -851,6 +859,8 @@ async def _collect_members(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) 
             User.avatar_url,
             User.character_model,
             User.slack_id,
+            DeveloperXP.level,
+            DeveloperXP.level_name,
         )
         .order_by(func.sum(SkillProfile.touch_count).desc())
         .limit(20)
@@ -895,6 +905,8 @@ async def _collect_members(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) 
                 top_modules=top_modules,
                 character_model=row.character_model,
                 presence=presence,
+                level=row.level or 1,
+                level_name=row.level_name or "seedling",
             )
         )
 

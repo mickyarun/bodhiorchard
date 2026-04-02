@@ -48,6 +48,8 @@ class MemberActivity(BaseModel):
     top_modules: list[str] = []
     character_model: str | None = None
     presence: str = Field(default="active", description="active | on_break | at_home")
+    level: int = 1
+    level_name: str = "seedling"
 
 
 class SecurityThreat(BaseModel):

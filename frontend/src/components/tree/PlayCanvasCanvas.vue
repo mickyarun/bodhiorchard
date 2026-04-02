@@ -144,6 +144,8 @@ function adaptTreeData(data: TreeData): EngineData {
       top_modules: m.top_modules,
       character_model: m.character_model,
       presence: m.presence,
+      level: m.level,
+      level_name: m.level_name,
     })),
     agent_activity: data.agent_activity.map(a => ({
       agent_name: a.agent_name,

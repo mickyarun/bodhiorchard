@@ -37,6 +37,8 @@ export interface MemberActivity {
   top_modules: string[]
   character_model: string | null
   presence?: 'active' | 'on_break' | 'at_home'
+  level?: number
+  level_name?: string
 }
 
 export interface SecurityThreat {

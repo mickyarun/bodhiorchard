@@ -21,6 +21,7 @@ import { KayKitCharacterFactory } from './KayKitCharacterFactory'
 import { parseCharacterModel, isKayKitConfig } from './CharacterConfig'
 import type { HouseResult } from '../buildings/HouseBuilder'
 import { AgentLabel } from '../agents/AgentLabel'
+import { createLevelBadge } from './LevelBadge'
 import { disposeMaterial } from '../utils/EntityUtils'
 import type { TreePositionLookup } from '../agents/AgentCharacterSystem'
 
@@ -125,6 +126,19 @@ export class CharacterSystem {
       // Register name label for billboard facing
       const label = character.entity.findByTag('billboard')[0] as pc.Entity | undefined
       if (label) app.registerBillboard(label)
+
+      // Add level badge above name label (if XP data available)
+      if (member.level && member.level > 1) {
+        const badgeHeight = isKayKitConfig(config) ? 1.2 : 1.5
+        const badge = createLevelBadge(
+          member.level,
+          member.level_name || 'seedling',
+          app.app.graphicsDevice,
+          badgeHeight,
+        )
+        character.entity.addChild(badge)
+        app.registerBillboard(badge)
+      }
     }
   }
 

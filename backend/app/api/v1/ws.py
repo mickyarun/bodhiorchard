@@ -90,8 +90,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 topic = msg.get("topic", "")
 
                 if action == "subscribe" and topic:
-                    # Topic authorization: notifications:{userId} restricted to own user
+                    # Topic authorization: user-scoped topics restricted to own user
                     if topic.startswith("notifications:") and topic != f"notifications:{user_id}":
+                        await websocket.send_json({"error": "forbidden", "topic": topic})
+                        continue
+                    if topic.startswith("xp:") and topic != f"xp:{user_id}":
                         await websocket.send_json({"error": "forbidden", "topic": topic})
                         continue
 

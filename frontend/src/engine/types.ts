@@ -82,6 +82,8 @@ export interface EngineMember {
   top_modules: string[]
   character_model: string | null
   presence?: PresenceState
+  level?: number
+  level_name?: string
 }
 
 export interface EngineDevActivity {
