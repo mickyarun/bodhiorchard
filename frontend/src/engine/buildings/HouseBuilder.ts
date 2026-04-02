@@ -33,6 +33,7 @@ export interface HouseResult {
   entity: pc.Entity
   memberId: string
   memberName: string
+  characterModel: string | null
   bedPosition: { x: number; y: number; z: number }
   seats: InteractionPoint[]
 }
@@ -47,6 +48,7 @@ export class HouseBuilder {
   async build(
     memberId: string,
     memberName: string,
+    characterModel: string | null,
     worldX: number,
     worldZ: number,
     index: number,
@@ -118,6 +120,6 @@ export class HouseBuilder {
       stone.setLocalScale(1.5, 1.5, 1.5)
     }
 
-    return { entity: root, memberId, memberName, bedPosition: bedPos, seats }
+    return { entity: root, memberId, memberName, characterModel, bedPosition: bedPos, seats }
   }
 }

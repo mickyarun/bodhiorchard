@@ -17,6 +17,9 @@ import * as pc from 'playcanvas'
 import type { AssetLoader } from '../assets/AssetLoader'
 import type { InputManager } from '../input/InputManager'
 import { getCharacterGLB } from '../assets/AssetManifest'
+import { parseCharacterModel, isKayKitConfig } from '../characters/CharacterConfig'
+import { KayKitCharacterFactory } from '../characters/KayKitCharacterFactory'
+import { CharacterFactory } from '../characters/CharacterFactory'
 import { tryMove, type CollisionBox } from './CollisionSystem'
 
 // ─── Character model constants (matches CharacterFactory) ────
@@ -114,8 +117,29 @@ export class PlayerController {
   // +Z-native model at yaw=0 faces +Z (toward camera). 180° = face toward house (-Z).
   static readonly SPAWN_YAW = 180
 
-  async init(root: pc.Entity, startX: number, startZ: number): Promise<pc.Entity> {
-    const glbPath = getCharacterGLB('a')
+  async init(root: pc.Entity, startX: number, startZ: number, characterModel?: string | null): Promise<pc.Entity> {
+    const config = parseCharacterModel(characterModel ?? null)
+
+    if (isKayKitConfig(config)) {
+      // KayKit character — use factory to create entity with animations + colors
+      const factory = new KayKitCharacterFactory(this.loader)
+      const result = await factory.create(
+        'player', '', config,
+        startX, 0, startZ,
+        PlayerController.SPAWN_YAW, false,
+      )
+      // Remove the name label (not needed for local player in house)
+      const label = result.entity.findByTag('billboard')[0] as pc.Entity | undefined
+      if (label) label.destroy()
+
+      root.addChild(result.entity)
+      this.entity = result.entity
+      return result.entity
+    }
+
+    // Legacy Kenney Blocky character path
+    const variant = config.characterId || CharacterFactory.getVariant('player', null)
+    const glbPath = getCharacterGLB(variant)
     const asset = await this.loader.load(glbPath)
     const container = asset.resource as ContainerWithAnims
 

@@ -11,6 +11,7 @@ const DEFAULT_SERVER = "ws://localhost:2567"
 export interface PlayerData {
   userId: string
   name: string
+  characterModel: string
   x: number
   z: number
   yaw: number
@@ -125,7 +126,7 @@ export class ColyseusClient {
       for (const sid of knownSessions) {
         if (!players.has(sid)) {
           knownSessions.delete(sid)
-          this.callbacks.onPlayerLeave?.(sid, { userId: '', name: '', x: 0, z: 0, yaw: 0, animState: 'idle' })
+          this.callbacks.onPlayerLeave?.(sid, { userId: '', name: '', characterModel: '', x: 0, z: 0, yaw: 0, animState: 'idle' })
         }
       }
     })

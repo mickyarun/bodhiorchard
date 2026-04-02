@@ -9,6 +9,9 @@ import type { AssetLoader } from '../engine/assets/AssetLoader'
 import { getCharacterGLB } from '../engine/assets/AssetManifest'
 import type { Application } from '../engine/core/Application'
 import type { PlayerData } from './ColyseusClient'
+import { parseCharacterModel, isKayKitConfig } from '../engine/characters/CharacterConfig'
+import { KayKitCharacterFactory } from '../engine/characters/KayKitCharacterFactory'
+import { CharacterFactory } from '../engine/characters/CharacterFactory'
 
 // Character model constants (matches PlayerController / CharacterFactory)
 const CHAR_NATIVE_HEIGHT = 9.0
@@ -41,25 +44,42 @@ export class NetworkedPlayer {
     app: Application,
     initial: PlayerData,
   ): Promise<void> {
-    // Use a different character model to distinguish from local player
-    const glbPath = getCharacterGLB('b')
-    const asset = await loader.load(glbPath)
-    const container = asset.resource as { instantiateRenderEntity(): pc.Entity }
+    const config = parseCharacterModel(initial.characterModel || null)
 
-    const wrapper = new pc.Entity(`Remote_${this.name}`)
-    wrapper.setPosition(initial.x, 0, initial.z)
-    wrapper.setEulerAngles(0, initial.yaw, 0)
+    if (isKayKitConfig(config)) {
+      // KayKit character — use factory for correct model + colors
+      const factory = new KayKitCharacterFactory(loader)
+      const result = await factory.create(
+        initial.userId, this.name, config,
+        initial.x, 0, initial.z,
+        initial.yaw, false,
+      )
+      parent.addChild(result.entity)
+      this.entity = result.entity
+      this.app = app
+    } else {
+      // Legacy Kenney Blocky character
+      const variant = config.characterId || CharacterFactory.getVariant(initial.userId, null)
+      const glbPath = getCharacterGLB(variant)
+      const asset = await loader.load(glbPath)
+      const container = asset.resource as { instantiateRenderEntity(): pc.Entity }
 
-    const renderEntity = container.instantiateRenderEntity()
-    renderEntity.setLocalScale(CHAR_SCALE, CHAR_SCALE, CHAR_SCALE)
-    renderEntity.setLocalPosition(0, CHAR_Y_OFFSET, 0)
-    wrapper.addChild(renderEntity)
+      const wrapper = new pc.Entity(`Remote_${this.name}`)
+      wrapper.setPosition(initial.x, 0, initial.z)
+      wrapper.setEulerAngles(0, initial.yaw, 0)
 
-    // Name label
-    this.addNameLabel(wrapper, app)
+      const renderEntity = container.instantiateRenderEntity()
+      renderEntity.setLocalScale(CHAR_SCALE, CHAR_SCALE, CHAR_SCALE)
+      renderEntity.setLocalPosition(0, CHAR_Y_OFFSET, 0)
+      wrapper.addChild(renderEntity)
 
-    parent.addChild(wrapper)
-    this.entity = wrapper
+      // Name label
+      this.addNameLabel(wrapper, app)
+
+      parent.addChild(wrapper)
+      this.entity = wrapper
+    }
+
     this.targetX = initial.x
     this.targetZ = initial.z
     this.targetYaw = initial.yaw

@@ -128,9 +128,9 @@ export class InteriorManager {
     // Enable interior root
     this.interiorRoot!.enabled = true
 
-    // Spawn player
+    // Spawn player with their selected character model
     this.player = new PlayerController(this.loader, this.input)
-    await this.player.init(this.interiorRoot!, PLAYER_ENTER_X, PLAYER_ENTER_Z)
+    await this.player.init(this.interiorRoot!, PLAYER_ENTER_X, PLAYER_ENTER_Z, house.characterModel)
     this.player.setCollisionBoxes(this.collisionBoxes)
 
     // Switch to interior camera
