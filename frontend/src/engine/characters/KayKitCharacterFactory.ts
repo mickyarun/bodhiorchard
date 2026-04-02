@@ -24,10 +24,16 @@ import { type ContainerWithAnims, findAnimTrack, LOCOMOTION_STATE_GRAPH } from '
 
 /** KayKit characters are ~2.4 units tall (measured AABB Y: 0 to 2.398). */
 const KAYKIT_NATIVE_HEIGHT = 2.4
-const KAYKIT_TARGET_HEIGHT = 1.0
+
+/**
+ * Target height reduced to 0.75 (vs Blocky's 1.0) because KayKit characters
+ * are rounder/bulkier with helmets/accessories that make them appear larger
+ * at the same height. 0.75 gives visual parity with Blocky inside houses.
+ */
+const KAYKIT_TARGET_HEIGHT = 0.75
 const KAYKIT_SCALE = KAYKIT_TARGET_HEIGHT / KAYKIT_NATIVE_HEIGHT
 const KAYKIT_Y_OFFSET = 0.0
-const LABEL_HEIGHT = KAYKIT_TARGET_HEIGHT + 0.25
+const LABEL_HEIGHT = KAYKIT_TARGET_HEIGHT + 0.2
 
 // ─── Body Region → Mesh Name Mapping ───────────
 
