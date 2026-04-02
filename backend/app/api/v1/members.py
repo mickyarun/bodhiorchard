@@ -451,6 +451,32 @@ async def update_character(
             detail="Only the user or an admin can update character preference.",
         )
 
+    # Validate character/accessory unlocks based on XP level
+    if body.character_model and body.character_model.startswith("kaykit:"):
+        from app.services.xp_service import get_unlocked_items
+
+        unlocks = await get_unlocked_items(db, user_id=user_id, org_id=org.id)
+        parts = body.character_model.split(":")
+        char_id = parts[1] if len(parts) > 1 else ""
+        right_hand = parts[5] if len(parts) > 5 else ""
+        left_hand = parts[6] if len(parts) > 6 else ""
+
+        if char_id and char_id not in unlocks.characters:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Character '{char_id}' is locked. Earn more XP to unlock it.",
+            )
+        if right_hand and right_hand not in unlocks.accessories:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Accessory '{right_hand}' is locked. Earn more XP to unlock it.",
+            )
+        if left_hand and left_hand not in unlocks.accessories:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Accessory '{left_hand}' is locked. Earn more XP to unlock it.",
+            )
+
     user.character_model = body.character_model
     await db.flush()
     await db.refresh(user)

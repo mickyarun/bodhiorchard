@@ -9,10 +9,12 @@ import re
 import uuid
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.tracked_repository import TrackedRepository
+from app.models.user import User
 from app.repositories.pull_request import PullRequestRepository
 from app.schemas.github import GitHubPullRequest, GitHubReview
 from app.services.bud_timeline import record_event
@@ -94,6 +96,20 @@ async def _handle_pr_opened(
         )
         await check_all_repos_have_prs(db, org_id, bud)
 
+    # Award XP for opening a PR
+    author_user_id = await _resolve_github_user(db, org_id, pr_data.user.login)
+    if author_user_id:
+        try:
+            from app.services.xp_service import award_xp
+
+            await award_xp(
+                db, user_id=author_user_id, org_id=org_id,
+                xp_amount=15, source="pr_opened",
+                source_ref=f"pr:{pr_data.id}",
+            )
+        except Exception:
+            logger.warning("xp_award_failed_pr_opened", exc_info=True)
+
     await db.commit()
     logger.info(
         "pr_opened_tracked",
@@ -131,6 +147,21 @@ async def _handle_pr_closed(
             },
         )
         await check_all_prs_merged(db, org_id, pr.bud_id)
+
+    # Award XP for merging a PR (author gets credit)
+    if is_merged:
+        author_user_id = await _resolve_github_user(db, org_id, pr_data.user.login)
+        if author_user_id:
+            try:
+                from app.services.xp_service import award_xp
+
+                await award_xp(
+                    db, user_id=author_user_id, org_id=org_id,
+                    xp_amount=25, source="pr_merged",
+                    source_ref=f"pr_merged:{pr_data.id}",
+                )
+            except Exception:
+                logger.warning("xp_award_failed_pr_merged", exc_info=True)
 
     await db.commit()
     logger.info(
@@ -172,5 +203,37 @@ async def _handle_review_submitted(
     new_status = state_map.get(review.state.upper())
     if new_status:
         pr.review_status = new_status
+
+        # Award XP to the reviewer
+        reviewer_user_id = await _resolve_github_user(db, org_id, review.user.login)
+        if reviewer_user_id:
+            try:
+                from app.services.xp_service import award_xp
+
+                await award_xp(
+                    db, user_id=reviewer_user_id, org_id=org_id,
+                    xp_amount=20, source="review",
+                    source_ref=f"review:{pr_data.id}:{review.user.login}",
+                )
+            except Exception:
+                logger.warning("xp_award_failed_review", exc_info=True)
+
         await db.commit()
+
+
+async def _resolve_github_user(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    github_login: str,
+) -> uuid.UUID | None:
+    """Resolve a GitHub login to a user_id within the org."""
+    if not github_login:
+        return None
+    stmt = (
+        select(User.id)
+        .where(User.github_username == github_login, User.org_id == org_id)
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 

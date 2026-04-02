@@ -23,6 +23,7 @@ from app.models.bud_estimate_snapshot import BUDEstimateSnapshot
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.design_system import DesignSystemRef
 from app.models.dev_activity import DevActivityLog
+from app.models.developer_xp import DeveloperXP, XPEvent
 from app.models.enterprise_rule import EnterpriseRule
 from app.models.feature_learning import FeatureLearning
 from app.models.jwt_token import JWTToken
@@ -67,6 +68,7 @@ __all__ = [
     "BugStatus",
     "DesignSystemRef",
     "DevActivityLog",
+    "DeveloperXP",
     "EnterpriseRule",
     "FeatureLearning",
     "JWTToken",
@@ -95,4 +97,5 @@ __all__ = [
     "UserEmailAlias",
     "UserMCPToken",
     "UserRole",
+    "XPEvent",
 ]

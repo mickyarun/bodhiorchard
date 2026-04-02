@@ -323,6 +323,25 @@ async def update_bud(
     await db.flush()
     await db.refresh(bud)
 
+    # Award XP for BUD completion (prod or closed with assignee)
+    if "status" in update_data:
+        _completed = update_data["status"] in (BUDStatus.PROD, BUDStatus.CLOSED)
+        if _completed and bud.assignee_id and old_status not in (BUDStatus.PROD, BUDStatus.CLOSED):
+            try:
+                from app.services.xp_service import award_quality_bonus, award_xp
+
+                await award_xp(
+                    db, user_id=bud.assignee_id, org_id=current_user.org_id,
+                    xp_amount=50, source="bud_completed",
+                    source_ref=f"bud:{bud.bud_number}",
+                )
+                await award_quality_bonus(
+                    db, user_id=bud.assignee_id, org_id=current_user.org_id,
+                    bud_id=bud.id,
+                )
+            except Exception:
+                logger.warning("xp_award_failed_bud_completion", exc_info=True)
+
     logger.info("bud_updated", bud_id=str(bud.id), fields=list(update_data.keys()))
 
     # Trigger side-effect jobs on status transitions

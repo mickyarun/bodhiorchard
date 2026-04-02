@@ -168,6 +168,20 @@ async def handle_dev_activity(
         },
     )
 
+    # Award XP for developer activity (non-blocking — XP errors must not break hooks)
+    if user_id:
+        try:
+            from app.services.xp_service import award_xp, check_and_award_streak
+
+            await check_and_award_streak(db, user_id=user_id, org_id=org.id)
+            if body.event_type == "commit" and body.commit_sha:
+                await award_xp(
+                    db, user_id=user_id, org_id=org.id,
+                    xp_amount=5, source="commit", source_ref=body.commit_sha,
+                )
+        except Exception:
+            logger.warning("xp_award_failed", user_id=str(user_id), exc_info=True)
+
     logger.info(
         "hook_activity_recorded",
         event_type=body.event_type,

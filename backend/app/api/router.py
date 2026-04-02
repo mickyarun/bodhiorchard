@@ -22,6 +22,7 @@ from app.api.v1.skills import router as skills_router
 from app.api.v1.slack import router as slack_router
 from app.api.v1.triage_sessions import router as triage_router
 from app.api.v1.ws import router as ws_router
+from app.api.v1.xp import router as xp_router
 from app.mcp.server import router as mcp_router
 
 api_router = APIRouter()
@@ -46,4 +47,5 @@ api_router.include_router(triage_router, prefix="/api/v1/triage-sessions")
 api_router.include_router(jobs_router, prefix="/api/v1/jobs")
 api_router.include_router(ws_router, prefix="/api/v1")
 api_router.include_router(public_router, prefix="/api/v1/public")
+api_router.include_router(xp_router, prefix="/api/v1")
 api_router.include_router(mcp_router)
