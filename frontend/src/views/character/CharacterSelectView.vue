@@ -9,7 +9,7 @@
       </div>
 
       <v-row>
-        <!-- Left: Character grid + color customizer -->
+        <!-- Left: Character grid + customization -->
         <v-col cols="12" md="5">
           <v-card color="surface" class="pa-5 mb-4">
             <CharacterGrid
@@ -18,12 +18,20 @@
             />
           </v-card>
 
-          <v-card color="surface" class="pa-5">
+          <v-card color="surface" class="pa-5 mb-4">
             <ColorCustomizer
               :shirt-color="config.shirtColor"
               :pants-color="config.pantsColor"
               :skin-color="config.skinColor"
               @update="onColorUpdate"
+            />
+          </v-card>
+
+          <v-card color="surface" class="pa-5">
+            <AccessoryPicker
+              :right-hand="config.rightHand"
+              :left-hand="config.leftHand"
+              @update="onAccessoryUpdate"
             />
           </v-card>
         </v-col>
@@ -65,6 +73,7 @@ import { useRouter } from 'vue-router'
 import CharacterGrid from '@/components/character/CharacterGrid.vue'
 import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import ColorCustomizer from '@/components/character/ColorCustomizer.vue'
+import AccessoryPicker from '@/components/character/AccessoryPicker.vue'
 import {
   type CharacterConfig,
   parseCharacterModel,
@@ -84,11 +93,13 @@ const saving = ref(false)
 // Load current selection from user profile, fallback to defaults
 const existing = parseCharacterModel(authStore.user?.character_model ?? null)
 const config = reactive<CharacterConfig>({
-  pack: existing.pack === 'kaykit' ? 'kaykit' : 'kaykit',
+  pack: 'kaykit',
   characterId: existing.pack === 'kaykit' ? existing.characterId : 'barbarian',
   shirtColor: existing.shirtColor || DEFAULT_SHIRT_COLOR,
   pantsColor: existing.pantsColor || DEFAULT_PANTS_COLOR,
   skinColor: existing.skinColor || DEFAULT_SKIN_COLOR,
+  rightHand: existing.rightHand || '',
+  leftHand: existing.leftHand || '',
 })
 
 // Computed shallow copy for the preview (triggers reactivity on any change)
@@ -98,6 +109,8 @@ const previewConfig = computed<CharacterConfig>(() => ({
   shirtColor: config.shirtColor,
   pantsColor: config.pantsColor,
   skinColor: config.skinColor,
+  rightHand: config.rightHand,
+  leftHand: config.leftHand,
 }))
 
 function onCharacterSelect(id: string): void {
@@ -108,8 +121,11 @@ function onColorUpdate(key: 'shirtColor' | 'pantsColor' | 'skinColor', value: st
   config[key] = value
 }
 
+function onAccessoryUpdate(key: 'rightHand' | 'leftHand', value: string): void {
+  config[key] = value
+}
+
 async function handleSave(): Promise<void> {
-  // Ensure user is loaded (may not be if navigated directly after password change)
   if (!authStore.user) {
     await authStore.fetchUser()
   }
@@ -123,9 +139,7 @@ async function handleSave(): Promise<void> {
   try {
     const serialized = serializeCharacterConfig(config)
     await membersStore.updateCharacter(userId, serialized)
-    // Refresh user so character_model is up to date for downstream checks
     await authStore.fetchUser()
-    // Navigate to dashboard — triggers fresh tree data fetch with updated character
     router.push({ name: 'dashboard' })
   } catch (err) {
     console.error('[CharacterSelect] Failed to save:', err)

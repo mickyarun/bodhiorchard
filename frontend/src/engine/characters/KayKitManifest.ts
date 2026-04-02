@@ -83,3 +83,44 @@ export const CORE_ANIMATION_CATEGORIES: AnimationCategory[] = [
 export function getCoreAnimationGLBs(): string[] {
   return CORE_ANIMATION_CATEGORIES.map(c => ANIMATION_GLBS[c])
 }
+
+// ─── Accessories ───────────────────────────────
+
+export type AccessorySlot = 'right_hand' | 'left_hand'
+
+/** Bone names in the KayKit Rig_Medium skeleton for accessory attachment. */
+export const SLOT_BONE_NAMES: Record<AccessorySlot, string> = {
+  right_hand: 'handslot.r',
+  left_hand:  'handslot.l',
+}
+
+export interface KayKitAccessoryDef {
+  id: string
+  name: string
+  glb: string
+  slot: AccessorySlot
+  locked: boolean
+}
+
+const ACCESSORIES: KayKitAccessoryDef[] = [
+  { id: 'sword',   name: 'Sword',     glb: `${BASE}/accessories/sword_1handed.glb`, slot: 'right_hand', locked: false },
+  { id: 'axe',     name: 'Axe',       glb: `${BASE}/accessories/axe_1handed.glb`,   slot: 'right_hand', locked: false },
+  { id: 'dagger',  name: 'Dagger',    glb: `${BASE}/accessories/dagger.glb`,        slot: 'right_hand', locked: false },
+  { id: 'staff',   name: 'Staff',     glb: `${BASE}/accessories/staff.glb`,         slot: 'right_hand', locked: false },
+  { id: 'wand',    name: 'Wand',      glb: `${BASE}/accessories/wand.glb`,          slot: 'right_hand', locked: false },
+  { id: 'bow',     name: 'Bow',       glb: `${BASE}/accessories/bow.glb`,           slot: 'right_hand', locked: false },
+  { id: 'shield',  name: 'Shield',    glb: `${BASE}/accessories/shield_badge.glb`,  slot: 'left_hand',  locked: false },
+  { id: 'mug',     name: 'Coffee Mug',glb: `${BASE}/accessories/mug_full.glb`,      slot: 'right_hand', locked: false },
+]
+
+export function getAccessoryDef(id: string): KayKitAccessoryDef | undefined {
+  return ACCESSORIES.find(a => a.id === id)
+}
+
+export function getAllAccessories(): readonly KayKitAccessoryDef[] {
+  return ACCESSORIES
+}
+
+export function getAccessoriesForSlot(slot: AccessorySlot): KayKitAccessoryDef[] {
+  return ACCESSORIES.filter(a => a.slot === slot)
+}

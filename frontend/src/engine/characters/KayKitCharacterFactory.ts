@@ -16,7 +16,7 @@ import * as pc from 'playcanvas'
 import type { AssetLoader } from '../assets/AssetLoader'
 import type { CharacterConfig } from './CharacterConfig'
 import type { CharacterEntity } from './CharacterFactory'
-import { getCharacterDef, getCoreAnimationGLBs } from './KayKitManifest'
+import { getCharacterDef, getCoreAnimationGLBs, getAccessoryDef, SLOT_BONE_NAMES, type AccessorySlot } from './KayKitManifest'
 import { createNameLabel } from './NameLabel'
 import { type ContainerWithAnims, findAnimTrack, LOCOMOTION_STATE_GRAPH } from './AnimUtils'
 
@@ -123,6 +123,9 @@ export class KayKitCharacterFactory {
       wrapper.anim!.setBoolean('sitting', true)
     }
 
+    // Attach accessories to hand bone slots
+    await this.attachAccessories(renderEntity, config)
+
     // Name label billboard (shared utility) — skip in preview mode
     if (!skipLabel && memberName) {
       const label = createNameLabel(memberName, this.loader.app.graphicsDevice, LABEL_HEIGHT)
@@ -177,6 +180,36 @@ export class KayKitCharacterFactory {
       }
     }
     return null
+  }
+
+  // ─── Accessory Attachment ───────────────────
+
+  /**
+   * Attach accessory GLBs to character hand bones.
+   *
+   * Finds the bone node by name (e.g., "handslot.r") in the render entity's
+   * graph hierarchy, loads the accessory GLB, instantiates it, and parents
+   * it to the bone. The accessory inherits the bone's animation transforms.
+   */
+  private async attachAccessories(renderEntity: pc.Entity, config: CharacterConfig): Promise<void> {
+    const slots: { id: string; slot: AccessorySlot }[] = []
+    if (config.rightHand) slots.push({ id: config.rightHand, slot: 'right_hand' })
+    if (config.leftHand) slots.push({ id: config.leftHand, slot: 'left_hand' })
+
+    for (const { id, slot } of slots) {
+      const def = getAccessoryDef(id)
+      if (!def) continue
+
+      const boneName = SLOT_BONE_NAMES[slot]
+      const boneNode = renderEntity.findByName(boneName) as pc.Entity | null
+      if (!boneNode) continue
+
+      const container = await this.loadContainer(def.glb)
+      const accessoryEntity = container.instantiateRenderEntity()
+      // Scale accessory to match the character's scale (already applied on renderEntity)
+      // Accessories are authored at the same scale as characters, so no extra scaling needed
+      boneNode.addChild(accessoryEntity)
+    }
   }
 
   // ─── Animation Loading ─────────────────────

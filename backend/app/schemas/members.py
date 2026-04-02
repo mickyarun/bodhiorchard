@@ -53,8 +53,8 @@ class UpdateCharacterRequest(BaseModel):
         None,
         alias="characterModel",
         max_length=100,
-        pattern=r"^([a-r]|kaykit:[a-z_]+:[0-9A-Fa-f]{6}:[0-9A-Fa-f]{6}:[0-9A-Fa-f]{6})$",
-        description="Character model: single letter 'a'-'r' (legacy) or 'kaykit:id:hex:hex:hex'",
+        pattern=r"^([a-r]|kaykit:[a-z_]+:[0-9A-Fa-f]{6}:[0-9A-Fa-f]{6}:[0-9A-Fa-f]{6}(:[a-z_]*){0,2})$",
+        description="'a'-'r' (legacy) or 'kaykit:id:hex:hex:hex[:right][:left]'",
     )
 
     model_config = {"populate_by_name": True}
