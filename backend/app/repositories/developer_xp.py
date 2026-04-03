@@ -54,13 +54,19 @@ class DeveloperXPRepository:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_leaderboard(self, limit: int = 20) -> list[tuple[DeveloperXP, User]]:
-        """Top developers by XP within the org."""
+    async def get_leaderboard(self, limit: int = 20) -> list[tuple[User, DeveloperXP | None]]:
+        """All org members ranked by XP (includes members with 0 XP)."""
+        from sqlalchemy import func as sa_func
+
         stmt = (
-            select(DeveloperXP, User)
-            .join(User, DeveloperXP.user_id == User.id)
-            .where(DeveloperXP.org_id == self.org_id)
-            .order_by(DeveloperXP.total_xp.desc())
+            select(User, DeveloperXP)
+            .outerjoin(
+                DeveloperXP,
+                (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == self.org_id),
+            )
+            .where(User.org_id == self.org_id)
+            .where(User.is_active.is_(True))
+            .order_by(sa_func.coalesce(DeveloperXP.total_xp, 0).desc())
             .limit(limit)
         )
         result = await self.db.execute(stmt)

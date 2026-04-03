@@ -1,16 +1,25 @@
 <template>
   <v-container class="py-6" fluid>
-    <div class="d-flex align-center mb-6">
-      <v-icon icon="mdi-account-circle" size="28" class="mr-2" />
+    <div class="d-flex align-center ga-2 mb-6">
+      <v-icon icon="mdi-account-circle" size="28" />
       <div class="text-h5 font-weight-bold">My Profile</div>
       <v-spacer />
       <v-btn
         variant="tonal"
         color="primary"
+        size="small"
         prepend-icon="mdi-account-edit-outline"
         to="/character-select"
       >
         Customize Character
+      </v-btn>
+      <v-btn
+        variant="tonal"
+        size="small"
+        prepend-icon="mdi-lock-reset"
+        to="/change-password"
+      >
+        Change Password
       </v-btn>
     </div>
 

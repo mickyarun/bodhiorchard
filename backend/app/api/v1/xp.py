@@ -56,15 +56,15 @@ async def get_leaderboard(
 
     return [
         LeaderboardEntry(
-            user_id=str(xp.user_id),
+            user_id=str(user.id),
             name=user.name,
             avatar_url=user.avatar_url,
-            total_xp=xp.total_xp,
-            level=xp.level,
-            level_name=xp.level_name,
-            streak_count=xp.streak_count,
+            total_xp=xp.total_xp if xp else 0,
+            level=xp.level if xp else 1,
+            level_name=xp.level_name if xp else "seedling",
+            streak_count=xp.streak_count if xp else 0,
         )
-        for xp, user in entries
+        for user, xp in entries
     ]
 
 
