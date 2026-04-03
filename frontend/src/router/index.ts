@@ -110,6 +110,16 @@ const router = createRouter({
           component: () => import('@/views/features/FeaturesView.vue'),
         },
         {
+          path: 'leaderboard',
+          name: 'leaderboard',
+          component: () => import('@/views/leaderboard/LeaderboardView.vue'),
+        },
+        {
+          path: 'profile',
+          name: 'profile',
+          component: () => import('@/views/profile/ProfileView.vue'),
+        },
+        {
           path: 'skills',
           name: 'skills',
           component: () => import('@/views/skills/SkillProfilesView.vue'),

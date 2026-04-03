@@ -33,6 +33,12 @@
           disabled
         />
         <v-list-item
+          prepend-icon="mdi-trophy-outline"
+          title="Leaderboard"
+          to="/leaderboard"
+          rounded="lg"
+        />
+        <v-list-item
           prepend-icon="mdi-account-cog-outline"
           title="Skills"
           to="/skills"
@@ -136,6 +142,12 @@
         <router-view />
       </div>
     </v-main>
+
+    <!-- Real-time XP toast notifications -->
+    <XPToast
+      :toasts="xpToasts"
+      @dismiss="xpDismiss"
+    />
   </v-app>
 </template>
 
@@ -145,10 +157,15 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import BodhigroveLogo from '@/components/common/BodhigroveLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
+import XPToast from '@/components/common/XPToast.vue'
 import { usePermissions } from '@/composables/usePermissions'
+import { useXPSocket } from '@/composables/useXPSocket'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+// Real-time XP notifications — runs for all authenticated pages
+const { toasts: xpToasts, dismissToast: xpDismiss } = useXPSocket()
 const {
   canApprove,
   canManageMembers,
