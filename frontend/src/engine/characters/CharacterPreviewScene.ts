@@ -72,8 +72,8 @@ export class CharacterPreviewScene {
     this.app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, 2)
     this.app.resizeCanvas(w, h)
 
-    // Ambient — slightly cool for contrast with warm key light
-    this.app.scene.ambientLight = new pc.Color(0.25, 0.25, 0.3)
+    // Ambient — bright enough to see face details + slightly cool
+    this.app.scene.ambientLight = new pc.Color(0.35, 0.35, 0.4)
 
     this.setupLighting()
     this.setupCamera()
@@ -97,16 +97,16 @@ export class CharacterPreviewScene {
   private setupLighting(): void {
     if (!this.app) return
 
-    // Key light — warm directional from upper-left
+    // Key light — warm directional from front-left (illuminates the face)
     const keyLight = new pc.Entity('KeyLight')
     keyLight.addComponent('light', {
       type: 'directional',
       color: new pc.Color(1, 0.95, 0.9),
-      intensity: 1.0,
+      intensity: 1.2,
       castShadows: true,
       shadowResolution: 1024,
     })
-    keyLight.setEulerAngles(45, 135, 0)
+    keyLight.setEulerAngles(40, -30, 0)
     this.app.root.addChild(keyLight)
 
     // Spot light — focused pool from above for dramatic effect
@@ -121,8 +121,8 @@ export class CharacterPreviewScene {
       castShadows: true,
       shadowResolution: 512,
     })
-    spotLight.setPosition(0, 4, 1)
-    spotLight.setEulerAngles(70, 0, 0)
+    spotLight.setPosition(0.5, 4, 1.5)
+    spotLight.setEulerAngles(65, 0, 0)
     this.app.root.addChild(spotLight)
 
     // Rim light — cool blue from behind for edge highlighting
