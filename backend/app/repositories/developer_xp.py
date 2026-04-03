@@ -58,13 +58,16 @@ class DeveloperXPRepository:
         """All org members ranked by XP (includes members with 0 XP)."""
         from sqlalchemy import func as sa_func
 
+        from app.models.user import OrgToUser
+
         stmt = (
             select(User, DeveloperXP)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
             .outerjoin(
                 DeveloperXP,
                 (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == self.org_id),
             )
-            .where(User.org_id == self.org_id)
+            .where(OrgToUser.org_id == self.org_id)
             .where(User.is_active.is_(True))
             .order_by(sa_func.coalesce(DeveloperXP.total_xp, 0).desc())
             .limit(limit)
