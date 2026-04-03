@@ -88,20 +88,22 @@ function selectColor(key: ColorKey, value: string): void {
 }
 
 .color-customizer__swatch {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   cursor: pointer;
   border: 2px solid transparent;
-  transition: border-color 0.15s, transform 0.15s;
+  transition: all 0.2s ease;
 }
 
 .color-customizer__swatch:hover {
-  transform: scale(1.15);
+  transform: scale(1.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .color-customizer__swatch--active {
+  transform: scale(1.15);
   border-color: white;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3), 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 </style>

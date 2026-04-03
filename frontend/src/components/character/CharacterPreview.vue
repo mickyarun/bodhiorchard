@@ -3,16 +3,26 @@
     ref="containerRef"
     class="character-preview"
   >
-    <div
-      v-if="loading"
-      class="character-preview__loading"
-    >
-      <v-progress-circular
-        indeterminate
-        size="32"
-        color="primary"
-      />
-    </div>
+    <!-- Skeleton loader before PlayCanvas boots -->
+    <v-skeleton-loader
+      v-if="!sceneReady"
+      type="image"
+      class="character-preview__skeleton"
+    />
+    <!-- Spinner during character swap (scene already running) -->
+    <transition name="fade">
+      <div
+        v-if="sceneReady && loading"
+        class="character-preview__loading"
+      >
+        <v-progress-circular
+          indeterminate
+          size="28"
+          width="3"
+          color="primary"
+        />
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -26,6 +36,7 @@ const props = defineProps<{
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
+const sceneReady = ref(false)
 const loading = ref(true)
 let scene: CharacterPreviewScene | null = null
 let resizeObserver: ResizeObserver | null = null
@@ -35,6 +46,8 @@ onMounted(async () => {
 
   scene = new CharacterPreviewScene()
   await scene.init(containerRef.value)
+  sceneReady.value = true  // scene boots with lighting + pedestal visible
+
   await scene.setCharacter(props.config)
   loading.value = false
 
@@ -72,18 +85,31 @@ onUnmounted(() => {
   min-height: 300px;
   border-radius: 12px;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.3);
 }
 
 .character-preview :deep(canvas) {
   display: block;
 }
 
+.character-preview__skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
 .character-preview__loading {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 1;
+  bottom: 16px;
+  right: 16px;
+  z-index: 2;
+}
+
+/* Fade transition for swap spinner */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
 }
 </style>

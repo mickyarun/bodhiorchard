@@ -11,27 +11,26 @@
 // ─── Character Definitions ─────────────────────
 
 export interface KayKitCharacterDef {
-  /** Unique identifier used in character_model encoding. */
   id: string
-  /** Display name shown in the selection UI. */
   name: string
-  /** Path to the character GLB (relative to public root). */
   glb: string
-  /** Path to the thumbnail preview image. */
   thumbnail: string
-  /** If true, shows a lock icon in the selection UI (V1: visual only). */
   locked: boolean
+  /** Minimum level required to unlock. Used for UI badge display. */
+  unlockLevel: number
+  /** Level name for unlock tooltip (e.g., "Sprout"). */
+  unlockName: string
 }
 
 const BASE = 'characters/kaykit'
 
 const CHARACTERS: KayKitCharacterDef[] = [
-  { id: 'barbarian',    name: 'Barbarian',    glb: `${BASE}/characters/barbarian.glb`,     thumbnail: `${BASE}/thumbnails/barbarian.png`,     locked: false },
-  { id: 'knight',       name: 'Knight',       glb: `${BASE}/characters/knight.glb`,        thumbnail: `${BASE}/thumbnails/knight.png`,        locked: false },
-  { id: 'mage',         name: 'Mage',         glb: `${BASE}/characters/mage.glb`,          thumbnail: `${BASE}/thumbnails/mage.png`,          locked: false },
-  { id: 'ranger',       name: 'Ranger',       glb: `${BASE}/characters/ranger.glb`,        thumbnail: `${BASE}/thumbnails/ranger.png`,        locked: false },
-  { id: 'rogue',        name: 'Rogue',        glb: `${BASE}/characters/rogue.glb`,         thumbnail: `${BASE}/thumbnails/rogue.png`,         locked: false },
-  { id: 'rogue_hooded', name: 'Rogue Hooded', glb: `${BASE}/characters/rogue_hooded.glb`,  thumbnail: `${BASE}/thumbnails/rogue_hooded.png`,  locked: false },
+  { id: 'barbarian',    name: 'Barbarian',    glb: `${BASE}/characters/barbarian.glb`,     thumbnail: `${BASE}/thumbnails/barbarian.png`,     locked: false, unlockLevel: 1, unlockName: 'Seedling' },
+  { id: 'knight',       name: 'Knight',       glb: `${BASE}/characters/knight.glb`,        thumbnail: `${BASE}/thumbnails/knight.png`,        locked: false, unlockLevel: 1, unlockName: 'Seedling' },
+  { id: 'mage',         name: 'Mage',         glb: `${BASE}/characters/mage.glb`,          thumbnail: `${BASE}/thumbnails/mage.png`,          locked: false, unlockLevel: 2, unlockName: 'Sprout' },
+  { id: 'ranger',       name: 'Ranger',       glb: `${BASE}/characters/ranger.glb`,        thumbnail: `${BASE}/thumbnails/ranger.png`,        locked: false, unlockLevel: 3, unlockName: 'Sapling' },
+  { id: 'rogue',        name: 'Rogue',        glb: `${BASE}/characters/rogue.glb`,         thumbnail: `${BASE}/thumbnails/rogue.png`,         locked: false, unlockLevel: 4, unlockName: 'Tree' },
+  { id: 'rogue_hooded', name: 'Rogue Hooded', glb: `${BASE}/characters/rogue_hooded.glb`,  thumbnail: `${BASE}/thumbnails/rogue_hooded.png`,  locked: false, unlockLevel: 5, unlockName: 'Ancient Oak' },
 ]
 
 export function getCharacterDef(id: string): KayKitCharacterDef | undefined {

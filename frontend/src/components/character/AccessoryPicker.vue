@@ -108,30 +108,33 @@ const leftHandItems = computed(() => {
 }
 
 .accessory-picker__item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 6px 10px;
+  gap: 3px;
+  padding: 8px 12px;
   border: 2px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: border-color 0.15s, transform 0.15s;
-  min-width: 60px;
+  transition: all 0.2s ease;
+  min-width: 72px;
 }
 
-.accessory-picker__item:hover {
+.accessory-picker__item:hover:not(.accessory-picker__item--locked) {
   border-color: rgba(255, 255, 255, 0.3);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
 }
 
 .accessory-picker__item--active {
   border-color: rgb(var(--v-theme-primary));
-  background: rgba(var(--v-theme-primary), 0.1);
+  background: rgba(var(--v-theme-primary), 0.12);
+  box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.25);
 }
 
 .accessory-picker__item--locked {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 </style>

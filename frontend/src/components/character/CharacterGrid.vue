@@ -4,31 +4,48 @@
       Choose Your Character
     </div>
     <div class="character-grid__items">
-      <div
+      <v-tooltip
         v-for="char in characters"
         :key="char.id"
-        class="character-grid__card"
-        :class="{
-          'character-grid__card--selected': char.id === selectedId,
-          'character-grid__card--locked': char.locked,
-        }"
-        @click="!char.locked && emit('select', char.id)"
+        :text="char.locked ? `Reach ${char.unlockName} (Lv.${char.unlockLevel}) to unlock` : char.name"
+        location="top"
       >
-        <img
-          :src="'/' + char.thumbnail"
-          :alt="char.name"
-          class="character-grid__img"
-        >
-        <div class="character-grid__name">
-          {{ char.name }}
-        </div>
-        <v-icon
-          v-if="char.locked"
-          class="character-grid__lock"
-          icon="mdi-lock"
-          size="24"
-        />
-      </div>
+        <template #activator="{ props: tooltipProps }">
+          <div
+            v-bind="tooltipProps"
+            class="character-grid__card"
+            :class="{
+              'character-grid__card--selected': char.id === selectedId,
+              'character-grid__card--locked': char.locked,
+            }"
+            @click="!char.locked && emit('select', char.id)"
+          >
+            <img
+              :src="'/' + char.thumbnail"
+              :alt="char.name"
+              class="character-grid__img"
+            >
+            <div class="character-grid__name">
+              {{ char.name }}
+            </div>
+            <!-- Lock overlay with level badge -->
+            <div
+              v-if="char.locked"
+              class="character-grid__lock-overlay"
+            >
+              <v-icon icon="mdi-lock" size="28" />
+              <v-chip
+                size="x-small"
+                color="warning"
+                variant="flat"
+                class="character-grid__level-badge"
+              >
+                Lv.{{ char.unlockLevel }}
+              </v-chip>
+            </div>
+          </div>
+        </template>
+      </v-tooltip>
     </div>
   </div>
 </template>
@@ -60,7 +77,7 @@ const characters = computed<KayKitCharacterDef[]>(() => {
 <style scoped>
 .character-grid__items {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
 }
 
@@ -70,24 +87,34 @@ const characters = computed<KayKitCharacterDef[]>(() => {
   border-radius: 12px;
   padding: 8px;
   cursor: pointer;
-  transition: border-color 0.2s, transform 0.15s;
+  transition: all 0.2s ease;
   background: rgba(255, 255, 255, 0.04);
   text-align: center;
 }
 
 .character-grid__card:hover:not(.character-grid__card--locked) {
   border-color: rgba(255, 255, 255, 0.3);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .character-grid__card--selected {
   border-color: rgb(var(--v-theme-primary));
-  background: rgba(var(--v-theme-primary), 0.1);
+  background: rgba(var(--v-theme-primary), 0.12);
+  box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.3);
+  transform: scale(1.03);
 }
 
 .character-grid__card--locked {
-  opacity: 0.4;
   cursor: not-allowed;
+}
+
+.character-grid__card--locked .character-grid__img {
+  filter: grayscale(1) brightness(0.5);
+}
+
+.character-grid__card--locked .character-grid__name {
+  opacity: 0.5;
 }
 
 .character-grid__img {
@@ -95,19 +122,32 @@ const characters = computed<KayKitCharacterDef[]>(() => {
   aspect-ratio: 1;
   object-fit: contain;
   border-radius: 8px;
+  transition: filter 0.2s ease;
 }
 
 .character-grid__name {
   font-size: 13px;
   font-weight: 500;
   margin-top: 4px;
+  transition: opacity 0.2s;
 }
 
-.character-grid__lock {
+.character-grid__lock-overlay {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: rgba(255, 255, 255, 0.6);
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.character-grid__level-badge {
+  font-size: 10px !important;
+  font-weight: 700;
 }
 </style>
