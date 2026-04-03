@@ -121,6 +121,11 @@
 
             <v-list density="compact" min-width="200">
               <v-list-item
+                prepend-icon="mdi-account-circle-outline"
+                title="My Profile"
+                to="/profile"
+              />
+              <v-list-item
                 prepend-icon="mdi-account-edit-outline"
                 title="Customize Character"
                 to="/character-select"
