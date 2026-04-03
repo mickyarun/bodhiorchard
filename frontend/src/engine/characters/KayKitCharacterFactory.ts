@@ -39,15 +39,14 @@ const LABEL_HEIGHT = KAYKIT_TARGET_HEIGHT + 0.2
 
 type BodyRegion = 'shirt' | 'pants' | 'skin'
 
-/** Maps body regions to mesh name substrings. Covers all KayKit mesh parts:
- *  shirt: Body, Cape, Helmet, HelmetVisor, BearHat (accessories follow shirt color)
- *  pants: LegLeft, LegRight
- *  skin: Head, ArmLeft, ArmRight
+/** Maps body regions to mesh name substrings for flat color tinting.
+ *  Head is excluded — its texture contains painted eyes/face details
+ *  that would be lost if we remove the diffuseMap.
  */
 const REGION_MESH_PATTERNS: Record<BodyRegion, string[]> = {
   shirt: ['Body', 'Cape', 'Helmet', 'Visor', 'Hat'],
   pants: ['LegLeft', 'LegRight'],
-  skin:  ['Head', 'ArmLeft', 'ArmRight'],
+  skin:  ['ArmLeft', 'ArmRight'],
 }
 
 /** Animation track names from KayKit GLBs mapped to state graph states. */
