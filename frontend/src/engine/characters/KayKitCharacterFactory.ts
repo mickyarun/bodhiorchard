@@ -39,14 +39,19 @@ const LABEL_HEIGHT = KAYKIT_TARGET_HEIGHT + 0.2
 
 type BodyRegion = 'shirt' | 'pants' | 'skin'
 
-/** Maps body regions to mesh name substrings for flat color tinting.
- *  Head is excluded — its texture contains painted eyes/face details
- *  that would be lost if we remove the diffuseMap.
+/** How strongly the user's color choice overrides the original texture.
+ *  0 = no tint (original colors), 1 = full replacement.
+ *  0.6 gives a visible color shift while keeping belt/boot/armor details.
+ */
+const TINT_STRENGTH = 0.6
+
+/** Maps body regions to mesh name substrings for color tinting.
+ *  Head is included since we now use a light wash (preserves eyes/face).
  */
 const REGION_MESH_PATTERNS: Record<BodyRegion, string[]> = {
   shirt: ['Body', 'Cape', 'Helmet', 'Visor', 'Hat'],
   pants: ['LegLeft', 'LegRight'],
-  skin:  ['ArmLeft', 'ArmRight'],
+  skin:  ['Head', 'ArmLeft', 'ArmRight'],
 }
 
 /** Animation track names from KayKit GLBs mapped to state graph states. */
@@ -145,11 +150,14 @@ export class KayKitCharacterFactory {
   // ─── Color Tinting ─────────────────────────
 
   /**
-   * Apply flat solid color per body region.
+   * Apply color tint per body region as a light wash over the original texture.
    *
-   * Removes the diffuseMap (gradient atlas texture) and sets a clean flat color.
-   * This gives Roblox-style solid-colored body parts — clear POC for customization.
-   * V2 will use canvas-based texture manipulation to preserve the gradient shading.
+   * Keeps the diffuseMap (preserves belt, boots, armor details) and uses
+   * the diffuse color as a tint multiplier blended toward white. This gives
+   * a visible color shift while retaining the original painted details.
+   *
+   * Blend formula: tint = lerp(white, userColor, TINT_STRENGTH)
+   * At 0.6 strength, a red choice becomes (1, 0.6, 0.6) — a warm wash.
    *
    * Returns cloned materials so the caller can dispose them on cleanup.
    */
@@ -169,9 +177,10 @@ export class KayKitCharacterFactory {
         if (!region) continue
 
         const mat = (mi.material as pc.StandardMaterial).clone()
-        // Remove texture to avoid color multiplication — flat solid color instead
-        mat.diffuseMap = null
-        mat.diffuse = colors[region]
+        // Blend user color toward white to create a light wash (preserves texture detail)
+        const c = colors[region]
+        const s = TINT_STRENGTH
+        mat.diffuse = new pc.Color(1 - s + c.r * s, 1 - s + c.g * s, 1 - s + c.b * s)
         mat.update()
         mi.material = mat
         clonedMaterials.push(mat)
