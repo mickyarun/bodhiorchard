@@ -1,111 +1,105 @@
 /**
  * PhysicsWorld — Rapier 3D physics wrapper for the garden engine.
  *
- * Provides a simple API for:
- *   - Static boxes (buildings, walls)
- *   - Sensor volumes (door triggers, zone detection)
- *   - Character controller (WASD movement with wall sliding)
- *   - Per-frame stepping + event reading
+ * All collision is handled by Rapier:
+ *   - Static cuboids for walls/buildings (character can't pass through)
+ *   - Sensor cuboids for door triggers (character passes through, fires events)
+ *   - KinematicCharacterController for player movement (auto wall-sliding)
  *
- * Uses Rapier's built-in KinematicCharacterController for accurate
- * collision response — no manual AABB needed.
+ * Door detection: sensors are real Rapier colliders with `.setSensor(true)`.
+ * After each `world.step()`, we use `world.intersectionsWith()` to check
+ * which sensors the player currently overlaps. Enter/exit events are derived
+ * by comparing with the previous frame.
  */
 import type RAPIER_NS from '@dimforge/rapier3d'
 
-// Rapier WASM must be loaded async via dynamic import.
-// Set by PhysicsWorld.create() before any other method is called.
+// Set by PhysicsWorld.create() before any instance method is called.
 let R: typeof RAPIER_NS
 
-// ─── Sensor Event ────────────────────────────
+// ─── Public Types ────────────────────────────
+
 export interface SensorEvent {
   type: 'enter' | 'exit'
   sensorId: string
 }
 
-// ─── Sensor Tracking ─────────────────────────
-interface SensorInfo {
+// ─── Internal ────────────────────────────────
+
+interface SensorRecord {
   id: string
-  colliderHandle: number
+  handle: number  // Rapier collider handle
 }
 
 export class PhysicsWorld {
   private world: RAPIER_NS.World
   private cc: RAPIER_NS.KinematicCharacterController
 
-  // Player physics
+  // Player
   private playerBody: RAPIER_NS.RigidBody | null = null
   private playerCollider: RAPIER_NS.Collider | null = null
 
-  // Sensor tracking
-  private sensors: SensorInfo[] = []
-  private activeSensors = new Set<string>()  // currently overlapping sensor IDs
+  // Sensors
+  private sensors: SensorRecord[] = []
+  private handleToId = new Map<number, string>()  // fast reverse lookup
+  private activeSensors = new Set<string>()
   private pendingEvents: SensorEvent[] = []
   private sensorsEnabled = true
 
   private constructor(world: RAPIER_NS.World) {
     this.world = world
-
-    // Character controller — handles wall sliding, autostep, snap-to-ground
-    this.cc = world.createCharacterController(0.02) // 0.02 skin offset
+    this.cc = world.createCharacterController(0.02)
     this.cc.setUp({ x: 0, y: 1, z: 0 })
     this.cc.enableAutostep(0.3, 0.1, true)
     this.cc.enableSnapToGround(0.3)
     this.cc.setMaxSlopeClimbAngle(45 * Math.PI / 180)
   }
 
-  /**
-   * Create a new PhysicsWorld. Must be called async (WASM loading).
-   * @param gravity - Gravity vector. Use {x:0, y:0, z:0} for top-down games.
-   */
   static async create(gravity = { x: 0, y: -9.81, z: 0 }): Promise<PhysicsWorld> {
     R = await import('@dimforge/rapier3d')
     const world = new R.World(gravity)
     return new PhysicsWorld(world)
   }
 
-  // ─── Static Bodies (Buildings, Walls) ──────
+  // ─── Static Bodies (Walls, Ground) ─────────
 
-  /**
-   * Add a static box collider (wall, building, ground).
-   * Position is the CENTER of the box.
-   */
+  /** Add a static box. Position is the CENTER. */
   addStaticBox(
     x: number, y: number, z: number,
     halfW: number, halfH: number, halfD: number,
-  ): RAPIER_NS.Collider {
-    const bodyDesc = R.RigidBodyDesc.fixed().setTranslation(x, y, z)
-    const body = this.world.createRigidBody(bodyDesc)
-    const colliderDesc = R.ColliderDesc.cuboid(halfW, halfH, halfD)
-    return this.world.createCollider(colliderDesc, body)
+  ): void {
+    const body = this.world.createRigidBody(
+      R.RigidBodyDesc.fixed().setTranslation(x, y, z),
+    )
+    this.world.createCollider(R.ColliderDesc.cuboid(halfW, halfH, halfD), body)
   }
 
-  /**
-   * Add a ground plane (large static box).
-   */
+  /** Add a ground plane. */
   addGround(y = -0.05, halfSize = 100): void {
     this.addStaticBox(0, y, 0, halfSize, 0.05, halfSize)
   }
 
-  // ─── Sensor Volumes (Triggers) ─────────────
+  // ─── Sensors (Door Triggers, Zones) ────────
 
   /**
-   * Add a sensor volume (trigger zone — no physical collision).
-   * Fires events when the player enters/exits.
+   * Add a Rapier sensor collider (trigger volume — no physical blocking).
+   * The player can walk through it; an event fires on enter/exit.
    */
   addSensor(
     id: string,
     x: number, y: number, z: number,
     halfW: number, halfH: number, halfD: number,
   ): void {
-    const bodyDesc = R.RigidBodyDesc.fixed().setTranslation(x, y, z)
-    const body = this.world.createRigidBody(bodyDesc)
-    const colliderDesc = R.ColliderDesc.cuboid(halfW, halfH, halfD)
-      .setSensor(true)
-    const collider = this.world.createCollider(colliderDesc, body)
-    this.sensors.push({ id, colliderHandle: collider.handle })
+    const body = this.world.createRigidBody(
+      R.RigidBodyDesc.fixed().setTranslation(x, y, z),
+    )
+    const collider = this.world.createCollider(
+      R.ColliderDesc.cuboid(halfW, halfH, halfD).setSensor(true),
+      body,
+    )
+    this.sensors.push({ id, handle: collider.handle })
+    this.handleToId.set(collider.handle, id)
   }
 
-  /** Enable/disable sensor event detection (disable during transitions). */
   setSensorsEnabled(enabled: boolean): void {
     this.sensorsEnabled = enabled
     if (!enabled) {
@@ -114,66 +108,54 @@ export class PhysicsWorld {
     }
   }
 
-  // ─── Player Character ──────────────────────
+  // ─── Player ────────────────────────────────
 
-  /**
-   * Create the player's physics body (kinematic + capsule collider).
-   */
+  /** Create kinematic player body with capsule collider. */
   createPlayer(x: number, z: number, radius = 0.2, halfHeight = 0.35): void {
-    const bodyDesc = R.RigidBodyDesc.kinematicPositionBased()
-      .setTranslation(x, halfHeight + radius, z)
-    this.playerBody = this.world.createRigidBody(bodyDesc)
-    const colliderDesc = R.ColliderDesc.capsule(halfHeight, radius)
-    this.playerCollider = this.world.createCollider(colliderDesc, this.playerBody)
+    const yCenter = halfHeight + radius
+    this.playerBody = this.world.createRigidBody(
+      R.RigidBodyDesc.kinematicPositionBased().setTranslation(x, yCenter, z),
+    )
+    this.playerCollider = this.world.createCollider(
+      R.ColliderDesc.capsule(halfHeight, radius),
+      this.playerBody,
+    )
   }
 
-  /**
-   * Move the player using the character controller (handles wall sliding).
-   * @param dx - desired X movement delta
-   * @param dz - desired Z movement delta
-   */
+  /** Move player via character controller (handles wall sliding). */
   movePlayer(dx: number, dz: number): void {
     if (!this.playerCollider || !this.playerBody) return
-
-    const desired = { x: dx, y: 0, z: dz }
-    this.cc.computeColliderMovement(this.playerCollider, desired)
-    const corrected = this.cc.computedMovement()
-
+    this.cc.computeColliderMovement(this.playerCollider, { x: dx, y: 0, z: dz })
+    const m = this.cc.computedMovement()
     const pos = this.playerBody.translation()
     this.playerBody.setNextKinematicTranslation({
-      x: pos.x + corrected.x,
-      y: pos.y,  // keep current Y
-      z: pos.z + corrected.z,
+      x: pos.x + m.x, y: pos.y, z: pos.z + m.z,
     })
   }
 
-  /** Get the player's current world position. */
   getPlayerPosition(): { x: number; y: number; z: number } {
     if (!this.playerBody) return { x: 0, y: 0, z: 0 }
     const t = this.playerBody.translation()
     return { x: t.x, y: t.y, z: t.z }
   }
 
-  /** Teleport the player to a new position (skips collision). */
   teleportPlayer(x: number, z: number): void {
     if (!this.playerBody) return
-    const pos = this.playerBody.translation()
-    this.playerBody.setTranslation({ x, y: pos.y, z }, true)
+    const y = this.playerBody.translation().y
+    this.playerBody.setTranslation({ x, y, z }, true)
   }
 
-  // ─── Simulation Step ───────────────────────
+  // ─── Step + Events ─────────────────────────
 
-  /** Advance the physics simulation and process sensor events. */
   step(): void {
     this.world.step()
-    this.processSensorEvents()
+    this.detectSensorOverlaps()
   }
 
-  /** Get and clear pending sensor events since last call. */
   consumeEvents(): SensorEvent[] {
-    const events = this.pendingEvents
+    const e = this.pendingEvents
     this.pendingEvents = []
-    return events
+    return e
   }
 
   // ─── Cleanup ───────────────────────────────
@@ -182,21 +164,26 @@ export class PhysicsWorld {
     this.world.free()
   }
 
-  // ─── Internal ──────────────────────────────
+  // ─── Internal: Sensor Detection ────────────
 
-  private processSensorEvents(): void {
+  /**
+   * After world.step(), check which sensors the player overlaps.
+   * Uses world.intersectionsWith() — Rapier's built-in broadphase query.
+   * Compares with previous frame to emit enter/exit events.
+   */
+  private detectSensorOverlaps(): void {
     if (!this.sensorsEnabled || !this.playerCollider) return
 
     const nowActive = new Set<string>()
 
-    for (const sensor of this.sensors) {
-      // Check if player intersects this sensor
-      if (this.world.intersectionPair(this.playerCollider, this.world.getCollider(sensor.colliderHandle))) {
-        nowActive.add(sensor.id)
-      }
-    }
+    // Rapier intersectionsWith: iterates all colliders overlapping the given one
+    this.world.intersectionsWith(this.playerCollider, (otherCollider) => {
+      const id = this.handleToId.get(otherCollider.handle)
+      if (id) nowActive.add(id)
+      return true  // continue iterating
+    })
 
-    // Detect enter/exit events by comparing with previous frame
+    // Diff with previous frame → enter/exit events
     for (const id of nowActive) {
       if (!this.activeSensors.has(id)) {
         this.pendingEvents.push({ type: 'enter', sensorId: id })
@@ -207,7 +194,6 @@ export class PhysicsWorld {
         this.pendingEvents.push({ type: 'exit', sensorId: id })
       }
     }
-
     this.activeSensors = nowActive
   }
 }

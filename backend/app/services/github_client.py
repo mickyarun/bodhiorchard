@@ -61,6 +61,11 @@ class GitHubClient:
                 )
                 # Retry without inline comments (422 often means stale line refs)
                 if resp.status_code == 422 and comments:
+                    logger.warning(
+                        "github_review_422_retry_without_inline",
+                        pr_number=pr_number,
+                        inline_count=len(comments),
+                    )
                     try:
                         fallback = await client.post(
                             url,
@@ -68,6 +73,10 @@ class GitHubClient:
                             headers=self._headers,
                         )
                         fallback.raise_for_status()
+                        logger.info(
+                            "github_review_fallback_posted",
+                            pr_number=pr_number,
+                        )
                         return fallback.json()
                     except HTTPStatusError:
                         pass

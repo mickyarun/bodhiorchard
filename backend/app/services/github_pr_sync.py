@@ -84,6 +84,10 @@ async def sync_review_comments_to_github(
             comments=gh_comments if gh_comments else None,
         )
 
+        # Store comments in BUD regardless of GitHub post success
+        if pr.bud_id:
+            await _store_agent_comments_in_bud(db, org_id, pr.bud_id, matching, repo_name)
+
         if result:
             pr.metadata_ = {**(pr.metadata_ or {}), "review_synced": True}
             await db.flush()
@@ -92,6 +96,40 @@ async def sync_review_comments_to_github(
                 pr_number=pr.github_pr_number,
                 comment_count=len(matching),
             )
+
+
+async def _store_agent_comments_in_bud(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_id: uuid.UUID,
+    comments: list[dict],
+    repo_name: str,
+) -> None:
+    """Store agent-generated review comments directly in the BUD."""
+    from app.repositories.bud import BUDRepository
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id_for_update(bud_id)
+    if not bud:
+        return
+
+    existing = list(bud.code_review_comments or [])
+    for c in comments:
+        existing.append(
+            {
+                "repo": repo_name,
+                "file": c.get("file", ""),
+                "line": c.get("line", 0),
+                "body": c.get("comment", ""),
+                "author": "bodhigrove-agent",
+                "html_url": "",
+                "created_at": "",
+                "is_summary": False,
+                "source": "agent",
+            }
+        )
+    bud.code_review_comments = existing
+    await db.flush()
 
 
 def _map_to_github_comments(comments: list[dict]) -> list[dict]:
