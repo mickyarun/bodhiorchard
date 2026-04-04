@@ -776,19 +776,17 @@ async function skipCodeReview(): Promise<void> {
 async function addManualComment(): Promise<void> {
   if (!bud.value || !manualComment.value.comment.trim()) return
 
-  const meta = { ...(bud.value.metadata || {}) } as Record<string, unknown>
-  const comments = [...((meta.code_review_comments as Array<Record<string, unknown>>) || [])]
-  comments.push({
+  const existing = [...(bud.value.code_review_comments || [])] as Array<Record<string, unknown>>
+  existing.push({
     repo: manualComment.value.repo || 'general',
     file: '',
     line: 0,
-    severity: 'warning',
-    comment: manualComment.value.comment,
-    deviates_from_spec: false,
+    body: manualComment.value.comment,
+    author: 'manual',
+    is_summary: false,
     source: 'manual',
   })
-  meta.code_review_comments = comments
-  await budStore.updateBUD(bud.value.id, { metadata: meta } as never)
+  await budStore.updateBUD(bud.value.id, { code_review_comments: existing } as never)
   await budStore.fetchBUD(bud.value.id)
 
   manualComment.value = { repo: '', comment: '' }
@@ -1005,9 +1003,8 @@ async function updateStatus(newStatus: string): Promise<void> {
   // Intercept code_review transition to show repo confirmation
   // Skip the popup if code review content already exists (e.g. going back from QA)
   if (newStatus === 'code_review') {
-    const meta = bud.value.metadata as Record<string, unknown> | undefined
-    const hasCodeReview = Array.isArray(meta?.code_review_comments)
-      && (meta.code_review_comments as unknown[]).length > 0
+    const hasCodeReview = Array.isArray(bud.value.code_review_comments)
+      && bud.value.code_review_comments.length > 0
     if (!hasCodeReview) {
       await workflowRef.value?.showCodeReviewConfirmation()
       return

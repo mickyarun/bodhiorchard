@@ -146,8 +146,7 @@ interface CodeReviewResolution {
 }
 
 const codeReviewComments = computed<CodeReviewComment[]>(() => {
-  const meta = props.bud?.metadata as Record<string, unknown> | null
-  return (meta?.code_review_comments as CodeReviewComment[] | undefined) ?? []
+  return (props.bud?.code_review_comments as CodeReviewComment[] | undefined) ?? []
 })
 
 // Code review checklist resolutions

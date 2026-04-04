@@ -1,40 +1,32 @@
 /**
- * ExteriorScene — Kenney house shell with surrounding ground.
+ * ExteriorScene — Multi-house village with Rapier physics.
  *
- * Builds the 4×4-tile Kenney house (walls + roof) using the same
- * BuildingFactory methods as the main dashboard. Returns AABB collision
- * boxes so PlayerController blocks at walls, leaving a gap at the door
- * opening (X: 1.0–2.0 on the front wall at Z=4).
+ * Builds N houses from EXTERIOR_HOUSES config, each as a 4×4-tile Kenney
+ * house shell with roof, stone path, and name label. Registers all wall
+ * collision and door sensors with PhysicsWorld.
  *
- * The house sits at the scene's local origin (0, 0, 0).
- * Player starts outside at Z=7, walks toward Z=4 to enter.
+ * Visual entities are created under the provided root entity.
+ * Physics bodies are created in the shared PhysicsWorld instance.
  */
 import * as pc from 'playcanvas'
 import { BuildingFactory } from '../buildings/BuildingFactory'
 import { PATH } from '../assets/AssetManifest'
-import { WALL_COLLISION } from './SceneConfig'
-import { CircularFence } from '../world/CircularFence'
-import type { CollisionBox } from './CollisionSystem'
+import {
+  WALL_COLLISION,
+  EXTERIOR_HOUSES,
+  HOUSE_DOOR_LOCAL,
+  type ExteriorHouseDef,
+} from './SceneConfig'
+import type { PhysicsWorld } from '../physics'
 
 const WALL_HEIGHT  = 1.29
-const GROUND_SIZE  = 20
-// Linear-space RGB — matches the garden's green ground palette
+const WALL_THICK   = 0.15  // half-thickness for physics boxes
+const GROUND_SIZE  = 30
 const GROUND_COLOR = { r: 0.45, g: 0.65, b: 0.35 }
 
-// ─── Fence config ─────────────────────────────────────────────────────────────
-// Fence ring centered on the 4×4 house mid-point (X=2, Z=2).
-// Radius 4.5 puts the front face at Z≈6.5 — between path end (Z=5.6) and
-// player spawn (Z=7.0), so the player walks through the gate then down the path.
-const FENCE_CENTER_X = 2
-const FENCE_CENTER_Z = 2
-const FENCE_RADIUS   = 4.5
-// Gate angle: shift left to align with the stone path center at X=1.5.
-// sin(θ) = (1.5 − 2) / 4.5  →  θ = arcsin(−0.111) ≈ −0.111 rad
-const FENCE_GATE_ANGLE = Math.asin((1.5 - FENCE_CENTER_X) / FENCE_RADIUS)
-const FENCE_GATE_WIDTH = 1.6   // world-unit gap for player to walk through
-
-/** Door tile is front-wall index=1 → center X=1.5, gap X=1.0–2.0. */
-export const DOOR_ENTER_POS = new pc.Vec3(1.5, 0, 4.7)
+/** Door opening is X=1.0–2.0 on front wall (Z=4). */
+const DOOR_GAP_MIN_X = 1.0
+const DOOR_GAP_MAX_X = 2.0
 
 export class ExteriorScene {
   private factory: BuildingFactory
@@ -43,19 +35,22 @@ export class ExteriorScene {
     this.factory = factory
   }
 
-  async build(root: pc.Entity): Promise<CollisionBox[]> {
-    this.buildGround(root)
-    await this.buildHouseShell(root)
-    await this.buildStonePath(root)
-    this.buildFence(root)
-    return this.buildCollisionBoxes()
+  /**
+   * Build the multi-house village and register physics.
+   * @param root - Parent entity for all visual elements
+   * @param physics - PhysicsWorld to register wall bodies and door sensors
+   */
+  async build(root: pc.Entity, physics: PhysicsWorld): Promise<void> {
+    this.buildGround(root, physics)
+
+    for (const house of EXTERIOR_HOUSES) {
+      await this.buildHouse(root, house, physics)
+    }
   }
 
-  private buildGround(root: pc.Entity): void {
-    // Flat green ground plane under everything
+  private buildGround(root: pc.Entity, physics: PhysicsWorld): void {
     const ground = new pc.Entity('Ground')
     ground.addComponent('render', { type: 'plane' })
-    // Use shared MaterialFactory when available (cached, properly-lit PBR material).
     const mat = this.factory.materialFactory?.getColor(
       'housetest_ground', GROUND_COLOR.r, GROUND_COLOR.g, GROUND_COLOR.b,
     ) ?? (() => {
@@ -66,47 +61,80 @@ export class ExteriorScene {
     })()
     ground.render!.meshInstances[0].material = mat
     ground.setLocalScale(GROUND_SIZE, 1, GROUND_SIZE)
-    // Plane pivot is at center — shift so house (0–4, 0–4) sits naturally on it
-    ground.setLocalPosition(GROUND_SIZE / 2 - 2, -0.005, GROUND_SIZE / 2 - 2)
+    ground.setLocalPosition(GROUND_SIZE / 2 - 5, -0.005, GROUND_SIZE / 2 - 3)
     root.addChild(ground)
+
+    // Physics ground plane
+    physics.addGround(-0.05, GROUND_SIZE)
   }
 
-  private async buildHouseShell(root: pc.Entity): Promise<void> {
-    await this.factory.createFloor(root, 4, 4)
-    await this.factory.createWalls(root, 4, 4, [
+  private async buildHouse(
+    root: pc.Entity,
+    house: ExteriorHouseDef,
+    physics: PhysicsWorld,
+  ): Promise<void> {
+    // Parent entity offset to house world position
+    const houseRoot = new pc.Entity(`House_${house.id}`)
+    houseRoot.setPosition(house.x, 0, house.z)
+    root.addChild(houseRoot)
+
+    // Visual: floor, walls, roof
+    await this.factory.createFloor(houseRoot, 4, 4)
+    await this.factory.createWalls(houseRoot, 4, 4, [
       { side: 'front', index: 1, type: 'door' },
       { side: 'left',  index: 1, type: 'window' },
       { side: 'left',  index: 2, type: 'window' },
       { side: 'right', index: 1, type: 'window' },
       { side: 'right', index: 2, type: 'window' },
     ])
-    this.factory.createRoof(root, 4, 4, WALL_HEIGHT)
-  }
+    this.factory.createRoof(houseRoot, 4, 4, WALL_HEIGHT)
 
-  private async buildStonePath(root: pc.Entity): Promise<void> {
+    // Visual: stone path leading to door
     const stoneZPositions = [4.4, 5.0, 5.6]
     for (let i = 0; i < stoneZPositions.length; i++) {
       const stone = await this.factory.placeFurniture(
-        root, PATH.stone, 1.5, 0.01, stoneZPositions[i], i * 30,
+        houseRoot, PATH.stone, 1.5, 0.01, stoneZPositions[i], i * 30,
       )
       stone.setLocalScale(1.5, 1.5, 1.5)
     }
+
+    // Visual: name label above house
+    const label = new pc.Entity(`Label_${house.id}`)
+    label.addComponent('render', { type: 'plane' })
+    label.setLocalPosition(2, WALL_HEIGHT + 0.5, 2)
+    label.setLocalScale(2, 1, 0.4)
+    label.setLocalEulerAngles(90, 0, 0)
+    houseRoot.addChild(label)
+
+    // Physics: register wall collision bodies (world-space)
+    this.registerWallPhysics(house.x, house.z, physics)
+
+    // Physics: door sensor (world-space)
+    physics.addSensor(
+      `door_${house.id}`,
+      house.x + HOUSE_DOOR_LOCAL.x,   // world X center of door
+      0.5,                              // Y center (mid-height)
+      house.z + HOUSE_DOOR_LOCAL.z,   // world Z (just outside door)
+      0.5,                              // halfW (1-unit wide door gap)
+      0.5,                              // halfH
+      0.3,                              // halfD (thin trigger zone)
+    )
   }
 
-  private buildFence(root: pc.Entity): void {
-    if (!this.factory.materialFactory) return
-    const fence = new CircularFence(this.factory.materialFactory)
-    fence.build(root, {
-      radius:     FENCE_RADIUS,
-      cx:         FENCE_CENTER_X,
-      cz:         FENCE_CENTER_Z,
-      gateAngle:  FENCE_GATE_ANGLE,
-      gateWidth:  FENCE_GATE_WIDTH,
-    })
-  }
-
-  private buildCollisionBoxes(): CollisionBox[] {
-    // Shared wall boxes defined in SceneConfig — single source of truth for both scenes.
-    return WALL_COLLISION
+  /**
+   * Register wall physics bodies for one house at world position (hx, hz).
+   * Creates 5 static cuboid colliders matching WALL_COLLISION boxes
+   * (4 walls + front wall split for door gap).
+   */
+  private registerWallPhysics(hx: number, hz: number, physics: PhysicsWorld): void {
+    for (const box of WALL_COLLISION) {
+      const cx = hx + (box.minX + box.maxX) / 2
+      const cy = WALL_HEIGHT / 2
+      const cz = hz + (box.minZ + box.maxZ) / 2
+      const halfW = (box.maxX - box.minX) / 2
+      const halfH = WALL_HEIGHT / 2
+      const halfD = (box.maxZ - box.minZ) / 2
+      physics.addStaticBox(cx, cy, cz, halfW, halfH, halfD)
+    }
   }
 }

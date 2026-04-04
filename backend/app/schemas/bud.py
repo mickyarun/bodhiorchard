@@ -54,6 +54,7 @@ class BUDUpdate(BaseModel):
     requirements_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
+    code_review_comments: list[dict] | None = None
     metadata_: dict | None = Field(None, alias="metadata")
     assignee_id: uuid.UUID | None = None
 

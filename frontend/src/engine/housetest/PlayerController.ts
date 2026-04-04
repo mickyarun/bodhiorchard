@@ -22,6 +22,7 @@ import { KayKitCharacterFactory } from '../characters/KayKitCharacterFactory'
 import { CharacterFactory } from '../characters/CharacterFactory'
 import { type ContainerWithAnims, findAnimTrack } from '../characters/AnimUtils'
 import { tryMove, type CollisionBox } from './CollisionSystem'
+import type { PhysicsWorld } from '../physics'
 
 // ─── Character model constants (matches CharacterFactory) ────
 const CHAR_NATIVE_HEIGHT = 9.0
@@ -90,6 +91,7 @@ export class PlayerController {
   private input: InputManager
   private entity: pc.Entity | null = null
   private collisionBoxes: CollisionBox[] = []
+  private physics: PhysicsWorld | null = null
   private _sitting  = false
   private _sleeping = false
 

@@ -361,9 +361,6 @@ export class GardenEngine {
     // the housing zone (its radius covers the entire village).
     const houseCollisions: { x: number; z: number; radius: number }[] = []
     const houseDoors: HouseDoor[] = []
-    const housingZone = this.sceneManager.worldLayout.getAllZones().find(z => z.name === 'housing')
-    const housingCenter = housingZone ? { x: housingZone.x, z: housingZone.z } : null
-
     for (const [memberId, house] of this.sceneManager.memberHouseMap) {
       const pos = house.entity.getPosition()
       // Each house is ~4×4 units, radius 2.5 covers footprint + small buffer

@@ -10,7 +10,11 @@
  * Uses Rapier's built-in KinematicCharacterController for accurate
  * collision response — no manual AABB needed.
  */
-import RAPIER from '@dimforge/rapier3d'
+import type RAPIER_NS from '@dimforge/rapier3d'
+
+// Rapier WASM must be loaded async via dynamic import.
+// Set by PhysicsWorld.create() before any other method is called.
+let R: typeof RAPIER_NS
 
 // ─── Sensor Event ────────────────────────────
 export interface SensorEvent {
@@ -25,12 +29,12 @@ interface SensorInfo {
 }
 
 export class PhysicsWorld {
-  private world: RAPIER.World
-  private cc: RAPIER.KinematicCharacterController
+  private world: RAPIER_NS.World
+  private cc: RAPIER_NS.KinematicCharacterController
 
   // Player physics
-  private playerBody: RAPIER.RigidBody | null = null
-  private playerCollider: RAPIER.Collider | null = null
+  private playerBody: RAPIER_NS.RigidBody | null = null
+  private playerCollider: RAPIER_NS.Collider | null = null
 
   // Sensor tracking
   private sensors: SensorInfo[] = []
@@ -38,7 +42,7 @@ export class PhysicsWorld {
   private pendingEvents: SensorEvent[] = []
   private sensorsEnabled = true
 
-  private constructor(world: RAPIER.World) {
+  private constructor(world: RAPIER_NS.World) {
     this.world = world
 
     // Character controller — handles wall sliding, autostep, snap-to-ground
@@ -54,8 +58,8 @@ export class PhysicsWorld {
    * @param gravity - Gravity vector. Use {x:0, y:0, z:0} for top-down games.
    */
   static async create(gravity = { x: 0, y: -9.81, z: 0 }): Promise<PhysicsWorld> {
-    await RAPIER.init()
-    const world = new RAPIER.World(gravity)
+    R = await import('@dimforge/rapier3d')
+    const world = new R.World(gravity)
     return new PhysicsWorld(world)
   }
 
@@ -68,10 +72,10 @@ export class PhysicsWorld {
   addStaticBox(
     x: number, y: number, z: number,
     halfW: number, halfH: number, halfD: number,
-  ): RAPIER.Collider {
-    const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z)
+  ): RAPIER_NS.Collider {
+    const bodyDesc = R.RigidBodyDesc.fixed().setTranslation(x, y, z)
     const body = this.world.createRigidBody(bodyDesc)
-    const colliderDesc = RAPIER.ColliderDesc.cuboid(halfW, halfH, halfD)
+    const colliderDesc = R.ColliderDesc.cuboid(halfW, halfH, halfD)
     return this.world.createCollider(colliderDesc, body)
   }
 
@@ -93,9 +97,9 @@ export class PhysicsWorld {
     x: number, y: number, z: number,
     halfW: number, halfH: number, halfD: number,
   ): void {
-    const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z)
+    const bodyDesc = R.RigidBodyDesc.fixed().setTranslation(x, y, z)
     const body = this.world.createRigidBody(bodyDesc)
-    const colliderDesc = RAPIER.ColliderDesc.cuboid(halfW, halfH, halfD)
+    const colliderDesc = R.ColliderDesc.cuboid(halfW, halfH, halfD)
       .setSensor(true)
     const collider = this.world.createCollider(colliderDesc, body)
     this.sensors.push({ id, colliderHandle: collider.handle })
@@ -116,10 +120,10 @@ export class PhysicsWorld {
    * Create the player's physics body (kinematic + capsule collider).
    */
   createPlayer(x: number, z: number, radius = 0.2, halfHeight = 0.35): void {
-    const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
+    const bodyDesc = R.RigidBodyDesc.kinematicPositionBased()
       .setTranslation(x, halfHeight + radius, z)
     this.playerBody = this.world.createRigidBody(bodyDesc)
-    const colliderDesc = RAPIER.ColliderDesc.capsule(halfHeight, radius)
+    const colliderDesc = R.ColliderDesc.capsule(halfHeight, radius)
     this.playerCollider = this.world.createCollider(colliderDesc, this.playerBody)
   }
 
@@ -183,7 +187,6 @@ export class PhysicsWorld {
   private processSensorEvents(): void {
     if (!this.sensorsEnabled || !this.playerCollider) return
 
-    const playerHandle = this.playerCollider.handle
     const nowActive = new Set<string>()
 
     for (const sensor of this.sensors) {
@@ -196,12 +199,12 @@ export class PhysicsWorld {
     // Detect enter/exit events by comparing with previous frame
     for (const id of nowActive) {
       if (!this.activeSensors.has(id)) {
-        this.pendingEvents.push({ type: 'enter', id })
+        this.pendingEvents.push({ type: 'enter', sensorId: id })
       }
     }
     for (const id of this.activeSensors) {
       if (!nowActive.has(id)) {
-        this.pendingEvents.push({ type: 'exit', id })
+        this.pendingEvents.push({ type: 'exit', sensorId: id })
       }
     }
 

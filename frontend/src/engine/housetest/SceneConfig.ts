@@ -137,6 +137,31 @@ export const WALL_COLLISION: CollisionBox[] = [
   { minX: 2.0,   maxX: 4.1,  minZ: 3.85,  maxZ: 4.15  },  // front-right panel
 ]
 
+// ─── Multi-house exterior layout ─────────────────────────────────────────────
+
+export interface ExteriorHouseDef {
+  id: string
+  x: number       // world X of house origin (lower-left corner in local space)
+  z: number       // world Z
+  label: string   // member name shown above house
+}
+
+/** 4 houses in a 2×2 grid, 6-unit spacing. Door faces +Z (front wall). */
+export const EXTERIOR_HOUSES: ExteriorHouseDef[] = [
+  { id: 'house_a', x: 0,  z: 0,  label: 'Alice' },
+  { id: 'house_b', x: 6,  z: 0,  label: 'Bob' },
+  { id: 'house_c', x: 0,  z: 8,  label: 'Carol' },
+  { id: 'house_d', x: 6,  z: 8,  label: 'Dave' },
+]
+
+/** Door center in house-local coordinates (X=1.5 centered in door gap, Z=4.0 front wall). */
+export const HOUSE_DOOR_LOCAL = { x: 1.5, z: 4.7 }
+
+/** Exit spawn offset from door (outside the house, clear of sensor). */
+export const HOUSE_EXIT_LOCAL = { x: 1.5, z: 6.0 }
+
+// ─── Collision ───────────────────────────────────────────────────────────────
+
 /** AABB collision boxes for walls and solid furniture.
  *  Sittable items (lounge chair, bed) are excluded — they would trap
  *  the player inside the collision box after sitAt()/sleepAt(). */

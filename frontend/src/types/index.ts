@@ -98,7 +98,22 @@ export interface BUDDocument extends BUDListItem {
   metadata: Record<string, unknown> | null
   impacted_repos: { repo_id: string; repo_name: string }[] | null
   estimated_dates: Record<string, PhaseEstimateData> | null
+  code_review_comments: CodeReviewComment[] | null
   active_agent_task: BUDAgentTask | null
+}
+
+export interface CodeReviewComment {
+  github_comment_id?: number
+  review_id?: number
+  repo: string
+  file: string
+  line: number
+  body: string
+  author: string
+  html_url?: string
+  created_at?: string
+  is_summary?: boolean
+  source?: string
 }
 
 // ── Estimation Types ──────────────────────────────────────
