@@ -1,15 +1,15 @@
 /**
- * HouseTestEngine — standalone house demo with scene transition.
+ * HouseTestEngine — Multi-house demo with Rapier physics.
  *
  * Architecture:
  *   app.root
- *   ├── exteriorRoot  (enabled initially)  — ground + house shell
- *   ├── interiorRoot  (disabled initially) — floor + walls + furniture
- *   └── playerWrapper (always enabled)     — Kenney character
+ *   ├── exteriorRoot  (enabled initially)  — ground + 4 house shells
+ *   ├── interiorRoot  (disabled initially) — shared interior room
+ *   └── playerWrapper (always enabled)     — character entity
  *
+ * Exterior uses Rapier physics (wall collision + door sensors).
+ * Interior uses manual AABB collision (furniture boxes).
  * Scene swap happens during fade-to-black so the entity toggle is invisible.
- * Collision uses manual AABB (no physics engine dependency).
- * Camera is an orbit camera — left-drag to orbit, scroll to zoom, camera-relative WASD.
  */
 import * as pc from 'playcanvas'
 import { Application } from '../core/Application'
@@ -21,42 +21,32 @@ import { ExteriorScene } from './ExteriorScene'
 import { InteriorScene } from './InteriorScene'
 import { PlayerController } from './PlayerController'
 import { OrbitCamera } from './OrbitCamera'
-import { DoorTrigger } from './DoorTrigger'
 import { SceneTransition } from './SceneTransition'
 import { HouseTestUI } from './HouseTestUI'
+import { PhysicsWorld } from '../physics'
+import {
+  EXTERIOR_HOUSES,
+  HOUSE_EXIT_LOCAL,
+  type InteractableId,
+} from './SceneConfig'
 import type { CollisionBox } from './CollisionSystem'
-import type { InteractableId } from './SceneConfig'
 
-// ─── Camera presets ──────────────────────────────────────────────────────────
-
-/**
- * Exterior orbit defaults — camera sits behind and above the player.
- * yaw=0 → camera at +Z (directly behind), pitch=35° elevation, dist=8.6 units.
- */
+// ─── Camera presets ─────────────────────────────────────────────────────────
 const CAM_EXT_YAW   = 0
 const CAM_EXT_PITCH = 35
-const CAM_EXT_DIST  = 8.6
+const CAM_EXT_DIST  = 12   // wider view for multi-house village
 
-/**
- * Interior: fixed elevated south-facing view over the front wall.
- * Orbit is disabled in interior — camera is locked so the small room is fully visible.
- */
 const CAM_INT_YAW   = 0
 const CAM_INT_PITCH = 60
 const CAM_INT_DIST  = 6
 
-// ─── Player start/exit positions ─────────────────────────────────────────────
-// IMPORTANT: spawn positions must be > DoorTrigger.TRIGGER_RADIUS (0.7) away
-// from trigger centers to prevent the cooldown-expiry → re-trigger loop.
-//   EXIT_CENTER  = (1.5, 0, 3.8)  →  PLAYER_ENTER must be Z ≤ 3.1
-//   ENTRY_CENTER = (1.5, 0, 4.7)  →  PLAYER_EXIT  must be Z ≥ 5.4
-const PLAYER_START_X = 1.5
-const PLAYER_START_Z = 7.0   // outside, in front of door
-const PLAYER_ENTER_X = 2.0
-const PLAYER_ENTER_Z = 1.5   // back-right area, verified clear of all furniture collision
-const PLAYER_EXIT_X  = 1.5
-const PLAYER_EXIT_Z  = 6.0   // outside, clear of entry trigger (dist=1.3 > 0.7)
+// ─── Player spawn ───────────────────────────────────────────────────────────
+const PLAYER_START_X = 3.0   // center of the 2×2 house grid
+const PLAYER_START_Z = -2.0  // south of houses, facing them
 
+// Interior spawn (back-right, clear of furniture collision)
+const PLAYER_ENTER_X = 2.0
+const PLAYER_ENTER_Z = 1.5
 
 export class HouseTestEngine {
   private application: Application | null = null
@@ -71,22 +61,24 @@ export class HouseTestEngine {
   private interior: InteriorScene | null = null
   private player: PlayerController | null = null
   private orbit: OrbitCamera | null = null
-  private door: DoorTrigger | null = null
   private transition: SceneTransition | null = null
   private ui: HouseTestUI | null = null
+  private physics: PhysicsWorld | null = null
 
   private scene: 'exterior' | 'interior' = 'exterior'
   private canvas: HTMLCanvasElement | null = null
-  private extBoxes: CollisionBox[] = []
   private intBoxes: CollisionBox[] = []
 
-  // E-key state — tracks rising edge so interaction fires once per press
+  // Multi-house state
+  private currentHouseId: string | null = null
+  private sensorReEnableTimer: ReturnType<typeof setTimeout> | null = null
+
+  // E-key interaction state
   private _ePrev = false
-  // Which interactable seat is currently active (used to clean up TV effect on stand-up)
   private _activeSeatId: InteractableId | null = null
 
   async init(container: HTMLElement, width: number, height: number): Promise<void> {
-    // ── 1. Boot PlayCanvas ───────────────────────────────────────────────────
+    // ── 1. Boot PlayCanvas ──────────────────────────────────────────────────
     this.canvas = document.createElement('canvas')
     Object.assign(this.canvas.style, { width: '100%', height: '100%', display: 'block' })
     container.appendChild(this.canvas)
@@ -97,146 +89,196 @@ export class HouseTestEngine {
     const app = this.application.app
     app.scene.ambientLight = new pc.Color(0.6, 0.6, 0.6)
 
-    // ── 2. Shared systems ────────────────────────────────────────────────────
+    // ── 2. Shared systems ───────────────────────────────────────────────────
     this.input = new InputManager()
     this.input.init(this.canvas)
 
     this.loader  = new AssetLoader(app)
     this.factory = new BuildingFactory(this.loader, new MaterialFactory())
 
-    // ── 3. Scene roots ───────────────────────────────────────────────────────
+    // ── 3. Initialize Rapier physics (async WASM load) ──────────────────────
+    // Zero gravity — top-down movement, no falling
+    this.physics = await PhysicsWorld.create({ x: 0, y: 0, z: 0 })
+
+    // ── 4. Scene roots ──────────────────────────────────────────────────────
     this.exteriorRoot = new pc.Entity('Exterior')
     this.interiorRoot = new pc.Entity('Interior')
     app.root.addChild(this.exteriorRoot)
     app.root.addChild(this.interiorRoot)
     this.interiorRoot.enabled = false
 
-    // ── 4. Build scenes (loads GLBs in parallel) ─────────────────────────────
+    // ── 5. Build scenes ─────────────────────────────────────────────────────
     this.exterior = new ExteriorScene(this.factory)
     this.interior = new InteriorScene(this.factory)
 
-    ;[this.extBoxes, this.intBoxes] = await Promise.all([
-      this.exterior.build(this.exteriorRoot),
-      this.interior.build(this.interiorRoot),
-    ])
+    // Exterior: builds 4 houses + registers physics (walls + door sensors)
+    await this.exterior.build(this.exteriorRoot, this.physics)
 
-    // ── 5. Player ────────────────────────────────────────────────────────────
+    // Interior: builds shared room (returns manual AABB collision boxes)
+    this.intBoxes = await this.interior.build(this.interiorRoot)
+
+    // ── 6. Player ───────────────────────────────────────────────────────────
     this.player = new PlayerController(this.loader, this.input)
     await this.player.init(app.root, PLAYER_START_X, PLAYER_START_Z)
-    this.player.setCollisionBoxes(this.extBoxes)
 
-    // ── 5b. Orbit camera ─────────────────────────────────────────────────────
+    // Create player physics body (capsule collider)
+    this.physics.createPlayer(PLAYER_START_X, PLAYER_START_Z)
+    this.player.setPhysics(this.physics)
+
+    // ── 7. Orbit camera ─────────────────────────────────────────────────────
     this.orbit = new OrbitCamera()
     this.orbit.init(this.canvas, this.application.camera, CAM_EXT_YAW, CAM_EXT_PITCH, CAM_EXT_DIST)
 
-    // ── 6. Door trigger + transition ─────────────────────────────────────────
-    this.door = new DoorTrigger()
-    this.door.onEnter(() => this.enterHouse())
-    this.door.onExit(() => this.exitHouse())
-
+    // ── 8. Scene transition ─────────────────────────────────────────────────
     this.transition = new SceneTransition()
     this.transition.init(container)
 
-    // ── 7. Interactables — generic action routing ─────────────────────────────
+    // ── 9. Interior interactables ───────────────────────────────────────────
     for (const item of this.interior.items) {
       item.onUse(() => {
         const { seat } = item
         if (item.action === 'sit'   && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw)
         if (item.action === 'sleep' && seat) this.player?.sleepAt(seat.x, seat.z, seat.yaw)
         this.ui?.showInfo(item.infoText)
-        // Track active seat — used to turn off TV effect when player stands up
         this._activeSeatId = item.id
         if (item.id === 'tv') this.interior?.tvEffect.turnOn()
       })
     }
 
-    // ── 8. UI ────────────────────────────────────────────────────────────────
+    // ── 10. UI ──────────────────────────────────────────────────────────────
     this.ui = new HouseTestUI()
     this.ui.init(container)
     this.ui.setScene('exterior')
 
-    // ── 9. Position camera for exterior ──────────────────────────────────────
+    // ── 11. Camera + loop ───────────────────────────────────────────────────
     this.positionExteriorCamera()
-
-    // ── 10. Start loop ───────────────────────────────────────────────────────
     this.application.setConfig({ onUpdate: (dt) => this.onUpdate(dt) })
   }
 
   private onUpdate(dt: number): void {
-    if (!this.player || !this.input || !this.application || !this.door) return
+    if (!this.player || !this.input || !this.application || !this.physics) return
 
     const camYaw = this.orbit?.yaw ?? 0
     this.player.update(dt, camYaw)
 
+    if (this.scene === 'exterior') {
+      // Step Rapier AFTER movePlayer (applies kinematic translation + updates narrow phase)
+      this.physics.step()
+    }
+
     const playerPos = this.player.getPosition()
 
-    // Door proximity check
-    this.door.update(playerPos)
+    if (this.scene === 'exterior') {
+      // Check door sensor events (read AFTER step so sensors reflect current position)
+      const events = this.physics.consumeEvents()
+      for (const evt of events) {
+        if (evt.type === 'enter' && evt.sensorId.startsWith('door_')) {
+          const houseId = evt.sensorId.replace('door_', '')
+          this.enterHouse(houseId)
+          break
+        }
+      }
+    }
 
-    // E-key interaction (interior only)
-    const eDown = this.input.isPressed(pc.KEY_E)
     if (this.scene === 'interior' && this.interior) {
+      // E-key interaction
+      const eDown = this.input.isPressed(pc.KEY_E)
       const eJust = eDown && !this._ePrev
       if (eJust) {
-        // If already sitting or sleeping, E exits that state immediately.
-        if (this.player?.isSitting)  { this.player.standUp(); }
-        else if (this.player?.isSleeping) { this.player.wakeUp(); }
+        if (this.player?.isSitting) { this.player.standUp() }
+        else if (this.player?.isSleeping) { this.player.wakeUp() }
         else {
-          // Otherwise find nearest interactable and trigger it.
           for (const item of this.interior.items) {
             if (item.isNear(playerPos)) { item.use(); break }
           }
         }
       }
+      this._ePrev = eDown
+
+      // Clean up seated effects on stand-up
+      if (this._activeSeatId !== null && !this.player?.isSitting && !this.player?.isSleeping) {
+        if (this._activeSeatId === 'tv') this.interior?.tvEffect.turnOff()
+        this._activeSeatId = null
+      }
+
+      // TV flicker
+      this.interior.tvEffect.update(dt)
+
+      // ESC or door exit — manual AABB DoorTrigger for interior exit
+      if (this.input.wasPressed(pc.KEY_ESCAPE)) {
+        this.exitHouse()
+      }
+      // Interior door exit: check if player walks near the door (Z > 3.5)
+      if (playerPos.z > 3.8 && Math.abs(playerPos.x - 1.5) < 0.7) {
+        this.exitHouse()
+      }
     }
-    this._ePrev = eDown
 
-    // Detect when player leaves a seated/sleeping state (via WASD or E)
-    // and clean up any active effects tied to that seat.
-    if (this._activeSeatId !== null && !this.player?.isSitting && !this.player?.isSleeping) {
-      if (this._activeSeatId === 'tv') this.interior?.tvEffect.turnOff()
-      this._activeSeatId = null
-    }
-
-    // Drive TV flicker from engine dt — keeps it in sync with the frame loop
-    if (this.scene === 'interior') this.interior?.tvEffect.update(dt)
-
-    // Orbit camera follows player every frame in both scenes
+    // Camera follows player
     this.orbit?.update(playerPos)
   }
 
   // ─── Scene transitions ───────────────────────────────────────────────────
 
-  private enterHouse(): void {
-    if (!this.transition || this.transition.isActive) return
+  private enterHouse(houseId: string): void {
+    if (!this.transition || this.transition.isActive || this.scene !== 'exterior') return
+
+    this.currentHouseId = houseId
+    this.physics?.setSensorsEnabled(false) // disable sensors during transition
+
+    this.scene = 'entering'  // prevent re-entrant sensor triggers
+
     void this.transition.perform(() => {
       this.scene = 'interior'
       this.exteriorRoot!.enabled = false
       this.interiorRoot!.enabled = true
+
+      // Switch to manual AABB collision for interior
       this.player!.setCollisionBoxes(this.intBoxes)
-      this.player!.teleport(PLAYER_ENTER_X, PLAYER_ENTER_Z, 180) // +Z-native: yaw=180 → faces -Z (into room)
-      this.door!.setScene('interior')
+      this.player!.teleport(PLAYER_ENTER_X, PLAYER_ENTER_Z, 180)
+
+      this._ePrev = true  // suppress false E-key edge on first interior frame
       this.ui?.setScene('interior')
       this.positionInteriorCamera()
     })
   }
 
   private exitHouse(): void {
-    if (!this.transition || this.transition.isActive) return
+    if (!this.transition || this.transition.isActive || this.scene !== 'interior') return
+
+    this.scene = 'exiting'  // prevent re-entrant calls from door proximity check
+
+    // Find the house we entered to compute exit position
+    const house = EXTERIOR_HOUSES.find(h => h.id === this.currentHouseId)
+    const exitX = (house?.x ?? 0) + HOUSE_EXIT_LOCAL.x
+    const exitZ = (house?.z ?? 0) + HOUSE_EXIT_LOCAL.z
+
     void this.transition.perform(() => {
       this.scene = 'exterior'
       this.interiorRoot!.enabled = false
       this.exteriorRoot!.enabled = true
-      this.player!.setCollisionBoxes(this.extBoxes)
+
+      // Clean up interior state
       if (this.player!.isSitting)  this.player!.standUp()
       if (this.player!.isSleeping) this.player!.wakeUp()
       this.interior?.tvEffect.turnOff()
       this._activeSeatId = null
-      this.player!.teleport(PLAYER_EXIT_X, PLAYER_EXIT_Z, 0)   // +Z-native: yaw=0 → faces +Z (away from house)
-      this.door!.setScene('exterior')
+
+      // Switch back to Rapier physics + teleport outside the correct house
+      this.player!.setPhysics(this.physics)
+      this.player!.teleport(exitX, exitZ, 0)
+      this.physics?.teleportPlayer(exitX, exitZ)
+
+      // Re-enable sensors after a delay to prevent re-trigger
+      this.sensorReEnableTimer = setTimeout(() => {
+        this.physics?.setSensorsEnabled(true)
+        this.sensorReEnableTimer = null
+      }, 500)
+
       this.ui?.setScene('exterior')
       this.ui?.hidePrompt()
       this.positionExteriorCamera()
+      this.currentHouseId = null
     })
   }
 
@@ -244,15 +286,12 @@ export class HouseTestEngine {
 
   private positionExteriorCamera(): void {
     if (!this.orbit || !this.player) return
-    // Reset orbit yaw to default (behind player) on exterior entry.
-    // Pitch and distance are preserved so the user's zoom level persists.
     this.orbit.setView(CAM_EXT_YAW, CAM_EXT_PITCH, CAM_EXT_DIST)
     this.orbit.update(this.player.getPosition())
   }
 
   private positionInteriorCamera(): void {
     if (!this.orbit || !this.player) return
-    // Snap to an elevated overhead angle; user can orbit freely from there.
     this.orbit.setView(CAM_INT_YAW, CAM_INT_PITCH, CAM_INT_DIST)
     this.orbit.update(this.player.getPosition())
   }
@@ -262,18 +301,22 @@ export class HouseTestEngine {
   }
 
   destroy(): void {
+    if (this.sensorReEnableTimer !== null) {
+      clearTimeout(this.sensorReEnableTimer)
+      this.sensorReEnableTimer = null
+    }
     this.transition?.destroy()
     this.ui?.destroy()
     this.player?.destroy()
     this.orbit?.destroy()
-    this.door?.destroy()
+    this.physics?.destroy()
     this.exterior = null
     this.interior = null
-    this.door = null
     this.transition = null
     this.ui = null
     this.player = null
     this.orbit = null
+    this.physics = null
     this.input?.destroy()
     this.input = null
     this.loader = null

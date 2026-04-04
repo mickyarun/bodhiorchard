@@ -445,17 +445,18 @@
                         </template>
                         <v-list-item-title class="text-body-2">
                           <v-icon
-                            :color="c.severity === 'error' ? 'error' : c.severity === 'warning' ? 'warning' : 'info'"
+                            :color="c.is_summary ? 'primary' : 'info'"
                             size="14"
                             class="mr-1"
                           >
-                            {{ c.severity === 'error' ? 'mdi-alert-circle' : c.severity === 'warning' ? 'mdi-alert' : 'mdi-information' }}
+                            {{ c.is_summary ? 'mdi-file-document-outline' : 'mdi-comment-text-outline' }}
                           </v-icon>
-                          <code class="text-caption">{{ c.repo }}/{{ c.file }}:{{ c.line }}</code>
-                          <v-chip v-if="c.deviates_from_spec" size="x-small" color="error" variant="tonal" class="ml-2">Spec Deviation</v-chip>
+                          <code v-if="c.file" class="text-caption">{{ c.file }}{{ c.line ? ':' + c.line : '' }}</code>
+                          <span v-else class="text-caption text-medium-emphasis">{{ c.repo }}</span>
+                          <v-chip v-if="c.is_summary" size="x-small" color="primary" variant="tonal" class="ml-2">Summary</v-chip>
                           <v-chip v-if="c.source === 'manual'" size="x-small" color="purple" variant="tonal" class="ml-2">Manual</v-chip>
                         </v-list-item-title>
-                        <v-list-item-subtitle class="text-body-2 mt-1">{{ c.comment }}</v-list-item-subtitle>
+                        <v-list-item-subtitle class="text-body-2 mt-1 text-wrap">{{ c.body || c.comment }}</v-list-item-subtitle>
 
                         <div v-if="workflowRef.resolutions[idx]?.done === false" class="mt-1 ml-8">
                           <v-text-field
@@ -750,10 +751,9 @@ function downloadCodeReview(): void {
   let md = `# Code Review: ${budRef} — ${bud.value.title}\n\n`
   md += `**${comments.length} comments**\n\n`
   for (const c of comments) {
-    const tag = c.severity === 'error' ? '[ERROR]' : c.severity === 'warning' ? '[WARN]' : '[INFO]'
-    const loc = c.file ? `${c.repo}/${c.file}:${c.line}` : c.repo
-    md += `### ${tag} ${loc}\n\n${c.comment}\n\n`
-    if (c.deviates_from_spec) md += `> Spec deviation\n\n`
+    const loc = c.file ? `${c.file}${c.line ? ':' + c.line : ''}` : c.repo
+    const tag = c.is_summary ? '[SUMMARY]' : '[COMMENT]'
+    md += `### ${tag} ${loc}\n\n${c.body || c.comment || ''}\n\n`
     md += `---\n\n`
   }
 

@@ -20,13 +20,8 @@ import {
 import type { PhysicsWorld } from '../physics'
 
 const WALL_HEIGHT  = 1.29
-const WALL_THICK   = 0.15  // half-thickness for physics boxes
 const GROUND_SIZE  = 30
 const GROUND_COLOR = { r: 0.45, g: 0.65, b: 0.35 }
-
-/** Door opening is X=1.0–2.0 on front wall (Z=4). */
-const DOOR_GAP_MIN_X = 1.0
-const DOOR_GAP_MAX_X = 2.0
 
 export class ExteriorScene {
   private factory: BuildingFactory

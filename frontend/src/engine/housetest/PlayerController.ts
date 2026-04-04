@@ -175,9 +175,15 @@ export class PlayerController {
     return wrapper
   }
 
-  /** Swap collision boxes when transitioning between scenes. */
+  /** Swap collision boxes when transitioning between scenes (manual AABB mode). */
   setCollisionBoxes(boxes: CollisionBox[]): void {
     this.collisionBoxes = boxes
+    this.physics = null  // disable Rapier when using manual boxes
+  }
+
+  /** Use Rapier physics for collision (exterior mode). */
+  setPhysics(physics: PhysicsWorld | null): void {
+    this.physics = physics
   }
 
   /** Teleport to chair and play sit animation. WASD stands up. */
@@ -249,9 +255,18 @@ export class PlayerController {
 
       const dx = dir.x * MOVE_SPEED * dt
       const dz = dir.z * MOVE_SPEED * dt
-      const pos = this.entity.getPosition()
-      const next = tryMove(pos, dx, dz, this.collisionBoxes, this._next)
-      this.entity.setPosition(next.x, 0, next.z)
+
+      if (this.physics) {
+        // Rapier mode: character controller handles wall sliding automatically
+        this.physics.movePlayer(dx, dz)
+        const p = this.physics.getPlayerPosition()
+        this.entity.setPosition(p.x, 0, p.z)
+      } else {
+        // Manual AABB mode (interior with furniture collision)
+        const pos = this.entity.getPosition()
+        const next = tryMove(pos, dx, dz, this.collisionBoxes, this._next)
+        this.entity.setPosition(next.x, 0, next.z)
+      }
 
       // Face world movement direction (instant snap).
       // Model is +Z-native with CCW euler-Y rotation: facing(θ) = (sinθ, 0, cosθ).
