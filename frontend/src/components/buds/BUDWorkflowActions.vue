@@ -90,7 +90,7 @@ import { ref, computed, watch } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useJobSocket } from '@/composables/useJobSocket'
-import type { BUDDocument } from '@/types'
+import type { BUDDocument, CodeReviewComment } from '@/types'
 
 const props = defineProps<{
   bud: BUDDocument
@@ -128,25 +128,13 @@ const showRepoConfirmDialog = ref(false)
 const commitRepos = ref<{ repoPath: string; repoName: string; commitCount: number; checked: boolean }[]>([])
 const excludeReason = ref('')
 
-interface CodeReviewComment {
-  repo: string
-  file: string
-  line: number
-  severity: 'error' | 'warning' | 'suggestion'
-  comment: string
-  deviates_from_spec: boolean
-  source?: 'ai' | 'manual'
-  status?: 'pending' | 'accepted' | 'skipped'
-  skip_reason?: string
-}
-
 interface CodeReviewResolution {
   done: boolean | null  // null = untouched, true = done, false = not done (requires comment)
   comment: string
 }
 
 const codeReviewComments = computed<CodeReviewComment[]>(() => {
-  return (props.bud?.code_review_comments as CodeReviewComment[] | undefined) ?? []
+  return props.bud?.code_review_comments ?? []
 })
 
 // Code review checklist resolutions

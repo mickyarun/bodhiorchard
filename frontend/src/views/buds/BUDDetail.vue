@@ -392,6 +392,40 @@
 
                   <!-- Active code review: show checklist -->
                   <template v-else>
+                    <!-- Reviewed PRs header (mirrors Development tab pattern) -->
+                    <v-card v-if="reviewedPRs.length" variant="outlined" rounded="lg" class="mb-3">
+                      <div class="d-flex align-center px-4 py-2">
+                        <v-icon size="small" class="mr-2">mdi-source-pull</v-icon>
+                        <span class="text-subtitle-2 font-weight-medium">
+                          Reviewed PR{{ reviewedPRs.length > 1 ? 's' : '' }}
+                        </span>
+                      </div>
+                      <v-divider />
+                      <v-list density="compact" class="py-0">
+                        <v-list-item
+                          v-for="pr in reviewedPRs"
+                          :key="pr.repo + '#' + pr.number"
+                          :href="pr.htmlUrl"
+                          target="_blank"
+                          class="py-2"
+                        >
+                          <template #prepend>
+                            <v-icon size="small" color="info">mdi-source-pull</v-icon>
+                          </template>
+                          <v-list-item-title class="text-body-2">
+                            {{ pr.repo }}
+                            <span class="text-medium-emphasis">#{{ pr.number }}</span>
+                          </v-list-item-title>
+                          <template #append>
+                            <v-chip size="x-small" variant="tonal" class="mr-2">
+                              {{ pr.commentCount }} comment{{ pr.commentCount !== 1 ? 's' : '' }}
+                            </v-chip>
+                            <v-icon size="x-small">mdi-open-in-new</v-icon>
+                          </template>
+                        </v-list-item>
+                      </v-list>
+                    </v-card>
+
                     <!-- Toolbar: Download + Add Manual Comment -->
                     <div class="d-flex align-center mb-3 ga-2">
                       <v-icon start size="18">mdi-clipboard-check-outline</v-icon>
@@ -425,40 +459,91 @@
                       </v-btn>
                     </div>
 
-                    <!-- Checklist -->
-                    <v-list v-if="workflowRef?.codeReviewComments?.length" density="compact" class="rounded-lg border mb-3">
-                      <v-list-item
+                    <!-- GitHub-style comment thread -->
+                    <div v-if="workflowRef?.codeReviewComments?.length" class="mb-3">
+                      <v-card
                         v-for="(c, idx) in workflowRef.codeReviewComments"
                         :key="idx"
+                        variant="outlined"
+                        rounded="lg"
+                        class="mb-3 code-review-comment"
                         :class="{
-                          'bg-green-lighten-5': workflowRef.resolutions[idx]?.done === true,
-                          'bg-orange-lighten-5': workflowRef.resolutions[idx]?.done === false,
+                          'code-review-comment--resolved': workflowRef.resolutions[idx]?.done === true,
+                          'code-review-comment--unresolved': workflowRef.resolutions[idx]?.done === false,
                         }"
                       >
-                        <template #prepend>
+                        <!-- Header: avatar + author + time + badges + PR link + resolve checkbox -->
+                        <div class="code-review-comment__header d-flex align-center px-4 py-2">
+                          <v-avatar size="28" color="grey-darken-3" class="mr-2">
+                            <v-img
+                              v-if="c.author && c.source !== 'manual' && c.author !== 'bodhigrove-agent'"
+                              :src="`https://github.com/${c.author}.png?size=56`"
+                            >
+                              <template #error>
+                                <v-icon size="16">mdi-account-question-outline</v-icon>
+                              </template>
+                            </v-img>
+                            <v-icon v-else size="16">
+                              {{ c.source === 'manual' ? 'mdi-account-outline' : 'mdi-robot-outline' }}
+                            </v-icon>
+                          </v-avatar>
+                          <div class="flex-grow-1">
+                            <span class="text-body-2 font-weight-medium">{{ c.author || 'Unknown' }}</span>
+                            <span v-if="formatRelativeTime(c.created_at)" class="text-caption text-medium-emphasis ml-1">
+                              commented {{ formatRelativeTime(c.created_at) }}
+                            </span>
+                            <v-chip v-if="c.is_summary" size="x-small" color="primary" variant="tonal" class="ml-2">
+                              Summary
+                            </v-chip>
+                            <v-chip v-if="c.source === 'manual'" size="x-small" color="purple" variant="tonal" class="ml-2">
+                              Manual
+                            </v-chip>
+                            <v-chip v-if="c.source === 'agent'" size="x-small" color="info" variant="tonal" class="ml-2">
+                              Agent
+                            </v-chip>
+                          </div>
+                          <v-btn
+                            v-if="c.html_url"
+                            :href="c.html_url"
+                            target="_blank"
+                            icon="mdi-open-in-new"
+                            size="x-small"
+                            variant="text"
+                            class="mr-1"
+                          />
                           <v-checkbox-btn
                             :model-value="workflowRef.resolutions[idx]?.done ?? false"
                             density="compact"
                             color="success"
+                            hide-details
                             @update:model-value="(val: boolean) => workflowRef?.updateResolution(idx, val)"
                           />
-                        </template>
-                        <v-list-item-title class="text-body-2">
-                          <v-icon
-                            :color="c.is_summary ? 'primary' : 'info'"
-                            size="14"
-                            class="mr-1"
-                          >
-                            {{ c.is_summary ? 'mdi-file-document-outline' : 'mdi-comment-text-outline' }}
-                          </v-icon>
-                          <code v-if="c.file" class="text-caption">{{ c.file }}{{ c.line ? ':' + c.line : '' }}</code>
-                          <span v-else class="text-caption text-medium-emphasis">{{ c.repo }}</span>
-                          <v-chip v-if="c.is_summary" size="x-small" color="primary" variant="tonal" class="ml-2">Summary</v-chip>
-                          <v-chip v-if="c.source === 'manual'" size="x-small" color="purple" variant="tonal" class="ml-2">Manual</v-chip>
-                        </v-list-item-title>
-                        <v-list-item-subtitle class="text-body-2 mt-1 text-wrap">{{ c.body || c.comment }}</v-list-item-subtitle>
+                        </div>
+                        <v-divider />
 
-                        <div v-if="workflowRef.resolutions[idx]?.done === false" class="mt-1 ml-8">
+                        <!-- Body -->
+                        <div class="px-4 py-3">
+                          <!-- File/line location chip (inline comments only) -->
+                          <div
+                            v-if="c.file"
+                            class="code-review-comment__location mb-2 d-flex align-center px-2 py-1 rounded"
+                          >
+                            <v-icon size="14" class="mr-1">mdi-file-code-outline</v-icon>
+                            <code class="text-caption">{{ c.file }}{{ c.line ? ':' + c.line : '' }}</code>
+                            <v-spacer />
+                            <span class="text-caption text-medium-emphasis">{{ c.repo }}</span>
+                          </div>
+
+                          <!-- Rendered markdown body -->
+                          <div
+                            v-if="commentText(c)"
+                            class="rendered-markdown text-body-2"
+                            v-html="renderMarkdown(commentText(c))"
+                          />
+                        </div>
+
+                        <!-- Unresolved reason textarea -->
+                        <div v-if="workflowRef.resolutions[idx]?.done === false" class="px-4 pb-3">
                           <v-text-field
                             v-model="workflowRef.resolutions[idx].comment"
                             variant="outlined"
@@ -468,8 +553,8 @@
                             hide-details="auto"
                           />
                         </div>
-                      </v-list-item>
-                    </v-list>
+                      </v-card>
+                    </div>
 
                     <!-- No agent comments yet -->
                     <div v-else class="text-center py-6 mb-3">
@@ -743,6 +828,71 @@ const repoDropdownItems = computed(() => {
   return repos.map(r => r.repo_name)
 })
 
+// ── Code Review: PR extraction + time formatting ─────────
+interface ReviewedPR {
+  repo: string        // e.g. "taskflow-web"
+  number: number      // e.g. 18
+  htmlUrl: string     // link to the PR itself (not the specific comment)
+  commentCount: number
+}
+
+// Parses a GitHub comment html_url like
+//   https://github.com/mickyarun/taskflow-web/pull/18#issuecomment-4187257141
+// into { repo, number, prUrl }. Returns null if the URL isn't a PR comment.
+function parsePrFromUrl(htmlUrl: string | undefined | null): { repo: string; number: number; prUrl: string } | null {
+  if (!htmlUrl) return null
+  const match = htmlUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/)
+  if (!match) return null
+  const [, owner, repo, numStr] = match
+  return {
+    repo,
+    number: parseInt(numStr, 10),
+    prUrl: `https://github.com/${owner}/${repo}/pull/${numStr}`,
+  }
+}
+
+// Normalize comment text — agent comments use `comment`, GitHub-synced use `body`.
+function commentText(c: { body?: string; comment?: string }): string {
+  return c.body || c.comment || ''
+}
+
+function formatRelativeTime(iso: string | undefined | null): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (isNaN(date.getTime())) return ''
+  const diffMs = Date.now() - date.getTime()
+  if (diffMs < 0) return date.toLocaleDateString()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? 's' : ''} ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? 's' : ''} ago`
+  const diffDay = Math.floor(diffHr / 24)
+  if (diffDay < 7) return `${diffDay} day${diffDay !== 1 ? 's' : ''} ago`
+  return date.toLocaleDateString()
+}
+
+// TODO(user): derive the list of unique PRs that were reviewed in this BUD.
+// Each code review comment may have an html_url like
+//   https://github.com/owner/repo/pull/18#issuecomment-...
+// Use parsePrFromUrl(c.html_url) to extract { repo, number, prUrl } for each
+// comment, then dedupe on `repo + "#" + number` and count how many comments
+// belong to each PR. Skip comments where parsePrFromUrl returns null (agent
+// inline comments and manual comments have no PR link).
+//
+// Expected shape: ReviewedPR[]
+// Expected behavior for the sample data we saw (1 comment from taskflow-web PR #18):
+//   [{ repo: 'taskflow-web', number: 18, htmlUrl: 'https://...', commentCount: 1 }]
+const reviewedPRs = computed<ReviewedPR[]>(() => {
+  const comments = bud.value?.code_review_comments || []
+  // TODO: implement the dedup + count logic here (5-10 lines).
+  // Hint: a Map<string, ReviewedPR> keyed by `${repo}#${number}` makes dedup easy.
+  // Use parsePrFromUrl(c.html_url) to extract { repo, number, prUrl } from each
+  // comment's html_url. Skip comments where parsePrFromUrl returns null.
+  void [comments, parsePrFromUrl]
+  return []
+})
+
 function downloadCodeReview(): void {
   if (!bud.value || !workflowRef.value) return
   const budRef = `BUD-${String(bud.value.bud_number).padStart(3, '0')}`
@@ -753,7 +903,7 @@ function downloadCodeReview(): void {
   for (const c of comments) {
     const loc = c.file ? `${c.file}${c.line ? ':' + c.line : ''}` : c.repo
     const tag = c.is_summary ? '[SUMMARY]' : '[COMMENT]'
-    md += `### ${tag} ${loc}\n\n${c.body || c.comment || ''}\n\n`
+    md += `### ${tag} ${loc}\n\n${commentText(c)}\n\n`
     md += `---\n\n`
   }
 
@@ -1468,5 +1618,92 @@ function formatDate(dateStr: string): string {
 .prd-locked-title {
   opacity: 0.5;
   pointer-events: none;
+}
+
+/* ── Code Review: GitHub-style comment cards ───── */
+.code-review-comment__header {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+
+.code-review-comment--resolved {
+  border-color: rgba(var(--v-theme-success), 0.5) !important;
+}
+
+.code-review-comment--resolved .code-review-comment__header {
+  background: rgba(var(--v-theme-success), 0.08);
+}
+
+.code-review-comment--unresolved {
+  border-color: rgba(var(--v-theme-warning), 0.5) !important;
+}
+
+.code-review-comment--unresolved .code-review-comment__header {
+  background: rgba(var(--v-theme-warning), 0.08);
+}
+
+.code-review-comment__location {
+  background: rgba(var(--v-theme-on-surface), 0.05);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+
+/* GitHub-style markdown tweaks scoped to code review comments.
+   The shared .rendered-markdown styles are tuned for full-tab PRD/tech-spec
+   surfaces; inside a comment card we need tighter spacing, readable link
+   contrast on the dark theme, and inline code that actually stands out. */
+.code-review-comment .rendered-markdown {
+  padding: 0;
+  line-height: 1.6;
+  font-size: 13px;
+  color: rgba(var(--v-theme-on-surface), 0.92);
+}
+
+.code-review-comment .rendered-markdown :deep(a) {
+  color: #58a6ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-word;
+}
+
+.code-review-comment .rendered-markdown :deep(a:hover) {
+  color: #79b8ff;
+}
+
+.code-review-comment .rendered-markdown :deep(code) {
+  background: rgba(var(--v-theme-on-surface), 0.15);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  padding: 1px 6px;
+  font-size: 0.85em;
+  color: rgba(var(--v-theme-on-surface), 0.95);
+}
+
+.code-review-comment .rendered-markdown :deep(pre) {
+  background: rgba(var(--v-theme-on-surface), 0.08);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+}
+
+.code-review-comment .rendered-markdown :deep(pre code) {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.code-review-comment .rendered-markdown :deep(p),
+.code-review-comment .rendered-markdown :deep(ol),
+.code-review-comment .rendered-markdown :deep(ul) {
+  margin: 0 0 10px;
+}
+
+.code-review-comment .rendered-markdown :deep(p:last-child),
+.code-review-comment .rendered-markdown :deep(ol:last-child),
+.code-review-comment .rendered-markdown :deep(ul:last-child) {
+  margin-bottom: 0;
+}
+
+.code-review-comment .rendered-markdown :deep(li) {
+  margin-bottom: 4px;
+}
+
+.code-review-comment .rendered-markdown :deep(strong) {
+  color: rgba(var(--v-theme-on-surface), 1);
 }
 </style>
