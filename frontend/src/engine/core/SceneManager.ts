@@ -331,6 +331,7 @@ export class SceneManager {
   get worldLayout(): WorldLayout { return this.layout }
   get gardenRootEntity(): pc.Entity | null { return this._gardenRoot }
   get agentSystemRef(): AgentCharacterSystem | null { return this.agentSystem }
+  get assetLoader(): AssetLoader { return this.loader }
 
   /** All pickable entities: repo trees + feature branches + houses + agents.
    *  NOT cached — tree features are added asynchronously during growth animation,

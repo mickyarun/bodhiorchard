@@ -127,7 +127,8 @@ async def handle_code_review_result(
         meta = dict(bud.metadata_ or {})
         qa_push_requested = meta.pop("qa_push_requested", False)
         new_comments = review_data.get("code_review_comments", [])
-        meta["code_review_comments"] = new_comments
+        # Comments stored via GitHub webhook (issue_comment/review_comment),
+        # not directly here. We only sync outbound to GitHub PR.
         if qa_push_requested:
             meta.pop("code_review_resolutions", None)
         auto_plan = review_data.get("automation_test_plan_md", "")
@@ -144,24 +145,36 @@ async def handle_code_review_result(
             await sync_review_comments_to_github(bud_id, org_id, new_comments, db)
 
         if qa_push_requested and comment_count == 0:
-            from app.models.bud import BUDStatus
-            from app.services.bud_assignment import auto_assign_for_phase
-            from app.services.bud_timeline import record_event
+            # Verify ACs before auto-transitioning to testing
+            ac_passed = True
+            try:
+                from app.services.ac_verification import verify_ac_completeness
 
-            old_status = bud.status
-            bud.status = BUDStatus.TESTING
-            await record_event(
-                db,
-                org_id,
-                bud_id,
-                "status_change",
-                detail={"from": old_status, "to": "testing", "auto": True},
-            )
-            await auto_assign_for_phase(db, org_id, bud, BUDStatus.TESTING)
+                ac_passed, _ = await verify_ac_completeness(db, org_id, bud)
+            except Exception:
+                logger.warning("ac_verification_error_in_review", bud_id=str(bud_id))
 
-            from app.services.bud_agent_trigger import create_agent_task_for_stage
+            if ac_passed:
+                from app.models.bud import BUDStatus
+                from app.services.bud_assignment import auto_assign_for_phase
+                from app.services.bud_timeline import record_event
 
-            await create_agent_task_for_stage(bud, "testing", org_id, db, force=True)
+                old_status = bud.status
+                bud.status = BUDStatus.TESTING
+                await record_event(
+                    db,
+                    org_id,
+                    bud_id,
+                    "status_change",
+                    detail={"from": old_status, "to": "testing", "auto": True},
+                )
+                await auto_assign_for_phase(db, org_id, bud, BUDStatus.TESTING)
+
+                from app.services.bud_agent_trigger import create_agent_task_for_stage
+
+                await create_agent_task_for_stage(bud, "testing", org_id, db, force=True)
+            else:
+                logger.info("ac_blocked_testing_after_review", bud_id=str(bud_id))
 
         # Re-estimate with code review context
         try:
@@ -308,7 +321,12 @@ def _extract_impacted_repos_json(output: str) -> tuple[list[str], str]:
 
 
 def _parse_code_review_output(output: str) -> dict[str, Any]:
-    """Parse code review JSON output from Claude."""
+    """Parse code review JSON output from Claude.
+
+    Comments are stored via GitHub webhook (not here). This only
+    extracts structured JSON if the agent returned it, for the
+    comment_count used in auto-transition logic.
+    """
     from app.services.json_parser import parse_json_response
 
     try:

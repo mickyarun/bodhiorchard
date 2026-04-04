@@ -102,6 +102,7 @@ async def list_repos(
             developBranch=r.develop_branch,
             hasUncommittedChanges=False,
             repoType=detect_repo_type(r.path),
+            githubRepo=r.github_repo_full_name,
             setupStatus=_detect_setup_status(r.path),
             designSystemStatus=_detect_design_system_status(str(r.id), ds_repo_ids),
         )
@@ -151,6 +152,15 @@ async def add_repo(
         repo.main_branch = detected_main
     if detected_dev:
         repo.develop_branch = detected_dev
+
+    # Auto-populate GitHub repo name from git remote origin
+    if not repo.github_repo_full_name:
+        from app.services.git_operations import get_github_repo_full_name
+
+        github_name = await get_github_repo_full_name(str(repo_path))
+        if github_name:
+            repo.github_repo_full_name = github_name
+
     await db.flush()
 
     return RepoInfo(
@@ -166,6 +176,7 @@ async def add_repo(
         developBranch=repo.develop_branch,
         hasUncommittedChanges=has_dirty,
         repoType=detect_repo_type(str(repo_path)),
+        githubRepo=repo.github_repo_full_name,
     )
 
 
@@ -255,6 +266,7 @@ async def update_repo_status(
         developBranch=repo.develop_branch,
         hasUncommittedChanges=False,
         repoType=detect_repo_type(repo.path),
+        githubRepo=repo.github_repo_full_name,
     )
 
 
@@ -342,6 +354,7 @@ async def update_repo_branches(
         developBranch=repo.develop_branch,
         hasUncommittedChanges=False,
         repoType=detect_repo_type(repo.path),
+        githubRepo=repo.github_repo_full_name,
     )
 
 

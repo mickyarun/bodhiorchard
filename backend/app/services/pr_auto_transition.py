@@ -55,11 +55,25 @@ async def check_all_repos_have_prs(
     pr_repo = PullRequestRepository(db, org_id=org_id)
     repo_ids_with_prs = await pr_repo.get_repo_ids_with_prs(bud.id)
 
-    impacted_ids = {r.get("repo_id") for r in impacted if r.get("repo_id")}
+    impacted_ids = {str(r.get("repo_id")) for r in impacted if r.get("repo_id")}
     if not impacted_ids:
         return
 
     if impacted_ids.issubset(repo_ids_with_prs):
+        # Auto-populate confirmed_repos so code review agent has repo paths
+        from app.repositories.tracked_repository import TrackedRepoRepository
+
+        tr_repo = TrackedRepoRepository(db, org_id=org_id)
+        repo_triples = await tr_repo.get_active_id_path_name()
+        confirmed = [
+            {"repo_path": path, "repo_name": name}
+            for rid, path, name in repo_triples
+            if str(rid) in impacted_ids
+        ]
+        meta = dict(bud.metadata_ or {})
+        meta["confirmed_repos"] = confirmed
+        bud.metadata_ = meta
+
         bud.status = BUDStatus.CODE_REVIEW
 
         await record_event(
@@ -73,13 +87,7 @@ async def check_all_repos_have_prs(
         from app.services.bud_agent_trigger import create_agent_task_for_stage
 
         await create_agent_task_for_stage(bud, "code_review", org_id, db)
-
-        try:
-            from app.services.bud_estimation import estimate_bud_dates
-
-            await estimate_bud_dates(db, org_id, bud, trigger="prs_opened")
-        except Exception:
-            logger.warning("estimation_failed_after_prs_opened", bud_id=str(bud.id))
+        # Estimation deferred — triggers after code review completes (agent_result_handlers)
         logger.info("auto_transition_to_code_review", bud_id=str(bud.id))
 
 
@@ -97,6 +105,18 @@ async def check_all_prs_merged(
     pr_repo = PullRequestRepository(db, org_id=org_id)
     if not await pr_repo.are_all_merged(bud_id):
         return
+
+    # Verify acceptance criteria before transitioning to testing
+    try:
+        from app.services.ac_verification import verify_ac_completeness
+
+        all_passed, _ = await verify_ac_completeness(db, org_id, bud)
+        if not all_passed:
+            logger.info("ac_verification_blocked_testing", bud_id=str(bud_id))
+            return  # Stay in CODE_REVIEW
+    except Exception:
+        logger.warning("ac_verification_error", bud_id=str(bud_id))
+        # Graceful degradation — allow transition if verification crashes
 
     bud.status = BUDStatus.TESTING
 

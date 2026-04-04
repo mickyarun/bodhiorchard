@@ -5,8 +5,6 @@ to intelligently assign any BUD phase that requires smart assignment
 (e.g., DEVELOPMENT, TESTING).
 """
 
-import json
-import re
 import uuid
 from datetime import UTC, datetime
 
@@ -28,87 +26,6 @@ _MAX_ACTIVE_BUDS = 3
 _W_SKILL = 0.5
 _W_WORKLOAD = 0.3
 _W_RECENCY = 0.2
-
-
-def _extract_modules_regex(tech_spec_md: str) -> set[str]:
-    """Fast regex fallback for module extraction.
-
-    Extracts first-level directory names from file paths mentioned in the
-    tech spec text.  Used when the LLM extractor fails or times out.
-    """
-    modules: set[str] = set()
-
-    for match in re.finditer(r"(?:[\w.-]+/){1,6}[\w.-]+", tech_spec_md):
-        first_dir = match.group().split("/")[0].lower()
-        if first_dir and len(first_dir) > 2:
-            modules.add(first_dir)
-
-    for match in re.finditer(r"(\w+)\s+(?:module|service|component|package)", tech_spec_md, re.I):
-        modules.add(match.group(1).lower())
-
-    return modules
-
-
-async def _extract_modules_llm(
-    tech_spec_md: str,
-    known_modules: set[str],
-) -> set[str]:
-    """Use a lightweight LLM call to extract relevant modules from a tech spec.
-
-    The LLM is told which module names exist in the codebase (from
-    SkillProfile records) and asked to pick the ones this tech plan touches.
-    Falls back to regex extraction on any failure.
-    """
-    try:
-        from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
-
-        known_list = ", ".join(sorted(known_modules)) if known_modules else "(none)"
-        snippet = tech_spec_md[:3000]
-
-        prompt = (
-            "Extract the top-level repository modules (directory names) that "
-            "this tech plan will touch. Reply with ONLY a JSON array of "
-            "lowercase strings. No explanation.\n\n"
-            f"Known modules in this codebase: {known_list}\n\n"
-            f"Tech plan:\n{snippet}\n\n"
-            'Example output: ["backend", "frontend", "docs"]'
-        )
-
-        config = ClaudeRunnerConfig(max_turns=1, timeout_seconds=60)
-        result = await run_claude_code(prompt=prompt, config=config)
-
-        if result.success and result.output:
-            # Parse JSON array from output (tolerant of markdown fences)
-            text = result.output.strip()
-            # Strip markdown code fences if present
-            if text.startswith("```"):
-                text = re.sub(r"^```\w*\n?", "", text)
-                text = re.sub(r"\n?```$", "", text)
-            parsed = json.loads(text.strip())
-            if isinstance(parsed, list):
-                return {str(m).lower() for m in parsed if isinstance(m, str)}
-    except Exception:
-        logger.warning("llm_module_extraction_failed")
-
-    return _extract_modules_regex(tech_spec_md)
-
-
-async def _extract_modules(
-    tech_spec_md: str | None,
-    known_modules: set[str] | None = None,
-) -> set[str]:
-    """Extract modules from a tech spec using LLM with regex fallback.
-
-    If known_modules are provided (from SkillProfile data), the LLM can
-    target the exact vocabulary.  Otherwise falls back to regex only.
-    """
-    if not tech_spec_md:
-        return set()
-
-    if known_modules:
-        return await _extract_modules_llm(tech_spec_md, known_modules)
-
-    return _extract_modules_regex(tech_spec_md)
 
 
 async def score_candidates(
@@ -171,11 +88,10 @@ async def score_candidates(
     )
     all_skills = list(skill_result.scalars().all())
 
-    # Gather known module names so the LLM can target the right vocabulary
-    known_modules = {sp.module.lower() for sp in all_skills}
-
-    # Extract modules from tech spec (LLM-powered with regex fallback)
-    modules = await _extract_modules(bud.tech_spec_md, known_modules)
+    # Use impacted_repos from tech arch — no LLM call needed
+    modules = {
+        r.get("repo_name", "").lower() for r in (bud.impacted_repos or []) if r.get("repo_name")
+    }
 
     # Group skills by user
     user_skills: dict[uuid.UUID, list[SkillProfile]] = {}

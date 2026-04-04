@@ -405,6 +405,16 @@ async def run_scan_pipeline(
                     )
 
                 tracked_repo = await tracked_repo_repo.get_by_path(repo_path)
+
+                # Auto-populate GitHub repo name from git remote if missing
+                if tracked_repo and not tracked_repo.github_repo_full_name:
+                    from app.services.git_operations import get_github_repo_full_name
+
+                    gh_name = await get_github_repo_full_name(repo_path)
+                    if gh_name:
+                        tracked_repo.github_repo_full_name = gh_name
+                        await db.flush()
+
                 main_branch = (tracked_repo.main_branch if tracked_repo else None) or "main"
 
                 # Create a temporary worktree for scanning the main branch
@@ -544,9 +554,7 @@ async def run_scan_pipeline(
 
                             from app.services.scan_phases import _list_repo_files
 
-                            files = await asyncio.to_thread(
-                                _list_repo_files, Path(repo_path)
-                            )
+                            files = await asyncio.to_thread(_list_repo_files, Path(repo_path))
                             if files:
                                 _pending_synthesis.append(
                                     {

@@ -25,6 +25,11 @@ export class GardenRoom extends Room<GardenRoomState> {
       this.broadcast("agent_activity", data, { except: client })
     })
 
+    // Dev activity broadcast — relay to all other clients so everyone sees developer movement
+    this.onMessage("dev_activity", (client, data: Record<string, unknown>) => {
+      this.broadcast("dev_activity", data, { except: client })
+    })
+
     this.onMessage("move", (client, data: {
       x: number
       z: number
@@ -36,7 +41,7 @@ export class GardenRoom extends Room<GardenRoomState> {
       if (typeof data.x !== "number" || !isFinite(data.x)) return
       if (typeof data.z !== "number" || !isFinite(data.z)) return
       if (typeof data.yaw !== "number" || !isFinite(data.yaw)) return
-      const validAnims = ["idle", "walk", "sit", "sleep"]
+      const validAnims = ["idle", "walk", "sit", "sleep", "sprint", "jump"]
       if (!validAnims.includes(data.animState)) return
       player.x = data.x
       player.z = data.z

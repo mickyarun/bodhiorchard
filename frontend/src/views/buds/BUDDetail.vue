@@ -604,6 +604,36 @@
             </v-card>
           </v-dialog>
 
+          <!-- Status Override Reason Dialog -->
+          <v-dialog v-model="overrideReasonDialog" max-width="420">
+            <v-card color="surface" class="pa-5">
+              <div class="text-subtitle-1 font-weight-medium mb-3">
+                Advance to Testing
+              </div>
+              <div class="text-body-2 text-medium-emphasis mb-3">
+                AC verification will be skipped. Please explain why you're manually advancing.
+              </div>
+              <v-textarea
+                v-model="overrideReasonText"
+                label="Reason (required)"
+                rows="3"
+                :rules="[v => !!v?.trim() || 'Reason is required']"
+              />
+              <v-card-actions class="pa-0 mt-2">
+                <v-spacer />
+                <v-btn variant="text" @click="overrideReasonDialog = false">Cancel</v-btn>
+                <v-btn
+                  color="warning"
+                  variant="flat"
+                  :disabled="!overrideReasonText.trim()"
+                  @click="confirmOverrideStatus"
+                >
+                  Advance
+                </v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-dialog>
+
           <!-- Activity Timeline (collapsible) -->
           <div class="timeline-section mt-4">
             <button class="timeline-toggle" @click="timelineOpen = !timelineOpen">
@@ -660,12 +690,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
 import { useJobSocket } from '@/composables/useJobSocket'
+import { subscribe, unsubscribe } from '@/services/socket'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
 import type { BUDSectionKey, TimelineEvent } from '@/types'
@@ -853,14 +884,7 @@ onMounted(async () => {
 
   // Auto-select tab based on BUD status (unless explicit ?tab= param)
   if (!tabParam && bud.value) {
-    const statusTabMap: Record<string, string> = {
-      design: 'design',
-      tech_arch: 'tech-spec',
-      development: 'development',
-      code_review: 'code-review',
-      testing: 'testing',
-    }
-    const defaultTab = statusTabMap[bud.value.status]
+    const defaultTab = STATUS_TAB_MAP[bud.value.status]
     if (defaultTab) activeTab.value = defaultTab
   }
 
@@ -868,7 +892,35 @@ onMounted(async () => {
   membersStore.fetchMembers()
   loadTimeline()
   loadEstimates()
+
+  // Subscribe to BUD activity events (PR opened/merged/comment via webhook)
+  const budActivityTopic = `bud:${id}:activity`
+  const handleBudActivity = () => {
+    budStore.fetchBUD(id)
+    loadTimeline()
+    loadEstimates()
+  }
+  subscribe(budActivityTopic, handleBudActivity)
+  onUnmounted(() => unsubscribe(budActivityTopic, handleBudActivity))
 })
+
+// Single source of truth for status → tab mapping
+const STATUS_TAB_MAP: Record<string, string> = {
+  bud: 'requirements',
+  design: 'design',
+  tech_arch: 'tech-spec',
+  development: 'development',
+  code_review: 'code-review',
+  testing: 'testing',
+}
+watch(
+  () => bud.value?.status,
+  (newStatus) => {
+    if (newStatus && STATUS_TAB_MAP[newStatus]) {
+      activeTab.value = STATUS_TAB_MAP[newStatus]
+    }
+  },
+)
 
 // Track active agent task. Watches both the task data and the component ref
 // so tracking starts as soon as both are available (covers any mount order).
@@ -942,6 +994,11 @@ const PHASE_ROLE_LABELS: Record<string, string> = {
   uat: 'product manager',
 }
 
+// Override reason dialog state
+const overrideReasonDialog = ref(false)
+const overrideReasonText = ref('')
+const pendingOverrideStatus = ref('')
+
 async function updateStatus(newStatus: string): Promise<void> {
   if (!bud.value) return
 
@@ -957,24 +1014,37 @@ async function updateStatus(newStatus: string): Promise<void> {
     }
   }
 
+  // Require reason when manually advancing code_review → testing
+  if (bud.value.status === 'code_review' && newStatus === 'testing') {
+    pendingOverrideStatus.value = newStatus
+    overrideReasonText.value = ''
+    overrideReasonDialog.value = true
+    return
+  }
+
+  await _executeStatusChange(newStatus)
+}
+
+async function confirmOverrideStatus(): Promise<void> {
+  if (!bud.value || !overrideReasonText.value.trim()) return
+  overrideReasonDialog.value = false
+  await _executeStatusChange(pendingOverrideStatus.value, overrideReasonText.value.trim())
+}
+
+async function _executeStatusChange(newStatus: string, reason?: string): Promise<void> {
+  if (!bud.value) return
   statusChangeTarget.value = newStatus
   statusChanging.value = true
   try {
-    await budStore.updateBUD(bud.value.id, { status: newStatus } as never)
+    const payload: Record<string, unknown> = { status: newStatus }
+    if (reason) payload.status_override_reason = reason
+    await budStore.updateBUD(bud.value.id, payload as never)
   } finally {
     statusChanging.value = false
   }
 
   // Switch tab to match the new status phase
-  const STATUS_TO_TAB: Record<string, string> = {
-    bud: 'requirements',
-    design: 'design',
-    tech_arch: 'tech-spec',
-    development: 'development',
-    code_review: 'code-review',
-    testing: 'testing',
-  }
-  const targetTab = STATUS_TO_TAB[newStatus]
+  const targetTab = STATUS_TAB_MAP[newStatus]
   if (targetTab) activeTab.value = targetTab
 
   // If entering design phase, open repo picker for generation

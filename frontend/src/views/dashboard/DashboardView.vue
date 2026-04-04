@@ -74,6 +74,16 @@
         >
           {{ showRelations ? 'Relations ON' : 'Relations' }}
         </v-btn>
+
+        <v-btn
+          size="small"
+          variant="tonal"
+          color="deep-purple"
+          prepend-icon="mdi-gamepad-variant-outline"
+          @click="toggleTakeover"
+        >
+          {{ isTakeover ? 'Exit Control' : 'Take Control' }}
+        </v-btn>
       </template>
 
       <!-- Graph-mode controls -->
@@ -173,6 +183,7 @@ watch(viewMode, (mode) => {
 // ─── Shared State ────────────────────────────────
 
 const showRelations = ref(false)
+const isTakeover = ref(false)
 const visibleRepos = ref<string[]>([])
 
 const repoNames = computed<string[]>(() => {
@@ -239,6 +250,18 @@ const totalBUDs = computed(() => {
 function toggleRelationships(): void {
   const visible = treeContentRef.value?.toggleArcs() ?? !showRelations.value
   showRelations.value = visible
+}
+
+function toggleTakeover(): void {
+  if (treeContentRef.value?.isTakeover()) {
+    treeContentRef.value?.exitTakeover()
+  } else {
+    treeContentRef.value?.takeoverCharacter()
+  }
+  // Sync state after async operations settle
+  setTimeout(() => {
+    isTakeover.value = treeContentRef.value?.isTakeover() ?? false
+  }, 100)
 }
 
 function selectAllRepos(): void {

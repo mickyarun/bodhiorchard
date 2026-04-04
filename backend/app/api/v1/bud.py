@@ -230,6 +230,7 @@ async def update_bud(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
 
     update_data = body.model_dump(exclude_unset=True)
+    update_data.pop("status_override_reason", None)  # consumed separately, not a model field
 
     if "status" in update_data:
         try:
@@ -282,6 +283,30 @@ async def update_bud(
     if "status" in update_data:
         new_status = update_data["status"]
 
+        # Require reason when manually advancing code_review → testing
+        if old_status == BUDStatus.CODE_REVIEW and new_status == BUDStatus.TESTING:
+            reason = body.status_override_reason
+            if not reason or not reason.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Reason required when manually advancing to testing",
+                )
+            from app.services.bud_timeline import record_event as _record
+
+            await _record(
+                db,
+                current_user.org_id,
+                bud.id,
+                "status_override",
+                actor_id=current_user.id,
+                actor_name=current_user.name,
+                detail={
+                    "from": old_status.value,
+                    "to": "testing",
+                    "reason": reason.strip(),
+                },
+            )
+
         from app.services.bud_assignment import auto_assign_for_phase
         from app.services.bud_timeline import record_event
 
@@ -331,12 +356,17 @@ async def update_bud(
                 from app.services.xp_service import award_quality_bonus, award_xp
 
                 await award_xp(
-                    db, user_id=bud.assignee_id, org_id=current_user.org_id,
-                    xp_amount=50, source="bud_completed",
+                    db,
+                    user_id=bud.assignee_id,
+                    org_id=current_user.org_id,
+                    xp_amount=50,
+                    source="bud_completed",
                     source_ref=f"bud:{bud.bud_number}",
                 )
                 await award_quality_bonus(
-                    db, user_id=bud.assignee_id, org_id=current_user.org_id,
+                    db,
+                    user_id=bud.assignee_id,
+                    org_id=current_user.org_id,
                     bud_id=bud.id,
                 )
             except Exception:

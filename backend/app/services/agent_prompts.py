@@ -132,42 +132,42 @@ async def build_code_review_prompt(
 
     repo_list = "\n".join(repo_sections)
 
-    bud_context = (
-        f"Use `get_bud_context` MCP tool to fetch the full tech spec and requirements "
-        f"for {bud_ref}. Check for deviations.\n"
-    )
-    if bud.tech_spec_md:
-        snippet = bud.tech_spec_md[:500].rsplit("\n", 1)[0]
-        bud_context += f"\nTech spec preview (use MCP for full version):\n{snippet}...\n"
-
     repo_path_map = {r.get("repo_id", ""): r.get("repo_path", "") for r in confirmed_repos}
     design_refs = _build_design_refs(bud, repo_path_map)
 
     prompt = (
-        f"You are performing an automated code review for {bud_ref}: {bud.title}.\n\n"
-        f"## Repositories to Review\n\n{repo_list}\n\n"
-        f"## BUD Context\n\n{bud_context}\n\n"
+        f"Code review for {bud_ref}: {bud.title}.\n\n"
+        f"## Repos\n\n{repo_list}\n\n"
         f"{design_refs}"
-        "## How to Review\n\n"
-        "1. Run `git diff` in each repo to see the actual code changes\n"
-        "2. Read the modified files to understand context\n"
-        "3. Use `get_bud_context` MCP tool to fetch the tech spec\n"
-        "4. Check for: bugs, security issues (OWASP top 10), type safety, "
-        "missing error handling, spec deviations\n\n"
-        "## Output Format\n\n"
-        "Produce a JSON response with this exact structure:\n"
+        "## Steps\n\n"
+        "1. `get_bud_context` → fetch tech spec + PRD ACs\n"
+        "2. `git diff` in each repo\n"
+        "3. Read modified files for context\n"
+        "4. `gitnexus_impact` on key symbols — flag d=1 dependents not updated\n"
+        "5. Verify each PRD AC has implementation in the diff\n\n"
+        "## Quality Checklist\n\n"
+        "| Check | Rule |\n"
+        "|-------|------|\n"
+        "| Bugs | Logic errors, null refs, race conditions |\n"
+        "| Security | OWASP top 10, org_id scoping, input validation |\n"
+        "| Modularity | Functions <50 lines, files <300 (BE) / <250 (FE) |\n"
+        "| Reuse | Existing patterns used, no duplicated code |\n"
+        "| No hacks | No hardcoded values, TODO/FIXME, bypassed checks |\n"
+        "| Standards | Type hints, docstrings on public funcs, lint clean |\n"
+        "| Spec match | Changes match tech arch + PRD acceptance criteria |\n"
+        "| Impact | gitnexus blast radius — d=1 dependents updated |\n\n"
+        "## Output (JSON only, no wrapper)\n\n"
         "```json\n"
         "{\n"
         '  "code_review_comments": [\n'
-        '    {"repo": "repo_name", "file": "path/to/file.py", "line": 42,\n'
-        '     "severity": "error|warning|suggestion", "comment": "...",\n'
-        '     "deviates_from_spec": false}\n'
+        '    {"repo": "name", "file": "path", "line": 42,\n'
+        '     "severity": "error|warning|suggestion",\n'
+        '     "comment": "...", "deviates_from_spec": false}\n'
         "  ],\n"
-        '  "automation_test_plan_md": "## Automated Tests\\n\\n...",\n'
-        '  "manual_test_plan_md": "## Manual Tests\\n\\n..."\n'
+        '  "automation_test_plan_md": "...",\n'
+        '  "manual_test_plan_md": "..."\n'
         "}\n"
-        "```\n\n"
-        "Output ONLY the JSON — no markdown wrapper, no explanation."
+        "```\n"
     )
 
     return prompt, working_dir

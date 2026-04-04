@@ -25,6 +25,9 @@ import type { TreeData } from '@/types/dashboard'
 import { GardenEngine } from '@/engine/index'
 import type { EngineData, RepoHealth, ThreatSeverity, BUDStatus, RelType } from '@/engine/types'
 import { subscribe, unsubscribe } from '@/services/socket'
+import { useAuthStore } from '@/stores/auth'
+
+const authStore = useAuthStore()
 
 const props = defineProps<{
   treeData: TreeData
@@ -49,6 +52,7 @@ let devActivityTopic: string | null = null
 function onDevActivity(data: unknown): void {
   if (!engine) return
   const raw = data as Record<string, unknown>
+  console.debug('[PlayCanvasCanvas] onDevActivity:', raw.event_type, raw.user_id, raw.repo_name)
   engine.handleDevActivity({
     user_id: (raw.user_id as string) || '',
     actor_name: (raw.actor_name as string) || 'Developer',
@@ -200,7 +204,10 @@ async function initEngine(): Promise<void> {
     }),
     onHouseClick: (info) => {
       emit('house-click', { name: info.name })
-      if (info.memberId) engine?.enterHouse(info.memberId)
+      // Only allow entering your own house
+      if (info.memberId && info.memberId === authStore.user?.id) {
+        engine?.enterHouse(info.memberId)
+      }
     },
     onHover: (tip) => {
       if (tip) {
@@ -285,7 +292,23 @@ function clearFocus(): void {
   engine?.clearFocus()
 }
 
-defineExpose({ toggleArcs, exitHouse, focusOnRepo, clearFocus })
+/** Take control of your character in the garden (callable from parent). */
+function takeoverCharacter(): void {
+  const userId = authStore.user?.id
+  if (userId) engine?.takeoverCharacter(userId)
+}
+
+/** Exit takeover mode back to overview (callable from parent). */
+function exitTakeover(): void {
+  engine?.exitTakeover()
+}
+
+/** Whether engine is in takeover mode. */
+function isTakeover(): boolean {
+  return engine?.isTakeover ?? false
+}
+
+defineExpose({ toggleArcs, exitHouse, focusOnRepo, clearFocus, takeoverCharacter, exitTakeover, isTakeover })
 
 onUnmounted(() => {
   if (agentTopic) {

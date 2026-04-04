@@ -1,0 +1,5 @@
+export { TakeoverController, type HouseDoor } from './TakeoverController'
+export { TakeoverCamera } from './TakeoverCamera'
+export { TakeoverUI } from './TakeoverUI'
+export { ProximitySystem } from './ProximitySystem'
+export { loadTakeoverAnimations, restoreLocomotionAnimations } from './TakeoverAnimGraph'

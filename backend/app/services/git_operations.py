@@ -272,6 +272,32 @@ async def remove_scan_worktree(repo_path: str) -> None:
         logger.info("scan_worktree_removed", repo=repo_path)
 
 
+async def get_github_repo_full_name(repo_path: str) -> str | None:
+    """Extract owner/repo from the git origin remote URL.
+
+    Supports both SSH (git@github.com:owner/repo.git) and
+    HTTPS (https://github.com/owner/repo.git) formats.
+    Returns None if not a GitHub remote.
+    """
+    import re
+
+    try:
+        stdout, _, _ = await run_git(["remote", "get-url", "origin"], cwd=repo_path)
+    except Exception:
+        return None
+
+    url = stdout.strip()
+    # SSH: git@github.com:owner/repo.git
+    match = re.match(r"git@github\.com:(.+?)(?:\.git)?$", url)
+    if match:
+        return match.group(1)
+    # HTTPS: https://github.com/owner/repo.git
+    match = re.match(r"https://github\.com/(.+?)(?:\.git)?$", url)
+    if match:
+        return match.group(1)
+    return None
+
+
 async def list_remote_branches(repo_path: str) -> list[str]:
     """List all remote branch names (origin/main → 'main').
 

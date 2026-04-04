@@ -217,6 +217,35 @@
               </div>
             </template>
 
+            <!-- AC Verification -->
+            <template v-else-if="event.event_type === 'ac_verification_passed'">
+              <div class="tl-primary">
+                <span>All {{ event.detail?.total }} acceptance criteria verified</span>
+              </div>
+            </template>
+
+            <template v-else-if="event.event_type === 'ac_verification_failed'">
+              <div class="tl-primary text-error">
+                <span>{{ event.detail?.passed }}/{{ event.detail?.total }} acceptance criteria verified</span>
+              </div>
+              <div v-if="event.detail?.results" class="tl-meta">
+                <div v-for="(r, i) in (event.detail.results as Array<Record<string, unknown>>).filter(r => !r.implemented)" :key="i" class="text-caption">
+                  Missing: {{ r.criterion }}
+                </div>
+              </div>
+            </template>
+
+            <!-- Status Override -->
+            <template v-else-if="event.event_type === 'status_override'">
+              <div class="tl-primary">
+                <span v-if="event.actor_name" class="tl-actor">{{ event.actor_name }}</span>
+                <span>manually advanced to {{ event.detail?.to }}</span>
+              </div>
+              <div v-if="event.detail?.reason" class="tl-meta">
+                Reason: {{ event.detail.reason }}
+              </div>
+            </template>
+
             <!-- Fallback -->
             <template v-else>
               <div class="tl-primary">
@@ -266,6 +295,9 @@ const EVENT_MAP: Record<string, EventConfig> = {
   all_prs_merged: { icon: 'mdi-check-all', color: 'success', label: 'All PRs merged' },
   estimate_generated: { icon: 'mdi-chart-timeline-variant', color: 'blue', label: 'Estimate updated' },
   estimate_overridden: { icon: 'mdi-calendar-edit', color: 'orange', label: 'Estimate overridden' },
+  ac_verification_passed: { icon: 'mdi-check-decagram', color: 'success', label: 'ACs verified' },
+  ac_verification_failed: { icon: 'mdi-alert-circle', color: 'error', label: 'ACs incomplete' },
+  status_override: { icon: 'mdi-shield-alert', color: 'orange', label: 'Manual override' },
 }
 
 const DEFAULT_CONFIG: EventConfig = { icon: 'mdi-circle-small', color: 'grey', label: 'Event' }

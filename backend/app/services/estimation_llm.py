@@ -33,10 +33,8 @@ def build_estimation_prompt(
         skill_lines = [
             f"  - {d['module']}: score {d['score']:.2f}, {d['touches']} touches" for d in details
         ]
-        matched = skill_ctx["modules_matched"]
-        needed = len(skill_ctx["modules_needed"])
         skill_block = (
-            f"\nDeveloper skill match ({matched}/{needed} modules):\n"
+            f"\nDeveloper skills ({len(details)} modules known):\n"
             + "\n".join(skill_lines)
             + f"\nAvg skill score: {skill_ctx['avg_skill_score']:.2f}\n"
         )

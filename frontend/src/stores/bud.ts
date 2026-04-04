@@ -271,7 +271,7 @@ export const useBUDStore = defineStore('bud', () => {
       const { data } = await api.get(`/v1/buds/${budId}/estimates`)
       return data
     } catch {
-      error.value = 'Failed to load estimates'
+      // Estimates are optional — don't show global error
       return null
     }
   }

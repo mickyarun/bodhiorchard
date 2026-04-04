@@ -50,6 +50,7 @@ class BUDUpdate(BaseModel):
 
     title: str | None = Field(None, min_length=1, max_length=500)
     status: str | None = None
+    status_override_reason: str | None = Field(None, max_length=2000)
     requirements_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
@@ -129,6 +130,7 @@ class BUDRead(BaseModel):
     qa_automation_cases: list[dict] | None = None
     qa_manual_cases: list[dict] | None = None
     qa_execution_plan_md: str | None = None
+    code_review_comments: list[dict] | None = None
     designs: list[BUDDesignRead] = []
     metadata: dict | None = Field(None, validation_alias="metadata_")
     impacted_repos: list[dict] | None = None

@@ -128,6 +128,9 @@ watch(() => props.displayData, () => {
 defineExpose({
   /** Returns new visibility state */
   toggleArcs: () => canvasRef.value?.toggleArcs(),
+  takeoverCharacter: () => canvasRef.value?.takeoverCharacter(),
+  exitTakeover: () => canvasRef.value?.exitTakeover(),
+  isTakeover: () => canvasRef.value?.isTakeover() ?? false,
 })
 </script>
 

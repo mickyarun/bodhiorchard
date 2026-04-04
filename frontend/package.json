@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@colyseus/sdk": "^0.17.35",
+    "@dimforge/rapier3d": "^0.19.3",
     "@mdi/font": "^7.4.0",
     "@panzoom/panzoom": "^4.6.1",
     "axios": "^1.6.5",

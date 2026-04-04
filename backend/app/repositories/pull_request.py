@@ -18,9 +18,7 @@ class PullRequestRepository(BaseRepository[PullRequest]):
 
     async def get_by_github_pr_id(self, github_pr_id: int) -> PullRequest | None:
         """Look up a PR by its GitHub global ID."""
-        stmt = self._scoped(
-            select(PullRequest).where(PullRequest.github_pr_id == github_pr_id)
-        )
+        stmt = self._scoped(select(PullRequest).where(PullRequest.github_pr_id == github_pr_id))
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -50,17 +48,15 @@ class PullRequestRepository(BaseRepository[PullRequest]):
 
         Returns False if there are no PRs at all.
         """
-        stmt = self._scoped(
-            select(PullRequest).where(PullRequest.bud_id == bud_id)
-        )
+        stmt = self._scoped(select(PullRequest).where(PullRequest.bud_id == bud_id))
         result = await self._db.execute(stmt)
         prs = list(result.scalars().all())
         if not prs:
             return False
         return all(pr.state == PRState.MERGED for pr in prs)
 
-    async def get_repo_ids_with_prs(self, bud_id: uuid.UUID) -> set[uuid.UUID]:
-        """Get set of repo_ids that have at least one PR for this BUD."""
+    async def get_repo_ids_with_prs(self, bud_id: uuid.UUID) -> set[str]:
+        """Get set of repo_id strings that have at least one PR for this BUD."""
         stmt = self._scoped(
             select(PullRequest.repo_id).where(
                 PullRequest.bud_id == bud_id,
@@ -68,4 +64,4 @@ class PullRequestRepository(BaseRepository[PullRequest]):
             )
         ).distinct()
         result = await self._db.execute(stmt)
-        return {row[0] for row in result.all()}
+        return {str(row[0]) for row in result.all()}

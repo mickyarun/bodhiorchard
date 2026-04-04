@@ -123,6 +123,14 @@ export class PlayerController {
       const label = result.entity.findByTag('billboard')[0] as pc.Entity | undefined
       if (label) label.destroy()
 
+      // Scale down for interior — garden scale (0.95) is too large for the small room
+      const interiorScale = 0.75
+      const renderChild = result.entity.children[0]
+      if (renderChild) {
+        const s = renderChild.getLocalScale()
+        renderChild.setLocalScale(s.x * interiorScale, s.y * interiorScale, s.z * interiorScale)
+      }
+
       root.addChild(result.entity)
       this.entity = result.entity
       return result.entity
@@ -209,10 +217,10 @@ export class PlayerController {
 
     const dir = this._dir
     dir.set(0, 0, 0)
-    if (this.input.isPressed(pc.KEY_W)) dir.z -= 1
-    if (this.input.isPressed(pc.KEY_S)) dir.z += 1
-    if (this.input.isPressed(pc.KEY_A)) dir.x -= 1
-    if (this.input.isPressed(pc.KEY_D)) dir.x += 1
+    if (this.input.isPressed(pc.KEY_W) || this.input.isPressed(pc.KEY_UP))    dir.z -= 1
+    if (this.input.isPressed(pc.KEY_S) || this.input.isPressed(pc.KEY_DOWN))  dir.z += 1
+    if (this.input.isPressed(pc.KEY_A) || this.input.isPressed(pc.KEY_LEFT))  dir.x -= 1
+    if (this.input.isPressed(pc.KEY_D) || this.input.isPressed(pc.KEY_RIGHT)) dir.x += 1
 
     // Any movement key while sitting/sleeping → resume normal movement.
     if (this._sitting || this._sleeping) {

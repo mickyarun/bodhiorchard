@@ -31,12 +31,21 @@ const DEV_ARRIVE_DIST_SQ = 1.0
 const DEV_IDLE_TIMEOUT = 60         // seconds before auto-return to seat
 const DEV_TREE_OFFSET_X = -1.5      // opposite side from agent robots
 const DEV_TREE_OFFSET_Z = 1.0
-const DEV_LABEL_HEIGHT = 1.45       // above the existing name label (1.25)
+const DEV_LABEL_HEIGHT = 1.55       // above the name label (character height ~0.95)
+const DEV_ORCHARD_FALLBACK_X = -3.0 // fallback position when repo_name is null
+const DEV_ORCHARD_FALLBACK_Z = 3.0
+const DEV_PHRASE_INTERVAL = 5       // seconds between phrase changes while working
+const DEV_WORKING_PHRASES = [
+  'Coding...', 'Writing code...', 'Debugging...', 'Refactoring...',
+  'Reviewing changes...', 'Running tests...', 'Thinking...',
+  'Reading docs...', 'Fixing a bug...', 'Adding feature...',
+]
 
 type DevMoveState = 'idle' | 'walking_to_tree' | 'working' | 'walking_home'
 
 interface DevActivityState {
   userId: string
+  displayName: string
   label: AgentLabel
   labelEntity: pc.Entity
   originalPosition: pc.Vec3
@@ -47,6 +56,7 @@ interface DevActivityState {
   targetZ: number
   moveState: DevMoveState
   idleTimer: number
+  phraseTimer: number
 }
 
 export class CharacterSystem {
@@ -58,6 +68,9 @@ export class CharacterSystem {
   // Dev activity state
   private activeDevs = new Map<string, DevActivityState>()
   private getTreePos: TreePositionLookup = () => null
+
+  // Takeover mode — blocks NPC AI for the taken-over character
+  private takeoverUserId: string | null = null
 
   constructor(loader: AssetLoader) {
     this.factory = new CharacterFactory(loader)
@@ -147,14 +160,49 @@ export class CharacterSystem {
     this.getTreePos = fn
   }
 
+  /** Set/clear which user is in takeover mode (blocks NPC AI for that character). */
+  setTakeoverUser(userId: string | null): void {
+    this.takeoverUserId = userId
+    // If entering takeover, clean up any active dev activity state for this user
+    if (userId) {
+      const state = this.activeDevs.get(userId)
+      if (state) this.cleanupActivityState(userId, state)
+    }
+  }
+
   // ─── Dev Activity ──────────────────────────────
 
   /** Handle a live dev activity event — move character to tree and show label. */
   handleDevActivity(activity: EngineDevActivity): void {
-    if (!this.app || !activity.user_id) return
+    if (!this.app) {
+      console.debug('[CharacterSystem] handleDevActivity: no app')
+      return
+    }
 
-    const character = this.getCharacter(activity.user_id)
-    if (!character) return
+    // Resolve character: try user_id first, then fallback to actor_name
+    let character: CharacterEntity | undefined
+    if (activity.user_id) {
+      character = this.getCharacter(activity.user_id)
+    }
+    if (!character && activity.actor_name) {
+      character = this.getCharacterByName(activity.actor_name)
+      console.debug('[CharacterSystem] user_id lookup failed, name fallback:',
+        activity.actor_name, character ? 'found' : 'not found')
+    }
+    if (!character) {
+      console.debug('[CharacterSystem] No character found for dev activity',
+        { user_id: activity.user_id, actor_name: activity.actor_name })
+      return
+    }
+
+    // Use the character's memberId as the canonical key (handles name-fallback case)
+    const resolvedId = character.memberId
+
+    // Skip movement for character under player takeover control
+    if (resolvedId === this.takeoverUserId) {
+      console.debug('[CharacterSystem] Skipping dev activity — character in takeover mode')
+      return
+    }
 
     // Session ended or completed → return to seat
     if (
@@ -162,47 +210,55 @@ export class CharacterSystem {
       activity.status === 'completed' ||
       activity.status === 'failed'
     ) {
-      this.returnToSeat(activity.user_id)
+      console.debug('[CharacterSystem] Session end/completed → return to seat', resolvedId)
+      this.returnToSeat(resolvedId)
       return
     }
 
     // Get or create activity state
-    let state = this.activeDevs.get(activity.user_id)
+    let state = this.activeDevs.get(resolvedId)
     if (!state) {
-      const newState = this.createActivityState(character, activity)
-      if (!newState) return
+      const newState = this.createActivityState(character, activity, resolvedId)
+      if (!newState) {
+        console.debug('[CharacterSystem] Failed to create activity state')
+        return
+      }
       state = newState
-      this.activeDevs.set(activity.user_id, state)
+      this.activeDevs.set(resolvedId, state)
     }
 
     // Update label text
-    state.label.setText(
-      activity.actor_name || character.memberName,
-      this.formatMessage(activity),
-    )
+    const displayName = activity.actor_name || character.memberName
+    state.displayName = displayName
+    state.label.setText(displayName, this.formatMessage(activity))
     state.idleTimer = 0
 
     // If repo changed (or first event with a repo), walk to the tree
     if (activity.repo_name && activity.repo_name !== state.currentRepoName) {
       const treePos = this.getTreePos(activity.repo_name)
       if (treePos) {
+        console.debug('[CharacterSystem] Walking to tree:', activity.repo_name,
+          'at', treePos.x.toFixed(1), treePos.z.toFixed(1))
         state.currentRepoName = activity.repo_name
         state.targetX = treePos.x + DEV_TREE_OFFSET_X
         state.targetZ = treePos.z + DEV_TREE_OFFSET_Z
         state.moveState = 'walking_to_tree'
-
-        const anim = character.entity.anim
-        if (anim) {
-          anim.setBoolean('sitting', false)
-          anim.setInteger('speed', 1)
-        }
+        this.startWalkAnim(character)
+      } else {
+        console.debug('[CharacterSystem] Tree not found for repo:', activity.repo_name, '→ orchard fallback')
+        this.walkToOrchardFallback(character, state)
       }
+    } else if (!activity.repo_name && state.moveState === 'idle') {
+      // No repo_name at all — walk to orchard area so movement is visible
+      console.debug('[CharacterSystem] No repo_name → orchard fallback')
+      this.walkToOrchardFallback(character, state)
     }
   }
 
   /** Per-frame update — tick walking and idle timers for active devs. */
   update(dt: number): void {
     for (const [userId, state] of this.activeDevs) {
+      if (userId === this.takeoverUserId) continue // skip player-controlled character
       const character = this.getCharacter(userId)
       if (!character) continue
 
@@ -211,12 +267,32 @@ export class CharacterSystem {
           this.tickWalking(character, state, dt, 'working')
           break
 
-        case 'working':
+        case 'working': {
           state.idleTimer += dt
+          state.phraseTimer += dt
+
+          // Cycle label phrases to show the character is "alive" and engaged
+          if (state.phraseTimer >= DEV_PHRASE_INTERVAL) {
+            state.phraseTimer = 0
+            const phrase = DEV_WORKING_PHRASES[
+              Math.floor(Math.random() * DEV_WORKING_PHRASES.length)
+            ]
+            state.label.setText(state.displayName, phrase)
+          }
+
+          // Gentle look-around: oscillate yaw so the character appears engaged
+          const lookAngle = Math.sin(state.idleTimer * 0.5) * 15
+          const baseYaw = Math.atan2(
+            state.targetX - state.originalPosition.x,
+            state.targetZ - state.originalPosition.z,
+          ) * (180 / Math.PI)
+          character.entity.setEulerAngles(0, baseYaw + lookAngle, 0)
+
           if (state.idleTimer >= DEV_IDLE_TIMEOUT) {
             this.returnToSeat(userId)
           }
           break
+        }
 
         case 'walking_home': {
           const arrived = this.tickWalking(character, state, dt, 'idle')
@@ -249,39 +325,33 @@ export class CharacterSystem {
     state.targetZ = state.originalPosition.z
     state.moveState = 'walking_home'
     state.currentRepoName = null
-
-    // Start walk animation
-    const anim = character.entity.anim
-    if (anim) {
-      anim.setBoolean('sitting', false)
-      anim.setInteger('speed', 1)
-    }
+    this.startWalkAnim(character)
   }
 
   /** Create DevActivityState for a newly active developer. */
   private createActivityState(
     character: CharacterEntity,
     activity: EngineDevActivity,
+    resolvedId: string,
   ): DevActivityState | null {
     if (!this.app) return null
 
     const pos = character.entity.getPosition()
     const euler = character.entity.getEulerAngles()
     const wasSitting = character.entity.anim?.getBoolean('sitting') ?? false
+    const displayName = activity.actor_name || character.memberName
 
     // Create activity label (green tint to distinguish from blue agent labels)
     const label = new AgentLabel(this.app.app.graphicsDevice)
-    const labelEntity = label.create(
-      activity.actor_name || character.memberName,
-      this.formatMessage(activity),
-    )
+    const labelEntity = label.create(displayName, this.formatMessage(activity))
     label.setColor(0.12, 0.47, 0.24)
     label.setHeight(DEV_LABEL_HEIGHT)
     character.entity.addChild(labelEntity)
     this.app.registerBillboard(labelEntity)
 
     return {
-      userId: activity.user_id,
+      userId: resolvedId,
+      displayName,
       label,
       labelEntity,
       originalPosition: new pc.Vec3(pos.x, pos.y, pos.z),
@@ -292,6 +362,7 @@ export class CharacterSystem {
       targetZ: pos.z,
       moveState: 'idle',
       idleTimer: 0,
+      phraseTimer: 0,
     }
   }
 
@@ -365,6 +436,33 @@ export class CharacterSystem {
     }
     state.label.destroy()
     this.activeDevs.delete(userId)
+  }
+
+  // ─── Dev Activity Helpers ───────────────────────
+
+  /** Find a character by display name (case-insensitive fallback for missing user_id). */
+  private getCharacterByName(name: string): CharacterEntity | undefined {
+    const lower = name.toLowerCase()
+    return this.characters.find(c => c.memberName.toLowerCase() === lower)
+  }
+
+  /** Start walk animation on a character (stand up + walk). */
+  private startWalkAnim(character: CharacterEntity): void {
+    const anim = character.entity.anim
+    if (anim) {
+      anim.setBoolean('sitting', false)
+      anim.setInteger('speed', 1)
+    }
+  }
+
+  /** Walk the character to the orchard fallback position (when no repo tree is available). */
+  private walkToOrchardFallback(character: CharacterEntity, state: DevActivityState): void {
+    state.currentRepoName = null
+    // Add small random jitter so multiple devs don't stack on the same spot
+    state.targetX = DEV_ORCHARD_FALLBACK_X + (Math.random() - 0.5) * 3
+    state.targetZ = DEV_ORCHARD_FALLBACK_Z + (Math.random() - 0.5) * 3
+    state.moveState = 'walking_to_tree'
+    this.startWalkAnim(character)
   }
 
   // ─── Placement & Query ──────────────────────────

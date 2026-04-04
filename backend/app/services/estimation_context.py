@@ -73,20 +73,20 @@ async def get_skill_context(
     if current_status not in SKILL_AWARE_PHASES or not bud.assignee_id:
         return None
 
-    from app.services.smart_assignment import _extract_modules
-
-    sp_result = await db.execute(select(SkillProfile).where(SkillProfile.org_id == org_id))
-    all_skills = list(sp_result.scalars().all())
-    known_modules = {sp.module.lower() for sp in all_skills}
-    modules = await _extract_modules(bud.tech_spec_md, known_modules)
-
-    assignee_skills = [
-        sp for sp in all_skills if sp.user_id == bud.assignee_id and sp.module.lower() in modules
-    ]
+    # Get assignee's skill profiles directly — no LLM call needed.
+    # The estimation LLM reads the tech spec and judges relevance itself.
+    sp_result = await db.execute(
+        select(SkillProfile).where(
+            SkillProfile.org_id == org_id,
+            SkillProfile.user_id == bud.assignee_id,
+        )
+    )
+    assignee_skills = list(sp_result.scalars().all())
+    modules = {sp.module.lower() for sp in assignee_skills}
 
     return {
-        "modules_needed": list(modules),
-        "modules_matched": len(assignee_skills),
+        "modules_known": list(modules),
+        "module_count": len(assignee_skills),
         "avg_skill_score": (
             sum(float(sp.skill_score) for sp in assignee_skills) / len(assignee_skills)
             if assignee_skills

@@ -60,3 +60,27 @@ class GitHubClient:
                 )
                 return None
 
+    async def get_review_comments(
+        self,
+        owner_repo: str,
+        pr_number: int,
+        review_id: int,
+    ) -> list[dict]:
+        """Fetch inline comments for a specific PR review.
+
+        Returns list of comment dicts with path, line, body, etc.
+        """
+        url = f"{_BASE_URL}/repos/{owner_repo}/pulls/{pr_number}/reviews/{review_id}/comments"
+        async with AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.get(url, headers=self._headers)
+                resp.raise_for_status()
+                return resp.json()
+            except HTTPStatusError:
+                logger.error(
+                    "github_get_review_comments_failed",
+                    status=resp.status_code,
+                    owner_repo=owner_repo,
+                    review_id=review_id,
+                )
+                return []

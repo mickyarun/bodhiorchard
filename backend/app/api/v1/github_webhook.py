@@ -21,9 +21,14 @@ router = APIRouter(tags=["github-webhooks"])
 
 def _verify_github_signature(secret: str, body: bytes, signature: str) -> bool:
     """Verify GitHub webhook HMAC-SHA256 signature."""
-    expected = "sha256=" + hmac.new(
-        secret.encode(), body, hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "sha256="
+        + hmac.new(
+            secret.encode(),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+    )
     return hmac.compare_digest(expected, signature)
 
 
@@ -37,6 +42,13 @@ async def github_webhook(request: Request) -> Response:
     body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
     event_type = request.headers.get("X-GitHub-Event", "")
+
+    logger.debug(
+        "github_webhook_received",
+        github_event=event_type,
+        has_signature=bool(signature),
+        body_len=len(body),
+    )
 
     if not signature or not event_type:
         return Response(status_code=400, content="Missing signature or event header")
@@ -66,8 +78,20 @@ async def github_webhook(request: Request) -> Response:
             return Response(status_code=200, content="No webhook secret configured")
 
         secret = decrypt_secret(org.github_webhook_secret)
-        if not secret or not _verify_github_signature(secret, body, signature):
-            logger.warning("github_webhook_bad_signature", org_id=str(org.id))
+        if not secret:
+            logger.warning(
+                "github_webhook_decrypt_failed",
+                org_id=str(org.id),
+                secret_len=len(org.github_webhook_secret or ""),
+            )
+            return Response(status_code=401, content="Invalid signature")
+        if not _verify_github_signature(secret, body, signature):
+            logger.warning(
+                "github_webhook_bad_signature",
+                org_id=str(org.id),
+                sig_header=signature[:20] + "..." if signature else "MISSING",
+                body_len=len(body),
+            )
             return Response(status_code=401, content="Invalid signature")
 
         # Auto-detect installation_id from webhook payload

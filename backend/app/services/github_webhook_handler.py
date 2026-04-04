@@ -16,7 +16,7 @@ from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.tracked_repository import TrackedRepository
 from app.models.user import User
 from app.repositories.pull_request import PullRequestRepository
-from app.schemas.github import GitHubPullRequest, GitHubReview
+from app.schemas.github import GitHubComment, GitHubPullRequest, GitHubReview
 from app.services.bud_timeline import record_event
 from app.services.pr_auto_transition import (
     check_all_prs_merged,
@@ -51,6 +51,14 @@ async def handle_github_event(
         review = GitHubReview.model_validate(payload["review"])
         pr_data = GitHubPullRequest.model_validate(payload["pull_request"])
         await _handle_review_submitted(org_id, pr_data, review, db)
+    elif event_type in ("issue_comment", "pull_request_review_comment"):
+        if action == "created":
+            comment = GitHubComment.model_validate(payload["comment"])
+            pr_number = payload.get("pull_request", {}).get("number") or payload.get(
+                "issue", {}
+            ).get("number")
+            if pr_number:
+                await _handle_pr_comment(org_id, repo, pr_number, comment, db)
 
 
 async def _handle_pr_opened(
@@ -87,7 +95,10 @@ async def _handle_pr_opened(
 
     if bud:
         await record_event(
-            db, org_id, bud.id, "pr_opened",
+            db,
+            org_id,
+            bud.id,
+            "pr_opened",
             detail={
                 "pr_number": pr_data.number,
                 "repo": repo.name,
@@ -103,14 +114,27 @@ async def _handle_pr_opened(
             from app.services.xp_service import award_xp
 
             await award_xp(
-                db, user_id=author_user_id, org_id=org_id,
-                xp_amount=15, source="pr_opened",
+                db,
+                user_id=author_user_id,
+                org_id=org_id,
+                xp_amount=15,
+                source="pr_opened",
                 source_ref=f"pr:{pr_data.id}",
             )
         except Exception:
             logger.warning("xp_award_failed_pr_opened", exc_info=True)
 
     await db.commit()
+
+    # Push update to frontend so BUD detail refreshes
+    if bud_id:
+        from app.services.event_bus import publish
+
+        publish(
+            f"bud:{bud_id}:activity",
+            {"event_type": "pr_opened", "pr_number": pr_data.number},
+        )
+
     logger.info(
         "pr_opened_tracked",
         pr_number=pr_data.number,
@@ -139,7 +163,10 @@ async def _handle_pr_closed(
 
     if pr.bud_id and is_merged:
         await record_event(
-            db, org_id, pr.bud_id, "pr_merged",
+            db,
+            org_id,
+            pr.bud_id,
+            "pr_merged",
             detail={
                 "pr_number": pr_data.number,
                 "repo": repo.name,
@@ -156,14 +183,27 @@ async def _handle_pr_closed(
                 from app.services.xp_service import award_xp
 
                 await award_xp(
-                    db, user_id=author_user_id, org_id=org_id,
-                    xp_amount=25, source="pr_merged",
+                    db,
+                    user_id=author_user_id,
+                    org_id=org_id,
+                    xp_amount=25,
+                    source="pr_merged",
                     source_ref=f"pr_merged:{pr_data.id}",
                 )
             except Exception:
                 logger.warning("xp_award_failed_pr_merged", exc_info=True)
 
     await db.commit()
+
+    if pr.bud_id:
+        from app.services.event_bus import publish
+
+        event = "pr_merged" if is_merged else "pr_closed"
+        publish(
+            f"bud:{pr.bud_id}:activity",
+            {"event_type": event, "pr_number": pr_data.number},
+        )
+
     logger.info(
         "pr_closed_tracked",
         pr_number=pr_data.number,
@@ -196,6 +236,7 @@ async def _handle_review_submitted(
     if not pr:
         return
 
+    # Update review status for approval/changes_requested
     state_map = {
         "APPROVED": PRReviewStatus.APPROVED,
         "CHANGES_REQUESTED": PRReviewStatus.CHANGES_REQUESTED,
@@ -204,21 +245,209 @@ async def _handle_review_submitted(
     if new_status:
         pr.review_status = new_status
 
-        # Award XP to the reviewer
-        reviewer_user_id = await _resolve_github_user(db, org_id, review.user.login)
+    # Fetch individual inline comments from GitHub API, store in dedicated column
+    if pr.bud_id:
+        try:
+            await _fetch_and_store_review_comments(
+                db,
+                org_id,
+                pr,
+                pr_data,
+                review,
+            )
+        except Exception:
+            logger.warning(
+                "fetch_review_comments_failed",
+                review_id=review.id,
+                pr_number=pr_data.number,
+            )
+
+    # Award XP to the reviewer
+    if new_status:
+        reviewer_user_id = await _resolve_github_user(
+            db,
+            org_id,
+            review.user.login,
+        )
         if reviewer_user_id:
             try:
                 from app.services.xp_service import award_xp
 
                 await award_xp(
-                    db, user_id=reviewer_user_id, org_id=org_id,
-                    xp_amount=20, source="review",
+                    db,
+                    user_id=reviewer_user_id,
+                    org_id=org_id,
+                    xp_amount=20,
+                    source="review",
                     source_ref=f"review:{pr_data.id}:{review.user.login}",
                 )
             except Exception:
                 logger.warning("xp_award_failed_review", exc_info=True)
 
-        await db.commit()
+    await db.commit()
+
+    if pr.bud_id:
+        from app.services.event_bus import publish
+
+        publish(
+            f"bud:{pr.bud_id}:activity",
+            {"event_type": "review_submitted", "state": review.state},
+        )
+
+
+async def _fetch_and_store_review_comments(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    pr: PullRequest,
+    pr_data: GitHubPullRequest,
+    review: GitHubReview,
+) -> None:
+    """Fetch inline comments for a review from GitHub API, store in BUD."""
+    from app.models.organization import Organization
+    from app.repositories.bud import BUDRepository
+    from app.services.github_client import GitHubClient
+    from app.services.github_pr_sync import get_installation_token
+
+    org = await db.get(Organization, org_id)
+    if not org:
+        return
+    token = await get_installation_token(org)
+    if not token:
+        return
+
+    client = GitHubClient(token)
+    gh_comments = await client.get_review_comments(
+        pr.github_repo_full_name,
+        pr_data.number,
+        review.id,
+    )
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id_for_update(pr.bud_id)
+    if not bud:
+        return
+
+    existing = list(bud.code_review_comments or [])
+    existing_ids = {c.get("github_comment_id") for c in existing if c.get("github_comment_id")}
+    repo_name = (pr.github_repo_full_name or "").split("/")[-1]
+
+    # Add review body as summary entry
+    if review.body and review.body.strip() and review.id not in existing_ids:
+        existing.append(
+            {
+                "github_comment_id": review.id,
+                "review_id": review.id,
+                "repo": repo_name,
+                "file": "",
+                "line": 0,
+                "body": review.body[:2000],
+                "author": review.user.login,
+                "html_url": review.html_url or "",
+                "created_at": "",
+                "is_summary": True,
+            }
+        )
+
+    # Add each inline comment
+    for c in gh_comments:
+        cid = c.get("id")
+        if cid in existing_ids:
+            continue
+        existing.append(
+            {
+                "github_comment_id": cid,
+                "review_id": review.id,
+                "repo": repo_name,
+                "file": c.get("path", ""),
+                "line": c.get("line") or c.get("original_line") or 0,
+                "body": (c.get("body") or "")[:2000],
+                "author": c.get("user", {}).get("login", ""),
+                "html_url": c.get("html_url", ""),
+                "created_at": c.get("created_at", ""),
+                "is_summary": False,
+            }
+        )
+
+    bud.code_review_comments = existing
+    await db.flush()
+
+    logger.info(
+        "review_comments_stored",
+        bud_id=str(pr.bud_id),
+        review_id=review.id,
+        inline_count=len(gh_comments),
+        total_stored=len(existing),
+    )
+
+
+async def _handle_pr_comment(
+    org_id: uuid.UUID,
+    repo: TrackedRepository,
+    pr_number: int,
+    comment: GitHubComment,
+    db: AsyncSession,
+) -> None:
+    """Store a PR comment (issue_comment or review_comment) in the BUD."""
+    stmt = (
+        select(PullRequest)
+        .where(
+            PullRequest.org_id == org_id,
+            PullRequest.github_pr_number == pr_number,
+            PullRequest.github_repo_full_name == repo.github_repo_full_name,
+        )
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    pr = result.scalar_one_or_none()
+    if not pr or not pr.bud_id:
+        return
+
+    from app.repositories.bud import BUDRepository
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id_for_update(pr.bud_id)
+    if not bud:
+        return
+
+    existing = list(bud.code_review_comments or [])
+    existing_ids = {c.get("github_comment_id") for c in existing if c.get("github_comment_id")}
+    if comment.id in existing_ids:
+        return
+
+    repo_name = (repo.github_repo_full_name or "").split("/")[-1]
+    existing.append(
+        {
+            "github_comment_id": comment.id,
+            "repo": repo_name,
+            "file": comment.path or "",
+            "line": comment.line or 0,
+            "body": comment.body[:2000],
+            "author": comment.user.login,
+            "html_url": comment.html_url,
+            "created_at": comment.created_at,
+            "is_summary": False,
+        }
+    )
+    bud.code_review_comments = existing
+    # Dedup guard above may leave FOR UPDATE lock — commit releases it
+    await db.commit()
+
+    logger.info(
+        "pr_comment_stored",
+        bud_id=str(pr.bud_id),
+        pr_number=pr_number,
+        author=comment.user.login,
+    )
+
+    try:
+        from app.services.event_bus import publish
+
+        publish(
+            f"bud:{pr.bud_id}:activity",
+            {"event_type": "pr_comment", "pr_number": pr_number},
+        )
+    except Exception:
+        logger.warning("event_bus_publish_failed", bud_id=str(pr.bud_id))
 
 
 async def _resolve_github_user(
@@ -229,11 +458,13 @@ async def _resolve_github_user(
     """Resolve a GitHub login to a user_id within the org."""
     if not github_login:
         return None
+    from app.models.user import OrgToUser
+
     stmt = (
         select(User.id)
-        .where(User.github_username == github_login, User.org_id == org_id)
+        .join(OrgToUser, OrgToUser.user_id == User.id)
+        .where(User.github_username == github_login, OrgToUser.org_id == org_id)
         .limit(1)
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
-

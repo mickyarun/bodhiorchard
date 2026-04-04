@@ -32,8 +32,8 @@ import { type ContainerWithAnims, findAnimTrack, LOCOMOTION_STATE_GRAPH } from '
 /** Model-space height (Y extent across all meshes). */
 const CHARACTER_NATIVE_HEIGHT = 9.0
 
-/** Desired world-space height (~75% of wall height for realistic proportion). */
-const CHARACTER_TARGET_HEIGHT = 1.0
+/** Desired world-space height — fits under house roof (WALL_HEIGHT=1.29). */
+const CHARACTER_TARGET_HEIGHT = 1.1
 
 /** Uniform scale applied to the render entity. */
 const CHARACTER_SCALE = CHARACTER_TARGET_HEIGHT / CHARACTER_NATIVE_HEIGHT

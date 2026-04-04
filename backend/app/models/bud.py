@@ -49,6 +49,9 @@ class BUDTimelineEventType(StrEnum):
     ALL_PRS_MERGED = "all_prs_merged"
     ESTIMATE_GENERATED = "estimate_generated"
     ESTIMATE_OVERRIDDEN = "estimate_overridden"
+    AC_VERIFICATION_PASSED = "ac_verification_passed"
+    AC_VERIFICATION_FAILED = "ac_verification_failed"
+    STATUS_OVERRIDE = "status_override"
 
 
 class BUDStatus(StrEnum):
@@ -93,6 +96,7 @@ class BUDDocument(BaseModel):
     qa_automation_cases: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     qa_manual_cases: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     qa_execution_plan_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_review_comments: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     embedding = mapped_column(Vector(384), nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
     impacted_repos: Mapped[list | None] = mapped_column(JSONB, nullable=True)

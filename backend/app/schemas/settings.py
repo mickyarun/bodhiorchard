@@ -100,6 +100,7 @@ class RepoInfo(BaseModel):
     develop_branch: str | None = Field(None, alias="developBranch")
     has_uncommitted_changes: bool = Field(False, alias="hasUncommittedChanges")
     repo_type: str | None = Field(None, alias="repoType")
+    github_repo: str | None = Field(None, alias="githubRepo")
     setup_status: str = Field("not_setup", alias="setupStatus")
     design_system_status: str = Field("none", alias="designSystemStatus")
 

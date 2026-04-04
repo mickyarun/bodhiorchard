@@ -26,11 +26,11 @@ import { type ContainerWithAnims, findAnimTrack, LOCOMOTION_STATE_GRAPH } from '
 const KAYKIT_NATIVE_HEIGHT = 2.4
 
 /**
- * Target height reduced to 0.75 (vs Blocky's 1.0) because KayKit characters
- * are rounder/bulkier with helmets/accessories that make them appear larger
- * at the same height. 0.75 gives visual parity with Blocky inside houses.
+ * Target height 0.95 units — fits inside houses (WALL_HEIGHT=1.29) while
+ * being visible in the garden. Larger than original 0.75 for better outdoor
+ * visibility without clipping through roofs.
  */
-const KAYKIT_TARGET_HEIGHT = 0.75
+const KAYKIT_TARGET_HEIGHT = 0.95
 const KAYKIT_SCALE = KAYKIT_TARGET_HEIGHT / KAYKIT_NATIVE_HEIGHT
 const KAYKIT_Y_OFFSET = 0.0
 const LABEL_HEIGHT = KAYKIT_TARGET_HEIGHT + 0.2

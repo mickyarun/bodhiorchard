@@ -15,6 +15,7 @@
  *   enterHouse(memberId)                       — enter a house interior
  *   exitHouse()                                — exit back to garden
  */
+import * as pc from 'playcanvas'
 import type {
   EngineData,
   EngineCallbacks,
@@ -28,10 +29,19 @@ import { MaterialFactory } from './rendering/MaterialFactory'
 import { SceneManager } from './core/SceneManager'
 import { TreePickerSystem } from './interaction/TreePickerSystem'
 import { InteriorManager } from './interior'
+import {
+  TakeoverController,
+  TakeoverCamera,
+  TakeoverUI,
+  ProximitySystem,
+  loadTakeoverAnimations,
+  restoreLocomotionAnimations,
+  type HouseDoor,
+} from './takeover'
 
 export { type EngineData, type EngineCallbacks } from './types'
 
-type SceneState = 'garden' | 'entering' | 'interior' | 'exiting'
+type SceneState = 'garden' | 'entering' | 'interior' | 'exiting' | 'takeover'
 
 export class GardenEngine {
   private app: Application | null = null
@@ -48,6 +58,14 @@ export class GardenEngine {
   private interior: InteriorManager | null = null
   private sceneState: SceneState = 'garden'
   private savedCameraState: CameraState | null = null
+  private _interiorMemberId: string | null = null
+
+  // Garden takeover (player controls their character)
+  private takeoverCtrl: TakeoverController | null = null
+  private takeoverCam: TakeoverCamera | null = null
+  private takeoverUI: TakeoverUI | null = null
+  private takeoverProximity: ProximitySystem | null = null
+  private takeoverUserId: string | null = null
 
   constructor() {
     this.events = new EventBus<EngineEvents>()
@@ -138,6 +156,50 @@ export class GardenEngine {
         // are invisible during interior mode and waste CPU cycles.
         break
 
+      case 'takeover':
+        // Garden stays alive — birds, clouds, agent robots, other characters
+        this.sceneManager?.update(dt)
+        if (this.takeoverCtrl && this.takeoverCam) {
+          this.takeoverCtrl.update(dt, this.takeoverCam.yaw)
+          this.takeoverCam.update(this.takeoverCtrl.getPosition())
+
+          // Proximity detection
+          if (this.takeoverProximity && this.takeoverUI && this.takeoverUserId) {
+            const chars = this.sceneManager?.characterSystemRef?.getCharacters() ?? []
+            this.takeoverProximity.update(
+              this.takeoverCtrl.getPosition(),
+              this.takeoverUserId,
+              chars,
+              this.takeoverUI,
+            )
+          }
+
+          // Inactivity warning / auto-exit
+          if (this.takeoverCtrl.showWarning) {
+            this.takeoverUI?.showWarning(this.takeoverCtrl.warningSecondsLeft)
+          } else {
+            this.takeoverUI?.hideWarning()
+          }
+
+          // Exit triggers — guard with 'exiting' to prevent re-entrant async calls
+          if (this.takeoverCtrl.isInactive) {
+            this.sceneState = 'exiting'
+            this.exitTakeover().catch(e => console.error('[GardenEngine] auto-exit failed:', e))
+          } else {
+            const door = this.takeoverCtrl.consumeTriggeredDoor()
+            if (door) {
+              this.sceneState = 'exiting'
+              this.exitTakeover()
+                .then(() => this.enterHouse(door.memberId))
+                .catch(e => console.error('[GardenEngine] door entry failed:', e))
+            } else if (this.input?.wasPressed(pc.KEY_ESCAPE)) {
+              this.sceneState = 'exiting'
+              this.exitTakeover().catch(e => console.error('[GardenEngine] ESC exit failed:', e))
+            }
+          }
+        }
+        break
+
       case 'entering':
       case 'exiting':
         // Transitions in progress — let camera complete any fly-to, skip input
@@ -155,6 +217,7 @@ export class GardenEngine {
     if (!house) return
 
     this.sceneState = 'entering'
+    this._interiorMemberId = memberId
     this.savedCameraState = this.camera.saveState()
 
     // Fly camera to house position
@@ -179,6 +242,7 @@ export class GardenEngine {
       // Recover from failed transition — don't leave sceneState stuck
       console.error('[GardenEngine] Failed to enter house:', err)
       this.sceneState = 'garden'
+      this._interiorMemberId = null
       this.camera.enable()
       const gardenRoot = this.sceneManager?.gardenRootEntity
       if (gardenRoot) gardenRoot.enabled = true
@@ -192,6 +256,9 @@ export class GardenEngine {
   /** Exit the house interior back to garden. */
   async exitHouse(): Promise<void> {
     if (this.sceneState !== 'interior' || !this.camera || !this.interior) return
+
+    // Remember which house we're exiting (for takeover spawn position)
+    const exitMemberId = this._interiorMemberId
 
     this.sceneState = 'exiting'
 
@@ -210,12 +277,181 @@ export class GardenEngine {
       this.sceneState = 'garden'
       this.events.emit('interior:exit')
     })
+
+    // After exiting house, enter takeover mode with character at the door
+    this._interiorMemberId = null
+    if (exitMemberId) {
+      // Spawn at the housing village gate (edge of zone, facing orchard center)
+      // This avoids getting trapped between tightly packed houses
+      const character = this.sceneManager?.characterSystemRef?.getCharacter(exitMemberId)
+      if (character) {
+        const zones = this.sceneManager!.worldLayout.getAllZones()
+        const housingZone = zones.find(z => z.name === 'housing')
+        if (housingZone) {
+          // Gate position: edge of housing zone, toward orchard (0,0)
+          const toCenter = Math.atan2(-housingZone.x, -housingZone.z)
+          const gateX = housingZone.x + Math.sin(toCenter) * (housingZone.radius + 2)
+          const gateZ = housingZone.z + Math.cos(toCenter) * (housingZone.radius + 2)
+          character.entity.setPosition(gateX, 0, gateZ)
+          character.entity.setEulerAngles(0, toCenter * (180 / Math.PI), 0)
+        }
+        character.entity.anim?.setBoolean('sitting', false)
+        character.entity.anim?.setInteger('speed', 0)
+      }
+      await this.takeoverCharacter(exitMemberId)
+    }
   }
 
   /** Helper — wait for a duration (used to let camera fly-to complete). */
   private waitForTransition(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
   }
+
+  // ─── Garden takeover ─────────────────────────────
+
+  /**
+   * Take control of a character in the garden.
+   * Camera follows the character, WASD drives movement.
+   * @param userId - The member's user_id (must match a character in the scene)
+   */
+  async takeoverCharacter(userId: string): Promise<void> {
+    if (this.sceneState !== 'garden' || !this.camera || !this.input || !this.sceneManager || !this.app) return
+
+    const charSystem = this.sceneManager.characterSystemRef
+    if (!charSystem) return
+
+    const character = charSystem.getCharacter(userId)
+    if (!character) {
+      console.warn('[GardenEngine] takeoverCharacter: character not found for', userId)
+      return
+    }
+
+    // If character is sitting at their desk, go straight to house interior mode
+    const isSitting = character.entity.anim?.getBoolean('sitting') ?? false
+    if (isSitting && this.sceneManager.memberHouseMap.has(userId)) {
+      console.debug('[GardenEngine] Character sitting at desk → entering interior mode')
+      this.enterHouse(userId)
+      return
+    }
+
+    this.takeoverUserId = userId
+
+    // Save camera state for restoration
+    this.savedCameraState = this.camera.saveState()
+    this.camera.disable()
+
+    // Block NPC AI for this character
+    charSystem.setTakeoverUser(userId)
+
+    // Load extended animations (Sprint, Jump)
+    try {
+      await loadTakeoverAnimations(character.entity, this.sceneManager.assetLoader)
+    } catch (err) {
+      console.warn('[GardenEngine] Failed to load takeover animations:', err)
+      // Continue anyway — walk/idle will still work from the extended state graph
+    }
+
+    // Initialize takeover systems
+    this.takeoverCtrl = new TakeoverController(this.input)
+    this.takeoverCtrl.setWorldRadius(this.sceneManager.worldLayout.getWorldRadius() + 6)
+
+    // Build per-house collision zones (small circles) instead of the huge
+    // village-wide exclusion zone which blocks walking between houses.
+    // Also build per-building zones from layout exclusions, but skip
+    // the housing zone (its radius covers the entire village).
+    const houseCollisions: { x: number; z: number; radius: number }[] = []
+    const houseDoors: HouseDoor[] = []
+    const housingZone = this.sceneManager.worldLayout.getAllZones().find(z => z.name === 'housing')
+    const housingCenter = housingZone ? { x: housingZone.x, z: housingZone.z } : null
+
+    for (const [memberId, house] of this.sceneManager.memberHouseMap) {
+      const pos = house.entity.getPosition()
+      // Each house is ~4×4 units, radius 2.5 covers footprint + small buffer
+      houseCollisions.push({ x: pos.x, z: pos.z, radius: 2.5 })
+
+      // Door trigger for ALL houses — walk up to any door to enter interior
+      const toCenter = Math.atan2(-pos.x, -pos.z)
+      houseDoors.push({
+        memberId,
+        name: house.memberName,
+        x: pos.x + Math.sin(toCenter) * 3.0,
+        z: pos.z + Math.cos(toCenter) * 3.0,
+      })
+    }
+
+    // Build AABB collision boxes from house circle approximations
+    // (will be replaced by Rapier physics after housetest prototype)
+    const collisionBoxes = houseCollisions.map(h => ({
+      minX: h.x - h.radius, maxX: h.x + h.radius,
+      minZ: h.z - h.radius, maxZ: h.z + h.radius,
+    }))
+    this.takeoverCtrl.setCollisionBoxes(collisionBoxes)
+    this.takeoverCtrl.setHouseDoors(houseDoors)
+    this.takeoverCtrl.enter(character.entity)
+
+    this.takeoverCam = new TakeoverCamera()
+    this.takeoverCam.enable(this.app.camera, this.canvas!)
+
+    this.takeoverUI = new TakeoverUI()
+    this.takeoverUI.init(this.canvas!.parentElement!)
+    this.takeoverUI.onExitClick = () => this.exitTakeover()
+    this.takeoverUI.show()
+
+    this.takeoverProximity = new ProximitySystem()
+
+    this.sceneState = 'takeover'
+    console.debug('[GardenEngine] Entered takeover mode for', userId)
+  }
+
+  /** Exit takeover mode — restore camera and resume NPC behavior. */
+  async exitTakeover(): Promise<void> {
+    if (this.sceneState !== 'takeover') return
+
+    const character = this.takeoverUserId
+      ? this.sceneManager?.characterSystemRef?.getCharacter(this.takeoverUserId)
+      : null
+
+    // Exit controller (restores entity position/anim)
+    this.takeoverCtrl?.exit()
+    this.takeoverCtrl = null
+
+    // Restore locomotion animations
+    if (character && this.sceneManager) {
+      try {
+        await restoreLocomotionAnimations(character.entity, this.sceneManager.assetLoader)
+      } catch (err) {
+        console.warn('[GardenEngine] Failed to restore locomotion animations:', err)
+      }
+    }
+
+    // Disable takeover camera and UI
+    this.takeoverCam?.disable()
+    this.takeoverCam = null
+    this.takeoverUI?.hide()
+    this.takeoverUI?.destroy()
+    this.takeoverUI = null
+    this.takeoverProximity?.reset()
+    this.takeoverProximity = null
+
+    // Resume NPC AI
+    this.sceneManager?.characterSystemRef?.setTakeoverUser(null)
+
+    // Restore garden camera
+    if (this.camera) {
+      this.camera.enable()
+      if (this.savedCameraState) {
+        this.camera.restoreState(this.savedCameraState)
+        this.savedCameraState = null
+      }
+    }
+
+    this.sceneState = 'garden'
+    this.takeoverUserId = null
+    console.debug('[GardenEngine] Exited takeover mode')
+  }
+
+  /** Whether the engine is currently in takeover mode. */
+  get isTakeover(): boolean { return this.sceneState === 'takeover' }
 
   /** Handle a real-time agent activity event from WebSocket. */
   handleAgentActivity(activity: import('./types').EngineAgentActivity): void {
@@ -224,7 +460,13 @@ export class GardenEngine {
 
   /** Handle a real-time dev activity event from WebSocket. */
   handleDevActivity(activity: import('./types').EngineDevActivity): void {
-    this.sceneManager?.characterSystemRef?.handleDevActivity(activity)
+    console.debug('[GardenEngine] handleDevActivity',
+      activity.event_type, activity.user_id, activity.repo_name)
+    if (!this.sceneManager?.characterSystemRef) {
+      console.debug('[GardenEngine] characterSystemRef not available (scene not built yet?)')
+      return
+    }
+    this.sceneManager.characterSystemRef.handleDevActivity(activity)
   }
 
   /** Toggle relationship arc visibility. Returns new visible state. */
@@ -258,6 +500,16 @@ export class GardenEngine {
   }
 
   destroy(): void {
+    // Clean up takeover if active
+    this.takeoverCtrl?.exit()
+    this.takeoverCtrl = null
+    this.takeoverCam?.destroy()
+    this.takeoverCam = null
+    this.takeoverUI?.destroy()
+    this.takeoverUI = null
+    this.takeoverProximity = null
+    this.takeoverUserId = null
+
     this.interior?.destroy()
     this.interior = null
     this.picker = null

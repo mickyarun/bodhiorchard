@@ -49,4 +49,18 @@ class GitHubReview(BaseModel):
 
     id: int
     state: str  # APPROVED, CHANGES_REQUESTED, COMMENTED
+    body: str | None = None
+    html_url: str | None = None
     user: GitHubUser
+
+
+class GitHubComment(BaseModel):
+    """Comment from issue_comment or pull_request_review_comment webhook."""
+
+    id: int
+    body: str
+    html_url: str
+    user: GitHubUser
+    created_at: str
+    path: str | None = None  # Only on review comments (file path)
+    line: int | None = None  # Only on review comments
