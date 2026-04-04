@@ -176,19 +176,15 @@ async def handle_code_review_result(
             else:
                 logger.info("ac_blocked_testing_after_review", bud_id=str(bud_id))
 
-        # Re-estimate with code review context
-        try:
-            from app.services.bud_estimation import estimate_bud_dates
-
-            await estimate_bud_dates(db, org_id, bud, trigger="code_review_completed")
-        except Exception:
-            logger.warning("estimation_failed_after_code_review", bud_id=str(bud_id))
         await db.flush()
 
+    # Return immediately so the agent completion event fires fast.
+    # Estimation runs after the handler returns (deferred in bud_agent_handler).
     return {
         "section": "test_plan_md",
         "comment_count": comment_count,
         "auto_transitioned": qa_push_requested and comment_count == 0,
+        "_deferred_estimation": True,
     }
 
 

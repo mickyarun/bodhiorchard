@@ -18,6 +18,8 @@
     "marked": "^17.0.5",
     "pinia": "^2.1.7",
     "playcanvas": "^2.17.2",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0",
     "vue": "^3.4.0",
     "vue-router": "^4.3.0",
     "vuetify": "^3.5.0",

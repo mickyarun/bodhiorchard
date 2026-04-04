@@ -102,7 +102,8 @@ RESULT_HANDLERS: dict[str, ResultHandler] = {
 
 
 async def _fail_designs_for_bud(
-    db: Any, bud_id: uuid_mod.UUID,
+    db: Any,
+    bud_id: uuid_mod.UUID,
 ) -> None:
     """Mark all 'generating' design rows for a BUD as 'failed'."""
     from sqlalchemy import update as sql_update
@@ -237,10 +238,14 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             # (the main db session commits only after run_claude_code completes,
             #  which can take 30-120 seconds — the row must be visible NOW)
             await log_agent_activity(
-                None, org_id=org_id, event_type="skill_invoked",
+                None,
+                org_id=org_id,
+                event_type="skill_invoked",
                 skill_slug=_skill_slug,
                 message=f"Skill '{_skill_slug}' invoked for {_task_type}",
-                bud_id=bud_id, skill_id=task.skill_id, task_id=task_id,
+                bud_id=bud_id,
+                skill_id=task.skill_id,
+                task_id=task_id,
                 repo_id=_repo_id,
                 bud_number=bud.bud_number if bud else None,
                 bud_title=bud.title if bud else None,
@@ -260,9 +265,14 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             if not result.success:
                 error_msg = result.error or "Agent execution failed"
                 await log_agent_activity(
-                    db, org_id=org_id, event_type="skill_failed",
-                    skill_slug=_skill_slug, message=error_msg,
-                    bud_id=bud_id, skill_id=task.skill_id, task_id=task_id,
+                    db,
+                    org_id=org_id,
+                    event_type="skill_failed",
+                    skill_slug=_skill_slug,
+                    message=error_msg,
+                    bud_id=bud_id,
+                    skill_id=task.skill_id,
+                    task_id=task_id,
                     repo_id=_repo_id,
                     bud_number=bud.bud_number if bud else None,
                     bud_title=bud.title if bud else None,
@@ -282,11 +292,16 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 result_summary = await handler(bud_id, org_id, result.output or "", task, db)
 
             await log_agent_activity(
-                db, org_id=org_id, event_type="skill_completed",
+                db,
+                org_id=org_id,
+                event_type="skill_completed",
                 skill_slug=_skill_slug,
                 message=f"Skill '{_skill_slug}' completed for {_task_type}",
-                bud_id=bud_id, skill_id=task.skill_id, task_id=task_id,
-                repo_id=_repo_id, metadata_=result_summary,
+                bud_id=bud_id,
+                skill_id=task.skill_id,
+                task_id=task_id,
+                repo_id=_repo_id,
+                metadata_=result_summary,
                 bud_number=bud.bud_number if bud else None,
                 bud_title=bud.title if bud else None,
             )
@@ -307,9 +322,13 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                     err_task.error_message = str(exc)[:500]
                 await err_db.commit()
             await log_agent_activity(
-                None, org_id=org_id, event_type="skill_failed",
-                skill_slug=_skill_slug, message=str(exc)[:2000],
-                bud_id=bud_id, task_id=task_id,
+                None,
+                org_id=org_id,
+                event_type="skill_failed",
+                skill_slug=_skill_slug,
+                message=str(exc)[:2000],
+                bud_id=bud_id,
+                task_id=task_id,
             )
             update_job(job_id, state=JobState.FAILED, error=str(exc)[:200])
             logger.exception("bud_agent_job_failed", task_id=str(task_id))
@@ -361,3 +380,25 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             "created_at": "",
         },
     )
+
+    # Deferred estimation — runs AFTER completion event is published to frontend.
+    # This prevents estimation LLM calls from blocking the UI refresh.
+    if result_summary and result_summary.get("_deferred_estimation"):
+        try:
+            from app.services.bud_estimation import estimate_bud_dates
+
+            async with AsyncSessionLocal() as est_db:
+                from app.repositories.bud import BUDRepository
+
+                bud_repo = BUDRepository(est_db, org_id=org_id)
+                bud = await bud_repo.get_by_id(bud_id)
+                if bud:
+                    await estimate_bud_dates(
+                        est_db,
+                        org_id,
+                        bud,
+                        trigger="code_review_completed",
+                    )
+                    await est_db.commit()
+        except Exception:
+            logger.warning("deferred_estimation_failed", bud_id=str(bud_id))

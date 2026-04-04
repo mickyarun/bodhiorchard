@@ -55,9 +55,22 @@ class GitHubClient:
                 logger.error(
                     "github_review_failed",
                     status=resp.status_code,
+                    response_body=resp.text[:500],
                     owner_repo=owner_repo,
                     pr_number=pr_number,
                 )
+                # Retry without inline comments (422 often means stale line refs)
+                if resp.status_code == 422 and comments:
+                    try:
+                        fallback = await client.post(
+                            url,
+                            json={"body": body, "event": "COMMENT"},
+                            headers=self._headers,
+                        )
+                        fallback.raise_for_status()
+                        return fallback.json()
+                    except HTTPStatusError:
+                        pass
                 return None
 
     async def get_review_comments(
