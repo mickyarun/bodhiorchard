@@ -172,8 +172,10 @@ export class HouseTestEngine {
       // Check door sensor events (read AFTER step so sensors reflect current position)
       const events = this.physics.consumeEvents()
       for (const evt of events) {
+        console.debug('[HouseTest] Sensor event:', evt.type, evt.sensorId)
         if (evt.type === 'enter' && evt.sensorId.startsWith('door_')) {
           const houseId = evt.sensorId.replace('door_', '')
+          console.log('[HouseTest] Entering house:', houseId)
           this.enterHouse(houseId)
           break
         }

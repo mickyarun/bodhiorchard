@@ -93,7 +93,10 @@ export class PhysicsWorld {
       R.RigidBodyDesc.fixed().setTranslation(x, y, z),
     )
     const collider = this.world.createCollider(
-      R.ColliderDesc.cuboid(halfW, halfH, halfD).setSensor(true),
+      R.ColliderDesc.cuboid(halfW, halfH, halfD)
+        .setSensor(true)
+        .setActiveCollisionTypes(R.ActiveCollisionTypes.DEFAULT | R.ActiveCollisionTypes.KINEMATIC_FIXED)
+        .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS),
       body,
     )
     this.sensors.push({ id, handle: collider.handle })
@@ -117,7 +120,10 @@ export class PhysicsWorld {
       R.RigidBodyDesc.kinematicPositionBased().setTranslation(x, yCenter, z),
     )
     this.playerCollider = this.world.createCollider(
-      R.ColliderDesc.capsule(halfHeight, radius),
+      R.ColliderDesc.capsule(halfHeight, radius)
+        // Enable collision detection between kinematic body and fixed sensors
+        .setActiveCollisionTypes(R.ActiveCollisionTypes.DEFAULT | R.ActiveCollisionTypes.KINEMATIC_FIXED)
+        .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS),
       this.playerBody,
     )
   }
@@ -125,12 +131,35 @@ export class PhysicsWorld {
   /** Move player via character controller (handles wall sliding). */
   movePlayer(dx: number, dz: number): void {
     if (!this.playerCollider || !this.playerBody) return
-    this.cc.computeColliderMovement(this.playerCollider, { x: dx, y: 0, z: dz })
+    this.cc.computeColliderMovement(
+      this.playerCollider,
+      { x: dx, y: 0, z: dz },
+      undefined, // filterFlags
+      undefined, // filterGroups
+      undefined, // filterExcludeCollider
+      undefined, // filterExcludeRigidBody
+      (collider) => !collider.isSensor(), // exclude sensors from collision
+    )
     const m = this.cc.computedMovement()
     const pos = this.playerBody.translation()
     this.playerBody.setNextKinematicTranslation({
       x: pos.x + m.x, y: pos.y, z: pos.z + m.z,
     })
+
+    // Debug: log when movement is blocked
+    if ((Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) &&
+        Math.abs(m.x) < 0.0001 && Math.abs(m.z) < 0.0001) {
+      console.debug('[PhysicsWorld] Movement BLOCKED at', pos.x.toFixed(2), pos.z.toFixed(2),
+        'desired:', dx.toFixed(4), dz.toFixed(4))
+      // Log what we're colliding with
+      for (let i = 0; i < this.cc.numComputedCollisions(); i++) {
+        const c = this.cc.computedCollision(i)
+        if (c) {
+          console.debug('  collision with collider handle:', c.collider?.handle,
+            'sensor:', c.collider?.isSensor())
+        }
+      }
+    }
   }
 
   getPlayerPosition(): { x: number; y: number; z: number } {
@@ -176,16 +205,16 @@ export class PhysicsWorld {
 
     const nowActive = new Set<string>()
 
-    // Rapier intersectionsWith: iterates all colliders overlapping the given one
-    this.world.intersectionsWith(this.playerCollider, (otherCollider) => {
+    // Rapier intersectionPairsWith: iterates all colliders overlapping the given one
+    this.world.intersectionPairsWith(this.playerCollider, (otherCollider) => {
       const id = this.handleToId.get(otherCollider.handle)
       if (id) nowActive.add(id)
-      return true  // continue iterating
     })
 
     // Diff with previous frame → enter/exit events
     for (const id of nowActive) {
       if (!this.activeSensors.has(id)) {
+        console.debug('[PhysicsWorld] Sensor ENTER:', id)
         this.pendingEvents.push({ type: 'enter', sensorId: id })
       }
     }

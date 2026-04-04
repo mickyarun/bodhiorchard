@@ -32,7 +32,10 @@ const CHAR_SCALE = CHAR_TARGET_HEIGHT / CHAR_NATIVE_HEIGHT
 const CHAR_Y_OFFSET = 1.0 * CHAR_SCALE
 
 // ─── Movement constants ──────────────────────────────────────
-const MOVE_SPEED = 3.0  // world units per second
+const MOVE_SPEED   = 3.0  // world units per second
+const SPRINT_SPEED = 6.0  // 2× walk
+const JUMP_HEIGHT  = 0.5  // peak Y
+const JUMP_DURATION = 0.45 // seconds
 
 // ─── Animation state graph ──────────────────────────────────
 // Extended from LOCOMOTION_STATE_GRAPH (AnimUtils.ts) with Sleep state for house interiors.
@@ -94,6 +97,7 @@ export class PlayerController {
   private physics: PhysicsWorld | null = null
   private _sitting  = false
   private _sleeping = false
+  private _jumpProgress = -1  // -1 = not jumping
 
   // Scratch Vec3s — avoids allocation in update loop
   private readonly _dir  = new pc.Vec3()
@@ -241,31 +245,55 @@ export class PlayerController {
       }
     }
 
+    const sprinting = this.input.isPressed(pc.KEY_SHIFT)
+    const jumpPressed = this.input.wasPressed(pc.KEY_SPACE)
+
+    // Jump trigger (only when not already jumping or sitting)
+    if (jumpPressed && this._jumpProgress < 0 && !this._sitting && !this._sleeping) {
+      this._jumpProgress = 0
+    }
+
+    // Jump arc (sine wave)
+    if (this._jumpProgress >= 0) {
+      this._jumpProgress += dt / JUMP_DURATION
+      if (this._jumpProgress >= 1) {
+        this._jumpProgress = -1
+        const p = this.entity.getPosition()
+        this.entity.setPosition(p.x, 0, p.z)
+      } else {
+        const jumpY = Math.sin(this._jumpProgress * Math.PI) * JUMP_HEIGHT
+        const p = this.entity.getPosition()
+        this.entity.setPosition(p.x, jumpY, p.z)
+      }
+    }
+
     const moving = dir.length() > 0
     if (moving) {
       dir.normalize()
 
       // Rotate camera-space input into world space using orbit yaw.
-      // W always moves in the camera's forward direction regardless of orbit angle.
       const sinA = Math.sin(camYaw * pc.math.DEG_TO_RAD)
       const cosA = Math.cos(camYaw * pc.math.DEG_TO_RAD)
       const wx = dir.z * sinA + dir.x * cosA
       const wz = dir.z * cosA - dir.x * sinA
       dir.set(wx, 0, wz)
 
-      const dx = dir.x * MOVE_SPEED * dt
-      const dz = dir.z * MOVE_SPEED * dt
+      const speed = sprinting ? SPRINT_SPEED : MOVE_SPEED
+      const dx = dir.x * speed * dt
+      const dz = dir.z * speed * dt
 
       if (this.physics) {
-        // Rapier mode: character controller handles wall sliding automatically
+        // Rapier mode: character controller handles wall sliding
         this.physics.movePlayer(dx, dz)
         const p = this.physics.getPlayerPosition()
-        this.entity.setPosition(p.x, 0, p.z)
+        const y = this._jumpProgress >= 0 ? this.entity.getPosition().y : 0
+        this.entity.setPosition(p.x, y, p.z)
       } else {
         // Manual AABB mode (interior with furniture collision)
         const pos = this.entity.getPosition()
         const next = tryMove(pos, dx, dz, this.collisionBoxes, this._next)
-        this.entity.setPosition(next.x, 0, next.z)
+        const y = this._jumpProgress >= 0 ? pos.y : 0
+        this.entity.setPosition(next.x, y, next.z)
       }
 
       // Face world movement direction (instant snap).
@@ -275,6 +303,7 @@ export class PlayerController {
       this.entity.setEulerAngles(0, targetYaw, 0)
     }
 
+    // Animation: 0=idle, 1=walk (sprint uses walk anim at faster movement)
     this.entity.anim!.setInteger('speed', moving ? 1 : 0)
   }
 
