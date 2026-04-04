@@ -54,7 +54,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     await websocket.accept()
     user_id = payload.get("sub", "unknown")
-    logger.info("ws_connected", user_id=user_id)
+    logger.debug("ws_connected", user_id=user_id)
 
     # ── State per connection ──────────────────────────────
     # topic → (event_bus queue, reader task)
@@ -105,7 +105,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             name=f"ws-reader-{topic}",
                         )
                         subscriptions[topic] = (bus_queue, task)
-                        logger.debug("ws_subscribed", user_id=user_id, topic=topic)
+                        # Subscription logged at trace level only (too verbose for debug)
 
                 elif action == "unsubscribe" and topic:
                     sub = subscriptions.pop(topic, None)

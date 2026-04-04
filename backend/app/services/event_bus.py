@@ -23,7 +23,7 @@ def subscribe(topic: str) -> asyncio.Queue[dict]:
     """
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=settings.ws.max_subscribe_queue)
     _subscribers.setdefault(topic, set()).add(queue)
-    logger.debug("event_bus_subscribe", topic=topic, subscriber_count=len(_subscribers[topic]))
+    # Subscribe logging removed — too noisy at debug level (fires on every page load)
     return queue
 
 
