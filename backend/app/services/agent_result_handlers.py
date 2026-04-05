@@ -202,6 +202,17 @@ async def handle_testing_result(
         except Exception:
             logger.warning("testing_output_parse_failed", bud_id=str(bud_id))
 
+    auto_empty = not parsed_data["automation_test_cases"]
+    manual_empty = not parsed_data["manual_test_cases"]
+    if output and auto_empty and manual_empty:
+        logger.warning(
+            "testing_output_zero_cases",
+            bud_id=str(bud_id),
+            task_id=str(task.id),
+            output_length=len(output),
+            output_preview=output[:500],
+        )
+
     for case in parsed_data["manual_test_cases"]:
         if "result" not in case:
             case["result"] = "pending"
