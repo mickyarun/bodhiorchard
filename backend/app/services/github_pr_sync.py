@@ -5,6 +5,7 @@ comments and posts them via the GitHub API.
 """
 
 import uuid
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -105,7 +106,14 @@ async def _store_agent_comments_in_bud(
     comments: list[dict],
     repo_name: str,
 ) -> None:
-    """Store agent-generated review comments directly in the BUD."""
+    """Store agent-generated review comments directly in the BUD.
+
+    Applies a fuzzy-signature dedup backstop against surviving non-agent
+    comments (human GitHub reviews and manual frontend additions) so the
+    Code Review Agent doesn't re-flag issues a human already surfaced.
+    Old agent-sourced comments are expected to have already been cleared
+    by `handle_code_review_result` before this function is called.
+    """
     from app.repositories.bud import BUDRepository
 
     bud_repo = BUDRepository(db, org_id=org_id)
@@ -114,22 +122,58 @@ async def _store_agent_comments_in_bud(
         return
 
     existing = list(bud.code_review_comments or [])
+    existing_sigs = {_comment_signature(c) for c in existing}
+    now_iso = datetime.now(UTC).isoformat()
+
+    added = 0
+    skipped = 0
     for c in comments:
-        existing.append(
-            {
-                "repo": repo_name,
-                "file": c.get("file", ""),
-                "line": c.get("line", 0),
-                "body": c.get("comment", ""),
-                "author": "bodhigrove-agent",
-                "html_url": "",
-                "created_at": "",
-                "is_summary": False,
-                "source": "agent",
-            }
-        )
+        new_entry = {
+            "repo": repo_name,
+            "file": c.get("file", ""),
+            "line": c.get("line", 0),
+            "body": c.get("comment", ""),
+            "author": "bodhigrove-agent",
+            "html_url": "",
+            "created_at": now_iso,
+            "is_summary": False,
+            "source": "agent",
+        }
+        sig = _comment_signature(new_entry)
+        if sig in existing_sigs:
+            skipped += 1
+            continue
+        existing.append(new_entry)
+        existing_sigs.add(sig)
+        added += 1
+
     bud.code_review_comments = existing
     await db.flush()
+
+    if skipped:
+        logger.info(
+            "agent_comments_dedup_skipped",
+            bud_id=str(bud_id),
+            repo=repo_name,
+            added=added,
+            skipped=skipped,
+        )
+
+
+def _comment_signature(c: dict) -> str:
+    """Stable signature for dedup on (repo, file, body prefix).
+
+    Lowercases and trims each field, then takes the first 120 chars of the
+    body text. Handles the common case where two comments phrase the same
+    issue slightly differently but agree on the location and lead sentence.
+    Body falls back to the `comment` field for legacy entries that stored
+    the text under that key.
+    """
+    repo = (c.get("repo") or "").strip().lower()
+    file = (c.get("file") or "").strip().lower()
+    body_raw = c.get("body") or c.get("comment") or ""
+    body = body_raw.strip().lower()[:120]
+    return f"{repo}|{file}|{body}"
 
 
 def _map_to_github_comments(comments: list[dict]) -> list[dict]:

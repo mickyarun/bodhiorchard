@@ -127,6 +127,40 @@ async def handle_code_review_result(
         meta = dict(bud.metadata_ or {})
         qa_push_requested = meta.pop("qa_push_requested", False)
         new_comments = review_data.get("code_review_comments", [])
+
+        # Re-review semantics: drop previously stored agent-sourced comments
+        # before storing this run's output. Keeps human GitHub review comments
+        # (source: "github") and manual frontend additions (source: "manual")
+        # intact, so we never wipe human-authored feedback. The parallel
+        # resolutions array is remapped to preserve the user's resolution
+        # state on surviving human/manual comments.
+        existing_comments = list(bud.code_review_comments or [])
+        existing_resolutions = meta.get("code_review_resolutions") or []
+        kept_comments: list[dict] = []
+        kept_resolutions: list[dict] = []
+        for idx, c in enumerate(existing_comments):
+            if c.get("source") == "agent":
+                continue
+            kept_comments.append(c)
+            if idx < len(existing_resolutions):
+                kept_resolutions.append(existing_resolutions[idx])
+            else:
+                kept_resolutions.append({"done": None, "comment": ""})
+
+        dropped = len(existing_comments) - len(kept_comments)
+        if dropped:
+            bud.code_review_comments = kept_comments
+            if kept_resolutions:
+                meta["code_review_resolutions"] = kept_resolutions
+            else:
+                meta.pop("code_review_resolutions", None)
+            logger.info(
+                "code_review_old_agent_comments_cleared",
+                bud_id=str(bud_id),
+                dropped=dropped,
+                kept=len(kept_comments),
+            )
+
         # Comments stored via GitHub webhook (issue_comment/review_comment),
         # not directly here. We only sync outbound to GitHub PR.
         if qa_push_requested:

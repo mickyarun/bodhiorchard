@@ -134,18 +134,35 @@ async def build_code_review_prompt(
 
     repo_path_map = {r.get("repo_id", ""): r.get("repo_path", "") for r in confirmed_repos}
     design_refs = _build_design_refs(bud, repo_path_map)
+    previous_review = _build_previous_review_section(bud)
 
     prompt = (
         f"Code review for {bud_ref}: {bud.title}.\n\n"
         f"## Repos\n\n{repo_list}\n\n"
+        f"{previous_review}"
         f"{design_refs}"
+        "## Scope\n\n"
+        "**Review only what this diff changes. Do NOT flag pre-existing "
+        "code that is unchanged.**\n\n"
+        "- Only comment on lines added or modified in the diff.\n"
+        "- You may read unchanged code to UNDERSTAND context, but do not "
+        "  flag issues you find in unchanged lines.\n"
+        "- Exception: if `gitnexus_impact` reveals d=1 callers/dependents "
+        "  that the diff failed to update, you MUST flag those even though "
+        "  the caller files are unchanged — the diff is incomplete.\n"
+        "- Exception: if the diff adds a new call to a pre-existing buggy "
+        "  function, flag the call site (not the function) only if the bug "
+        "  materially affects the new usage.\n"
+        "- Do NOT re-review the entire file. Do NOT propose refactors of "
+        "  untouched code. Do NOT critique style of lines the author "
+        "  didn't write.\n\n"
         "## Steps\n\n"
         "1. `get_bud_context` → fetch tech spec + PRD ACs\n"
-        "2. `git diff` in each repo\n"
-        "3. Read modified files for context\n"
+        "2. `git diff` in each repo — this is your scope of review\n"
+        "3. Read modified files ONLY as much as needed to understand the diff\n"
         "4. `gitnexus_impact` on key symbols — flag d=1 dependents not updated\n"
         "5. Verify each PRD AC has implementation in the diff\n\n"
-        "## Quality Checklist\n\n"
+        "## Quality Checklist (apply to changed lines only)\n\n"
         "| Check | Rule |\n"
         "|-------|------|\n"
         "| Bugs | Logic errors, null refs, race conditions |\n"
@@ -171,6 +188,86 @@ async def build_code_review_prompt(
     )
 
     return prompt, working_dir
+
+
+def _build_previous_review_section(bud: BUDDocument) -> str:
+    """Format prior code review comments + resolutions as re-review context.
+
+    Returns an empty string on a first-ever review. Otherwise produces a
+    markdown section listing each previously flagged issue with its
+    user-supplied resolution state (RESOLVED, DEFERRED, UNREVIEWED) and
+    explicit rules telling the LLM how to handle each case.
+
+    The intent is to stop the Code Review Agent from endlessly re-discovering
+    the same issues on every re-review run. Resolution state comes from
+    `bud.metadata_.code_review_resolutions`, an array indexed parallel with
+    `bud.code_review_comments` (written by the frontend Code Review tab).
+    """
+    existing = bud.code_review_comments or []
+    if not existing:
+        return ""
+
+    meta = bud.metadata_ or {}
+    resolutions = meta.get("code_review_resolutions") or []
+
+    rows: list[str] = []
+    for idx, c in enumerate(existing):
+        res = resolutions[idx] if idx < len(resolutions) else None
+        done = res.get("done") if isinstance(res, dict) else None
+        res_comment = (res.get("comment") or "") if isinstance(res, dict) else ""
+        res_comment = res_comment.strip()
+
+        if done is True:
+            status = "RESOLVED"
+        elif done is False and res_comment:
+            # Escape pipes + newlines so the deferral reason can't break the
+            # surrounding markdown table cell.
+            deferral = res_comment.replace("|", "/").replace("\n", " ")[:80]
+            status = f'DEFERRED ("{deferral}")'
+        else:
+            status = "UNREVIEWED"
+
+        repo = c.get("repo", "-")
+        file_loc = c.get("file", "")
+        line = c.get("line", 0)
+        if file_loc and line:
+            loc = f"{file_loc}:{line}"
+        elif file_loc:
+            loc = file_loc
+        else:
+            loc = "-"
+        author = c.get("author", "unknown")
+
+        body = (c.get("body") or c.get("comment") or "").strip()
+        # Collapse to a single-line summary that survives markdown table rendering
+        summary = body.replace("\n", " ").replace("|", "/")
+        if len(summary) > 140:
+            summary = summary[:140] + "..."
+
+        rows.append(
+            f"| {idx + 1} | {status} | {author} | {repo} | {loc} | {summary} |"
+        )
+
+    return (
+        "## Previous Review\n\n"
+        "This is a RE-REVIEW. The comments below were flagged in a prior "
+        "review. Each has a user-supplied resolution status. Your job is "
+        "NOT to re-flag everything from scratch.\n\n"
+        "**Rules:**\n"
+        "- If status is `RESOLVED`, verify the fix against the current diff. "
+        "If the fix is present, stay silent on that issue. If the claimed fix "
+        "is NOT in the diff, re-flag it with a note that the claimed fix is "
+        "missing.\n"
+        "- If status is `DEFERRED`, respect the user's deferral reason. Do "
+        "NOT re-flag even if the issue is still present.\n"
+        "- If status is `UNREVIEWED`, evaluate against the current diff — "
+        "re-flag only if still an issue.\n"
+        "- You MAY raise NEW issues not listed below.\n\n"
+        "| # | Status | Author | Repo | Location | Summary |\n"
+        "|---|--------|--------|------|----------|---------|\n"
+        + "\n".join(rows)
+        + "\n\n"
+    )
 
 
 async def build_testing_prompt(
