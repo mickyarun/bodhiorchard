@@ -266,3 +266,31 @@ class TimelineEventRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CodeReviewRepoStatus(BaseModel):
+    """Per-repo status row shown on the Code Review tab."""
+
+    repo_id: str
+    repo_name: str
+    pr_number: int | None = None
+    pr_state: str  # "not_raised" | "open" | "merged" | "closed"
+    pr_url: str | None = None
+    comment_count: int
+
+
+class CodeReviewStatusResponse(BaseModel):
+    """Response for GET /buds/{id}/code-review/status."""
+
+    repos: list[CodeReviewRepoStatus]
+
+
+class CodeReviewOverrideRequest(BaseModel):
+    """Body for POST /buds/{id}/code-review/override.
+
+    Forces a BUD from code_review → testing with a user-supplied reason
+    when the normal PR-merge-driven auto-transition doesn't apply (e.g.
+    docs-only changes, manual merges, or exceptional escalations).
+    """
+
+    reason: str = Field(..., min_length=10, max_length=2000)

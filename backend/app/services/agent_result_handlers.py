@@ -113,112 +113,66 @@ async def handle_code_review_result(
     task: BUDAgentTask,
     db: Any,
 ) -> dict | None:
-    """Code review result: parse JSON, store comments, auto-transition if clean."""
+    """Code review result: parse JSON, sync any comments to GitHub.
+
+    The code_review → testing transition is no longer owned by this handler.
+    The happy path is driven by GitHub PR merges (see
+    ``pr_auto_transition.check_all_prs_merged``) and the escape hatch is the
+    ``POST /buds/{id}/code-review/override`` endpoint. This handler's only job
+    is to persist the agent's first-run output: posting any inline comments
+    to the linked GitHub PR via ``sync_review_comments_to_github``, which in
+    turn writes them into ``bud.code_review_comments`` for the Code Review tab
+    comment count.
+    """
     from app.repositories.bud import BUDRepository
 
     review_data = _parse_code_review_output(output)
+    parse_ok = review_data.get("_parse_ok", True)
+
+    if not parse_ok:
+        # Agent output was unparseable — log loudly with BUD context so on-call
+        # can triage. The handler still returns successfully so the task row is
+        # marked COMPLETED (a FAILED task would auto-retry and likely hit the
+        # same parse failure), but the result_summary carries the parse_ok
+        # flag so the UI can surface a "re-run code review" banner.
+        logger.error(
+            "code_review_parse_failed",
+            bud_id=str(bud_id),
+            task_id=str(task.id),
+        )
 
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
-    qa_push_requested = False
     comment_count = 0
 
     if bud:
-        meta = dict(bud.metadata_ or {})
-        qa_push_requested = meta.pop("qa_push_requested", False)
-        new_comments = review_data.get("code_review_comments", [])
+        raw_comments = review_data.get("code_review_comments", [])
+        # Defensive: if the agent returned a scalar or garbage, don't crash
+        # downstream with a confusing error.
+        new_comments: list[dict] = raw_comments if isinstance(raw_comments, list) else []
+        comment_count = len(new_comments)
 
-        # Re-review semantics: drop previously stored agent-sourced comments
-        # before storing this run's output. Keeps human GitHub review comments
-        # (source: "github") and manual frontend additions (source: "manual")
-        # intact, so we never wipe human-authored feedback. The parallel
-        # resolutions array is remapped to preserve the user's resolution
-        # state on surviving human/manual comments.
-        existing_comments = list(bud.code_review_comments or [])
-        existing_resolutions = meta.get("code_review_resolutions") or []
-        kept_comments: list[dict] = []
-        kept_resolutions: list[dict] = []
-        for idx, c in enumerate(existing_comments):
-            if c.get("source") == "agent":
-                continue
-            kept_comments.append(c)
-            if idx < len(existing_resolutions):
-                kept_resolutions.append(existing_resolutions[idx])
-            else:
-                kept_resolutions.append({"done": None, "comment": ""})
-
-        dropped = len(existing_comments) - len(kept_comments)
-        if dropped:
-            bud.code_review_comments = kept_comments
-            if kept_resolutions:
-                meta["code_review_resolutions"] = kept_resolutions
-            else:
-                meta.pop("code_review_resolutions", None)
-            logger.info(
-                "code_review_old_agent_comments_cleared",
-                bud_id=str(bud_id),
-                dropped=dropped,
-                kept=len(kept_comments),
-            )
-
-        # Comments stored via GitHub webhook (issue_comment/review_comment),
-        # not directly here. We only sync outbound to GitHub PR.
-        if qa_push_requested:
-            meta.pop("code_review_resolutions", None)
+        # Stash auto/manual test plan drafts in metadata for the testing phase
+        # prompt builder to consume when that phase runs.
         auto_plan = review_data.get("automation_test_plan_md", "")
         manual_plan = review_data.get("manual_test_plan_md", "")
         if auto_plan or manual_plan:
+            meta = dict(bud.metadata_ or {})
             meta["automation_test_plan_md"] = auto_plan
             meta["manual_test_plan_md"] = manual_plan
-        bud.metadata_ = meta
-        comment_count = len(new_comments)
+            bud.metadata_ = meta
 
         if new_comments:
             from app.services.github_pr_sync import sync_review_comments_to_github
 
             await sync_review_comments_to_github(bud_id, org_id, new_comments, db)
 
-        if qa_push_requested and comment_count == 0:
-            # Verify ACs before auto-transitioning to testing
-            ac_passed = True
-            try:
-                from app.services.ac_verification import verify_ac_completeness
-
-                ac_passed, _ = await verify_ac_completeness(db, org_id, bud)
-            except Exception:
-                logger.warning("ac_verification_error_in_review", bud_id=str(bud_id))
-
-            if ac_passed:
-                from app.models.bud import BUDStatus
-                from app.services.bud_assignment import auto_assign_for_phase
-                from app.services.bud_timeline import record_event
-
-                old_status = bud.status
-                bud.status = BUDStatus.TESTING
-                await record_event(
-                    db,
-                    org_id,
-                    bud_id,
-                    "status_change",
-                    detail={"from": old_status, "to": "testing", "auto": True},
-                )
-                await auto_assign_for_phase(db, org_id, bud, BUDStatus.TESTING)
-
-                from app.services.bud_agent_trigger import create_agent_task_for_stage
-
-                await create_agent_task_for_stage(bud, "testing", org_id, db, force=True)
-            else:
-                logger.info("ac_blocked_testing_after_review", bud_id=str(bud_id))
-
         await db.flush()
 
-    # Return immediately so the agent completion event fires fast.
-    # Estimation runs after the handler returns (deferred in bud_agent_handler).
     return {
         "section": "test_plan_md",
         "comment_count": comment_count,
-        "auto_transitioned": qa_push_requested and comment_count == 0,
-        "_deferred_estimation": True,
+        "parse_ok": parse_ok,
     }
 
 
@@ -353,19 +307,35 @@ def _extract_impacted_repos_json(output: str) -> tuple[list[str], str]:
 def _parse_code_review_output(output: str) -> dict[str, Any]:
     """Parse code review JSON output from Claude.
 
-    Comments are stored via GitHub webhook (not here). This only
-    extracts structured JSON if the agent returned it, for the
-    comment_count used in auto-transition logic.
+    Returns the parsed dict on success, or a sentinel ``{"_parse_ok": False,
+    "code_review_comments": []}`` on failure so the caller can distinguish
+    "clean review with no issues" from "agent output was unparseable". A
+    parse failure is logged at error level with a prefix of the raw output
+    for forensics — silently treating unparseable output as "approved" is
+    a safety hole in a code-review pipeline.
     """
     from app.services.json_parser import parse_json_response
 
     try:
         parsed = parse_json_response(output)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        logger.warning("code_review_output_parse_failed")
-    return {"code_review_comments": []}
+    except Exception as exc:
+        logger.error(
+            "code_review_output_parse_exception",
+            error=str(exc),
+            output_preview=(output or "")[:500],
+        )
+        return {"_parse_ok": False, "code_review_comments": []}
+
+    if not isinstance(parsed, dict):
+        logger.error(
+            "code_review_output_not_dict",
+            parsed_type=type(parsed).__name__,
+            output_preview=(output or "")[:500],
+        )
+        return {"_parse_ok": False, "code_review_comments": []}
+
+    parsed["_parse_ok"] = True
+    return parsed
 
 
 def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:

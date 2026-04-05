@@ -96,7 +96,12 @@ async def check_all_prs_merged(
     org_id: uuid.UUID,
     bud_id: uuid.UUID,
 ) -> None:
-    """Auto-transition to testing if all PRs are merged."""
+    """Auto-transition to testing if all PRs are merged.
+
+    Code review correctness is delegated entirely to GitHub PR reviews +
+    merges — merging a PR is the human signal that the change has been
+    reviewed and approved. No LLM gate between code_review and testing.
+    """
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if not bud or bud.status != BUDStatus.CODE_REVIEW:
@@ -105,18 +110,6 @@ async def check_all_prs_merged(
     pr_repo = PullRequestRepository(db, org_id=org_id)
     if not await pr_repo.are_all_merged(bud_id):
         return
-
-    # Verify acceptance criteria before transitioning to testing
-    try:
-        from app.services.ac_verification import verify_ac_completeness
-
-        all_passed, _ = await verify_ac_completeness(db, org_id, bud)
-        if not all_passed:
-            logger.info("ac_verification_blocked_testing", bud_id=str(bud_id))
-            return  # Stay in CODE_REVIEW
-    except Exception:
-        logger.warning("ac_verification_error", bud_id=str(bud_id))
-        # Graceful degradation — allow transition if verification crashes
 
     bud.status = BUDStatus.TESTING
 

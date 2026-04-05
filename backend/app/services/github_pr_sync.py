@@ -25,10 +25,14 @@ async def sync_review_comments_to_github(
     comments: list[dict],
     db: AsyncSession,
 ) -> None:
-    """Post code review comments to linked GitHub PRs.
+    """Persist agent review comments locally and post to any open PRs.
 
-    Groups comments by repo, matches to open PRs, and posts
-    via GitHub API. Idempotent — skips PRs already reviewed.
+    Comments are always stored locally in ``bud.code_review_comments``
+    (so the Code Review tab's comment-count badges reflect the agent's
+    output) regardless of whether an open GitHub PR exists to post to.
+    When PRs do exist, comments are also posted as inline PR reviews via
+    the GitHub API. Partial failures on the GitHub side do not prevent
+    local storage.
 
     Args:
         bud_id: BUD whose comments to sync.
@@ -39,13 +43,34 @@ async def sync_review_comments_to_github(
     if not comments:
         return
 
+    # Group comments by repo name first — used for both local storage and
+    # GitHub post matching.
+    by_repo: dict[str, list[dict]] = {}
+    for c in comments:
+        repo = c.get("repo", "")
+        if repo:
+            by_repo.setdefault(repo, []).append(c)
+
+    # Local storage ALWAYS runs, independent of GitHub connectivity. This
+    # guarantees the Code Review tab shows the agent's output even when
+    # the GitHub App isn't installed, the token is missing, or no PR has
+    # been raised yet.
+    for repo_name, matching in by_repo.items():
+        await _store_agent_comments_in_bud(db, org_id, bud_id, matching, repo_name)
+
+    # GitHub posting is best-effort from here on.
     org = await db.get(Organization, org_id)
     if not org:
+        logger.warning("github_sync_skip_no_org", org_id=str(org_id), bud_id=str(bud_id))
         return
 
     token = await get_installation_token(org)
     if not token:
-        logger.debug("github_sync_skip_no_token", org_id=str(org_id))
+        logger.warning(
+            "github_sync_skip_no_token",
+            org_id=str(org_id),
+            bud_id=str(bud_id),
+        )
         return
 
     client = GitHubClient(token)
@@ -54,16 +79,14 @@ async def sync_review_comments_to_github(
     open_prs = [pr for pr in prs if pr.state == PRState.OPEN]
 
     if not open_prs:
+        logger.info(
+            "github_sync_no_open_prs",
+            bud_id=str(bud_id),
+            comment_count=len(comments),
+        )
         return
 
-    # Group comments by repo name
-    by_repo: dict[str, list[dict]] = {}
-    for c in comments:
-        repo = c.get("repo", "")
-        by_repo.setdefault(repo, []).append(c)
-
     for pr in open_prs:
-        # Match PR to comments by repo name (last segment of full_name)
         repo_name = pr.github_repo_full_name.split("/")[-1]
         matching = by_repo.get(repo_name, [])
         if not matching:
@@ -74,20 +97,23 @@ async def sync_review_comments_to_github(
         if meta.get("review_synced"):
             continue
 
-        # Map to GitHub inline comment format
         gh_comments = _map_to_github_comments(matching)
         body = f"Automated code review by BodhiGrove ({len(matching)} comment(s))"
 
-        result = await client.create_pr_review(
-            pr.github_repo_full_name,
-            pr.github_pr_number,
-            body=body,
-            comments=gh_comments if gh_comments else None,
-        )
-
-        # Store comments in BUD regardless of GitHub post success
-        if pr.bud_id:
-            await _store_agent_comments_in_bud(db, org_id, pr.bud_id, matching, repo_name)
+        try:
+            result = await client.create_pr_review(
+                pr.github_repo_full_name,
+                pr.github_pr_number,
+                body=body,
+                comments=gh_comments if gh_comments else None,
+            )
+        except Exception:
+            logger.exception(
+                "github_sync_post_failed",
+                pr_number=pr.github_pr_number,
+                bud_id=str(bud_id),
+            )
+            continue
 
         if result:
             pr.metadata_ = {**(pr.metadata_ or {}), "review_synced": True}
@@ -108,11 +134,16 @@ async def _store_agent_comments_in_bud(
 ) -> None:
     """Store agent-generated review comments directly in the BUD.
 
-    Applies a fuzzy-signature dedup backstop against surviving non-agent
-    comments (human GitHub reviews and manual frontend additions) so the
-    Code Review Agent doesn't re-flag issues a human already surfaced.
-    Old agent-sourced comments are expected to have already been cleared
-    by `handle_code_review_result` before this function is called.
+    Called from ``sync_review_comments_to_github`` after posting agent
+    comments to a GitHub PR. The stored entries feed the comment-count
+    badges on the Code Review tab's per-repo status board.
+
+    On each call, existing ``source: "agent"`` entries for ``repo_name``
+    are cleared before appending the new batch. This makes the operation
+    idempotent under task retries and re-runs: the stored agent comments
+    always reflect the most recent agent output, never a superset across
+    runs. Human-authored entries (``source: "github"`` from webhooks and
+    anything else) are untouched.
     """
     from app.repositories.bud import BUDRepository
 
@@ -121,59 +152,33 @@ async def _store_agent_comments_in_bud(
     if not bud:
         return
 
-    existing = list(bud.code_review_comments or [])
-    existing_sigs = {_comment_signature(c) for c in existing}
+    # Drop previous agent entries for THIS repo only — preserves agent
+    # comments from sibling repos processed earlier in the same sync loop
+    # and all non-agent entries.
+    existing = [
+        c
+        for c in (bud.code_review_comments or [])
+        if not (c.get("source") == "agent" and c.get("repo") == repo_name)
+    ]
     now_iso = datetime.now(UTC).isoformat()
 
-    added = 0
-    skipped = 0
     for c in comments:
-        new_entry = {
-            "repo": repo_name,
-            "file": c.get("file", ""),
-            "line": c.get("line", 0),
-            "body": c.get("comment", ""),
-            "author": "bodhigrove-agent",
-            "html_url": "",
-            "created_at": now_iso,
-            "is_summary": False,
-            "source": "agent",
-        }
-        sig = _comment_signature(new_entry)
-        if sig in existing_sigs:
-            skipped += 1
-            continue
-        existing.append(new_entry)
-        existing_sigs.add(sig)
-        added += 1
+        existing.append(
+            {
+                "repo": repo_name,
+                "file": c.get("file", ""),
+                "line": c.get("line", 0),
+                "body": c.get("comment", ""),
+                "author": "bodhigrove-agent",
+                "html_url": "",
+                "created_at": now_iso,
+                "is_summary": False,
+                "source": "agent",
+            }
+        )
 
     bud.code_review_comments = existing
     await db.flush()
-
-    if skipped:
-        logger.info(
-            "agent_comments_dedup_skipped",
-            bud_id=str(bud_id),
-            repo=repo_name,
-            added=added,
-            skipped=skipped,
-        )
-
-
-def _comment_signature(c: dict) -> str:
-    """Stable signature for dedup on (repo, file, body prefix).
-
-    Lowercases and trims each field, then takes the first 120 chars of the
-    body text. Handles the common case where two comments phrase the same
-    issue slightly differently but agree on the location and lead sentence.
-    Body falls back to the `comment` field for legacy entries that stored
-    the text under that key.
-    """
-    repo = (c.get("repo") or "").strip().lower()
-    file = (c.get("file") or "").strip().lower()
-    body_raw = c.get("body") or c.get("comment") or ""
-    body = body_raw.strip().lower()[:120]
-    return f"{repo}|{file}|{body}"
 
 
 def _map_to_github_comments(comments: list[dict]) -> list[dict]:

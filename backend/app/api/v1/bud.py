@@ -27,6 +27,9 @@ from app.schemas.bud import (
     BUDListItem,
     BUDRead,
     BUDUpdate,
+    CodeReviewOverrideRequest,
+    CodeReviewRepoStatus,
+    CodeReviewStatusResponse,
     TimelineEventRead,
 )
 from app.schemas.dev_activity import (
@@ -424,52 +427,146 @@ async def _trigger_status_jobs(
         )
 
 
-@router.post(
-    "/{bud_id}/re-review",
-    response_model=BUDAgentTaskRead,
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_permissions("buds:edit"))],
+@router.get(
+    "/{bud_id}/code-review/status",
+    response_model=CodeReviewStatusResponse,
+    dependencies=[Depends(require_permissions("buds:view"))],
 )
-async def trigger_re_review(
+async def get_code_review_status(
     bud_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> BUDAgentTaskRead:
-    """Re-run code review before transitioning to QA.
-
-    Forces a new code_review agent task. The handler will auto-transition
-    to testing if no new comments are found (when qa_push_requested is set).
-    """
-    from app.services.bud_agent_trigger import create_agent_task_for_stage
+) -> CodeReviewStatusResponse:
+    """Return PR status + comment count per impacted repo for the Code Review tab."""
+    from app.services.bud_code_review_status import get_pr_status_summary
 
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if not bud:
         raise HTTPException(status_code=404, detail="BUD not found")
-    if bud.status != "code_review":
-        raise HTTPException(status_code=409, detail="BUD is not in code_review status")
 
-    # Check no agent already running
-    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
-    active = await task_repo.get_active_for_bud(bud_id)
-    if active:
-        raise HTTPException(status_code=409, detail="Another task is already running")
-
-    await create_agent_task_for_stage(
-        bud,
-        "code_review",
-        current_user.org_id,
-        db,
-        triggered_by=current_user.id,
-        force=True,
+    rows = await get_pr_status_summary(db, current_user.org_id, bud)
+    return CodeReviewStatusResponse(
+        repos=[CodeReviewRepoStatus(**r) for r in rows],
     )
-    await db.commit()
 
-    # Return the newly created task
-    new_task = await task_repo.get_active_for_bud(bud_id)
-    if not new_task:
-        raise HTTPException(status_code=500, detail="Failed to create re-review task")
-    return BUDAgentTaskRead.model_validate(new_task)
+
+@router.post(
+    "/{bud_id}/code-review/override",
+    response_model=BUDRead,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def override_code_review(
+    bud_id: uuid.UUID,
+    payload: CodeReviewOverrideRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BUDRead:
+    """Force-transition a BUD from code_review to testing with a user-supplied reason.
+
+    Used when PR merges don't cover the case (docs-only changes, manual merges,
+    exceptional escalations). Records the reason in the timeline and triggers
+    the QA test-case agent. Blocked if an agent task is currently running on
+    this BUD.
+    """
+    from app.services.bud_agent_trigger import create_agent_task_for_stage
+    from app.services.bud_timeline import record_event
+
+    # Row lock serializes concurrent override requests — the second caller
+    # waits on the first's transaction to resolve, then sees status=testing
+    # and fails the guard below.
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id_for_update(bud_id)
+    if not bud:
+        raise HTTPException(status_code=404, detail="BUD not found")
+    if bud.status != BUDStatus.CODE_REVIEW:
+        raise HTTPException(
+            status_code=409,
+            detail=f"BUD is not in code_review status (current: {bud.status})",
+        )
+
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    if await task_repo.get_active_for_bud(bud_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot override while an agent task is running",
+        )
+
+    old_status = str(bud.status)
+    await record_event(
+        db,
+        current_user.org_id,
+        bud_id,
+        "code_review_override",
+        detail={
+            "reason": payload.reason,
+            "from": old_status,
+            "to": "testing",
+            "triggered_by": str(current_user.id),
+        },
+    )
+    await record_event(
+        db,
+        current_user.org_id,
+        bud_id,
+        "status_change",
+        detail={"from": old_status, "to": "testing", "auto": False},
+    )
+
+    bud.status = BUDStatus.TESTING
+
+    # Commit the override + status transition FIRST, as a durable record,
+    # before attempting to spawn the follow-on testing task. This prevents
+    # a silent rollback if create_agent_task_for_stage hits one of its
+    # early-return guards or raises — the override audit trail is preserved
+    # even if the testing task fails to spawn, and operators can retry task
+    # creation separately.
+    await db.commit()
+    logger.info(
+        "code_review_override_committed",
+        bud_id=str(bud_id),
+        triggered_by=str(current_user.id),
+    )
+
+    # Now spawn the testing agent task. Failures here don't undo the override.
+    try:
+        await create_agent_task_for_stage(
+            bud,
+            "testing",
+            current_user.org_id,
+            db,
+            triggered_by=current_user.id,
+            force=True,
+        )
+    except Exception:
+        logger.exception(
+            "code_review_override_testing_task_failed",
+            bud_id=str(bud_id),
+        )
+
+    # Refresh estimates so dashboards reflect the new phase.
+    try:
+        from app.services.bud_estimation import estimate_bud_dates
+
+        refreshed_for_est = await bud_repo.get_by_id(bud_id)
+        if refreshed_for_est is not None:
+            await estimate_bud_dates(
+                db,
+                current_user.org_id,
+                refreshed_for_est,
+                trigger="code_review_override",
+            )
+            await db.commit()
+    except Exception:
+        logger.warning(
+            "code_review_override_estimation_failed",
+            bud_id=str(bud_id),
+        )
+
+    refreshed = await bud_repo.get_by_id(bud_id)
+    if refreshed is None:
+        raise HTTPException(status_code=500, detail="BUD vanished after override")
+    return await _bud_response(refreshed, current_user.org_id, db)
 
 
 @router.post(

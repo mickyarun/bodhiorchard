@@ -381,24 +381,3 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
         },
     )
 
-    # Deferred estimation — runs AFTER completion event is published to frontend.
-    # This prevents estimation LLM calls from blocking the UI refresh.
-    if result_summary and result_summary.get("_deferred_estimation"):
-        try:
-            from app.services.bud_estimation import estimate_bud_dates
-
-            async with AsyncSessionLocal() as est_db:
-                from app.repositories.bud import BUDRepository
-
-                bud_repo = BUDRepository(est_db, org_id=org_id)
-                bud = await bud_repo.get_by_id(bud_id)
-                if bud:
-                    await estimate_bud_dates(
-                        est_db,
-                        org_id,
-                        bud,
-                        trigger="code_review_completed",
-                    )
-                    await est_db.commit()
-        except Exception:
-            logger.warning("deferred_estimation_failed", bud_id=str(bud_id))
