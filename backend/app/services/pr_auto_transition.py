@@ -96,20 +96,30 @@ async def check_all_prs_merged(
     org_id: uuid.UUID,
     bud_id: uuid.UUID,
 ) -> None:
-    """Auto-transition to testing if all PRs are merged.
+    """Auto-transition to testing if every impacted repo has a merged PR.
+
+    Uses the same per-repo priority collapse as ``get_pr_status_summary``
+    (OPEN > MERGED > CLOSED), so that historical closed-without-merging
+    PRs from earlier development iterations don't block the transition.
+    A BUD with 14 closed PRs and 1 merged PR on the same repo should
+    auto-advance just like a clean single-PR BUD.
 
     Code review correctness is delegated entirely to GitHub PR reviews +
     merges — merging a PR is the human signal that the change has been
     reviewed and approved. No LLM gate between code_review and testing.
     """
+    from app.services.bud_code_review_status import get_pr_status_summary
+
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if not bud or bud.status != BUDStatus.CODE_REVIEW:
         return
 
-    pr_repo = PullRequestRepository(db, org_id=org_id)
-    if not await pr_repo.are_all_merged(bud_id):
-        return
+    repo_statuses = await get_pr_status_summary(db, org_id, bud)
+    if not repo_statuses:
+        return  # no impacted repos — override is the only path forward
+    if not all(r["pr_state"] == "merged" for r in repo_statuses):
+        return  # at least one impacted repo hasn't landed yet
 
     bud.status = BUDStatus.TESTING
 

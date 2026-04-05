@@ -43,18 +43,6 @@ class PullRequestRepository(BaseRepository[PullRequest]):
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
-    async def are_all_merged(self, bud_id: uuid.UUID) -> bool:
-        """Check if every PR linked to a BUD is merged.
-
-        Returns False if there are no PRs at all.
-        """
-        stmt = self._scoped(select(PullRequest).where(PullRequest.bud_id == bud_id))
-        result = await self._db.execute(stmt)
-        prs = list(result.scalars().all())
-        if not prs:
-            return False
-        return all(pr.state == PRState.MERGED for pr in prs)
-
     async def get_repo_ids_with_prs(self, bud_id: uuid.UUID) -> set[str]:
         """Get set of repo_id strings that have at least one PR for this BUD."""
         stmt = self._scoped(
