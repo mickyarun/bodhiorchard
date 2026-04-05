@@ -816,7 +816,7 @@ const PHASE_ROLE_LABELS: Record<string, string> = {
   design: 'designer',
   tech_arch: 'tech lead',
   development: 'developer',
-  code_review: 'reviewer',
+  code_review: 'developer',
   testing: 'QA engineer',
   uat: 'product manager',
 }

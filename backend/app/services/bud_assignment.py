@@ -52,6 +52,29 @@ async def auto_assign_for_phase(
 
     Returns new assignee_id, or None if no matching members.
     """
+    # Code review stays with the developer who built the feature. No
+    # reassignment — the current assignee is already the most recent
+    # developer from the development phase. Record a timeline event so
+    # the assignment is visible in the BUD's history.
+    if new_status == BUDStatus.CODE_REVIEW:
+        if bud.assignee_id:
+            assignee = await db.get(User, bud.assignee_id)
+            await record_event(
+                db,
+                org_id,
+                bud.id,
+                "assigned",
+                actor_id=actor_id,
+                actor_name=actor_name,
+                detail={
+                    "assignee_id": str(bud.assignee_id),
+                    "assignee_name": assignee.name if assignee else None,
+                    "role": UserRole.DEVELOPER,
+                    "method": "retained_from_development",
+                },
+            )
+        return bud.assignee_id
+
     role_name = PHASE_ROLE_MAP.get(new_status)
     if role_name is None:
         return bud.assignee_id
