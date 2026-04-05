@@ -1,10 +1,17 @@
 /**
- * TreePickerSystem — raycasting, hover tooltips, and click handling for tree-world entities.
+ * TreePickerSystem — hover tooltips and click handling for tree-world entities.
  *
- * Uses ray-sphere intersection against entities tagged 'pickable'.
+ * Two picking primitives:
+ *   • Feature branches (tall thin cylinders) → 2D screen-space distance.
+ *     Matches the reference pattern in treetest/index.ts — ray-sphere fails on
+ *     branches because their pick sphere at entity origin is a blob at the
+ *     base, missing the branch length where the user actually hovers.
+ *   • Everything else (repo trees, houses, agents) → 3D ray-sphere.
+ *     These have meaningful roughly-spherical bounds.
+ *
  * Reads typed TreeNodeData via the discriminated union accessor.
- *
- * Pattern source: engine/graph/GraphPickingSystem.ts
+ * Pattern source (ray path): engine/graph/GraphPickingSystem.ts
+ * Pattern source (screen path): engine/treetest/index.ts onMouseMove
  */
 import * as pc from 'playcanvas'
 import type { InputManager } from '../input/InputManager'
@@ -14,16 +21,20 @@ import { getTreeData, type TreeNodeData } from '../world/TreeNodeData'
 /** Optional function to enrich hover tooltip text (e.g. add cross-repo count). */
 export type TreeTooltipEnricher = (data: TreeNodeData, baseText: string) => string
 
+/** Pixel radius within which a hover registers on a projected feature-branch point. */
+const FEATURE_HOVER_PX = 18
+
 export class TreePickerSystem {
   private lastHoveredId: string | null = null
   private lastHoverPos = { x: -1, y: -1 }
   private tooltipEnricher: TreeTooltipEnricher | null = null
 
-  // Pre-allocated scratch vectors for raycasting
+  // Pre-allocated scratch vectors for raycasting + screen projection
   private readonly _rayFrom = new pc.Vec3()
   private readonly _rayTo = new pc.Vec3()
   private readonly _rayDir = new pc.Vec3()
   private readonly _scratchCenter = new pc.Vec3()
+  private readonly _screenPos = new pc.Vec3()
 
   /** Set optional tooltip enricher (called after base tooltip text is computed). */
   setTooltipEnricher(enricher: TreeTooltipEnricher | null): void {
@@ -50,7 +61,13 @@ export class TreePickerSystem {
     this.lastHoverPos.x = hoverPos.x
     this.lastHoverPos.y = hoverPos.y
 
-    const hit = this.raycast(camera, hoverPos.x, hoverPos.y, pickableEntities)
+    // Phase 1: feature branches by 2D screen-space distance (treetest-style).
+    // Branches are thin cylinders — a ray-sphere at their origin misses the
+    // branch body where the user actually hovers.
+    let hit = this.pickFeatureByScreen(camera, hoverPos.x, hoverPos.y, pickableEntities)
+    // Phase 2: fall back to ray-sphere for chunkier entities (repo, house, agent, bud, threat, rel).
+    if (!hit) hit = this.raycast(camera, hoverPos.x, hoverPos.y, pickableEntities)
+
     if (hit) {
       this.handleHover(hit, hoverPos, callbacks)
     } else if (this.lastHoveredId) {
@@ -159,7 +176,52 @@ export class TreePickerSystem {
     }
   }
 
-  // ─── Raycasting ────────────────────────────────
+  // ─── Screen-space feature picking ──────────────
+
+  /**
+   * 2D screen-space picker for feature branches.
+   * Projects every tree_feature entity's world position into screen space
+   * and returns the closest one within FEATURE_HOVER_PX of the cursor.
+   *
+   * Why not ray-sphere: feature branches are thin cylinders. entity.getPosition()
+   * is at the base with scale.y encoding length — a ray-sphere at max(scale)/2
+   * gives a small blob near the base that misses the visible branch body.
+   *
+   * Mirrors treetest/index.ts:241-273.
+   */
+  private pickFeatureByScreen(
+    camera: pc.Entity,
+    screenX: number,
+    screenY: number,
+    pickableEntities: pc.Entity[],
+  ): pc.Entity | null {
+    const cam = camera.camera
+    if (!cam) return null
+
+    let best: pc.Entity | null = null
+    let bestDist = FEATURE_HOVER_PX * FEATURE_HOVER_PX
+
+    for (const entity of pickableEntities) {
+      if (!entity.tags.has('pickable')) continue
+      const data = getTreeData(entity)
+      if (data?.type !== 'tree_feature') continue
+
+      cam.worldToScreen(entity.getPosition(), this._screenPos)
+      // screenPos.z < 0 means behind the camera — skip
+      if (this._screenPos.z < 0) continue
+      const dx = this._screenPos.x - screenX
+      const dy = this._screenPos.y - screenY
+      const d2 = dx * dx + dy * dy
+      if (d2 < bestDist) {
+        bestDist = d2
+        best = entity
+      }
+    }
+
+    return best
+  }
+
+  // ─── Ray-sphere picking (chunky entities + click fallback) ───
 
   private raycast(
     camera: pc.Entity,
