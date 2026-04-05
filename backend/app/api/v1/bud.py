@@ -412,6 +412,25 @@ async def _trigger_status_jobs(
     if new_status != old_status:
         from app.services.bud_agent_trigger import create_agent_task_for_stage
 
+        # Skip the code review agent if we're moving INTO code_review but all
+        # impacted repos already have merged PRs. The agent's only purpose is
+        # to post automated feedback on open PRs — once everything is merged,
+        # the code is already approved on GitHub and re-running the agent is
+        # wasteful (and confusing, because there's nothing to post to).
+        # Typical case: tester rejects from testing, BUD flips back to
+        # code_review, but the merged PRs are still merged.
+        if new_status == BUDStatus.CODE_REVIEW:
+            from app.services.bud_code_review_status import get_pr_status_summary
+
+            repo_statuses = await get_pr_status_summary(db, current_user.org_id, bud)
+            if repo_statuses and all(r["pr_state"] == "merged" for r in repo_statuses):
+                logger.info(
+                    "code_review_agent_skip_all_merged",
+                    bud_id=str(bud.id),
+                    from_status=str(old_status),
+                )
+                return
+
         # Force re-run when going back to code_review from later stages
         force = new_status == BUDStatus.CODE_REVIEW and old_status in (
             BUDStatus.TESTING,
