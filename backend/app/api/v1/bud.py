@@ -286,29 +286,41 @@ async def update_bud(
     if "status" in update_data:
         new_status = update_data["status"]
 
-        # Require reason when manually advancing code_review → testing
+        # Manual code_review → testing:
+        # If every impacted repo has a merged PR, this is the same as the
+        # webhook-driven auto-transition — no bypass, no reason needed.
+        # Only require a reason when the user is genuinely bypassing the
+        # PR-merge gate (e.g. docs-only changes, manual merges).
         if old_status == BUDStatus.CODE_REVIEW and new_status == BUDStatus.TESTING:
-            reason = body.status_override_reason
-            if not reason or not reason.strip():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Reason required when manually advancing to testing",
-                )
-            from app.services.bud_timeline import record_event as _record
+            from app.services.bud_code_review_status import get_pr_status_summary
 
-            await _record(
-                db,
-                current_user.org_id,
-                bud.id,
-                "status_override",
-                actor_id=current_user.id,
-                actor_name=current_user.name,
-                detail={
-                    "from": old_status.value,
-                    "to": "testing",
-                    "reason": reason.strip(),
-                },
+            repo_statuses = await get_pr_status_summary(db, current_user.org_id, bud)
+            all_merged = bool(repo_statuses) and all(
+                r["pr_state"] == "merged" for r in repo_statuses
             )
+
+            if not all_merged:
+                reason = body.status_override_reason
+                if not reason or not reason.strip():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Reason required when manually advancing to testing",
+                    )
+                from app.services.bud_timeline import record_event as _record
+
+                await _record(
+                    db,
+                    current_user.org_id,
+                    bud.id,
+                    "status_override",
+                    actor_id=current_user.id,
+                    actor_name=current_user.name,
+                    detail={
+                        "from": old_status.value,
+                        "to": "testing",
+                        "reason": reason.strip(),
+                    },
+                )
 
         from app.services.bud_assignment import auto_assign_for_phase
         from app.services.bud_timeline import record_event
