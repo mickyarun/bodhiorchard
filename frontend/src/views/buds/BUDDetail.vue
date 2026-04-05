@@ -482,6 +482,26 @@
             </v-card>
           </v-dialog>
 
+          <!-- No Open PR Warning Dialog -->
+          <v-dialog v-model="showNoPRWarningDialog" max-width="420">
+            <v-card color="surface" class="pa-5">
+              <div class="text-subtitle-1 font-weight-medium mb-3">
+                No PR is open to review
+              </div>
+              <div class="text-body-2 text-medium-emphasis mb-4">
+                All PRs are merged or no PR has been raised yet. Code review
+                will start only after a PR is raised on GitHub.
+              </div>
+              <v-card-actions class="pa-0">
+                <v-spacer />
+                <v-btn variant="text" @click="showNoPRWarningDialog = false">Cancel</v-btn>
+                <v-btn color="primary" variant="flat" @click="confirmNoPRWarning">
+                  Proceed
+                </v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-dialog>
+
           <!-- Activity Timeline (collapsible) -->
           <div class="timeline-section mt-4">
             <button class="timeline-toggle" @click="timelineOpen = !timelineOpen">
@@ -571,6 +591,7 @@ const bud = computed(() => budStore.currentBUD)
 
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)
+const showNoPRWarningDialog = ref(false)
 
 // Child component refs
 const designPanelRef = ref<InstanceType<typeof BUDDesignPanel> | null>(null)
@@ -808,13 +829,12 @@ const pendingOverrideStatus = ref('')
 async function updateStatus(newStatus: string): Promise<void> {
   if (!bud.value) return
 
-  // Intercept code_review transition to show repo confirmation
-  // Skip the popup if code review content already exists (e.g. going back from QA)
+  // Intercept code_review transition: warn if no PRs are open
   if (newStatus === 'code_review') {
-    const hasCodeReview = Array.isArray(bud.value.code_review_comments)
-      && bud.value.code_review_comments.length > 0
-    if (!hasCodeReview) {
-      await workflowRef.value?.showCodeReviewConfirmation()
+    const repoStatuses = await budStore.fetchCodeReviewStatus(bud.value.id)
+    const hasOpenPR = repoStatuses.some(r => r.pr_state === 'open')
+    if (!hasOpenPR) {
+      showNoPRWarningDialog.value = true
       return
     }
   }
@@ -839,6 +859,11 @@ async function updateStatus(newStatus: string): Promise<void> {
   }
 
   await _executeStatusChange(newStatus)
+}
+
+async function confirmNoPRWarning(): Promise<void> {
+  showNoPRWarningDialog.value = false
+  await _executeStatusChange('code_review')
 }
 
 async function confirmOverrideStatus(): Promise<void> {
