@@ -872,25 +872,31 @@ function formatRelativeTime(iso: string | undefined | null): string {
   return date.toLocaleDateString()
 }
 
-// TODO(user): derive the list of unique PRs that were reviewed in this BUD.
-// Each code review comment may have an html_url like
-//   https://github.com/owner/repo/pull/18#issuecomment-...
-// Use parsePrFromUrl(c.html_url) to extract { repo, number, prUrl } for each
-// comment, then dedupe on `repo + "#" + number` and count how many comments
-// belong to each PR. Skip comments where parsePrFromUrl returns null (agent
-// inline comments and manual comments have no PR link).
-//
-// Expected shape: ReviewedPR[]
-// Expected behavior for the sample data we saw (1 comment from taskflow-web PR #18):
-//   [{ repo: 'taskflow-web', number: 18, htmlUrl: 'https://...', commentCount: 1 }]
+// Derives the list of unique PRs that were reviewed in this BUD by parsing
+// each comment's html_url. Agent inline comments and manual comments don't
+// have a PR link and are skipped. Deduped by full PR URL (owner/repo/number),
+// so the same PR produces one row regardless of how many comments it owns.
+// Insertion order is preserved — PRs appear in the order their first comment
+// appears in bud.code_review_comments, which matches chronological review order.
 const reviewedPRs = computed<ReviewedPR[]>(() => {
   const comments = bud.value?.code_review_comments || []
-  // TODO: implement the dedup + count logic here (5-10 lines).
-  // Hint: a Map<string, ReviewedPR> keyed by `${repo}#${number}` makes dedup easy.
-  // Use parsePrFromUrl(c.html_url) to extract { repo, number, prUrl } from each
-  // comment's html_url. Skip comments where parsePrFromUrl returns null.
-  void [comments, parsePrFromUrl]
-  return []
+  const prMap = new Map<string, ReviewedPR>()
+  for (const c of comments) {
+    const parsed = parsePrFromUrl(c.html_url)
+    if (!parsed) continue
+    const existing = prMap.get(parsed.prUrl)
+    if (existing) {
+      existing.commentCount++
+    } else {
+      prMap.set(parsed.prUrl, {
+        repo: parsed.repo,
+        number: parsed.number,
+        htmlUrl: parsed.prUrl,
+        commentCount: 1,
+      })
+    }
+  }
+  return Array.from(prMap.values())
 })
 
 function downloadCodeReview(): void {
