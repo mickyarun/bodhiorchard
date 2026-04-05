@@ -18,8 +18,6 @@
       </div>
     </v-alert>
 
-    <!-- Code Review checklist is rendered INSIDE the Code Review tab (BUDDetail.vue) -->
-    <!-- Checklist state is exposed via defineExpose for the parent to use -->
 
     <!-- Reassignment dialog -->
     <v-dialog v-model="showReassignDialog" max-width="440">
@@ -86,11 +84,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useJobSocket } from '@/composables/useJobSocket'
-import type { BUDDocument, CodeReviewComment } from '@/types'
+import type { BUDDocument } from '@/types'
 
 const props = defineProps<{
   bud: BUDDocument
@@ -99,7 +97,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'status-change', status: string): void
   (e: 'reload-timeline'): void
 }>()
 
@@ -127,81 +124,6 @@ const AGENT_CONFIG: Record<string, { name: string; label: string }> = {
 const showRepoConfirmDialog = ref(false)
 const commitRepos = ref<{ repoPath: string; repoName: string; commitCount: number; checked: boolean }[]>([])
 const excludeReason = ref('')
-
-interface CodeReviewResolution {
-  done: boolean | null  // null = untouched, true = done, false = not done (requires comment)
-  comment: string
-}
-
-const codeReviewComments = computed<CodeReviewComment[]>(() => {
-  return props.bud?.code_review_comments ?? []
-})
-
-// Code review checklist resolutions
-const resolutions = ref<CodeReviewResolution[]>([])
-const pushAttempted = ref(false)
-
-// Initialize resolutions from existing metadata or fresh
-function initResolutions(): void {
-  const meta = props.bud?.metadata as Record<string, unknown> | null
-  const existing = (meta?.code_review_resolutions as CodeReviewResolution[] | undefined) ?? []
-  const comments = codeReviewComments.value
-  resolutions.value = comments.map((_, idx) =>
-    existing[idx] ?? { done: null, comment: '' },
-  )
-}
-initResolutions()
-
-// Watch for BUD updates to re-init resolutions
-watch(() => codeReviewComments.value.length, () => initResolutions())
-
-const resolvedCount = computed(() =>
-  resolutions.value.filter(r => r.done === true || (r.done === false && r.comment.trim())).length,
-)
-
-const canPushToQA = computed(() =>
-  codeReviewComments.value.length > 0
-  && resolutions.value.length === codeReviewComments.value.length
-  && resolutions.value.every(r => r.done === true || (r.done === false && r.comment.trim())),
-)
-
-function updateResolution(idx: number, checked: boolean): void {
-  if (!resolutions.value[idx]) {
-    resolutions.value[idx] = { done: null, comment: '' }
-  }
-  // Checking the box = done, unchecking = not done (needs comment)
-  resolutions.value[idx].done = checked
-  if (checked) resolutions.value[idx].comment = ''
-}
-
-async function handlePushToQA(): Promise<void> {
-  pushAttempted.value = true
-  if (!canPushToQA.value) return
-
-  // Save resolutions + flag for re-review before QA transition
-  const meta = { ...(props.bud.metadata || {}) } as Record<string, unknown>
-  meta.code_review_resolutions = resolutions.value
-  meta.qa_push_requested = true
-  await budStore.updateBUD(props.bud.id, { metadata: meta } as never)
-
-  // Trigger re-review — backend will auto-transition to testing if no new issues
-  try {
-    const resp = await fetch(`/api/v1/buds/${props.bud.id}/re-review`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${authStore.token}` },
-    })
-    if (resp.ok) {
-      const task = await resp.json()
-      if (task.job_id) {
-        trackAgentTask({ job_id: task.job_id, task_type: 'code_review', status: 'running' })
-      }
-    }
-  } catch {
-    // Fallback: just reload
-    await budStore.fetchBUD(props.bud.id)
-  }
-  emit('reload-timeline')
-}
 
 async function handleReassignment(): Promise<void> {
   if (!reassignReason.value.trim()) return
@@ -292,13 +214,5 @@ defineExpose({
   agentStatusMessage,
   showCodeReviewConfirmation,
   trackAgentTask,
-  // Code review checklist state (rendered in Code Review tab, not here)
-  codeReviewComments,
-  resolutions,
-  resolvedCount,
-  canPushToQA,
-  pushAttempted,
-  updateResolution,
-  handlePushToQA,
 })
 </script>

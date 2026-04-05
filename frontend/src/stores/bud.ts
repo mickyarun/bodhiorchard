@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, JobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem } from '@/types'
-import { BUD_STATUS_ORDER } from '@/types'
+import type { AxiosError } from 'axios'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, JobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus } from '@/types'
+import { BUD_STATUS_ORDER, CODE_REVIEW_OVERRIDE_REASON_MIN } from '@/types'
 import api from '@/services/api'
 
 // Maps legacy DB status values to new pipeline statuses (pre-migration compat)
@@ -233,6 +234,40 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function fetchCodeReviewStatus(budId: string): Promise<CodeReviewRepoStatus[]> {
+    try {
+      const { data } = await api.get(`/v1/buds/${budId}/code-review/status`)
+      return data?.repos ?? []
+    } catch {
+      return []
+    }
+  }
+
+  async function overrideCodeReview(
+    budId: string,
+    reason: string,
+  ): Promise<BUDDocument | null> {
+    error.value = ''
+    try {
+      const { data } = await api.post(`/v1/buds/${budId}/code-review/override`, { reason })
+      if (currentBUD.value?.id === budId) currentBUD.value = data
+      const idx = buds.value.findIndex(p => p.id === budId)
+      if (idx !== -1) buds.value[idx] = data
+      return data
+    } catch (err) {
+      const axiosErr = err as AxiosError<{ detail?: string }>
+      const detail = axiosErr.response?.data?.detail
+      if (axiosErr.response?.status === 409) {
+        error.value = detail || 'Cannot override — BUD is not in code_review or an agent task is running'
+      } else if (axiosErr.response?.status === 422) {
+        error.value = detail || `Reason must be at least ${CODE_REVIEW_OVERRIDE_REASON_MIN} characters`
+      } else {
+        error.value = 'Failed to override code review'
+      }
+      return null
+    }
+  }
+
   async function regenerateDesign(budId: string, designId: string): Promise<DesignJobCreated | null> {
     try {
       const { data } = await api.post(`/v1/buds/${budId}/designs/${designId}/regenerate`)
@@ -325,6 +360,8 @@ export const useBUDStore = defineStore('bud', () => {
     fetchChatHistory,
     fetchTimeline,
     fetchPRChecklist,
+    fetchCodeReviewStatus,
+    overrideCodeReview,
     requestReassignment,
     retryAgentTask,
     fetchEstimates,

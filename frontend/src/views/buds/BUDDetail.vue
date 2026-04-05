@@ -154,13 +154,12 @@
             Created {{ formatDate(bud.created_at) }} &middot; Updated {{ formatDate(bud.updated_at) }}
           </div>
 
-          <!-- Workflow banners, code review panel, approval/reject/reassign dialogs -->
+          <!-- Workflow banners, approval/reject/reassign dialogs, repo confirmation -->
           <BUDWorkflowActions
             ref="workflowRef"
             :bud="bud"
             :can-approve="canApprove"
             :is-current-assignee="isCurrentAssignee"
-            @status-change="updateStatus"
             @reload-timeline="loadTimeline(); loadEstimates()"
           />
 
@@ -368,267 +367,29 @@
 
               <!-- Code Review -->
               <v-tabs-window-item value="code-review">
-                <div class="pa-4">
-                  <!-- Agent running state -->
-                  <div v-if="workflowRef?.agentGenerating && bud.status === 'code_review'" class="d-flex justify-center py-12">
-                    <v-progress-circular indeterminate size="24" width="2" class="mr-3" />
-                    <span class="text-body-2 text-medium-emphasis">{{ workflowRef?.agentStatusMessage || 'Reviewing code...' }}</span>
+                <!-- Not started: BUD hasn't reached code_review yet. The
+                     "agent running" case is covered by the unified top banner
+                     (search `agent-banner` in this file). -->
+                <div v-if="!reachedCodeReview" class="text-center py-12">
+                  <v-icon icon="mdi-code-tags-check" size="48" color="primary" class="mb-3 opacity-40" />
+                  <div class="text-h6 font-weight-medium mb-2">Code review not started</div>
+                  <div class="text-body-2 text-medium-emphasis">
+                    Code review will begin when development is complete and moved to the code review stage.
                   </div>
-
-                  <!-- Empty state: not in code_review yet -->
-                  <div v-else-if="bud.status !== 'code_review' && bud.status !== 'testing' && bud.status !== 'uat' && bud.status !== 'prod' && bud.status !== 'closed'" class="text-center py-12">
-                    <v-icon icon="mdi-code-tags-check" size="48" color="primary" class="mb-3 opacity-40" />
-                    <div class="text-h6 font-weight-medium mb-2">Code review not started</div>
-                    <div class="text-body-2 text-medium-emphasis">
-                      Code review will begin when development is complete and moved to the code review stage.
-                    </div>
-                  </div>
-
-                  <!-- Completed state: already past code review -->
-                  <div v-else-if="bud.status !== 'code_review'" class="text-center py-8">
-                    <v-icon icon="mdi-check-circle-outline" size="48" color="success" class="mb-3 opacity-60" />
-                    <div class="text-body-1 font-weight-medium">Code review completed</div>
-                  </div>
-
-                  <!-- Active code review: show checklist -->
-                  <template v-else>
-                    <!-- Reviewed PRs header (mirrors Development tab pattern) -->
-                    <v-card v-if="reviewedPRs.length" variant="outlined" rounded="lg" class="mb-3">
-                      <div class="d-flex align-center px-4 py-2">
-                        <v-icon size="small" class="mr-2">mdi-source-pull</v-icon>
-                        <span class="text-subtitle-2 font-weight-medium">
-                          Reviewed PR{{ reviewedPRs.length > 1 ? 's' : '' }}
-                        </span>
-                      </div>
-                      <v-divider />
-                      <v-list density="compact" class="py-0">
-                        <v-list-item
-                          v-for="pr in reviewedPRs"
-                          :key="pr.repo + '#' + pr.number"
-                          :href="pr.htmlUrl"
-                          target="_blank"
-                          class="py-2"
-                        >
-                          <template #prepend>
-                            <v-icon size="small" color="info">mdi-source-pull</v-icon>
-                          </template>
-                          <v-list-item-title class="text-body-2">
-                            {{ pr.repo }}
-                            <span class="text-medium-emphasis">#{{ pr.number }}</span>
-                          </v-list-item-title>
-                          <template #append>
-                            <v-chip size="x-small" variant="tonal" class="mr-2">
-                              {{ pr.commentCount }} comment{{ pr.commentCount !== 1 ? 's' : '' }}
-                            </v-chip>
-                            <v-icon size="x-small">mdi-open-in-new</v-icon>
-                          </template>
-                        </v-list-item>
-                      </v-list>
-                    </v-card>
-
-                    <!-- Toolbar: Download + Add Manual Comment -->
-                    <div class="d-flex align-center mb-3 ga-2">
-                      <v-icon start size="18">mdi-clipboard-check-outline</v-icon>
-                      <span class="text-subtitle-1 font-weight-medium">
-                        Code Review ({{ workflowRef?.resolvedCount ?? 0 }}/{{ workflowRef?.codeReviewComments?.length ?? 0 }})
-                      </span>
-                      <v-spacer />
-                      <v-progress-linear
-                        v-if="workflowRef?.codeReviewComments?.length"
-                        :model-value="(workflowRef.resolvedCount / workflowRef.codeReviewComments.length) * 100"
-                        color="primary"
-                        height="6"
-                        rounded
-                        style="max-width: 100px"
-                      />
-                      <v-btn
-                        variant="tonal"
-                        size="small"
-                        prepend-icon="mdi-download"
-                        @click="downloadCodeReview"
-                      >
-                        Download
-                      </v-btn>
-                      <v-btn
-                        variant="outlined"
-                        size="small"
-                        prepend-icon="mdi-plus"
-                        @click="showAddManualComment = true"
-                      >
-                        Add Comment
-                      </v-btn>
-                    </div>
-
-                    <!-- GitHub-style comment thread -->
-                    <div v-if="workflowRef?.codeReviewComments?.length" class="mb-3">
-                      <v-card
-                        v-for="(c, idx) in workflowRef.codeReviewComments"
-                        :key="idx"
-                        variant="outlined"
-                        rounded="lg"
-                        class="mb-3 code-review-comment"
-                        :class="{
-                          'code-review-comment--resolved': workflowRef.resolutions[idx]?.done === true,
-                          'code-review-comment--unresolved': workflowRef.resolutions[idx]?.done === false,
-                        }"
-                      >
-                        <!-- Header: avatar + author + time + badges + PR link + resolve checkbox -->
-                        <div class="code-review-comment__header d-flex align-center px-4 py-2">
-                          <v-avatar size="28" color="grey-darken-3" class="mr-2">
-                            <v-img
-                              v-if="c.author && c.source !== 'manual' && c.author !== 'bodhigrove-agent'"
-                              :src="`https://github.com/${c.author}.png?size=56`"
-                            >
-                              <template #error>
-                                <v-icon size="16">mdi-account-question-outline</v-icon>
-                              </template>
-                            </v-img>
-                            <v-icon v-else size="16">
-                              {{ c.source === 'manual' ? 'mdi-account-outline' : 'mdi-robot-outline' }}
-                            </v-icon>
-                          </v-avatar>
-                          <div class="flex-grow-1">
-                            <span class="text-body-2 font-weight-medium">{{ c.author || 'Unknown' }}</span>
-                            <span v-if="formatRelativeTime(c.created_at)" class="text-caption text-medium-emphasis ml-1">
-                              commented {{ formatRelativeTime(c.created_at) }}
-                            </span>
-                            <v-chip v-if="c.is_summary" size="x-small" color="primary" variant="tonal" class="ml-2">
-                              Summary
-                            </v-chip>
-                            <v-chip v-if="c.source === 'manual'" size="x-small" color="purple" variant="tonal" class="ml-2">
-                              Manual
-                            </v-chip>
-                            <v-chip v-if="c.source === 'agent'" size="x-small" color="info" variant="tonal" class="ml-2">
-                              Agent
-                            </v-chip>
-                          </div>
-                          <v-btn
-                            v-if="c.html_url"
-                            :href="c.html_url"
-                            target="_blank"
-                            icon="mdi-open-in-new"
-                            size="x-small"
-                            variant="text"
-                            class="mr-1"
-                          />
-                          <v-checkbox-btn
-                            :model-value="workflowRef.resolutions[idx]?.done ?? false"
-                            density="compact"
-                            color="success"
-                            hide-details
-                            @update:model-value="(val: boolean) => workflowRef?.updateResolution(idx, val)"
-                          />
-                        </div>
-                        <v-divider />
-
-                        <!-- Body -->
-                        <div class="px-4 py-3">
-                          <!-- File/line location chip (inline comments only) -->
-                          <div
-                            v-if="c.file"
-                            class="code-review-comment__location mb-2 d-flex align-center px-2 py-1 rounded"
-                          >
-                            <v-icon size="14" class="mr-1">mdi-file-code-outline</v-icon>
-                            <code class="text-caption">{{ c.file }}{{ c.line ? ':' + c.line : '' }}</code>
-                            <v-spacer />
-                            <span class="text-caption text-medium-emphasis">{{ c.repo }}</span>
-                          </div>
-
-                          <!-- Rendered markdown body -->
-                          <div
-                            v-if="commentText(c)"
-                            class="rendered-markdown text-body-2"
-                            v-html="renderMarkdown(commentText(c))"
-                          />
-                        </div>
-
-                        <!-- Unresolved reason textarea -->
-                        <div v-if="workflowRef.resolutions[idx]?.done === false" class="px-4 pb-3">
-                          <v-text-field
-                            v-model="workflowRef.resolutions[idx].comment"
-                            variant="outlined"
-                            density="compact"
-                            placeholder="Why not addressed? (required)"
-                            :error="!workflowRef.resolutions[idx].comment?.trim() && workflowRef.pushAttempted"
-                            hide-details="auto"
-                          />
-                        </div>
-                      </v-card>
-                    </div>
-
-                    <!-- No agent comments yet -->
-                    <div v-else class="text-center py-6 mb-3">
-                      <v-icon icon="mdi-check-all" size="36" color="success" class="mb-2 opacity-60" />
-                      <div class="text-body-2 text-medium-emphasis">No agent review comments. Add manual comments above.</div>
-                    </div>
-
-                    <!-- Re-review + Push to QA -->
-                    <div class="d-flex align-center">
-                      <span class="text-caption text-medium-emphasis">
-                        Re-runs code review to verify fixes, then moves to QA if clean
-                      </span>
-                      <v-spacer />
-                      <v-btn
-                        variant="text"
-                        size="small"
-                        color="warning"
-                        @click="skipCodeReview"
-                      >
-                        Skip & Push to QA
-                      </v-btn>
-                      <v-btn
-                        color="primary"
-                        variant="flat"
-                        size="small"
-                        class="ml-2"
-                        :disabled="!workflowRef?.canPushToQA"
-                        @click="workflowRef?.handlePushToQA()"
-                      >
-                        <v-icon start size="16">mdi-refresh</v-icon>
-                        Re-review & Push to QA
-                      </v-btn>
-                    </div>
-                  </template>
-
-                  <!-- Add Manual Comment Dialog -->
-                  <v-dialog v-model="showAddManualComment" max-width="480">
-                    <v-card class="pa-2">
-                      <v-card-title class="text-h6 pb-1">Add Code Review Comment</v-card-title>
-                      <v-card-text class="pb-2">
-                        <v-select
-                          v-model="manualComment.repo"
-                          variant="outlined"
-                          density="compact"
-                          label="Repository"
-                          :items="repoDropdownItems"
-                          class="mb-2"
-                        />
-                        <v-textarea
-                          v-model="manualComment.comment"
-                          variant="outlined"
-                          density="compact"
-                          label="Comment"
-                          rows="3"
-                          placeholder="Describe the issue or feedback..."
-                          :rules="[v => !!v?.trim() || 'Comment is required']"
-                        />
-                      </v-card-text>
-                      <v-card-actions class="px-4 pb-3 pt-0">
-                        <v-spacer />
-                        <v-btn variant="text" size="small" @click="showAddManualComment = false">Cancel</v-btn>
-                        <v-btn
-                          color="primary"
-                          variant="flat"
-                          size="small"
-                          :disabled="!manualComment.comment?.trim()"
-                          @click="addManualComment"
-                        >
-                          Add Comment
-                        </v-btn>
-                      </v-card-actions>
-                    </v-card>
-                  </v-dialog>
                 </div>
+
+                <!-- Already past code review -->
+                <div v-else-if="bud.status !== 'code_review'" class="text-center py-8">
+                  <v-icon icon="mdi-check-circle-outline" size="48" color="success" class="mb-3 opacity-60" />
+                  <div class="text-body-1 font-weight-medium">Code review completed</div>
+                </div>
+
+                <!-- Active: PR status board + Override CTA -->
+                <BUDCodeReviewStatus
+                  v-else
+                  :bud-id="bud.id"
+                  @transitioned="onCodeReviewTransitioned"
+                />
               </v-tabs-window-item>
 
               <!-- Testing -->
@@ -793,6 +554,7 @@ import BUDTimeline from '@/components/buds/BUDTimeline.vue'
 import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
 import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
 import BUDPRChecklist from '@/components/buds/BUDPRChecklist.vue'
+import BUDCodeReviewStatus from '@/components/buds/BUDCodeReviewStatus.vue'
 import BUDQAPanel from '@/components/buds/BUDQAPanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import { marked } from 'marked'
@@ -819,134 +581,23 @@ const canApprove = computed(() => {
   return role === 'tech_lead' || role === 'manager' || role === 'org_owner'
 })
 
-// ── Code Review: download + manual comments ──────────────
-const showAddManualComment = ref(false)
-const manualComment = ref({ repo: '', comment: '' })
-
-const repoDropdownItems = computed(() => {
-  const repos = bud.value?.impacted_repos || []
-  return repos.map(r => r.repo_name)
+// "Has the BUD reached the code_review phase yet?" — matches the
+// BUD_STATUS_ORDER.indexOf pattern used by BUDEstimateTimeline.vue and
+// BUDBoard.vue for phase-reached checks.
+const _codeReviewPhaseIdx = BUD_STATUS_ORDER.indexOf('code_review')
+const reachedCodeReview = computed(() => {
+  const s = bud.value?.status
+  if (!s) return false
+  return BUD_STATUS_ORDER.indexOf(s) >= _codeReviewPhaseIdx
 })
 
-// ── Code Review: PR extraction + time formatting ─────────
-interface ReviewedPR {
-  repo: string        // e.g. "taskflow-web"
-  number: number      // e.g. 18
-  htmlUrl: string     // link to the PR itself (not the specific comment)
-  commentCount: number
-}
-
-// Parses a GitHub comment html_url like
-//   https://github.com/mickyarun/taskflow-web/pull/18#issuecomment-4187257141
-// into { repo, number, prUrl }. Returns null if the URL isn't a PR comment.
-function parsePrFromUrl(htmlUrl: string | undefined | null): { repo: string; number: number; prUrl: string } | null {
-  if (!htmlUrl) return null
-  const match = htmlUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/)
-  if (!match) return null
-  const [, owner, repo, numStr] = match
-  return {
-    repo,
-    number: parseInt(numStr, 10),
-    prUrl: `https://github.com/${owner}/${repo}/pull/${numStr}`,
-  }
-}
-
-// Normalize comment text — agent comments use `comment`, GitHub-synced use `body`.
-function commentText(c: { body?: string; comment?: string }): string {
-  return c.body || c.comment || ''
-}
-
-function formatRelativeTime(iso: string | undefined | null): string {
-  if (!iso) return ''
-  const date = new Date(iso)
-  if (isNaN(date.getTime())) return ''
-  const diffMs = Date.now() - date.getTime()
-  if (diffMs < 0) return date.toLocaleDateString()
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? 's' : ''} ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? 's' : ''} ago`
-  const diffDay = Math.floor(diffHr / 24)
-  if (diffDay < 7) return `${diffDay} day${diffDay !== 1 ? 's' : ''} ago`
-  return date.toLocaleDateString()
-}
-
-// Derives the list of unique PRs that were reviewed in this BUD by parsing
-// each comment's html_url. Agent inline comments and manual comments don't
-// have a PR link and are skipped. Deduped by full PR URL (owner/repo/number),
-// so the same PR produces one row regardless of how many comments it owns.
-// Insertion order is preserved — PRs appear in the order their first comment
-// appears in bud.code_review_comments, which matches chronological review order.
-const reviewedPRs = computed<ReviewedPR[]>(() => {
-  const comments = bud.value?.code_review_comments || []
-  const prMap = new Map<string, ReviewedPR>()
-  for (const c of comments) {
-    const parsed = parsePrFromUrl(c.html_url)
-    if (!parsed) continue
-    const existing = prMap.get(parsed.prUrl)
-    if (existing) {
-      existing.commentCount++
-    } else {
-      prMap.set(parsed.prUrl, {
-        repo: parsed.repo,
-        number: parsed.number,
-        htmlUrl: parsed.prUrl,
-        commentCount: 1,
-      })
-    }
-  }
-  return Array.from(prMap.values())
-})
-
-function downloadCodeReview(): void {
-  if (!bud.value || !workflowRef.value) return
-  const budRef = `BUD-${String(bud.value.bud_number).padStart(3, '0')}`
-  const comments = workflowRef.value.codeReviewComments || []
-
-  let md = `# Code Review: ${budRef} — ${bud.value.title}\n\n`
-  md += `**${comments.length} comments**\n\n`
-  for (const c of comments) {
-    const loc = c.file ? `${c.file}${c.line ? ':' + c.line : ''}` : c.repo
-    const tag = c.is_summary ? '[SUMMARY]' : '[COMMENT]'
-    md += `### ${tag} ${loc}\n\n${commentText(c)}\n\n`
-    md += `---\n\n`
-  }
-
-  const blob = new Blob([md], { type: 'text/markdown' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `${budRef}-code-review.md`
-  a.click()
-  URL.revokeObjectURL(a.href)
-}
-
-async function skipCodeReview(): Promise<void> {
+// Code Review → Testing transition handler. BUDCodeReviewStatus emits
+// this after a successful override. The tab auto-switches to Testing
+// via the STATUS_TAB_MAP watcher once fetchBUD picks up the new status,
+// so no manual activeTab assignment needed.
+async function onCodeReviewTransitioned(): Promise<void> {
   if (!bud.value) return
-  const meta = { ...(bud.value.metadata || {}) } as Record<string, unknown>
-  meta.code_review_skipped = true
-  await budStore.updateBUD(bud.value.id, { metadata: meta, status: 'testing' } as never)
-  await budStore.fetchBUD(bud.value.id)
-}
-
-async function addManualComment(): Promise<void> {
-  if (!bud.value || !manualComment.value.comment.trim()) return
-
-  const existing = [...(bud.value.code_review_comments || [])] as Array<Record<string, unknown>>
-  existing.push({
-    repo: manualComment.value.repo || 'general',
-    file: '',
-    line: 0,
-    body: manualComment.value.comment,
-    author: 'manual',
-    is_summary: false,
-    source: 'manual',
-  })
-  await budStore.updateBUD(bud.value.id, { code_review_comments: existing } as never)
-  await budStore.fetchBUD(bud.value.id)
-
-  manualComment.value = { repo: '', comment: '' }
-  showAddManualComment.value = false
+  await Promise.all([budStore.fetchBUD(bud.value.id), loadTimeline()])
 }
 
 const isCurrentAssignee = computed(() =>
@@ -1626,90 +1277,4 @@ function formatDate(dateStr: string): string {
   pointer-events: none;
 }
 
-/* ── Code Review: GitHub-style comment cards ───── */
-.code-review-comment__header {
-  background: rgba(var(--v-theme-on-surface), 0.04);
-}
-
-.code-review-comment--resolved {
-  border-color: rgba(var(--v-theme-success), 0.5) !important;
-}
-
-.code-review-comment--resolved .code-review-comment__header {
-  background: rgba(var(--v-theme-success), 0.08);
-}
-
-.code-review-comment--unresolved {
-  border-color: rgba(var(--v-theme-warning), 0.5) !important;
-}
-
-.code-review-comment--unresolved .code-review-comment__header {
-  background: rgba(var(--v-theme-warning), 0.08);
-}
-
-.code-review-comment__location {
-  background: rgba(var(--v-theme-on-surface), 0.05);
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-}
-
-/* GitHub-style markdown tweaks scoped to code review comments.
-   The shared .rendered-markdown styles are tuned for full-tab PRD/tech-spec
-   surfaces; inside a comment card we need tighter spacing, readable link
-   contrast on the dark theme, and inline code that actually stands out. */
-.code-review-comment .rendered-markdown {
-  padding: 0;
-  line-height: 1.6;
-  font-size: 13px;
-  color: rgba(var(--v-theme-on-surface), 0.92);
-}
-
-.code-review-comment .rendered-markdown :deep(a) {
-  color: #58a6ff;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  word-break: break-word;
-}
-
-.code-review-comment .rendered-markdown :deep(a:hover) {
-  color: #79b8ff;
-}
-
-.code-review-comment .rendered-markdown :deep(code) {
-  background: rgba(var(--v-theme-on-surface), 0.15);
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
-  padding: 1px 6px;
-  font-size: 0.85em;
-  color: rgba(var(--v-theme-on-surface), 0.95);
-}
-
-.code-review-comment .rendered-markdown :deep(pre) {
-  background: rgba(var(--v-theme-on-surface), 0.08);
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
-}
-
-.code-review-comment .rendered-markdown :deep(pre code) {
-  background: none;
-  border: none;
-  padding: 0;
-}
-
-.code-review-comment .rendered-markdown :deep(p),
-.code-review-comment .rendered-markdown :deep(ol),
-.code-review-comment .rendered-markdown :deep(ul) {
-  margin: 0 0 10px;
-}
-
-.code-review-comment .rendered-markdown :deep(p:last-child),
-.code-review-comment .rendered-markdown :deep(ol:last-child),
-.code-review-comment .rendered-markdown :deep(ul:last-child) {
-  margin-bottom: 0;
-}
-
-.code-review-comment .rendered-markdown :deep(li) {
-  margin-bottom: 4px;
-}
-
-.code-review-comment .rendered-markdown :deep(strong) {
-  color: rgba(var(--v-theme-on-surface), 1);
-}
 </style>

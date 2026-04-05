@@ -485,6 +485,29 @@ export interface PRChecklistItem {
   status: 'no_pr' | 'open' | 'merged'
 }
 
+// ─── Code Review tab ───────────────────────────
+
+export type CodeReviewPRState = 'not_raised' | 'open' | 'merged' | 'closed'
+
+export interface CodeReviewRepoStatus {
+  repo_id: string
+  repo_name: string
+  pr_number: number | null
+  pr_state: CodeReviewPRState
+  pr_url: string | null
+  comment_count: number
+}
+
+export interface CodeReviewStatusResponse {
+  repos: CodeReviewRepoStatus[]
+}
+
+// Mirror of backend `CodeReviewOverrideRequest` Pydantic constraints in
+// backend/app/schemas/bud.py. Keep in sync manually if the backend limits
+// change — a drift here silently turns into 422s with generic messages.
+export const CODE_REVIEW_OVERRIDE_REASON_MIN = 10
+export const CODE_REVIEW_OVERRIDE_REASON_MAX = 2000
+
 // ─── XP / Gamification ─────────────────────────
 
 export interface XPProfile {
