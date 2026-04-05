@@ -458,7 +458,8 @@
                 Advance to Testing
               </div>
               <div class="text-body-2 text-medium-emphasis mb-3">
-                AC verification will be skipped. Please explain why you're manually advancing.
+                Some PRs aren't merged yet. Please explain why you're manually
+                advancing to QA.
               </div>
               <v-textarea
                 v-model="overrideReasonText"
@@ -818,12 +819,23 @@ async function updateStatus(newStatus: string): Promise<void> {
     }
   }
 
-  // Require reason when manually advancing code_review → testing
+  // Manual advance code_review → testing:
+  //   - If every impacted repo already has a merged PR, there's nothing to
+  //     "override" — the code is approved on GitHub and we just advance
+  //     straight through, same outcome as the webhook auto-transition.
+  //   - Otherwise the user is bypassing PR merges (e.g. docs-only change
+  //     or unusual workflow), so we still prompt for a reason so the
+  //     bypass is recorded on the timeline.
   if (bud.value.status === 'code_review' && newStatus === 'testing') {
-    pendingOverrideStatus.value = newStatus
-    overrideReasonText.value = ''
-    overrideReasonDialog.value = true
-    return
+    const repoStatuses = await budStore.fetchCodeReviewStatus(bud.value.id)
+    const allMerged = repoStatuses.length > 0
+      && repoStatuses.every(r => r.pr_state === 'merged')
+    if (!allMerged) {
+      pendingOverrideStatus.value = newStatus
+      overrideReasonText.value = ''
+      overrideReasonDialog.value = true
+      return
+    }
   }
 
   await _executeStatusChange(newStatus)
