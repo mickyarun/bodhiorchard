@@ -339,10 +339,31 @@ def _parse_code_review_output(output: str) -> dict[str, Any]:
 
 
 def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
-    """Normalize various agent output structures into expected format."""
+    """Normalize various agent output structures into expected format.
+
+    The QA agent may produce test cases in several shapes:
+    - ``{automation_test_cases: [...], manual_test_cases: [...]}`` (ideal)
+    - ``{automation: [...], manual: [...]}`` (shorthand)
+    - ``{test_cases: [{layer: "automation", ...}, {layer: "manual", ...}]}``
+      (unified list with a ``layer`` discriminator)
+    All are normalized into the canonical two-list shape.
+    """
     auto = parsed.get("automation_test_cases", [])
     manual = parsed.get("manual_test_cases", [])
     plan = parsed.get("test_execution_plan", "")
+
+    # Unified test_cases list with a "layer" discriminator per item
+    if not auto and not manual and "test_cases" in parsed:
+        all_cases = parsed["test_cases"]
+        if isinstance(all_cases, list):
+            for tc in all_cases:
+                if not isinstance(tc, dict):
+                    continue
+                layer = (tc.get("layer") or tc.get("type") or "").lower()
+                if layer in ("automation", "automated", "auto"):
+                    auto.append(tc)
+                else:
+                    manual.append(tc)
 
     if not auto and "automation" in parsed:
         auto_section = parsed["automation"]
