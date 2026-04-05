@@ -201,9 +201,16 @@ function trackAgentTask(task: { job_id: string | null; task_type: string; status
       await budStore.fetchBUD(props.bud.id)
       emit('reload-timeline')
     },
-    onError(err) {
+    async onError(err) {
       agentGenerating.value = false
       agentStatusMessage.value = `Failed: ${err}`
+      agentName.value = ''
+      // Refetch so bud.active_agent_task reflects the failed status —
+      // the unified top banner and any per-tab consumers read from
+      // that field and would otherwise stay stuck on the stale
+      // "running" state until the next page load.
+      await budStore.fetchBUD(props.bud.id)
+      emit('reload-timeline')
     },
   })
 }

@@ -1,27 +1,10 @@
 <template>
   <div class="qa-panel pa-4">
-    <!-- Loading -->
+    <!-- Initial fetch of QA test cases. Agent running/failed state is
+         handled by the unified top banner in BUDDetail.vue, matching the
+         pattern other tabs follow — no per-tab duplication. -->
     <div v-if="loading" class="d-flex justify-center py-12">
       <v-progress-circular indeterminate size="24" width="2" />
-    </div>
-
-    <!-- Agent failed -->
-    <div v-else-if="props.activeAgentTask?.task_type === 'testing' && props.activeAgentTask?.status === 'failed' && !hasTestCases" class="empty-state">
-      <v-icon icon="mdi-alert-circle" size="48" color="error" class="mb-3 opacity-60" />
-      <div class="text-h6 font-weight-medium mb-2">Test case generation failed</div>
-      <div class="text-body-2 text-medium-emphasis mb-2" style="max-width: 440px;">
-        {{ props.activeAgentTask.error_message || 'The QA agent encountered an error.' }}
-      </div>
-      <div class="text-caption text-medium-emphasis mb-4">Attempt {{ props.activeAgentTask.attempt }}</div>
-    </div>
-
-    <!-- Agent running -->
-    <div v-else-if="props.activeAgentTask?.task_type === 'testing' && (props.activeAgentTask?.status === 'running' || props.activeAgentTask?.status === 'pending')" class="empty-state">
-      <v-progress-circular indeterminate size="32" width="3" color="purple" class="mb-3" />
-      <div class="text-h6 font-weight-medium mb-2">Generating test cases...</div>
-      <div class="text-body-2 text-medium-emphasis">
-        {{ props.activeAgentTask.status_message || 'The QA agent is analyzing code changes and generating test cases.' }}
-      </div>
     </div>
 
     <!-- Empty state: no test cases yet -->
