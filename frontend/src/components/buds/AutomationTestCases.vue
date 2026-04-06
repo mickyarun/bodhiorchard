@@ -35,7 +35,7 @@
           </v-expansion-panel-title>
           <v-expansion-panel-text>
             <div class="mb-3">
-              <div class="text-caption text-medium-emphasis mb-1">Gherkin Scenario</div>
+              <div class="text-caption text-medium-emphasis mb-1">Test Scenario</div>
               <pre class="bg-grey-lighten-4 pa-3 rounded text-body-2" style="white-space: pre-wrap">{{ tc.gherkin }}</pre>
               <v-btn
                 size="x-small"
@@ -44,7 +44,7 @@
                 @click="copyToClipboard(tc.gherkin)"
               >
                 <v-icon start size="14">mdi-content-copy</v-icon>
-                Copy Gherkin
+                Copy Scenario
               </v-btn>
             </div>
 

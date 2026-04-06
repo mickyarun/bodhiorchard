@@ -235,7 +235,7 @@ function downloadTestPlan(): void {
       md += `### ${tc.id}: ${tc.title}\n\n`
       md += `- **Type:** ${tc.type}\n`
       md += `- **Priority:** ${tc.priority}\n`
-      if (tc.gherkin) md += `- **Gherkin:**\n\`\`\`gherkin\n${tc.gherkin}\n\`\`\`\n`
+      if (tc.gherkin) md += `- **Test Scenario:**\n\`\`\`\n${tc.gherkin}\n\`\`\`\n`
       if (tc.input) md += `- **Input:** ${tc.input}\n`
       if (tc.expected_output) md += `- **Expected:** ${tc.expected_output}\n`
       if (tc.tags?.length) md += `- **Tags:** ${tc.tags.join(', ')}\n`
@@ -300,4 +300,31 @@ onMounted(load)
   padding: 48px 16px;
   text-align: center;
 }
+
+/* Markdown rendering for test plan + execution plan */
+.markdown-body :deep(h1) { font-size: 1.4em; font-weight: 700; margin: 0 0 12px; }
+.markdown-body :deep(h2) { font-size: 1.15em; font-weight: 600; margin: 20px 0 8px; }
+.markdown-body :deep(h3) { font-size: 1em; font-weight: 600; margin: 16px 0 6px; }
+.markdown-body :deep(p) { margin: 0 0 10px; }
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) { margin: 0 0 10px; padding-left: 24px; }
+.markdown-body :deep(ol) { list-style-type: decimal; }
+.markdown-body :deep(li) { margin-bottom: 6px; }
+.markdown-body :deep(li p) { margin: 0; }
+.markdown-body :deep(strong) { font-weight: 600; color: rgba(var(--v-theme-on-surface), 0.95); }
+.markdown-body :deep(code) {
+  background: rgba(var(--v-theme-on-surface), 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.87em;
+}
+.markdown-body :deep(pre) {
+  background: rgba(var(--v-theme-on-surface), 0.05);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 0 0 10px;
+  overflow-x: auto;
+}
+.markdown-body :deep(pre code) { background: none; padding: 0; }
 </style>

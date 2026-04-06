@@ -242,32 +242,47 @@ async def build_testing_prompt(
         prompt += draft_context
     prompt += (
         "## Instructions\n\n"
-        "Target 15-25 test cases total. Cover: functional, negative, boundary, "
-        "stress, non-functional (a11y, perf), and impact (regression).\n"
-        "Split into automation (unit/integration/component tests) and manual "
-        "(visual, a11y, UX, real-device, stress) test cases.\n\n"
+        "You are a QA engineer, NOT a developer. Write test cases to cover "
+        "all scenarios based on the requirements and code changes — as many "
+        "as needed, no padding.\n\n"
+        "**Automation cases** = Playwright E2E tests. Write each as a scenario "
+        "with Given/When/Then steps that a developer can hand to Claude Code "
+        "to produce a working Playwright test file. Cover: functional flows, "
+        "negative paths, boundary values, regression checks.\n\n"
+        "**Manual cases** = ONLY things Playwright cannot verify: visual "
+        "design parity (comparing to wireframe with human eyes), screen "
+        "reader/VoiceOver testing, physical device behavior, subjective UX "
+        "feel. Do NOT put functional tests here — if Playwright can click it "
+        "and assert the result, it belongs in automation.\n\n"
+        "Do NOT generate unit tests, integration tests, or store/composable "
+        "tests — those are the developer's responsibility, not QA's.\n\n"
         "## Output Format (JSON only, no wrapper)\n\n"
         "```json\n"
         "{\n"
         '  "automation_test_cases": [\n'
-        '    {"id": "TC-001", "title": "...",\n'
-        '     "type": "unit|integration|e2e|api",\n'
-        '     "gherkin": "Given ... When ... Then ...",\n'
-        '     "input": "...", "expected_output": "...",\n'
-        '     "priority": "critical|high|medium|low",\n'
+        '    {"id": "TC-001", "title": "Bell icon switches to filled on unread",\n'
+        '     "type": "e2e",\n'
+        '     "gherkin": "Given the user has 3 unread notifications\\n'
+        "When the page loads\\n"
+        "Then the bell icon should be the filled variant\\n"
+        'And the badge should show 3",\n'
+        '     "input": "3 unread notifications in DB",\n'
+        '     "expected_output": "Filled bell SVG + badge showing 3",\n'
+        '     "priority": "high",\n'
         '     "tags": ["smoke", "regression"]}\n'
         "  ],\n"
         '  "manual_test_cases": [\n'
-        '    {"id": "TC-021", "title": "...",\n'
-        '     "description": "...", "preconditions": "...",\n'
-        '     "steps": ["step 1", "step 2"],\n'
-        '     "expected_result": "...",\n'
-        '     "priority": "critical|high|medium|low",\n'
-        '     "category": "functional|usability|accessibility|security"}\n'
+        '    {"id": "TC-021", "title": "Panel matches wireframe visual design",\n'
+        '     "description": "Compare rendered panel against approved wireframe",\n'
+        '     "preconditions": "Wireframe open side-by-side",\n'
+        '     "steps": ["Open notification panel", "Compare layout to wireframe"],\n'
+        '     "expected_result": "Panel matches wireframe spacing and colors",\n'
+        '     "priority": "medium",\n'
+        '     "category": "usability"}\n'
         "  ],\n"
         '  "test_execution_plan": "## Phases\\n\\n'
-        "1. **Unit tests** — run first...\\n"
-        '2. **Manual regression** — verify UI..."\n'
+        "1. **Playwright E2E** — run on every PR...\\n"
+        '2. **Manual visual/a11y** — run before release..."\n'
         "}\n"
         "```\n"
     )
