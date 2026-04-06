@@ -444,6 +444,34 @@ async def _trigger_status_jobs(
                 )
                 return
 
+        # When entering testing: if test cases already exist from a previous
+        # run, skip the QA agent (no need to regenerate). If they're empty
+        # (previous run failed or produced nothing), force-run the agent
+        # despite test_plan_md being populated (test_plan_md is just a
+        # summary string like "0 automation + 0 manual" which the content-
+        # exists guard in create_agent_task_for_stage would treat as "done").
+        if new_status == BUDStatus.TESTING:
+            has_cases = bool(bud.qa_automation_cases or bud.qa_manual_cases)
+            if has_cases:
+                logger.info(
+                    "testing_agent_skip_cases_exist",
+                    bud_id=str(bud.id),
+                    auto_count=len(bud.qa_automation_cases or []),
+                    manual_count=len(bud.qa_manual_cases or []),
+                )
+                return
+            # No test cases yet — force the agent to run even if
+            # test_plan_md has stale content from a previous empty run.
+            await create_agent_task_for_stage(
+                bud,
+                str(new_status),
+                current_user.org_id,
+                db,
+                triggered_by=current_user.id,
+                force=True,
+            )
+            return
+
         # Force re-run when going back to code_review from later stages
         force = new_status == BUDStatus.CODE_REVIEW and old_status in (
             BUDStatus.TESTING,

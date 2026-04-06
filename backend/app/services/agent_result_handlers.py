@@ -363,18 +363,47 @@ def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
     manual = parsed.get("manual_test_cases", [])
     plan = parsed.get("test_execution_plan", "")
 
-    # Unified test_cases list with a "layer" discriminator per item
+    # Unified test_cases list with a discriminator per item. The agent has
+    # used at least 3 different field names across runs (layer, type, suite),
+    # so we check all known variants.
     if not auto and not manual and "test_cases" in parsed:
         all_cases = parsed["test_cases"]
         if isinstance(all_cases, list):
             for tc in all_cases:
                 if not isinstance(tc, dict):
                     continue
-                layer = (tc.get("layer") or tc.get("type") or "").lower()
-                if layer in ("automation", "automated", "auto"):
+                disc = (
+                    tc.get("layer")
+                    or tc.get("type")
+                    or tc.get("suite")
+                    or tc.get("kind")
+                    or ""
+                ).lower()
+                if disc in ("automation", "automated", "auto", "unit", "integration", "component"):
                     auto.append(tc)
                 else:
                     manual.append(tc)
+
+    # Category-based fallback: if ALL test cases ended up as manual despite
+    # the unified split (all discriminator fields were missing), re-classify
+    # based on category heuristics. Unit/functional/boundary/negative tests
+    # are typically automation; a11y/visual/ux tests are typically manual.
+    auto_categories = {
+        "functional", "boundary", "negative", "stress", "regression",
+        "integration", "unit", "component", "impact",
+    }
+    if not auto and manual:
+        reclassified_auto: list = []
+        remaining_manual: list = []
+        for tc in manual:
+            cat = (tc.get("category") or "").lower()
+            if cat in auto_categories:
+                reclassified_auto.append(tc)
+            else:
+                remaining_manual.append(tc)
+        if reclassified_auto:
+            auto = reclassified_auto
+            manual = remaining_manual
 
     if not auto and "automation" in parsed:
         auto_section = parsed["automation"]
@@ -403,6 +432,18 @@ def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
         plan = "\n".join(f"- {item}" if isinstance(item, str) else str(item) for item in plan)
     elif not isinstance(plan, str):
         plan = ""
+
+    # Post-process: replace raw Python list repr (['TC-001', 'TC-002'])
+    # with comma-joined IDs. The agent sometimes embeds Python-style arrays
+    # in the execution plan string.
+    if isinstance(plan, str) and "['TC-" in plan:
+        import re
+
+        plan = re.sub(
+            r"\['(TC-\d+)'(?:,\s*'(TC-\d+)')*\]",
+            lambda m: ", ".join(s.strip("' ") for s in m.group(0).strip("[]").split(",")),
+            plan,
+        )
 
     return {
         "automation_test_cases": auto if isinstance(auto, list) else [],

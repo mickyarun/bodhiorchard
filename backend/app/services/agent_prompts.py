@@ -244,9 +244,32 @@ async def build_testing_prompt(
         "## Instructions\n\n"
         "Target 15-25 test cases total. Cover: functional, negative, boundary, "
         "stress, non-functional (a11y, perf), and impact (regression).\n"
-        "Produce automation test cases (Playwright/Cucumber), "
-        "manual test cases, and a test execution plan.\n"
-        "Output ONLY the JSON — no markdown wrapper, no explanation.\n"
+        "Split into automation (unit/integration/component tests) and manual "
+        "(visual, a11y, UX, real-device, stress) test cases.\n\n"
+        "## Output Format (JSON only, no wrapper)\n\n"
+        "```json\n"
+        "{\n"
+        '  "automation_test_cases": [\n'
+        '    {"id": "TC-001", "title": "...",\n'
+        '     "type": "unit|integration|e2e|api",\n'
+        '     "gherkin": "Given ... When ... Then ...",\n'
+        '     "input": "...", "expected_output": "...",\n'
+        '     "priority": "critical|high|medium|low",\n'
+        '     "tags": ["smoke", "regression"]}\n'
+        "  ],\n"
+        '  "manual_test_cases": [\n'
+        '    {"id": "TC-021", "title": "...",\n'
+        '     "description": "...", "preconditions": "...",\n'
+        '     "steps": ["step 1", "step 2"],\n'
+        '     "expected_result": "...",\n'
+        '     "priority": "critical|high|medium|low",\n'
+        '     "category": "functional|usability|accessibility|security"}\n'
+        "  ],\n"
+        '  "test_execution_plan": "## Phases\\n\\n'
+        "1. **Unit tests** — run first...\\n"
+        '2. **Manual regression** — verify UI..."\n'
+        "}\n"
+        "```\n"
     )
 
     return prompt, working_dir

@@ -217,9 +217,51 @@ function renderMarkdown(md: string | null): string {
 }
 
 function downloadTestPlan(): void {
-  if (!props.testPlanMd) return
   const budRef = `BUD-${String(props.budNumber ?? 0).padStart(3, '0')}`
-  const blob = new Blob([props.testPlanMd], { type: 'text/markdown' })
+  const autoCount = automationCases.value.length
+  const manualCount = manualCases.value.length
+
+  let md = `# Test Plan: ${budRef}\n\n`
+  md += `- **${autoCount}** automation test cases\n`
+  md += `- **${manualCount}** manual test cases\n\n`
+
+  if (executionPlan.value) {
+    md += `## Execution Plan\n\n${executionPlan.value}\n\n`
+  }
+
+  if (autoCount > 0) {
+    md += `## Automation Test Cases (${autoCount})\n\n`
+    for (const tc of automationCases.value) {
+      md += `### ${tc.id}: ${tc.title}\n\n`
+      md += `- **Type:** ${tc.type}\n`
+      md += `- **Priority:** ${tc.priority}\n`
+      if (tc.gherkin) md += `- **Gherkin:**\n\`\`\`gherkin\n${tc.gherkin}\n\`\`\`\n`
+      if (tc.input) md += `- **Input:** ${tc.input}\n`
+      if (tc.expected_output) md += `- **Expected:** ${tc.expected_output}\n`
+      if (tc.tags?.length) md += `- **Tags:** ${tc.tags.join(', ')}\n`
+      md += '\n'
+    }
+  }
+
+  if (manualCount > 0) {
+    md += `## Manual Test Cases (${manualCount})\n\n`
+    for (const tc of manualCases.value) {
+      md += `### ${tc.id}: ${tc.title}\n\n`
+      md += `- **Category:** ${tc.category}\n`
+      md += `- **Priority:** ${tc.priority}\n`
+      md += `- **Status:** ${tc.result || 'pending'}\n`
+      if (tc.description) md += `- **Description:** ${tc.description}\n`
+      if (tc.preconditions) md += `- **Preconditions:** ${tc.preconditions}\n`
+      if (tc.steps?.length) {
+        md += `- **Steps:**\n`
+        for (const step of tc.steps) md += `  1. ${step}\n`
+      }
+      if (tc.expected_result) md += `- **Expected:** ${tc.expected_result}\n`
+      md += '\n'
+    }
+  }
+
+  const blob = new Blob([md], { type: 'text/markdown' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = `${budRef}-test-plan.md`
