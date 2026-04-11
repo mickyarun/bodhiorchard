@@ -130,7 +130,9 @@ defineExpose({
   toggleArcs: () => canvasRef.value?.toggleArcs(),
   takeoverCharacter: () => canvasRef.value?.takeoverCharacter(),
   exitTakeover: () => canvasRef.value?.exitTakeover(),
+  exitHouse: () => canvasRef.value?.exitHouse(),
   isTakeover: () => canvasRef.value?.isTakeover() ?? false,
+  isInControl: () => canvasRef.value?.isInControl() ?? false,
 })
 </script>
 

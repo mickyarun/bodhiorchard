@@ -10,13 +10,14 @@
     "start:prod": "node dist/main.js"
   },
   "dependencies": {
-    "colyseus": "^0.17.0",
-    "@colyseus/ws-transport": "^0.17.0"
+    "@colyseus/ws-transport": "^0.17.0",
+    "colyseus": "^0.17.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.0.0",
     "ts-node": "^10.9.0",
     "ts-node-dev": "^2.0.0",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.4.0"
   }
 }

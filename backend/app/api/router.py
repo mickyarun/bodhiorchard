@@ -9,6 +9,7 @@ from app.api.v1.bud import router as bud_router
 from app.api.v1.claude import router as claude_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.design_system import router as design_system_router
+from app.api.v1.internal_colyseus import router as internal_colyseus_router
 from app.api.v1.github_webhook import router as github_webhook_router
 from app.api.v1.jobs import router as jobs_router
 from app.api.v1.members import router as members_router
@@ -49,3 +50,4 @@ api_router.include_router(ws_router, prefix="/api/v1")
 api_router.include_router(public_router, prefix="/api/v1/public")
 api_router.include_router(xp_router, prefix="/api/v1")
 api_router.include_router(mcp_router)
+api_router.include_router(internal_colyseus_router, prefix="/api/v1")

@@ -47,7 +47,10 @@ export class ColyseusClient {
   }
 
   /** Join a house room. Creates or joins "house-{memberId}". */
-  async joinHouseRoom(memberId: string, userData: { userId: string; name: string }): Promise<Room> {
+  async joinHouseRoom(
+    memberId: string,
+    userData: { userId: string; name: string; characterModel?: string },
+  ): Promise<Room> {
     if (this.currentRoom) {
       await this.leaveRoom()
     }
@@ -58,12 +61,44 @@ export class ColyseusClient {
         ownerId: memberId,
         userId: userData.userId,
         name: userData.name,
+        characterModel: userData.characterModel ?? '',
       })
 
       this.setupStateListeners()
       return this.currentRoom
     } catch (err) {
       console.warn("[ColyseusClient] Failed to join house room:", err)
+      throw err
+    }
+  }
+
+  /**
+   * Join the org-wide room. One room per org holds authoritative state
+   * for all members + agents. Creates `org-{orgId}` if not exists.
+   *
+   * Does NOT wire setupStateListeners (that's for HouseRoom only).
+   * OrgRoom state subscription is handled by OrgRoomClient.
+   */
+  async joinOrgRoom(
+    orgId: string,
+    userData: { userId: string; name: string; characterModel?: string; token?: string },
+  ): Promise<Room> {
+    if (this.currentRoom) {
+      await this.leaveRoom()
+    }
+
+    try {
+      this.currentRoom = await this.client.joinOrCreate("org", {
+        roomId: `org-${orgId}`,
+        orgId,
+        userId: userData.userId,
+        name: userData.name,
+        characterModel: userData.characterModel ?? '',
+        token: userData.token ?? '',
+      })
+      return this.currentRoom
+    } catch (err) {
+      console.warn("[ColyseusClient] Failed to join org room:", err)
       throw err
     }
   }

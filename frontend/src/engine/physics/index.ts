@@ -1,1 +1,1 @@
-export { PhysicsWorld, type SensorEvent } from './PhysicsWorld'
+export { PhysicsWorld, type DoorCollision } from './PhysicsWorld'

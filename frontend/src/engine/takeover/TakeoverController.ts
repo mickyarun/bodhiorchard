@@ -2,17 +2,20 @@
  * TakeoverController — WASD movement controller for garden takeover mode.
  *
  * Drives an EXISTING character entity from CharacterSystem (not a new entity).
- * Uses the proven AABB slide-collision from CollisionSystem (same as interior).
+ * Uses Rapier physics via PhysicsWorld — collision, door detection, and
+ * character controller wall-sliding are all handled by Rapier.
  *
  * Features:
  *   - Walk (WASD/arrows), Sprint (Shift), Jump (Space)
- *   - AABB slide collision (buildings) + world boundary clamp
- *   - E-key door entry (shows prompt when near, enters on press)
+ *   - Door collision detection (bump into door → fire DoorCollision event)
  *   - Inactivity auto-revert to NPC mode
+ *
+ * This controller knows ONLY about PhysicsWorld and its character entity.
+ * All scene/building knowledge lives in TakeoverPhysicsBuilder.
  */
 import * as pc from 'playcanvas'
 import type { InputManager } from '../input/InputManager'
-import { tryMove, type CollisionBox } from '../housetest/CollisionSystem'
+import type { PhysicsWorld, DoorCollision } from '../physics'
 
 // ─── Movement ────────────────────────────────
 const WALK_SPEED    = 3.0
@@ -20,25 +23,14 @@ const SPRINT_SPEED  = 6.0
 const JUMP_HEIGHT   = 0.6
 const JUMP_DURATION = 0.5
 
-// ─── Door interaction ────────────────────────
-const DOOR_PROMPT_DIST_SQ = 3.0 * 3.0  // show "Press E" prompt at this range
-const DOOR_ENTER_DIST_SQ  = 2.0 * 2.0  // E-key activates at this range
-
 // ─── Inactivity ──────────────────────────────
 const INACTIVITY_TIMEOUT = 120
 const INACTIVITY_WARNING = 90
 
-/** House door for E-key interior entry. */
-export interface HouseDoor {
-  memberId: string
-  x: number
-  z: number
-  name: string
-}
-
 export class TakeoverController {
   private input: InputManager
   private entity: pc.Entity | null = null
+  private physics: PhysicsWorld | null = null
 
   // Saved state for restoration
   private originalPosition = new pc.Vec3()
@@ -51,20 +43,11 @@ export class TakeoverController {
   // Inactivity
   private _inactivityTimer = 0
 
-  // World boundary
-  private worldRadius = 60
+  // Door re-enable delay (prevents false trigger on spawn overlap)
+  private doorEnableTimer: ReturnType<typeof setTimeout> | null = null
 
-  // AABB collision boxes (buildings, houses)
-  private collisionBoxes: CollisionBox[] = []
-
-  // House doors (E-key entry)
-  private houseDoors: HouseDoor[] = []
-  private _triggeredDoor: HouseDoor | null = null
-  private _nearDoor: HouseDoor | null = null  // for UI prompt
-
-  // Scratch vectors (avoid per-frame allocation)
-  private readonly _dir  = new pc.Vec3()
-  private readonly _next = new pc.Vec3()
+  // Scratch vector
+  private readonly _dir = new pc.Vec3()
 
   constructor(input: InputManager) {
     this.input = input
@@ -79,32 +62,47 @@ export class TakeoverController {
     return Math.max(0, INACTIVITY_TIMEOUT - this._inactivityTimer)
   }
 
-  /** Door triggered by E-key this frame. Consumed on read. */
-  consumeTriggeredDoor(): HouseDoor | null {
-    const door = this._triggeredDoor
-    this._triggeredDoor = null
-    return door
+  /** Door collision from last physics step. Consumed on read. */
+  consumeDoorHit(): DoorCollision | null {
+    return this.physics?.consumeDoorHit() ?? null
   }
-
-  /** Door the player is near (for UI prompt). */
-  get nearDoor(): HouseDoor | null { return this._nearDoor }
 
   /** Current world position (for camera follow). */
   getPosition(): pc.Vec3 {
     return this.entity?.getPosition() ?? pc.Vec3.ZERO
   }
 
-  // ─── Configuration ─────────────────────────
+  /** Current yaw in degrees (for multiplayer broadcast). */
+  getYaw(): number {
+    return this.entity?.getEulerAngles().y ?? 0
+  }
 
-  setWorldRadius(radius: number): void { this.worldRadius = radius }
-  setCollisionBoxes(boxes: CollisionBox[]): void { this.collisionBoxes = boxes }
-  setHouseDoors(doors: HouseDoor[]): void { this.houseDoors = doors }
+  /**
+   * Current animation state as a server-recognized string.
+   * Maps the anim component's `speed` (0/1/2) + `jumping` into one of
+   * OrgRoom's VALID_ANIMS: idle | walk | sprint | jump.
+   */
+  getAnimState(): string {
+    const anim = this.entity?.anim
+    if (!anim) return "idle"
+    if (this.jumpProgress >= 0) return "jump"
+    const speed = anim.getInteger("speed") ?? 0
+    if (speed >= 2) return "sprint"
+    if (speed >= 1) return "walk"
+    return "idle"
+  }
 
   // ─── Lifecycle ─────────────────────────────
 
-  /** Enter takeover — save entity state, stand up. */
-  enter(entity: pc.Entity): void {
+  /**
+   * Enter takeover — save entity state, create physics player, enable door detection.
+   * @param entity - Existing character entity from CharacterSystem
+   * @param physics - PhysicsWorld from SceneManager (must have walls/doors registered)
+   */
+  enter(entity: pc.Entity, physics: PhysicsWorld): void {
     this.entity = entity
+    this.physics = physics
+
     const pos = entity.getPosition()
     this.originalPosition.copy(pos)
     this.originalYaw = entity.getEulerAngles().y
@@ -113,18 +111,25 @@ export class TakeoverController {
     if (this.wasSitting) entity.anim?.setBoolean('sitting', false)
     entity.anim?.setInteger('speed', 0)
 
+    // Create physics player at the character's current position
+    physics.createPlayer(pos.x, pos.z)
+
+    // Enable doors after a short delay — prevents false trigger if the
+    // spawn position happens to overlap a door collider.
+    physics.setDoorsEnabled(false)
+    this.doorEnableTimer = setTimeout(() => {
+      physics.setDoorsEnabled(true)
+      this.doorEnableTimer = null
+    }, 300)
+
     this.jumpProgress = -1
     this._inactivityTimer = 0
-    this._triggeredDoor = null
-    this._nearDoor = null
   }
 
   /** Per-frame update. */
   update(dt: number, camYaw: number): void {
-    if (!this.entity) return
+    if (!this.entity || !this.physics) return
 
-    // Read one-shot inputs ONCE at top of frame (prevents consumption issues)
-    const ePressed = this.input.wasPressed(pc.KEY_E)
     const spacePressed = this.input.wasPressed(pc.KEY_SPACE)
 
     const anim = this.entity.anim
@@ -139,13 +144,13 @@ export class TakeoverController {
     const moving = dir.length() > 0
 
     // Inactivity tracking
-    if (moving || spacePressed || ePressed || sprinting) {
+    if (moving || spacePressed || sprinting) {
       this._inactivityTimer = 0
     } else {
       this._inactivityTimer += dt
     }
 
-    // ─── Jump ──────────────────────────────
+    // ─── Jump (visual arc, Y-only) ─────────
     if (spacePressed && this.jumpProgress < 0) {
       this.jumpProgress = 0
       anim?.setBoolean('jumping', true)
@@ -156,16 +161,10 @@ export class TakeoverController {
       if (this.jumpProgress >= 1) {
         this.jumpProgress = -1
         anim?.setBoolean('jumping', false)
-        const p = this.entity.getPosition()
-        this.entity.setPosition(p.x, 0, p.z)
-      } else {
-        const jumpY = Math.sin(this.jumpProgress * Math.PI) * JUMP_HEIGHT
-        const p = this.entity.getPosition()
-        this.entity.setPosition(p.x, jumpY, p.z)
       }
     }
 
-    // ─── Movement with AABB collision ──────
+    // ─── Movement via Rapier character controller ──
     if (moving) {
       dir.normalize()
       const sinA = Math.sin(camYaw * pc.math.DEG_TO_RAD)
@@ -174,70 +173,40 @@ export class TakeoverController {
       const wz = dir.z * cosA - dir.x * sinA
 
       const speed = sprinting ? SPRINT_SPEED : WALK_SPEED
-      const dx = wx * speed * dt
-      const dz = wz * speed * dt
-
-      const pos = this.entity.getPosition()
-
-      // AABB slide collision (same proven algorithm as interior PlayerController)
-      const next = tryMove(pos, dx, dz, this.collisionBoxes, this._next)
-
-      // World boundary clamp
-      const distSq = next.x * next.x + next.z * next.z
-      if (distSq > this.worldRadius * this.worldRadius && distSq > 0.001) {
-        const dist = Math.sqrt(distSq)
-        next.x = next.x / dist * this.worldRadius
-        next.z = next.z / dist * this.worldRadius
-      }
-
-      // Preserve Y for jump arc
-      const y = this.jumpProgress >= 0 ? this.entity.getPosition().y : 0
-      this.entity.setPosition(next.x, y, next.z)
+      this.physics.movePlayer(wx * speed * dt, wz * speed * dt)
 
       // Face movement direction
       this.entity.setEulerAngles(0, Math.atan2(wx, wz) * pc.math.RAD_TO_DEG, 0)
     }
 
+    // Step physics + sync entity position
+    this.physics.step()
+    const p = this.physics.getPlayerPosition()
+    const jumpY = this.jumpProgress >= 0 ? Math.sin(this.jumpProgress * Math.PI) * JUMP_HEIGHT : 0
+    this.entity.setPosition(p.x, jumpY, p.z)
+
     // ─── Animation ────────────────────────
     if (anim) {
       anim.setInteger('speed', moving ? (sprinting ? 2 : 1) : 0)
     }
-
-    // ─── Door interaction (E-key) ─────────
-    this._nearDoor = null
-    if (this.houseDoors.length > 0) {
-      const pos = this.entity.getPosition()
-      let closestDoor: HouseDoor | null = null
-      let closestDistSq = DOOR_PROMPT_DIST_SQ
-
-      for (const door of this.houseDoors) {
-        const ddx = pos.x - door.x
-        const ddz = pos.z - door.z
-        const dsq = ddx * ddx + ddz * ddz
-        if (dsq < closestDistSq) {
-          closestDistSq = dsq
-          closestDoor = door
-        }
-      }
-
-      if (closestDoor) {
-        this._nearDoor = closestDoor
-        // E-key pressed while close enough → trigger entry
-        if (ePressed && closestDistSq < DOOR_ENTER_DIST_SQ) {
-          this._triggeredDoor = closestDoor
-        }
-      }
-    }
   }
 
-  /** Exit takeover — restore entity to original state. */
+  /** Exit takeover — restore entity, destroy physics player. */
   exit(): void {
     if (!this.entity) return
+
+    if (this.doorEnableTimer !== null) {
+      clearTimeout(this.doorEnableTimer)
+      this.doorEnableTimer = null
+    }
+
     this.jumpProgress = -1
 
+    // Restore original position and yaw
     this.entity.setPosition(this.originalPosition.x, 0, this.originalPosition.z)
     this.entity.setEulerAngles(0, this.originalYaw, 0)
 
+    // Restore animation state
     const anim = this.entity.anim
     if (anim) {
       anim.setInteger('speed', 0)
@@ -245,9 +214,14 @@ export class TakeoverController {
       if (this.wasSitting) anim.setBoolean('sitting', true)
     }
 
+    // Clean up physics player + disable door detection
+    if (this.physics) {
+      this.physics.setDoorsEnabled(false)
+      this.physics.destroyPlayer()
+    }
+
     this.entity = null
+    this.physics = null
     this._inactivityTimer = 0
-    this._triggeredDoor = null
-    this._nearDoor = null
   }
 }

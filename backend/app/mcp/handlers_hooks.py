@@ -5,6 +5,7 @@ sent via POST /mcp/dev-activity with MCP token auth. All events are
 stored in a single unified dev_activity_logs table.
 """
 
+import asyncio
 import re
 import uuid
 
@@ -18,6 +19,7 @@ from app.models.tracked_repository import TrackedRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.dev_activity import DevActivityHookRequest, DevActivityHookResponse
+from app.services.colyseus_bridge import publish_to_colyseus
 from app.services.event_bus import publish
 
 logger = structlog.get_logger(__name__)
@@ -151,21 +153,24 @@ async def handle_dev_activity(
             },
         )
 
-    # Publish org-scoped dev activity for live 3D garden character updates
-    publish(
-        f"dev_activity:{org.id}",
-        {
-            "id": str(log.id),
-            "event_type": body.event_type,
-            "status": log.status,
-            "message": log.message,
-            "source": "claude_hook",
-            "actor_name": actor_name,
-            "user_id": str(user_id) if user_id else None,
-            "repo_name": _pub_repo_name,
-            "file_path": body.file_path,
-            "created_at": log.created_at.isoformat(),
-        },
+    # Forward to Colyseus so the authoritative server simulation drives
+    # character movement for every viewer of this org's dashboard. Detached so
+    # a slow/unreachable Colyseus server cannot stall the hook request path
+    # (publish_to_colyseus has a 2s internal timeout and logs its own errors).
+    dev_activity_payload = {
+        "id": str(log.id),
+        "event_type": body.event_type,
+        "status": log.status,
+        "message": log.message,
+        "source": "claude_hook",
+        "actor_name": actor_name,
+        "user_id": str(user_id) if user_id else None,
+        "repo_name": _pub_repo_name,
+        "file_path": body.file_path,
+        "created_at": log.created_at.isoformat(),
+    }
+    asyncio.create_task(
+        publish_to_colyseus(org.id, "dev_activity", dev_activity_payload)
     )
 
     # Award XP for developer activity (non-blocking — XP errors must not break hooks)

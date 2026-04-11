@@ -80,7 +80,7 @@
           variant="tonal"
           color="deep-purple"
           prepend-icon="mdi-gamepad-variant-outline"
-          @click="toggleTakeover"
+          @click="handleTakeoverClick"
         >
           {{ isTakeover ? 'Exit Control' : 'Take Control' }}
         </v-btn>
@@ -149,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDashboardStore } from '@/stores/dashboard'
 import type { TreeData } from '@/types/dashboard'
@@ -253,15 +253,31 @@ function toggleRelationships(): void {
 }
 
 function toggleTakeover(): void {
-  if (treeContentRef.value?.isTakeover()) {
-    treeContentRef.value?.exitTakeover()
+  const ref = treeContentRef.value
+  if (!ref) return
+  if (ref.isInControl()) {
+    // In takeover OR interior — exit to overview
+    if (ref.isTakeover()) ref.exitTakeover()
+    else ref.exitHouse()  // interior mode
   } else {
-    treeContentRef.value?.takeoverCharacter()
+    ref.takeoverCharacter()
   }
   // Sync state after async operations settle
   setTimeout(() => {
-    isTakeover.value = treeContentRef.value?.isTakeover() ?? false
+    isTakeover.value = treeContentRef.value?.isInControl() ?? false
   }, 100)
+}
+
+/**
+ * Handle Take Control button click. Blurs the button so that subsequent
+ * keyboard events (Space/Enter) don't re-trigger it via browser default
+ * focused-button activation behavior.
+ */
+function handleTakeoverClick(event: Event): void {
+  // Remove focus from the button so Space/Enter won't re-click it
+  const target = event.currentTarget as HTMLElement | null
+  target?.blur()
+  toggleTakeover()
 }
 
 function selectAllRepos(): void {
@@ -272,10 +288,29 @@ function selectAllRepos(): void {
   }
 }
 
-// ─── Data Fetch ──────────────────────────────────
+// ─── Data Fetch + takeover state sync ───────────
+
+let takeoverSyncInterval: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   store.fetchTreeData()
+
+  // Poll control state every 500ms so the button label stays in sync
+  // when state changes via auto-exit, door entry, ESC, etc.
+  // `isInControl` covers both takeover mode AND house interior mode.
+  takeoverSyncInterval = setInterval(() => {
+    const engineState = treeContentRef.value?.isInControl() ?? false
+    if (engineState !== isTakeover.value) {
+      isTakeover.value = engineState
+    }
+  }, 500)
+})
+
+onUnmounted(() => {
+  if (takeoverSyncInterval !== null) {
+    clearInterval(takeoverSyncInterval)
+    takeoverSyncInterval = null
+  }
 })
 </script>
 

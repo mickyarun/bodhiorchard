@@ -1,6 +1,8 @@
 """Application configuration loaded from environment variables."""
 
-from pydantic import Field
+import os
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -94,6 +96,44 @@ class IntegrationConfig(BaseSettings):
     slack_signing_secret: str = Field(default="", alias="SLACK_SIGNING_SECRET")
 
 
+_DEV_BRIDGE_SECRET = "dev-colyseus-bridge-secret"
+
+
+class ColyseusConfig(BaseSettings):
+    """Colyseus multiplayer server bridge configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
+
+    url: str = Field(
+        default="http://localhost:2567",
+        alias="COLYSEUS_URL",
+        description="HTTP base URL of the Colyseus multiplayer server (backend-to-server calls).",
+    )
+    bridge_secret: str = Field(
+        default=_DEV_BRIDGE_SECRET,
+        alias="COLYSEUS_BRIDGE_SECRET",
+        description="Shared secret for backend ↔ Colyseus bridge authentication.",
+    )
+
+    @model_validator(mode="after")
+    def _reject_dev_secret_in_prod(self) -> "ColyseusConfig":
+        """Refuse to run with the dev default secret when ENV=production.
+
+        The bridge grants anyone with the secret full authority to inject
+        arbitrary dev/agent activity events into any org's garden — leaking
+        the secret into source control would be catastrophic. In production
+        the env var is mandatory; in dev/test the well-known default is
+        acceptable for local tooling.
+        """
+        env = os.environ.get("ENV", "dev").lower()
+        if env == "production" and self.bridge_secret == _DEV_BRIDGE_SECRET:
+            raise ValueError(
+                "COLYSEUS_BRIDGE_SECRET must be set to a non-default value "
+                "when ENV=production. Refusing to start with the dev default.",
+            )
+        return self
+
+
 class Settings(BaseSettings):
     """Root application settings aggregating all config groups."""
 
@@ -122,6 +162,7 @@ class Settings(BaseSettings):
     redis: RedisConfig = RedisConfig()
     integrations: IntegrationConfig = IntegrationConfig()
     ws: WebSocketConfig = WebSocketConfig()
+    colyseus: ColyseusConfig = ColyseusConfig()
 
 
 settings = Settings()

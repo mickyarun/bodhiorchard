@@ -25,6 +25,8 @@ export interface PavilionResult {
   entity: pc.Entity
   exclusionZone: ExclusionZone
   seats: InteractionPoint[]
+  /** Hut dimensions for takeover physics wall generation. */
+  hutDims: { width: number; depth: number; frontDoorIndices: number[] }
 }
 
 const WALL_HEIGHT = 1.29
@@ -126,6 +128,7 @@ export class StandupPavilion {
       entity: root,
       exclusionZone: { x, z, radius: 6 },
       seats,
+      hutDims: { width: HUT_WIDTH, depth: HUT_DEPTH, frontDoorIndices: [0, 1, 2] },
     }
   }
 

@@ -35,6 +35,8 @@ export interface CoffeeBarResult {
   entity: pc.Entity
   exclusionZone: ExclusionZone
   seats: InteractionPoint[]
+  /** Hut dimensions for takeover physics wall generation. */
+  hutDims: { width: number; depth: number; frontDoorIndices: number[] }
 }
 
 export class CoffeeBarBuilder {
@@ -128,6 +130,7 @@ export class CoffeeBarBuilder {
       entity: root,
       exclusionZone: { x, z, radius: 8 },
       seats,
+      hutDims: { width: HUT_WIDTH, depth: HUT_DEPTH, frontDoorIndices: [0, 1, 2] },
     }
   }
 }

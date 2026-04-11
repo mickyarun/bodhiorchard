@@ -30,6 +30,8 @@ export interface PoolResortResult {
   entity: pc.Entity;
   exclusionZone: ExclusionZone;
   seats: InteractionPoint[];
+  /** Pond obstacle for takeover physics (player blocked from entering water). */
+  pondObstacle: { x: number; z: number; radius: number };
 }
 
 // ─── Pond known constants ───
@@ -193,6 +195,8 @@ export class PoolResortBuilder {
       entity: root,
       exclusionZone: { x, z, radius: 14 },
       seats,
+      // Pond radius ~7 units (TARGET_POND_WIDTH / 2)
+      pondObstacle: { x, z, radius: TARGET_POND_WIDTH / 2 },
     };
   }
 }

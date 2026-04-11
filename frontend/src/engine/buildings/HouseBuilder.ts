@@ -27,7 +27,8 @@ import { BUILDING, PATH } from '../assets/AssetManifest'
 import { setTreeData } from '../world/TreeNodeData'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 
-const WALL_HEIGHT = 1.29
+/** Shared wall height constant — exported so takeover physics can match visual walls. */
+export const WALL_HEIGHT = 1.29
 
 export interface HouseResult {
   entity: pc.Entity

@@ -24,7 +24,6 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import type { TreeData } from '@/types/dashboard'
 import { GardenEngine } from '@/engine/index'
 import type { EngineData, RepoHealth, ThreatSeverity, BUDStatus, RelType } from '@/engine/types'
-import { subscribe, unsubscribe } from '@/services/socket'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
@@ -45,45 +44,6 @@ const tooltipText = ref<string | null>(null)
 const tooltipPos = ref({ x: 0, y: 0 })
 
 let engine: GardenEngine | null = null
-let agentTopic: string | null = null
-let devActivityTopic: string | null = null
-
-/** Handle real-time dev activity from WebSocket (developer characters). */
-function onDevActivity(data: unknown): void {
-  if (!engine) return
-  const raw = data as Record<string, unknown>
-  console.debug('[PlayCanvasCanvas] onDevActivity:', raw.event_type, raw.user_id, raw.repo_name)
-  engine.handleDevActivity({
-    user_id: (raw.user_id as string) || '',
-    actor_name: (raw.actor_name as string) || 'Developer',
-    event_type: (raw.event_type as string) || '',
-    status: (raw.status as string) || 'in_progress',
-    message: (raw.message as string) || null,
-    repo_name: (raw.repo_name as string) || null,
-    file_path: (raw.file_path as string) || null,
-    created_at: (raw.created_at as string) || '',
-  })
-}
-
-/** Handle real-time agent activity from WebSocket. */
-function onAgentActivity(data: unknown): void {
-  if (!engine) return
-  const raw = data as Record<string, unknown>
-  engine.handleAgentActivity({
-    agent_name: (raw.actor_name as string) || (raw.skill_slug as string) || 'agent',
-    action: (raw.message as string) || '',
-    timestamp: (raw.created_at as string) || '',
-    status: (raw.status as string) || 'in_progress',
-    skill_slug: (raw.skill_slug as string) || '',
-    repo_name: (raw.repo_name as string) || null,
-    bud_number: (raw.bud_number as number) || null,
-    session_id: (raw.session_id as string) || null,
-    event_type: (raw.event_type as string) || '',
-    task_id: (raw.task_id as string) || null,
-    bud_title: (raw.bud_title as string) || null,
-    impacted_repo_names: (raw.impacted_repo_names as string[]) || [],
-  })
-}
 let resizeObserver: ResizeObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -219,16 +179,44 @@ async function initEngine(): Promise<void> {
     },
   })
 
+  // Tell engine who the authenticated user is (for identity preservation in
+  // house visits and for JWT verification on Colyseus join). The auth store
+  // may not be ready at mount time — a watcher below retries when it is.
+  applyCurrentUser()
+
+  // Enable server-driven mode BEFORE setData so CharacterSystem/AgentSystem
+  // skip their local build paths — spawns come from OrgRoom snapshots instead.
+  engine.enableServerDriven(true)
+
   await engine.setData(adaptTreeData(props.treeData))
 
-  // Subscribe to real-time agent activity events for live robot spawn/update/remove
-  if (props.treeData.org_id) {
-    agentTopic = `agent_activity:${props.treeData.org_id}`
-    subscribe(agentTopic, onAgentActivity)
+  // Connect to the Colyseus OrgRoom (if auth is already available). The
+  // watcher on authStore.user handles the case where auth resolves later.
+  await tryConnectOrgRoom()
+}
 
-    // Subscribe to dev activity events for live developer character movement
-    devActivityTopic = `dev_activity:${props.treeData.org_id}`
-    subscribe(devActivityTopic, onDevActivity)
+/** Push the auth store's user into the engine (if available). */
+function applyCurrentUser(): void {
+  if (!engine) return
+  if (authStore.user) {
+    engine.setCurrentUser({
+      id: authStore.user.id,
+      name: authStore.user.name,
+      characterModel: authStore.user.character_model,
+      token: authStore.token ?? null,
+    })
+  } else {
+    engine.setCurrentUser(null)
+  }
+}
+
+/** Connect to the Colyseus OrgRoom if both auth and org_id are ready. */
+async function tryConnectOrgRoom(): Promise<void> {
+  if (!engine || !authStore.user || !props.treeData.org_id) return
+  try {
+    await engine.connectToOrgRoom(props.treeData.org_id)
+  } catch (err) {
+    console.warn('[PlayCanvasCanvas] OrgRoom connect failed:', err)
   }
 }
 
@@ -272,6 +260,21 @@ watch(
   { deep: true },
 )
 
+// React to auth becoming available after mount. In practice `authStore.user`
+// is often null when PlayCanvasCanvas first mounts (fetchUser is async) — in
+// that case initEngine skips setCurrentUser + connectToOrgRoom, and this
+// watcher kicks off the connection once auth resolves.
+watch(
+  () => authStore.user,
+  async (user) => {
+    if (!engine) return
+    applyCurrentUser()
+    if (user) {
+      await tryConnectOrgRoom()
+    }
+  },
+)
+
 /** Toggle relationship arc visibility. */
 function toggleArcs(): boolean {
   return engine?.toggleArcs() ?? false
@@ -308,17 +311,14 @@ function isTakeover(): boolean {
   return engine?.isTakeover ?? false
 }
 
-defineExpose({ toggleArcs, exitHouse, focusOnRepo, clearFocus, takeoverCharacter, exitTakeover, isTakeover })
+/** Whether the player is actively controlling a character (takeover OR interior). */
+function isInControl(): boolean {
+  return engine?.isInControl ?? false
+}
+
+defineExpose({ toggleArcs, exitHouse, focusOnRepo, clearFocus, takeoverCharacter, exitTakeover, isTakeover, isInControl })
 
 onUnmounted(() => {
-  if (agentTopic) {
-    unsubscribe(agentTopic, onAgentActivity)
-    agentTopic = null
-  }
-  if (devActivityTopic) {
-    unsubscribe(devActivityTopic, onDevActivity)
-    devActivityTopic = null
-  }
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null

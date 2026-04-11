@@ -20,6 +20,8 @@ export interface CafeteriaResult {
   entity: pc.Entity
   exclusionZone: ExclusionZone
   seats: InteractionPoint[]
+  /** Hut dimensions for takeover physics wall generation. */
+  hutDims: { width: number; depth: number; frontDoorIndices: number[] }
 }
 
 export class CafeteriaBuilder {
@@ -95,6 +97,7 @@ export class CafeteriaBuilder {
       entity: root,
       exclusionZone: { x, z, radius: 9 },
       seats,
+      hutDims: { width: HUT_WIDTH, depth: HUT_DEPTH, frontDoorIndices: [1, 2] },
     }
   }
 }

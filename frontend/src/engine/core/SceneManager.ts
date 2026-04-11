@@ -51,6 +51,12 @@ import { GardenAnimalSystem } from '../world/GardenAnimalSystem'
 import { LanternSystem } from '../effects/LanternSystem'
 import { CircularFence } from '../world/CircularFence'
 import { AgentCharacterSystem } from '../agents'
+import { PhysicsWorld } from '../physics'
+import {
+  TakeoverPhysicsBuilder,
+  type HutInfo,
+  type PondObstacle,
+} from '../takeover/TakeoverPhysicsBuilder'
 
 export class SceneManager {
   private app: Application
@@ -82,8 +88,16 @@ export class SceneManager {
   // Building entities (for destruction)
   private buildingEntities: pc.Entity[] = []
 
+  // Takeover physics (created async, null if Rapier WASM fails to load)
+  private _physics: PhysicsWorld | null = null
+  private buildingHuts: HutInfo[] = []
+  private pondObstacle: PondObstacle | null = null
+
   // Shared data for Phase 3+
   private _memberHouseMap = new Map<string, HouseResult>()
+
+  /** Member lookup by user_id — includes character_model for identity preservation when visiting houses. */
+  private _memberDataMap = new Map<string, { user_id: string; name: string; character_model: string | null }>()
 
   // Garden world root — toggled off during interior mode
   private _gardenRoot: pc.Entity | null = null
@@ -95,9 +109,36 @@ export class SceneManager {
     this.layout = new WorldLayout()
   }
 
-  /** Build the entire world from engine data. */
-  async build(data: EngineData): Promise<void> {
+  /**
+   * Build the entire world from engine data.
+   *
+   * @param data   The scene data to build.
+   * @param signal Optional AbortSignal. When aborted at any await checkpoint,
+   *               the build exits via `throw signal.reason` (a DOMException
+   *               with name='AbortError' by default). The internal `buildId`
+   *               cancellation continues to work as a defense-in-depth fallback
+   *               for callers that don't pass a signal.
+   */
+  async build(data: EngineData, signal?: AbortSignal): Promise<void> {
     const currentBuild = ++this.buildId
+    /** Throws if build was either superseded (buildId) or externally aborted (signal). */
+    const checkCancelled = (): boolean => {
+      if (signal?.aborted) {
+        // Web Platform convention: throwIfAborted() throws signal.reason
+        signal.throwIfAborted()
+      }
+      return this.buildId !== currentBuild
+    }
+
+    // Cache member data for identity lookups (character_model for house visits)
+    this._memberDataMap.clear()
+    for (const m of data.members) {
+      this._memberDataMap.set(m.user_id, {
+        user_id: m.user_id,
+        name: m.name,
+        character_model: m.character_model,
+      })
+    }
 
     // 1. Batch preload all GLBs (trees are now procedural — no tree GLBs needed)
     const allPaths = [
@@ -113,7 +154,7 @@ export class SceneManager {
     await this.loader.loadBatch(uniquePaths)
 
     // Check if a newer build was started while we were loading
-    if (this.buildId !== currentBuild) return
+    if (checkCancelled()) return
 
     // 2. Environment (independent of data)
     this.sky = new SkySystem()
@@ -129,7 +170,7 @@ export class SceneManager {
     // 3. Repo visualization (default: trees with decoration)
     this.repoVis = this.createRepoVisualization()
     const treeZones = await this.repoVis.build(this.app, data, this.layout)
-    if (this.buildId !== currentBuild) return
+    if (checkCancelled()) return
     this.layout.addExclusionZones(treeZones)
 
     // 3b. Garden birds — roam between repo trees
@@ -142,7 +183,7 @@ export class SceneManager {
     // 3c. Garden animals — cube-pets wandering on the ground
     this.gardenAnimals = new GardenAnimalSystem(this.app.app)
     await this.gardenAnimals.init(this.loader)
-    if (this.buildId !== currentBuild) return
+    if (checkCancelled()) return
 
     // 4. Buildings
     const buildingFactory = new BuildingFactory(this.loader, this.materials)
@@ -155,26 +196,36 @@ export class SceneManager {
     if (coffeeZone) {
       const coffeeBuilder = new CoffeeBarBuilder(buildingFactory)
       const coffeeResult = await coffeeBuilder.build(this.app, coffeeZone.x, coffeeZone.z)
-      if (this.buildId !== currentBuild) return
+      if (checkCancelled()) return
       this.buildingEntities.push(coffeeResult.entity)
       this.layout.addExclusionZones([coffeeResult.exclusionZone])
       this.layout.registerSeats(coffeeResult.seats)
+      this.buildingHuts.push({
+        x: coffeeZone.x, z: coffeeZone.z,
+        yawDeg: coffeeResult.entity.getEulerAngles().y,
+        ...coffeeResult.hutDims,
+      })
     }
 
     if (cafeteriaZone) {
       const cafeteriaBuilder = new CafeteriaBuilder(buildingFactory)
       const cafeteriaResult = await cafeteriaBuilder.build(this.app, cafeteriaZone.x, cafeteriaZone.z)
-      if (this.buildId !== currentBuild) return
+      if (checkCancelled()) return
       this.buildingEntities.push(cafeteriaResult.entity)
       this.layout.addExclusionZones([cafeteriaResult.exclusionZone])
       this.layout.registerSeats(cafeteriaResult.seats)
+      this.buildingHuts.push({
+        x: cafeteriaZone.x, z: cafeteriaZone.z,
+        yawDeg: cafeteriaResult.entity.getEulerAngles().y,
+        ...cafeteriaResult.hutDims,
+      })
     }
 
     // Housing village
     if (data.members.length > 0) {
       const village = new HousingVillage(this.loader)
       const housingResult = await village.build(this.app, data.members, this.layout)
-      if (this.buildId !== currentBuild) return
+      if (checkCancelled()) return
       this.buildingEntities.push(housingResult.entity)
       this.layout.addExclusionZones([housingResult.exclusionZone])
       this.layout.registerSeats(housingResult.seats)
@@ -184,48 +235,48 @@ export class SceneManager {
     if (poolZone) {
       const poolBuilder = new PoolResortBuilder(buildingFactory, this.loader)
       const poolResult = await poolBuilder.build(this.app, poolZone.x, poolZone.z)
-      if (this.buildId !== currentBuild) return
+      if (checkCancelled()) return
       this.buildingEntities.push(poolResult.entity)
       this.layout.addExclusionZones([poolResult.exclusionZone])
       this.layout.registerSeats(poolResult.seats)
+      this.pondObstacle = poolResult.pondObstacle
     }
 
     if (pavilionZone) {
       const pavilion = new StandupPavilion(buildingFactory)
       const pavilionResult = await pavilion.build(this.app, pavilionZone.x, pavilionZone.z)
-      if (this.buildId !== currentBuild) return
+      if (checkCancelled()) return
       this.buildingEntities.push(pavilionResult.entity)
       this.layout.addExclusionZones([pavilionResult.exclusionZone])
       this.layout.registerSeats(pavilionResult.seats)
+      this.buildingHuts.push({
+        x: pavilionZone.x, z: pavilionZone.z,
+        yawDeg: pavilionResult.entity.getEulerAngles().y,
+        ...pavilionResult.hutDims,
+      })
     }
 
-    // 4b. Characters (after all buildings → seats and houses are registered)
-    if (data.members.length > 0) {
-      try {
-        this.characterSystem = new CharacterSystem(this.loader)
-        await this.characterSystem.build(
-          this.app,
-          data.members,
-          this._memberHouseMap,
-          [...this.layout.getSeats()],
-        )
-        // Wire tree position lookup for dev activity character movement
-        this.characterSystem.setTreePositionLookup(
-          (repoName) => this.getTreePosition(repoName),
-        )
-      } catch (err) {
-        console.warn('[SceneManager] Character loading failed (scene continues):', err)
-        this.characterSystem = null
-      }
-      if (this.buildId !== currentBuild) return
+    // 4b. Characters — CharacterSystem is a renderer only; entities are
+    // spawned on demand from OrgRoom state by GardenEngine.connectToOrgRoom.
+    try {
+      this.characterSystem = new CharacterSystem(this.loader)
+      this.characterSystem.build(this.app)
+    } catch (err) {
+      console.warn('[SceneManager] CharacterSystem init failed (scene continues):', err)
+      this.characterSystem = null
     }
+    if (checkCancelled()) return
+
+    // 4c. Initialize Rapier physics for takeover mode (non-blocking)
+    await this.initPhysics(currentBuild, signal)
+    if (checkCancelled()) return
 
     // 5. Paths between zones + zone signs
     const zones = this.layout.getAllZones()
     const pathRoutes = PathSystem.defaultRoutes([...zones])
     this.paths = new PathSystem()
     await this.paths.build(this.app, this.loader, pathRoutes)
-    if (this.buildId !== currentBuild) return
+    if (checkCancelled()) return
 
     // Zone signs at each building zone entrance (facing orchard)
     for (const zone of zones) {
@@ -246,11 +297,11 @@ export class SceneManager {
     // 6. Scatter pine trees + bushes (after all exclusion zones are registered)
     this.pines = new PineTreeSystem()
     await this.pines.build(this.app, this.loader, this.layout.getExclusionZones())
-    if (this.buildId !== currentBuild) return
+    if (checkCancelled()) return
 
     this.bushes = new BushSystem()
     await this.bushes.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes)
-    if (this.buildId !== currentBuild) return
+    if (checkCancelled()) return
 
     // 6b. Forest lake — pond inside a dense forest cluster, opposite the mountains (SE)
     // Positioned at the far edge of the world, like mountains
@@ -258,12 +309,12 @@ export class SceneManager {
     const FOREST_LAKE_Z = -160
     this.forestLake = new ForestLake()
     await this.forestLake.build(this.app, this.loader, FOREST_LAKE_X, FOREST_LAKE_Z)
-    if (this.buildId !== currentBuild) return
+    if (checkCancelled()) return
 
     // 6c. Mountain backdrop — Eastern Ghats-style range at the far edge
     this.mountains = new MountainBackdrop()
     await this.mountains.build(this.app, this.loader)
-    if (this.buildId !== currentBuild) return
+    if (checkCancelled()) return
 
     // 7. Relationship arcs
     this.arcs = new RelationshipArcs()
@@ -295,7 +346,7 @@ export class SceneManager {
       this.app, this.loader, data.agent_activity,
       (repoName) => this.getTreePosition(repoName),
     )
-    if (this.buildId !== currentBuild) return
+    if (checkCancelled()) return
 
     // 9. Wrap all garden content under a single root for scene transitions.
     // When entering a house interior, gardenRoot.enabled = false hides the entire garden.
@@ -313,13 +364,21 @@ export class SceneManager {
     this.gardenBirds?.update(dt)
     this.gardenAnimals?.update(dt)
     this.agentSystem?.update(dt)
-    this.characterSystem?.update(dt)
+    // CharacterSystem is a renderer only — positions come from OrgRoom state sync,
+    // there is no per-frame simulation to advance.
   }
 
-  /** Rebuild entire scene with new data. */
-  async rebuild(data: EngineData): Promise<void> {
+  /**
+   * Rebuild entire scene with new data.
+   *
+   * @param signal Optional AbortSignal forwarded to `build()`. Aborting at
+   *   any await checkpoint causes the build to throw `signal.reason` (a
+   *   DOMException with name='AbortError'). Used by GardenEngine's
+   *   SerializedExecutor to abort in-flight builds on disposal.
+   */
+  async rebuild(data: EngineData, signal?: AbortSignal): Promise<void> {
     this.teardown()
-    await this.build(data)
+    await this.build(data, signal)
   }
 
   // ─── Public Accessors ─────────────────────────
@@ -332,6 +391,17 @@ export class SceneManager {
   get gardenRootEntity(): pc.Entity | null { return this._gardenRoot }
   get agentSystemRef(): AgentCharacterSystem | null { return this.agentSystem }
   get assetLoader(): AssetLoader { return this.loader }
+  get physicsWorld(): PhysicsWorld | null { return this._physics }
+
+  /** Look up a member's character model by user_id. */
+  getMemberCharacterModel(userId: string): string | null {
+    return this._memberDataMap.get(userId)?.character_model ?? null
+  }
+
+  /** Look up full member data (user_id, name, character_model) by user_id. */
+  getMember(userId: string): { user_id: string; name: string; character_model: string | null } | null {
+    return this._memberDataMap.get(userId) ?? null
+  }
 
   /** All pickable entities: repo trees + feature branches + houses + agents.
    *  NOT cached — tree features are added asynchronously during growth animation,
@@ -367,6 +437,47 @@ export class SceneManager {
    *   Closed ring (no gate) at worldRadius + 8 units margin.
    *   Wide post spacing (~4 units) keeps entity count low for a large ring.
    */
+  /**
+   * Initialize Rapier physics world and register all collision bodies for takeover mode.
+   * Non-blocking: if Rapier WASM fails to load, scene builds without physics and
+   * takeover will log a warning when attempted.
+   *
+   * Concurrent-build safe: if another build started during WASM load, the freshly
+   * created physics world is destroyed before return to avoid a WASM memory leak.
+   */
+  private async initPhysics(currentBuild: number, signal?: AbortSignal): Promise<void> {
+    try {
+      // Zero gravity — top-down movement, no falling
+      const created = await PhysicsWorld.create({ x: 0, y: 0, z: 0 })
+
+      // Concurrent build guard — discard orphaned world to free WASM memory.
+      // Also check the external abort signal so disposal during physics init
+      // doesn't leak the WASM-backed world.
+      if (this.buildId !== currentBuild || signal?.aborted) {
+        created.destroy()
+        return
+      }
+
+      this._physics = created
+      const builder = new TakeoverPhysicsBuilder(this._physics)
+      builder.registerHouses(this._memberHouseMap)
+      builder.registerBuildings(this.buildingHuts)
+      if (this.pondObstacle) {
+        builder.registerPond(this.pondObstacle)
+      }
+      builder.registerPerimeter(this.layout.getWorldRadius() + 8)
+
+      // Doors disabled until takeover starts (prevents fire on scene build)
+      this._physics.setDoorsEnabled(false)
+      console.debug('[SceneManager] Physics initialized:',
+        this._memberHouseMap.size, 'houses,',
+        this.buildingHuts.length, 'huts')
+    } catch (err) {
+      console.warn('[SceneManager] Physics init failed — takeover will be disabled:', err)
+      this._physics = null
+    }
+  }
+
   /**
    * Wrap all garden world content under a single gardenRoot entity.
    * Called at the end of build() — re-parents everything except camera/lights.
@@ -477,6 +588,7 @@ export class SceneManager {
     }
     this.buildingEntities = []
     this._memberHouseMap.clear()
+    this._memberDataMap.clear()
 
     this.agentSystem?.destroy()
     this.agentSystem = null
@@ -516,6 +628,11 @@ export class SceneManager {
 
     this._gardenRoot?.destroy()
     this._gardenRoot = null
+
+    this._physics?.destroy()
+    this._physics = null
+    this.buildingHuts = []
+    this.pondObstacle = null
 
     this.layout.reset()
   }

@@ -29,11 +29,23 @@ import type { CollisionBox } from '../housetest/CollisionSystem'
 import { InteriorCamera } from './InteriorCamera'
 import { InteriorUI } from './InteriorUI'
 import { InteractionLoop } from './InteractionLoop'
-import { ColyseusClient, NetworkedPlayer, PlayerSyncAdapter, type PlayerData } from '../../multiplayer'
+import {
+  ColyseusClient,
+  NetworkedPlayer,
+  OrgRoomClient,
+  PlayerSyncAdapter,
+  type MemberStateSnapshot,
+  type PlayerData,
+} from '../../multiplayer'
 
 // Player spawn inside the room — clear of all furniture collision boxes
 const PLAYER_ENTER_X = 2.0
 const PLAYER_ENTER_Z = 1.5
+
+// Owner NPC interior seats — hand-tuned against the InteriorScene layout.
+// The owner is spawned here when OrgRoomState says they're currently at home.
+const OWNER_DESK_SEAT = { x: 3.3, z: 1.1, yaw: 180 }  // sitting at desk, facing -Z
+const OWNER_BED_SEAT  = { x: 1.0, z: 0.55, yaw: 90 }  // lying on bed, facing +X
 
 export class InteriorManager {
   private app: Application
@@ -54,10 +66,22 @@ export class InteriorManager {
   private collisionBoxes: CollisionBox[] = []
   private built = false
   private currentMember: string | null = null
+  private currentHouseOwnerId: string | null = null
 
-  // Multiplayer
+  // Multiplayer — visitor identity (the authenticated user visiting the house)
+  private visitorId: string | null = null
+  private visitorName: string | null = null
+  private visitorCharacterModel: string | null = null
   private syncAdapter = new PlayerSyncAdapter()
   private remotePlayers = new Map<string, NetworkedPlayer>()
+
+  // Owner NPC driven by OrgRoomState (Phase 8). `ownerNpcGen` is bumped on
+  // every spawn/despawn request — in-flight spawns compare their captured gen
+  // against the current value and abort if superseded, preventing leaks when
+  // a despawn arrives mid-spawn.
+  private ownerNpc: NetworkedPlayer | null = null
+  private ownerNpcGen = 0
+  private orgRoomUnsubscribe: (() => void) | null = null
 
   /** Called when user triggers exit (door, ESC, or button). Set by GardenEngine. */
   onExit: (() => void) | null = null
@@ -120,17 +144,35 @@ export class InteriorManager {
    * Enter a house interior.
    * Called during SceneTransition.perform() black frame.
    */
-  async enter(house: HouseResult): Promise<void> {
+  /** Identity of a user visiting a house (used for multiplayer presence). */
+  // Visitor type defined inline in enter() signature
+
+  /**
+   * Enter a house interior.
+   * @param house - The house to enter (may or may not belong to the visitor)
+   * @param visitor - The authenticated user entering the house. Their identity is
+   *   broadcast to the multiplayer room so OTHER clients in the same house see them.
+   *   If omitted (e.g., unauthenticated/dev mode), falls back to house owner identity.
+   */
+  async enter(
+    house: HouseResult,
+    visitor?: { userId: string; name: string; characterModel: string | null } | null,
+  ): Promise<void> {
     if (!this.built) await this.build()
     this.currentMember = house.memberName
-    // memberId used by multiplayer room join below
+    this.currentHouseOwnerId = house.memberId
+
+    // Store visitor identity for multiplayer broadcast
+    this.visitorId = visitor?.userId ?? house.memberId
+    this.visitorName = visitor?.name ?? house.memberName
+    this.visitorCharacterModel = visitor?.characterModel ?? house.characterModel
 
     // Enable interior root
     this.interiorRoot!.enabled = true
 
-    // Spawn player with their selected character model
+    // Spawn player with the visitor's character model (keeps identity when visiting others' houses)
     this.player = new PlayerController(this.loader, this.input)
-    await this.player.init(this.interiorRoot!, PLAYER_ENTER_X, PLAYER_ENTER_Z, house.characterModel)
+    await this.player.init(this.interiorRoot!, PLAYER_ENTER_X, PLAYER_ENTER_Z, this.visitorCharacterModel)
     this.player.setCollisionBoxes(this.collisionBoxes)
 
     // Switch to interior camera
@@ -141,8 +183,21 @@ export class InteriorManager {
     this.interaction.reset()
     this.syncAdapter.reset()
 
-    // Join multiplayer room (non-blocking — game works without server)
+    // Join multiplayer room keyed by HOUSE OWNER (so visitors + owner meet in same room)
     this.joinMultiplayerRoom(house.memberId)
+
+    // Spawn the house owner as an interior NPC if OrgRoomState says they're
+    // currently at home. Only shows someone else's owner — if the visitor IS
+    // the owner, they're already represented as the player character.
+    if (house.memberId !== this.visitorId) {
+      await this.refreshOwnerNpc(house.memberId)
+      this.orgRoomUnsubscribe = OrgRoomClient.getInstance().addMemberChangeListener(
+        (userId, snapshot) => {
+          if (userId !== this.currentHouseOwnerId) return
+          void this.onOwnerStateChanged(snapshot)
+        },
+      )
+    }
   }
 
   /** Per-frame update while in interior mode. */
@@ -164,6 +219,8 @@ export class InteriorManager {
     for (const remote of this.remotePlayers.values()) {
       remote.update()
     }
+    // Interior owner NPC (Phase 8) — driven by OrgRoomState, interpolated here.
+    this.ownerNpc?.update()
 
     // ESC key — exit
     if (this.input.isPressed(pc.KEY_ESCAPE)) {
@@ -180,6 +237,16 @@ export class InteriorManager {
     if (this.player?.isSitting) this.player.standUp()
     if (this.player?.isSleeping) this.player.wakeUp()
     this.scene?.tvEffect.turnOff()
+
+    // Unsubscribe from OrgRoom owner state updates
+    if (this.orgRoomUnsubscribe) {
+      this.orgRoomUnsubscribe()
+      this.orgRoomUnsubscribe = null
+    }
+    // Bump gen to invalidate any in-flight owner NPC spawn still awaiting assets
+    this.ownerNpcGen++
+    this.ownerNpc?.despawn()
+    this.ownerNpc = null
 
     // Disable camera + UI
     this.camera.disable()
@@ -198,6 +265,10 @@ export class InteriorManager {
     this.interaction.reset()
     this.syncAdapter.reset()
     this.currentMember = null
+    this.currentHouseOwnerId = null
+    this.visitorId = null
+    this.visitorName = null
+    this.visitorCharacterModel = null
   }
 
   get isActive(): boolean { return this.interiorRoot?.enabled ?? false }
@@ -217,7 +288,12 @@ export class InteriorManager {
 
   // ─── Multiplayer helpers ───────────────────────
 
-  private joinMultiplayerRoom(memberId: string): void {
+  /**
+   * Join the Colyseus house room keyed by the HOUSE OWNER's memberId.
+   * The visitor's own identity (not the house owner's) is sent as the player data
+   * so other clients in the room can distinguish and render this specific user.
+   */
+  private joinMultiplayerRoom(houseOwnerId: string): void {
     const client = ColyseusClient.getInstance()
     client.setCallbacks({
       onPlayerJoin: (sessionId, player) => this.spawnRemotePlayer(sessionId, player),
@@ -227,9 +303,10 @@ export class InteriorManager {
       },
     })
     // Non-blocking — multiplayer is optional (game works offline)
-    client.joinHouseRoom(memberId, {
-      userId: memberId,  // TODO: use actual user ID from auth
-      name: this.currentMember || 'Visitor',
+    client.joinHouseRoom(houseOwnerId, {
+      userId: this.visitorId ?? houseOwnerId,
+      name: this.visitorName ?? 'Visitor',
+      characterModel: this.visitorCharacterModel ?? '',
     }).catch((err) => {
       console.warn('[InteriorManager] Multiplayer unavailable:', err)
     })
@@ -258,5 +335,88 @@ export class InteriorManager {
       remote.despawn()
       this.remotePlayers.delete(sessionId)
     }
+  }
+
+  // ─── Owner NPC (Phase 8) ────────────────────
+
+  /**
+   * Decide whether the house owner should be visible inside, and which seat
+   * they should occupy, based on their current OrgRoomState.
+   */
+  private ownerSeatForSnapshot(
+    ownerId: string,
+    snapshot: MemberStateSnapshot,
+  ): { x: number; z: number; yaw: number } | null {
+    // The server sets locationContext to `house_{ownerId}` when the member
+    // is placed at their own desk/bed. Any other context (garden, break_*,
+    // tree_*) means they're not currently inside the house.
+    if (snapshot.locationContext !== `house_${ownerId}`) return null
+    // Presence dictates the pose: at_home → bed, active → desk.
+    if (snapshot.presence === 'at_home') return OWNER_BED_SEAT
+    return OWNER_DESK_SEAT
+  }
+
+  /** Spawn (or respawn) the owner NPC based on current OrgRoomState. */
+  private async refreshOwnerNpc(ownerId: string): Promise<void> {
+    if (!this.interiorRoot) return
+    const snapshot = OrgRoomClient.getInstance().getMember(ownerId)
+    if (!snapshot) return
+
+    const seat = this.ownerSeatForSnapshot(ownerId, snapshot)
+    if (!seat) {
+      // Owner is elsewhere — ensure no stale NPC remains and cancel any
+      // in-flight spawn by bumping the generation.
+      this.ownerNpcGen++
+      this.ownerNpc?.despawn()
+      this.ownerNpc = null
+      return
+    }
+
+    // Already spawned — just reposition to match any seat change.
+    if (this.ownerNpc) {
+      this.ownerNpc.setTarget({
+        userId: ownerId,
+        name: snapshot.name,
+        characterModel: snapshot.characterModel,
+        x: seat.x,
+        z: seat.z,
+        yaw: seat.yaw,
+        animState: snapshot.presence === 'at_home' ? 'sleep' : 'sit',
+      })
+      return
+    }
+
+    // Fresh spawn — capture the current generation so a concurrent despawn
+    // (exit, owner leaving, rapid state flip) can invalidate this call.
+    const myGen = ++this.ownerNpcGen
+    const candidate = new NetworkedPlayer(`owner_${ownerId}`, snapshot.name)
+    await candidate.spawn(this.interiorRoot, this.loader, this.app, {
+      userId: ownerId,
+      name: snapshot.name,
+      characterModel: snapshot.characterModel,
+      x: seat.x,
+      z: seat.z,
+      yaw: seat.yaw,
+      animState: snapshot.presence === 'at_home' ? 'sleep' : 'sit',
+    })
+
+    // If anything superseded us (despawn, exit, re-entry), discard the candidate.
+    if (this.ownerNpcGen !== myGen || !this.interiorRoot?.enabled) {
+      candidate.despawn()
+      return
+    }
+    this.ownerNpc = candidate
+  }
+
+  /** Handle an OrgRoom member-change event for the current house owner. */
+  private async onOwnerStateChanged(snapshot: MemberStateSnapshot | null): Promise<void> {
+    if (!this.currentHouseOwnerId) return
+    if (!snapshot) {
+      // Owner was removed from the org — despawn.
+      this.ownerNpc?.despawn()
+      this.ownerNpc = null
+      return
+    }
+    await this.refreshOwnerNpc(this.currentHouseOwnerId)
   }
 }

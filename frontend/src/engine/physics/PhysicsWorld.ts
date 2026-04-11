@@ -1,33 +1,24 @@
 /**
- * PhysicsWorld — Rapier 3D physics wrapper for the garden engine.
+ * PhysicsWorld — Rapier 3D physics wrapper.
  *
- * All collision is handled by Rapier:
- *   - Static cuboids for walls/buildings (character can't pass through)
- *   - Sensor cuboids for door triggers (character passes through, fires events)
- *   - KinematicCharacterController for player movement (auto wall-sliding)
+ * Collision approach:
+ *   - Walls: static cuboids → character can't pass through
+ *   - Doors: static cuboids (thin) → character bumps into them,
+ *     we detect the collision and trigger scene transition
+ *   - Character: kinematic + capsule + character controller
  *
- * Door detection: sensors are real Rapier colliders with `.setSensor(true)`.
- * After each `world.step()`, we use `world.intersectionsWith()` to check
- * which sensors the player currently overlaps. Enter/exit events are derived
- * by comparing with the previous frame.
+ * Door detection: after computeColliderMovement(), check
+ * numComputedCollisions() — if any collision is with a door
+ * collider, fire a door event.
  */
 import type RAPIER_NS from '@dimforge/rapier3d'
 
-// Set by PhysicsWorld.create() before any instance method is called.
 let R: typeof RAPIER_NS
 
 // ─── Public Types ────────────────────────────
 
-export interface SensorEvent {
-  type: 'enter' | 'exit'
-  sensorId: string
-}
-
-// ─── Internal ────────────────────────────────
-
-interface SensorRecord {
-  id: string
-  handle: number  // Rapier collider handle
+export interface DoorCollision {
+  doorId: string
 }
 
 export class PhysicsWorld {
@@ -38,128 +29,114 @@ export class PhysicsWorld {
   private playerBody: RAPIER_NS.RigidBody | null = null
   private playerCollider: RAPIER_NS.Collider | null = null
 
-  // Sensors
-  private sensors: SensorRecord[] = []
-  private handleToId = new Map<number, string>()  // fast reverse lookup
-  private activeSensors = new Set<string>()
-  private pendingEvents: SensorEvent[] = []
-  private sensorsEnabled = true
+  // Door colliders: handle → doorId
+  private doorHandles = new Map<number, string>()
+
+  // Door collision detected this frame
+  private _doorHit: DoorCollision | null = null
+  private doorsEnabled = true
 
   private constructor(world: RAPIER_NS.World) {
     this.world = world
-    this.cc = world.createCharacterController(0.02)
+    this.cc = world.createCharacterController(0.01)
     this.cc.setUp({ x: 0, y: 1, z: 0 })
-    this.cc.enableAutostep(0.3, 0.1, true)
-    this.cc.enableSnapToGround(0.3)
     this.cc.setMaxSlopeClimbAngle(45 * Math.PI / 180)
   }
 
   static async create(gravity = { x: 0, y: -9.81, z: 0 }): Promise<PhysicsWorld> {
     R = await import('@dimforge/rapier3d')
-    const world = new R.World(gravity)
-    return new PhysicsWorld(world)
+    return new PhysicsWorld(new R.World(gravity))
   }
 
   // ─── Static Bodies (Walls, Ground) ─────────
 
-  /** Add a static box. Position is the CENTER. */
-  addStaticBox(
-    x: number, y: number, z: number,
-    halfW: number, halfH: number, halfD: number,
-  ): void {
-    const body = this.world.createRigidBody(
-      R.RigidBodyDesc.fixed().setTranslation(x, y, z),
-    )
+  addStaticBox(x: number, y: number, z: number, halfW: number, halfH: number, halfD: number): void {
+    const body = this.world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(x, y, z))
     this.world.createCollider(R.ColliderDesc.cuboid(halfW, halfH, halfD), body)
   }
 
-  /** Add a ground plane. */
   addGround(y = -0.05, halfSize = 100): void {
     this.addStaticBox(0, y, 0, halfSize, 0.05, halfSize)
   }
 
-  // ─── Sensors (Door Triggers, Zones) ────────
-
   /**
-   * Add a Rapier sensor collider (trigger volume — no physical blocking).
-   * The player can walk through it; an event fires on enter/exit.
+   * Add a static box rotated around the Y axis.
+   * Used for walls not axis-aligned with world XZ (e.g., rotated buildings, perimeter rings).
    */
-  addSensor(
-    id: string,
+  addStaticBoxRotated(
     x: number, y: number, z: number,
     halfW: number, halfH: number, halfD: number,
+    yawRad: number,
   ): void {
+    // Y-axis rotation quaternion: (0, sin(yaw/2), 0, cos(yaw/2))
+    const half = yawRad * 0.5
     const body = this.world.createRigidBody(
-      R.RigidBodyDesc.fixed().setTranslation(x, y, z),
+      R.RigidBodyDesc.fixed()
+        .setTranslation(x, y, z)
+        .setRotation({ x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) }),
     )
-    const collider = this.world.createCollider(
-      R.ColliderDesc.cuboid(halfW, halfH, halfD)
-        .setSensor(true)
-        .setActiveCollisionTypes(R.ActiveCollisionTypes.DEFAULT | R.ActiveCollisionTypes.KINEMATIC_FIXED)
-        .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS),
-      body,
-    )
-    this.sensors.push({ id, handle: collider.handle })
-    this.handleToId.set(collider.handle, id)
+    this.world.createCollider(R.ColliderDesc.cuboid(halfW, halfH, halfD), body)
   }
 
-  setSensorsEnabled(enabled: boolean): void {
-    this.sensorsEnabled = enabled
-    if (!enabled) {
-      this.activeSensors.clear()
-      this.pendingEvents = []
-    }
+  // ─── Door Colliders ────────────────────────
+  // A door is a thin static box in the door gap.
+  // Character bumps into it → we detect the collision.
+
+  addDoor(id: string, x: number, y: number, z: number, halfW: number, halfH: number, halfD: number): void {
+    const body = this.world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(x, y, z))
+    const collider = this.world.createCollider(R.ColliderDesc.cuboid(halfW, halfH, halfD), body)
+    this.doorHandles.set(collider.handle, id)
+  }
+
+  setDoorsEnabled(enabled: boolean): void {
+    this.doorsEnabled = enabled
+    if (!enabled) this._doorHit = null
+  }
+
+  /** Get door collision from last frame. Consumed on read. */
+  consumeDoorHit(): DoorCollision | null {
+    const hit = this._doorHit
+    this._doorHit = null
+    return hit
   }
 
   // ─── Player ────────────────────────────────
 
-  /** Create kinematic player body with capsule collider. */
   createPlayer(x: number, z: number, radius = 0.2, halfHeight = 0.35): void {
     const yCenter = halfHeight + radius
     this.playerBody = this.world.createRigidBody(
       R.RigidBodyDesc.kinematicPositionBased().setTranslation(x, yCenter, z),
     )
     this.playerCollider = this.world.createCollider(
-      R.ColliderDesc.capsule(halfHeight, radius)
-        // Enable collision detection between kinematic body and fixed sensors
-        .setActiveCollisionTypes(R.ActiveCollisionTypes.DEFAULT | R.ActiveCollisionTypes.KINEMATIC_FIXED)
-        .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS),
+      R.ColliderDesc.capsule(halfHeight, radius),
       this.playerBody,
     )
   }
 
-  /** Move player via character controller (handles wall sliding). */
   movePlayer(dx: number, dz: number): void {
     if (!this.playerCollider || !this.playerBody) return
-    this.cc.computeColliderMovement(
-      this.playerCollider,
-      { x: dx, y: 0, z: dz },
-      undefined, // filterFlags
-      undefined, // filterGroups
-      undefined, // filterExcludeCollider
-      undefined, // filterExcludeRigidBody
-      (collider) => !collider.isSensor(), // exclude sensors from collision
-    )
+
+    this.cc.computeColliderMovement(this.playerCollider, { x: dx, y: 0, z: dz })
+
+    // Check if any collision was with a door collider
+    if (this.doorsEnabled) {
+      for (let i = 0; i < this.cc.numComputedCollisions(); i++) {
+        const collision = this.cc.computedCollision(i)
+        if (collision?.collider) {
+          const doorId = this.doorHandles.get(collision.collider.handle)
+          if (doorId) {
+            this._doorHit = { doorId }
+            break
+          }
+        }
+      }
+    }
+
     const m = this.cc.computedMovement()
     const pos = this.playerBody.translation()
     this.playerBody.setNextKinematicTranslation({
       x: pos.x + m.x, y: pos.y, z: pos.z + m.z,
     })
-
-    // Debug: log when movement is blocked
-    if ((Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) &&
-        Math.abs(m.x) < 0.0001 && Math.abs(m.z) < 0.0001) {
-      console.debug('[PhysicsWorld] Movement BLOCKED at', pos.x.toFixed(2), pos.z.toFixed(2),
-        'desired:', dx.toFixed(4), dz.toFixed(4))
-      // Log what we're colliding with
-      for (let i = 0; i < this.cc.numComputedCollisions(); i++) {
-        const c = this.cc.computedCollision(i)
-        if (c) {
-          console.debug('  collision with collider handle:', c.collider?.handle,
-            'sensor:', c.collider?.isSensor())
-        }
-      }
-    }
   }
 
   getPlayerPosition(): { x: number; y: number; z: number } {
@@ -174,55 +151,24 @@ export class PhysicsWorld {
     this.playerBody.setTranslation({ x, y, z }, true)
   }
 
-  // ─── Step + Events ─────────────────────────
+  /** Remove the player body + collider from the world (e.g., when exiting takeover). */
+  destroyPlayer(): void {
+    if (this.playerBody) {
+      this.world.removeRigidBody(this.playerBody)
+      this.playerBody = null
+      this.playerCollider = null
+    }
+  }
+
+  // ─── Step ──────────────────────────────────
 
   step(): void {
     this.world.step()
-    this.detectSensorOverlaps()
-  }
-
-  consumeEvents(): SensorEvent[] {
-    const e = this.pendingEvents
-    this.pendingEvents = []
-    return e
   }
 
   // ─── Cleanup ───────────────────────────────
 
   destroy(): void {
     this.world.free()
-  }
-
-  // ─── Internal: Sensor Detection ────────────
-
-  /**
-   * After world.step(), check which sensors the player overlaps.
-   * Uses world.intersectionsWith() — Rapier's built-in broadphase query.
-   * Compares with previous frame to emit enter/exit events.
-   */
-  private detectSensorOverlaps(): void {
-    if (!this.sensorsEnabled || !this.playerCollider) return
-
-    const nowActive = new Set<string>()
-
-    // Rapier intersectionPairsWith: iterates all colliders overlapping the given one
-    this.world.intersectionPairsWith(this.playerCollider, (otherCollider) => {
-      const id = this.handleToId.get(otherCollider.handle)
-      if (id) nowActive.add(id)
-    })
-
-    // Diff with previous frame → enter/exit events
-    for (const id of nowActive) {
-      if (!this.activeSensors.has(id)) {
-        console.debug('[PhysicsWorld] Sensor ENTER:', id)
-        this.pendingEvents.push({ type: 'enter', sensorId: id })
-      }
-    }
-    for (const id of this.activeSensors) {
-      if (!nowActive.has(id)) {
-        this.pendingEvents.push({ type: 'exit', sensorId: id })
-      }
-    }
-    this.activeSensors = nowActive
   }
 }

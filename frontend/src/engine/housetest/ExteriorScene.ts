@@ -104,15 +104,15 @@ export class ExteriorScene {
     // Physics: register wall collision bodies (world-space)
     this.registerWallPhysics(house.x, house.z, physics)
 
-    // Physics: door sensor (world-space)
-    physics.addSensor(
-      `door_${house.id}`,
-      house.x + HOUSE_DOOR_LOCAL.x,   // world X center of door
-      0.5,                              // Y center (mid-height)
-      house.z + HOUSE_DOOR_LOCAL.z,   // world Z (just outside door)
-      0.5,                              // halfW (1-unit wide door gap)
-      0.5,                              // halfH
-      0.3,                              // halfD (thin trigger zone)
+    // Physics: door collider (thin box in the door gap — character bumps into it)
+    physics.addDoor(
+      house.id,
+      house.x + HOUSE_DOOR_LOCAL.x,   // center X of door gap
+      WALL_HEIGHT / 2,                 // center Y
+      house.z + 4.0,                   // Z at the front wall
+      0.45,                            // halfW — slightly narrower than 1-unit gap
+      WALL_HEIGHT / 2,                 // halfH — full wall height
+      0.05,                            // halfD — very thin so it feels like a door
     )
   }
 

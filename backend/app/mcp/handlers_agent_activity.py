@@ -7,6 +7,7 @@ Processes activity events from two sources:
 All events are stored in agent_activity_logs, linked to agent_skills.
 """
 
+import asyncio
 import contextlib
 import uuid
 
@@ -18,11 +19,13 @@ from app.mcp.auth import MCPAuthResult
 from app.mcp.handlers_hooks import _resolve_bud, _resolve_repo_id
 from app.models.agent_activity import AgentActivityLog
 from app.models.agent_skill import AgentSkill
+from app.models.bud import BUDDocument
 from app.models.tracked_repository import TrackedRepository
 from app.schemas.agent_activity import (
     AgentActivityHookRequest,
     AgentActivityHookResponse,
 )
+from app.services.colyseus_bridge import publish_to_colyseus
 from app.services.event_bus import publish
 
 logger = structlog.get_logger(__name__)
@@ -145,25 +148,34 @@ async def handle_agent_activity(
         )
         _pub_repo_name = _repo_row.scalar_one_or_none()
 
-    publish(
-        f"agent_activity:{org.id}",
-        {
-            "id": str(log.id),
-            "event_type": body.event_type,
-            "status": log.status,
-            "message": log.message,
-            "source": "claude_hook",
-            "skill_slug": body.skill_slug,
-            "actor_name": actor_name,
-            "user_id": str(user_id) if user_id else None,
-            "file_path": body.file_path,
-            "created_at": log.created_at.isoformat(),
-            "task_id": str(log.task_id) if log.task_id else None,
-            "repo_name": _pub_repo_name,
-            "bud_number": bud_number,
-            "bud_title": None,  # not available at hook time without extra query
-            "impacted_repo_names": [],  # resolved by frontend from initial data
-        },
+    # Resolve impacted_repo_names from the BUD (needed by the Colyseus
+    # server simulation to drive multi-repo shuffle walking).
+    impacted_repo_names = await _resolve_impacted_repos(db, bud_id)
+
+    agent_activity_payload = {
+        "id": str(log.id),
+        "event_type": body.event_type,
+        "status": log.status,
+        "message": log.message,
+        "source": "claude_hook",
+        "skill_slug": body.skill_slug,
+        "actor_name": actor_name,
+        "user_id": str(user_id) if user_id else None,
+        "file_path": body.file_path,
+        "created_at": log.created_at.isoformat(),
+        "task_id": str(log.task_id) if log.task_id else None,
+        "session_id": body.session_id,
+        "repo_name": _pub_repo_name,
+        "bud_number": bud_number,
+        "bud_title": None,  # not available at hook time without extra query
+        "impacted_repo_names": impacted_repo_names,
+    }
+    publish(f"agent_activity:{org.id}", agent_activity_payload)
+
+    # Forward to Colyseus for server-authoritative robot simulation. Detached
+    # so a slow bridge cannot stall the hook request path.
+    asyncio.create_task(
+        publish_to_colyseus(org.id, "agent_activity", agent_activity_payload)
     )
 
     logger.info(
@@ -198,6 +210,39 @@ async def _resolve_skill_id(
     ).limit(1)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def _resolve_impacted_repos(
+    db: AsyncSession,
+    bud_id: uuid.UUID | None,
+) -> list[str]:
+    """Resolve the list of repo names a BUD impacts.
+
+    The Colyseus agent simulation uses this to drive multi-repo shuffle
+    walking (a robot visits each impacted tree in turn). Mirrors the
+    same extraction logic in ``app.services.tree_data``.
+
+    Args:
+        db: Async DB session.
+        bud_id: BUD document id; when None, returns an empty list.
+
+    Returns:
+        Ordered list of repo names, or an empty list on missing data.
+    """
+    if not bud_id:
+        return []
+    stmt = select(BUDDocument.impacted_repos).where(BUDDocument.id == bud_id)
+    result = await db.execute(stmt)
+    raw = result.scalar_one_or_none()
+    if not raw:
+        return []
+    names: list[str] = []
+    for entry in raw:
+        if isinstance(entry, dict):
+            name = entry.get("repo_name")
+            if isinstance(name, str) and name:
+                names.append(name)
+    return names
 
 
 def _infer_status(event_type: str) -> str:

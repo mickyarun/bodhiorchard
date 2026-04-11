@@ -1,62 +1,38 @@
 /**
- * CharacterSystem — Manages all character entities in the scene.
+ * CharacterSystem — renders character entities from authoritative OrgRoom state.
  *
- * Creates one character per member, places them based on presence:
- *   - 'active' or undefined → seated at a building (desk, coffee bar, etc.)
- *   - 'on_break' → at pool or coffee bar seats
- *   - 'at_home' → at their house bed position
+ * Every character in the garden corresponds to a `MemberState` on the Colyseus
+ * server. This system is a pure renderer: it spawns, updates, and removes
+ * entities in response to snapshot callbacks from `OrgRoomClient`. The server
+ * owns position, presence placement, and dev-activity walking.
  *
- * Live dev activity: when a developer starts coding (session_start, commit, etc.),
- * their character walks to the repo tree and shows a live activity label above
- * their head (reusing AgentLabel with green tint). On session_end or idle timeout,
- * the character returns to their original seat.
+ * Legacy local simulation (presence-based placement, dev activity walking,
+ * return-to-seat timers) lived here before the multiplayer port and has been
+ * removed — see `multiplayer/src/sim/DevActivitySim.ts` for the server version.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import type { AssetLoader } from '../assets/AssetLoader'
-import type { EngineMember, EngineDevActivity } from '../types'
-import type { InteractionPoint } from './InteractionPoint'
 import { CharacterFactory, type CharacterEntity } from './CharacterFactory'
 import { KayKitCharacterFactory, getClonedMaterials } from './KayKitCharacterFactory'
 import { parseCharacterModel, isKayKitConfig } from './CharacterConfig'
-import type { HouseResult } from '../buildings/HouseBuilder'
-import { AgentLabel } from '../agents/AgentLabel'
 import { createLevelBadge } from './LevelBadge'
 import { disposeMaterial } from '../utils/EntityUtils'
-import type { TreePositionLookup } from '../agents/AgentCharacterSystem'
 
-// ─── Dev activity constants ────────────────────
-const DEV_WALK_SPEED = 1.2
-const DEV_ARRIVE_DIST_SQ = 1.0
-const DEV_IDLE_TIMEOUT = 60         // seconds before auto-return to seat
-const DEV_TREE_OFFSET_X = -1.5      // opposite side from agent robots
-const DEV_TREE_OFFSET_Z = 1.0
-const DEV_LABEL_HEIGHT = 1.55       // above the name label (character height ~0.95)
-const DEV_ORCHARD_FALLBACK_X = -3.0 // fallback position when repo_name is null
-const DEV_ORCHARD_FALLBACK_Z = 3.0
-const DEV_PHRASE_INTERVAL = 5       // seconds between phrase changes while working
-const DEV_WORKING_PHRASES = [
-  'Coding...', 'Writing code...', 'Debugging...', 'Refactoring...',
-  'Reviewing changes...', 'Running tests...', 'Thinking...',
-  'Reading docs...', 'Fixing a bug...', 'Adding feature...',
-]
-
-type DevMoveState = 'idle' | 'walking_to_tree' | 'working' | 'walking_home'
-
-interface DevActivityState {
+/** Minimum snapshot shape needed to spawn/update a server-driven character. */
+export interface CharacterSnapshot {
   userId: string
-  displayName: string
-  label: AgentLabel
-  labelEntity: pc.Entity
-  originalPosition: pc.Vec3
-  originalYaw: number
-  wasSitting: boolean
-  currentRepoName: string | null
-  targetX: number
-  targetZ: number
-  moveState: DevMoveState
-  idleTimer: number
-  phraseTimer: number
+  name: string
+  characterModel: string
+  level: number
+  levelName: string
+  x: number
+  y: number
+  z: number
+  yaw: number
+  animState: string  // idle | walk | sit | sleep | sprint | jump
+  labelName: string
+  labelMessage: string
 }
 
 export class CharacterSystem {
@@ -65,489 +41,166 @@ export class CharacterSystem {
   private characters: CharacterEntity[] = []
   private app: Application | null = null
 
-  // Dev activity state
-  private activeDevs = new Map<string, DevActivityState>()
-  private getTreePos: TreePositionLookup = () => null
+  // Parent entity for all character entities. Created in build() so it gets
+  // swept into GardenRoot by wrapGardenRoot() — this ensures characters are
+  // hidden when interior mode sets gardenRoot.enabled = false.
+  private characterRoot: pc.Entity | null = null
 
-  // Takeover mode — blocks NPC AI for the taken-over character
+  // Takeover mode — the userId whose character is under local WASD control.
+  // Used to skip snapshot updates for that character (client-side prediction).
   private takeoverUserId: string | null = null
+
+  // Track pending spawns to prevent duplicate async spawn races
+  private spawning = new Set<string>()
 
   constructor(loader: AssetLoader) {
     this.factory = new CharacterFactory(loader)
     this.kayKitFactory = new KayKitCharacterFactory(loader)
   }
 
-  /**
-   * Build characters for all members and add them to the scene.
-   *
-   * @param app - PlayCanvas application wrapper
-   * @param members - Team members to create characters for
-   * @param memberHouseMap - Maps member user_id → house data (bed position, seats)
-   * @param allSeats - All registered seats from all buildings
-   */
-  async build(
-    app: Application,
-    members: EngineMember[],
-    memberHouseMap: Map<string, HouseResult>,
-    allSeats: InteractionPoint[],
-  ): Promise<void> {
+  /** Set the PlayCanvas Application (required for server-driven spawns). */
+  setApp(app: Application): void {
     this.app = app
+  }
 
-    // Track which seats are taken so we don't double-assign
-    const takenSeats = new Set<string>()
+  /**
+   * Prepare the system for rendering. Creates a CharacterRoot parent entity
+   * (swept into GardenRoot by SceneManager.wrapGardenRoot) and stores the
+   * app handle. Actual character entities are spawned via `spawnFromSnapshot`
+   * when OrgRoom state events arrive.
+   */
+  build(app: Application): void {
+    this.app = app
+    this.characterRoot = new pc.Entity('CharacterRoot')
+    app.root.addChild(this.characterRoot)
+  }
 
-    for (const member of members) {
-      const house = memberHouseMap.get(member.user_id)
-      const placement = this.getPlacement(member, house, allSeats, takenSeats)
+  // ─── Server-Driven Rendering ───────────────────
 
-      // Dispatch: KayKit characters vs legacy Kenney Blocky
-      const config = parseCharacterModel(member.character_model)
+  /**
+   * Spawn a character from a server snapshot. Creates the character entity
+   * using the existing factory infrastructure, then positions it per server state.
+   *
+   * Idempotent — returns existing character if already spawned.
+   * Async — safe to call from server state listener callbacks; spawn races are deduped.
+   */
+  async spawnFromSnapshot(snapshot: CharacterSnapshot): Promise<void> {
+    if (!this.app) return
+    // Already spawned?
+    if (this.characters.find(c => c.memberId === snapshot.userId)) return
+    // Already spawning?
+    if (this.spawning.has(snapshot.userId)) return
+    this.spawning.add(snapshot.userId)
+
+    try {
+      const sitting = snapshot.animState === 'sit' || snapshot.animState === 'sleep'
+      const config = parseCharacterModel(snapshot.characterModel)
       let character: CharacterEntity
 
       if (isKayKitConfig(config)) {
         character = await this.kayKitFactory.create(
-          member.user_id,
-          member.name,
+          snapshot.userId,
+          snapshot.name,
           config,
-          placement.x,
-          placement.y,
-          placement.z,
-          placement.yaw,
-          placement.sitting,
+          snapshot.x,
+          snapshot.y,
+          snapshot.z,
+          snapshot.yaw,
+          sitting,
         )
       } else {
-        const variant = CharacterFactory.getVariant(
-          member.user_id,
-          member.character_model,
-        )
+        const variant = CharacterFactory.getVariant(snapshot.userId, snapshot.characterModel)
         character = await this.factory.create(
-          member.user_id,
-          member.name,
+          snapshot.userId,
+          snapshot.name,
           variant,
-          placement.x,
-          placement.y,
-          placement.z,
-          placement.yaw,
-          placement.sitting,
+          snapshot.x,
+          snapshot.y,
+          snapshot.z,
+          snapshot.yaw,
+          sitting,
         )
       }
 
-      // Add to scene — animation starts on first tick (activate=true set in factory)
-      app.root.addChild(character.entity)
+      // Guard: the system may have been destroyed while we were awaiting
+      if (!this.app) {
+        character.entity.destroy()
+        return
+      }
+
+      (this.characterRoot ?? this.app.root).addChild(character.entity)
       this.characters.push(character)
 
       // Register name label for billboard facing
       const label = character.entity.findByTag('billboard')[0] as pc.Entity | undefined
-      if (label) app.registerBillboard(label)
+      if (label) this.app.registerBillboard(label)
 
-      // Add level badge above name label (if XP data available)
-      if (member.level && member.level > 1) {
+      // Level badge
+      if (snapshot.level > 1) {
         const badgeHeight = isKayKitConfig(config) ? 1.2 : 1.5
         const badge = createLevelBadge(
-          member.level,
-          member.level_name || 'seedling',
-          app.app.graphicsDevice,
+          snapshot.level,
+          snapshot.levelName || 'seedling',
+          this.app.app.graphicsDevice,
           badgeHeight,
         )
         character.entity.addChild(badge)
-        app.registerBillboard(badge)
+        this.app.registerBillboard(badge)
       }
+    } finally {
+      this.spawning.delete(snapshot.userId)
     }
   }
 
-  /** Wire in tree position lookup for dev activity movement. */
-  setTreePositionLookup(fn: TreePositionLookup): void {
-    this.getTreePos = fn
-  }
-
-  /** Set/clear which user is in takeover mode (blocks NPC AI for that character). */
-  setTakeoverUser(userId: string | null): void {
-    this.takeoverUserId = userId
-    // If entering takeover, clean up any active dev activity state for this user
-    if (userId) {
-      const state = this.activeDevs.get(userId)
-      if (state) this.cleanupActivityState(userId, state)
-    }
-  }
-
-  // ─── Dev Activity ──────────────────────────────
-
-  /** Handle a live dev activity event — move character to tree and show label. */
-  handleDevActivity(activity: EngineDevActivity): void {
-    if (!this.app) {
-      console.debug('[CharacterSystem] handleDevActivity: no app')
-      return
-    }
-
-    // Resolve character: try user_id first, then fallback to actor_name
-    let character: CharacterEntity | undefined
-    if (activity.user_id) {
-      character = this.getCharacter(activity.user_id)
-    }
-    if (!character && activity.actor_name) {
-      character = this.getCharacterByName(activity.actor_name)
-      console.debug('[CharacterSystem] user_id lookup failed, name fallback:',
-        activity.actor_name, character ? 'found' : 'not found')
-    }
+  /**
+   * Update a character's position + animation from a server snapshot.
+   * Called on every server state change for this member.
+   */
+  updateFromSnapshot(snapshot: CharacterSnapshot): void {
+    const character = this.getCharacter(snapshot.userId)
     if (!character) {
-      console.debug('[CharacterSystem] No character found for dev activity',
-        { user_id: activity.user_id, actor_name: activity.actor_name })
+      void this.spawnFromSnapshot(snapshot)
       return
     }
 
-    // Use the character's memberId as the canonical key (handles name-fallback case)
-    const resolvedId = character.memberId
+    if (snapshot.userId === this.takeoverUserId) return
 
-    // Skip movement for character under player takeover control
-    if (resolvedId === this.takeoverUserId) {
-      console.debug('[CharacterSystem] Skipping dev activity — character in takeover mode')
-      return
-    }
+    character.entity.setPosition(snapshot.x, snapshot.y, snapshot.z)
+    character.entity.setEulerAngles(0, snapshot.yaw, 0)
 
-    // Session ended or completed → return to seat
-    if (
-      activity.event_type === 'session_end' ||
-      activity.status === 'completed' ||
-      activity.status === 'failed'
-    ) {
-      console.debug('[CharacterSystem] Session end/completed → return to seat', resolvedId)
-      this.returnToSeat(resolvedId)
-      return
-    }
-
-    // Get or create activity state
-    let state = this.activeDevs.get(resolvedId)
-    if (!state) {
-      const newState = this.createActivityState(character, activity, resolvedId)
-      if (!newState) {
-        console.debug('[CharacterSystem] Failed to create activity state')
-        return
-      }
-      state = newState
-      this.activeDevs.set(resolvedId, state)
-    }
-
-    // Update label text
-    const displayName = activity.actor_name || character.memberName
-    state.displayName = displayName
-    state.label.setText(displayName, this.formatMessage(activity))
-    state.idleTimer = 0
-
-    // If repo changed (or first event with a repo), walk to the tree
-    if (activity.repo_name && activity.repo_name !== state.currentRepoName) {
-      const treePos = this.getTreePos(activity.repo_name)
-      if (treePos) {
-        console.debug('[CharacterSystem] Walking to tree:', activity.repo_name,
-          'at', treePos.x.toFixed(1), treePos.z.toFixed(1))
-        state.currentRepoName = activity.repo_name
-        state.targetX = treePos.x + DEV_TREE_OFFSET_X
-        state.targetZ = treePos.z + DEV_TREE_OFFSET_Z
-        state.moveState = 'walking_to_tree'
-        this.startWalkAnim(character)
-      } else {
-        console.debug('[CharacterSystem] Tree not found for repo:', activity.repo_name, '→ orchard fallback')
-        this.walkToOrchardFallback(character, state)
-      }
-    } else if (!activity.repo_name && state.moveState === 'idle') {
-      // No repo_name at all — walk to orchard area so movement is visible
-      console.debug('[CharacterSystem] No repo_name → orchard fallback')
-      this.walkToOrchardFallback(character, state)
-    }
-  }
-
-  /** Per-frame update — tick walking and idle timers for active devs. */
-  update(dt: number): void {
-    for (const [userId, state] of this.activeDevs) {
-      if (userId === this.takeoverUserId) continue // skip player-controlled character
-      const character = this.getCharacter(userId)
-      if (!character) continue
-
-      switch (state.moveState) {
-        case 'walking_to_tree':
-          this.tickWalking(character, state, dt, 'working')
-          break
-
-        case 'working': {
-          state.idleTimer += dt
-          state.phraseTimer += dt
-
-          // Cycle label phrases to show the character is "alive" and engaged
-          if (state.phraseTimer >= DEV_PHRASE_INTERVAL) {
-            state.phraseTimer = 0
-            const phrase = DEV_WORKING_PHRASES[
-              Math.floor(Math.random() * DEV_WORKING_PHRASES.length)
-            ]
-            state.label.setText(state.displayName, phrase)
-          }
-
-          // Gentle look-around: oscillate yaw so the character appears engaged
-          const lookAngle = Math.sin(state.idleTimer * 0.5) * 15
-          const baseYaw = Math.atan2(
-            state.targetX - state.originalPosition.x,
-            state.targetZ - state.originalPosition.z,
-          ) * (180 / Math.PI)
-          character.entity.setEulerAngles(0, baseYaw + lookAngle, 0)
-
-          if (state.idleTimer >= DEV_IDLE_TIMEOUT) {
-            this.returnToSeat(userId)
-          }
-          break
-        }
-
-        case 'walking_home': {
-          const arrived = this.tickWalking(character, state, dt, 'idle')
-          if (arrived) {
-            // Restore sitting if they were seated
-            if (state.wasSitting) {
-              character.entity.anim?.setBoolean('sitting', true)
-            }
-            // Clean up activity state
-            this.cleanupActivityState(userId, state)
-          }
-          break
-        }
-      }
-    }
-  }
-
-  /** Trigger return-to-seat for a developer. */
-  private returnToSeat(userId: string): void {
-    const state = this.activeDevs.get(userId)
-    if (!state) return
-
-    const character = this.getCharacter(userId)
-    if (!character) {
-      this.cleanupActivityState(userId, state)
-      return
-    }
-
-    state.targetX = state.originalPosition.x
-    state.targetZ = state.originalPosition.z
-    state.moveState = 'walking_home'
-    state.currentRepoName = null
-    this.startWalkAnim(character)
-  }
-
-  /** Create DevActivityState for a newly active developer. */
-  private createActivityState(
-    character: CharacterEntity,
-    activity: EngineDevActivity,
-    resolvedId: string,
-  ): DevActivityState | null {
-    if (!this.app) return null
-
-    const pos = character.entity.getPosition()
-    const euler = character.entity.getEulerAngles()
-    const wasSitting = character.entity.anim?.getBoolean('sitting') ?? false
-    const displayName = activity.actor_name || character.memberName
-
-    // Create activity label (green tint to distinguish from blue agent labels)
-    const label = new AgentLabel(this.app.app.graphicsDevice)
-    const labelEntity = label.create(displayName, this.formatMessage(activity))
-    label.setColor(0.12, 0.47, 0.24)
-    label.setHeight(DEV_LABEL_HEIGHT)
-    character.entity.addChild(labelEntity)
-    this.app.registerBillboard(labelEntity)
-
-    return {
-      userId: resolvedId,
-      displayName,
-      label,
-      labelEntity,
-      originalPosition: new pc.Vec3(pos.x, pos.y, pos.z),
-      originalYaw: euler.y,
-      wasSitting,
-      currentRepoName: null,
-      targetX: pos.x,
-      targetZ: pos.z,
-      moveState: 'idle',
-      idleTimer: 0,
-      phraseTimer: 0,
-    }
-  }
-
-  /** Tick walking toward target. Returns true if arrived. */
-  private tickWalking(
-    character: CharacterEntity,
-    state: DevActivityState,
-    dt: number,
-    arrivalState: DevMoveState,
-  ): boolean {
-    const pos = character.entity.getPosition()
-    const dx = state.targetX - pos.x
-    const dz = state.targetZ - pos.z
-    const distSq = dx * dx + dz * dz
-
-    if (distSq < DEV_ARRIVE_DIST_SQ) {
-      // Arrived
-      state.moveState = arrivalState
-      character.entity.anim?.setInteger('speed', 0)
-      return true
-    }
-
-    const dist = Math.sqrt(distSq)
-    const step = DEV_WALK_SPEED * dt
-    const nx = dx / dist
-    const nz = dz / dist
-
-    character.entity.setPosition(
-      pos.x + nx * step,
-      0,
-      pos.z + nz * step,
-    )
-
-    // Face walking direction
-    const yaw = Math.atan2(nx, nz) * (180 / Math.PI)
-    character.entity.setEulerAngles(0, yaw, 0)
-
-    return false
-  }
-
-  /** Format the activity message for the label bottom line. */
-  private formatMessage(activity: EngineDevActivity): string {
-    const msg = activity.message
-    switch (activity.event_type) {
-      case 'commit':
-        return msg ? (msg.length > 40 ? msg.slice(0, 37) + '...' : msg) : 'Committing...'
-      case 'file_change':
-        if (activity.file_path) {
-          const parts = activity.file_path.split('/')
-          return `Editing ${parts[parts.length - 1]}`
-        }
-        return msg || 'Editing files...'
-      case 'session_start':
-        return 'Starting session...'
-      case 'session_end':
-        return 'Session ended'
-      case 'tool_call':
-        return msg || 'Running tool...'
-      case 'tool_error':
-      case 'api_error':
-        return msg || 'Error encountered'
-      default:
-        return msg || 'Working...'
-    }
-  }
-
-  /** Clean up activity state and label for a developer. */
-  private cleanupActivityState(userId: string, state: DevActivityState): void {
-    if (this.app) {
-      this.app.unregisterBillboard(state.labelEntity)
-    }
-    state.label.destroy()
-    this.activeDevs.delete(userId)
-  }
-
-  // ─── Dev Activity Helpers ───────────────────────
-
-  /** Find a character by display name (case-insensitive fallback for missing user_id). */
-  private getCharacterByName(name: string): CharacterEntity | undefined {
-    const lower = name.toLowerCase()
-    return this.characters.find(c => c.memberName.toLowerCase() === lower)
-  }
-
-  /** Start walk animation on a character (stand up + walk). */
-  private startWalkAnim(character: CharacterEntity): void {
     const anim = character.entity.anim
     if (anim) {
-      anim.setBoolean('sitting', false)
-      anim.setInteger('speed', 1)
+      const isSitting = snapshot.animState === 'sit' || snapshot.animState === 'sleep'
+      anim.setBoolean('sitting', isSitting)
+      const speed = snapshot.animState === 'walk' || snapshot.animState === 'sprint' ? 1 : 0
+      anim.setInteger('speed', speed)
     }
+
   }
 
-  /** Walk the character to the orchard fallback position (when no repo tree is available). */
-  private walkToOrchardFallback(character: CharacterEntity, state: DevActivityState): void {
-    state.currentRepoName = null
-    // Add small random jitter so multiple devs don't stack on the same spot
-    state.targetX = DEV_ORCHARD_FALLBACK_X + (Math.random() - 0.5) * 3
-    state.targetZ = DEV_ORCHARD_FALLBACK_Z + (Math.random() - 0.5) * 3
-    state.moveState = 'walking_to_tree'
-    this.startWalkAnim(character)
+  /** Remove a character by userId (when server MemberState is removed). */
+  removeByUserId(userId: string): void {
+    const idx = this.characters.findIndex(c => c.memberId === userId)
+    if (idx === -1) return
+    const character = this.characters[idx]
+    if (this.app) {
+      const label = character.entity.findByTag('billboard')[0] as pc.Entity | undefined
+      if (label) this.app.unregisterBillboard(label)
+    }
+    character.entity.destroy()
+    this.characters.splice(idx, 1)
   }
 
-  // ─── Placement & Query ──────────────────────────
-
-  /** Determine where to place a character based on presence. */
-  private getPlacement(
-    member: EngineMember,
-    house: HouseResult | undefined,
-    allSeats: InteractionPoint[],
-    takenSeats: Set<string>,
-  ): { x: number; y: number; z: number; yaw: number; sitting: boolean } {
-    const presence = member.presence ?? 'active'
-
-    // 'at_home' → stand at house bed position
-    if (presence === 'at_home' && house) {
-      return {
-        x: house.bedPosition.x,
-        y: 0,
-        z: house.bedPosition.z,
-        yaw: 0,
-        sitting: false,
-      }
-    }
-
-    // 'active' → try to seat at their house desk first
-    if (presence === 'active' && house) {
-      const deskSeat = house.seats.find(s => !takenSeats.has(s.id))
-      if (deskSeat) {
-        takenSeats.add(deskSeat.id)
-        return {
-          x: deskSeat.x,
-          y: deskSeat.y,
-          z: deskSeat.z,
-          yaw: deskSeat.yaw,
-          sitting: true,
-        }
-      }
-    }
-
-    // 'on_break' → try pool or coffee bar seats
-    if (presence === 'on_break') {
-      const breakZones = ['pool_resort', 'coffee_bar']
-      for (const zone of breakZones) {
-        const seat = allSeats.find(s => s.zone === zone && !takenSeats.has(s.id))
-        if (seat) {
-          takenSeats.add(seat.id)
-          return {
-            x: seat.x,
-            y: seat.y,
-            z: seat.z,
-            yaw: seat.yaw,
-            sitting: true,
-          }
-        }
-      }
-    }
-
-    // Fallback: any available seat
-    const anySeat = allSeats.find(s => !takenSeats.has(s.id))
-    if (anySeat) {
-      takenSeats.add(anySeat.id)
-      return {
-        x: anySeat.x,
-        y: anySeat.y,
-        z: anySeat.z,
-        yaw: anySeat.yaw,
-        sitting: true,
-      }
-    }
-
-    // Last resort: stand at house or origin
-    if (house) {
-      return {
-        x: house.bedPosition.x,
-        y: 0,
-        z: house.bedPosition.z,
-        yaw: 0,
-        sitting: false,
-      }
-    }
-
-    return { x: 0, y: 0, z: 0, yaw: 0, sitting: false }
+  /**
+   * Mark which user is in local takeover mode. Snapshot updates for this
+   * user are skipped (client-side prediction — the local WASD controller
+   * drives the entity, and the server echoes positions back via takeoverSessionId).
+   */
+  setTakeoverUser(userId: string | null): void {
+    this.takeoverUserId = userId
   }
 
-  /** Get all character entities (for Phase 5 interaction picking). */
+  /** Get all character entities (used by interaction picking). */
   getCharacters(): CharacterEntity[] {
     return this.characters
   }
@@ -558,11 +211,8 @@ export class CharacterSystem {
   }
 
   destroy(): void {
-    // Clean up active dev activity states (labels + GPU resources)
-    for (const [userId, state] of this.activeDevs) {
-      this.cleanupActivityState(userId, state)
-    }
-
+    // Destroy the parent first — all children are destroyed recursively.
+    // But we still iterate to unregister billboards and dispose GPU resources.
     for (const char of this.characters) {
       if (this.app) {
         const label = char.entity.findByTag('billboard')[0] as pc.Entity | undefined
@@ -581,7 +231,8 @@ export class CharacterSystem {
       char.entity.destroy()
     }
     this.characters = []
-    this.activeDevs.clear()
+    this.characterRoot?.destroy()
+    this.characterRoot = null
     this.app = null
     this.factory.clear()
     this.kayKitFactory.clear()

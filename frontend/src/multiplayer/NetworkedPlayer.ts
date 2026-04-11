@@ -46,6 +46,7 @@ export class NetworkedPlayer {
     kayKitFactory?: KayKitCharacterFactory,
   ): Promise<void> {
     const config = parseCharacterModel(initial.characterModel || null)
+    const seated = initial.animState === 'sit' || initial.animState === 'sleep'
 
     if (isKayKitConfig(config)) {
       // KayKit character — reuse shared factory for GLB cache sharing
@@ -53,7 +54,7 @@ export class NetworkedPlayer {
       const result = await factory.create(
         initial.userId, this.name, config,
         initial.x, 0, initial.z,
-        initial.yaw, false,
+        initial.yaw, seated,
       )
       parent.addChild(result.entity)
       this.entity = result.entity
@@ -79,6 +80,9 @@ export class NetworkedPlayer {
 
       parent.addChild(wrapper)
       this.entity = wrapper
+
+      // Drive the anim component's sitting boolean if present
+      wrapper.anim?.setBoolean('sitting', seated)
     }
 
     this.targetX = initial.x
@@ -86,11 +90,17 @@ export class NetworkedPlayer {
     this.targetYaw = initial.yaw
   }
 
-  /** Update target position from network data. */
+  /** Update target position and pose from network data. */
   setTarget(player: PlayerData): void {
     this.targetX = player.x
     this.targetZ = player.z
     this.targetYaw = player.yaw
+    // Apply pose transitions (sit/sleep/idle/walk) — server is authoritative.
+    const anim = this.entity?.anim
+    if (anim) {
+      const sitting = player.animState === 'sit' || player.animState === 'sleep'
+      anim.setBoolean('sitting', sitting)
+    }
   }
 
   /** Per-frame interpolation toward target position. */

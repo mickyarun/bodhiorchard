@@ -7,7 +7,7 @@
  *   ├── interiorRoot  (disabled initially) — shared interior room
  *   └── playerWrapper (always enabled)     — character entity
  *
- * Exterior uses Rapier physics (wall collision + door sensors).
+ * Exterior uses Rapier physics (wall collision + door colliders).
  * Interior uses manual AABB collision (furniture boxes).
  * Scene swap happens during fade-to-black so the entity toggle is invisible.
  */
@@ -65,13 +65,13 @@ export class HouseTestEngine {
   private ui: HouseTestUI | null = null
   private physics: PhysicsWorld | null = null
 
-  private scene: 'exterior' | 'interior' = 'exterior'
+  private scene: 'exterior' | 'entering' | 'interior' | 'exiting' = 'exterior'
   private canvas: HTMLCanvasElement | null = null
   private intBoxes: CollisionBox[] = []
 
   // Multi-house state
   private currentHouseId: string | null = null
-  private sensorReEnableTimer: ReturnType<typeof setTimeout> | null = null
+  private doorReEnableTimer: ReturnType<typeof setTimeout> | null = null
 
   // E-key interaction state
   private _ePrev = false
@@ -111,7 +111,7 @@ export class HouseTestEngine {
     this.exterior = new ExteriorScene(this.factory)
     this.interior = new InteriorScene(this.factory)
 
-    // Exterior: builds 4 houses + registers physics (walls + door sensors)
+    // Exterior: builds 4 houses + registers physics (walls + door colliders)
     await this.exterior.build(this.exteriorRoot, this.physics)
 
     // Interior: builds shared room (returns manual AABB collision boxes)
@@ -169,16 +169,11 @@ export class HouseTestEngine {
     const playerPos = this.player.getPosition()
 
     if (this.scene === 'exterior') {
-      // Check door sensor events (read AFTER step so sensors reflect current position)
-      const events = this.physics.consumeEvents()
-      for (const evt of events) {
-        console.debug('[HouseTest] Sensor event:', evt.type, evt.sensorId)
-        if (evt.type === 'enter' && evt.sensorId.startsWith('door_')) {
-          const houseId = evt.sensorId.replace('door_', '')
-          console.log('[HouseTest] Entering house:', houseId)
-          this.enterHouse(houseId)
-          break
-        }
+      // Check if player bumped into a door collider
+      const doorHit = this.physics.consumeDoorHit()
+      if (doorHit) {
+        console.log('[HouseTest] Door hit:', doorHit.doorId)
+        this.enterHouse(doorHit.doorId)
       }
     }
 
@@ -226,9 +221,9 @@ export class HouseTestEngine {
     if (!this.transition || this.transition.isActive || this.scene !== 'exterior') return
 
     this.currentHouseId = houseId
-    this.physics?.setSensorsEnabled(false) // disable sensors during transition
+    this.physics?.setDoorsEnabled(false) // disable door detection during transition
 
-    this.scene = 'entering'  // prevent re-entrant sensor triggers
+    this.scene = 'entering'  // prevent re-entrant door collision triggers
 
     void this.transition.perform(() => {
       this.scene = 'interior'
@@ -271,10 +266,10 @@ export class HouseTestEngine {
       this.player!.teleport(exitX, exitZ, 0)
       this.physics?.teleportPlayer(exitX, exitZ)
 
-      // Re-enable sensors after a delay to prevent re-trigger
-      this.sensorReEnableTimer = setTimeout(() => {
-        this.physics?.setSensorsEnabled(true)
-        this.sensorReEnableTimer = null
+      // Re-enable door detection after a delay to prevent re-trigger
+      this.doorReEnableTimer = setTimeout(() => {
+        this.physics?.setDoorsEnabled(true)
+        this.doorReEnableTimer = null
       }, 500)
 
       this.ui?.setScene('exterior')
@@ -303,9 +298,9 @@ export class HouseTestEngine {
   }
 
   destroy(): void {
-    if (this.sensorReEnableTimer !== null) {
-      clearTimeout(this.sensorReEnableTimer)
-      this.sensorReEnableTimer = null
+    if (this.doorReEnableTimer !== null) {
+      clearTimeout(this.doorReEnableTimer)
+      this.doorReEnableTimer = null
     }
     this.transition?.destroy()
     this.ui?.destroy()

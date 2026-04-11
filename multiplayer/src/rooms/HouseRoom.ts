@@ -17,7 +17,7 @@ class HouseRoomState extends Schema {
   @type("string") ownerId: string = ""  // whose house this is
 }
 
-export class HouseRoom extends Room<HouseRoomState> {
+export class HouseRoom extends Room<{ state: HouseRoomState }> {
   maxClients = 10
 
   onCreate(options: { ownerId?: string }) {
