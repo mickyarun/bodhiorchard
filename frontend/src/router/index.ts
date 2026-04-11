@@ -154,6 +154,12 @@ const router = createRouter({
           meta: { permission: 'agents:configure' },
           component: () => import('@/views/settings/SettingsAgentPrompts.vue'),
         },
+        {
+          path: 'settings/qa-automation',
+          name: 'settings-qa-automation',
+          meta: { permission: 'integrations:configure' },
+          component: () => import('@/views/settings/SettingsQAAutomation.vue'),
+        },
       ],
     },
   ],

@@ -42,4 +42,7 @@ export interface SetupChecklistStatus {
   slackConnected: boolean
   branchesMapped: boolean
   membersImported: boolean
+  // True once the org has visited the QA automation settings page and
+  // saved any value (even defaults). See backend/app/api/v1/setup.py.
+  qaConfigured: boolean
 }

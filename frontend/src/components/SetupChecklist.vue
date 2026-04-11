@@ -130,6 +130,13 @@ const items = computed<ChecklistItem[]>(() => {
     { key: 'github', label: 'Connect GitHub', done: c.githubConnected, route: '/settings', optional: true },
     { key: 'slack', label: 'Connect Slack', done: c.slackConnected, route: '/settings', optional: true },
     { key: 'members', label: 'Import team members', done: c.membersImported, route: '/members', optional: true },
+    {
+      key: 'qa',
+      label: 'Customize QA automation framework',
+      done: c.qaConfigured,
+      route: '/settings/qa-automation',
+      optional: true,
+    },
   ]
 })
 

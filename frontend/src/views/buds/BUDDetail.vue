@@ -566,6 +566,7 @@ import { useMembersStore } from '@/stores/members'
 import { useJobSocket } from '@/composables/useJobSocket'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
+import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
 import type { BUDSectionKey, TimelineEvent } from '@/types'
 import { useEstimates } from '@/composables/useEstimates'
@@ -664,10 +665,18 @@ const { startTracking } = useJobSocket()
 const fileInput = ref<HTMLInputElement | null>(null)
 const uploadSection = ref('requirements_md')
 
-const statusItems = BUD_STATUS_ORDER.map(s => ({
-  title: BUD_STATUS_LABELS[s],
-  value: s,
-}))
+// Status dropdown items. Uses the org-filtered phase order so UAT is
+// hidden when the org has it disabled (see usePhaseOrder). This is the
+// ONE place BUDDetail renders a user-facing phase list — everything else
+// here uses BUD_STATUS_ORDER for monotonic phase-reached checks, which
+// must stay on the canonical unfiltered list.
+const { phaseOrder } = usePhaseOrder()
+const statusItems = computed(() =>
+  phaseOrder.value.map(s => ({
+    title: BUD_STATUS_LABELS[s],
+    value: s,
+  })),
+)
 
 const statusColor = computed(() =>
   bud.value ? BUD_STATUS_COLORS[bud.value.status] || 'default' : 'default',

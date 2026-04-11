@@ -8,9 +8,25 @@
           {{ budStore.buds.length }} document{{ budStore.buds.length !== 1 ? 's' : '' }}
         </div>
       </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="showCreateDialog = true">
-        New BUD
-      </v-btn>
+      <div class="d-flex align-center ga-2">
+        <!-- Customize lifecycle stages — same permission gate as the
+             settings route. Visible to users who can actually change
+             the UAT toggle / framework; hidden for plain viewers. -->
+        <v-tooltip v-if="canViewQAAutomation" text="Customize QA framework & lifecycle stages" location="bottom">
+          <template #activator="{ props: tipProps }">
+            <v-btn
+              v-bind="tipProps"
+              icon="mdi-cog-outline"
+              variant="text"
+              size="small"
+              :to="{ name: 'settings-qa-automation' }"
+            />
+          </template>
+        </v-tooltip>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="showCreateDialog = true">
+          New BUD
+        </v-btn>
+      </div>
     </div>
 
     <!-- Loading -->
@@ -46,7 +62,7 @@
     <div v-else class="board-container">
       <div class="board-scroll">
         <div
-          v-for="status in BUD_STATUS_ORDER.filter(s => s !== 'discarded')"
+          v-for="status in boardColumns"
           :key="status"
           class="board-column"
         >
@@ -176,11 +192,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
-import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS } from '@/types'
+import { BUD_STATUS_LABELS, BUD_STATUS_COLORS } from '@/types'
 import type { BUDStatus } from '@/types'
+import { usePhaseOrder } from '@/composables/usePhaseOrder'
+import { usePermissions } from '@/composables/usePermissions'
 
 const router = useRouter()
 const budStore = useBUDStore()
@@ -222,13 +240,23 @@ function initials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
 }
 
-const ACTIVE_PHASE_COUNT = BUD_STATUS_ORDER.filter(
-  s => s !== 'discarded' && s !== 'closed',
-).length
+// Phase order filtered by org settings (e.g. UAT may be disabled). The
+// kanban columns and progress-bar denominator both use this so the board
+// reacts when the org toggles UAT off, without a page reload.
+const { phaseOrder } = usePhaseOrder()
+const { canViewQAAutomation } = usePermissions()
+const boardColumns = computed<BUDStatus[]>(() =>
+  phaseOrder.value.filter(s => s !== 'discarded'),
+)
+const activePhaseCount = computed<number>(
+  () => phaseOrder.value.filter(s => s !== 'discarded' && s !== 'closed').length,
+)
 
 function phaseProgress(status: BUDStatus): number {
-  const idx = BUD_STATUS_ORDER.indexOf(status)
-  return idx >= 0 ? Math.min(100, ((idx + 1) / ACTIVE_PHASE_COUNT) * 100) : 0
+  // Use the filtered phaseOrder for both numerator and denominator so the
+  // progress bar is consistent regardless of whether UAT is enabled.
+  const idx = phaseOrder.value.indexOf(status)
+  return idx >= 0 ? Math.min(100, ((idx + 1) / activePhaseCount.value) * 100) : 0
 }
 
 function deadlineColor(deadline: string): string {

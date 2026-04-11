@@ -19,6 +19,18 @@ export interface ConnectionsState {
     maxTurns: number
     autoCreateMembers: boolean
   }
+  // Per-org QA automation settings. Must track the backend
+  // QAAutomationSettings Pydantic model — see backend/app/schemas/settings.py.
+  // Kept in snake_case fields because FastAPI emits canonical names on GET
+  // and we PATCH the same shape back.
+  qaAutomation: {
+    enabled: boolean
+    framework: string
+  }
+  // Per-org BUD lifecycle stage toggles.
+  budStages: {
+    uatEnabled: boolean
+  }
 }
 
 function emptyState(): ConnectionsState {
@@ -33,6 +45,16 @@ function emptyState(): ConnectionsState {
       timeoutSeconds: 300,
       maxTurns: 40,
       autoCreateMembers: true,
+    },
+    // Defaults mirror backend QAAutomationSettings / BUDStageSettings defaults.
+    // If the backend ships a different default, update BOTH or get_connections
+    // will overwrite whatever we initialize here on first fetch anyway.
+    qaAutomation: {
+      enabled: true,
+      framework: 'playwright',
+    },
+    budStages: {
+      uatEnabled: true,
     },
   }
 }

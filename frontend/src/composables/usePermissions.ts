@@ -21,6 +21,10 @@ export function usePermissions() {
   const canViewConnections = computed(() => hasPermission('integrations:view'))
   const canViewDesignSystems = computed(() => hasPermission('integrations:configure'))
   const canViewAgentPrompts = computed(() => hasPermission('agents:configure'))
+  // QA Automation page matches the SettingsQAAutomation route guard — same
+  // permission gate as the other "configure" pages, so the sidebar entry
+  // is visible to the same users who can actually save changes.
+  const canViewQAAutomation = computed(() => hasPermission('integrations:configure'))
 
   return {
     hasPermission,
@@ -31,5 +35,6 @@ export function usePermissions() {
     canViewConnections,
     canViewDesignSystems,
     canViewAgentPrompts,
+    canViewQAAutomation,
   }
 }

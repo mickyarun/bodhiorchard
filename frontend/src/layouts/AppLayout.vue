@@ -93,6 +93,13 @@
               rounded="lg"
               class="pl-10"
             />
+            <v-list-item
+              v-if="canViewQAAutomation"
+              title="QA Automation"
+              to="/settings/qa-automation"
+              rounded="lg"
+              class="pl-10"
+            />
           </v-list-group>
         </v-list>
 
@@ -178,6 +185,7 @@ const {
   canViewConnections,
   canViewDesignSystems,
   canViewAgentPrompts,
+  canViewQAAutomation,
 } = usePermissions()
 
 const userInitials = computed(() => {
