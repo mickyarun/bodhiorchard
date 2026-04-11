@@ -20,7 +20,7 @@ const ZONE_LABELS: Record<string, string> = {
   cafeteria: 'Cafeteria',
   housing: 'Village',
   pool: 'Pool',
-  pavilion: 'Pavilion',
+  pavilion: 'Standup',
   orchard: 'Orchard',
 }
 

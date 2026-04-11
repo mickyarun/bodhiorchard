@@ -226,6 +226,8 @@ export const BUILDING = {
 export const CAMPFIRE = {
   stones: `${GARDEN}/campfire_stones.glb`,
   logs: `${GARDEN}/campfire_logs.glb`,
+  /** Sketchfab fireplace with cauldron + stands. Z-up, 100× matrix baked in. */
+  fireplace: `${GARDEN}/fireplace.glb`,
 } as const
 
 export const PAVILION = {

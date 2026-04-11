@@ -249,11 +249,14 @@ export class SceneManager {
       this.buildingEntities.push(pavilionResult.entity)
       this.layout.addExclusionZones([pavilionResult.exclusionZone])
       this.layout.registerSeats(pavilionResult.seats)
-      this.buildingHuts.push({
-        x: pavilionZone.x, z: pavilionZone.z,
-        yawDeg: pavilionResult.entity.getEulerAngles().y,
-        ...pavilionResult.hutDims,
-      })
+      // Open-air standup area has no walls → no physics hut to register.
+      if (pavilionResult.hutDims) {
+        this.buildingHuts.push({
+          x: pavilionZone.x, z: pavilionZone.z,
+          yawDeg: pavilionResult.entity.getEulerAngles().y,
+          ...pavilionResult.hutDims,
+        })
+      }
     }
 
     // 4b. Characters — CharacterSystem is a renderer only; entities are
