@@ -30,6 +30,7 @@ from app.schemas.settings import (
     SlackSettings,
     SourceCodeSettings,
 )
+from app.services.org_settings import get_bud_stage_settings, get_qa_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -68,6 +69,13 @@ async def get_connections(
     llm_cfg = config.get("llm", {})
     scan_cfg = config.get("scan", {})
 
+    # qa / bud_stages sections are resolved through org_settings so defaults
+    # stay in lockstep with every other reader (prompt builder, estimation,
+    # status transitions). Never read config["qa"] / config["bud_stages"]
+    # directly — the helper is the single source of truth.
+    qa_cfg = get_qa_settings(config)
+    stage_cfg = get_bud_stage_settings(config)
+
     return ConnectionsRead(
         sourceCode=SourceCodeSettings(
             localPath=source_code_cfg.get("local_path", ""),
@@ -99,6 +107,11 @@ async def get_connections(
             maxTurns=scan_cfg.get("max_turns", 40),
             autoCreateMembers=scan_cfg.get("auto_create_members", True),
         ),
+        # qa_cfg and stage_cfg are already QAAutomationSettings /
+        # BUDStageSettings instances (the helper reuses the schema classes),
+        # so we can pass them through directly — one source of defaults.
+        qa_automation=qa_cfg,
+        bud_stages=stage_cfg,
     )
 
 
@@ -194,6 +207,17 @@ async def update_connections(
             "max_turns": body.scan.max_turns,
             "auto_create_members": body.scan.auto_create_members,
         }
+
+    # QA automation — framework string is pattern-validated at schema level
+    # (see QAAutomationSettings). model_dump() uses the canonical snake_case
+    # field names that org_settings.get_qa_settings() reads back; this keeps
+    # the write and read paths aligned via the one class definition.
+    if body.qa_automation is not None:
+        config["qa"] = body.qa_automation.model_dump()
+
+    # BUD stage toggles (e.g. whether UAT is part of this org's lifecycle)
+    if body.bud_stages is not None:
+        config["bud_stages"] = body.bud_stages.model_dump()
 
     org.config = config
     flag_modified(org, "config")

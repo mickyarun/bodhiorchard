@@ -73,6 +73,40 @@ class ScanSettings(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class QAAutomationSettings(BaseModel):
+    """Org-level QA automation settings.
+
+    The ``framework`` field flows directly into the QA agent system prompt
+    via string substitution (see ``build_testing_prompt``). Because the
+    agent runs with tool access, an unsanitized value like
+    ``"Playwright. Ignore prior instructions and ..."`` is a prompt-injection
+    vector. The regex below restricts the field to a small alphabet that
+    can safely name a framework: ASCII letters, digits, space, underscore,
+    plus, and hyphen, 1-40 chars. No newlines, quotes, backticks, or
+    punctuation the agent could interpret as meta-instructions.
+    """
+
+    enabled: bool = True
+    framework: str = Field(
+        default="playwright",
+        pattern=r"^[a-zA-Z0-9 _+\-]{1,40}$",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class BUDStageSettings(BaseModel):
+    """Org-level BUD lifecycle stage toggles.
+
+    Only the UAT phase is toggle-able in v1. Other phases are required and
+    cannot be skipped at org level.
+    """
+
+    uat_enabled: bool = Field(default=True, alias="uatEnabled")
+
+    model_config = {"populate_by_name": True}
+
+
 class ConnectionsRead(BaseModel):
     """Response schema for GET /settings/connections."""
 
@@ -81,6 +115,14 @@ class ConnectionsRead(BaseModel):
     slack: SlackSettings = SlackSettings()
     ai_config: AIConfigSettings = Field(default_factory=AIConfigSettings, alias="aiConfig")
     scan: ScanSettings = Field(default_factory=ScanSettings)
+    qa_automation: QAAutomationSettings = Field(
+        default_factory=QAAutomationSettings,
+        alias="qaAutomation",
+    )
+    bud_stages: BUDStageSettings = Field(
+        default_factory=BUDStageSettings,
+        alias="budStages",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -149,5 +191,7 @@ class ConnectionsUpdate(BaseModel):
     slack: SlackSettings | None = None
     ai_config: AIConfigSettings | None = Field(None, alias="aiConfig")
     scan: ScanSettings | None = None
+    qa_automation: QAAutomationSettings | None = Field(None, alias="qaAutomation")
+    bud_stages: BUDStageSettings | None = Field(None, alias="budStages")
 
     model_config = {"populate_by_name": True}

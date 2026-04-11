@@ -512,7 +512,11 @@ async def _collect_bud_stages(db: AsyncSession, org_id: uuid.UUID, tree: TreeDat
             if feat.repo_name:
                 bud_repo_map[feat.from_bud] = feat.repo_name
 
-    # testing and uat render as flowers; prod and closed render as fruit
+    # testing and uat render as flowers; prod and closed render as fruit.
+    # Including "uat" in this filter is a no-op for orgs with UAT disabled
+    # (see app.services.org_settings.is_uat_enabled) — no BUD in such orgs
+    # will ever carry status="uat", so the filter harmlessly matches zero
+    # rows for that status and we don't need per-org filtering here.
     result = await db.execute(
         select(BUDDocument.bud_number, BUDDocument.title, BUDDocument.status)
         .where(BUDDocument.org_id == org_id)

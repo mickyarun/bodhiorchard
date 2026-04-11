@@ -103,3 +103,4 @@ class SetupStatusResponse(BaseModel):
     slack_connected: bool = Field(alias="slackConnected")
     branches_mapped: bool = Field(alias="branchesMapped")
     members_imported: bool = Field(alias="membersImported")
+    qa_configured: bool = Field(False, alias="qaConfigured")

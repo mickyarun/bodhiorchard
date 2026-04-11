@@ -472,11 +472,20 @@ async def _trigger_status_jobs(
             )
             return
 
-        # Force re-run when going back to code_review from later stages
-        force = new_status == BUDStatus.CODE_REVIEW and old_status in (
-            BUDStatus.TESTING,
-            BUDStatus.UAT,
-        )
+        # Force re-run when going back to code_review from a later stage.
+        # The list of valid "later stages" depends on whether this org uses
+        # UAT — if UAT is disabled, the transition code_review → uat is
+        # impossible, so including UAT here would be dead code. We gate it
+        # with an explicit is_uat_enabled() check so the intent is visible
+        # in the source (rather than silently relying on unreachability).
+        from app.repositories.organization import OrganizationRepository
+        from app.services.org_settings import is_uat_enabled
+
+        org = await OrganizationRepository(db).get_by_id(current_user.org_id)
+        force_from_stages: list[BUDStatus] = [BUDStatus.TESTING]
+        if is_uat_enabled(org.config if org else None):
+            force_from_stages.append(BUDStatus.UAT)
+        force = new_status == BUDStatus.CODE_REVIEW and old_status in force_from_stages
         await create_agent_task_for_stage(
             bud,
             str(new_status),

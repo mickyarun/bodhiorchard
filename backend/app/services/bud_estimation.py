@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.bud_estimate_snapshot import BUDEstimateSnapshot
+from app.repositories.organization import OrganizationRepository
 from app.services.bud_timeline import record_event
 from app.services.estimation_context import (
     compute_bud_complexity,
@@ -21,7 +22,6 @@ from app.services.estimation_context import (
     get_skill_context,
 )
 from app.services.estimation_engine import (
-    PHASE_ORDER,
     PERTEstimate,
     add_business_days,
     default_pert_spread,
@@ -30,6 +30,7 @@ from app.services.estimation_engine import (
     pert_std_dev,
 )
 from app.services.estimation_llm import llm_pert_estimate
+from app.services.org_settings import get_phase_order
 
 logger = structlog.get_logger(__name__)
 
@@ -49,12 +50,20 @@ async def estimate_bud_dates(
     heuristic_complexity = compute_bud_complexity(bud)
     current_status = bud.status.value if isinstance(bud.status, BUDStatus) else bud.status
 
-    # Determine remaining phases
+    # Resolve the org's phase order (may omit "uat" if the org has it
+    # toggled off via org.config.bud_stages.uat_enabled). BUDDocument has
+    # no .organization relationship, so we load the org explicitly.
+    org = await OrganizationRepository(db).get_by_id(org_id)
+    phase_order = get_phase_order(org.config if org else None)
+
+    # Determine remaining phases relative to the current status. If the
+    # current status is itself disabled (e.g. current_status="uat" but the
+    # org just turned UAT off), fall back to starting from the beginning.
     try:
-        current_idx = PHASE_ORDER.index(current_status)
+        current_idx = phase_order.index(current_status)
     except ValueError:
         current_idx = 0
-    remaining = PHASE_ORDER[current_idx:]
+    remaining = phase_order[current_idx:]
 
     # Gather context
     backlog_ctx = await get_backlog_context(db, org_id, bud)
@@ -78,6 +87,7 @@ async def estimate_bud_dates(
             heuristic_complexity,
             backlog_ctx["queue_depth"],
             backlog_ctx["assignee_workload"],
+            phase_order=phase_order,
         )
         pert_estimates = {p: all_defaults[p] for p in remaining if p in all_defaults}
         complexity = heuristic_complexity
@@ -150,9 +160,18 @@ async def override_phase_date(
     actor_id: uuid.UUID,
     actor_name: str,
 ) -> dict:
-    """Override a single phase's estimated date with a mandatory reason."""
-    if phase not in PHASE_ORDER:
-        raise ValueError(f"Invalid phase: {phase}")
+    """Override a single phase's estimated date with a mandatory reason.
+
+    Only phases enabled for this org can be overridden — e.g. a UAT-
+    disabled org rejects ``phase="uat"`` so we don't accidentally write
+    a stale UAT row into estimated_dates.
+    """
+    org = await OrganizationRepository(db).get_by_id(org_id)
+    allowed_phases = get_phase_order(org.config if org else None)
+    if phase not in allowed_phases:
+        raise ValueError(
+            f"Invalid phase '{phase}' for this org (allowed: {allowed_phases})"
+        )
     estimated = dict(bud.estimated_dates or {})
     old_date = (estimated.get(phase) or {}).get("estimated_completion")
 

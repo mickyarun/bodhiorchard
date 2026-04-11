@@ -183,9 +183,18 @@ async def handle_testing_result(
     task: BUDAgentTask,
     db: Any,
 ) -> dict | None:
-    """Testing result: parse JSON and store test cases in BUD columns."""
+    """Testing result: parse JSON and store test cases in BUD columns.
+
+    When the org has QA automation disabled (``org.config.qa.enabled``
+    is False), any automation cases the agent emits are dropped here —
+    the prompt already tells the agent not to generate them, but this
+    is the enforcement backstop so a misbehaving agent cannot populate
+    automation cases against the org's will.
+    """
     from app.repositories.bud import BUDRepository
+    from app.repositories.organization import OrganizationRepository
     from app.services.json_parser import parse_json_response
+    from app.services.org_settings import get_qa_settings
 
     default: dict[str, Any] = {
         "automation_test_cases": [],
@@ -202,8 +211,24 @@ async def handle_testing_result(
         except Exception:
             logger.warning("testing_output_parse_failed", bud_id=str(bud_id))
 
+    # Single-point enforcement of the automation-off rule. Prompt tells the
+    # agent what to do; this drops anything that slipped through.
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_by_id(org_id)
+    qa = get_qa_settings(org.config if org else None)
+    if not qa.enabled and parsed_data["automation_test_cases"]:
+        logger.info(
+            "qa_automation_disabled_dropping_cases",
+            bud_id=str(bud_id),
+            dropped=len(parsed_data["automation_test_cases"]),
+        )
+        parsed_data["automation_test_cases"] = []
+
     auto_empty = not parsed_data["automation_test_cases"]
     manual_empty = not parsed_data["manual_test_cases"]
+    # Zero-cases warning is suppressed when automation is off and manual
+    # cases exist — "automation empty, manual populated" is the expected
+    # shape for automation-disabled orgs, not a failure.
     if output and auto_empty and manual_empty:
         logger.warning(
             "testing_output_zero_cases",

@@ -55,18 +55,34 @@ def default_pert_spread(
     complexity: int,
     backlog_depth: int,
     assignee_workload: int,
+    phase_order: list[str] | None = None,
 ) -> dict[str, PERTEstimate]:
     """Generate conservative PERT spreads from defaults when LLM is unavailable.
 
     Scales base durations by complexity (1-5), backlog depth, and workload.
+
+    Args:
+        complexity: 1-5 scale for feature complexity.
+        backlog_depth: Number of buds in the assignee's queue.
+        assignee_workload: Current workload factor for the assignee.
+        phase_order: Optional subset/ordering of phases to include. When
+            None, uses all phases from ``DEFAULT_PHASE_DAYS``. Pass a
+            filtered list (e.g. excluding "uat") when the caller knows
+            the org has certain phases disabled. Backward compatible:
+            omitting this argument preserves the original behaviour.
     """
     complexity_factor = complexity / 3.0
     queue_factor = 1 + (backlog_depth * 0.3)
     workload_factor = 1 + (assignee_workload * 0.2)
     combined = queue_factor * workload_factor
 
+    phases_to_iterate = phase_order if phase_order is not None else list(DEFAULT_PHASE_DAYS.keys())
+
     result: dict[str, PERTEstimate] = {}
-    for phase, base in DEFAULT_PHASE_DAYS.items():
+    for phase in phases_to_iterate:
+        base = DEFAULT_PHASE_DAYS.get(phase)
+        if base is None:
+            continue
         scaled = base * complexity_factor * combined
         result[phase] = PERTEstimate(
             optimistic=round(scaled * 0.6, 1),

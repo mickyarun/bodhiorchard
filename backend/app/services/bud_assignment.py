@@ -18,6 +18,11 @@ logger = structlog.get_logger(__name__)
 
 # Maps each lifecycle phase to the UserRole responsible for it.
 # Phases not listed here (PROD, CLOSED, DISCARDED) skip auto-assignment.
+# The UAT entry is only reachable when the org has UAT enabled in
+# org.config.bud_stages (see app.services.org_settings.is_uat_enabled) —
+# UAT-disabled orgs never transition to BUDStatus.UAT, so auto_assign_for_phase
+# will never look this key up for them. Keeping it in the map is harmless
+# and avoids per-org map filtering.
 PHASE_ROLE_MAP: dict[BUDStatus, str] = {
     BUDStatus.BUD: UserRole.PM,
     BUDStatus.DESIGN: UserRole.DESIGNER,

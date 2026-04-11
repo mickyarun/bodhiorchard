@@ -194,8 +194,15 @@ async def build_testing_prompt(
     org_id: uuid_mod.UUID,
     db: Any,
 ) -> tuple[str, str | None]:
-    """Build QA testing prompt with repo locations and commit refs."""
+    """Build QA testing prompt with repo locations and commit refs.
+
+    Reads the org's QA automation settings (``org.config.qa``) so the
+    agent targets the right framework, or produces manual-only cases when
+    the org has automation disabled. See ``org_settings.get_qa_settings``.
+    """
     from app.repositories.dev_activity import DevActivityLogRepository
+    from app.repositories.organization import OrganizationRepository
+    from app.services.org_settings import get_qa_settings
 
     bud_ref = f"BUD-{bud.bud_number:03d}"
     meta = bud.metadata_ or {}
@@ -203,6 +210,13 @@ async def build_testing_prompt(
 
     activity_repo = DevActivityLogRepository(db, org_id=org_id)
     last_shas = await activity_repo.get_last_sha_per_repo(bud.id)
+
+    # Load org QA config. BUDDocument has no .organization relationship
+    # (only an org_id FK), so we load the org explicitly.
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_by_id(org_id)
+    qa = get_qa_settings(org.config if org else None)
+    framework = qa.framework
 
     repo_sections, working_dir = _build_repo_diff_sections(
         confirmed_repos,
@@ -240,52 +254,106 @@ async def build_testing_prompt(
     )
     if draft_context:
         prompt += draft_context
-    prompt += (
-        "## Instructions\n\n"
-        "You are a QA engineer, NOT a developer. Write test cases to cover "
-        "all scenarios based on the requirements and code changes — as many "
-        "as needed, no padding.\n\n"
-        "**Automation cases** = Playwright E2E tests. Write each as a scenario "
-        "with Given/When/Then steps that a developer can hand to Claude Code "
-        "to produce a working Playwright test file. Cover: functional flows, "
-        "negative paths, boundary values, regression checks.\n\n"
-        "**Manual cases** = ONLY things Playwright cannot verify: visual "
-        "design parity (comparing to wireframe with human eyes), screen "
-        "reader/VoiceOver testing, physical device behavior, subjective UX "
-        "feel. Do NOT put functional tests here — if Playwright can click it "
-        "and assert the result, it belongs in automation.\n\n"
-        "Do NOT generate unit tests, integration tests, or store/composable "
-        "tests — those are the developer's responsibility, not QA's.\n\n"
-        "## Output Format (JSON only, no wrapper)\n\n"
-        "```json\n"
-        "{\n"
-        '  "automation_test_cases": [\n'
-        '    {"id": "TC-001", "title": "Bell icon switches to filled on unread",\n'
-        '     "type": "e2e",\n'
-        '     "gherkin": "Given the user has 3 unread notifications\\n'
-        "When the page loads\\n"
-        "Then the bell icon should be the filled variant\\n"
-        'And the badge should show 3",\n'
-        '     "input": "3 unread notifications in DB",\n'
-        '     "expected_output": "Filled bell SVG + badge showing 3",\n'
-        '     "priority": "high",\n'
-        '     "tags": ["smoke", "regression"]}\n'
-        "  ],\n"
-        '  "manual_test_cases": [\n'
-        '    {"id": "TC-021", "title": "Panel matches wireframe visual design",\n'
-        '     "description": "Compare rendered panel against approved wireframe",\n'
-        '     "preconditions": "Wireframe open side-by-side",\n'
-        '     "steps": ["Open notification panel", "Compare layout to wireframe"],\n'
-        '     "expected_result": "Panel matches wireframe spacing and colors",\n'
-        '     "priority": "medium",\n'
-        '     "category": "usability"}\n'
-        "  ],\n"
-        '  "test_execution_plan": "## Phases\\n\\n'
-        "1. **Playwright E2E** — run on every PR...\\n"
-        '2. **Manual visual/a11y** — run before release..."\n'
-        "}\n"
-        "```\n"
-    )
+
+    # Framework-specific instructions block. When automation is on we tell
+    # the agent to write scenarios for the org's chosen framework; when off
+    # we tell it to produce manual-only cases and explicitly emit an empty
+    # automation list (the handler also enforces this as a backstop).
+    if qa.enabled:
+        instructions_block = (
+            "## Instructions\n\n"
+            "You are a QA engineer, NOT a developer. Write test cases to cover "
+            "all scenarios based on the requirements and code changes — as many "
+            "as needed, no padding.\n\n"
+            f"**Automation cases** = {framework} tests. Write each as a scenario "
+            "with Given/When/Then steps that a developer can hand to Claude Code "
+            f"to produce a working {framework} test file. Cover: functional flows, "
+            "negative paths, boundary values, regression checks.\n\n"
+            "**Manual cases** = ONLY things automation cannot verify: visual "
+            "design parity (comparing to wireframe with human eyes), screen "
+            "reader/VoiceOver testing, physical device behavior, subjective UX "
+            f"feel. Do NOT put functional tests here — if {framework} can drive it "
+            "and assert the result, it belongs in automation.\n\n"
+            "Do NOT generate unit tests, integration tests, or store/composable "
+            "tests — those are the developer's responsibility, not QA's.\n\n"
+        )
+        output_format_block = (
+            "## Output Format (JSON only, no wrapper)\n\n"
+            "```json\n"
+            "{\n"
+            '  "automation_test_cases": [\n'
+            '    {"id": "TC-001", "title": "Bell icon switches to filled on unread",\n'
+            '     "type": "e2e",\n'
+            '     "gherkin": "Given the user has 3 unread notifications\\n'
+            "When the page loads\\n"
+            "Then the bell icon should be the filled variant\\n"
+            'And the badge should show 3",\n'
+            '     "input": "3 unread notifications in DB",\n'
+            '     "expected_output": "Filled bell SVG + badge showing 3",\n'
+            '     "priority": "high",\n'
+            '     "tags": ["smoke", "regression"]}\n'
+            "  ],\n"
+            '  "manual_test_cases": [\n'
+            '    {"id": "TC-021", "title": "Panel matches wireframe visual design",\n'
+            '     "description": "Compare rendered panel against approved wireframe",\n'
+            '     "preconditions": "Wireframe open side-by-side",\n'
+            '     "steps": ["Open notification panel", "Compare layout to wireframe"],\n'
+            '     "expected_result": "Panel matches wireframe spacing and colors",\n'
+            '     "priority": "medium",\n'
+            '     "category": "usability"}\n'
+            "  ],\n"
+            '  "test_execution_plan": "## Phases\\n\\n'
+            f"1. **{framework}** — run on every PR...\\n"
+            '2. **Manual visual/a11y** — run before release..."\n'
+            "}\n"
+            "```\n"
+        )
+    else:
+        instructions_block = (
+            "## Instructions\n\n"
+            "You are a QA engineer, NOT a developer. Write test cases to cover "
+            "all scenarios based on the requirements and code changes — as many "
+            "as needed, no padding.\n\n"
+            "**This organization has automation DISABLED.** Produce **manual "
+            "test cases only** — do not populate `automation_test_cases`. "
+            "Return an empty list for that field.\n\n"
+            "Cover the full test surface in manual cases: functional flows, "
+            "negative paths, boundary values, regression scenarios, visual "
+            "design parity, accessibility, and any scenarios that require "
+            "human judgement. Each case must be executable by a human tester "
+            "without needing an automation framework.\n\n"
+            "Do NOT generate unit tests, integration tests, or store/composable "
+            "tests — those are the developer's responsibility, not QA's.\n\n"
+        )
+        output_format_block = (
+            "## Output Format (JSON only, no wrapper)\n\n"
+            "```json\n"
+            "{\n"
+            '  "automation_test_cases": [],\n'
+            '  "manual_test_cases": [\n'
+            '    {"id": "TC-001", "title": "Unread notification shows filled bell",\n'
+            '     "description": "Verify bell icon updates when unread count > 0",\n'
+            '     "preconditions": "User has at least 1 unread notification",\n'
+            '     "steps": ["Log in", "Observe bell icon in header"],\n'
+            '     "expected_result": "Bell icon is filled and shows numeric badge",\n'
+            '     "priority": "high",\n'
+            '     "category": "functional"},\n'
+            '    {"id": "TC-021", "title": "Panel matches wireframe visual design",\n'
+            '     "description": "Compare rendered panel against approved wireframe",\n'
+            '     "preconditions": "Wireframe open side-by-side",\n'
+            '     "steps": ["Open notification panel", "Compare layout to wireframe"],\n'
+            '     "expected_result": "Panel matches wireframe spacing and colors",\n'
+            '     "priority": "medium",\n'
+            '     "category": "usability"}\n'
+            "  ],\n"
+            '  "test_execution_plan": "## Phases\\n\\n'
+            "1. **Manual functional pass** — run before merge...\\n"
+            '2. **Manual regression** — run before release..."\n'
+            "}\n"
+            "```\n"
+        )
+
+    prompt += instructions_block + output_format_block
 
     return prompt, working_dir
 

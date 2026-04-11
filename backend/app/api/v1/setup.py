@@ -338,6 +338,11 @@ async def get_checklist_status(
         scan_id = active_scan.scan_id
         scan_progress = active_scan.progress_pct
 
+    # "QA configured" = org has visited the QA Automation settings page and
+    # saved any value. We treat the presence of ANY qa section as the done
+    # signal (even default values count — visiting the page is the point).
+    qa_configured = bool(org.config and org.config.get("qa"))
+
     return SetupStatusResponse(
         orgCreated=True,
         claudeCodeTested=True,  # If they got past setup, Claude was tested
@@ -350,4 +355,5 @@ async def get_checklist_status(
         slackConnected=bool(org.slack_bot_token),
         branchesMapped=all(r.main_branch for r in active_repos) if active_repos else False,
         membersImported=len(users) > 1,
+        qaConfigured=qa_configured,
     )

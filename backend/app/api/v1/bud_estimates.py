@@ -17,13 +17,14 @@ from app.models.bud import BUDDocument
 from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_estimate import BUDEstimateSnapshotRepository
+from app.repositories.organization import OrganizationRepository
 from app.schemas.bud import (
     BUDEstimatesRead,
     EstimateOverrideRequest,
     EstimateSnapshotRead,
     PhaseEstimate,
 )
-from app.services.estimation_engine import PHASE_ORDER
+from app.services.org_settings import get_phase_order
 
 logger = structlog.get_logger(__name__)
 
@@ -84,11 +85,19 @@ async def override_estimate(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PhaseEstimate:
-    """Override a single phase's estimated date. Requires reason."""
-    if phase not in PHASE_ORDER:
+    """Override a single phase's estimated date. Requires reason.
+
+    Validates ``phase`` against the org's active phase list so a UAT-disabled
+    org rejects ``phase="uat"`` here at the HTTP boundary with a clean 400 —
+    without this, the in-service backstop in ``override_phase_date`` would
+    still catch it but as an uncaught ``ValueError`` surfaced as HTTP 500.
+    """
+    org = await OrganizationRepository(db).get_by_id(current_user.org_id)
+    allowed_phases = get_phase_order(org.config if org else None)
+    if phase not in allowed_phases:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid phase: {phase}",
+            detail=f"Invalid phase '{phase}' for this org (allowed: {allowed_phases})",
         )
 
     from app.services.bud_estimation import override_phase_date
@@ -154,14 +163,22 @@ async def _get_bud_or_404(
 
 
 def _build_estimates_response(bud: BUDDocument) -> BUDEstimatesRead:
-    """Build BUDEstimatesRead from a BUD's estimated_dates JSONB."""
+    """Build BUDEstimatesRead from a BUD's estimated_dates JSONB.
+
+    Iterates whatever phase rows are actually present in ``estimated_dates``
+    (which ``estimate_bud_dates`` already filtered by the org's phase order)
+    rather than walking a fixed list — so UAT-disabled orgs naturally return
+    no UAT row without this function needing to know about the toggle.
+    """
     est = bud.estimated_dates or {}
     summary = est.get("_summary", {})
 
     phases = []
-    for phase in PHASE_ORDER:
-        phase_data = est.get(phase)
-        if not phase_data:
+    for phase, phase_data in est.items():
+        # Skip the "_summary" metadata key and any non-dict values.
+        if phase.startswith("_") or not isinstance(phase_data, dict):
+            continue
+        if "estimated_completion" not in phase_data:
             continue
         phases.append(
             PhaseEstimate(
