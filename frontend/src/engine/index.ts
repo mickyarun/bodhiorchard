@@ -60,6 +60,11 @@ export class GardenEngine {
   private sceneState: SceneState = 'garden'
   private savedCameraState: CameraState | null = null
   private _interiorMemberId: string | null = null
+  // Re-entrancy guard for enterHouse/exitHouse. Set `true` for the duration
+  // of a scene transition; the top guards on both methods check this flag
+  // to prevent double-entry (e.g. a door hit firing mid-fade) and
+  // double-exit (e.g. ESC pressed while the exit fade is still running).
+  private _transitioning = false
 
   // Garden takeover (player controls their character)
   private takeoverCtrl: TakeoverController | null = null
@@ -427,102 +432,134 @@ export class GardenEngine {
 
   /** Enter a house interior by member ID. */
   async enterHouse(memberId: string): Promise<void> {
-    if (this.sceneState !== 'garden' || !this.camera || !this.interior || !this.sceneManager) return
+    if (this.sceneState !== 'garden' || this._transitioning) return
+    if (!this.camera || !this.interior || !this.sceneManager) return
     const house = this.sceneManager.memberHouseMap.get(memberId)
     if (!house) return
 
-    this.sceneState = 'entering'
-    this._interiorMemberId = memberId
-    this.savedCameraState = this.camera.saveState()
-
-    // Fly camera to house position
-    const housePos = house.entity.getPosition()
-    this.camera.focusOnPosition(housePos, 8)
-
-    // Wait for fly-to transition, then fade to interior
-    await this.waitForTransition(800)
-
+    this._transitioning = true
     try {
-      await this.interior.sceneTransition.perform(async () => {
-        // Hide garden world — grass, rocks, trees, buildings all disappear
+      this.sceneState = 'entering'
+      this._interiorMemberId = memberId
+      this.savedCameraState = this.camera.saveState()
+
+      // Fly camera to house position
+      const housePos = house.entity.getPosition()
+      this.camera.focusOnPosition(housePos, 8)
+
+      // Wait for fly-to transition, then fade to interior
+      await this.waitForTransition(800)
+
+      try {
+        await this.interior.sceneTransition.perform(async () => {
+          // Hide garden world — grass, rocks, trees, buildings all disappear
+          const gardenRoot = this.sceneManager?.gardenRootEntity
+          if (gardenRoot) gardenRoot.enabled = false
+
+          this.camera!.disable()
+
+          // Suppress door hits for 500 ms across the transition so any
+          // stale collision from the frame we entered on can't bleed
+          // through to whoever reads doors next (e.g. the interior exit
+          // check or the upcoming takeover re-entry).
+          this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+
+          // Build visitor identity from the authenticated user (not the house owner).
+          // This keeps the visitor's own character model and broadcasts their identity
+          // to the multiplayer room so other clients see them correctly.
+          const visitor = this.currentUser ? {
+            userId: this.currentUser.id,
+            name: this.currentUser.name,
+            characterModel: this.currentUser.characterModel,
+          } : null
+          console.debug('[GardenEngine] Entering house as visitor:', visitor)
+          await this.interior!.enter(house, visitor)
+          this.sceneState = 'interior'
+          this.events.emit('interior:enter', { memberId, memberName: house.memberName })
+        })
+      } catch (err) {
+        // Recover from failed transition — don't leave sceneState stuck
+        console.error('[GardenEngine] Failed to enter house:', err)
+        this.sceneState = 'garden'
+        this._interiorMemberId = null
+        this.camera.enable()
         const gardenRoot = this.sceneManager?.gardenRootEntity
-        if (gardenRoot) gardenRoot.enabled = false
-
-        this.camera!.disable()
-
-        // Build visitor identity from the authenticated user (not the house owner).
-        // This keeps the visitor's own character model and broadcasts their identity
-        // to the multiplayer room so other clients see them correctly.
-        const visitor = this.currentUser ? {
-          userId: this.currentUser.id,
-          name: this.currentUser.name,
-          characterModel: this.currentUser.characterModel,
-        } : null
-        console.debug('[GardenEngine] Entering house as visitor:', visitor)
-        await this.interior!.enter(house, visitor)
-        this.sceneState = 'interior'
-        this.events.emit('interior:enter', { memberId, memberName: house.memberName })
-      })
-    } catch (err) {
-      // Recover from failed transition — don't leave sceneState stuck
-      console.error('[GardenEngine] Failed to enter house:', err)
-      this.sceneState = 'garden'
-      this._interiorMemberId = null
-      this.camera.enable()
-      const gardenRoot = this.sceneManager?.gardenRootEntity
-      if (gardenRoot) gardenRoot.enabled = true
-      if (this.savedCameraState) {
-        this.camera.restoreState(this.savedCameraState)
-        this.savedCameraState = null
+        if (gardenRoot) gardenRoot.enabled = true
+        if (this.savedCameraState) {
+          this.camera.restoreState(this.savedCameraState)
+          this.savedCameraState = null
+        }
       }
+    } finally {
+      this._transitioning = false
     }
   }
 
   /** Exit the house interior back to garden. */
   async exitHouse(): Promise<void> {
-    if (this.sceneState !== 'interior' || !this.camera || !this.interior) return
+    if (this.sceneState !== 'interior' || this._transitioning) return
+    if (!this.camera || !this.interior) return
 
     // Remember which house we're exiting (for takeover spawn position)
     const exitMemberId = this._interiorMemberId
+    const visitorId = this.currentUser?.id ?? exitMemberId
 
-    this.sceneState = 'exiting'
+    this._transitioning = true
+    try {
+      this.sceneState = 'exiting'
 
-    await this.interior.sceneTransition.perform(() => {
-      this.interior!.exit()
+      await this.interior.sceneTransition.perform(() => {
+        this.interior!.exit()
 
-      // Restore garden world visibility
-      const gardenRoot = this.sceneManager?.gardenRootEntity
-      if (gardenRoot) gardenRoot.enabled = true
+        // Restore garden world visibility
+        const gardenRoot = this.sceneManager?.gardenRootEntity
+        if (gardenRoot) gardenRoot.enabled = true
 
-      this.camera!.enable()
-      if (this.savedCameraState) {
-        this.camera!.restoreState(this.savedCameraState)
-        this.savedCameraState = null
-      }
-      this.sceneState = 'garden'
-      this.events.emit('interior:exit')
-    })
-
-    // After exiting house, resume takeover of the AUTHENTICATED USER's character
-    // (not the house owner — they were just visiting).
-    this._interiorMemberId = null
-    const visitorId = this.currentUser?.id ?? exitMemberId  // fallback to house owner if no current user
-    if (visitorId) {
-      // Spawn visitor at the housing village gate (edge of zone, facing orchard center)
-      const character = this.sceneManager?.characterSystemRef?.getCharacter(visitorId)
-      if (character) {
-        const zones = this.sceneManager!.worldLayout.getAllZones()
-        const housingZone = zones.find(z => z.name === 'housing')
-        if (housingZone) {
-          const toCenter = Math.atan2(-housingZone.x, -housingZone.z)
-          const gateX = housingZone.x + Math.sin(toCenter) * (housingZone.radius + 2)
-          const gateZ = housingZone.z + Math.cos(toCenter) * (housingZone.radius + 2)
-          character.entity.setPosition(gateX, 0, gateZ)
-          character.entity.setEulerAngles(0, toCenter * (180 / Math.PI), 0)
+        this.camera!.enable()
+        if (this.savedCameraState) {
+          this.camera!.restoreState(this.savedCameraState)
+          this.savedCameraState = null
         }
-        character.entity.anim?.setBoolean('sitting', false)
-        character.entity.anim?.setInteger('speed', 0)
-      }
+
+        // Teleport the visitor to the door-safe exit position of the
+        // house they just left. `HouseResult.exitPosition` is computed at
+        // build time (HouseBuilder) and rotated into world coords by
+        // HousingVillage, so this is a one-line lookup — no runtime
+        // geometry math and no zone-perimeter approximation.
+        const house = exitMemberId
+          ? this.sceneManager?.memberHouseMap.get(exitMemberId)
+          : null
+        if (house && visitorId) {
+          const character = this.sceneManager?.characterSystemRef?.getCharacter(visitorId)
+          if (character) {
+            const exit = house.exitPosition
+            character.entity.setPosition(exit.x, 0, exit.z)
+            character.entity.setEulerAngles(0, exit.yaw, 0)
+            character.entity.anim?.setBoolean('sitting', false)
+            character.entity.anim?.setInteger('speed', 0)
+          }
+        }
+
+        // Block door re-trigger for 500 ms while the new takeover
+        // physics capsule is being created. TakeoverController.enter
+        // also installs its own 300 ms hard-gate on top — the physics
+        // world honors whichever is longer (see
+        // `PhysicsWorld.consumeDoorHit`).
+        this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+
+        this.sceneState = 'garden'
+        this.events.emit('interior:exit')
+      })
+
+      this._interiorMemberId = null
+    } finally {
+      this._transitioning = false
+    }
+
+    // Re-attach WASD takeover on the visitor. Kept outside the
+    // `_transitioning` window so `takeoverCharacter`'s own guards (which
+    // check `sceneState === 'garden'`) can run unblocked.
+    if (visitorId) {
       await this.takeoverCharacter(visitorId)
     }
   }
@@ -555,11 +592,42 @@ export class GardenEngine {
       return
     }
 
-    // If character is sitting at their desk, go straight to house interior mode
-    const isSitting = character.entity.anim?.getBoolean('sitting') ?? false
-    if (isSitting && this.sceneManager.memberHouseMap.has(userId)) {
-      this.enterHouse(userId)
-      return
+    // Take Control always enters garden WASD mode. Interior mode (walking
+    // around inside the house) is a separate entry point triggered by
+    // clicking on the house itself (`onHouseClick` → `enterHouse`). Keeping
+    // the two paths distinct avoids the "click Exit, click Take Control,
+    // end up back in the house I just left" loop that the overloaded
+    // routing used to produce.
+    console.log('[GardenEngine] takeoverCharacter → entering garden WASD mode')
+
+    // If the character is currently inside their own house (e.g. sitting
+    // at their desk as the auto-sim had them doing), spit them out the
+    // front door BEFORE the physics capsule is created. Without this,
+    // `TakeoverController.enter` would spawn the capsule inside the walls
+    // and WASD mode would show the garden exterior with the character
+    // stuck in interior geometry. We deliberately don't route them to
+    // interior mode — the plan keeps takeover == garden WASD and
+    // interior is only reached via the house-click or door-walk paths.
+    const ownHouse = this.sceneManager.memberHouseMap.get(userId)
+    if (ownHouse) {
+      const hp = ownHouse.entity.getPosition()
+      const cp = character.entity.getPosition()
+      // House footprint is 4×4, with HousingVillage placing the entity
+      // at a corner (local-origin) and applying a 90° Y rotation. After
+      // rotation the world-space AABB is x ∈ [hp.x, hp.x+4], z ∈ [hp.z-4, hp.z].
+      const insideX = cp.x >= hp.x - 0.2 && cp.x <= hp.x + 4.2
+      const insideZ = cp.z >= hp.z - 4.2 && cp.z <= hp.z + 0.2
+      if (insideX && insideZ) {
+        const exit = ownHouse.exitPosition
+        character.entity.setPosition(exit.x, 0, exit.z)
+        character.entity.setEulerAngles(0, exit.yaw, 0)
+        character.entity.anim?.setBoolean('sitting', false)
+        character.entity.anim?.setInteger('speed', 0)
+        // Extend the door cooldown so the first physics tick after
+        // capsule creation can't re-fire the door sensor.
+        this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+        console.debug('[GardenEngine] teleported', userId, 'to house exit before takeover')
+      }
     }
 
     this.takeoverUserId = userId
@@ -624,19 +692,34 @@ export class GardenEngine {
     const ctrl = this.takeoverCtrl
     this.takeoverCtrl = null
 
-    // Release server-side takeover so OrgRoom's NPC sim can resume for this member.
+    // Release server-side takeover so OrgRoom's walkHome simulation resumes
+    // for this member. The server will start advancing position toward the
+    // home seat on its next tick.
     if (this.takeoverUserId) {
       this.orgRoomClient?.sendTakeoverEnd(this.takeoverUserId)
     }
 
-    const character = this.takeoverUserId
-      ? this.sceneManager?.characterSystemRef?.getCharacter(this.takeoverUserId)
+    // Clear the client-side prediction block BEFORE any async work. Snapshot
+    // updates for this member will flow through again — specifically the
+    // server's walkHome position advances — so the entity stays in sync with
+    // the authoritative server state instead of being snapped back to a
+    // stale cached position by ctrl.exit().
+    const exitingUserId = this.takeoverUserId
+    this.sceneManager?.characterSystemRef?.setTakeoverUser(null)
+
+    const character = exitingUserId
+      ? this.sceneManager?.characterSystemRef?.getCharacter(exitingUserId)
       : null
 
-    // Exit controller (restores entity position/anim + destroys physics player)
+    // Destroy physics player + cancel door detection, but do NOT restore the
+    // entity to the pre-takeover position — the server-driven snapshot sync
+    // now owns the authoritative location and will walk the character home
+    // via DevActivitySim's walkHome path started by handleTakeoverEnd.
     ctrl.exit()
 
-    // Restore locomotion animations
+    // Restore locomotion animations (GLB swap). During this await, the
+    // server's walkHome ticks stream in as snapshot updates and advance
+    // character.entity position naturally — no local snapping needed.
     if (character && this.sceneManager) {
       try {
         await restoreLocomotionAnimations(character.entity, this.sceneManager.assetLoader)
@@ -654,9 +737,6 @@ export class GardenEngine {
     this.takeoverProximity?.reset()
     this.takeoverProximity = null
 
-    // Resume NPC AI
-    this.sceneManager?.characterSystemRef?.setTakeoverUser(null)
-
     // Restore garden camera
     if (this.camera) {
       this.camera.enable()
@@ -668,7 +748,7 @@ export class GardenEngine {
 
     this.sceneState = 'garden'
     this.takeoverUserId = null
-    console.debug('[GardenEngine] Exited takeover mode')
+    console.log('[GardenEngine] Exited takeover mode — server walking home')
   }
 
   /** Whether the engine is currently in takeover mode. */

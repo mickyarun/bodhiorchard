@@ -23,10 +23,19 @@
 import { Room, Client } from "colyseus"
 import { OrgRoomState } from "../schema/OrgRoomState"
 import { MemberState } from "../schema/MemberState"
-import { computePlacement } from "../sim/MemberPlacement"
-import { getTreePositions } from "../sim/WorldLayout"
-import { DevActivitySim, parseDevActivityEvent } from "../sim/DevActivitySim"
+import {
+  computePlacement,
+  type Placement,
+  type PresenceState,
+} from "../sim/MemberPlacement"
+import { BREAK_SEATS, getTreePositions } from "../sim/WorldLayout"
+import {
+  DevActivitySim,
+  parseDevActivityEvent,
+  type HomeCoords,
+} from "../sim/DevActivitySim"
 import { AgentActivitySim, parseAgentActivityEvent } from "../sim/AgentActivitySim"
+import { InferredPresenceSim } from "../sim/InferredPresenceSim"
 import {
   fetchOrgSnapshot,
   verifyUserToken,
@@ -41,6 +50,11 @@ const SIM_TICK_MS = 50
 // themselves to ~20Hz (50ms) — we enforce a slightly lower bound to allow
 // jitter. Messages arriving faster are dropped to prevent single-client DoS.
 const MIN_MOVE_INTERVAL_MS = 25
+
+// InferredPresenceSim tick rate — 60 seconds. Inferred presence is derived
+// from time-of-day and idle thresholds (10 / 20 minutes), so evaluating more
+// often than once per minute would waste cycles without adding responsiveness.
+const INFERRED_PRESENCE_TICK_MS = 60_000
 
 interface OrgRoomCreateOptions {
   orgId?: string
@@ -71,11 +85,37 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   // Repo tree positions from snapshot — used by DevActivitySim
   repoPositions = new Map<string, { x: number; z: number }>()
 
-  // Server-side dev activity simulation (walk-to-tree, phrase cycling, return-to-seat)
-  private devSim = new DevActivitySim(this.repoPositions)
+  // Server-side dev activity simulation (walk-to-tree, phrase cycling, return-to-seat).
+  // The second argument is a live home resolver: when the sim returns a member
+  // to their seat after a dev session, it consults this callback for the CURRENT
+  // home coordinates rather than using the cached originals. This is how a
+  // presence change mid-dev-activity lands the member at the new seat. Field
+  // initializers run in declaration order, so `this.repoPositions` is already
+  // set; the arrow function defers method access to call time (after the
+  // constructor finishes), which is when returnToSeat would actually invoke it.
+  private devSim = new DevActivitySim(
+    this.repoPositions,
+    (userId) => this.resolveHomeCoords(userId),
+  )
 
   // Server-side agent/robot simulation (spawn, walk between repo trees, despawn)
   private agentSim = new AgentActivitySim(this.repoPositions)
+
+  // Inferred presence simulation — drives pseudo-presence for non-Slack users
+  // from their dev-activity history + time of day. Skips Slack-driven members
+  // (they get real presence via Phase B bridge events) and takeover-controlled
+  // members (player input wins). Callback wired to applyPresenceChange so the
+  // walk-home machinery is shared with Slack-driven updates.
+  private inferredSim = new InferredPresenceSim(
+    (userId, presence, preferredZone) =>
+      this.applyPresenceChange(userId, presence, preferredZone),
+  )
+
+  // Set of userIds whose presence is authoritatively driven by Slack.
+  // Populated by loadSnapshot from the backend-supplied `has_slack` field.
+  // Members in this set are skipped by InferredPresenceSim.tick so the two
+  // presence sources don't fight each other.
+  private hasSlack = new Set<string>()
 
   // Resolves once the initial snapshot has been loaded (or failed).
   // onJoin awaits this so late joiners never race against an empty state map.
@@ -97,11 +137,29 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
 
     // Drive the server-side simulation at 20Hz — walking, phrase cycles, idle timeouts.
     // setSimulationInterval passes dt in milliseconds; sim tick expects seconds.
+    //
+    // NOTE: `setSimulationInterval` is SINGULAR in Colyseus — a second call
+    // silently overwrites the first. For the slower InferredPresenceSim
+    // timer below we use `this.clock.setInterval` instead, which supports
+    // multiple independent schedules.
     this.setSimulationInterval((dtMs) => {
       const dt = dtMs / 1000
       this.devSim.tick(this.state.members, dt)
       this.agentSim.tick(this.state.agents, dt)
     }, SIM_TICK_MS)
+
+    // Separate slow-tick loop for InferredPresenceSim (once per minute).
+    // The inferred presence rules key off time-of-day and minute-scale idle
+    // thresholds, so evaluating at 20Hz would waste 1,199 cycles out of 1,200.
+    // `new Date()` is read here (not inside the sim) so test code can drive
+    // the sim with arbitrary timestamps without monkey-patching the clock.
+    //
+    // Uses `this.clock.setInterval` (Colyseus Clock API) rather than a
+    // second `setSimulationInterval` call, which would overwrite the 20Hz
+    // devSim/agentSim timer and silently halt walking-home position ticks.
+    this.clock.setInterval(() => {
+      this.inferredSim.tick(this.state.members, this.hasSlack, new Date())
+    }, INFERRED_PRESENCE_TICK_MS)
 
     // Kick off snapshot load and expose a promise so onJoin can wait for it.
     // onCreate MUST NOT throw — the room stays usable (empty state) on failure.
@@ -193,14 +251,36 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     const name = (client.userData as { name?: string } | undefined)?.name ?? client.sessionId
     console.log(`[OrgRoom] ${name} left org=${this.state.orgId}`)
 
-    // Clear takeover flag if this client was controlling a member
+    // If this client was controlling a member via takeover, release the
+    // takeover lock AND start a walk-home so the character doesn't strand
+    // wherever the player last WASD'd to. Without this, a disconnect leaves
+    // the member at garden coordinates with `locationContext = "garden"` —
+    // next time the player logs back in, their character is in the middle
+    // of the map instead of at their desk.
+    //
+    // Mirrors `handleTakeoverEnd` but is triggered by the WS close path
+    // rather than an explicit takeover_end message. We walk for the same
+    // reason the explicit path does.
     const userId = (client.userData as { userId?: string } | undefined)?.userId
-    if (userId) {
-      const member = this.state.members.get(userId)
-      if (member && member.takeoverSessionId === client.sessionId) {
-        member.takeoverSessionId = ""
-      }
+    if (!userId) return
+    const member = this.state.members.get(userId)
+    if (!member) return
+    if (member.takeoverSessionId !== client.sessionId) return
+
+    member.y = 0
+    if (member.animState === "jump" || member.animState === "sprint") {
+      member.animState = "idle"
     }
+    member.takeoverSessionId = ""
+
+    const home = this.computeHomePlacement(
+      userId,
+      member.presence as PresenceState,
+    )
+    this.devSim.walkHome(member, home.x, home.z, home.yaw, home.sitting)
+    console.log(
+      `[OrgRoom] ${name} disconnect-while-takeover → walking home to ${home.locationContext}`,
+    )
   }
 
   onDispose() {
@@ -212,7 +292,9 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
 
   /**
    * Handle an event forwarded from the backend via the bridge endpoint.
-   * dev_activity → routed to DevActivitySim; agent_activity → Phase 6.
+   * dev_activity → routed to DevActivitySim
+   * agent_activity → routed to AgentActivitySim
+   * member_presence → live presence update, routed to applyPresenceChange
    */
   handleBridgeEvent(type: string, data: Record<string, unknown>): void {
     if (type === "dev_activity") {
@@ -222,6 +304,12 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
         return
       }
       this.devSim.handleEvent(this.state.members, event)
+      // Also inform the inferred-presence sim so it can reset the member's
+      // idle timer. Skip if the user_id didn't resolve — no observable user
+      // to track. Non-Slack users rely on this to stay in the "active" state.
+      if (event.user_id) {
+        this.inferredSim.recordDevActivity(event.user_id, new Date())
+      }
       return
     }
     if (type === "agent_activity") {
@@ -231,6 +319,15 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
         return
       }
       this.agentSim.handleEvent(this.state.agents, event)
+      return
+    }
+    if (type === "member_presence") {
+      const event = parseMemberPresenceEvent(data)
+      if (!event) {
+        console.warn(`[OrgRoom] Malformed member_presence payload org=${this.state.orgId}`)
+        return
+      }
+      this.applyPresenceChange(event.user_id, event.presence)
       return
     }
     console.log(`[OrgRoom] Bridge event type=${type} (unhandled) org=${this.state.orgId}`)
@@ -263,6 +360,19 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     // Drop any in-flight agents — tree coords are about to be rebuilt and
     // existing AgentEntries cache targetX/Z against the old positions.
     this.agentSim.reset(this.state.agents)
+
+    // Drop inferred presence traces — day keys and member IDs may have
+    // drifted since the last snapshot. The sim will rebuild its trace map
+    // as new dev_activity events arrive.
+    this.inferredSim.reset()
+
+    // Rebuild the has_slack skip set from the snapshot. Members without
+    // this field default to false (treated as non-Slack → inferred presence
+    // applies). See BackendClient.OrgSnapshotMember for the contract.
+    this.hasSlack.clear()
+    for (const m of snapshot.members) {
+      if (m.has_slack) this.hasSlack.add(m.user_id)
+    }
 
     // Compute repo tree positions (used by Phase 5 dev_activity sim)
     this.repoPositions.clear()
@@ -306,6 +416,160 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     })
 
     console.log(`[OrgRoom] Snapshot loaded org=${this.state.orgId} members=${sorted.length}`)
+  }
+
+  // ─── Placement helpers ───────────────────────
+
+  /**
+   * Compute a member's "home" placement for the current room state.
+   *
+   * Unlike the one-shot placement done at snapshot load time, this method
+   * is meant to be called live — after takeover exit, after a presence
+   * change, etc. It:
+   *
+   * 1. Derives a stable member index from a sorted snapshot of live
+   *    `state.members` (sort key: `userId`) so the house grid assignment
+   *    matches what snapshot load would have produced.
+   * 2. Computes break-seat occupancy from live state — iterates all OTHER
+   *    on-break members and reserves whichever BREAK_SEATS indices their
+   *    `locationContext` tags match. Prevents double-booking.
+   * 3. Delegates to `computePlacement` which owns the actual seat math.
+   *
+   * Single source of truth used by `handleTakeoverEnd` today, and will be
+   * reused by presence-change handling and inferred-presence ticks as those
+   * features land. Any future caller that needs "where should this member be
+   * right now based on their presence?" should call here, not reinvent.
+   *
+   * Complexity: O(N) where N = member count. Only called on infrequent
+   * events (takeover exit, presence change) — not per-frame.
+   *
+   * @param userId        The member to place.
+   * @param presence      The presence to place them as (may differ from
+   *                      `member.presence` when recomputing after a change).
+   * @param preferredZone Optional hint for `on_break` placement — e.g.
+   *                      `"cafeteria"` for idle users, `"pool_resort"` for
+   *                      morning-no-activity users. Ignored for other presences.
+   * @returns Placement with x/y/z/yaw/sitting/locationContext set.
+   */
+  private computeHomePlacement(
+    userId: string,
+    presence: PresenceState,
+    preferredZone?: string,
+  ): Placement {
+    // Stable order → stable house grid slot assignment.
+    const sorted = [...this.state.members.values()]
+      .sort((a, b) => a.userId.localeCompare(b.userId))
+    const memberIndex = sorted.findIndex(m => m.userId === userId)
+
+    // Reserve break seats already occupied by OTHER on-break members, so we
+    // don't seat this member on top of someone else. We read occupancy from
+    // `locationContext` (format `break_{zone}_{seatIndex}`) rather than
+    // coordinates so a member mid-walk who hasn't physically arrived yet
+    // still reserves their target seat.
+    //
+    // The trailing numeric index disambiguates within a zone — BREAK_SEATS
+    // has 4 seats per zone (coffee_bar, pool_resort, cafeteria), so walking
+    // from `break_cafeteria_0` to `break_cafeteria_2` is a legal parallel
+    // occupancy that must not double-book.
+    const takenBreakSeats = new Set<number>()
+    for (const other of sorted) {
+      if (other.userId === userId) continue
+      if (other.presence !== "on_break") continue
+      const match = other.locationContext.match(/^break_.+_(\d+)$/)
+      if (!match) continue
+      const seatIdx = parseInt(match[1], 10)
+      if (seatIdx >= 0 && seatIdx < BREAK_SEATS.length) {
+        takenBreakSeats.add(seatIdx)
+      }
+    }
+
+    return computePlacement(
+      {
+        userId,
+        presence,
+        memberIndex,
+        totalMembers: sorted.length,
+      },
+      takenBreakSeats,
+      preferredZone,
+    )
+  }
+
+  /**
+   * Home-resolver callback supplied to DevActivitySim's constructor.
+   *
+   * The sim calls this at `returnToSeat` time (i.e. when a dev session ends
+   * naturally via idle timeout or session_end event). Reading `member.presence`
+   * at call time — not at session start — is what makes mid-session presence
+   * changes route the member to their NEW seat on arrival, instead of the
+   * stale original. Returns `null` if the member is gone from state so the
+   * sim can fall back to its cached originals.
+   */
+  private resolveHomeCoords(userId: string): HomeCoords | null {
+    const member = this.state.members.get(userId)
+    if (!member) return null
+    const home = this.computeHomePlacement(
+      userId,
+      member.presence as PresenceState,
+    )
+    return {
+      x: home.x,
+      z: home.z,
+      yaw: home.yaw,
+      sitting: home.sitting,
+    }
+  }
+
+  /**
+   * Apply a presence change to a member and walk them to the new seat.
+   *
+   * This is the shared primitive used by both Slack-driven presence updates
+   * (bridge event `member_presence` in Phase B) and inferred-presence ticks
+   * (`InferredPresenceSim` in Phase C). Callers just pass the new presence;
+   * this method owns the decision tree:
+   *
+   * 1. No-op if the member is unknown or presence didn't change (idempotent).
+   * 2. Update the live `member.presence` field so subsequent lookups see the
+   *    new value — this is what makes presence changes "stick" between snapshot
+   *    reloads (fixes G2's "presence frozen at snapshot load" root cause).
+   * 3. If the member is under takeover, SKIP the walk. The updated `presence`
+   *    field will be picked up by `handleTakeoverEnd` when the player releases
+   *    control, and the walk-home there will use the new seat. This respects
+   *    player control without fighting it.
+   * 4. Otherwise, compute the new home via `computeHomePlacement` (passing the
+   *    preferred zone through to `computePlacement`) and kick off a walk via
+   *    `devSim.walkHome`. The existing walking_home arrival branch handles
+   *    animation, yaw restoration, and locationContext update.
+   *
+   * @param userId        The member whose presence changed.
+   * @param newPresence   The new presence value.
+   * @param preferredZone Optional break-zone hint for on_break placements.
+   */
+  applyPresenceChange(
+    userId: string,
+    newPresence: PresenceState,
+    preferredZone?: string,
+  ): void {
+    const member = this.state.members.get(userId)
+    if (!member) return
+
+    // Idempotent — no walk if nothing changed. Prevents spurious animation
+    // restarts on duplicate events (e.g. Slack poll firing the same status
+    // twice in a row, or two bridge publishes racing).
+    if (member.presence === newPresence) return
+
+    member.presence = newPresence
+
+    // Respect player control. The new presence is stored on the schema, so
+    // handleTakeoverEnd will see it when the player releases and walk to the
+    // right seat automatically. No server-side fighting with WASD input.
+    if (member.takeoverSessionId) return
+
+    const home = this.computeHomePlacement(userId, newPresence, preferredZone)
+    this.devSim.walkHome(member, home.x, home.z, home.yaw, home.sitting)
+    console.log(
+      `[OrgRoom] ${member.name} presence → ${newPresence}, walking to ${home.locationContext}`,
+    )
   }
 
   // ─── Message handlers ────────────────────────
@@ -363,13 +627,26 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
 
     // Clean up any transient takeover pose (mid-jump, sprint) before handing
     // control back to the sim. Prevents other viewers from seeing the member
-    // frozen in the air or at a stale Y until the next dev_activity event.
+    // frozen in the air until the walk-home below takes over on the next tick.
     member.y = 0
     if (member.animState === "jump" || member.animState === "sprint") {
       member.animState = "idle"
     }
     member.takeoverSessionId = ""
-    console.log(`[OrgRoom] ${member.name} takeover END`)
+
+    // Walk the character back to its presence-based seat. Without this, the
+    // character would freeze wherever the player left them until the next
+    // dev_activity or presence event. The existing devSim walking_home state
+    // machine handles the animation, yaw restoration, and locationContext
+    // update on arrival — see walkHome() for the contract.
+    const home = this.computeHomePlacement(
+      data.userId,
+      member.presence as PresenceState,
+    )
+    this.devSim.walkHome(member, home.x, home.z, home.yaw, home.sitting)
+    console.log(
+      `[OrgRoom] ${member.name} takeover END → walking home to ${home.locationContext}`,
+    )
   }
 
   // ─── Validation ──────────────────────────────
@@ -382,4 +659,31 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (!OrgRoom.VALID_ANIMS.includes(data.animState)) return false
     return true
   }
+}
+
+// ─── Bridge event validators ───────────────────
+
+/** Payload shape published by the backend on Slack presence transitions. */
+interface MemberPresenceEvent {
+  user_id: string
+  presence: PresenceState
+}
+
+/**
+ * Best-effort runtime validator for the member_presence bridge payload.
+ * The backend is in a separate process; cross-process JSON is untrusted
+ * at the schema level. Returns `null` on malformed input (caller logs and
+ * drops the event). Same defensive pattern as `parseDevActivityEvent` and
+ * `parseAgentActivityEvent`.
+ */
+function parseMemberPresenceEvent(raw: unknown): MemberPresenceEvent | null {
+  if (!raw || typeof raw !== "object") return null
+  const d = raw as Record<string, unknown>
+  if (typeof d.user_id !== "string" || d.user_id.length === 0) return null
+  if (
+    d.presence !== "active" &&
+    d.presence !== "on_break" &&
+    d.presence !== "at_home"
+  ) return null
+  return { user_id: d.user_id, presence: d.presence }
 }

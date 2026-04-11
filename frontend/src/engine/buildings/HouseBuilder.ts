@@ -37,6 +37,20 @@ export interface HouseResult {
   characterModel: string | null
   bedPosition: { x: number; y: number; z: number }
   seats: InteractionPoint[]
+  /**
+   * World-space position a character is teleported to when exiting the
+   * house interior. Computed at build time so callers don't need to
+   * understand house rotation or door geometry — the house knows where
+   * its front door is.
+   *
+   * Populated in house-local coordinates by `HouseBuilder` and then
+   * rotated into world coordinates by `HousingVillage` (alongside
+   * `bedPosition` and `seats`).
+   *
+   * `yaw` is degrees around Y — the character faces away from the door
+   * after exit so forward-walking doesn't immediately re-trigger it.
+   */
+  exitPosition: { x: number; z: number; yaw: number }
 }
 
 export class HouseBuilder {
@@ -121,6 +135,21 @@ export class HouseBuilder {
       stone.setLocalScale(1.5, 1.5, 1.5)
     }
 
-    return { entity: root, memberId, memberName, characterModel, bedPosition: bedPos, seats }
+    // ─── Exit position (door-safe spawn point for interior→garden exit) ───
+    // Door is at local (x=1.5, z=4.0) on the front wall. Outward direction
+    // is local +Z. Place the exit 1.6 units beyond the door (matches the end
+    // of the stone path at local z=5.6) so a fresh physics capsule won't
+    // overlap the door collider, and face yaw=0 (local +Z → away from house).
+    //
+    // HousingVillage applies a 90° Y rotation to the house root and then
+    // transforms bed/seat/exit positions into world space — so these values
+    // are stored in pre-rotation local world coords, mirroring `bedPos` above.
+    const exitPosition = {
+      x: worldX + 1.5,
+      z: worldZ + 5.6,
+      yaw: 0,
+    }
+
+    return { entity: root, memberId, memberName, characterModel, bedPosition: bedPos, seats, exitPosition }
   }
 }

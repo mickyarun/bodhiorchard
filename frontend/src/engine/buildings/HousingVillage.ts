@@ -93,6 +93,15 @@ export class HousingVillage {
       result.bedPosition.x = houseX + bdz
       result.bedPosition.z = houseZ - bdx
 
+      // Rotate the exit position the same way as seats/bed. `yaw` shifts by
+      // +90 so the character faces the world-space outward direction after
+      // the house's 90° rotation.
+      const edx = result.exitPosition.x - houseX
+      const edz = result.exitPosition.z - houseZ
+      result.exitPosition.x = houseX + edz
+      result.exitPosition.z = houseZ - edx
+      result.exitPosition.yaw += 90
+
       root.addChild(result.entity)
       allSeats.push(...result.seats)
       memberHouseMap.set(member.user_id, result)

@@ -34,7 +34,15 @@ export class PhysicsWorld {
 
   // Door collision detected this frame
   private _doorHit: DoorCollision | null = null
+
+  // Hard gate: when false, door detection is completely disabled.
+  // Used by takeover/interior transitions to stop consuming hits during fades.
   private doorsEnabled = true
+
+  // Cooldown gate: a future ms timestamp before which door hits are ignored.
+  // Independent from `doorsEnabled` — `consumeDoorHit` checks both. See
+  // `disableDoorsUntil` for the compose-without-coordination contract.
+  private _doorsDisabledUntil = 0
 
   private constructor(world: RAPIER_NS.World) {
     this.world = world
@@ -88,13 +96,43 @@ export class PhysicsWorld {
     this.doorHandles.set(collider.handle, id)
   }
 
+  /**
+   * Hard gate for door detection. `false` disables all door hits until
+   * set back to `true`; also clears any pending hit. Use for long-lived
+   * states (takeover setup, interior mode) where you control both edges
+   * of the window. For short-lived cooldowns after a scene transition,
+   * prefer `disableDoorsUntil` which is time-bounded and composes with
+   * other callers.
+   */
   setDoorsEnabled(enabled: boolean): void {
     this.doorsEnabled = enabled
     if (!enabled) this._doorHit = null
   }
 
-  /** Get door collision from last frame. Consumed on read. */
+  /**
+   * Suppress door hit detection until the given absolute ms timestamp
+   * (`Date.now() + N`). Forward-only — a later call with an earlier
+   * timestamp never shrinks the window — so multiple scene-transition
+   * callers can request their own cooldowns without coordinating.
+   *
+   * Composes cleanly with `setDoorsEnabled`: `consumeDoorHit` returns
+   * `null` if EITHER the hard gate is false OR the cooldown is active.
+   * Also clears any pending hit so the very next frame doesn't fire on
+   * a stale collision detected before the cooldown was installed.
+   */
+  disableDoorsUntil(timestamp: number): void {
+    this._doorsDisabledUntil = Math.max(this._doorsDisabledUntil, timestamp)
+    this._doorHit = null
+  }
+
+  /**
+   * Get door collision from last frame. Consumed on read.
+   * Returns `null` if either the hard gate is false or the cooldown
+   * window has not yet elapsed.
+   */
   consumeDoorHit(): DoorCollision | null {
+    if (!this.doorsEnabled) return null
+    if (Date.now() < this._doorsDisabledUntil) return null
     const hit = this._doorHit
     this._doorHit = null
     return hit
@@ -113,13 +151,23 @@ export class PhysicsWorld {
     )
   }
 
+  /**
+   * Whether door-hit detection is currently active. False if either the
+   * hard gate is off or a cooldown window is still in effect. Used by
+   * `movePlayer` to skip populating `_doorHit` during suppression, so
+   * stale hits never survive into the next active frame.
+   */
+  private get doorsActive(): boolean {
+    return this.doorsEnabled && Date.now() >= this._doorsDisabledUntil
+  }
+
   movePlayer(dx: number, dz: number): void {
     if (!this.playerCollider || !this.playerBody) return
 
     this.cc.computeColliderMovement(this.playerCollider, { x: dx, y: 0, z: dz })
 
     // Check if any collision was with a door collider
-    if (this.doorsEnabled) {
+    if (this.doorsActive) {
       for (let i = 0; i < this.cc.numComputedCollisions(); i++) {
         const collision = this.cc.computedCollision(i)
         if (collision?.collider) {
