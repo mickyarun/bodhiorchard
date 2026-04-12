@@ -5,6 +5,37 @@
       <v-progress-circular indeterminate size="24" width="2" />
     </div>
 
+    <!-- Open PRs targeting this stage (shown in all states) -->
+    <div v-if="!loading && data.openPRs.length" class="mb-4">
+      <div class="text-overline text-medium-emphasis mb-2">
+        Open PR{{ data.openPRs.length > 1 ? 's' : '' }} targeting {{ stageLabel }}
+      </div>
+      <div class="d-flex flex-column ga-2">
+        <v-card
+          v-for="pr in data.openPRs"
+          :key="`open-${pr.repoName}-${pr.prNumber}`"
+          variant="outlined"
+          class="pa-3"
+          color="warning"
+        >
+          <div class="d-flex align-center ga-3">
+            <v-icon icon="mdi-source-pull" size="20" color="warning" />
+            <div class="flex-grow-1 min-w-0">
+              <div class="d-flex align-center ga-2">
+                <a :href="pr.htmlUrl" target="_blank" rel="noopener" class="text-decoration-none font-weight-medium text-body-2">
+                  #{{ pr.prNumber }}
+                </a>
+                <span class="text-caption text-medium-emphasis">{{ pr.repoName }}</span>
+                <v-chip size="x-small" variant="tonal" color="warning">Open</v-chip>
+              </div>
+              <div v-if="pr.title" class="text-caption text-medium-emphasis text-truncate">{{ pr.title }}</div>
+            </div>
+            <div v-if="pr.authorLogin" class="text-caption">{{ pr.authorLogin }}</div>
+          </div>
+        </v-card>
+      </div>
+    </div>
+
     <!-- Empty state: not yet reached this stage -->
     <div v-else-if="data.status === 'not_reached'" class="empty-state">
       <v-icon :icon="stageIcon" size="48" color="primary" class="mb-3 opacity-40" />
@@ -38,37 +69,6 @@
               No {{ stageLabel }} branch
             </v-chip>
           </div>
-        </div>
-      </div>
-
-      <!-- Open PRs targeting this stage (empty state) -->
-      <div v-if="data.openPRs.length" class="mb-4" style="width: 100%; max-width: 480px;">
-        <div class="text-overline text-medium-emphasis mb-2">
-          Open PR{{ data.openPRs.length > 1 ? 's' : '' }} targeting {{ stageLabel }}
-        </div>
-        <div class="d-flex flex-column ga-2">
-          <v-card
-            v-for="pr in data.openPRs"
-            :key="`open-${pr.repoName}-${pr.prNumber}`"
-            variant="outlined"
-            class="pa-3"
-            color="warning"
-          >
-            <div class="d-flex align-center ga-3">
-              <v-icon icon="mdi-source-pull" size="20" color="warning" />
-              <div class="flex-grow-1 min-w-0">
-                <div class="d-flex align-center ga-2">
-                  <a :href="pr.htmlUrl" target="_blank" rel="noopener" class="text-decoration-none font-weight-medium text-body-2">
-                    #{{ pr.prNumber }}
-                  </a>
-                  <span class="text-caption text-medium-emphasis">{{ pr.repoName }}</span>
-                  <v-chip size="x-small" variant="tonal" color="warning">Open</v-chip>
-                </div>
-                <div v-if="pr.title" class="text-caption text-medium-emphasis text-truncate">{{ pr.title }}</div>
-              </div>
-              <div v-if="pr.authorLogin" class="text-caption">{{ pr.authorLogin }}</div>
-            </div>
-          </v-card>
         </div>
       </div>
 
@@ -142,37 +142,6 @@
               {{ repo.hasReleasePR ? 'Released' : 'Pending' }}
             </v-chip>
           </div>
-        </div>
-      </div>
-
-      <!-- Open PRs targeting this stage (has-events state) -->
-      <div v-if="data.openPRs.length" class="mb-5">
-        <div class="text-overline text-medium-emphasis mb-2">
-          Open PR{{ data.openPRs.length > 1 ? 's' : '' }} targeting {{ stageLabel }}
-        </div>
-        <div class="d-flex flex-column ga-2">
-          <v-card
-            v-for="pr in data.openPRs"
-            :key="`open-${pr.repoName}-${pr.prNumber}`"
-            variant="outlined"
-            class="pa-3"
-            color="warning"
-          >
-            <div class="d-flex align-center ga-3">
-              <v-icon icon="mdi-source-pull" size="20" color="warning" />
-              <div class="flex-grow-1 min-w-0">
-                <div class="d-flex align-center ga-2">
-                  <a :href="pr.htmlUrl" target="_blank" rel="noopener" class="text-decoration-none font-weight-medium text-body-2">
-                    #{{ pr.prNumber }}
-                  </a>
-                  <span class="text-caption text-medium-emphasis">{{ pr.repoName }}</span>
-                  <v-chip size="x-small" variant="tonal" color="warning">Open</v-chip>
-                </div>
-                <div v-if="pr.title" class="text-caption text-medium-emphasis text-truncate">{{ pr.title }}</div>
-              </div>
-              <div v-if="pr.authorLogin" class="text-caption">{{ pr.authorLogin }}</div>
-            </div>
-          </v-card>
         </div>
       </div>
 
@@ -279,6 +248,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import api from '@/services/api'
+import { formatDateTime } from '@/utils/date'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { useSettingsStore } from '@/stores/settings'
 import type { BUDReleaseStage, ReleaseStage } from '@/types'
@@ -355,18 +325,7 @@ const statusBannerTitle = computed(() => {
   return props.stage === 'uat' ? 'In UAT' : 'In Production'
 })
 
-function formatDate(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+const formatDate = formatDateTime
 
 async function load(): Promise<void> {
   loading.value = true

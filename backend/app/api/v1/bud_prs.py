@@ -24,6 +24,7 @@ from app.schemas.bud_release import (
     ReleaseTimelineEvent,
 )
 from app.schemas.pull_request import PRChecklistItem, PullRequestRead
+from app.utils.branch_matching import branch_matches
 
 router = APIRouter()
 
@@ -217,7 +218,7 @@ async def get_bud_release_stage(
         target_branch = (
             repo.uat_branch if typed_stage == "uat" else repo.main_branch
         ) if repo else None
-        if target_branch and _branch_matches(pr.base_branch, target_branch):
+        if target_branch and branch_matches(pr.base_branch, target_branch):
             open_prs.append(
                 ReleasePR(
                     pr_number=pr.github_pr_number,
@@ -239,15 +240,6 @@ async def get_bud_release_stage(
         commits=commits,
         events=timeline,
     )
-
-
-def _branch_matches(ref: str, pattern: str) -> bool:
-    """Check if a branch ref matches a configured pattern (exact or glob)."""
-    if "*" in pattern or "?" in pattern or "[" in pattern:
-        from fnmatch import fnmatch
-
-        return fnmatch(ref, pattern)
-    return ref == pattern
 
 
 def _parse_iso(value: object) -> datetime | None:

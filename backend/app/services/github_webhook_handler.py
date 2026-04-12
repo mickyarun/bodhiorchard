@@ -225,20 +225,6 @@ async def _handle_pr_closed(
     )
 
 
-def _branch_matches(ref: str, pattern: str) -> bool:
-    """Check if a branch ref matches a configured pattern.
-
-    Supports exact match (``release/uat``) and ``fnmatch``-style wildcards
-    (``release*`` matches ``release/uat``, ``release/v2.1``). Patterns
-    without glob characters fall back to simple equality — no regex.
-    """
-    if "*" in pattern or "?" in pattern or "[" in pattern:
-        from fnmatch import fnmatch
-
-        return fnmatch(ref, pattern)
-    return ref == pattern
-
-
 async def _maybe_detect_release_promotion(
     org_id: uuid.UUID,
     repo: TrackedRepository,
@@ -260,7 +246,9 @@ async def _maybe_detect_release_promotion(
         return
 
     stage: ReleaseStage | None = None
-    if repo.uat_branch and _branch_matches(base_ref, repo.uat_branch):
+    from app.utils.branch_matching import branch_matches
+
+    if repo.uat_branch and branch_matches(base_ref, repo.uat_branch):
         from app.models.organization import Organization
         from app.services.org_settings import is_uat_enabled
 

@@ -543,14 +543,18 @@ async def _trigger_status_jobs(
     ):
         import asyncio
 
-        asyncio.create_task(
+        task = asyncio.create_task(
             _bg_estimate(
                 bud.id,
                 current_user.org_id,
                 update_data["status"].value,
                 current_user.id,
                 current_user.name,
-            )
+            ),
+            name=f"bg_estimate_{bud.id}_{update_data['status'].value}",
+        )
+        task.add_done_callback(
+            lambda t: t.result() if not t.cancelled() and not t.exception() else None,
         )
 
 

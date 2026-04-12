@@ -753,6 +753,7 @@ import BUDQAPanel from '@/components/buds/BUDQAPanel.vue'
 import BUDReleaseStagePanel from '@/components/buds/BUDReleaseStagePanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import { useSettingsStore } from '@/stores/settings'
+import { formatDateTime } from '@/utils/date'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -803,17 +804,7 @@ const closedTimelineEvents = computed(() =>
       (e.detail?.to === 'closed' || e.detail?.to === 'discarded'),
   ),
 )
-function formatClosedDate(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+const formatClosedDate = formatDateTime
 
 // "Read-only" tabs hide the section toolbar (Edit/Export/Import).
 const READ_ONLY_TABS = new Set([

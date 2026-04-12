@@ -19,6 +19,11 @@ tracking (UAT and Prod tabs on the BUD detail page):
   per-commit lookup that fans out from each release PR is fast and the
   index doesn't bloat with the OPEN PR rows that have no merge SHA yet.
 
+- ``ix_dev_activity_commit_sha``: partial index on
+  ``(org_id, commit_sha)`` filtered to non-null values, so the fallback
+  SHA lookup (strategy 2 in release detection) is indexed instead of
+  doing a sequential scan on dev_activity_logs.
+
 No data backfill: detection is forward-only (PRs merged before this ship
 won't be matchable, which is acceptable since release-stage tabs only
 exist from this point on).
@@ -56,10 +61,17 @@ def upgrade() -> None:
         ["org_id", "merge_commit_sha"],
         postgresql_where=sa.text("merge_commit_sha IS NOT NULL"),
     )
+    op.create_index(
+        "ix_dev_activity_commit_sha",
+        "dev_activity_logs",
+        ["org_id", "commit_sha"],
+        postgresql_where=sa.text("commit_sha IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
-    """Drop the partial index and the two columns."""
+    """Drop the indexes and the two columns."""
+    op.drop_index("ix_dev_activity_commit_sha", table_name="dev_activity_logs")
     op.drop_index("ix_pr_merge_commit_sha", table_name="pull_requests")
     op.drop_column("pull_requests", "merge_commit_sha")
     op.drop_column("tracked_repositories", "uat_branch")

@@ -48,55 +48,60 @@ logger = structlog.get_logger(__name__)
 ReleaseStage = Literal["uat", "prod"]
 
 
-async def find_bud_for_sha(
+async def find_buds_for_shas(
     db: AsyncSession,
     org_id: uuid.UUID,
-    sha: str,
-) -> uuid.UUID | None:
-    """Find which BUD a commit SHA belongs to.
+    shas: list[str],
+) -> dict[str, uuid.UUID]:
+    """Batch-find which BUD each commit SHA belongs to.
 
-    Two-step lookup, returns on the first match:
+    Returns a dict mapping ``sha \u2192 bud_id`` for all matched SHAs. Uses
+    two bulk ``IN (...)`` queries instead of per-SHA round-trips:
 
-    1. ``PullRequest.merge_commit_sha == sha`` \u2014 a previously merged
-       BUD-branch PR landed this exact SHA on develop. Works for all merge
-       strategies because GitHub's webhook gives us the post-merge SHA.
-    2. ``DevActivityLog.commit_sha == sha`` \u2014 the commit was authored
-       directly by a developer working on a bud branch (matches the
-       merge-commit strategy where individual SHAs survive the merge).
+    1. ``PullRequest.merge_commit_sha IN (...)`` \u2014 canonical post-merge SHA
+    2. ``DevActivityLog.commit_sha IN (...)`` \u2014 fallback for merge-commit
+       strategy where individual SHAs survive
 
-    Returns ``None`` if no BUD owns this SHA \u2014 expected for unrelated
-    commits in a release PR.
+    SHAs matched by strategy 1 take priority (strategy 2 only runs for
+    SHAs not yet resolved).
     """
-    if not sha:
-        return None
+    if not shas:
+        return {}
 
-    # Strategy 1: previously merged BUD-branch PR.
+    result_map: dict[str, uuid.UUID] = {}
+
+    # Strategy 1: bulk PullRequest.merge_commit_sha lookup
     pr_stmt = (
-        select(PullRequest.bud_id)
+        select(PullRequest.merge_commit_sha, PullRequest.bud_id)
         .where(
             PullRequest.org_id == org_id,
-            PullRequest.merge_commit_sha == sha,
+            PullRequest.merge_commit_sha.in_(shas),
             PullRequest.bud_id.is_not(None),
         )
-        .limit(1)
     )
-    result = await db.execute(pr_stmt)
-    bud_id = result.scalar_one_or_none()
-    if bud_id is not None:
-        return bud_id
+    pr_result = await db.execute(pr_stmt)
+    for sha, bud_id in pr_result.all():
+        if sha and bud_id:
+            result_map[sha] = bud_id
 
-    # Strategy 2: original dev commit captured by Claude Code hook.
-    dev_stmt = (
-        select(DevActivityLog.bud_id)
-        .where(
-            DevActivityLog.org_id == org_id,
-            DevActivityLog.commit_sha == sha,
-            DevActivityLog.bud_id.is_not(None),
+    # Strategy 2: bulk DevActivityLog.commit_sha lookup for unmatched SHAs
+    remaining = [s for s in shas if s not in result_map]
+    if remaining:
+        dev_stmt = (
+            select(DevActivityLog.commit_sha, DevActivityLog.bud_id)
+            .where(
+                DevActivityLog.org_id == org_id,
+                DevActivityLog.commit_sha.in_(remaining),
+                DevActivityLog.bud_id.is_not(None),
+            )
+            .distinct()
         )
-        .limit(1)
-    )
-    result = await db.execute(dev_stmt)
-    return result.scalar_one_or_none()
+        dev_result = await db.execute(dev_stmt)
+        for sha, bud_id in dev_result.all():
+            if sha and bud_id and sha not in result_map:
+                result_map[sha] = bud_id
+
+    return result_map
 
 
 async def _event_already_recorded(
@@ -144,9 +149,9 @@ async def detect_release_promotion(
 
     Called from the GitHub webhook handler after the existing BUD-branch
     detection runs. Fetches the release PR's commits via the GitHub API,
-    fans out each commit through ``find_bud_for_sha``, and writes one
-    ``merged_to_{stage}`` timeline event per matched BUD (idempotent on
-    webhook re-delivery).
+    does a batch SHA lookup (2 SQL queries total regardless of commit count),
+    and writes one ``merged_to_{stage}`` timeline event per matched BUD
+    (idempotent on webhook re-delivery).
 
     Args:
         db: Async DB session.
@@ -187,14 +192,16 @@ async def detect_release_promotion(
     if not commits:
         return 0
 
-    # First pass: bucket commits by owning BUD so each BUD gets a single
-    # event carrying ALL its matched commits, not just the first one. The
-    # UI needs the full list to show "these N commits from this BUD shipped
-    # in that release" \u2014 critical for spotting dropped or cherry-picked work.
+    # Batch SHA lookup \u2014 2 SQL queries total instead of 2N per-commit
+    all_shas = [c.get("sha", "") for c in commits if c.get("sha")]
+    sha_to_bud = await find_buds_for_shas(db, org_id, all_shas)
+
+    # Bucket commits by owning BUD so each BUD gets a single event
+    # carrying ALL its matched commits.
     matches: dict[uuid.UUID, list[dict[str, str]]] = {}
     for commit in commits:
         sha = commit.get("sha", "")
-        bud_id = await find_bud_for_sha(db, org_id, sha)
+        bud_id = sha_to_bud.get(sha)
         if bud_id is None:
             continue
         commit_message = ""
@@ -205,7 +212,7 @@ async def detect_release_promotion(
             {"sha": sha, "message": commit_message},
         )
 
-    # Second pass: write one event per BUD, idempotent on re-delivery.
+    # Write one event per BUD, idempotent on re-delivery.
     new_event_count = 0
     for bud_id, bud_commits in matches.items():
         already = await _event_already_recorded(
@@ -245,9 +252,7 @@ async def detect_release_promotion(
         new_event_count += 1
 
     # For prod merges: auto-close the BUD when ALL impacted repos have
-    # shipped to production. This mirrors the CODE_REVIEW → TESTING
-    # auto-transition pattern (all repos merged → advance) but for the
-    # final lifecycle step.
+    # shipped to production.
     if stage == "prod" and new_event_count:
         for bud_id in matches:
             await _maybe_auto_close_bud(db, org_id, bud_id)
@@ -271,7 +276,7 @@ async def _maybe_auto_close_bud(
 ) -> None:
     """Auto-close a BUD if all impacted repos have merged_to_prod events.
 
-    Only fires when the BUD is currently in ``prod`` or ``uat`` status —
+    Only fires when the BUD is currently in ``prod`` or ``uat`` status \u2014
     if it's already ``closed`` or still in ``testing``, this is a no-op.
     Records a ``status_change`` timeline event with ``auto: true`` so the
     timeline shows it was system-driven.
@@ -287,11 +292,14 @@ async def _maybe_auto_close_bud(
         return
 
     impacted = bud.impacted_repos or []
+    if not isinstance(impacted, list):
+        return
     if not impacted:
         return
 
     impacted_repo_ids = {
-        r.get("repo_id") for r in impacted if r.get("repo_id")
+        r.get("repo_id") for r in impacted
+        if isinstance(r, dict) and r.get("repo_id")
     }
     if not impacted_repo_ids:
         return
@@ -316,7 +324,7 @@ async def _maybe_auto_close_bud(
     if not impacted_repo_ids.issubset(repos_with_prod):
         return  # Not all repos have shipped yet
 
-    # All impacted repos have merged to prod — auto-close
+    # All impacted repos have merged to prod \u2014 auto-close
     bud.status = BUDStatus.CLOSED
 
     await record_event(

@@ -144,6 +144,15 @@ class GitHubClient:
                         page=page,
                     )
                     return all_commits
+                except Exception:
+                    logger.error(
+                        "github_get_pr_commits_connection_error",
+                        owner_repo=owner_repo,
+                        pr_number=pr_number,
+                        page=page,
+                        exc_info=True,
+                    )
+                    return all_commits
                 batch = resp.json()
                 if not batch:
                     break
