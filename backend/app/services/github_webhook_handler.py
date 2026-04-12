@@ -205,7 +205,7 @@ async def _handle_pr_closed(
     # not just BUD-branch PRs \u2014 a release PR (e.g. develop \u2192 release/uat)
     # has no bud-NNN head branch but is exactly what we want to detect.
     if is_merged:
-        await _maybe_detect_release_promotion(org_id, repo, pr_data, db)
+        await _maybe_detect_release_promotion(org_id, repo, pr_data, pr, db)
 
     await db.commit()
 
@@ -229,13 +229,23 @@ async def _maybe_detect_release_promotion(
     org_id: uuid.UUID,
     repo: TrackedRepository,
     pr_data: GitHubPullRequest,
+    pr: PullRequest,
     db: AsyncSession,
 ) -> None:
-    """Run release-stage detection if the PR's base branch is a release target.
+    """Record release-stage events when a PR merges into a stage branch.
 
-    Compares ``pr_data.base.ref`` against ``repo.uat_branch`` (gated by the
-    org-level ``bud_stages.uat_enabled`` toggle) and ``repo.main_branch``.
-    On match, fans out via ``release_detection.detect_release_promotion``.
+    Two paths, chosen automatically:
+
+    **Fast path** \u2014 the PR already has ``bud_id`` (BUD-branch PR merging
+    directly into a stage branch, e.g. ``bud-001/... \u2192 release/uat``).
+    Records ``merged_to_{stage}`` directly from the PR's metadata.
+    Zero GitHub API calls.
+
+    **SHA-walk path** \u2014 the PR has no ``bud_id`` (release PR carrying
+    multiple BUDs, e.g. ``develop \u2192 main``). Fetches the PR's commits
+    via GitHub API and batch-matches SHAs to discover which BUDs are
+    included. One API call + 2 SQL queries.
+
     Failures are logged but never break the parent webhook handler \u2014
     detection is observational and must not block PR state updates.
     """
@@ -262,7 +272,15 @@ async def _maybe_detect_release_promotion(
         return
 
     try:
-        await detect_release_promotion(db, org_id, repo, pr_data, stage)
+        if pr.bud_id:
+            # Fast path: BUD-branch PR merged directly into a stage branch.
+            # We already know the BUD \u2014 skip the GitHub API call entirely.
+            await _record_release_event_for_bud(
+                db, org_id, pr.bud_id, repo, pr_data, stage,
+            )
+        else:
+            # SHA-walk path: release PR carrying multiple BUDs.
+            await detect_release_promotion(db, org_id, repo, pr_data, stage)
     except Exception:
         logger.warning(
             "release_detection_failed",
@@ -271,6 +289,64 @@ async def _maybe_detect_release_promotion(
             repo=repo.name,
             exc_info=True,
         )
+
+
+async def _record_release_event_for_bud(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_id: uuid.UUID,
+    repo: TrackedRepository,
+    pr_data: GitHubPullRequest,
+    stage: str,
+) -> None:
+    """Fast-path: record a merged_to_{stage} event for a known BUD.
+
+    Called when a BUD-branch PR (which already carries ``bud_id``) merges
+    directly into a stage branch. Skips the GitHub API commit-walk and
+    SHA matching entirely.
+    """
+    from app.services.release_detection import _event_already_recorded, _maybe_auto_close_bud
+
+    already = await _event_already_recorded(
+        db, org_id, bud_id, stage, pr_data.number, repo.id,  # type: ignore[arg-type]
+    )
+    if already:
+        return
+
+    await record_event(
+        db,
+        org_id,
+        bud_id,
+        f"merged_to_{stage}",
+        detail={
+            "release_pr_number": pr_data.number,
+            "release_pr_html_url": pr_data.html_url,
+            "release_pr_title": pr_data.title,
+            "release_pr_author": pr_data.user.login,
+            "repo_id": str(repo.id),
+            "repo_name": repo.name,
+            "merged_at": pr_data.merged_at,
+            "matched_commits": [],
+        },
+    )
+
+    from app.services.event_bus import publish as _publish
+
+    _publish(
+        f"bud:{bud_id}:activity",
+        {"event_type": f"merged_to_{stage}", "release_pr_number": pr_data.number},
+    )
+
+    if stage == "prod":
+        await _maybe_auto_close_bud(db, org_id, bud_id)
+
+    logger.info(
+        "release_event_fast_path",
+        stage=stage,
+        bud_id=str(bud_id),
+        pr_number=pr_data.number,
+        repo=repo.name,
+    )
 
 
 async def _handle_pr_synchronize(
