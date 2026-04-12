@@ -66,6 +66,7 @@ async def handle_triage_job(job_id: str, raw_payload: dict[str, Any]) -> None:
                 from app.services.slack_intake import (
                     continue_triage,
                     handle_pm_approval,
+                    start_bug_triage,
                     start_triage,
                 )
 
@@ -76,6 +77,18 @@ async def handle_triage_job(job_id: str, raw_payload: dict[str, Any]) -> None:
 
                     event = SlackReactionEvent.model_validate(event_data)
                     await start_triage(
+                        db=db,
+                        org=org,
+                        bot_token=bot_token,
+                        channel=event.item.channel,
+                        message_ts=event.item.ts,
+                        requester_slack_id=event.user,
+                    )
+                elif payload.action == "start_bug_triage":
+                    from app.schemas.slack import SlackReactionEvent
+
+                    event = SlackReactionEvent.model_validate(event_data)
+                    await start_bug_triage(
                         db=db,
                         org=org,
                         bot_token=bot_token,

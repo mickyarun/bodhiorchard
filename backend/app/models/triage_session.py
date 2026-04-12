@@ -44,6 +44,10 @@ class TriageSession(BaseModel):
     requester_slack_id: Mapped[str] = mapped_column(String(50), nullable=False)
     requester_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     original_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "bud" (default, existing flow) or "bug" (bug triage via 🐛)
+    session_type: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="bud", server_default="bud"
+    )
     status: Mapped[str] = mapped_column(
         String(30), nullable=False, default=TriageStatus.INTERVIEWING
     )

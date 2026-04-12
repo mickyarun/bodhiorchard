@@ -188,6 +188,7 @@ async def slack_events(
         event = SlackReactionEvent.model_validate(event_data)
         if event.item.type == "message" and event.reaction in (
             "brain",
+            "bug",
             "white_check_mark",
             "x",
         ):
@@ -195,6 +196,13 @@ async def slack_events(
                 triage_payload = TriageJobPayload(
                     team_id=payload.team_id or "",
                     action="start_triage",
+                    event_type="reaction_added",
+                    event_data=event.model_dump(),
+                )
+            elif event.reaction == "bug":
+                triage_payload = TriageJobPayload(
+                    team_id=payload.team_id or "",
+                    action="start_bug_triage",
                     event_type="reaction_added",
                     event_data=event.model_dump(),
                 )
