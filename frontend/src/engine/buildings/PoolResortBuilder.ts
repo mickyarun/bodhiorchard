@@ -50,7 +50,7 @@ const POND_SCALE = TARGET_POND_WIDTH / POND_NATIVE_WIDTH; // ≈ 0.04010
  * while keeping the water surface visible. The pond GLB includes its own
  * water mesh, so we must not push too far or the water goes underground.
  */
-const POND_Y_OFFSET = -0.15;
+const POND_Y_OFFSET = -1.0;
 
 /**
  * Grass surface Y in world units — the flat area where furniture sits.
