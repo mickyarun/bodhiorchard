@@ -413,7 +413,13 @@ async def collect_agents(
 async def collect_members(
     db: AsyncSession, org_id: uuid.UUID, tree: TreeData,
 ) -> None:
-    """Collect team members with their contribution percentages.
+    """Collect ALL org members with their contribution percentages.
+
+    Uses ``OrgToUser`` as the membership source (same as the Colyseus
+    snapshot in ``internal_colyseus._collect_org_members``) so every
+    member gets a house in the village — including managers and new
+    joiners who haven't committed any tracked code yet. ``SkillProfile``
+    is LEFT-JOINed so contribution metrics are zero instead of missing.
 
     Args:
         db: Async database session.
@@ -422,6 +428,7 @@ async def collect_members(
     """
     from app.models.developer_xp import DeveloperXP
     from app.models.organization import Organization
+    from app.models.user import OrgToUser
 
     cfg_row = await db.execute(
         select(Organization.config).where(Organization.id == org_id)
@@ -436,16 +443,24 @@ async def collect_members(
             User.avatar_url,
             User.character_model,
             User.slack_id,
-            func.sum(SkillProfile.touch_count).label("total_touches"),
+            func.coalesce(func.sum(SkillProfile.touch_count), 0).label("total_touches"),
             DeveloperXP.level,
             DeveloperXP.level_name,
         )
-        .join(SkillProfile, SkillProfile.user_id == User.id)
+        # OrgToUser is the authoritative membership join — ensures every
+        # org member appears regardless of contribution activity.
+        .join(OrgToUser, OrgToUser.user_id == User.id)
+        # LEFT JOIN SkillProfile — members without contributions get NULL
+        # sums which coalesce to 0 above.
+        .outerjoin(
+            SkillProfile,
+            (SkillProfile.user_id == User.id) & (SkillProfile.org_id == org_id),
+        )
         .outerjoin(
             DeveloperXP,
             (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == org_id),
         )
-        .where(SkillProfile.org_id == org_id)
+        .where(OrgToUser.org_id == org_id)
         .where(User.is_active.is_(True))
         .where(~User.name.ilike("%[bot]%"))
         .group_by(
@@ -458,8 +473,8 @@ async def collect_members(
             DeveloperXP.level,
             DeveloperXP.level_name,
         )
-        .order_by(func.sum(SkillProfile.touch_count).desc())
-        .limit(20)
+        .order_by(func.coalesce(func.sum(SkillProfile.touch_count), 0).desc())
+        .limit(50)
     )
     rows = result.all()
     if not rows:
