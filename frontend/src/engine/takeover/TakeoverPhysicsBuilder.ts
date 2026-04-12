@@ -18,19 +18,19 @@
  */
 import type { PhysicsWorld } from '../physics'
 import { WALL_HEIGHT, type HouseResult } from '../buildings/HouseBuilder'
+import { getHouseTier } from '../buildings/HouseTierConfig'
 
 // ─── Constants ─────────────────────────────────
 
 /** Single source of truth for wall height — shared with visual HouseBuilder. */
 const HOUSE_WALL_HEIGHT = WALL_HEIGHT
 
-/** House is 4×4 tiles, door on front wall at local X=1.5 (tile index 1 spans 1.0-2.0). */
-const HOUSE_SIZE = 4
-const HOUSE_DOOR_X_LOCAL = 1.5   // door center X in local coords
-const HOUSE_DOOR_Z_LOCAL = 4.0   // front wall Z in local coords
 const HOUSE_DOOR_HALF_W = 0.45   // slightly narrower than 1-unit door gap
 const HOUSE_DOOR_HALF_D = 0.05   // thin trigger
 const HOUSE_WALL_THICK = 0.15    // half-thickness of wall boxes
+
+/** Door tile index per tier (must match HouseBuilder wall openings). */
+const TIER_DOOR_INDEX: Record<number, number> = { 1: 1, 2: 1, 3: 2 }
 
 // ─── Public Types ──────────────────────────────
 
@@ -62,7 +62,7 @@ export class TakeoverPhysicsBuilder {
 
   /**
    * Register wall colliders + door colliders for all houses.
-   * Each house is a 4×4 tile hut with door at front-center.
+   * Tier-aware: reads house.tier to determine wall dimensions and door position.
    * Door collider ID = memberId (so doorHit.doorId maps directly to enterHouse(memberId)).
    */
   registerHouses(memberHouseMap: Map<string, HouseResult>): void {
@@ -71,17 +71,19 @@ export class TakeoverPhysicsBuilder {
       const yawDeg = house.entity.getEulerAngles().y
       const yawRad = yawDeg * Math.PI / 180
 
-      // Walls: 5 segments (back, left, right, front-left panel, front-right panel)
-      // The door gap spans X=1.0-2.0 on the front wall (tile index 1)
-      const walls = computeHutWallBoxes(HOUSE_SIZE, HOUSE_SIZE, [1])
+      const tierDef = getHouseTier(house.tier ?? 2)
+      const doorIdx = TIER_DOOR_INDEX[tierDef.tier] ?? 1
+
+      // Walls: segments around the perimeter with door gap on front wall
+      const walls = computeHutWallBoxes(tierDef.width, tierDef.depth, [doorIdx])
       for (const wall of walls) {
         this.addRotatedWall(pos.x, pos.z, yawRad, wall, HOUSE_WALL_HEIGHT)
       }
 
       // Door: thin collider in the door gap on front wall
-      const doorLocal = { x: HOUSE_DOOR_X_LOCAL, z: HOUSE_DOOR_Z_LOCAL }
-      const doorWorld = rotatePointYaw(doorLocal.x, doorLocal.z, yawRad)
-      // Door half-extents also rotate with yaw (swap W/D for 90° rotations)
+      const doorXLocal = doorIdx + 0.5  // center of the door tile
+      const doorZLocal = tierDef.depth   // front wall Z
+      const doorWorld = rotatePointYaw(doorXLocal, doorZLocal, yawRad)
       const doorHalf = rotateHalfSize(HOUSE_DOOR_HALF_W, HOUSE_DOOR_HALF_D, yawRad)
       this.physics.addDoor(
         memberId,

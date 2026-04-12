@@ -39,6 +39,8 @@ import {
 } from './takeover'
 import { OrgRoomClient } from '../multiplayer'
 import { SerializedExecutor } from './utils/SerializedExecutor'
+import { VehicleController } from './vehicles/VehicleController'
+import { getVehicleDef } from './vehicles/VehicleManifest'
 
 export { type EngineData, type EngineCallbacks } from './types'
 
@@ -72,6 +74,7 @@ export class GardenEngine {
   private takeoverUI: TakeoverUI | null = null
   private takeoverProximity: ProximitySystem | null = null
   private takeoverUserId: string | null = null
+  private vehicleCtrl: VehicleController | null = null
   // Throttle move broadcasts to OrgRoom at ~20Hz during takeover
   private takeoverMoveAccumulator = 0
   private static readonly TAKEOVER_MOVE_INTERVAL = 0.05  // seconds
@@ -369,8 +372,17 @@ export class GardenEngine {
         // Garden stays alive — birds, clouds, agent robots, other characters
         this.sceneManager?.update(dt)
         if (this.takeoverCtrl && this.takeoverCam) {
+          // TakeoverController always runs (handles inactivity even when mounted)
           this.takeoverCtrl.update(dt, this.takeoverCam.yaw)
-          this.takeoverCam.update(this.takeoverCtrl.getPosition())
+
+          // When mounted, VehicleController drives actual movement + camera
+          if (this.vehicleCtrl?.isActive) {
+            this.vehicleCtrl.update(dt, this.takeoverCam.yaw)
+            const vPos = this.vehicleCtrl.getPosition()
+            if (vPos) this.takeoverCam.update(vPos)
+          } else {
+            this.takeoverCam.update(this.takeoverCtrl.getPosition())
+          }
 
           // Throttled broadcast to OrgRoom — other viewers see us move in real time.
           // Client-side prediction: we drive our own entity locally; CharacterSystem
@@ -379,12 +391,14 @@ export class GardenEngine {
             this.takeoverMoveAccumulator += dt
             if (this.takeoverMoveAccumulator >= GardenEngine.TAKEOVER_MOVE_INTERVAL) {
               this.takeoverMoveAccumulator = 0
-              const pos = this.takeoverCtrl.getPosition()
-              this.orgRoomClient.sendMove(
-                pos.x, pos.y, pos.z,
-                this.takeoverCtrl.getYaw(),
-                this.takeoverCtrl.getAnimState(),
-              )
+              // When mounted, position + yaw come from the vehicle
+              const vPos = this.vehicleCtrl?.isActive ? this.vehicleCtrl.getPosition() : null
+              const pos = vPos ?? this.takeoverCtrl.getPosition()
+              const yaw = this.vehicleCtrl?.isActive
+                ? this.vehicleCtrl.getYaw()
+                : this.takeoverCtrl.getYaw()
+              const animState = this.vehicleCtrl?.isActive ? 'walk' : this.takeoverCtrl.getAnimState()
+              this.orgRoomClient.sendMove(pos.x, pos.y, pos.z, yaw, animState)
             }
           }
 
@@ -428,6 +442,39 @@ export class GardenEngine {
                 this.takeoverUI?.hideSeatPrompt()
                 // Broadcast sit to other clients
                 this.orgRoomClient?.sendMove(nearest.x, nearest.y, nearest.z, nearest.yaw, 'sit')
+              }
+            }
+          }
+
+          // ─── Vehicle mount/dismount: V-key ───
+          if (this.input?.wasPressed(pc.KEY_V) && this.sceneManager && !this.takeoverCtrl.isSitting) {
+            if (this.vehicleCtrl?.isActive) {
+              // Dismount
+              const dismountPos = this.vehicleCtrl.dismount()
+              if (dismountPos) {
+                this.takeoverCtrl.mounted = false
+                this.sceneManager.physicsWorld?.teleportPlayer(dismountPos.x, dismountPos.z)
+                this.orgRoomClient?.sendDismountVehicle()
+              }
+            } else {
+              // Mount — default to horse for V1
+              const horseDef = getVehicleDef('horse')
+              if (horseDef && this.sceneManager.physicsWorld) {
+                if (!this.vehicleCtrl) {
+                  this.vehicleCtrl = new VehicleController(this.input, this.sceneManager.assetLoader)
+                }
+                const character = this.sceneManager.characterSystemRef?.getCharacter(this.takeoverUserId!)
+                if (character?.entity) {
+                  this.takeoverCtrl.mounted = true
+                  const physics = this.sceneManager.physicsWorld
+                  const root = this.app!.root
+                  this.vehicleCtrl.mount(horseDef, character.entity, physics, root)
+                    .then(() => this.orgRoomClient?.sendMountVehicle('horse'))
+                    .catch(e => {
+                      console.error('[GardenEngine] Vehicle mount failed:', e)
+                      if (this.takeoverCtrl) this.takeoverCtrl.mounted = false
+                    })
+                }
               }
             }
           }
@@ -755,6 +802,12 @@ export class GardenEngine {
   async exitTakeover(): Promise<void> {
     // Re-entry guard: takeoverCtrl is cleared first thing to prevent any concurrent calls
     if (!this.takeoverCtrl) return
+
+    // Dismount vehicle if mounted before exiting takeover
+    if (this.vehicleCtrl?.isActive) {
+      this.vehicleCtrl.dismount()
+      this.takeoverCtrl.mounted = false
+    }
 
     // Immediately transition to 'exiting' state + clear ctrl to block the takeover update loop
     this.sceneState = 'exiting'

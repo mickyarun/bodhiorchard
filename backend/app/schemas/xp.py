@@ -17,6 +17,9 @@ class XPProfileRead(BaseModel):
     streak_best: int
     unlocked_characters: list[str]
     unlocked_accessories: list[str]
+    skill_points: int = 0
+    house_level: int = 2
+    vehicle_unlocks: list[str] = []
 
     model_config = {"from_attributes": True}
 

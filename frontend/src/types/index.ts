@@ -642,6 +642,9 @@ export interface XPProfile {
   streak_best: number
   unlocked_characters: string[]
   unlocked_accessories: string[]
+  skill_points: number
+  house_level: number
+  vehicle_unlocks: string[]
 }
 
 export interface LeaderboardEntry {

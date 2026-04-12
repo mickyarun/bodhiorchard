@@ -27,6 +27,7 @@ export interface MemberPlacementInput {
   presence: PresenceState
   memberIndex: number
   totalMembers: number
+  houseLevel?: number
 }
 
 /**
@@ -49,11 +50,11 @@ export function computePlacement(
   breakSeats: readonly BreakSeat[],
   preferredZone?: string,
 ): Placement {
-  const { userId, presence, memberIndex, totalMembers } = input
+  const { userId, presence, memberIndex, totalMembers, houseLevel } = input
 
   // ─── at_home → bed position in own house ───
   if (presence === "at_home") {
-    const bed = getHouseBedPosition(memberIndex, totalMembers)
+    const bed = getHouseBedPosition(memberIndex, totalMembers, houseLevel)
     if (bed) {
       return {
         x: bed.x,
@@ -69,7 +70,7 @@ export function computePlacement(
 
   // ─── active → desk seat in own house ───
   if (presence === "active") {
-    const desk = getHouseDeskSeat(memberIndex, totalMembers)
+    const desk = getHouseDeskSeat(memberIndex, totalMembers, houseLevel)
     if (desk) {
       return {
         x: desk.x,

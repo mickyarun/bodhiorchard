@@ -197,6 +197,7 @@ export const BUILDING = {
 
   // Housing
   bedSingle: `${FURNITURE}/bedSingle.glb`,
+  bedDouble: `${FURNITURE}/bedDouble.glb`,
   loungeChair: `${FURNITURE}/loungeChair.glb`,
   loungeSofa: `${FURNITURE}/loungeSofa.glb`,
   cabinetTelevision: `${FURNITURE}/cabinetTelevision.glb`,

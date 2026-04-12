@@ -84,6 +84,7 @@ export interface EngineMember {
   presence?: PresenceState
   level?: number
   level_name?: string
+  house_level?: number
 }
 
 export interface EngineAgentActivity {

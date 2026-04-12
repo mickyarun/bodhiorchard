@@ -196,6 +196,16 @@ export class OrgRoomClient {
     this.room?.send("takeover_end", { userId })
   }
 
+  /** Send vehicle mount command. */
+  sendMountVehicle(vehicleId: string): void {
+    this.room?.send("mount_vehicle", { vehicleId })
+  }
+
+  /** Send vehicle dismount command. */
+  sendDismountVehicle(): void {
+    this.room?.send("dismount_vehicle", {})
+  }
+
   /** Temporary dev tool: fire a simulated dev_activity for the current user. */
   sendSimulateDevActivity(): void {
     this.room?.send("simulate_dev_activity")

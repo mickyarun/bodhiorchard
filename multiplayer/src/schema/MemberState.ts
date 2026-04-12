@@ -41,6 +41,12 @@ export class MemberState extends Schema {
   @type("string") labelName = ""
   @type("string") labelMessage = ""
 
+  // House tier (1=Hut, 2=Cottage, 3=Mansion)
+  @type("number") houseLevel = 2
+
+  // Vehicle (empty = on foot, "horse" = riding)
+  @type("string") vehicleId = ""
+
   // Takeover — when set, this member is player-controlled (server pauses NPC sim)
   @type("string") takeoverSessionId = ""
 

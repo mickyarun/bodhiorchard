@@ -34,6 +34,7 @@ export interface OrgSnapshotMember {
    * old snapshots without this field fall through to inferred presence.
    */
   has_slack?: boolean
+  house_level?: number
 }
 
 /** Valid day-of-week keys for `PresenceSettingsPayload.workingDays`. */

@@ -16,7 +16,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -44,6 +44,13 @@ class DeveloperXP(BaseModel):
     streak_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_active_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     streak_best: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Skill points — earned alongside XP, spent on upgrades
+    skill_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    house_level: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    vehicle_unlocks: Mapped[list[str]] = mapped_column(
+        ARRAY(String(30)), nullable=False, server_default="{}",
+    )
 
     def __repr__(self) -> str:
         return f"<DeveloperXP(user={self.user_id}, xp={self.total_xp}, lv={self.level})>"

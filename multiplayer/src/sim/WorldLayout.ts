@@ -33,18 +33,21 @@ export function getZone(name: string): Zone | null {
 // ─── House grid layout ───────────────────────
 // Mirror of HousingVillage constants
 
-export const HOUSE_SPACING_X = 6
-export const HOUSE_SPACING_Z = 6
+export const HOUSE_SPACING_X = 8
+export const HOUSE_SPACING_Z = 8
 export const HOUSES_PER_ROW = 4
 
-/** Desk seat offset in house-local space (x=3.2, z=1.3 before rotation). */
-const DESK_LOCAL_X = 3.2
-const DESK_LOCAL_Z = 1.3
-const DESK_YAW = 180  // faces -Z (before 90° house rotation)
-
-/** Bed position in house-local space. */
-const BED_LOCAL_X = 1.0
-const BED_LOCAL_Z = 1.1
+/** Desk/bed offsets per house tier (local space, before 90° rotation). */
+const TIER_DESK: Record<number, { x: number; z: number; yaw: number }> = {
+  1: { x: 2.2, z: 2.3, yaw: 180 },   // Hut 3×3 (matches chairDesk placeSeat z)
+  2: { x: 3.2, z: 1.3, yaw: 180 },   // Cottage 4×4 (current default)
+  3: { x: 3.4, z: 1.3, yaw: 180 },   // Mansion 5×5
+}
+const TIER_BED: Record<number, { x: number; z: number }> = {
+  1: { x: 1.5, z: 0.7 },
+  2: { x: 1.0, z: 1.1 },
+  3: { x: 1.5, z: 0.8 },
+}
 
 /**
  * Compute the world-space position of a member's house origin.
@@ -79,18 +82,19 @@ export function getHouseOrigin(memberIndex: number, totalMembers: number): { x: 
 export function getHouseDeskSeat(
   memberIndex: number,
   totalMembers: number,
+  houseLevel = 2,
 ): { x: number; y: number; z: number; yaw: number } | null {
   const origin = getHouseOrigin(memberIndex, totalMembers)
   if (!origin) return null
 
+  const local = TIER_DESK[houseLevel] ?? TIER_DESK[2]
+
   // Apply 90° rotation: (dx, dz) → (dz, -dx)
-  const dx = DESK_LOCAL_X
-  const dz = DESK_LOCAL_Z
   return {
-    x: origin.x + dz,
+    x: origin.x + local.z,
     y: 0,
-    z: origin.z - dx,
-    yaw: DESK_YAW + 90,  // add 90° for house rotation
+    z: origin.z - local.x,
+    yaw: local.yaw + 90,  // add 90° for house rotation
   }
 }
 
@@ -101,16 +105,17 @@ export function getHouseDeskSeat(
 export function getHouseBedPosition(
   memberIndex: number,
   totalMembers: number,
+  houseLevel = 2,
 ): { x: number; y: number; z: number; yaw: number } | null {
   const origin = getHouseOrigin(memberIndex, totalMembers)
   if (!origin) return null
 
-  const dx = BED_LOCAL_X
-  const dz = BED_LOCAL_Z
+  const local = TIER_BED[houseLevel] ?? TIER_BED[2]
+
   return {
-    x: origin.x + dz,
+    x: origin.x + local.z,
     y: 0.38,
-    z: origin.z - dx,
+    z: origin.z - local.x,
     yaw: 90,
   }
 }

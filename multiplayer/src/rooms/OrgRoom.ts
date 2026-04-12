@@ -491,6 +491,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       member.characterModel = m.character_model ?? ""
       member.level = m.level ?? 0
       member.levelName = m.level_name ?? ""
+      member.houseLevel = m.house_level ?? 2
       member.presence = m.presence
       member.x = placement.x
       member.y = placement.y

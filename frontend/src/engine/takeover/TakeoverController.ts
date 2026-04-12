@@ -41,6 +41,9 @@ export class TakeoverController {
   // Seat interaction — E-key sit at nearby chairs
   private _sitting = false
 
+  // Vehicle mount — when true, movement is delegated to VehicleController
+  private _mounted = false
+
   // Jump
   private jumpProgress = -1
 
@@ -68,6 +71,10 @@ export class TakeoverController {
 
   /** Whether the player is currently sitting at a chair. */
   get isSitting(): boolean { return this._sitting }
+
+  /** Whether the player is currently riding a vehicle. */
+  get isMounted(): boolean { return this._mounted }
+  set mounted(value: boolean) { this._mounted = value }
 
   /**
    * Teleport the character to a seat and play the sit animation.
@@ -168,6 +175,18 @@ export class TakeoverController {
   update(dt: number, camYaw: number): void {
     if (!this.entity || !this.physics) return
 
+    // ─── Mounted: movement delegated to VehicleController ────────
+    if (this._mounted) {
+      // VehicleController.update() is called by GardenEngine directly.
+      // We only track inactivity here.
+      const anyInput =
+        this.input.isPressed(pc.KEY_W) || this.input.isPressed(pc.KEY_S) ||
+        this.input.isPressed(pc.KEY_A) || this.input.isPressed(pc.KEY_D)
+      if (anyInput) this._inactivityTimer = 0
+      else this._inactivityTimer += dt
+      return
+    }
+
     // ─── Sitting: freeze all movement, WASD auto-stands ──────────
     if (this._sitting) {
       const anyMove =
@@ -262,6 +281,7 @@ export class TakeoverController {
 
     this.jumpProgress = -1
     this._sitting = false
+    this._mounted = false
 
     // Clean up physics player + disable door detection
     if (this.physics) {
