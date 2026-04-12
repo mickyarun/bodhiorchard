@@ -16,16 +16,6 @@
     >
       {{ tooltipText }}
     </div>
-    <!-- Temporary dev tool: simulate a dev_activity event for testing
-         the tree-watering animation. Remove when real hooks are confirmed. -->
-    <button
-      v-if="isDev"
-      class="simulate-btn"
-      title="Simulate dev activity (walk to tree)"
-      @click="handleSimulate"
-    >
-      Simulate
-    </button>
   </div>
 </template>
 
@@ -38,12 +28,6 @@ import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 
-// Dev-only simulate button (remove when real hooks are confirmed)
-const isDev = import.meta.env.DEV
-function handleSimulate(): void {
-  console.log('[Simulate] clicked, engine=', !!engine)
-  engine?.simulateDevActivity()
-}
 
 const props = defineProps<{
   treeData: TreeData
@@ -414,23 +398,4 @@ onUnmounted(() => {
   max-width: 250px;
 }
 
-/* Temporary dev tool — remove when real hooks are confirmed */
-.simulate-btn {
-  position: fixed;
-  bottom: 16px;
-  left: 16px;
-  z-index: 9999;
-  padding: 8px 16px;
-  background: rgba(33, 150, 243, 0.95);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  pointer-events: auto;
-}
-.simulate-btn:hover {
-  background: rgba(33, 150, 243, 1);
-}
 </style>
