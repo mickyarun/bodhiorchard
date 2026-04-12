@@ -44,6 +44,12 @@
 - All modules must have docstrings
 - All public functions must have docstrings
 
+## Async SQLAlchemy Gotchas
+- **MissingGreenlet:** After modifying ORM attributes (e.g., `bug.embedding = vec`), always `await db.flush()` + `await db.refresh(obj)` before accessing other attributes — lazy loading fails outside the async greenlet
+- **Background tasks:** Use `asyncio.create_task()` with a module-level `set` to hold references (prevents GC). Each task must create its own `AsyncSessionLocal()` session — never share the request's session
+- **Guard ordering:** In the BUD PATCH handler, status guards must run BEFORE `transition_feature_for_bud` and other side-effect-producing calls
+- **Pydantic aliases:** Use snake_case field names in Python constructors (not camelCase aliases) — mypy can't resolve aliases even with `populate_by_name=True`
+
 ## Common Commands
 ```bash
 # Run dev server

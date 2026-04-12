@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **bodhigrove** (6609 symbols, 18538 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **bodhigrove** (8274 symbols, 23086 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -99,6 +99,20 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+---
+
+## Frontend Quality Gate
+- **No ESLint config exists** — `npm run lint` fails. Use `vue-tsc --noEmit` as the type-check gate
+- **Pre-existing TS error** in `SceneManager.ts` (unused import) — ignore in type-check output
+- `v-tabs-window-item` `value` must exactly match `v-tab` `value` — mismatches cause silent blank content
+- Tab values like `'uat'`, `'prod'`, `'closed'` are NOT in `BUD_SECTIONS` — they're in `NON_SECTION_BUD_TABS` and `STATUS_TAB_MAP`
+
+## BUD Lifecycle Completeness
+- BUDs get embeddings at creation time (for bug linker vector search)
+- `on_bud_closed()` in `bud_closure.py` handles: contributor XP + repo scan (called from both manual PATCH and auto-close)
+- Release detection: fast path (bud_id on PR) vs SHA-walk path (release PRs without bud_id)
+- Bug auto-linking: `bug_linker.py` uses pgvector cosine distance with 0.40 threshold
 
 ---
 
