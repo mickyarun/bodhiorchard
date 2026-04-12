@@ -250,8 +250,10 @@
               <v-tab value="development">Development</v-tab>
               <v-tab value="code-review">Code Review</v-tab>
               <v-tab value="testing">Testing</v-tab>
+              <v-tab v-if="uatStageEnabled" value="uat">UAT</v-tab>
+              <v-tab value="prod">Prod</v-tab>
             </v-tabs>
-            <div v-if="activeTab !== 'development' && activeTab !== 'code-review' && activeTab !== 'testing'" class="toolbar-actions">
+            <div v-if="!isReadOnlyTab" class="toolbar-actions">
               <v-btn
                 variant="text"
                 size="small"
@@ -403,6 +405,24 @@
                 />
               </v-tabs-window-item>
 
+              <!-- UAT (only when org has UAT stage enabled) -->
+              <v-tabs-window-item v-if="uatStageEnabled" value="uat">
+                <BUDReleaseStagePanel
+                  :bud-id="bud.id"
+                  stage="uat"
+                  :has-stage-branch-configured="hasUatBranchConfigured"
+                />
+              </v-tabs-window-item>
+
+              <!-- Prod (always shown) -->
+              <v-tabs-window-item value="prod">
+                <BUDReleaseStagePanel
+                  :bud-id="bud.id"
+                  stage="prod"
+                  :has-stage-branch-configured="hasMainBranchConfigured"
+                />
+              </v-tabs-window-item>
+
               <!-- Test Plan tab removed — test plan content is now part of QA tab -->
             </v-tabs-window>
           </div>
@@ -502,6 +522,85 @@
             </v-card>
           </v-dialog>
 
+          <!-- Pending manual test cases dialog.
+               Triggered when the tester tries to advance testing → uat
+               (or testing → prod on a UAT-disabled org) while any manual
+               case is still in pending state. Hard gate — no Proceed
+               button, the user must go resolve the cases first. -->
+          <v-dialog v-model="showPendingCasesDialog" max-width="500">
+            <v-card color="surface" class="pa-5">
+              <div class="d-flex align-center ga-2 mb-3">
+                <v-icon icon="mdi-clipboard-alert-outline" color="warning" />
+                <div class="text-subtitle-1 font-weight-medium">
+                  Manual test cases still pending
+                </div>
+              </div>
+              <div class="text-body-2 text-medium-emphasis mb-3">
+                Cannot advance to
+                <strong>{{ pendingCasesTarget }}</strong> —
+                {{ pendingCasesList.length }} manual test case{{ pendingCasesList.length === 1 ? '' : 's' }}
+                {{ pendingCasesList.length === 1 ? 'is' : 'are' }} still awaiting a result.
+              </div>
+              <div class="pending-cases-list mb-4">
+                <div
+                  v-for="tc in pendingCasesList.slice(0, 8)"
+                  :key="tc.id"
+                  class="pending-case-row"
+                >
+                  <v-icon icon="mdi-circle-outline" size="14" class="mr-2 opacity-60" />
+                  <strong class="mr-1">{{ tc.id }}</strong>
+                  <span class="text-truncate">{{ tc.title }}</span>
+                </div>
+                <div
+                  v-if="pendingCasesList.length > 8"
+                  class="text-caption text-medium-emphasis mt-1 pl-6"
+                >
+                  and {{ pendingCasesList.length - 8 }} more…
+                </div>
+              </div>
+              <div class="text-caption text-medium-emphasis mb-4">
+                Open the QA tab, mark each case as pass, fail, blocked, or
+                skipped, then try again.
+              </div>
+              <v-card-actions class="pa-0">
+                <v-spacer />
+                <v-btn variant="text" @click="showPendingCasesDialog = false">
+                  Close
+                </v-btn>
+                <v-btn
+                  color="primary"
+                  variant="flat"
+                  prepend-icon="mdi-clipboard-check-outline"
+                  @click="openQATab"
+                >
+                  Open QA tab
+                </v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-dialog>
+
+          <!-- Snackbar surfaces backend rejections (permission denied,
+               race conditions where the frontend preempt didn't catch
+               a pending case, etc.) so the user sees WHY the PATCH was
+               rejected instead of a blank failure. -->
+          <v-snackbar
+            v-model="statusErrorSnackbar"
+            color="error"
+            location="bottom"
+            :timeout="6000"
+            multi-line
+          >
+            {{ statusErrorMessage }}
+            <template #actions>
+              <v-btn
+                variant="text"
+                @click="statusErrorSnackbar = false"
+              >
+                Dismiss
+              </v-btn>
+            </template>
+          </v-snackbar>
+
           <!-- Activity Timeline (collapsible) -->
           <div class="timeline-section mt-4">
             <button class="timeline-toggle" @click="timelineOpen = !timelineOpen">
@@ -578,7 +677,9 @@ import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
 import BUDPRChecklist from '@/components/buds/BUDPRChecklist.vue'
 import BUDCodeReviewStatus from '@/components/buds/BUDCodeReviewStatus.vue'
 import BUDQAPanel from '@/components/buds/BUDQAPanel.vue'
+import BUDReleaseStagePanel from '@/components/buds/BUDReleaseStagePanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
+import { useSettingsStore } from '@/stores/settings'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -587,12 +688,75 @@ const router = useRouter()
 const budStore = useBUDStore()
 const authStore = useAuthStore()
 const membersStore = useMembersStore()
+const settingsStore = useSettingsStore()
 
 const bud = computed(() => budStore.currentBUD)
 
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)
 const showNoPRWarningDialog = ref(false)
+
+// Org-level UAT toggle. Hidden when false: the UAT tab disappears, and
+// any active session that's currently on the UAT tab falls back to Prod.
+// Default to true so the tab is visible during the brief settings load.
+const uatStageEnabled = computed(
+  () => settingsStore.connections.budStages?.uatEnabled ?? true,
+)
+
+// "Read-only" tabs hide the section toolbar (Edit/Export/Import). The
+// Development/Code Review/Testing tabs were already in this set; UAT and
+// Prod join them because they're observational \u2014 nothing to edit there.
+const READ_ONLY_TABS = new Set([
+  'development',
+  'code-review',
+  'testing',
+  'uat',
+  'prod',
+])
+const isReadOnlyTab = computed(() => READ_ONLY_TABS.has(activeTab.value))
+
+// Empty-state CTA on the release-stage panels: was a relevant branch
+// configured on ANY of this BUD's impacted repos? When false, the panel
+// shows a "Configure UAT branch" or "Configure production branch" link.
+// Branch info isn't on bud.impacted_repos directly \u2014 we look it up via
+// the settings store's repo list which the layout already loads.
+const hasUatBranchConfigured = computed(() => {
+  const ids = new Set(
+    (bud.value?.impacted_repos ?? []).map((r: { repo_id?: string }) => r.repo_id),
+  )
+  return settingsStore.repos.some(
+    (r) => ids.has(r.id) && !!r.uatBranch,
+  )
+})
+const hasMainBranchConfigured = computed(() => {
+  const ids = new Set(
+    (bud.value?.impacted_repos ?? []).map((r: { repo_id?: string }) => r.repo_id),
+  )
+  return settingsStore.repos.some(
+    (r) => ids.has(r.id) && !!r.mainBranch,
+  )
+})
+
+// If UAT is currently selected and the toggle gets flipped off (e.g.
+// admin disables UAT in another tab), drop back to Prod so the tab strip
+// stays consistent with the visible content.
+watch(uatStageEnabled, (enabled) => {
+  if (!enabled && activeTab.value === 'uat') {
+    activeTab.value = 'prod'
+  }
+})
+
+// Pending-manual-test-cases dialog state (testing → uat/prod guard).
+// Populated from bud.value.qa_manual_cases when the user attempts a
+// forward transition out of testing with pending cases still open.
+const showPendingCasesDialog = ref(false)
+const pendingCasesTarget = ref<string>('')
+const pendingCasesList = ref<{ id: string; title: string }[]>([])
+
+// Snackbar surfaces backend PATCH failures (the store now extracts
+// detail strings verbatim from 400/403/500 responses).
+const statusErrorSnackbar = ref(false)
+const statusErrorMessage = ref('')
 
 // Child component refs
 const designPanelRef = ref<InstanceType<typeof BUDDesignPanel> | null>(null)
@@ -728,6 +892,12 @@ onMounted(async () => {
   membersStore.fetchMembers()
   loadTimeline()
   loadEstimates()
+  // Settings store powers the UAT toggle visibility (uatStageEnabled)
+  // and the release-stage panels' "configure branch" CTA
+  // (hasUatBranchConfigured / hasMainBranchConfigured). Both actions
+  // are no-ops if the data is already cached, so this is cheap.
+  if (!settingsStore.connections.budStages) settingsStore.fetchConnections()
+  if (settingsStore.repos.length === 0) settingsStore.fetchRepos()
 
   // Subscribe to BUD activity events (PR opened/merged/comment via webhook)
   const budActivityTopic = `bud:${id}:activity`
@@ -867,7 +1037,35 @@ async function updateStatus(newStatus: string): Promise<void> {
     }
   }
 
+  // Guard: testing → uat (or → prod when UAT is disabled) must have
+  // every manual test case in a terminal state. Preempt the backend
+  // guard client-side so the user sees the list of blocking cases in a
+  // modal instead of hitting a 400 and seeing a snackbar. The backend
+  // guard still fires as the authoritative check.
+  //
+  // Re-fetch the BUD first so qa_manual_cases reflects results saved
+  // in the QA tab. The test runner composable (useQATestCases) updates
+  // its own local ref but doesn't refresh the store's currentBUD, so
+  // bud.value.qa_manual_cases can be stale after marking cases as pass.
+  if (bud.value.status === 'testing' && (newStatus === 'uat' || newStatus === 'prod')) {
+    await budStore.fetchBUD(bud.value.id)
+    const pending = (bud.value.qa_manual_cases ?? []).filter(
+      tc => tc.result === 'pending',
+    )
+    if (pending.length > 0) {
+      pendingCasesTarget.value = newStatus
+      pendingCasesList.value = pending.map(tc => ({ id: tc.id, title: tc.title }))
+      showPendingCasesDialog.value = true
+      return
+    }
+  }
+
   await _executeStatusChange(newStatus)
+}
+
+function openQATab(): void {
+  showPendingCasesDialog.value = false
+  activeTab.value = 'testing'
 }
 
 async function confirmNoPRWarning(): Promise<void> {
@@ -888,7 +1086,17 @@ async function _executeStatusChange(newStatus: string, reason?: string): Promise
   try {
     const payload: Record<string, unknown> = { status: newStatus }
     if (reason) payload.status_override_reason = reason
-    await budStore.updateBUD(bud.value.id, payload as never)
+    const result = await budStore.updateBUD(bud.value.id, payload as never)
+    // When the store returns null, the backend rejected the PATCH. The
+    // store has already captured the detail string into budStore.error
+    // via extractApiError — surface it in the snackbar so the user sees
+    // exactly why (e.g. the backend manual-cases guard catching a race
+    // the client-side preempt missed).
+    if (result === null && budStore.error) {
+      statusErrorMessage.value = budStore.error
+      statusErrorSnackbar.value = true
+      return
+    }
   } finally {
     statusChanging.value = false
   }
@@ -1037,6 +1245,32 @@ function formatDate(dateStr: string): string {
 </script>
 
 <style scoped>
+/* ── Pending cases dialog ────────────────────── */
+.pending-cases-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+  border-radius: 6px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.pending-case-row {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  padding: 3px 0;
+  color: rgba(var(--v-theme-on-surface), 0.85);
+}
+
+.pending-case-row .text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
 /* ── Agent banner ────────────────────────────── */
 .agent-banner {
   padding: 10px 16px;

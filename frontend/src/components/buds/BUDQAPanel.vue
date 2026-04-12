@@ -7,8 +7,20 @@
       <v-progress-circular indeterminate size="24" width="2" />
     </div>
 
+    <template v-else>
+      <!-- QA automation activity stream — visible whenever automation is
+           enabled, regardless of whether test cases have been generated yet.
+           A QA tester might be writing automation BEFORE the agent generates
+           test cases, so we render this above the empty state too. Hidden
+           entirely when qa.enabled=false. -->
+      <BUDQATestingActivity
+        v-if="qaAutomationEnabled"
+        :bud-id="props.budId"
+        :bud-number="props.budNumber"
+      />
+
     <!-- Empty state: no test cases yet -->
-    <div v-else-if="!hasTestCases" class="empty-state">
+    <div v-if="!hasTestCases" class="empty-state">
       <v-icon icon="mdi-test-tube" size="48" color="purple" class="mb-3 opacity-40" />
       <div class="text-h6 font-weight-medium mb-2">Ready for QA</div>
       <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 440px;">
@@ -16,19 +28,8 @@
         <code>bud-{{ budNumber }}/</code> branch.
       </div>
 
-      <!-- MCP setup guide -->
-      <v-card variant="outlined" class="mb-4 pa-3 text-left" style="max-width: 440px;">
-        <div class="d-flex align-center ga-2 mb-2">
-          <v-icon icon="mdi-wrench" size="16" color="purple" />
-          <span class="text-body-2 font-weight-medium">Setup MCP Token</span>
-        </div>
-        <ol class="text-caption text-medium-emphasis pl-4" style="margin: 0;">
-          <li>Go to <strong>Settings → Integrations → MCP Token</strong></li>
-          <li>Generate and copy your token</li>
-          <li>Run: <code>export BODHIGROVE_MCP_TOKEN="your-token"</code></li>
-          <li>Restart Claude Code in the repo</li>
-        </ol>
-      </v-card>
+      <!-- MCP setup guide (shared with the development tab) -->
+      <MCPSetupHint purpose="testing" class="mb-4" />
 
       <!-- Impacted repos hint -->
       <div v-if="impactedRepos && impactedRepos.length" class="mb-4">
@@ -60,7 +61,7 @@
     </div>
 
     <!-- Has test cases -->
-    <template v-else>
+    <template v-if="hasTestCases">
       <!-- Stats row -->
       <v-row dense class="mb-4">
         <v-col cols="3">
@@ -149,6 +150,7 @@
             <ManualTestRunner
               :cases="manualCases"
               :evidence="evidence"
+              :bud-id="props.budId"
               @update-result="handleUpdateResult"
               @upload-evidence="handleUploadEvidence"
               @delete-evidence="handleDeleteEvidence"
@@ -156,6 +158,7 @@
           </v-expansion-panel-text>
         </v-expansion-panel>
       </v-expansion-panels>
+    </template>
     </template>
   </div>
 </template>
@@ -165,8 +168,11 @@ import { ref, computed, onMounted } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useQATestCases } from '@/composables/useQATestCases'
+import { useSettingsStore } from '@/stores/settings'
 import AutomationTestCases from './AutomationTestCases.vue'
 import ManualTestRunner from './ManualTestRunner.vue'
+import MCPSetupHint from './MCPSetupHint.vue'
+import BUDQATestingActivity from './BUDQATestingActivity.vue'
 import type { ManualTestCase } from '@/types'
 
 import type { BUDAgentTask } from '@/types'
@@ -190,6 +196,11 @@ const {
   uploadEvidence,
   deleteEvidence,
 } = useQATestCases(props.budId)
+
+const settingsStore = useSettingsStore()
+const qaAutomationEnabled = computed(
+  () => settingsStore.connections.qaAutomation?.enabled ?? false,
+)
 
 const branchCopied = ref(false)
 
@@ -276,9 +287,13 @@ function copyBranchName(): void {
   setTimeout(() => { branchCopied.value = false }, 2000)
 }
 
-async function handleUpdateResult(testCaseId: string, result: ManualTestCase['result']): Promise<void> {
+async function handleUpdateResult(
+  testCaseId: string,
+  result: ManualTestCase['result'],
+  notes?: string,
+): Promise<void> {
   if (result === 'pending') return
-  await updateManualResult(testCaseId, result)
+  await updateManualResult(testCaseId, result, notes)
 }
 
 async function handleUploadEvidence(testCaseId: string, file: File): Promise<void> {

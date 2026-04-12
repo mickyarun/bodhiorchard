@@ -14,19 +14,8 @@
         automatically via git hooks.
       </div>
 
-      <!-- MCP setup guide -->
-      <v-card variant="outlined" class="mb-4 pa-3 text-left" style="max-width: 440px;">
-        <div class="d-flex align-center ga-2 mb-2">
-          <v-icon icon="mdi-wrench" size="16" color="primary" />
-          <span class="text-body-2 font-weight-medium">Setup MCP Token</span>
-        </div>
-        <ol class="text-caption text-medium-emphasis pl-4" style="margin: 0;">
-          <li>Go to <strong>Settings → Integrations → MCP Token</strong></li>
-          <li>Generate and copy your token</li>
-          <li>Run: <code>export BODHIGROVE_MCP_TOKEN="your-token"</code></li>
-          <li>Restart Claude Code in the repo</li>
-        </ol>
-      </v-card>
+      <!-- MCP setup guide (shared with the QA testing tab) -->
+      <MCPSetupHint purpose="development" class="mb-4" />
 
       <!-- Impacted repos hint -->
       <div v-if="impactedRepos && impactedRepos.length" class="mb-4">
@@ -233,7 +222,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useBudActivity } from '@/composables/useBudActivity'
+import { useSettingsStore } from '@/stores/settings'
+import { fileColor, fileIcon, parseFiles, timeAgo } from '@/utils/dev-activity-helpers'
 import type { DevActivity } from '@/types'
+import MCPSetupHint from './MCPSetupHint.vue'
 
 const props = defineProps<{
   budId: string
@@ -246,7 +238,19 @@ defineEmits<{
   (e: 'download-tech-spec'): void
 }>()
 
-const { activities, contributors, repos, stats, loading, load, startListening } = useBudActivity(props.budId)
+// When QA automation is enabled for the org, the testing tab pulls
+// commits from QA-role users into its own activity stream. We exclude
+// those rows from the dev tab so the same commit doesn't appear twice.
+// Orgs without QA enabled see no behaviour change — the filter is only
+// applied when there's a separate QA tab to route to.
+const settingsStore = useSettingsStore()
+const devActivityRoleFilter = computed(() =>
+  settingsStore.connections.qaAutomation?.enabled ? { excludeRole: 'qa' } : undefined,
+)
+const { activities, contributors, repos, stats, loading, load, startListening } = useBudActivity(
+  props.budId,
+  devActivityRoleFilter.value,
+)
 const branchCopied = ref(false)
 
 const hasActivity = computed(() =>
@@ -274,42 +278,6 @@ function statusColor(status: string): string {
   if (status === 'failed') return 'error'
   if (status === 'blocked') return 'warning'
   return 'info'
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
-
-function parseFiles(raw: string): string[] {
-  if (!raw) return []
-  return raw.split(',').map(f => f.trim()).filter(Boolean)
-}
-
-function fileIcon(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase() || ''
-  if (['vue', 'tsx', 'jsx'].includes(ext)) return 'mdi-vuejs'
-  if (['ts', 'js'].includes(ext)) return 'mdi-language-typescript'
-  if (['py'].includes(ext)) return 'mdi-language-python'
-  if (['css', 'scss'].includes(ext)) return 'mdi-palette'
-  if (['md'].includes(ext)) return 'mdi-file-document'
-  if (['json', 'yaml', 'yml', 'toml'].includes(ext)) return 'mdi-code-json'
-  if (['test', 'spec'].some(t => path.includes(t))) return 'mdi-test-tube'
-  return 'mdi-file-outline'
-}
-
-function fileColor(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase() || ''
-  if (['vue', 'tsx', 'jsx'].includes(ext)) return 'teal'
-  if (['ts', 'js'].includes(ext)) return 'blue'
-  if (['py'].includes(ext)) return 'amber'
-  if (['test', 'spec'].some(t => path.includes(t))) return 'purple'
-  return 'grey'
 }
 
 function eventIcon(a: DevActivity): string {

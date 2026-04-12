@@ -4,6 +4,7 @@ import type { AxiosError } from 'axios'
 import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, JobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus } from '@/types'
 import { BUD_STATUS_ORDER, CODE_REVIEW_OVERRIDE_REASON_MIN } from '@/types'
 import api from '@/services/api'
+import { extractApiError } from '@/utils/errors'
 
 // Maps legacy DB status values to new pipeline statuses (pre-migration compat)
 const LEGACY_STATUS_MAP: Record<string, BUDStatus> = {
@@ -98,8 +99,12 @@ export const useBUDStore = defineStore('bud', () => {
         designAvailable.value = true
       }
       return data
-    } catch {
-      error.value = 'Failed to update BUD'
+    } catch (err) {
+      // Surface the backend's detail message verbatim (e.g. "Cannot advance
+      // to uat: 3 manual test cases still pending (TM-001, TM-002, TM-003)")
+      // instead of a generic fallback — swallowing the detail hides real
+      // transition-guard rules from the user.
+      error.value = extractApiError(err, 'Failed to update BUD')
       return null
     }
   }

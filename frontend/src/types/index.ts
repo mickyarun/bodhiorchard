@@ -50,10 +50,18 @@ export const BUD_SECTIONS = {
 export type BUDSectionKey = keyof typeof BUD_SECTIONS
 export type BUDTabValue = (typeof BUD_SECTIONS)[BUDSectionKey]['tab']
 
+// Tabs that don't correspond to a BUD_SECTIONS entry but are still
+// valid for ?tab= deep-linking. Release-stage tabs (uat, prod) are
+// observational \u2014 they have no markdown content, no exportable section,
+// and no editor \u2014 so they don't fit the BUD_SECTIONS shape, but the
+// router still needs to accept them as valid tab params.
+const NON_SECTION_BUD_TABS = ['uat', 'prod'] as const
+
 // Derived helpers
-export const VALID_BUD_TABS = new Set(
-  Object.values(BUD_SECTIONS).map(s => s.tab),
-) as ReadonlySet<string>
+export const VALID_BUD_TABS = new Set([
+  ...Object.values(BUD_SECTIONS).map(s => s.tab),
+  ...NON_SECTION_BUD_TABS,
+]) as ReadonlySet<string>
 
 export const TAB_TO_SECTION: Record<string, BUDSectionKey> = Object.fromEntries(
   Object.entries(BUD_SECTIONS).map(([k, v]) => [v.tab, k]),
@@ -248,6 +256,20 @@ export interface DevCommitRepo {
   last_sha: string
 }
 
+/**
+ * A repo that has commits for a BUD but is NOT in tracked_repositories.
+ *
+ * Surfaced separately from DevCommitRepo so the BUD detail testing tab
+ * can render an "Add as tracked" CTA. The QA tester ran Claude Code in
+ * a path the org hasn't added yet — the row exists in dev_activity_logs
+ * but couldn't resolve to a tracked_repositories.id.
+ */
+export interface UntrackedRepo {
+  repo_path: string
+  name: string
+  commit_count: number
+}
+
 export interface DevStats {
   total_commits: number
   total_files_changed: number
@@ -267,6 +289,7 @@ export interface DevActivityResponse {
   commits: DevCommit[]
   contributors: DevContributor[]
   repos: DevCommitRepo[]
+  untracked_repos: UntrackedRepo[]
   stats: DevStats
 }
 
@@ -383,6 +406,7 @@ export interface RepoInfo {
   featureCount: number
   mainBranch: string | null
   developBranch: string | null
+  uatBranch: string | null
   hasUncommittedChanges: boolean
   repoType: string | null
   setupStatus: 'merged' | 'not_setup'
@@ -393,6 +417,44 @@ export interface RepoBranchList {
   branches: string[]
   currentMain: string | null
   currentDevelop: string | null
+  currentUat: string | null
+}
+
+// ── BUD Release Stage Types ────────────────────────────────────────
+export type ReleaseStage = 'uat' | 'prod'
+export type ReleaseStageStatus = 'not_reached' | 'in_stage' | 'passed'
+
+export interface ReleasePR {
+  prNumber: number
+  repoName: string
+  htmlUrl: string
+  title: string | null
+  authorLogin: string | null
+  mergedAt: string | null
+}
+
+export interface ReleaseCommit {
+  sha: string
+  shortSha: string
+  message: string | null
+  repoName: string
+}
+
+export interface ReleaseTimelineEvent {
+  occurredAt: string
+  prNumber: number
+  repoName: string
+  htmlUrl: string
+}
+
+export interface BUDReleaseStage {
+  budId: string
+  stage: ReleaseStage
+  status: ReleaseStageStatus
+  firstReachedAt: string | null
+  releasePRs: ReleasePR[]
+  commits: ReleaseCommit[]
+  events: ReleaseTimelineEvent[]
 }
 
 export const BUD_STATUS_COLORS: Record<BUDStatus, string> = {
