@@ -26,11 +26,12 @@ import { type ContainerWithAnims, findAnimTrack, LOCOMOTION_STATE_GRAPH } from '
 const KAYKIT_NATIVE_HEIGHT = 2.4
 
 /**
- * Target height 0.95 units — fits inside houses (WALL_HEIGHT=1.29) while
- * being visible in the garden. Larger than original 0.75 for better outdoor
- * visibility without clipping through roofs.
+ * Target height 0.7 units — proportioned to Kenney Furniture Kit chairs
+ * (seat height ~0.23, table height ~0.4). Fits comfortably inside houses
+ * (WALL_HEIGHT=1.29) and looks right when sitting at cafeteria benches
+ * and coffee bar chairs.
  */
-const KAYKIT_TARGET_HEIGHT = 0.95
+const KAYKIT_TARGET_HEIGHT = 0.7
 const KAYKIT_SCALE = KAYKIT_TARGET_HEIGHT / KAYKIT_NATIVE_HEIGHT
 const KAYKIT_Y_OFFSET = 0.0
 const LABEL_HEIGHT = KAYKIT_TARGET_HEIGHT + 0.2
