@@ -130,6 +130,18 @@ async def create_bud(
     )
     await bud_repo.create(bud)
 
+    # Generate embedding so the bug linker can match bugs to this BUD.
+    # Fast (~50ms) and done inline so the embedding is available immediately.
+    try:
+        from app.services.embedding_service import embedding_service
+
+        embed_text = body.title
+        if body.requirements_md:
+            embed_text = f"{body.title} {body.requirements_md[:500]}"
+        bud.embedding = await embedding_service.embed(embed_text)
+    except Exception:
+        logger.warning("bud_embedding_failed", bud_number=next_number, exc_info=True)
+
     from app.services.feature_lifecycle import create_planned_feature
 
     await create_planned_feature(

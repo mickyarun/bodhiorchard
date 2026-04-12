@@ -23,9 +23,10 @@ from app.services.embedding_service import embedding_service
 logger = structlog.get_logger(__name__)
 
 # Maximum cosine distance to consider a match. Lower = stricter.
-# 0.35 is a good balance: catches semantically related bugs without
-# false-linking unrelated ones. Tunable per org in the future.
-AUTO_LINK_THRESHOLD = 0.35
+# 0.40 catches semantically related bugs (e.g. "Notification list not
+# opening" matches "Notification Bell Improvement" at ~0.37 distance).
+# Tunable per org in the future via org config.
+AUTO_LINK_THRESHOLD = 0.40
 
 
 async def embed_and_link_bug(
