@@ -43,6 +43,7 @@ import { CafeteriaBuilder } from '../buildings/CafeteriaBuilder'
 import { HousingVillage } from '../buildings/HousingVillage'
 import { StandupPavilion } from '../buildings/StandupPavilion'
 import { PoolResortBuilder } from '../buildings/PoolResortBuilder'
+import type { WaterSurface } from '../effects/WaterSurface'
 import { BuildingFactory } from '../buildings/BuildingFactory'
 import type { HouseResult } from '../buildings/HouseBuilder'
 import { CharacterSystem } from '../characters/CharacterSystem'
@@ -92,6 +93,7 @@ export class SceneManager {
   private _physics: PhysicsWorld | null = null
   private buildingHuts: HutInfo[] = []
   private pondObstacle: PondObstacle | null = null
+  private poolWater: WaterSurface | null = null
 
   // Shared data for Phase 3+
   private _memberHouseMap = new Map<string, HouseResult>()
@@ -240,6 +242,7 @@ export class SceneManager {
       this.layout.addExclusionZones([poolResult.exclusionZone])
       this.layout.registerSeats(poolResult.seats)
       this.pondObstacle = poolResult.pondObstacle
+      this.poolWater = poolResult.waterSurface
     }
 
     if (pavilionZone) {
@@ -363,6 +366,7 @@ export class SceneManager {
     this.sky?.update(dt)
     this.clouds?.update(dt)
     this.forestLake?.update(dt)
+    this.poolWater?.update(dt)
     this.repoVis?.update?.(dt)
     this.gardenBirds?.update(dt)
     this.gardenAnimals?.update(dt)
