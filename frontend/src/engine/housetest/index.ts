@@ -19,6 +19,7 @@ import { MaterialFactory } from '../rendering/MaterialFactory'
 import { InputManager } from '../input/InputManager'
 import { ExteriorScene } from './ExteriorScene'
 import { InteriorScene } from './InteriorScene'
+import { PoolScene } from './PoolScene'
 import { PlayerController } from './PlayerController'
 import { OrbitCamera } from './OrbitCamera'
 import { SceneTransition } from './SceneTransition'
@@ -40,6 +41,10 @@ const CAM_INT_YAW   = 0
 const CAM_INT_PITCH = 60
 const CAM_INT_DIST  = 6
 
+const CAM_POOL_YAW   = 0
+const CAM_POOL_PITCH = 45
+const CAM_POOL_DIST  = 16
+
 // ─── Player spawn ───────────────────────────────────────────────────────────
 const PLAYER_START_X = 3.0   // center of the 2×2 house grid
 const PLAYER_START_Z = -2.0  // south of houses, facing them
@@ -56,16 +61,18 @@ export class HouseTestEngine {
 
   private exteriorRoot: pc.Entity | null = null
   private interiorRoot: pc.Entity | null = null
+  private poolRoot: pc.Entity | null = null
 
   private exterior: ExteriorScene | null = null
   private interior: InteriorScene | null = null
+  private pool: PoolScene | null = null
   private player: PlayerController | null = null
   private orbit: OrbitCamera | null = null
   private transition: SceneTransition | null = null
   private ui: HouseTestUI | null = null
   private physics: PhysicsWorld | null = null
 
-  private scene: 'exterior' | 'entering' | 'interior' | 'exiting' = 'exterior'
+  private scene: 'exterior' | 'entering' | 'interior' | 'exiting' | 'pool' = 'exterior'
   private canvas: HTMLCanvasElement | null = null
   private intBoxes: CollisionBox[] = []
 
@@ -103,9 +110,12 @@ export class HouseTestEngine {
     // ── 4. Scene roots ──────────────────────────────────────────────────────
     this.exteriorRoot = new pc.Entity('Exterior')
     this.interiorRoot = new pc.Entity('Interior')
+    this.poolRoot = new pc.Entity('Pool')
     app.root.addChild(this.exteriorRoot)
     app.root.addChild(this.interiorRoot)
+    app.root.addChild(this.poolRoot)
     this.interiorRoot.enabled = false
+    this.poolRoot.enabled = false
 
     // ── 5. Build scenes ─────────────────────────────────────────────────────
     this.exterior = new ExteriorScene(this.factory)
@@ -116,6 +126,10 @@ export class HouseTestEngine {
 
     // Interior: builds shared room (returns manual AABB collision boxes)
     this.intBoxes = await this.interior.build(this.interiorRoot)
+
+    // Pool: builds umbrella+chair sets with SeatProber detection
+    this.pool = new PoolScene(this.loader, new MaterialFactory())
+    await this.pool.build(this.poolRoot)
 
     // ── 6. Player ───────────────────────────────────────────────────────────
     this.player = new PlayerController(this.loader, this.input)
@@ -142,6 +156,16 @@ export class HouseTestEngine {
         this.ui?.showInfo(item.infoText)
         this._activeSeatId = item.id
         if (item.id === 'tv') this.interior?.tvEffect.turnOn()
+      })
+    }
+
+    // ── 9b. Pool interactables ───────────────────────────────────────────
+    for (const item of this.pool.items) {
+      item.onUse(() => {
+        const { seat } = item
+        if (item.action === 'sit' && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw)
+        this.ui?.showInfo(item.infoText)
+        this._activeSeatId = item.id
       })
     }
 
@@ -174,6 +198,11 @@ export class HouseTestEngine {
       if (doorHit) {
         console.log('[HouseTest] Door hit:', doorHit.doorId)
         this.enterHouse(doorHit.doorId)
+      }
+
+      // P key → switch to pool scene
+      if (this.input.wasPressed(pc.KEY_P)) {
+        this.enterPool()
       }
     }
 
@@ -208,6 +237,44 @@ export class HouseTestEngine {
       // Interior door exit: check if player walks near the door (Z > 3.5)
       if (playerPos.z > 3.8 && Math.abs(playerPos.x - 1.5) < 0.7) {
         this.exitHouse()
+      }
+    }
+
+    if (this.scene === 'pool' && this.pool) {
+      // E-key interaction with pool chairs
+      const eDown = this.input.isPressed(pc.KEY_E)
+      const eJust = eDown && !this._ePrev
+      if (eJust) {
+        if (this.player?.isSitting) { this.player.standUp() }
+        else {
+          for (const item of this.pool.items) {
+            if (item.isNear(playerPos)) { item.use(); break }
+          }
+        }
+      }
+      this._ePrev = eDown
+
+      // Clean up seated state on stand-up
+      if (this._activeSeatId !== null && !this.player?.isSitting) {
+        this._activeSeatId = null
+      }
+
+      // Show/hide prompts for nearby pool chairs
+      let nearItem = false
+      if (!this.player?.isSitting) {
+        for (const item of this.pool.items) {
+          if (item.isNear(playerPos)) {
+            this.ui?.showPrompt(item.promptText)
+            nearItem = true
+            break
+          }
+        }
+      }
+      if (!nearItem) this.ui?.hidePrompt()
+
+      // ESC → back to exterior
+      if (this.input.wasPressed(pc.KEY_ESCAPE)) {
+        this.exitPool()
       }
     }
 
@@ -279,6 +346,58 @@ export class HouseTestEngine {
     })
   }
 
+  // ─── Pool scene transitions ──────────────────────────────────────────
+
+  private enterPool(): void {
+    if (!this.transition || this.transition.isActive || this.scene !== 'exterior') return
+
+    this.physics?.setDoorsEnabled(false)
+    this.scene = 'entering'
+
+    void this.transition.perform(() => {
+      this.scene = 'pool'
+      this.exteriorRoot!.enabled = false
+      this.interiorRoot!.enabled = false
+      this.poolRoot!.enabled = true
+
+      // No collision boxes for pool — open area
+      this.player!.setCollisionBoxes([])
+      this.player!.teleport(0, -3, 0) // south of pool, facing chairs
+
+      this._ePrev = true
+      this.ui?.setScene('pool')
+      this.positionPoolCamera()
+    })
+  }
+
+  private exitPool(): void {
+    if (!this.transition || this.transition.isActive || this.scene !== 'pool') return
+
+    this.scene = 'exiting'
+
+    void this.transition.perform(() => {
+      this.scene = 'exterior'
+      this.poolRoot!.enabled = false
+      this.exteriorRoot!.enabled = true
+
+      if (this.player!.isSitting) this.player!.standUp()
+      this._activeSeatId = null
+
+      this.player!.setPhysics(this.physics)
+      this.player!.teleport(PLAYER_START_X, PLAYER_START_Z, 0)
+      this.physics?.teleportPlayer(PLAYER_START_X, PLAYER_START_Z)
+
+      this.doorReEnableTimer = setTimeout(() => {
+        this.physics?.setDoorsEnabled(true)
+        this.doorReEnableTimer = null
+      }, 500)
+
+      this.ui?.setScene('exterior')
+      this.ui?.hidePrompt()
+      this.positionExteriorCamera()
+    })
+  }
+
   // ─── Camera helpers ──────────────────────────────────────────────────────
 
   private positionExteriorCamera(): void {
@@ -290,6 +409,12 @@ export class HouseTestEngine {
   private positionInteriorCamera(): void {
     if (!this.orbit || !this.player) return
     this.orbit.setView(CAM_INT_YAW, CAM_INT_PITCH, CAM_INT_DIST)
+    this.orbit.update(this.player.getPosition())
+  }
+
+  private positionPoolCamera(): void {
+    if (!this.orbit || !this.player) return
+    this.orbit.setView(CAM_POOL_YAW, CAM_POOL_PITCH, CAM_POOL_DIST)
     this.orbit.update(this.player.getPosition())
   }
 

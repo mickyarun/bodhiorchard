@@ -31,7 +31,7 @@ export class HouseTestUI {
       fontSize: '13px', letterSpacing: '2px', fontWeight: '600',
     })
 
-    this.makeLabel('WASD — Move   E — Interact   Drag — Orbit   Scroll — Zoom', {
+    this.makeLabel('WASD — Move   E — Interact   P — Pool   Drag — Orbit   Scroll — Zoom', {
       position: 'absolute', bottom: '20px', left: '50%',
       transform: 'translateX(-50%)',
       background: 'rgba(0,0,0,0.45)', color: 'rgba(255,255,255,0.75)',
@@ -60,9 +60,10 @@ export class HouseTestUI {
     })
   }
 
-  setScene(scene: 'exterior' | 'interior'): void {
+  setScene(scene: 'exterior' | 'interior' | 'pool'): void {
     if (this.sceneLabel) {
-      this.sceneLabel.textContent = scene === 'exterior' ? 'EXTERIOR' : 'INTERIOR'
+      const labels: Record<string, string> = { exterior: 'EXTERIOR', interior: 'INTERIOR', pool: 'POOL (SeatProber)' }
+      this.sceneLabel.textContent = labels[scene] ?? scene.toUpperCase()
     }
   }
 

@@ -47,6 +47,8 @@ export interface FurnitureDef {
 
 /** All valid interactable IDs — typed so string comparisons get compile-time safety. */
 export type InteractableId = 'tv' | 'laptop' | 'bed'
+  | 'pool_chair_0' | 'pool_chair_1' | 'pool_chair_2'
+  | 'pool_chair_3' | 'pool_chair_4' | 'pool_chair_5'
 
 export interface InteractableDef {
   id: InteractableId
@@ -172,4 +174,30 @@ export const INTERIOR_COLLISION: CollisionBox[] = [
   // Bed excluded — player sleeps inside it; back wall box already blocks going through wall
   { minX: 2.65, maxX: 3.95, minZ: 0.05, maxZ: 0.72 },  // desk only (chair area left open so player can sit)
   { minX: 3.25, maxX: 3.85, minZ: 2.65, maxZ: 3.35 },  // TV cabinet (right wall, near door)
+]
+
+// ─── Pool scene ─────────────────────────────────────────────────────────────
+// 6 umbrella+chair sets arranged around a central pool area.
+// Seats are NOT hardcoded — SeatProber detects the actual chair surface from geometry.
+
+export interface PoolChairDef {
+  id: InteractableId
+  /** Local X position relative to pool center. */
+  x: number
+  /** Local Z position relative to pool center. */
+  z: number
+  /** Yaw in degrees — chair faces this direction toward pool. */
+  yaw: number
+}
+
+export const POOL_CHAIRS: PoolChairDef[] = [
+  // Left side: facing pool (+X → yaw 90)
+  { id: 'pool_chair_0', x: -5.0, z: -1.5, yaw: 90 },
+  { id: 'pool_chair_1', x: -5.0, z:  2.5, yaw: 90 },
+  // Right side: facing pool (-X → yaw -90)
+  { id: 'pool_chair_2', x:  5.0, z: -1.5, yaw: -90 },
+  { id: 'pool_chair_3', x:  5.0, z:  2.5, yaw: -90 },
+  // Far end: facing pool (-Z → yaw 180)
+  { id: 'pool_chair_4', x: -2.5, z:  5.0, yaw: 180 },
+  { id: 'pool_chair_5', x:  2.5, z:  5.0, yaw: 180 },
 ]

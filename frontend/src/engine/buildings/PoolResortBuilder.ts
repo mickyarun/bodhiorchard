@@ -18,6 +18,7 @@ import type { MaterialFactory } from "../rendering/MaterialFactory";
 import type { InteractionPoint } from "../characters/InteractionPoint";
 import type { ExclusionZone } from "../utils/MathUtils";
 import { WaterSurface } from "../effects/WaterSurface";
+import { SeatProber } from "../characters/SeatProber";
 
 export interface PoolResortResult {
   entity: pc.Entity;
@@ -73,7 +74,7 @@ export class PoolResortBuilder {
     localY: number,
     localZ: number,
     yaw = 0,
-  ): void {
+  ): pc.Entity {
     const model = this.loader.instance(ucAsset);
     model.setLocalScale(UC_SCALE, UC_SCALE, UC_SCALE);
     model.setLocalPosition(
@@ -87,6 +88,7 @@ export class PoolResortBuilder {
     wrapper.setLocalPosition(localX, localY, localZ);
     if (yaw !== 0) wrapper.setLocalEulerAngles(0, yaw, 0);
     parent.addChild(wrapper);
+    return wrapper;
   }
 
   async build(
@@ -116,56 +118,29 @@ export class PoolResortBuilder {
     const ucAsset = await this.loader.load(POOL.umbrellaChairs);
     const chairY = 0;
 
+    // Helper: place umbrella set + probe seat surface from mesh geometry
+    const placeAndProbe = (localX: number, localZ: number, yaw: number) => {
+      const wrapper = this.placeUmbrellaSet(root, ucAsset, localX, chairY, localZ, yaw);
+      const probedY = SeatProber.probeSeatY(wrapper);
+      seats.push(
+        BuildingFactory.createInteractionSeat(
+          'pool_resort', seatIndex++,
+          x + localX, z + localZ, yaw, 'poolChair', 'sit', chairY, probedY ?? undefined,
+        ),
+      );
+    };
+
     // Left side: 2 sets facing pool (+X → yaw 90)
-    const leftX = -5.0;
-    this.placeUmbrellaSet(root, ucAsset, leftX, chairY, -1.5, 90);
-    seats.push(
-      BuildingFactory.createInteractionSeat(
-        'pool_resort', seatIndex++,
-        x + leftX, z - 1.5, 90, 'poolChair', 'sit', chairY,
-      ),
-    );
-    this.placeUmbrellaSet(root, ucAsset, leftX, chairY, 2.5, 90);
-    seats.push(
-      BuildingFactory.createInteractionSeat(
-        'pool_resort', seatIndex++,
-        x + leftX, z + 2.5, 90, 'poolChair', 'sit', chairY,
-      ),
-    );
+    placeAndProbe(-5.0, -1.5, 90);
+    placeAndProbe(-5.0, 2.5, 90);
 
     // Right side: 2 sets facing pool (-X → yaw -90)
-    const rightX = 5.0;
-    this.placeUmbrellaSet(root, ucAsset, rightX, chairY, -1.5, -90);
-    seats.push(
-      BuildingFactory.createInteractionSeat(
-        'pool_resort', seatIndex++,
-        x + rightX, z - 1.5, -90, 'poolChair', 'sit', chairY,
-      ),
-    );
-    this.placeUmbrellaSet(root, ucAsset, rightX, chairY, 2.5, -90);
-    seats.push(
-      BuildingFactory.createInteractionSeat(
-        'pool_resort', seatIndex++,
-        x + rightX, z + 2.5, -90, 'poolChair', 'sit', chairY,
-      ),
-    );
+    placeAndProbe(5.0, -1.5, -90);
+    placeAndProbe(5.0, 2.5, -90);
 
     // Far end: 2 sets facing pool (toward -Z → yaw 180)
-    const farZ = 5.0;
-    this.placeUmbrellaSet(root, ucAsset, -2.5, chairY, farZ, 180);
-    seats.push(
-      BuildingFactory.createInteractionSeat(
-        'pool_resort', seatIndex++,
-        x - 2.5, z + farZ, 180, 'poolChair', 'sit', chairY,
-      ),
-    );
-    this.placeUmbrellaSet(root, ucAsset, 2.5, chairY, farZ, 180);
-    seats.push(
-      BuildingFactory.createInteractionSeat(
-        'pool_resort', seatIndex++,
-        x + 2.5, z + farZ, 180, 'poolChair', 'sit', chairY,
-      ),
-    );
+    placeAndProbe(-2.5, 5.0, 180);
+    placeAndProbe(2.5, 5.0, 180);
 
     app.root.addChild(root);
 
