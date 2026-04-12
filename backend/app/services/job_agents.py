@@ -63,10 +63,10 @@ async def handle_triage_job(job_id: str, raw_payload: dict[str, Any]) -> None:
                     update_job(job_id, state=JobState.FAILED, error="No bot token configured")
                     return
 
+                from app.services.slack_bug_intake import start_bug_triage
                 from app.services.slack_intake import (
                     continue_triage,
                     handle_pm_approval,
-                    start_bug_triage,
                     start_triage,
                 )
 

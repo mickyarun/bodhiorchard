@@ -1,5 +1,6 @@
 """Bug CRUD endpoints — create, list, get, update."""
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -176,6 +177,9 @@ async def update_bug(
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
 def _schedule_embedding_and_link(bug_id: uuid.UUID, org_id: uuid.UUID) -> None:
     """Fire-and-forget: generate embedding + auto-link to closest BUD."""
     import asyncio
@@ -184,9 +188,8 @@ def _schedule_embedding_and_link(bug_id: uuid.UUID, org_id: uuid.UUID) -> None:
         _bg_embed_and_link(bug_id, org_id),
         name=f"bug_embed_{bug_id}",
     )
-    task.add_done_callback(
-        lambda t: t.result() if not t.cancelled() and not t.exception() else None,
-    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def _bg_embed_and_link(bug_id: uuid.UUID, org_id: uuid.UUID) -> None:

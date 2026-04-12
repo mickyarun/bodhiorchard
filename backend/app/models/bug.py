@@ -41,7 +41,7 @@ class Bug(BaseModel):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     bud_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("bud_documents.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("bud_documents.id"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
