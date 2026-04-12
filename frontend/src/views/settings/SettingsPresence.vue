@@ -1,52 +1,15 @@
 <template>
-  <div class="settings-page">
-    <!-- Header -->
-    <div class="settings-header pa-6 pb-4">
-      <div class="d-flex align-center justify-space-between">
-        <div>
-          <div class="text-h5 font-weight-bold">Presence & Auto Mode</div>
-          <div class="text-body-2 text-medium-emphasis">
-            Configure working days, hours, and timezone for automatic presence inference
-          </div>
-        </div>
-        <div class="d-flex ga-2">
-          <v-btn variant="text" prepend-icon="mdi-arrow-left" :to="{ name: 'settings' }">
-            Back to Settings
-          </v-btn>
-          <v-btn
-            color="primary"
-            prepend-icon="mdi-content-save-outline"
-            :loading="settingsStore.saving"
-            :disabled="!isValid"
-            @click="save"
-          >
-            Save Changes
-          </v-btn>
-        </div>
-      </div>
-
-      <v-alert v-if="settingsStore.error" type="error" variant="tonal" class="mt-4" closable>
-        {{ settingsStore.error }}
-      </v-alert>
-      <v-alert
-        v-if="settingsStore.saveSuccess"
-        type="success"
-        variant="tonal"
-        class="mt-4"
-        closable
-        @click:close="settingsStore.saveSuccess = false"
-      >
-        Settings saved successfully.
-      </v-alert>
-    </div>
-
-    <!-- Content -->
-    <div class="px-6 pb-6">
-      <div v-if="settingsStore.loading" class="d-flex justify-center py-12">
-        <v-progress-circular indeterminate color="primary" />
-      </div>
-
-      <template v-else>
+  <SettingsPageShell
+    title="Presence & Auto Mode"
+    subtitle="Configure working days, hours, and timezone for automatic presence inference"
+    :loading="settingsStore.loading"
+    :saving="settingsStore.saving"
+    :valid="isValid"
+    :error="settingsStore.error"
+    :save-success="settingsStore.saveSuccess"
+    @save="save"
+    @success-close="settingsStore.saveSuccess = false"
+  >
         <!-- ─── TIMEZONE-NOT-SET WARNING ─────────────────────── -->
         <v-alert
           v-if="presence.timezone === null"
@@ -246,13 +209,12 @@
             </v-btn>
           </div>
         </v-card>
-      </template>
-    </div>
-  </div>
+  </SettingsPageShell>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import SettingsPageShell from '@/components/settings/SettingsPageShell.vue'
 import { useSettingsStore } from '@/stores/settings'
 
 type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
@@ -383,15 +345,3 @@ onMounted(async () => {
 })
 </script>
 
-<style scoped>
-.settings-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.settings-header {
-  flex-shrink: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-</style>
