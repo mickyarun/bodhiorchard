@@ -109,6 +109,16 @@ export function buildPresenceConfig(
     if (dow !== undefined) workingDays.add(dow)
   }
 
+  // Defensive: empty workingDays would mean every day is non-working,
+  // putting all members permanently to bed with no visible error.
+  if (workingDays.size === 0) {
+    console.error(
+      `[PresenceConfig] workingDays empty after mapping payload ` +
+        `${JSON.stringify(payload.workingDays)} — using default Mon-Fri`,
+    )
+    return DEFAULT_PRESENCE_CONFIG
+  }
+
   return {
     autoModeEnabled: payload.autoModeEnabled,
     workingDays,

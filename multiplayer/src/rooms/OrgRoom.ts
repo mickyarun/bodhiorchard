@@ -167,6 +167,11 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     // second `setSimulationInterval` call, which would overwrite the 20Hz
     // devSim/agentSim timer and silently halt walking-home position ticks.
     this.clock.setInterval(() => {
+      // Skip if the initial snapshot hasn't loaded yet — evaluating with
+      // DEFAULT_PRESENCE_CONFIG against zero members is harmless but
+      // evaluating against members loaded before setConfig() fires
+      // produces a wrong-config tick that sends members to wrong seats.
+      if (!this.state.members.size) return
       this.inferredSim.tick(this.state.members, this.hasSlack, new Date())
       this.presenceTickCounter += 1
       // Every N ticks (default 15 min), re-fetch the snapshot so live rooms
@@ -219,7 +224,13 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (!this.state.orgId) return
     try {
       const snapshot = await fetchOrgSnapshot(this.state.orgId)
-      if (!snapshot) return
+      if (!snapshot) {
+        console.warn(
+          `[OrgRoom] presence-config refresh got null snapshot for ` +
+            `org=${this.state.orgId} — keeping existing config`,
+        )
+        return
+      }
       this.inferredSim.setConfig(buildPresenceConfig(snapshot.presenceSettings))
     } catch (err) {
       console.warn(

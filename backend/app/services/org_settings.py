@@ -79,6 +79,12 @@ def get_presence_settings(org_config: dict | None) -> PresenceSettings:
     preserves the legacy hardcoded behaviour (Mon-Fri, 08:00-18:00,
     server-local time) for orgs that never visit the settings page.
 
+    **Defensive:** if the stored JSON is corrupt (e.g. empty working_days
+    from a pre-validation write, or a removed IANA timezone), this catches
+    the ``ValidationError`` and returns ``DEFAULT_PRESENCE_SETTINGS``
+    instead of letting the error propagate into callers like
+    ``refresh_all_presence`` which iterate all orgs in a shared loop.
+
     Args:
         org_config: The raw ``organization.config`` JSONB dict, or None.
 
@@ -86,7 +92,18 @@ def get_presence_settings(org_config: dict | None) -> PresenceSettings:
         A ``PresenceSettings`` with all fields populated.
     """
     raw = (org_config or {}).get("presence") or {}
-    return PresenceSettings(**raw)
+    try:
+        return PresenceSettings(**raw)
+    except Exception as exc:
+        import structlog
+
+        structlog.get_logger(__name__).error(
+            "presence_settings_invalid",
+            raw_keys=list(raw.keys()),
+            error=str(exc),
+            action="falling back to defaults — fix this org's config JSONB",
+        )
+        return DEFAULT_PRESENCE_SETTINGS
 
 
 def get_phase_order(org_config: dict | None) -> list[str]:
