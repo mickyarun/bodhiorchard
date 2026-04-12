@@ -175,11 +175,10 @@ function generateCoffeeBarSeats(
 function generatePoolSeats(
   zoneX: number, zoneZ: number, count: number,
 ): BreakSeat[] {
-  // Pool deck chairs sit HIGH (~1.09 units) because the umbrella+chair GLB
-  // has elevated folding legs. The chair mesh center is also offset from
-  // the umbrella wrapper position — these per-yaw offsets were measured
-  // from the Chair1 mesh AABB center in the GLB model space, then rotated.
-  const SEAT_Y = 1.09
+  // Pool lounge chair seat surface height. The umbrella+chair GLB (model-space
+  // Y min -218.68) is scaled by UC_SCALE ≈ 0.00692 and offset to put bottom
+  // at Y=0. The actual seat surface of the reclined chair is at ~0.47 units.
+  const SEAT_Y = 0.47
 
   // Chair mesh offset from wrapper center, rotated by yaw.
   // Measured from Beach_Chair1_1 mesh center: model (56.6, 101) * UC_SCALE
