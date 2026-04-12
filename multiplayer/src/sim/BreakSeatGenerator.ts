@@ -16,13 +16,7 @@
  * source of truth as the frontend's WorldLayout.
  */
 
-// ─── Zone positions (must match frontend/src/engine/world/WorldLayout.ts) ──
-
-const ZONES = {
-  coffee_bar: { x: -28, z: -20 },
-  cafeteria:  { x: 28,  z: -20 },
-  pool:       { x: 30,  z: 22  },
-} as const
+import { getZone } from "./WorldLayout"
 
 // ─── Seat type ──────────────────────────────────────────────────────────────
 
@@ -56,19 +50,21 @@ const POOL_MAX = 6
 export function generateBreakSeats(teamSize: number): BreakSeat[] {
   const budget = Math.max(Math.ceil(teamSize * BREAK_RATIO), 6) // min 6
 
-  // Raw split: 40/30/30
-  let cafCount = Math.ceil(budget * 0.4)
-  let cofCount = Math.ceil(budget * 0.3)
-  let poolCount = Math.min(Math.ceil(budget * 0.3), POOL_MAX)
+  // Split: pool gets 30% (capped), coffee bar gets 30%, cafeteria gets remainder.
+  // Using floor for pool + coffee and giving the remainder to cafeteria avoids
+  // the ceil-on-each-split overcount that produces more seats than the budget.
+  const poolCount = Math.min(Math.floor(budget * 0.3), POOL_MAX)
+  const cofCount = Math.floor(budget * 0.3)
+  const cafCount = budget - cofCount - poolCount
 
-  // Redistribute pool overflow to cafeteria
-  const poolOverflow = Math.ceil(budget * 0.3) - poolCount
-  cafCount += poolOverflow
+  const caf  = getZone("cafeteria")!
+  const cof  = getZone("coffee_bar")!
+  const pool = getZone("pool")!
 
   return [
-    ...generateCafeteriaSeats(ZONES.cafeteria.x, ZONES.cafeteria.z, cafCount),
-    ...generateCoffeeBarSeats(ZONES.coffee_bar.x, ZONES.coffee_bar.z, cofCount),
-    ...generatePoolSeats(ZONES.pool.x, ZONES.pool.z, poolCount),
+    ...generateCafeteriaSeats(caf.x, caf.z, cafCount),
+    ...generateCoffeeBarSeats(cof.x, cof.z, cofCount),
+    ...generatePoolSeats(pool.x, pool.z, poolCount),
   ]
 }
 
