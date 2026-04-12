@@ -414,7 +414,7 @@ export class GardenEngine {
           }
 
           // ─── Seat interaction: E-key to sit/stand at nearby chairs ───
-          if (this.input?.wasPressed(pc.KEY_E) && this.sceneManager) {
+          if (this.input?.wasPressed(pc.KEY_E) && this.sceneManager && !this.vehicleCtrl?.isActive) {
             if (this.takeoverCtrl.isSitting) {
               this.takeoverCtrl.standUp()
               this.takeoverUI?.hideSeatPrompt()
@@ -463,8 +463,9 @@ export class GardenEngine {
                 if (!this.vehicleCtrl) {
                   this.vehicleCtrl = new VehicleController(this.input, this.sceneManager.assetLoader)
                 }
-                const character = this.sceneManager.characterSystemRef?.getCharacter(this.takeoverUserId!)
-                if (character?.entity) {
+                const userId = this.takeoverUserId
+                const character = userId ? this.sceneManager.characterSystemRef?.getCharacter(userId) : null
+                if (character?.entity && userId) {
                   this.takeoverCtrl.mounted = true
                   const physics = this.sceneManager.physicsWorld
                   const root = this.app!.root
@@ -480,7 +481,7 @@ export class GardenEngine {
           }
 
           // Show/hide "Press E to sit" prompt when near a seat
-          if (!this.takeoverCtrl.isSitting && this.sceneManager) {
+          if (!this.takeoverCtrl.isSitting && !this.vehicleCtrl?.isActive && this.sceneManager) {
             const pos = this.takeoverCtrl.getPosition()
             const seats = this.sceneManager.worldLayout.getSeats()
             const nearSeat = seats.some(s => {
