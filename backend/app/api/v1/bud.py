@@ -245,6 +245,18 @@ async def update_bud(
                 detail=f"Invalid status: {update_data['status']}",
             ) from None
 
+    # Guard: closed/discarded BUDs cannot be reopened. Placed before ANY
+    # side-effect-producing code (transition_feature_for_bud, assignments)
+    # so a rejected request never mutates state.
+    if "status" in update_data and bud.status in (BUDStatus.CLOSED, BUDStatus.DISCARDED):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Cannot change status of a {bud.status.value} BUD. "
+                "Create a new BUD instead."
+            ),
+        )
+
     if "status" in update_data:
         from app.services.feature_lifecycle import transition_feature_for_bud
 
@@ -286,17 +298,6 @@ async def update_bud(
     # Record status change + auto-assign
     if "status" in update_data:
         new_status = update_data["status"]
-
-        # Guard: closed/discarded BUDs cannot be reopened. The lifecycle
-        # is terminal — create a new BUD instead.
-        if old_status in (BUDStatus.CLOSED, BUDStatus.DISCARDED):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Cannot change status of a {old_status.value} BUD. "
-                    "Create a new BUD instead."
-                ),
-            )
 
         # Manual code_review → testing:
         # If every impacted repo has a merged PR, this is the same as the
