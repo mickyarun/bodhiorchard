@@ -174,8 +174,12 @@ export class CharacterSystem {
       anim.setBoolean('sitting', isSitting)
       const speed = snapshot.animState === 'walk' || snapshot.animState === 'sprint' ? 1 : 0
       anim.setInteger('speed', speed)
+      // Tree-activity working animations: interact=1, use-item=2, else=0
+      const working = snapshot.animState === 'interact' ? 1
+        : snapshot.animState === 'use-item' ? 2
+        : 0
+      anim.setInteger('working', working)
     }
-
   }
 
   /** Remove a character by userId (when server MemberState is removed). */

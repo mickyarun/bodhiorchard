@@ -196,6 +196,11 @@ export class OrgRoomClient {
     this.room?.send("takeover_end", { userId })
   }
 
+  /** Temporary dev tool: fire a simulated dev_activity for the current user. */
+  sendSimulateDevActivity(): void {
+    this.room?.send("simulate_dev_activity")
+  }
+
   // ─── Member state query API (Phase 8) ────────────
 
   /** Read a member snapshot by userId. Returns null if not present. */

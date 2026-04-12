@@ -332,6 +332,11 @@ export class GardenEngine {
     }
   }
 
+  /** Temporary dev tool: simulate a dev_activity event for the current user. */
+  simulateDevActivity(): void {
+    this.orgRoomClient?.sendSimulateDevActivity()
+  }
+
   /** Disconnect from the org room (on unmount/destroy). */
   async disconnectOrgRoom(): Promise<void> {
     if (this.orgRoomClient) {

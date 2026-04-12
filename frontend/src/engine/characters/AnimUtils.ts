@@ -50,8 +50,13 @@ export function findAnimTrack(
 /**
  * Locomotion state graph shared by both KayKit and legacy character factories.
  *
- * States: START → Idle ↔ Walk ↔ Sit
- * Parameters: speed (int), sitting (bool)
+ * States: START → Idle ↔ Walk ↔ Sit ↔ Interact ↔ UseItem
+ * Parameters: speed (int), sitting (bool), working (int: 0=none, 1=interact, 2=use-item)
+ *
+ * The "working" integer drives two tree-activity animations:
+ *   1 → Interact (Kenney: interact-right, KayKit: Interact) — reaching/watering
+ *   2 → UseItem  (Kenney: typing,          KayKit: Use_Item) — coding/working
+ *   0 → exit back to Idle
  */
 export const LOCOMOTION_STATE_GRAPH = {
   layers: [{
@@ -61,6 +66,8 @@ export const LOCOMOTION_STATE_GRAPH = {
       { name: 'Idle', speed: 1.0 },
       { name: 'Walk', speed: 1.0 },
       { name: 'Sit', speed: 1.0 },
+      { name: 'Interact', speed: 1.0 },
+      { name: 'UseItem', speed: 1.0 },
     ],
     transitions: [
       { from: 'START', to: 'Idle', time: 0, priority: 0 },
@@ -80,10 +87,29 @@ export const LOCOMOTION_STATE_GRAPH = {
         from: 'Sit', to: 'Idle', time: 0.3, priority: 0,
         conditions: [{ parameterName: 'sitting', predicate: pc.ANIM_EQUAL_TO, value: false }],
       },
+      // Tree-activity: Idle → Interact (working=1)
+      {
+        from: 'Idle', to: 'Interact', time: 0.3, priority: 0,
+        conditions: [{ parameterName: 'working', predicate: pc.ANIM_EQUAL_TO, value: 1 }],
+      },
+      {
+        from: 'Interact', to: 'Idle', time: 0.3, priority: 0,
+        conditions: [{ parameterName: 'working', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
+      },
+      // Tree-activity: Idle → UseItem (working=2)
+      {
+        from: 'Idle', to: 'UseItem', time: 0.3, priority: 0,
+        conditions: [{ parameterName: 'working', predicate: pc.ANIM_EQUAL_TO, value: 2 }],
+      },
+      {
+        from: 'UseItem', to: 'Idle', time: 0.3, priority: 0,
+        conditions: [{ parameterName: 'working', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
+      },
     ],
   }],
   parameters: {
     speed: { name: 'speed', type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
     sitting: { name: 'sitting', type: pc.ANIM_PARAMETER_BOOLEAN, value: false },
+    working: { name: 'working', type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
   },
 }

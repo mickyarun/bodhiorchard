@@ -56,9 +56,11 @@ const REGION_MESH_PATTERNS: Record<BodyRegion, string[]> = {
 
 /** Animation track names from KayKit GLBs mapped to state graph states. */
 const ANIM_TRACK_MAP: Record<string, string> = {
-  'Idle':  'Idle_A',
-  'Walk':  'Walking_A',
-  'Sit':   'Sit_Chair_Idle',
+  'Idle':     'Idle_A',
+  'Walk':     'Walking_A',
+  'Sit':      'Sit_Chair_Idle',
+  'Interact': 'Interact',    // general.glb — reaching/tending animation
+  'UseItem':  'Use_Item',    // general.glb — using a held object animation
 }
 
 // ─── Hex Color Helper ──────────────────────────

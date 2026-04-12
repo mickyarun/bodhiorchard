@@ -125,11 +125,15 @@ export class CharacterFactory {
     const idleTrack = findAnimTrack(container, 'idle')
     const walkTrack = findAnimTrack(container, 'walk')
     const sitTrack = findAnimTrack(container, 'sit')
+    const interactTrack = findAnimTrack(container, 'interact-right')
+    const useItemTrack = findAnimTrack(container, 'typing')
 
     if (layer) {
       if (idleTrack) layer.assignAnimation('Idle', idleTrack)
       if (walkTrack) layer.assignAnimation('Walk', walkTrack)
       if (sitTrack) layer.assignAnimation('Sit', sitTrack)
+      if (interactTrack) layer.assignAnimation('Interact', interactTrack)
+      if (useItemTrack) layer.assignAnimation('UseItem', useItemTrack)
     }
 
     // Set sitting parameter — state graph evaluates Idle→Sit on first tick

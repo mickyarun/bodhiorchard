@@ -144,6 +144,27 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     this.onMessage("takeover_start", (client, data: TakeoverMessage) => this.handleTakeoverStart(client, data))
     this.onMessage("takeover_end", (client, data: TakeoverMessage) => this.handleTakeoverEnd(client, data))
 
+    // Temporary dev tool: simulate a dev_activity event for the current user.
+    // Picks a random repo tree and walks the character there. Remove when
+    // real dev_activity hooks are confirmed working.
+    this.onMessage("simulate_dev_activity", (client) => {
+      const userId = (client.userData as { userId?: string } | undefined)?.userId
+      if (!userId) return
+      const repos = [...this.repoPositions.keys()]
+      if (repos.length === 0) return
+      const repoName = repos[Math.floor(Math.random() * repos.length)]!
+      this.devSim.handleEvent(this.state.members, {
+        user_id: userId,
+        actor_name: null,
+        repo_name: repoName,
+        event_type: "file_change",
+        status: "completed",
+        message: null,
+        file_path: "simulated/test.ts",
+      })
+      this.inferredSim.recordDevActivity(userId, new Date())
+    })
+
     // Drive the server-side simulation at 20Hz — walking, phrase cycles, idle timeouts.
     // setSimulationInterval passes dt in milliseconds; sim tick expects seconds.
     //

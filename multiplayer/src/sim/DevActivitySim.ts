@@ -82,6 +82,27 @@ export function parseDevActivityEvent(raw: unknown): DevActivityEvent | null {
   }
 }
 
+/** Live home coordinates for a member, computed from current room state. */
+export interface HomeCoords {
+  x: number
+  z: number
+  yaw: number
+  sitting: boolean
+}
+
+/**
+ * Resolver that returns the CURRENT home coordinates for a member, based on
+ * their live presence. Called at `returnToSeat` time rather than reading
+ * cached `originalX/Z` from when the dev session started — this ensures a
+ * presence change during dev activity (e.g. went on break while coding)
+ * routes the member to the new seat on arrival, not the stale old desk.
+ *
+ * Returns `null` if the member is no longer resolvable (removed from state,
+ * unknown presence, etc.) — the sim falls back to the cached originals in
+ * that case.
+ */
+export type HomeResolver = (userId: string) => HomeCoords | null
+
 export class DevActivitySim {
   private activeDevs = new Map<string, ActivityState>()
 
@@ -90,8 +111,17 @@ export class DevActivitySim {
    *   holds this reference and reads from it on each event — the owner
    *   (OrgRoom) is expected to mutate the Map in place (clear + set)
    *   on snapshot reload rather than replacing the instance.
+   * @param homeResolver Optional callback invoked at return-to-seat time
+   *   to get the member's CURRENT home coordinates. Without it, the sim
+   *   uses cached originalX/Z from when the dev session started — fine
+   *   for static presence, but stale if presence changed mid-session.
+   *   OrgRoom supplies a resolver that calls `computeHomePlacement` with
+   *   the member's live `member.presence` field.
    */
-  constructor(private repoPositions: Map<string, { x: number; z: number }>) {}
+  constructor(
+    private repoPositions: Map<string, { x: number; z: number }>,
+    private homeResolver?: HomeResolver,
+  ) {}
 
   /**
    * Drop all tracked activity state. Called on snapshot reload so that
@@ -101,6 +131,61 @@ export class DevActivitySim {
    */
   reset(): void {
     this.activeDevs.clear()
+  }
+
+  /**
+   * Start walking a member home to an externally-computed seat.
+   *
+   * Unlike the private `returnToSeat` path (which only works when the
+   * member is already in an active dev-activity session and reuses that
+   * session's cached `originalX/Z`), this can be called at any time —
+   * e.g. from `OrgRoom.handleTakeoverEnd` when a player releases control
+   * of their character, or from a presence-change handler when the member
+   * needs to relocate to a new seat.
+   *
+   * Creates a minimal ActivityState with `moveState = "walking_home"` so
+   * the existing `tick()` walking_home branch handles the animation frame
+   * by frame, and the arrival branch restores yaw, clears labels, and
+   * sets `locationContext = house_{userId}` — all reused, no duplication.
+   *
+   * Overwrites any existing activeDevs entry for this member: a new
+   * walk-home call always supersedes whatever the member was doing.
+   * This is the right semantic for takeover exit (player control ends
+   * mid-dev-activity → take them home, abandon the stale work state).
+   *
+   * @param member       The MemberState to walk. Mutated in place.
+   * @param targetX      Destination world X (the seat/bed coordinate).
+   * @param targetZ      Destination world Z.
+   * @param targetYaw    Yaw to restore on arrival (matches seat facing).
+   * @param wasSitting   Whether to sit down on arrival (true for desk/break seats, false for bed stand).
+   */
+  walkHome(
+    member: MemberState,
+    targetX: number,
+    targetZ: number,
+    targetYaw: number,
+    wasSitting: boolean,
+  ): void {
+    this.activeDevs.set(member.userId, {
+      userId:          member.userId,
+      displayName:     member.name,
+      originalX:       targetX,
+      originalZ:       targetZ,
+      originalYaw:     targetYaw,
+      wasSitting,
+      currentRepoName: null,
+      targetX,
+      targetZ,
+      moveState:       "walking_home",
+      idleTimer:       0,
+      phraseTimer:     0,
+    })
+    // Immediate animation feedback so remote clients see the walk start
+    // without waiting for the next tick. Walking context stays "garden"
+    // until arrival — the walking_home branch in tick() sets it to
+    // `house_{userId}` on arrival.
+    member.animState = "walk"
+    member.locationContext = "garden"
   }
 
   /**
@@ -238,7 +323,13 @@ export class DevActivitySim {
 
     if (distSq < ARRIVE_DIST_SQ) {
       state.moveState = arrivalState
-      member.animState = arrivalState === "working" ? "idle" : (state.wasSitting ? "sit" : "idle")
+      // When arriving at a tree to "work", randomly play one of two
+      // animations so the garden feels alive — interact (watering/tending)
+      // or use-item (typing/working). Both Kenney and KayKit character
+      // packs have corresponding tracks already loaded.
+      member.animState = arrivalState === "working"
+        ? (Math.random() < 0.5 ? "interact" : "use-item")
+        : (state.wasSitting ? "sit" : "idle")
       return true
     }
 
@@ -257,8 +348,22 @@ export class DevActivitySim {
   private returnToSeat(member: MemberState): void {
     const state = this.activeDevs.get(member.userId)
     if (!state) return
-    state.targetX = state.originalX
-    state.targetZ = state.originalZ
+
+    // Consult the live home resolver first — if presence changed during the
+    // dev session (e.g. member went on break while coding), we want to land
+    // at the NEW seat, not the stale cached desk. Fall through to the cached
+    // originalX/Z if no resolver is wired or it returns null (e.g. member
+    // vanished from state).
+    const liveHome = this.homeResolver?.(member.userId)
+    if (liveHome) {
+      state.targetX = liveHome.x
+      state.targetZ = liveHome.z
+      state.originalYaw = liveHome.yaw
+      state.wasSitting = liveHome.sitting
+    } else {
+      state.targetX = state.originalX
+      state.targetZ = state.originalZ
+    }
     state.moveState = "walking_home"
     state.currentRepoName = null
     member.animState = "walk"

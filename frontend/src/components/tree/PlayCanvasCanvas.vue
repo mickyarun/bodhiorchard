@@ -16,6 +16,16 @@
     >
       {{ tooltipText }}
     </div>
+    <!-- Temporary dev tool: simulate a dev_activity event for testing
+         the tree-watering animation. Remove when real hooks are confirmed. -->
+    <button
+      v-if="isDev"
+      class="simulate-btn"
+      title="Simulate dev activity (walk to tree)"
+      @click="engine?.simulateDevActivity()"
+    >
+      Simulate
+    </button>
   </div>
 </template>
 
@@ -27,6 +37,9 @@ import type { EngineData, RepoHealth, ThreatSeverity, BUDStatus, RelType } from 
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
+
+// Dev-only simulate button (remove when real hooks are confirmed)
+const isDev = import.meta.env.DEV
 
 const props = defineProps<{
   treeData: TreeData
@@ -44,6 +57,10 @@ const tooltipText = ref<string | null>(null)
 const tooltipPos = ref({ x: 0, y: 0 })
 
 let engine: GardenEngine | null = null
+// Set to true only after `initEngine` completes — guards the auth watcher
+// from firing a stale `tryConnectOrgRoom` while setData is still building
+// the scene (race that produced the "CharacterSystem not ready" warning).
+let engineReady = false
 let resizeObserver: ResizeObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -190,6 +207,12 @@ async function initEngine(): Promise<void> {
 
   await engine.setData(adaptTreeData(props.treeData))
 
+  // Mark the engine as ready BEFORE the first connect attempt. This flag
+  // gates the auth watcher so it never fires a stale `tryConnectOrgRoom`
+  // while setData is still in-flight (the race that produced the
+  // "CharacterSystem not ready" warning).
+  engineReady = true
+
   // Connect to the Colyseus OrgRoom (if auth is already available). The
   // watcher on authStore.user handles the case where auth resolves later.
   await tryConnectOrgRoom()
@@ -199,11 +222,18 @@ async function initEngine(): Promise<void> {
 function applyCurrentUser(): void {
   if (!engine) return
   if (authStore.user) {
+    // Read the token directly from localStorage rather than authStore.token.
+    // The axios response interceptor writes new tokens to localStorage on
+    // 401-refresh but does NOT update the Pinia ref, so authStore.token can
+    // be stale (old expired JWT) while localStorage holds the fresh one.
+    // Using localStorage ensures Colyseus receives the latest token and
+    // onAuth's verifyUserToken doesn't reject with "invalid auth token".
+    const freshToken = localStorage.getItem('bodhigrove_token') ?? authStore.token ?? null
     engine.setCurrentUser({
       id: authStore.user.id,
       name: authStore.user.name,
       characterModel: authStore.user.character_model,
-      token: authStore.token ?? null,
+      token: freshToken,
     })
   } else {
     engine.setCurrentUser(null)
@@ -213,6 +243,11 @@ function applyCurrentUser(): void {
 /** Connect to the Colyseus OrgRoom if both auth and org_id are ready. */
 async function tryConnectOrgRoom(): Promise<void> {
   if (!engine || !authStore.user || !props.treeData.org_id) return
+  // Re-apply auth state in case it resolved AFTER the initial applyCurrentUser()
+  // in initEngine (e.g. fetchUser finishing during setData's await). Without
+  // this, engine.currentUser stays null and connectToOrgRoom early-returns with
+  // "sceneManager or currentUser not set".
+  applyCurrentUser()
   try {
     await engine.connectToOrgRoom(props.treeData.org_id)
   } catch (err) {
@@ -264,10 +299,14 @@ watch(
 // is often null when PlayCanvasCanvas first mounts (fetchUser is async) — in
 // that case initEngine skips setCurrentUser + connectToOrgRoom, and this
 // watcher kicks off the connection once auth resolves.
+//
+// Gated on `engineReady` so it never races with initEngine's own setData
+// build — if auth resolves mid-build, the watcher defers and initEngine's
+// final tryConnectOrgRoom call handles it.
 watch(
   () => authStore.user,
   async (user) => {
-    if (!engine) return
+    if (!engine || !engineReady) return
     applyCurrentUser()
     if (user) {
       await tryConnectOrgRoom()
@@ -319,6 +358,7 @@ function isInControl(): boolean {
 defineExpose({ toggleArcs, exitHouse, focusOnRepo, clearFocus, takeoverCharacter, exitTakeover, isTakeover, isInControl })
 
 onUnmounted(() => {
+  engineReady = false
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -367,5 +407,23 @@ onUnmounted(() => {
   white-space: pre-line;
   z-index: 10;
   max-width: 250px;
+}
+
+/* Temporary dev tool — remove when real hooks are confirmed */
+.simulate-btn {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 100;
+  padding: 6px 14px;
+  background: rgba(33, 150, 243, 0.9);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.simulate-btn:hover {
+  background: rgba(33, 150, 243, 1);
 }
 </style>
