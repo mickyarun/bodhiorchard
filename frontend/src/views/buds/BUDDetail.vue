@@ -535,6 +535,57 @@
             class="mt-4"
           />
 
+          <!-- Linked Bugs -->
+          <v-card variant="outlined" class="mt-4 pa-4">
+            <div class="d-flex align-center mb-3">
+              <v-icon icon="mdi-bug-outline" size="20" class="mr-2" />
+              <span class="text-subtitle-2 font-weight-medium">Bugs</span>
+              <v-chip v-if="budBugs.length" size="x-small" variant="tonal" color="error" class="ml-2">
+                {{ budBugs.length }}
+              </v-chip>
+              <v-spacer />
+              <v-btn
+                variant="tonal"
+                size="small"
+                color="error"
+                prepend-icon="mdi-bug-outline"
+                @click="showBugCreate = true"
+              >
+                Report Bug
+              </v-btn>
+            </div>
+
+            <div v-if="budBugsLoading" class="d-flex justify-center py-4">
+              <v-progress-circular indeterminate size="20" width="2" />
+            </div>
+            <div v-else-if="budBugs.length === 0" class="text-caption text-medium-emphasis text-center py-2">
+              No bugs linked to this BUD
+            </div>
+            <div v-else class="d-flex flex-column ga-1">
+              <div
+                v-for="bug in budBugs"
+                :key="bug.id"
+                class="d-flex align-center ga-2 pa-2 rounded"
+                style="border: 1px solid rgba(255,255,255,0.06); cursor: pointer"
+                @click="$router.push('/bugs')"
+              >
+                <v-chip :color="BUG_SEVERITY_COLORS[bug.severity]" size="x-small" variant="tonal">
+                  {{ bug.severity }}
+                </v-chip>
+                <span class="text-body-2 flex-grow-1 text-truncate">{{ bug.title }}</span>
+                <v-chip :color="BUG_STATUS_COLORS[bug.status]" size="x-small" variant="tonal">
+                  {{ bug.status }}
+                </v-chip>
+              </div>
+            </div>
+          </v-card>
+
+          <BugCreateDialog
+            v-model="showBugCreate"
+            :bud-id="bud.id"
+            @created="onBugCreated"
+          />
+
           <!-- Override Dialog -->
           <v-dialog v-model="overrideDialogOpen" max-width="420">
             <v-card color="surface" class="pa-5">
@@ -763,7 +814,7 @@ import { useJobSocket } from '@/composables/useJobSocket'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
-import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
+import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUG_SEVERITY_COLORS, BUG_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
 import type { BUDSectionKey, BUDStatus, TimelineEvent } from '@/types'
 import { useEstimates } from '@/composables/useEstimates'
 import ChatPanel from '@/components/buds/ChatPanel.vue'
@@ -775,7 +826,9 @@ import BUDPRChecklist from '@/components/buds/BUDPRChecklist.vue'
 import BUDCodeReviewStatus from '@/components/buds/BUDCodeReviewStatus.vue'
 import BUDQAPanel from '@/components/buds/BUDQAPanel.vue'
 import BUDReleaseStagePanel from '@/components/buds/BUDReleaseStagePanel.vue'
+import BugCreateDialog from '@/views/bugs/BugCreateDialog.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
+import { useBugsStore } from '@/stores/bugs'
 import { useSettingsStore } from '@/stores/settings'
 import { formatDateTime } from '@/utils/date'
 import { marked } from 'marked'
@@ -787,6 +840,23 @@ const budStore = useBUDStore()
 const authStore = useAuthStore()
 const membersStore = useMembersStore()
 const settingsStore = useSettingsStore()
+const bugsStore = useBugsStore()
+
+// Bugs linked to this BUD
+const budBugs = ref<import('@/types').BugListItem[]>([])
+const budBugsLoading = ref(false)
+const showBugCreate = ref(false)
+
+async function loadBudBugs(): Promise<void> {
+  if (!bud.value) return
+  budBugsLoading.value = true
+  budBugs.value = await bugsStore.fetchBugsForBud(bud.value.id)
+  budBugsLoading.value = false
+}
+
+function onBugCreated(): void {
+  loadBudBugs()
+}
 
 const bud = computed(() => budStore.currentBUD)
 
@@ -1024,6 +1094,7 @@ onMounted(async () => {
   // are no-ops if the data is already cached, so this is cheap.
   if (!settingsStore.connections.budStages) settingsStore.fetchConnections()
   if (settingsStore.repos.length === 0) settingsStore.fetchRepos()
+  loadBudBugs()
 
   // Subscribe to BUD activity events (PR opened/merged/comment via webhook)
   const budActivityTopic = `bud:${id}:activity`
