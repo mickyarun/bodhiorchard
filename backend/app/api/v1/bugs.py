@@ -73,6 +73,27 @@ async def create_bug(
         # BUD already linked manually — just generate embedding in background
         _schedule_embedding(bug.id, current_user.org_id)
 
+    # If the bug is linked to a BUD that's in testing, check whether the
+    # open bug count now exceeds the org's rejection threshold. If so, the
+    # BUD auto-rejects back to development.
+    linked_bud_id = bug.bud_id
+    if linked_bud_id:
+        try:
+            from app.repositories.bud import BUDRepository
+            from app.services.bug_testing_gate import check_bug_threshold
+
+            bud_repo = BUDRepository(db, org_id=current_user.org_id)
+            linked_bud = await bud_repo.get_by_id(linked_bud_id)
+            if linked_bud:
+                await check_bug_threshold(db, current_user.org_id, linked_bud)
+                await db.flush()
+        except Exception:
+            import structlog
+
+            structlog.get_logger(__name__).warning(
+                "bug_threshold_check_failed", bug_id=str(bug.id), exc_info=True,
+            )
+
     return await _bug_to_read(db, bug, current_user.org_id)
 
 
