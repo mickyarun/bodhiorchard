@@ -243,8 +243,8 @@ function loadBugs(): void {
 async function openBug(bug: BugListItem): Promise<void> {
   await bugsStore.fetchBug(bug.id)
   linkBudId.value = bugsStore.currentBug?.budId || null
-  // Ensure BUD list is loaded for the autocomplete
-  if (budStore.buds.length === 0) budStore.fetchBUDs()
+  // Always refresh BUD list so new BUDs appear in the autocomplete
+  await budStore.fetchBUDs()
   showDetail.value = true
 }
 
@@ -256,7 +256,7 @@ async function onLinkBud(budId: string | null): Promise<void> {
 async function unlinkBud(): Promise<void> {
   if (!bugsStore.currentBug) return
   linkBudId.value = null
-  await bugsStore.updateBug(bugsStore.currentBug.id, { budId: '' })
+  await bugsStore.updateBug(bugsStore.currentBug.id, { budId: null })
 }
 
 async function changeStatus(newStatus: BugStatusValue): Promise<void> {

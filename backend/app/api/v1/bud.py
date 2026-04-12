@@ -139,6 +139,7 @@ async def create_bud(
         if body.requirements_md:
             embed_text = f"{body.title} {body.requirements_md[:500]}"
         bud.embedding = await embedding_service.embed(embed_text)
+        await db.flush()
     except Exception:
         logger.warning("bud_embedding_failed", bud_number=next_number, exc_info=True)
 
