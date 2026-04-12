@@ -93,13 +93,23 @@
                   <v-list density="compact" min-width="180">
                     <v-list-subheader>Change Status</v-list-subheader>
                     <v-list-item
-                      v-for="s in statusItems"
-                      :key="s.value"
-                      :title="s.title"
-                      :active="bud.status === s.value"
-                      :disabled="agentLocked"
-                      @click="updateStatus(s.value)"
-                    />
+                      v-if="isClosed"
+                      disabled
+                    >
+                      <span class="text-caption text-medium-emphasis">
+                        {{ bud.status === 'discarded' ? 'Discarded' : 'Closed' }} — cannot change status
+                      </span>
+                    </v-list-item>
+                    <template v-else>
+                      <v-list-item
+                        v-for="s in statusItems"
+                        :key="s.value"
+                        :title="s.title"
+                        :active="bud.status === s.value"
+                        :disabled="agentLocked"
+                        @click="updateStatus(s.value)"
+                      />
+                    </template>
                     <v-divider class="my-1" />
                     <v-list-item
                       base-color="error"

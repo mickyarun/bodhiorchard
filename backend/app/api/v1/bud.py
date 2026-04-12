@@ -287,6 +287,17 @@ async def update_bud(
     if "status" in update_data:
         new_status = update_data["status"]
 
+        # Guard: closed/discarded BUDs cannot be reopened. The lifecycle
+        # is terminal — create a new BUD instead.
+        if old_status in (BUDStatus.CLOSED, BUDStatus.DISCARDED):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot change status of a {old_status.value} BUD. "
+                    "Create a new BUD instead."
+                ),
+            )
+
         # Manual code_review → testing:
         # If every impacted repo has a merged PR, this is the same as the
         # webhook-driven auto-transition — no bypass, no reason needed.
