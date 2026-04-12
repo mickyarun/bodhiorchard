@@ -203,22 +203,46 @@ async def get_bud_release_stage(
 
     # Open PRs targeting this stage's branch — gives visibility into
     # in-flight work before it merges and triggers release detection.
+    #
+    # Two sources:
+    # 1. BUD-linked PRs (bud_id == this BUD) whose base_branch matches
+    #    the stage target — covers direct bud-NNN/... → main PRs.
+    # 2. Repo-scoped PRs (any bud_id or NULL) whose base_branch matches
+    #    the stage target on an impacted repo — covers release PRs like
+    #    develop → main that carry multiple BUDs and have no bud_id.
     open_prs: list[ReleasePR] = []
+    seen_pr_ids: set[int] = set()
+
+    impacted_repo_ids = [
+        uuid.UUID(r.get("repo_id"))
+        for r in (bud.impacted_repos or [])
+        if isinstance(r, dict) and r.get("repo_id")
+    ]
+
+    from sqlalchemy import or_
+
+    open_pr_filters = [PullRequest.bud_id == bud_id]
+    if impacted_repo_ids:
+        open_pr_filters.append(PullRequest.repo_id.in_(impacted_repo_ids))
+
     open_pr_stmt = (
         select(PullRequest, TrackedRepository)
         .join(TrackedRepository, PullRequest.repo_id == TrackedRepository.id, isouter=True)
         .where(
             PullRequest.org_id == current_user.org_id,
-            PullRequest.bud_id == bud_id,
             PullRequest.state == PRState.OPEN,
+            or_(*open_pr_filters),
         )
     )
     open_result = await db.execute(open_pr_stmt)
     for pr, repo in open_result.all():
+        if pr.github_pr_id in seen_pr_ids:
+            continue
         target_branch = (
             repo.uat_branch if typed_stage == "uat" else repo.main_branch
         ) if repo else None
         if target_branch and branch_matches(pr.base_branch, target_branch):
+            seen_pr_ids.add(pr.github_pr_id)
             open_prs.append(
                 ReleasePR(
                     pr_number=pr.github_pr_number,
