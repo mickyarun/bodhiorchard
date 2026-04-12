@@ -35,7 +35,7 @@ import {
   type HomeCoords,
 } from "../sim/DevActivitySim"
 import { AgentActivitySim, parseAgentActivityEvent } from "../sim/AgentActivitySim"
-import { InferredPresenceSim } from "../sim/InferredPresenceSim"
+import { InferredPresenceSim, buildPresenceConfig } from "../sim/InferredPresenceSim"
 import {
   fetchOrgSnapshot,
   verifyUserToken,
@@ -55,6 +55,12 @@ const MIN_MOVE_INTERVAL_MS = 25
 // from time-of-day and idle thresholds (10 / 20 minutes), so evaluating more
 // often than once per minute would waste cycles without adding responsiveness.
 const INFERRED_PRESENCE_TICK_MS = 60_000
+
+// How many InferredPresenceSim ticks pass between snapshot re-fetches. At
+// 60s/tick × 15 = 15 minutes, this is the maximum latency for a PATCH on
+// /v1/settings/connections (presence section) to reach a live OrgRoom. See
+// the plan follow-up note for an eventual push-on-PATCH bridge.
+const SNAPSHOT_REFRESH_EVERY_N_TICKS = 15
 
 interface OrgRoomCreateOptions {
   orgId?: string
@@ -117,6 +123,9 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   // presence sources don't fight each other.
   private hasSlack = new Set<string>()
 
+  // Counter for the snapshot re-fetch cadence. See SNAPSHOT_REFRESH_EVERY_N_TICKS.
+  private presenceTickCounter = 0
+
   // Resolves once the initial snapshot has been loaded (or failed).
   // onJoin awaits this so late joiners never race against an empty state map.
   private snapshotReady!: Promise<void>
@@ -159,6 +168,15 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     // devSim/agentSim timer and silently halt walking-home position ticks.
     this.clock.setInterval(() => {
       this.inferredSim.tick(this.state.members, this.hasSlack, new Date())
+      this.presenceTickCounter += 1
+      // Every N ticks (default 15 min), re-fetch the snapshot so live rooms
+      // pick up per-org presence settings changes (working days, hours,
+      // timezone, auto-mode). Full snapshot is refetched for simplicity —
+      // we only apply the presence config via setConfig, NOT reload members
+      // (which would disrupt seat assignments and takeovers).
+      if (this.presenceTickCounter % SNAPSHOT_REFRESH_EVERY_N_TICKS === 0) {
+        void this.refreshPresenceConfig()
+      }
     }, INFERRED_PRESENCE_TICK_MS)
 
     // Kick off snapshot load and expose a promise so onJoin can wait for it.
@@ -183,6 +201,31 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       }
     } catch (err) {
       console.error(`[OrgRoom] Snapshot load failed for org=${this.state.orgId}:`, err)
+    }
+  }
+
+  /**
+   * Lightweight periodic refresh of per-org presence configuration.
+   *
+   * Called by the InferredPresenceSim tick loop every
+   * `SNAPSHOT_REFRESH_EVERY_N_TICKS` ticks (≈15 min) so live rooms pick
+   * up settings changes (working days, hours, timezone, auto-mode)
+   * without needing a client-driven room recreation or a server-push
+   * channel. Only the presence config is re-applied — members, repos,
+   * seats, and takeover sessions are intentionally left untouched
+   * because those should be stable across a settings tweak.
+   */
+  private async refreshPresenceConfig(): Promise<void> {
+    if (!this.state.orgId) return
+    try {
+      const snapshot = await fetchOrgSnapshot(this.state.orgId)
+      if (!snapshot) return
+      this.inferredSim.setConfig(buildPresenceConfig(snapshot.presenceSettings))
+    } catch (err) {
+      console.warn(
+        `[OrgRoom] presence-config refresh failed for org=${this.state.orgId}:`,
+        err,
+      )
     }
   }
 
@@ -365,6 +408,10 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     // drifted since the last snapshot. The sim will rebuild its trace map
     // as new dev_activity events arrive.
     this.inferredSim.reset()
+
+    // Apply per-org presence configuration (working days, hours, timezone,
+    // auto-mode). Undefined snapshot.presenceSettings → legacy defaults.
+    this.inferredSim.setConfig(buildPresenceConfig(snapshot.presenceSettings))
 
     // Rebuild the has_slack skip set from the snapshot. Members without
     // this field default to false (treated as non-Slack → inferred presence

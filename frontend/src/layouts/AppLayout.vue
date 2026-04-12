@@ -100,6 +100,13 @@
               rounded="lg"
               class="pl-10"
             />
+            <v-list-item
+              v-if="canViewPresenceSettings"
+              title="Presence & Auto Mode"
+              to="/settings/presence"
+              rounded="lg"
+              class="pl-10"
+            />
           </v-list-group>
         </v-list>
 
@@ -137,6 +144,15 @@
                 title="Customize Character"
                 to="/character-select"
               />
+              <!-- Self-service MCP token — any authenticated user, no
+                   admin or settings permission required. Gives Claude
+                   Code a personal token for commit attribution. -->
+              <v-list-item
+                prepend-icon="mdi-key-variant"
+                title="MCP Token"
+                to="/profile/mcp-token"
+              />
+              <v-divider class="my-1" />
               <v-list-item
                 prepend-icon="mdi-logout"
                 title="Sign out"
@@ -186,6 +202,7 @@ const {
   canViewDesignSystems,
   canViewAgentPrompts,
   canViewQAAutomation,
+  canViewPresenceSettings,
 } = usePermissions()
 
 const userInitials = computed(() => {

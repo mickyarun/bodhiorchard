@@ -26,12 +26,45 @@ export interface OrgSnapshotMember {
   presence: "active" | "on_break" | "at_home"
   level?: number
   level_name?: string
+  /**
+   * True if this member's presence is authoritatively driven by Slack
+   * (user has a slack_id AND the org has a slack_bot_token configured).
+   * False means presence must be inferred from dev activity + time of day
+   * via InferredPresenceSim (Phase C). Defaults to false when absent so
+   * old snapshots without this field fall through to inferred presence.
+   */
+  has_slack?: boolean
+}
+
+/** Valid day-of-week keys for `PresenceSettingsPayload.workingDays`. */
+export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
+
+/**
+ * Per-org presence configuration as returned by the backend's
+ * `/internal/colyseus/org-snapshot` endpoint. The camelCase naming
+ * mirrors the Pydantic `PresenceSettings` schema serialised with
+ * `by_alias=True`. The multiplayer side consumes this via
+ * `buildPresenceConfig` which normalises it into the internal
+ * `PresenceConfig` shape used by `InferredPresenceSim`.
+ */
+export interface PresenceSettingsPayload {
+  autoModeEnabled: boolean
+  workingDays: WeekdayKey[]
+  workingHoursStart: string  // "HH:MM" 24-hour
+  workingHoursEnd: string    // "HH:MM" 24-hour
+  timezone: string | null    // null = use server local time (legacy path)
 }
 
 export interface OrgSnapshotResponse {
   orgId: string
   members: OrgSnapshotMember[]
   repos: Array<{ repo_name: string; growth_stage: number }>
+  /**
+   * Optional for backward compatibility — snapshots generated before
+   * this field existed simply omit it, and the sim falls back to
+   * `DEFAULT_PRESENCE_CONFIG` (Mon-Fri, 8-18, no timezone).
+   */
+  presenceSettings?: PresenceSettingsPayload
 }
 
 export interface TokenVerification {

@@ -31,6 +31,18 @@ export interface ConnectionsState {
   budStages: {
     uatEnabled: boolean
   }
+  // Per-org presence / auto-mode settings. Mirrors the backend
+  // PresenceSettings Pydantic model (by_alias=True envelope). The
+  // `timezone: null` sentinel means "use server local time" which
+  // is the legacy behaviour — setting a concrete IANA name opts in
+  // to timezone-aware rules everywhere (multiplayer sim + Slack cache).
+  presence: {
+    autoModeEnabled: boolean
+    workingDays: Array<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'>
+    workingHoursStart: string  // "HH:MM" 24-hour
+    workingHoursEnd: string    // "HH:MM" 24-hour
+    timezone: string | null
+  }
 }
 
 function emptyState(): ConnectionsState {
@@ -55,6 +67,16 @@ function emptyState(): ConnectionsState {
     },
     budStages: {
       uatEnabled: true,
+    },
+    // Defaults mirror backend PresenceSettings defaults — Mon-Fri, 08:00-18:00,
+    // timezone null (= use server time). These are overwritten by the first
+    // fetchConnections() anyway, but keep the shape non-null for reactivity.
+    presence: {
+      autoModeEnabled: true,
+      workingDays: ['mon', 'tue', 'wed', 'thu', 'fri'],
+      workingHoursStart: '08:00',
+      workingHoursEnd: '18:00',
+      timezone: null,
     },
   }
 }
@@ -159,11 +181,16 @@ export const useSettingsStore = defineStore('settings', () => {
     repoId: string,
     mainBranch: string | null,
     developBranch: string | null,
+    uatBranch: string | null = null,
   ): Promise<boolean> {
     try {
       await api.patch(`/v1/settings/repos/${repoId}/branches`, {
         mainBranch,
         developBranch,
+        // Send empty string instead of null when the user clears it,
+        // so the backend distinguishes "intentionally cleared" from
+        // "field omitted" (the omitted case is just leave-as-is).
+        uatBranch: uatBranch ?? '',
       })
       await fetchRepos()
       return true

@@ -1,22 +1,34 @@
-"""Single source of truth for per-org QA and BUD stage settings.
+"""Single source of truth for per-org QA, BUD stage, and presence settings.
 
 Settings that change BUD lifecycle behaviour (QA automation framework,
-UAT stage on/off) live in the ``organizations.config`` JSONB column under
-the ``qa`` and ``bud_stages`` keys. This module is the ONLY place in the
-backend that reads those keys — every service needing them must go through
-``get_qa_settings`` / ``get_bud_stage_settings`` / ``get_phase_order`` so
-we have one defaulting rule, one key name, and one place to change.
+UAT stage on/off) and presence-inference behaviour (working days, hours,
+timezone, auto-mode toggle) live in the ``organizations.config`` JSONB
+column under the ``qa``, ``bud_stages``, and ``presence`` keys. This
+module is the ONLY place in the backend that reads those keys — every
+service needing them must go through ``get_qa_settings`` /
+``get_bud_stage_settings`` / ``get_phase_order`` / ``get_presence_settings``
+so we have one defaulting rule, one key name, and one place to change.
 
 The Pydantic classes returned here are imported verbatim from
 ``app.schemas.settings`` so there is exactly ONE definition of each model
 in the backend. The schema classes carry the write-path validation (e.g.
-the prompt-injection regex on ``framework``); stored data is already
-validated when it reaches this module, so we just construct the same
-class with the persisted values and the shipped defaults fill any gaps.
+the prompt-injection regex on ``framework``, the IANA timezone whitelist
+on ``timezone``); stored data is already validated when it reaches this
+module, so we just construct the same class with the persisted values
+and the shipped defaults fill any gaps.
 """
 
-from app.schemas.settings import BUDStageSettings, QAAutomationSettings
+from app.schemas.settings import (
+    BUDStageSettings,
+    PresenceSettings,
+    QAAutomationSettings,
+)
 from app.services.estimation_engine import PHASE_ORDER
+
+# Shipped defaults as a module-level constant so callers that need the
+# raw dict (e.g. the internal_colyseus snapshot payload) do not pay the
+# Pydantic construction cost on every request.
+DEFAULT_PRESENCE_SETTINGS: PresenceSettings = PresenceSettings()
 
 
 def get_qa_settings(org_config: dict | None) -> QAAutomationSettings:
@@ -56,6 +68,25 @@ def is_uat_enabled(org_config: dict | None) -> bool:
     have to import / construct the whole settings object.
     """
     return get_bud_stage_settings(org_config).uat_enabled
+
+
+def get_presence_settings(org_config: dict | None) -> PresenceSettings:
+    """Resolve per-org presence-inference settings from an organization config dict.
+
+    Accepts ``None`` / missing / partial ``presence`` sections and fills
+    in the shipped defaults. A fresh org with no presence section is
+    indistinguishable from one that saved the defaults explicitly, which
+    preserves the legacy hardcoded behaviour (Mon-Fri, 08:00-18:00,
+    server-local time) for orgs that never visit the settings page.
+
+    Args:
+        org_config: The raw ``organization.config`` JSONB dict, or None.
+
+    Returns:
+        A ``PresenceSettings`` with all fields populated.
+    """
+    raw = (org_config or {}).get("presence") or {}
+    return PresenceSettings(**raw)
 
 
 def get_phase_order(org_config: dict | None) -> list[str]:

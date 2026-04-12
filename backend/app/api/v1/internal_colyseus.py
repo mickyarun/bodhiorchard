@@ -23,8 +23,11 @@ from app.config import settings
 from app.core.deps import get_db
 from app.core.security import verify_token
 from app.models.developer_xp import DeveloperXP
+from app.models.organization import Organization
 from app.models.user import OrgToUser, User
 from app.repositories.tracked_repository import TrackedRepoRepository
+from app.schemas.settings import PresenceSettings
+from app.services.org_settings import get_presence_settings
 from app.services.presence_cache import get_presence_state
 from app.services.tree_data import get_tree_data
 
@@ -76,9 +79,19 @@ async def get_org_snapshot(
     tracked_repos = await repo_repo.get_active_path_name_pairs()
     tree = await get_tree_data(db, org_id, tracked_repos, refresh=False)
 
+    # Resolve per-org presence settings (working days, hours, timezone,
+    # auto-mode toggle). Defaults preserve the legacy hardcoded behaviour
+    # (Mon-Fri, 08:00-18:00, server-local) so un-migrated orgs get the
+    # same presence sim output as before this field existed.
+    config_row = await db.execute(
+        select(Organization.config).where(Organization.id == org_id)
+    )
+    org_config = config_row.scalar_one_or_none() or {}
+    presence_settings = get_presence_settings(org_config)
+
     # Fetch ALL active org members — full membership list, not filtered by
     # contribution activity. This is what the garden is keyed on.
-    member_rows = await _collect_org_members(db, org_id)
+    member_rows = await _collect_org_members(db, org_id, presence_settings)
 
     logger.info(
         "colyseus_org_snapshot",
@@ -97,12 +110,15 @@ async def get_org_snapshot(
             }
             for r in tree.repos
         ],
+        # camelCase alias matches the multiplayer TS side (PresenceSettingsPayload).
+        "presenceSettings": presence_settings.model_dump(mode="json", by_alias=True),
     }
 
 
 async def _collect_org_members(
     db: AsyncSession,
     org_id: uuid.UUID,
+    presence_settings: PresenceSettings,
 ) -> list[dict]:
     """Return every active member of an org for the Colyseus snapshot.
 
@@ -114,7 +130,29 @@ async def _collect_org_members(
 
     Ordering is stable (by user_id) so the Colyseus room's house-grid slot
     assignment is deterministic across snapshot reloads.
+
+    The ``has_slack`` field per member tells the Colyseus server whether
+    Slack is the authoritative presence source for that member. The
+    InferredPresenceSim (Phase C) uses this to skip Slack-driven members
+    and only apply dev-activity-based pseudo-presence to non-Slack users.
+    A user has Slack if and only if (a) their ``slack_id`` is set AND
+    (b) the org has a ``slack_bot_token`` configured (no token → no poll
+    → no presence data → treat as inferred).
+
+    Args:
+        db: Async database session.
+        org_id: The organization UUID.
+        presence_settings: Per-org presence config, passed through to
+            ``get_presence_state`` so Slack-driven state classification
+            honours the org's working days, hours, and timezone.
     """
+    # Check once whether the org has a Slack bot token configured. Used
+    # below to compute `has_slack` per member without re-querying.
+    token_row = await db.execute(
+        select(Organization.slack_bot_token).where(Organization.id == org_id)
+    )
+    org_has_slack_token = bool(token_row.scalar_one_or_none())
+
     stmt = (
         select(
             User.id,
@@ -139,10 +177,17 @@ async def _collect_org_members(
 
     members: list[dict] = []
     for row in rows:
-        # Look up Slack presence state (falls back to "active" if no mapping)
+        # Look up Slack presence state (falls back to "active" if no mapping).
+        # ``get_presence_state`` applies the org's working-day + work-hours
+        # rules when deciding ``on_break`` vs ``at_home`` for offline users.
         presence = "active"
         if row.slack_id:
-            presence = get_presence_state(str(org_id), row.slack_id)
+            presence = get_presence_state(str(org_id), row.slack_id, presence_settings)
+
+        # "has_slack" is true only when BOTH the user has a slack_id AND
+        # the org has a bot token. A user with slack_id in an org that
+        # removed its token is still non-Slack-driven for presence purposes.
+        has_slack = bool(row.slack_id) and org_has_slack_token
 
         members.append(
             {
@@ -152,6 +197,7 @@ async def _collect_org_members(
                 "presence": presence,
                 "level": row.level or 1,
                 "level_name": row.level_name or "seedling",
+                "has_slack": has_slack,
             }
         )
     return members
@@ -177,14 +223,32 @@ async def verify_user_token(
     token = payload.get("token")
     claimed_org_id = payload.get("org_id")
     if not token:
+        logger.warning("colyseus_verify_token_missing", claimed_org_id=claimed_org_id)
         return {"valid": False}
 
     jwt_payload = verify_token(token)
     if jwt_payload is None:
+        # verify_token swallows JWTError (expired, bad signature, malformed).
+        # Log the prefix so we can distinguish "no token" from "bad token"
+        # without leaking the full credential. Most common cause in practice:
+        # token expired (60min default lifetime) and the client didn't
+        # refresh before joining the Colyseus room.
+        logger.warning(
+            "colyseus_verify_token_invalid",
+            reason="jwt_decode_failed",
+            token_prefix=token[:12] + "..." if len(token) > 12 else "***",
+            claimed_org_id=claimed_org_id,
+        )
         return {"valid": False}
 
     token_org_id = jwt_payload.get("org_id")
     if claimed_org_id and token_org_id and str(token_org_id) != str(claimed_org_id):
+        logger.warning(
+            "colyseus_verify_token_org_mismatch",
+            token_org_id=str(token_org_id),
+            claimed_org_id=str(claimed_org_id),
+            user_id=jwt_payload.get("sub", ""),
+        )
         return {"valid": False}
 
     return {

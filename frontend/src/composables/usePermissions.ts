@@ -25,6 +25,9 @@ export function usePermissions() {
   // permission gate as the other "configure" pages, so the sidebar entry
   // is visible to the same users who can actually save changes.
   const canViewQAAutomation = computed(() => hasPermission('integrations:configure'))
+  // Presence / Auto Mode page mirrors the same "configure" permission —
+  // anyone who can touch QA automation can also touch presence settings.
+  const canViewPresenceSettings = computed(() => hasPermission('integrations:configure'))
 
   return {
     hasPermission,
@@ -36,5 +39,6 @@ export function usePermissions() {
     canViewDesignSystems,
     canViewAgentPrompts,
     canViewQAAutomation,
+    canViewPresenceSettings,
   }
 }

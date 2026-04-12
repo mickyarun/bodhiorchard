@@ -44,6 +44,7 @@ from app.schemas.dashboard import (
     SecurityThreat,
     TreeData,
 )
+from app.services.org_settings import get_presence_settings
 from app.services.presence_cache import get_presence_state
 
 logger = structlog.get_logger(__name__)
@@ -835,6 +836,14 @@ async def _resolve_task_repo_name(
 async def _collect_members(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) -> None:
     """Collect team members with their contribution percentages."""
     from app.models.developer_xp import DeveloperXP
+    from app.models.organization import Organization
+
+    # Resolve per-org presence settings once so the Slack presence state
+    # classification below honours the org's working days + hours + tz.
+    cfg_row = await db.execute(
+        select(Organization.config).where(Organization.id == org_id)
+    )
+    presence_settings = get_presence_settings(cfg_row.scalar_one_or_none() or {})
 
     result = await db.execute(
         select(
@@ -894,10 +903,10 @@ async def _collect_members(db: AsyncSession, org_id: uuid.UUID, tree: TreeData) 
         care_pct = round((touches / total_touches * 100) if total_touches > 0 else 0, 1)
         top_modules = user_modules.get(row.id, [])
 
-        # Look up Slack presence state
+        # Look up Slack presence state (honours per-org working schedule).
         presence = "active"
         if row.slack_id:
-            presence = get_presence_state(str(org_id), row.slack_id)
+            presence = get_presence_state(str(org_id), row.slack_id, presence_settings)
 
         tree.members.append(
             MemberActivity(

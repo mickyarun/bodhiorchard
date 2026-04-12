@@ -1,6 +1,9 @@
 """Pydantic schemas for the settings endpoints."""
 
-from pydantic import BaseModel, Field
+import zoneinfo
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SourceCodeSettings(BaseModel):
@@ -107,6 +110,72 @@ class BUDStageSettings(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+# Valid day-of-week keys for PresenceSettings.working_days.
+WeekdayKey = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+class PresenceSettings(BaseModel):
+    """Org-level presence-inference configuration.
+
+    Controls how the Colyseus ``InferredPresenceSim`` and the Slack
+    ``presence_cache._compute_state`` decide when a team member is at
+    their desk, on a break, or at home. Defaults preserve the legacy
+    behaviour (Mon-Fri, 08:00-18:00, server-local time) so existing orgs
+    see no change until they explicitly save a setting.
+
+    The ``timezone`` field is deliberately optional. ``None`` means
+    "interpret times in the server's local zone" — this is the exact
+    behaviour the two presence systems had before this setting existed
+    and is the only default that guarantees zero behaviour change on
+    un-migrated orgs. Setting a concrete IANA name (``"Asia/Kolkata"``,
+    ``"America/New_York"``, ...) switches both systems into
+    timezone-aware mode.
+    """
+
+    auto_mode_enabled: bool = Field(default=True, alias="autoModeEnabled")
+    working_days: list[WeekdayKey] = Field(
+        default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"],
+        alias="workingDays",
+        min_length=1,
+    )
+    working_hours_start: str = Field(
+        default="08:00",
+        alias="workingHoursStart",
+        pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
+    )
+    working_hours_end: str = Field(
+        default="18:00",
+        alias="workingHoursEnd",
+        pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
+    )
+    timezone: str | None = Field(default=None)
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, value: str | None) -> str | None:
+        """Reject unknown IANA timezone names. ``None`` is allowed."""
+        if value is None:
+            return None
+        if value not in zoneinfo.available_timezones():
+            raise ValueError(f"Unknown IANA timezone: {value!r}")
+        return value
+
+    @model_validator(mode="after")
+    def _start_before_end(self) -> "PresenceSettings":
+        """Assert the working day's start time is strictly before its end."""
+        def to_tuple(hhmm: str) -> tuple[int, int]:
+            hour, minute = hhmm.split(":")
+            return (int(hour), int(minute))
+
+        if to_tuple(self.working_hours_start) >= to_tuple(self.working_hours_end):
+            raise ValueError(
+                "working_hours_start must be strictly before working_hours_end"
+            )
+        return self
+
+    model_config = {"populate_by_name": True}
+
+
 class ConnectionsRead(BaseModel):
     """Response schema for GET /settings/connections."""
 
@@ -123,6 +192,7 @@ class ConnectionsRead(BaseModel):
         default_factory=BUDStageSettings,
         alias="budStages",
     )
+    presence: PresenceSettings = Field(default_factory=PresenceSettings)
 
     model_config = {"populate_by_name": True}
 
@@ -140,6 +210,7 @@ class RepoInfo(BaseModel):
     feature_count: int = Field(0, alias="featureCount")
     main_branch: str | None = Field(None, alias="mainBranch")
     develop_branch: str | None = Field(None, alias="developBranch")
+    uat_branch: str | None = Field(None, alias="uatBranch")
     has_uncommitted_changes: bool = Field(False, alias="hasUncommittedChanges")
     repo_type: str | None = Field(None, alias="repoType")
     github_repo: str | None = Field(None, alias="githubRepo")
@@ -154,6 +225,7 @@ class RepoBranchUpdate(BaseModel):
 
     main_branch: str | None = Field(None, alias="mainBranch")
     develop_branch: str | None = Field(None, alias="developBranch")
+    uat_branch: str | None = Field(None, alias="uatBranch")
 
     model_config = {"populate_by_name": True}
 
@@ -164,6 +236,7 @@ class RepoBranchList(BaseModel):
     branches: list[str]
     current_main: str | None = Field(None, alias="currentMain")
     current_develop: str | None = Field(None, alias="currentDevelop")
+    current_uat: str | None = Field(None, alias="currentUat")
 
     model_config = {"populate_by_name": True}
 
@@ -193,5 +266,6 @@ class ConnectionsUpdate(BaseModel):
     scan: ScanSettings | None = None
     qa_automation: QAAutomationSettings | None = Field(None, alias="qaAutomation")
     bud_stages: BUDStageSettings | None = Field(None, alias="budStages")
+    presence: PresenceSettings | None = None
 
     model_config = {"populate_by_name": True}

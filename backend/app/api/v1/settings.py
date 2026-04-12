@@ -30,7 +30,11 @@ from app.schemas.settings import (
     SlackSettings,
     SourceCodeSettings,
 )
-from app.services.org_settings import get_bud_stage_settings, get_qa_settings
+from app.services.org_settings import (
+    get_bud_stage_settings,
+    get_presence_settings,
+    get_qa_settings,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -69,12 +73,13 @@ async def get_connections(
     llm_cfg = config.get("llm", {})
     scan_cfg = config.get("scan", {})
 
-    # qa / bud_stages sections are resolved through org_settings so defaults
-    # stay in lockstep with every other reader (prompt builder, estimation,
-    # status transitions). Never read config["qa"] / config["bud_stages"]
-    # directly — the helper is the single source of truth.
+    # qa / bud_stages / presence sections are resolved through org_settings
+    # so defaults stay in lockstep with every other reader (prompt builder,
+    # estimation, status transitions, presence sim). Never read those keys
+    # directly from `config` — the helpers are the single source of truth.
     qa_cfg = get_qa_settings(config)
     stage_cfg = get_bud_stage_settings(config)
+    presence_cfg = get_presence_settings(config)
 
     return ConnectionsRead(
         sourceCode=SourceCodeSettings(
@@ -107,11 +112,12 @@ async def get_connections(
             maxTurns=scan_cfg.get("max_turns", 40),
             autoCreateMembers=scan_cfg.get("auto_create_members", True),
         ),
-        # qa_cfg and stage_cfg are already QAAutomationSettings /
-        # BUDStageSettings instances (the helper reuses the schema classes),
-        # so we can pass them through directly — one source of defaults.
+        # qa_cfg / stage_cfg / presence_cfg are already schema instances
+        # (the helpers reuse the same classes), so we can pass them through
+        # directly — one source of defaults.
         qa_automation=qa_cfg,
         bud_stages=stage_cfg,
+        presence=presence_cfg,
     )
 
 
@@ -218,6 +224,12 @@ async def update_connections(
     # BUD stage toggles (e.g. whether UAT is part of this org's lifecycle)
     if body.bud_stages is not None:
         config["bud_stages"] = body.bud_stages.model_dump()
+
+    # Presence / auto-mode settings (working days, hours, timezone).
+    # by_alias=False so stored JSON stays in snake_case to match the other
+    # sections. ``get_presence_settings`` reads from this exact shape.
+    if body.presence is not None:
+        config["presence"] = body.presence.model_dump(mode="json", by_alias=False)
 
     org.config = config
     flag_modified(org, "config")

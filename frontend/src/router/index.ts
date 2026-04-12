@@ -120,6 +120,15 @@ const router = createRouter({
           component: () => import('@/views/profile/ProfileView.vue'),
         },
         {
+          // Self-service MCP token management. No permission gate — any
+          // authenticated user can generate their own token. Hits the
+          // new /v1/me/mcp-token backend endpoint, which writes only to
+          // the user_mcp_tokens row and never touches the org-level hash.
+          path: 'profile/mcp-token',
+          name: 'profile-mcp-token',
+          component: () => import('@/views/profile/ProfileMcpToken.vue'),
+        },
+        {
           path: 'skills',
           name: 'skills',
           component: () => import('@/views/skills/SkillProfilesView.vue'),
@@ -159,6 +168,12 @@ const router = createRouter({
           name: 'settings-qa-automation',
           meta: { permission: 'integrations:configure' },
           component: () => import('@/views/settings/SettingsQAAutomation.vue'),
+        },
+        {
+          path: 'settings/presence',
+          name: 'settings-presence',
+          meta: { permission: 'integrations:configure' },
+          component: () => import('@/views/settings/SettingsPresence.vue'),
         },
       ],
     },
