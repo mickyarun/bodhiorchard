@@ -399,6 +399,52 @@ export class GardenEngine {
             )
           }
 
+          // ─── Seat interaction: E-key to sit/stand at nearby chairs ───
+          if (this.input?.wasPressed(pc.KEY_E) && this.sceneManager) {
+            if (this.takeoverCtrl.isSitting) {
+              this.takeoverCtrl.standUp()
+              this.takeoverUI?.hideSeatPrompt()
+              // Broadcast stand-up to other clients
+              const sp = this.takeoverCtrl.getPosition()
+              this.orgRoomClient?.sendMove(sp.x, sp.y, sp.z, this.takeoverCtrl.getYaw(), 'idle')
+            } else {
+              // Find nearest seat within proximity
+              const pos = this.takeoverCtrl.getPosition()
+              const seats = this.sceneManager.worldLayout.getSeats()
+              const PROXIMITY_SQ = 2.5 * 2.5
+              let nearest: { x: number; y: number; z: number; yaw: number } | null = null
+              let nearestDist = PROXIMITY_SQ
+              for (const seat of seats) {
+                const dx = pos.x - seat.x
+                const dz = pos.z - seat.z
+                const distSq = dx * dx + dz * dz
+                if (distSq < nearestDist) {
+                  nearestDist = distSq
+                  nearest = seat
+                }
+              }
+              if (nearest) {
+                this.takeoverCtrl.sitAt(nearest.x, nearest.y, nearest.z, nearest.yaw)
+                this.takeoverUI?.hideSeatPrompt()
+                // Broadcast sit to other clients
+                this.orgRoomClient?.sendMove(nearest.x, nearest.y, nearest.z, nearest.yaw, 'sit')
+              }
+            }
+          }
+
+          // Show/hide "Press E to sit" prompt when near a seat
+          if (!this.takeoverCtrl.isSitting && this.sceneManager) {
+            const pos = this.takeoverCtrl.getPosition()
+            const seats = this.sceneManager.worldLayout.getSeats()
+            const nearSeat = seats.some(s => {
+              const dx = pos.x - s.x
+              const dz = pos.z - s.z
+              return dx * dx + dz * dz < 6.25  // 2.5 unit radius
+            })
+            if (nearSeat) this.takeoverUI?.showSeatPrompt()
+            else this.takeoverUI?.hideSeatPrompt()
+          }
+
           // Inactivity warning / auto-exit
           if (this.takeoverCtrl.showWarning) {
             this.takeoverUI?.showWarning(this.takeoverCtrl.warningSecondsLeft)

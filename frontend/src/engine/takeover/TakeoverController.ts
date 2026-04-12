@@ -32,10 +32,14 @@ export class TakeoverController {
   private entity: pc.Entity | null = null
   private physics: PhysicsWorld | null = null
 
-  // Saved state for restoration
-  private originalPosition = new pc.Vec3()
-  private originalYaw = 0
+  // Saved sitting flag — used in `enter` to un-set the anim boolean so the
+  // character stands up when takeover starts. No longer need originalPosition
+  // or originalYaw; the server walks the character home on exit, so there's
+  // nothing to locally "restore."
   private wasSitting = false
+
+  // Seat interaction — E-key sit at nearby chairs
+  private _sitting = false
 
   // Jump
   private jumpProgress = -1
@@ -60,6 +64,42 @@ export class TakeoverController {
   get showWarning(): boolean { return this._inactivityTimer >= INACTIVITY_WARNING }
   get warningSecondsLeft(): number {
     return Math.max(0, INACTIVITY_TIMEOUT - this._inactivityTimer)
+  }
+
+  /** Whether the player is currently sitting at a chair. */
+  get isSitting(): boolean { return this._sitting }
+
+  /**
+   * Teleport the character to a seat and play the sit animation.
+   * Freezes movement and door detection while seated. Called from
+   * GardenEngine when the player presses E near a chair.
+   */
+  sitAt(x: number, y: number, z: number, yaw: number): void {
+    if (!this.entity) return
+    this._sitting = true
+    this.entity.setPosition(x, y, z)
+    this.entity.setEulerAngles(0, yaw, 0)
+    this.entity.anim?.setBoolean('sitting', true)
+    this.entity.anim?.setInteger('speed', 0)
+    this.entity.anim?.setInteger('working', 0)
+    this.physics?.setDoorsEnabled(false)
+    this._inactivityTimer = 0
+  }
+
+  /**
+   * Stand up from a chair and resume movement. Clears the sit animation
+   * and re-enables door detection. Called from GardenEngine on E-key
+   * or WASD while sitting.
+   */
+  standUp(): void {
+    if (!this.entity || !this._sitting) return
+    this._sitting = false
+    this.entity.anim?.setBoolean('sitting', false)
+    this.physics?.setDoorsEnabled(true)
+    // Sync physics capsule to the seated position so movement resumes
+    // from the chair, not from the last walked-to position.
+    const pos = this.entity.getPosition()
+    this.physics?.teleportPlayer(pos.x, pos.z)
   }
 
   /** Door collision from last physics step. Consumed on read. */
@@ -104,8 +144,6 @@ export class TakeoverController {
     this.physics = physics
 
     const pos = entity.getPosition()
-    this.originalPosition.copy(pos)
-    this.originalYaw = entity.getEulerAngles().y
     this.wasSitting = entity.anim?.getBoolean('sitting') ?? false
 
     if (this.wasSitting) entity.anim?.setBoolean('sitting', false)
@@ -129,6 +167,18 @@ export class TakeoverController {
   /** Per-frame update. */
   update(dt: number, camYaw: number): void {
     if (!this.entity || !this.physics) return
+
+    // ─── Sitting: freeze all movement, WASD auto-stands ──────────
+    if (this._sitting) {
+      const anyMove =
+        this.input.isPressed(pc.KEY_W) || this.input.isPressed(pc.KEY_UP) ||
+        this.input.isPressed(pc.KEY_S) || this.input.isPressed(pc.KEY_DOWN) ||
+        this.input.isPressed(pc.KEY_A) || this.input.isPressed(pc.KEY_LEFT) ||
+        this.input.isPressed(pc.KEY_D) || this.input.isPressed(pc.KEY_RIGHT)
+      if (anyMove) this.standUp()
+      else this._inactivityTimer += dt
+      return  // skip physics + movement while seated
+    }
 
     const spacePressed = this.input.wasPressed(pc.KEY_SPACE)
 
@@ -191,7 +241,17 @@ export class TakeoverController {
     }
   }
 
-  /** Exit takeover — restore entity, destroy physics player. */
+  /**
+   * Exit takeover — clean up controller state only. Does NOT restore the
+   * entity's position/yaw/anim locally because the server-driven snapshot
+   * stream is now authoritative and will take over within a tick. Snapping
+   * back to `originalPosition` here would create a visible teleport followed
+   * by another teleport when the first snapshot update arrives — and during
+   * the brief gap, the entity's animState/position would be stale.
+   *
+   * The server's `handleTakeoverEnd` starts a walkHome on its side; each
+   * subsequent snapshot update advances `character.entity` naturally.
+   */
   exit(): void {
     if (!this.entity) return
 
@@ -201,18 +261,7 @@ export class TakeoverController {
     }
 
     this.jumpProgress = -1
-
-    // Restore original position and yaw
-    this.entity.setPosition(this.originalPosition.x, 0, this.originalPosition.z)
-    this.entity.setEulerAngles(0, this.originalYaw, 0)
-
-    // Restore animation state
-    const anim = this.entity.anim
-    if (anim) {
-      anim.setInteger('speed', 0)
-      anim.setBoolean('jumping', false)
-      if (this.wasSitting) anim.setBoolean('sitting', true)
-    }
+    this._sitting = false
 
     // Clean up physics player + disable door detection
     if (this.physics) {

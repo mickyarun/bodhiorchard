@@ -14,6 +14,7 @@ export class TakeoverUI {
   private container: HTMLElement | null = null
   private memberCard: HTMLElement | null = null
   private warning: HTMLElement | null = null
+  private seatPrompt: HTMLElement | null = null
   private exitBtn: HTMLElement | null = null
   private parentEl: HTMLElement | null = null
   private originalParentPosition = ''
@@ -120,6 +121,23 @@ export class TakeoverUI {
     if (this.warning) this.warning.style.display = 'none'
   }
 
+  /** Show "Press E to sit" prompt when near a chair. */
+  showSeatPrompt(): void {
+    if (!this.seatPrompt) {
+      this.seatPrompt = this.makeLabel(
+        '\u24ba Press E to sit',
+        'bottom: 80px; left: 50%; transform: translateX(-50%); ' +
+        'background: rgba(0,0,0,0.7); padding: 6px 14px; border-radius: 6px; ' +
+        'font-size: 13px; pointer-events: none;',
+      )
+    }
+    this.seatPrompt.style.display = 'block'
+  }
+
+  hideSeatPrompt(): void {
+    if (this.seatPrompt) this.seatPrompt.style.display = 'none'
+  }
+
   destroy(): void {
     if (this.parentEl) {
       this.parentEl.style.position = this.originalParentPosition
@@ -129,6 +147,7 @@ export class TakeoverUI {
     this.container = null
     this.memberCard = null
     this.warning = null
+    this.seatPrompt = null
     this.exitBtn = null
     this.onExitClick = null
   }
