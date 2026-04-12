@@ -50,5 +50,5 @@ export const SEAT_OFFSETS: Record<string, { forwardOffset: number; seatY: number
   loungeSofa:    { forwardOffset: 0.08, seatY: 0.23 },
   loungeChair:   { forwardOffset: 0.10, seatY: 0.23 },
   pavilionBench: { forwardOffset: 0.10, seatY: 0.23 },
-  poolChair:     { forwardOffset: 0.05, seatY: 0.15 },
+  poolChair:     { forwardOffset: 0.35, seatY: 0.15 },
 }

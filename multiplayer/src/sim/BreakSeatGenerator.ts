@@ -175,17 +175,25 @@ function generateCoffeeBarSeats(
 function generatePoolSeats(
   zoneX: number, zoneZ: number, count: number,
 ): BreakSeat[] {
-  // Pool chairs now sit at ground level (Y=0) since the pond GLB terrain
-  // was replaced with a procedural WaterSurface. Seat height from the
-  // poolChair InteractionPoint offset is 0.15.
+  // Pool chairs at ground level. The forwardOffset (0.35) shifts the seat
+  // position toward the chair surface in the facing direction — same value
+  // as InteractionPoint.SEAT_OFFSETS.poolChair.forwardOffset on the frontend.
   const SEAT_Y = 0.15
+  const FWD = 0.35  // forwardOffset for poolChair
+
+  // Helper: shift (x, z) by `FWD` units in the yaw direction
+  const fwd = (baseX: number, baseZ: number, yaw: number) => ({
+    x: baseX + Math.sin(yaw * Math.PI / 180) * FWD,
+    z: baseZ + Math.cos(yaw * Math.PI / 180) * FWD,
+  })
+
   const ALL_POOL_SEATS: BreakSeat[] = [
-    { zone: "pool_resort", x: zoneX - 5,   y: SEAT_Y, z: zoneZ - 1.5, yaw: 90 },
-    { zone: "pool_resort", x: zoneX - 5,   y: SEAT_Y, z: zoneZ + 2.5, yaw: 90 },
-    { zone: "pool_resort", x: zoneX + 5,   y: SEAT_Y, z: zoneZ - 1.5, yaw: -90 },
-    { zone: "pool_resort", x: zoneX + 5,   y: SEAT_Y, z: zoneZ + 2.5, yaw: -90 },
-    { zone: "pool_resort", x: zoneX - 2.5, y: SEAT_Y, z: zoneZ + 5,   yaw: 180 },
-    { zone: "pool_resort", x: zoneX + 2.5, y: SEAT_Y, z: zoneZ + 5,   yaw: 180 },
+    { zone: "pool_resort", ...fwd(zoneX - 5, zoneZ - 1.5, 90),     y: SEAT_Y, yaw: 90 },
+    { zone: "pool_resort", ...fwd(zoneX - 5, zoneZ + 2.5, 90),     y: SEAT_Y, yaw: 90 },
+    { zone: "pool_resort", ...fwd(zoneX + 5, zoneZ - 1.5, -90),    y: SEAT_Y, yaw: -90 },
+    { zone: "pool_resort", ...fwd(zoneX + 5, zoneZ + 2.5, -90),    y: SEAT_Y, yaw: -90 },
+    { zone: "pool_resort", ...fwd(zoneX - 2.5, zoneZ + 5, 180),    y: SEAT_Y, yaw: 180 },
+    { zone: "pool_resort", ...fwd(zoneX + 2.5, zoneZ + 5, 180),    y: SEAT_Y, yaw: 180 },
   ]
   return ALL_POOL_SEATS.slice(0, Math.min(count, POOL_MAX))
 }
