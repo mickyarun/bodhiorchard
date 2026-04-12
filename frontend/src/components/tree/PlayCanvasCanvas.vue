@@ -22,7 +22,7 @@
       v-if="isDev"
       class="simulate-btn"
       title="Simulate dev activity (walk to tree)"
-      @click="engine?.simulateDevActivity()"
+      @click="handleSimulate"
     >
       Simulate
     </button>
@@ -40,6 +40,7 @@ const authStore = useAuthStore()
 
 // Dev-only simulate button (remove when real hooks are confirmed)
 const isDev = import.meta.env.DEV
+function handleSimulate(): void { engine?.simulateDevActivity() }
 
 const props = defineProps<{
   treeData: TreeData
