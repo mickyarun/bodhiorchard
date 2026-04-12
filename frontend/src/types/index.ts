@@ -458,6 +458,65 @@ export interface BUDReleaseStage {
   events: ReleaseTimelineEvent[]
 }
 
+// ── Bug Types ────────────────────────────────────────────────────
+export type BugSeverity = 'low' | 'medium' | 'high' | 'critical'
+export type BugStatusValue = 'open' | 'in-progress' | 'resolved' | 'closed' | 'blocked'
+
+export interface BugListItem {
+  id: string
+  title: string
+  severity: BugSeverity
+  status: BugStatusValue
+  module: string | null
+  budId: string | null
+  budNumber: number | null
+  reporterName: string | null
+  assigneeName: string | null
+  createdAt: string
+}
+
+export interface BugRead {
+  id: string
+  title: string
+  description: string | null
+  severity: BugSeverity
+  status: BugStatusValue
+  module: string | null
+  linkedPr: string | null
+  budId: string | null
+  budNumber: number | null
+  budTitle: string | null
+  reporterId: string
+  reporterName: string | null
+  assigneeId: string | null
+  assigneeName: string | null
+  resolvedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BugListResponse {
+  items: BugListItem[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export const BUG_SEVERITY_COLORS: Record<BugSeverity, string> = {
+  low: 'grey',
+  medium: 'warning',
+  high: 'orange',
+  critical: 'error',
+}
+
+export const BUG_STATUS_COLORS: Record<BugStatusValue, string> = {
+  open: 'error',
+  'in-progress': 'warning',
+  resolved: 'success',
+  closed: 'grey',
+  blocked: 'purple',
+}
+
 export const BUD_STATUS_COLORS: Record<BUDStatus, string> = {
   'bud': 'brown',
   'design': 'teal',
