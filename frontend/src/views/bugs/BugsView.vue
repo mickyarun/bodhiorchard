@@ -114,9 +114,37 @@
           <div v-if="bugsStore.currentBug.module">
             <strong>Module:</strong> {{ bugsStore.currentBug.module }}
           </div>
-          <div v-if="bugsStore.currentBug.budNumber">
-            <strong>Linked BUD:</strong> BUD-{{ String(bugsStore.currentBug.budNumber).padStart(3, '0') }}
-            <span v-if="bugsStore.currentBug.budTitle"> &mdash; {{ bugsStore.currentBug.budTitle }}</span>
+          <div class="d-flex align-center ga-2">
+            <strong>Linked BUD:</strong>
+            <template v-if="bugsStore.currentBug.budNumber">
+              <v-chip
+                size="small"
+                variant="tonal"
+                color="primary"
+                closable
+                @click:close="unlinkBud"
+              >
+                BUD-{{ String(bugsStore.currentBug.budNumber).padStart(3, '0') }}
+                <span v-if="bugsStore.currentBug.budTitle" class="ml-1 text-truncate" style="max-width: 200px;">
+                  {{ bugsStore.currentBug.budTitle }}
+                </span>
+              </v-chip>
+            </template>
+            <template v-else>
+              <v-autocomplete
+                v-model="linkBudId"
+                :items="budItems"
+                item-title="label"
+                item-value="value"
+                variant="outlined"
+                density="compact"
+                placeholder="Search BUDs..."
+                hide-details
+                clearable
+                style="max-width: 280px"
+                @update:model-value="onLinkBud"
+              />
+            </template>
           </div>
           <div><strong>Reporter:</strong> {{ bugsStore.currentBug.reporterName || 'Unknown' }}</div>
           <div v-if="bugsStore.currentBug.assigneeName">
@@ -152,15 +180,26 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useBUDStore } from '@/stores/bud'
 import { useBugsStore } from '@/stores/bugs'
 import { BUG_SEVERITY_COLORS, BUG_STATUS_COLORS } from '@/types'
 import type { BugListItem, BugRead, BugStatusValue } from '@/types'
 import { formatDateTime } from '@/utils/date'
 import BugCreateDialog from './BugCreateDialog.vue'
 
+const budStore = useBUDStore()
 const bugsStore = useBugsStore()
 
 const showCreate = ref(false)
+const linkBudId = ref<string | null>(null)
+
+// BUD items for the autocomplete — loaded once when detail opens
+const budItems = computed(() =>
+  budStore.buds.map((b) => ({
+    label: `BUD-${String(b.bud_number).padStart(3, '0')}: ${b.title}`,
+    value: b.id,
+  })),
+)
 const showDetail = ref(false)
 const filterStatus = ref<string | null>(null)
 const filterSeverity = ref<string | null>(null)
@@ -203,7 +242,21 @@ function loadBugs(): void {
 
 async function openBug(bug: BugListItem): Promise<void> {
   await bugsStore.fetchBug(bug.id)
+  linkBudId.value = bugsStore.currentBug?.budId || null
+  // Ensure BUD list is loaded for the autocomplete
+  if (budStore.buds.length === 0) budStore.fetchBUDs()
   showDetail.value = true
+}
+
+async function onLinkBud(budId: string | null): Promise<void> {
+  if (!bugsStore.currentBug || !budId) return
+  await bugsStore.updateBug(bugsStore.currentBug.id, { budId })
+}
+
+async function unlinkBud(): Promise<void> {
+  if (!bugsStore.currentBug) return
+  linkBudId.value = null
+  await bugsStore.updateBug(bugsStore.currentBug.id, { budId: '' })
 }
 
 async function changeStatus(newStatus: BugStatusValue): Promise<void> {
