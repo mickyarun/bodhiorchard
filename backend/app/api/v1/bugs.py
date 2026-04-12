@@ -49,8 +49,26 @@ async def create_bug(
     bug_repo = BugRepository(db, org_id=current_user.org_id)
     bug = await bug_repo.create(bug)
 
-    # Generate embedding + auto-link in the background (non-blocking)
-    _schedule_embedding_and_link(bug.id, current_user.org_id)
+    # Embed + auto-link inline so the response includes the linked BUD.
+    # This is fast (~100ms embed + 1 pgvector query) and gives the user
+    # immediate feedback about which BUD was matched.
+    if not bud_uuid:
+        try:
+            from app.services.bug_linker import embed_and_link_bug
+
+            matched = await embed_and_link_bug(db, current_user.org_id, bug)
+            if matched:
+                await db.flush()
+                await db.refresh(bug)
+        except Exception:
+            import structlog
+
+            structlog.get_logger(__name__).warning(
+                "bug_embed_link_failed_inline", bug_id=str(bug.id), exc_info=True,
+            )
+    else:
+        # BUD already linked manually — just generate embedding in background
+        _schedule_embedding(bug.id, current_user.org_id)
 
     return await _bug_to_read(db, bug, current_user.org_id)
 
@@ -180,20 +198,18 @@ async def update_bug(
 _background_tasks: set[asyncio.Task[None]] = set()
 
 
-def _schedule_embedding_and_link(bug_id: uuid.UUID, org_id: uuid.UUID) -> None:
-    """Fire-and-forget: generate embedding + auto-link to closest BUD."""
-    import asyncio
-
+def _schedule_embedding(bug_id: uuid.UUID, org_id: uuid.UUID) -> None:
+    """Fire-and-forget: generate embedding only (BUD already linked manually)."""
     task = asyncio.create_task(
-        _bg_embed_and_link(bug_id, org_id),
+        _bg_embed(bug_id, org_id),
         name=f"bug_embed_{bug_id}",
     )
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
 
-async def _bg_embed_and_link(bug_id: uuid.UUID, org_id: uuid.UUID) -> None:
-    """Background: embed bug text and auto-link to closest BUD."""
+async def _bg_embed(bug_id: uuid.UUID, org_id: uuid.UUID) -> None:
+    """Background: generate embedding for a bug (no auto-link)."""
     import structlog
 
     from app.database import AsyncSessionLocal
@@ -206,12 +222,15 @@ async def _bg_embed_and_link(bug_id: uuid.UUID, org_id: uuid.UUID) -> None:
             if not bug:
                 return
 
-            from app.services.bug_linker import embed_and_link_bug
+            from app.services.embedding_service import embedding_service
 
-            await embed_and_link_bug(db, org_id, bug)
+            text = bug.title
+            if bug.description:
+                text = f"{text} {bug.description}"
+            bug.embedding = await embedding_service.embed(text)
             await db.commit()
     except Exception:
-        logger.warning("bug_embed_link_failed", bug_id=str(bug_id), exc_info=True)
+        logger.warning("bug_embed_failed", bug_id=str(bug_id), exc_info=True)
 
 
 async def _bug_to_read(
