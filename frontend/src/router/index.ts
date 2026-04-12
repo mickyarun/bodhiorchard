@@ -110,6 +110,11 @@ const router = createRouter({
           component: () => import('@/views/features/FeaturesView.vue'),
         },
         {
+          path: 'bugs',
+          name: 'bugs',
+          component: () => import('@/views/bugs/BugsView.vue'),
+        },
+        {
           path: 'leaderboard',
           name: 'leaderboard',
           component: () => import('@/views/leaderboard/LeaderboardView.vue'),

@@ -29,8 +29,8 @@
         <v-list-item
           prepend-icon="mdi-bug-outline"
           title="Bugs"
+          to="/bugs"
           rounded="lg"
-          disabled
         />
         <v-list-item
           prepend-icon="mdi-trophy-outline"
