@@ -6,6 +6,7 @@ from app.api.health import router as health_router
 from app.api.v1.agent_skills import router as agent_skills_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.bud import router as bud_router
+from app.api.v1.bugs import router as bugs_router
 from app.api.v1.claude import router as claude_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.design_system import router as design_system_router
@@ -35,6 +36,7 @@ api_router.include_router(auth_router, prefix="/api/v1/auth")
 api_router.include_router(claude_router, prefix="/api/v1/claude")
 api_router.include_router(orgs_router, prefix="/api/v1/organizations")
 api_router.include_router(bud_router, prefix="/api/v1/buds")
+api_router.include_router(bugs_router, prefix="/api/v1/bugs")
 api_router.include_router(dashboard_router, prefix="/api/v1/dashboard")
 api_router.include_router(design_system_router, prefix="/api/v1/design-systems")
 api_router.include_router(roles_router, prefix="/api/v1")
