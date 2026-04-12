@@ -191,10 +191,10 @@ export class PlayerController {
   }
 
   /** Teleport to chair and play sit animation. WASD stands up. */
-  sitAt(x: number, z: number, yaw: number): void {
+  sitAt(x: number, z: number, yaw: number, y = 0): void {
     if (!this.entity) return
     this._sitting = true
-    this.entity.setPosition(x, 0, z)
+    this.entity.setPosition(x, y, z)
     this.entity.setEulerAngles(0, yaw, 0)
     this.entity.anim?.setInteger('speed', 0)
     this.entity.anim?.setInteger('sitting', 1)

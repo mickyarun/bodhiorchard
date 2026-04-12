@@ -133,7 +133,8 @@ export class HouseTestEngine {
 
     // ── 6. Player ───────────────────────────────────────────────────────────
     this.player = new PlayerController(this.loader, this.input)
-    await this.player.init(app.root, PLAYER_START_X, PLAYER_START_Z)
+    // Use KayKit character (same as main dashboard) instead of legacy Kenney Blocky
+    await this.player.init(app.root, PLAYER_START_X, PLAYER_START_Z, 'kaykit:barbarian:FF6B35:2E4057:F4C28F')
 
     // Create player physics body (capsule collider)
     this.physics.createPlayer(PLAYER_START_X, PLAYER_START_Z)
@@ -151,7 +152,7 @@ export class HouseTestEngine {
     for (const item of this.interior.items) {
       item.onUse(() => {
         const { seat } = item
-        if (item.action === 'sit'   && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw)
+        if (item.action === 'sit'   && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw, seat.y)
         if (item.action === 'sleep' && seat) this.player?.sleepAt(seat.x, seat.z, seat.yaw)
         this.ui?.showInfo(item.infoText)
         this._activeSeatId = item.id
@@ -163,7 +164,7 @@ export class HouseTestEngine {
     for (const item of this.pool.items) {
       item.onUse(() => {
         const { seat } = item
-        if (item.action === 'sit' && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw)
+        if (item.action === 'sit' && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw, seat.y)
         this.ui?.showInfo(item.infoText)
         this._activeSeatId = item.id
       })

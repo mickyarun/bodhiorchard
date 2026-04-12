@@ -91,6 +91,7 @@ export class PoolScene {
           x: result.seatWorldX,
           z: result.seatWorldZ,
           yaw: chairDef.yaw,
+          y: result.seatWorldY,
         },
         2.0, // proximity radius
       )

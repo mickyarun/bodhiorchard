@@ -23,6 +23,7 @@ export interface SeatConfig {
   x: number
   z: number
   yaw: number  // euler Y facing direction for player
+  y?: number   // seat surface height (default 0)
 }
 
 // ─── Furniture config ─────────────────────────────────────────────────────────
