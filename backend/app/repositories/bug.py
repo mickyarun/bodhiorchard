@@ -59,6 +59,20 @@ class BugRepository(BaseRepository[Bug]):
         result = await self._db.execute(stmt)
         return result.scalar() or 0
 
+    async def count_open_for_bud(self, bud_id: uuid.UUID) -> int:
+        """Count open (unresolved) bugs linked to a specific BUD.
+
+        Includes: open, in-progress, blocked. Excludes: resolved, closed.
+        """
+        stmt = self._scoped(
+            select(func.count(Bug.id)).where(
+                Bug.bud_id == bud_id,
+                Bug.status.in_([BugStatus.OPEN, BugStatus.IN_PROGRESS, BugStatus.BLOCKED]),
+            ),
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar() or 0
+
     async def search_by_status(
         self,
         *,

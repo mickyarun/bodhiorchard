@@ -94,6 +94,14 @@ class QAAutomationSettings(BaseModel):
         default="playwright",
         pattern=r"^[a-zA-Z0-9 _+\-]{1,40}$",
     )
+    # When open bugs on a BUD in testing reach this count, the BUD is
+    # auto-rejected back to development and the QA assignee is freed.
+    bug_reject_threshold: int = Field(
+        default=5,
+        alias="bugRejectThreshold",
+        ge=1,
+        le=50,
+    )
 
     model_config = {"populate_by_name": True}
 

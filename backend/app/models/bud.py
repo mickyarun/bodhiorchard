@@ -49,6 +49,7 @@ class BUDTimelineEventType(StrEnum):
     ALL_PRS_MERGED = "all_prs_merged"
     MERGED_TO_UAT = "merged_to_uat"
     MERGED_TO_PROD = "merged_to_prod"
+    TESTING_REJECTED = "testing_rejected"
     ESTIMATE_GENERATED = "estimate_generated"
     ESTIMATE_OVERRIDDEN = "estimate_overridden"
     AC_VERIFICATION_PASSED = "ac_verification_passed"

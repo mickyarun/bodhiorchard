@@ -106,6 +106,14 @@ def get_presence_settings(org_config: dict | None) -> PresenceSettings:
         return DEFAULT_PRESENCE_SETTINGS
 
 
+def get_bug_reject_threshold(org_config: dict | None) -> int:
+    """Return the open-bug count that triggers auto-rejection from testing.
+
+    Thin wrapper so callers don't need to construct QAAutomationSettings.
+    """
+    return get_qa_settings(org_config).bug_reject_threshold
+
+
 def get_phase_order(org_config: dict | None) -> list[str]:
     """Return the BUD phase order for this org, filtered by toggles.
 
