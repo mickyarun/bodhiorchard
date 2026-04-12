@@ -536,7 +536,7 @@
           />
 
           <!-- Linked Bugs -->
-          <BUDBugsPanel :bud-id="bud.id" class="mt-4" />
+          <BUDBugsPanel :bud-id="bud.id" :bud-status="bud.status" class="mt-4" />
 
           <!-- Override Dialog -->
           <v-dialog v-model="overrideDialogOpen" max-width="420">

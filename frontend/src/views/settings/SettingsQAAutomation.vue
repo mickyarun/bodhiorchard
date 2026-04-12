@@ -92,12 +92,36 @@
             density="compact"
             class="mb-2"
           />
-          <div class="text-caption text-medium-emphasis">
+          <div class="text-caption text-medium-emphasis mb-6">
             When off, BUDs transition directly from Testing to Prod. Useful for
             teams without a dedicated User Acceptance Testing phase. Existing
             BUDs currently in UAT are unaffected — only new transitions are
             blocked.
           </div>
+
+          <v-divider class="mb-4" />
+
+          <div class="d-flex align-center mb-3">
+            <div>
+              <div class="text-body-1 font-weight-medium">Bug Rejection Threshold</div>
+              <div class="text-caption text-medium-emphasis">
+                When open bugs on a BUD in testing reach this count, the BUD is
+                automatically sent back to development and the QA tester is freed.
+              </div>
+            </div>
+          </div>
+
+          <v-text-field
+            v-model.number="qa.bugRejectThreshold"
+            type="number"
+            label="Max open bugs before rejection"
+            variant="outlined"
+            density="compact"
+            :min="1"
+            :max="50"
+            style="max-width: 200px"
+            hide-details
+          />
         </v-card>
   </SettingsPageShell>
 </template>

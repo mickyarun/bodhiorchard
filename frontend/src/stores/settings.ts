@@ -26,6 +26,7 @@ export interface ConnectionsState {
   qaAutomation: {
     enabled: boolean
     framework: string
+    bugRejectThreshold: number
   }
   // Per-org BUD lifecycle stage toggles.
   budStages: {
@@ -64,6 +65,7 @@ function emptyState(): ConnectionsState {
     qaAutomation: {
       enabled: true,
       framework: 'playwright',
+      bugRejectThreshold: 5,
     },
     budStages: {
       uatEnabled: true,
