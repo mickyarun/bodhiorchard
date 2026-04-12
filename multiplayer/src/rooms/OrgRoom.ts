@@ -655,6 +655,12 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (member.takeoverSessionId) return
 
     const home = this.computeHomePlacement(userId, newPresence, preferredZone)
+    // Set locationContext BEFORE walkHome — walkHome resets it to "garden"
+    // for the walking animation, but we need the target context to be
+    // visible to subsequent computeHomePlacement calls in the SAME tick.
+    // Without this, multiple members changing presence simultaneously all
+    // read stale "garden" contexts and get assigned the same break seat.
+    member.locationContext = home.locationContext
     this.devSim.walkHome(member, home.x, home.z, home.yaw, home.sitting)
     console.log(
       `[OrgRoom] ${member.name} presence → ${newPresence}, walking to ${home.locationContext}`,

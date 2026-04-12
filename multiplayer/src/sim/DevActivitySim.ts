@@ -181,11 +181,13 @@ export class DevActivitySim {
       phraseTimer:     0,
     })
     // Immediate animation feedback so remote clients see the walk start
-    // without waiting for the next tick. Walking context stays "garden"
-    // until arrival — the walking_home branch in tick() sets it to
-    // `house_{userId}` on arrival.
+    // without waiting for the next tick.
+    // NOTE: locationContext is NOT reset here — the caller (applyPresenceChange)
+    // sets it to the TARGET context before calling walkHome so that subsequent
+    // computeHomePlacement calls in the same tick see the reserved seat. The
+    // walking_home arrival branch in tick() overwrites it with the final value
+    // (e.g. `house_{userId}`) on completion.
     member.animState = "walk"
-    member.locationContext = "garden"
   }
 
   /**
