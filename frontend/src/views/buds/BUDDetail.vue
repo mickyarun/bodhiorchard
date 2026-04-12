@@ -448,6 +448,19 @@
                     </div>
                   </v-alert>
 
+                  <!-- Release / closure date -->
+                  <div v-if="closedEvent" class="mb-5">
+                    <div class="text-overline text-medium-emphasis mb-2">
+                      {{ bud.status === 'discarded' ? 'Discarded on' : 'Completed on' }}
+                    </div>
+                    <div class="d-flex align-center ga-2">
+                      <v-icon icon="mdi-calendar-check" size="18" color="success" />
+                      <span class="text-body-1 font-weight-medium">
+                        {{ formatClosedDate(closedEvent.created_at) }}
+                      </span>
+                    </div>
+                  </div>
+
                   <!-- Closure reason (from status_override or status_change detail) -->
                   <div v-if="closedReason" class="mb-5">
                     <div class="text-overline text-medium-emphasis mb-2">Reason</div>
@@ -500,8 +513,9 @@
             </v-tabs-window>
           </div>
 
-          <!-- Delivery Estimates -->
+          <!-- Delivery Estimates (hidden when closed/discarded — no forecast needed) -->
           <BUDEstimateTimeline
+            v-if="!isClosed"
             :estimates="budEstimates"
             :current-phase="bud.status"
             :loading="estimatesLoading"

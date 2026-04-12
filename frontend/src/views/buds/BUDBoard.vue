@@ -112,7 +112,13 @@
               <div v-if="bud.current_phase_deadline" class="text-caption mb-1" :class="deadlineColor(bud.current_phase_deadline)">
                 ▸ Phase: {{ formatDate(bud.current_phase_deadline) }}
               </div>
-              <div v-if="bud.prod_p70_date" class="text-caption text-medium-emphasis mb-2">
+              <div v-if="bud.status === 'closed'" class="text-caption text-success mb-2">
+                ▸ Released: {{ formatDate(bud.updated_at) }}
+              </div>
+              <div v-else-if="bud.status === 'discarded'" class="text-caption text-error mb-2">
+                ▸ Discarded: {{ formatDate(bud.updated_at) }}
+              </div>
+              <div v-else-if="bud.prod_p70_date" class="text-caption text-medium-emphasis mb-2">
                 ▸ Live: {{ formatDate(bud.prod_p70_date) }} (70%)
               </div>
 
