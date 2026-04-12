@@ -55,7 +55,7 @@ export type BUDTabValue = (typeof BUD_SECTIONS)[BUDSectionKey]['tab']
 // observational \u2014 they have no markdown content, no exportable section,
 // and no editor \u2014 so they don't fit the BUD_SECTIONS shape, but the
 // router still needs to accept them as valid tab params.
-const NON_SECTION_BUD_TABS = ['uat', 'prod'] as const
+const NON_SECTION_BUD_TABS = ['uat', 'prod', 'closed'] as const
 
 // Derived helpers
 export const VALID_BUD_TABS = new Set([

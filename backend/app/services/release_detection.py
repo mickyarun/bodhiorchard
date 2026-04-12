@@ -244,6 +244,14 @@ async def detect_release_promotion(
         )
         new_event_count += 1
 
+    # For prod merges: auto-close the BUD when ALL impacted repos have
+    # shipped to production. This mirrors the CODE_REVIEW → TESTING
+    # auto-transition pattern (all repos merged → advance) but for the
+    # final lifecycle step.
+    if stage == "prod" and new_event_count:
+        for bud_id in matches:
+            await _maybe_auto_close_bud(db, org_id, bud_id)
+
     if new_event_count:
         logger.info(
             "release_promotion_detected",
@@ -254,3 +262,81 @@ async def detect_release_promotion(
             commits_walked=len(commits),
         )
     return new_event_count
+
+
+async def _maybe_auto_close_bud(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_id: uuid.UUID,
+) -> None:
+    """Auto-close a BUD if all impacted repos have merged_to_prod events.
+
+    Only fires when the BUD is currently in ``prod`` or ``uat`` status —
+    if it's already ``closed`` or still in ``testing``, this is a no-op.
+    Records a ``status_change`` timeline event with ``auto: true`` so the
+    timeline shows it was system-driven.
+    """
+    from app.models.bud import BUDStatus
+    from app.repositories.bud import BUDRepository
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        return
+    if bud.status not in (BUDStatus.UAT, BUDStatus.PROD):
+        return
+
+    impacted = bud.impacted_repos or []
+    if not impacted:
+        return
+
+    impacted_repo_ids = {
+        r.get("repo_id") for r in impacted if r.get("repo_id")
+    }
+    if not impacted_repo_ids:
+        return
+
+    # Check which repos already have merged_to_prod events for this BUD
+    stmt = (
+        select(BUDTimelineEvent)
+        .where(
+            BUDTimelineEvent.org_id == org_id,
+            BUDTimelineEvent.bud_id == bud_id,
+            BUDTimelineEvent.event_type == "merged_to_prod",
+        )
+    )
+    result = await db.execute(stmt)
+    prod_events = list(result.scalars())
+    repos_with_prod = {
+        e.detail.get("repo_id")
+        for e in prod_events
+        if e.detail
+    }
+
+    if not impacted_repo_ids.issubset(repos_with_prod):
+        return  # Not all repos have shipped yet
+
+    # All impacted repos have merged to prod — auto-close
+    bud.status = BUDStatus.CLOSED
+
+    await record_event(
+        db,
+        org_id,
+        bud_id,
+        "status_change",
+        detail={
+            "from": "prod",
+            "to": "closed",
+            "auto": True,
+            "reason": "All impacted repos merged to production",
+        },
+    )
+    publish(
+        f"bud:{bud_id}:activity",
+        {"event_type": "status_change", "to": "closed"},
+    )
+    logger.info(
+        "bud_auto_closed_all_repos_in_prod",
+        bud_id=str(bud_id),
+        impacted_count=len(impacted_repo_ids),
+    )
