@@ -17,6 +17,20 @@ class CommitRepoRead(BaseModel):
     last_sha: str
 
 
+class UntrackedRepoRead(BaseModel):
+    """Schema for a repo with commits but NOT in tracked_repositories.
+
+    Surfaced separately from ``CommitRepoRead`` so the BUD detail testing
+    tab can render an "Add as tracked" CTA. The QA tester (or anyone else)
+    pushed activity from a path the org hasn't added yet — the row exists
+    in dev_activity_logs but couldn't resolve to a tracked_repositories.id.
+    """
+
+    repo_path: str
+    name: str
+    commit_count: int
+
+
 class DevActivityRead(BaseModel):
     """Schema for a single developer activity entry."""
 
@@ -88,6 +102,7 @@ class DevActivityResponse(BaseModel):
     commits: list[DevCommitRead] = []
     contributors: list[ContributorRead] = []
     repos: list[CommitRepoRead] = []
+    untracked_repos: list[UntrackedRepoRead] = []
     stats: DevStatsRead = DevStatsRead()
 
 

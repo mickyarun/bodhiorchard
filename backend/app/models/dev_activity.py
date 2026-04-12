@@ -72,6 +72,11 @@ class DevActivityLog(BaseModel):
         nullable=True,
     )
     files_changed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Raw filesystem path of the repo this activity came from. Persisted even
+    # when repo_id is NULL (i.e. the path doesn't match any tracked_repository),
+    # so the BUD testing tab can group "untracked" rows by path and offer an
+    # "Add as tracked" CTA. Backfilled to NULL for existing rows.
+    repo_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     metadata_: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:

@@ -9,9 +9,10 @@ from app.api.v1.bud import router as bud_router
 from app.api.v1.claude import router as claude_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.design_system import router as design_system_router
-from app.api.v1.internal_colyseus import router as internal_colyseus_router
 from app.api.v1.github_webhook import router as github_webhook_router
+from app.api.v1.internal_colyseus import router as internal_colyseus_router
 from app.api.v1.jobs import router as jobs_router
+from app.api.v1.me import router as me_router
 from app.api.v1.members import router as members_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.organizations import router as orgs_router
@@ -46,6 +47,7 @@ api_router.include_router(slack_router, prefix="/api/v1/slack")
 api_router.include_router(github_webhook_router, prefix="/api/v1/webhooks")
 api_router.include_router(triage_router, prefix="/api/v1/triage-sessions")
 api_router.include_router(jobs_router, prefix="/api/v1/jobs")
+api_router.include_router(me_router, prefix="/api/v1")
 api_router.include_router(ws_router, prefix="/api/v1")
 api_router.include_router(public_router, prefix="/api/v1/public")
 api_router.include_router(xp_router, prefix="/api/v1")

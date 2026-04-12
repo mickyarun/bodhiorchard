@@ -52,13 +52,34 @@ async def handle_dev_activity(
 
     # 1. Resolve user — token first, email fallback
     user = auth.user
+    token_owner_email = user.email if user else None
+    resolved_via = "token" if user else "none"
     if user is None and body.author_email:
         from app.services.user_resolution import resolve_user_by_email
 
         user = await resolve_user_by_email(db, org.id, body.author_email)
+        if user:
+            resolved_via = "email_fallback"
 
     user_id = user.id if user else None
     actor_name = user.name if user else None
+
+    # DEBUG: log the attribution resolution so we can see which user the
+    # row is attributed to. The effective ROLE (for testing-tab routing)
+    # is computed at READ time by joining through org_to_user → roles,
+    # so there's nothing to snapshot here — just making sure the right
+    # user_id lands on the row. Remove after triage.
+    logger.info(
+        "hook_activity_attribution",
+        event_type=body.event_type,
+        token_owner_email=token_owner_email,
+        git_author_email=body.author_email or None,
+        resolved_via=resolved_via,
+        resolved_user_id=str(user_id) if user_id else None,
+        resolved_actor_name=actor_name,
+        branch=body.branch or None,
+        repo_path=body.repo_path or None,
+    )
 
     # 2. Resolve repo_id from repo_path
     repo_id = await _resolve_repo_id(db, org.id, body.repo_path)
@@ -109,6 +130,11 @@ async def handle_dev_activity(
         commit_sha=body.commit_sha or None,
         file_path=body.file_path or None,
         files_changed=body.files_changed or None,
+        # Persist the raw repo_path verbatim, even when repo_id is None
+        # (i.e. the path doesn't match any tracked_repository). The BUD
+        # testing tab uses this to surface "untracked" repos with an
+        # "Add as tracked" CTA. Truncate defensively to fit the column.
+        repo_path=(body.repo_path[:1000] if body.repo_path else None),
         metadata_=meta or None,
     )
     db.add(log)

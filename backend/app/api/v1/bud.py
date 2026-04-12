@@ -39,6 +39,7 @@ from app.schemas.dev_activity import (
     DevActivityResponse,
     DevCommitRead,
     DevStatsRead,
+    UntrackedRepoRead,
 )
 
 logger = structlog.get_logger(__name__)
@@ -320,6 +321,44 @@ async def update_bud(
                         "to": "testing",
                         "reason": reason.strip(),
                     },
+                )
+
+        # Manual testing → uat (or prod when UAT is disabled):
+        # QA is only "done" when every manual test case has a terminal
+        # result — pass / fail / blocked / skipped. Advancing past testing
+        # while any case is still pending would bury real work in an
+        # un-triaged state. Skipped counts as terminal because it's an
+        # explicit tester decision ("not applicable"), unlike pending
+        # which means "never looked at".
+        #
+        # This guard intentionally catches testing → prod even when UAT
+        # IS enabled in the org config — a user manually jumping past UAT
+        # still needs QA to have signed off on every case. Closing from
+        # testing is NOT blocked: closed means "abandoning this BUD",
+        # not "shipping it", so forcing every pending case to be resolved
+        # would be friction rather than safety.
+        if old_status == BUDStatus.TESTING and new_status in (
+            BUDStatus.UAT,
+            BUDStatus.PROD,
+        ):
+            pending_cases = [
+                tc
+                for tc in (bud.qa_manual_cases or [])
+                if isinstance(tc, dict) and tc.get("result") == "pending"
+            ]
+            if pending_cases:
+                pending_ids = [str(tc.get("id", "?")) for tc in pending_cases[:5]]
+                more = len(pending_cases) - len(pending_ids)
+                suffix = f" and {more} more" if more > 0 else ""
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Cannot advance to {new_status.value}: "
+                        f"{len(pending_cases)} manual test case"
+                        f"{'s' if len(pending_cases) != 1 else ''} still pending "
+                        f"({', '.join(pending_ids)}{suffix}). "
+                        f"Mark each as pass, fail, blocked, or skipped in the QA tab first."
+                    ),
                 )
 
         from app.services.bud_assignment import auto_assign_for_phase
@@ -853,20 +892,60 @@ def _parse_files_changed(raw: str) -> list[str]:
 )
 async def get_dev_activity(
     bud_id: uuid.UUID,
+    role: str | None = Query(
+        None,
+        description=(
+            "Optional actor_role filter — only return rows where the "
+            "committer's snapshotted role matches. Used by the BUD detail "
+            "testing tab (role=qa). Mutually exclusive with exclude_role."
+        ),
+    ),
+    exclude_role: str | None = Query(
+        None,
+        description=(
+            "Optional actor_role anti-filter — only return rows where the "
+            "committer's snapshotted role does NOT match (NULL roles are "
+            "still included as fall-through). Used by the BUD detail dev "
+            "tab (exclude_role=qa) when QA automation is enabled. Mutually "
+            "exclusive with role."
+        ),
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DevActivityResponse:
-    """Get development activity summary: commits, MCP updates, and stats."""
+    """Get development activity summary: commits, MCP updates, and stats.
+
+    Optional ``role`` / ``exclude_role`` query params filter the activity
+    by the committer's snapshotted ``actor_role`` (set on the dev_activity
+    row at write time by the MCP push handler). The two are mutually
+    exclusive — passing both is a 400.
+    """
+    if role is not None and exclude_role is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="role and exclude_role are mutually exclusive",
+        )
 
     from app.repositories.dev_activity import DevActivityLogRepository
 
     activity_repo = DevActivityLogRepository(db, org_id=current_user.org_id)
     task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
 
-    # Sequential — AsyncSession is not safe for concurrent use
-    commits = await activity_repo.list_commits_for_bud(bud_id, limit=50)
-    activities = await activity_repo.list_for_bud(bud_id, limit=50)
-    repo_summaries = await activity_repo.list_commit_repos_for_bud(bud_id)
+    # Sequential — AsyncSession is not safe for concurrent use.
+    # Threading the role filter through every list method keeps the
+    # activities / commits / repos / untracked_repos views in lockstep.
+    commits = await activity_repo.list_commits_for_bud(
+        bud_id, limit=50, role=role, exclude_role=exclude_role
+    )
+    activities = await activity_repo.list_for_bud(
+        bud_id, limit=50, role=role, exclude_role=exclude_role
+    )
+    repo_summaries = await activity_repo.list_commit_repos_for_bud(
+        bud_id, role=role, exclude_role=exclude_role
+    )
+    untracked_summaries = await activity_repo.list_untracked_repos_for_bud(
+        bud_id, role=role, exclude_role=exclude_role
+    )
     agent_tasks = await task_repo.list_for_bud(bud_id)
 
     # Count unique files across all commits
@@ -944,6 +1023,14 @@ async def get_dev_activity(
                 last_sha=s.last_sha,
             )
             for s in repo_summaries
+        ],
+        untracked_repos=[
+            UntrackedRepoRead(
+                repo_path=u.repo_path,
+                name=Path(u.repo_path).name,
+                commit_count=u.commit_count,
+            )
+            for u in untracked_summaries
         ],
         stats=DevStatsRead(
             total_commits=len(commits),
