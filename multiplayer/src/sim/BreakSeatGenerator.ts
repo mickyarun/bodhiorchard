@@ -165,7 +165,10 @@ function generateCoffeeBarSeats(
 function generatePoolSeats(
   zoneX: number, zoneZ: number, count: number,
 ): BreakSeat[] {
-  const SEAT_Y = 0.15
+  // Pool seats sit on the raised pond surface (POND_SURFACE_Y=0.18) at poolChair
+  // seat height (0.15). Total Y = baseY + seatY = 0.33. Without the baseY term
+  // characters clip through the ground of the elevated pool area.
+  const SEAT_Y = 0.33
   const ALL_POOL_SEATS: BreakSeat[] = [
     { zone: "pool_resort", x: zoneX - 5,   y: SEAT_Y, z: zoneZ - 1.5, yaw: 90 },
     { zone: "pool_resort", x: zoneX - 5,   y: SEAT_Y, z: zoneZ + 2.5, yaw: 90 },
