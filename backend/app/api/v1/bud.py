@@ -426,6 +426,19 @@ async def update_bud(
             except Exception:
                 logger.warning("xp_award_failed_bud_completion", exc_info=True)
 
+        # Post-closure side-effects: award contributor XP + trigger scan
+        if _completed:
+            try:
+                from app.services.bud_closure import on_bud_closed
+
+                await on_bud_closed(
+                    db, current_user.org_id, bud,
+                    actor_id=current_user.id,
+                    actor_name=current_user.name,
+                )
+            except Exception:
+                logger.warning("bud_closure_side_effects_failed", exc_info=True)
+
     logger.info("bud_updated", bud_id=str(bud.id), fields=list(update_data.keys()))
 
     # Trigger side-effect jobs on status transitions

@@ -343,6 +343,15 @@ async def _maybe_auto_close_bud(
         f"bud:{bud_id}:activity",
         {"event_type": "status_change", "to": "closed"},
     )
+
+    # Post-closure side-effects: award contributor XP + trigger scan
+    try:
+        from app.services.bud_closure import on_bud_closed
+
+        await on_bud_closed(db, org_id, bud)
+    except Exception:
+        logger.warning("auto_close_side_effects_failed", bud_id=str(bud_id), exc_info=True)
+
     logger.info(
         "bud_auto_closed_all_repos_in_prod",
         bud_id=str(bud_id),
