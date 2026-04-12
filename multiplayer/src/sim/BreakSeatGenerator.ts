@@ -36,26 +36,36 @@ const BREAK_RATIO = 0.6
 /** Max pool seats (limited by physical umbrella GLB sets). */
 const POOL_MAX = 6
 
+/**
+ * Minimum seats per zone — matches the physical furniture count built by
+ * each frontend builder. You can't have fewer seats than visible chairs,
+ * or characters sit on air. For large teams the budget-based scaling
+ * adds MORE rows; these minimums only kick in for small teams.
+ */
+const CAFE_MIN = 8     // CafeteriaBuilder: 2 rows × 2 tables × 2 benches
+const COFFEE_MIN = 8   // CoffeeBarBuilder: 2 columns × 2 tables × 2 chairs
+const POOL_MIN = 6     // PoolResortBuilder: 6 umbrella+chair sets
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
  * Generate break-zone seats scaled to the team size.
  *
- * Distribution: 40% cafeteria, 30% coffee bar, 30% pool (capped at 6).
- * Any pool overflow redistributes to cafeteria (largest capacity).
+ * Each zone gets at least its physical furniture count (8/8/6). For large
+ * teams the 60% budget distributes proportionally (40/30/30). Pool is
+ * always capped at 6 (physical umbrella sets).
  *
  * @param teamSize Number of org members (from snapshot).
  * @returns Array of BreakSeat with exact world-space positions.
  */
 export function generateBreakSeats(teamSize: number): BreakSeat[] {
-  const budget = Math.max(Math.ceil(teamSize * BREAK_RATIO), 6) // min 6
+  const budget = Math.max(Math.ceil(teamSize * BREAK_RATIO), 6)
 
-  // Split: pool gets 30% (capped), coffee bar gets 30%, cafeteria gets remainder.
-  // Using floor for pool + coffee and giving the remainder to cafeteria avoids
-  // the ceil-on-each-split overcount that produces more seats than the budget.
-  const poolCount = Math.min(Math.floor(budget * 0.3), POOL_MAX)
-  const cofCount = Math.floor(budget * 0.3)
-  const cafCount = budget - cofCount - poolCount
+  // Each zone gets max(budget-share, physical-furniture-count).
+  // Pool is computed first (capped), coffee second, cafeteria absorbs remainder.
+  const poolCount = Math.min(Math.max(Math.floor(budget * 0.3), POOL_MIN), POOL_MAX)
+  const cofCount = Math.max(Math.floor(budget * 0.3), COFFEE_MIN)
+  const cafCount = Math.max(budget - cofCount - poolCount, CAFE_MIN)
 
   const caf  = getZone("cafeteria")!
   const cof  = getZone("coffee_bar")!
