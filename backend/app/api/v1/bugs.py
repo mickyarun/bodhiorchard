@@ -56,10 +56,13 @@ async def create_bug(
         try:
             from app.services.bug_linker import embed_and_link_bug
 
-            matched = await embed_and_link_bug(db, current_user.org_id, bug)
-            if matched:
-                await db.flush()
-                await db.refresh(bug)
+            await embed_and_link_bug(db, current_user.org_id, bug)
+            # Always flush + refresh after embed_and_link_bug — it modifies
+            # bug.embedding (and possibly bug.bud_id), which expires other
+            # ORM attributes. Without refresh, accessing bug.updated_at in
+            # _bug_to_read triggers a MissingGreenlet error.
+            await db.flush()
+            await db.refresh(bug)
         except Exception:
             import structlog
 
