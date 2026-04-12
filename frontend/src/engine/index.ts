@@ -437,10 +437,20 @@ export class GardenEngine {
 
   /** Enter a house interior by member ID. */
   async enterHouse(memberId: string): Promise<void> {
-    if (this.sceneState !== 'garden' || this._transitioning) return
-    if (!this.camera || !this.interior || !this.sceneManager) return
+    console.debug('[GardenEngine] enterHouse called for', memberId, 'sceneState=', this.sceneState)
+    if (this.sceneState !== 'garden' || this._transitioning) {
+      console.warn('[GardenEngine] enterHouse blocked: sceneState=', this.sceneState, 'transitioning=', this._transitioning)
+      return
+    }
+    if (!this.camera || !this.interior || !this.sceneManager) {
+      console.warn('[GardenEngine] enterHouse blocked: missing', !this.camera ? 'camera' : '', !this.interior ? 'interior' : '', !this.sceneManager ? 'sceneManager' : '')
+      return
+    }
     const house = this.sceneManager.memberHouseMap.get(memberId)
-    if (!house) return
+    if (!house) {
+      console.warn('[GardenEngine] enterHouse: no house for memberId=', memberId, 'map keys:', [...this.sceneManager.memberHouseMap.keys()])
+      return
+    }
 
     this._transitioning = true
     try {
@@ -615,23 +625,31 @@ export class GardenEngine {
     // interior is only reached via the house-click or door-walk paths.
     const ownHouse = this.sceneManager.memberHouseMap.get(userId)
     if (ownHouse) {
-      const hp = ownHouse.entity.getPosition()
       const cp = character.entity.getPosition()
-      // House footprint is 4×4, with HousingVillage placing the entity
-      // at a corner (local-origin) and applying a 90° Y rotation. After
-      // rotation the world-space AABB is x ∈ [hp.x, hp.x+4], z ∈ [hp.z-4, hp.z].
-      const insideX = cp.x >= hp.x - 0.2 && cp.x <= hp.x + 4.2
-      const insideZ = cp.z >= hp.z - 4.2 && cp.z <= hp.z + 0.2
-      if (insideX && insideZ) {
+      // Check if the character is near any of the house's known interior
+      // positions (bed, seats). This is more robust than a hardcoded AABB
+      // because it works regardless of house grid layout, rotation, or
+      // member ordering changes.
+      const bed = ownHouse.bedPosition
+      const dx = cp.x - bed.x
+      const dz = cp.z - bed.z
+      const nearBed = (dx * dx + dz * dz) < 9  // within 3 units of bed
+      const nearSeat = ownHouse.seats.some(s => {
+        const sx = cp.x - s.x
+        const sz = cp.z - s.z
+        return (sx * sx + sz * sz) < 4  // within 2 units of a seat
+      })
+      if (nearBed || nearSeat) {
         const exit = ownHouse.exitPosition
         character.entity.setPosition(exit.x, 0, exit.z)
         character.entity.setEulerAngles(0, exit.yaw, 0)
         character.entity.anim?.setBoolean('sitting', false)
         character.entity.anim?.setInteger('speed', 0)
+        character.entity.anim?.setInteger('working', 0)
         // Extend the door cooldown so the first physics tick after
         // capsule creation can't re-fire the door sensor.
         this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
-        console.debug('[GardenEngine] teleported', userId, 'to house exit before takeover')
+        console.debug('[GardenEngine] teleported', userId, 'to house exit at', exit.x, exit.z)
       }
     }
 

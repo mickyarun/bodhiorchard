@@ -473,7 +473,12 @@ async def collect_members(
             DeveloperXP.level,
             DeveloperXP.level_name,
         )
-        .order_by(func.coalesce(func.sum(SkillProfile.touch_count), 0).desc())
+        # MUST match the ordering in internal_colyseus._collect_org_members
+        # (ORDER BY User.id) so the housing grid slot assignment is identical
+        # on frontend and server. A different ordering would place houses at
+        # different grid positions than where the server positioned characters,
+        # causing the "character stuck inside wrong house" bug.
+        .order_by(User.id)
         .limit(50)
     )
     rows = result.all()

@@ -40,7 +40,10 @@ const authStore = useAuthStore()
 
 // Dev-only simulate button (remove when real hooks are confirmed)
 const isDev = import.meta.env.DEV
-function handleSimulate(): void { engine?.simulateDevActivity() }
+function handleSimulate(): void {
+  console.log('[Simulate] clicked, engine=', !!engine)
+  engine?.simulateDevActivity()
+}
 
 const props = defineProps<{
   treeData: TreeData
@@ -182,6 +185,7 @@ async function initEngine(): Promise<void> {
     }),
     onHouseClick: (info) => {
       emit('house-click', { name: info.name })
+      console.debug('[PlayCanvasCanvas] house click:', info.memberId, 'authUser:', authStore.user?.id, 'match:', info.memberId === authStore.user?.id)
       // Only allow entering your own house
       if (info.memberId && info.memberId === authStore.user?.id) {
         engine?.enterHouse(info.memberId)
@@ -412,17 +416,19 @@ onUnmounted(() => {
 
 /* Temporary dev tool — remove when real hooks are confirmed */
 .simulate-btn {
-  position: absolute;
+  position: fixed;
   bottom: 16px;
-  right: 16px;
-  z-index: 100;
-  padding: 6px 14px;
-  background: rgba(33, 150, 243, 0.9);
+  left: 16px;
+  z-index: 9999;
+  padding: 8px 16px;
+  background: rgba(33, 150, 243, 0.95);
   color: #fff;
   border: none;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  pointer-events: auto;
 }
 .simulate-btn:hover {
   background: rgba(33, 150, 243, 1);
