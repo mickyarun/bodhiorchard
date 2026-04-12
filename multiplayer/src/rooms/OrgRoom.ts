@@ -28,7 +28,8 @@ import {
   type Placement,
   type PresenceState,
 } from "../sim/MemberPlacement"
-import { BREAK_SEATS, getTreePositions } from "../sim/WorldLayout"
+import { getTreePositions } from "../sim/WorldLayout"
+import { generateBreakSeats, type BreakSeat } from "../sim/BreakSeatGenerator"
 import {
   DevActivitySim,
   parseDevActivityEvent,
@@ -125,6 +126,10 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
 
   // Counter for the snapshot re-fetch cadence. See SNAPSHOT_REFRESH_EVERY_N_TICKS.
   private presenceTickCounter = 0
+
+  // Dynamically generated break-zone seats, scaled to team size.
+  // Regenerated on each snapshot load via generateBreakSeats().
+  private breakSeats: BreakSeat[] = generateBreakSeats(5) // default for empty room
 
   // Resolves once the initial snapshot has been loaded (or failed).
   // onJoin awaits this so late joiners never race against an empty state map.
@@ -464,6 +469,9 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     // Stable sort by user_id — guarantees deterministic house assignment
     const sorted = [...snapshot.members].sort((a, b) => a.user_id.localeCompare(b.user_id))
 
+    // Generate break seats scaled to team size (60% can break simultaneously).
+    this.breakSeats = generateBreakSeats(sorted.length)
+
     const takenBreakSeats = new Set<number>()
     sorted.forEach((m, index) => {
       const placement = computePlacement(
@@ -474,6 +482,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
           totalMembers: sorted.length,
         },
         takenBreakSeats,
+        this.breakSeats,
       )
 
       const member = new MemberState()
@@ -510,7 +519,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
    *    `state.members` (sort key: `userId`) so the house grid assignment
    *    matches what snapshot load would have produced.
    * 2. Computes break-seat occupancy from live state — iterates all OTHER
-   *    on-break members and reserves whichever BREAK_SEATS indices their
+   *    on-break members and reserves whichever breakSeats indices their
    *    `locationContext` tags match. Prevents double-booking.
    * 3. Delegates to `computePlacement` which owns the actual seat math.
    *
@@ -546,9 +555,9 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     // coordinates so a member mid-walk who hasn't physically arrived yet
     // still reserves their target seat.
     //
-    // The trailing numeric index disambiguates within a zone — BREAK_SEATS
-    // has 4 seats per zone (coffee_bar, pool_resort, cafeteria), so walking
-    // from `break_cafeteria_0` to `break_cafeteria_2` is a legal parallel
+    // The trailing numeric index disambiguates within a zone — the generated
+    // breakSeats array has multiple seats per zone, so walking from
+    // `break_cafeteria_0` to `break_cafeteria_2` is a legal parallel
     // occupancy that must not double-book.
     const takenBreakSeats = new Set<number>()
     for (const other of sorted) {
@@ -557,7 +566,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       const match = other.locationContext.match(/^break_.+_(\d+)$/)
       if (!match) continue
       const seatIdx = parseInt(match[1], 10)
-      if (seatIdx >= 0 && seatIdx < BREAK_SEATS.length) {
+      if (seatIdx >= 0 && seatIdx < this.breakSeats.length) {
         takenBreakSeats.add(seatIdx)
       }
     }
@@ -570,6 +579,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
         totalMembers: sorted.length,
       },
       takenBreakSeats,
+      this.breakSeats,
       preferredZone,
     )
   }

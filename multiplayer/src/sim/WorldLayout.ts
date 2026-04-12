@@ -155,22 +155,6 @@ export function getTreePositions(count: number): Array<{ x: number; z: number }>
   return positions
 }
 
-// ─── Break zone seats (coffee bar, pool) ─────
-
-/**
- * Simplified break seat positions — approximate placements within break zones.
- * Multiple seats per zone allow round-robin assignment.
- */
-export const BREAK_SEATS: Array<{ zone: string; x: number; y: number; z: number; yaw: number }> = [
-  // Coffee bar seats (around zone x=-28, z=-20)
-  { zone: "coffee_bar", x: -28, y: 0, z: -22, yaw: 0 },
-  { zone: "coffee_bar", x: -26, y: 0, z: -20, yaw: 270 },
-  { zone: "coffee_bar", x: -30, y: 0, z: -20, yaw: 90 },
-  { zone: "coffee_bar", x: -28, y: 0, z: -18, yaw: 180 },
-
-  // Pool seats (around zone x=30, z=22)
-  { zone: "pool_resort", x: 30, y: 0, z: 20, yaw: 0 },
-  { zone: "pool_resort", x: 32, y: 0, z: 22, yaw: 270 },
-  { zone: "pool_resort", x: 28, y: 0, z: 22, yaw: 90 },
-  { zone: "pool_resort", x: 30, y: 0, z: 24, yaw: 180 },
-]
+// Break zone seats are now generated dynamically by BreakSeatGenerator.ts
+// based on team size. See generateBreakSeats(teamSize) for the layout
+// engines that mirror the frontend builders' exact furniture positions.

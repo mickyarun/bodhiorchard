@@ -8,7 +8,8 @@
  *   'at_home'     → standing at their house bed
  *   'on_break'    → seated at pool or coffee bar
  */
-import { getHouseDeskSeat, getHouseBedPosition, BREAK_SEATS } from "./WorldLayout"
+import { getHouseDeskSeat, getHouseBedPosition } from "./WorldLayout"
+import type { BreakSeat } from "./BreakSeatGenerator"
 
 export type PresenceState = "active" | "on_break" | "at_home"
 
@@ -33,10 +34,20 @@ export interface MemberPlacementInput {
  *
  * `takenBreakSeats` is a mutable set of seat indices already assigned
  * in this placement pass — used to avoid double-booking break seats.
+ *
+ * `preferredZone` is an optional hint for `on_break` placement. When set,
+ * the break-seat loop first tries seats in that zone (e.g. "cafeteria",
+ * "pool_resort", "coffee_bar"); if all are taken or the zone doesn't exist,
+ * it falls back to the global first-available order. Snapshot-load callers
+ * pass no preferred zone (the round-robin order in `breakSeats` wins).
+ * Live callers (inferred presence for non-Slack users) pass the zone they
+ * want so e.g. "idle for 10 minutes" → cafeteria, not coffee bar.
  */
 export function computePlacement(
   input: MemberPlacementInput,
   takenBreakSeats: Set<number>,
+  breakSeats: readonly BreakSeat[],
+  preferredZone?: string,
 ): Placement {
   const { userId, presence, memberIndex, totalMembers } = input
 
@@ -72,25 +83,55 @@ export function computePlacement(
     return fallback(userId)
   }
 
-  // ─── on_break → coffee bar or pool seat ───
+  // ─── on_break → break zone seat ───
   if (presence === "on_break") {
-    for (let i = 0; i < BREAK_SEATS.length; i++) {
-      if (takenBreakSeats.has(i)) continue
-      const seat = BREAK_SEATS[i]
-      takenBreakSeats.add(i)
-      return {
-        x: seat.x,
-        y: seat.y,
-        z: seat.z,
-        yaw: seat.yaw,
-        sitting: true,
-        locationContext: `break_${seat.zone}`,
-      }
+    // Pass 1: prefer seats in the requested zone (if any). Skips seats that
+    // are already taken so two members with the same preferredZone fan out
+    // across the zone's available seats before spilling to other zones.
+    if (preferredZone) {
+      const preferred = findBreakSeat(breakSeats, takenBreakSeats, preferredZone)
+      if (preferred) return preferred
     }
+    // Pass 2: any available seat in any zone (original behavior).
+    const anySeat = findBreakSeat(breakSeats, takenBreakSeats)
+    if (anySeat) return anySeat
     return fallback(userId)
   }
 
   return fallback(userId)
+}
+
+/**
+ * Find the first unoccupied `breakSeats` entry, optionally filtered by zone.
+ * Mutates `takenBreakSeats` on success — the found index is marked taken.
+ * Returns `null` if no seat matches.
+ *
+ * `locationContext` is formatted as `break_{zone}_{seatIndex}` so callers can
+ * reconstruct the exact taken seat from the string. A plain `break_{zone}`
+ * would lose information when there are multiple seats per zone (as there are
+ * for coffee_bar, pool_resort, and cafeteria). Parsing reference in
+ * `OrgRoom.computeHomePlacement`.
+ */
+function findBreakSeat(
+  breakSeats: readonly BreakSeat[],
+  takenBreakSeats: Set<number>,
+  zoneFilter?: string,
+): Placement | null {
+  for (let i = 0; i < breakSeats.length; i++) {
+    if (takenBreakSeats.has(i)) continue
+    const seat = breakSeats[i]
+    if (zoneFilter && seat.zone !== zoneFilter) continue
+    takenBreakSeats.add(i)
+    return {
+      x: seat.x,
+      y: seat.y,
+      z: seat.z,
+      yaw: seat.yaw,
+      sitting: true,
+      locationContext: `break_${seat.zone}_${i}`,
+    }
+  }
+  return null
 }
 
 function fallback(userId: string): Placement {
