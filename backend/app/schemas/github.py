@@ -42,6 +42,12 @@ class GitHubPullRequest(BaseModel):
     user: GitHubUser
     merged: bool | None = False
     merged_at: str | None = None
+    # The commit SHA written onto the base branch when the PR was merged.
+    # Present on closed-merged events; absent on open/synchronize. This is
+    # the only SHA guaranteed to land on `develop` regardless of merge
+    # strategy (merge / squash / rebase) — the release-stage detector keys
+    # off it to find which BUDs are included in a downstream release PR.
+    merge_commit_sha: str | None = None
 
 
 class GitHubReview(BaseModel):

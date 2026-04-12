@@ -100,6 +100,7 @@ async def list_repos(
             featureCount=r.feature_count,
             mainBranch=r.main_branch,
             developBranch=r.develop_branch,
+            uatBranch=r.uat_branch,
             hasUncommittedChanges=False,
             repoType=detect_repo_type(r.path),
             githubRepo=r.github_repo_full_name,
@@ -174,6 +175,7 @@ async def add_repo(
         featureCount=repo.feature_count,
         mainBranch=repo.main_branch,
         developBranch=repo.develop_branch,
+        uatBranch=repo.uat_branch,
         hasUncommittedChanges=has_dirty,
         repoType=detect_repo_type(str(repo_path)),
         githubRepo=repo.github_repo_full_name,
@@ -264,6 +266,7 @@ async def update_repo_status(
         featureCount=repo.feature_count,
         mainBranch=repo.main_branch,
         developBranch=repo.develop_branch,
+        uatBranch=repo.uat_branch,
         hasUncommittedChanges=False,
         repoType=detect_repo_type(repo.path),
         githubRepo=repo.github_repo_full_name,
@@ -303,6 +306,7 @@ async def get_repo_branches(
         branches=branches,
         currentMain=repo.main_branch,
         currentDevelop=repo.develop_branch,
+        currentUat=repo.uat_branch,
     )
 
 
@@ -339,6 +343,9 @@ async def update_repo_branches(
         repo.main_branch = body.main_branch
     if body.develop_branch is not None:
         repo.develop_branch = body.develop_branch
+    if body.uat_branch is not None:
+        # Empty string \u2192 explicit clear; non-empty \u2192 set.
+        repo.uat_branch = body.uat_branch or None
     await db.flush()
 
     return RepoInfo(
@@ -352,6 +359,7 @@ async def update_repo_branches(
         featureCount=repo.feature_count,
         mainBranch=repo.main_branch,
         developBranch=repo.develop_branch,
+        uatBranch=repo.uat_branch,
         hasUncommittedChanges=False,
         repoType=detect_repo_type(repo.path),
         githubRepo=repo.github_repo_full_name,

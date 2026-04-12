@@ -181,6 +181,7 @@
               <th class="text-center">Status</th>
               <th class="text-center">Main Branch</th>
               <th class="text-center">Dev Branch</th>
+              <th v-if="uatStageEnabled" class="text-center">UAT Branch</th>
               <th class="text-center">Knowledge</th>
               <th class="text-center">Features</th>
               <th class="text-center">Last SHA</th>
@@ -260,6 +261,28 @@
                   @click="openBranchDialog(repo)"
                 >
                   Not mapped
+                </v-chip>
+              </td>
+              <td v-if="uatStageEnabled" class="text-center">
+                <v-chip
+                  v-if="repo.uatBranch"
+                  size="x-small"
+                  variant="tonal"
+                  color="orange"
+                  prepend-icon="mdi-source-branch"
+                  style="cursor: pointer"
+                  @click="openBranchDialog(repo)"
+                >
+                  {{ repo.uatBranch }}
+                </v-chip>
+                <v-chip
+                  v-else
+                  size="x-small"
+                  variant="tonal"
+                  style="cursor: pointer"
+                  @click="openBranchDialog(repo)"
+                >
+                  Not set
                 </v-chip>
               </td>
               <td class="text-center">{{ repo.knowledgeCount }}</td>
@@ -535,7 +558,7 @@
         <v-select
           v-model="branchDialogMain"
           :items="branchDialogBranches"
-          label="Main Branch *"
+          label="Production (main) Branch *"
           variant="outlined"
           density="compact"
           prepend-inner-icon="mdi-source-branch"
@@ -549,7 +572,20 @@
           variant="outlined"
           density="compact"
           prepend-inner-icon="mdi-source-branch"
+          :class="uatStageEnabled ? 'mb-3' : ''"
           :rules="[v => !!v || 'Required']"
+        />
+        <v-combobox
+          v-if="uatStageEnabled"
+          v-model="branchDialogUat"
+          :items="branchDialogBranches"
+          label="UAT Branch (optional)"
+          variant="outlined"
+          density="compact"
+          prepend-inner-icon="mdi-source-branch"
+          clearable
+          hint="Select a branch or type a pattern (e.g. release/uat, release*). Leave empty to skip UAT tracking."
+          persistent-hint
         />
       </template>
 
@@ -626,11 +662,15 @@ const scanAfterAdd = ref(true)
 const directoryPicker = ref<InstanceType<typeof DirectoryPicker> | null>(null)
 
 // Branch mapping dialog
+const uatStageEnabled = computed(
+  () => settingsStore.connections.budStages?.uatEnabled ?? true,
+)
 const showBranchDialog = ref(false)
 const branchDialogRepo = ref<RepoInfo | null>(null)
 const branchDialogBranches = ref<string[]>([])
 const branchDialogMain = ref<string | null>(null)
 const branchDialogDev = ref<string | null>(null)
+const branchDialogUat = ref<string | null>(null)
 const branchesLoading = ref(false)
 const branchSaving = ref(false)
 
@@ -728,6 +768,7 @@ async function openBranchDialog(repo: RepoInfo): Promise<void> {
   branchDialogRepo.value = repo
   branchDialogMain.value = repo.mainBranch
   branchDialogDev.value = repo.developBranch
+  branchDialogUat.value = repo.uatBranch
   branchDialogBranches.value = []
   showBranchDialog.value = true
   branchesLoading.value = true
@@ -741,6 +782,9 @@ async function openBranchDialog(repo: RepoInfo): Promise<void> {
     if (!branchDialogDev.value && data.currentDevelop) {
       branchDialogDev.value = data.currentDevelop
     }
+    if (!branchDialogUat.value && data.currentUat) {
+      branchDialogUat.value = data.currentUat
+    }
   }
   branchesLoading.value = false
 }
@@ -752,6 +796,7 @@ async function saveBranchMapping(): Promise<void> {
     branchDialogRepo.value.id,
     branchDialogMain.value,
     branchDialogDev.value,
+    uatStageEnabled.value ? branchDialogUat.value : null,
   )
   branchSaving.value = false
   showBranchDialog.value = false

@@ -1,14 +1,28 @@
-"""BUD pull request endpoints — PR list and merge checklist."""
+"""BUD pull request endpoints — PR list, merge checklist, release stages."""
 
 import uuid
+from datetime import datetime
+from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
+from app.models.bud import BUDTimelineEvent
+from app.models.pull_request import PRState, PullRequest
+from app.models.tracked_repository import TrackedRepository
 from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.pull_request import PullRequestRepository
+from app.schemas.bud_release import (
+    BUDReleaseStage,
+    ReleaseCommit,
+    ReleasePR,
+    ReleaseStage,
+    ReleaseStageStatus,
+    ReleaseTimelineEvent,
+)
 from app.schemas.pull_request import PRChecklistItem, PullRequestRead
 
 router = APIRouter()
@@ -80,3 +94,174 @@ async def get_pr_checklist(
         ))
 
     return items
+
+
+@router.get(
+    "/{bud_id}/release-stages/{stage}",
+    response_model=BUDReleaseStage,
+    dependencies=[Depends(require_permissions("buds:view"))],
+)
+async def get_bud_release_stage(
+    bud_id: uuid.UUID,
+    stage: Literal["uat", "prod"],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BUDReleaseStage:
+    """Return release-stage detail (PRs, commits, events) for a BUD.
+
+    Reads the ``merged_to_{stage}`` timeline events written by
+    ``release_detection.detect_release_promotion`` and reshapes them into
+    the ``BUDReleaseStage`` payload that drives the UAT and Prod tabs on
+    the BUD detail page. Status is derived from event presence:
+
+    - ``not_reached``: no events for this stage
+    - ``in_stage``: events for this stage but not for the next one
+    - ``passed``: only meaningful for ``uat`` \u2014 the BUD also has prod events
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if not bud:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="BUD not found.",
+        )
+
+    typed_stage: ReleaseStage = stage
+    target_event_type = f"merged_to_{typed_stage}"
+    next_event_type = "merged_to_prod" if typed_stage == "uat" else None
+
+    stmt = (
+        select(BUDTimelineEvent)
+        .where(
+            BUDTimelineEvent.org_id == current_user.org_id,
+            BUDTimelineEvent.bud_id == bud_id,
+            BUDTimelineEvent.event_type.in_(
+                [target_event_type, next_event_type] if next_event_type else [target_event_type]
+            ),
+        )
+        .order_by(BUDTimelineEvent.created_at.asc())
+    )
+    result = await db.execute(stmt)
+    all_events = list(result.scalars())
+
+    stage_events = [e for e in all_events if e.event_type == target_event_type]
+    next_events = [e for e in all_events if next_event_type and e.event_type == next_event_type]
+
+    if not stage_events:
+        derived_status: ReleaseStageStatus = "not_reached"
+    elif next_events:
+        derived_status = "passed"
+    else:
+        derived_status = "in_stage"
+
+    release_prs: list[ReleasePR] = []
+    commits: list[ReleaseCommit] = []
+    timeline: list[ReleaseTimelineEvent] = []
+    seen_pr_keys: set[tuple[int, str]] = set()
+    first_reached = stage_events[0].created_at if stage_events else None
+
+    for event in stage_events:
+        d = event.detail or {}
+        pr_number = d.get("release_pr_number")
+        repo_name = d.get("repo_name", "")
+        html_url = d.get("release_pr_html_url", "")
+        if pr_number is not None:
+            key = (int(pr_number), repo_name)
+            if key not in seen_pr_keys:
+                seen_pr_keys.add(key)
+                release_prs.append(
+                    ReleasePR(
+                        pr_number=int(pr_number),
+                        repo_name=repo_name,
+                        html_url=html_url,
+                        title=d.get("release_pr_title"),
+                        author_login=d.get("release_pr_author"),
+                        merged_at=_parse_iso(d.get("merged_at")),
+                    ),
+                )
+            timeline.append(
+                ReleaseTimelineEvent(
+                    occurred_at=event.created_at,
+                    pr_number=int(pr_number),
+                    repo_name=repo_name,
+                    html_url=html_url,
+                ),
+            )
+        for c in d.get("matched_commits") or []:
+            sha = (c.get("sha") or "") if isinstance(c, dict) else ""
+            if not sha:
+                continue
+            commits.append(
+                ReleaseCommit(
+                    sha=sha,
+                    short_sha=sha[:7],
+                    message=c.get("message") if isinstance(c, dict) else None,
+                    repo_name=repo_name,
+                ),
+            )
+
+    # Open PRs targeting this stage's branch — gives visibility into
+    # in-flight work before it merges and triggers release detection.
+    open_prs: list[ReleasePR] = []
+    open_pr_stmt = (
+        select(PullRequest, TrackedRepository)
+        .join(TrackedRepository, PullRequest.repo_id == TrackedRepository.id, isouter=True)
+        .where(
+            PullRequest.org_id == current_user.org_id,
+            PullRequest.bud_id == bud_id,
+            PullRequest.state == PRState.OPEN,
+        )
+    )
+    open_result = await db.execute(open_pr_stmt)
+    for pr, repo in open_result.all():
+        target_branch = (
+            repo.uat_branch if typed_stage == "uat" else repo.main_branch
+        ) if repo else None
+        if target_branch and _branch_matches(pr.base_branch, target_branch):
+            open_prs.append(
+                ReleasePR(
+                    pr_number=pr.github_pr_number,
+                    repo_name=repo.name if repo else "",
+                    html_url=pr.html_url,
+                    title=pr.title,
+                    author_login=pr.author_github_login,
+                    merged_at=None,
+                ),
+            )
+
+    return BUDReleaseStage(
+        bud_id=str(bud_id),
+        stage=typed_stage,
+        status=derived_status,
+        first_reached_at=first_reached,
+        release_prs=release_prs,
+        open_prs=open_prs,
+        commits=commits,
+        events=timeline,
+    )
+
+
+def _branch_matches(ref: str, pattern: str) -> bool:
+    """Check if a branch ref matches a configured pattern (exact or glob)."""
+    if "*" in pattern or "?" in pattern or "[" in pattern:
+        from fnmatch import fnmatch
+
+        return fnmatch(ref, pattern)
+    return ref == pattern
+
+
+def _parse_iso(value: object) -> datetime | None:
+    """Parse a stored ISO-8601 timestamp string back into a datetime.
+
+    Detail JSON stores ``merged_at`` as a string (the raw GitHub field
+    is preserved verbatim by ``record_event``). We rehydrate it here so
+    the response schema's ``datetime`` field gets a real datetime, not a
+    string. Returns ``None`` for missing or unparseable values rather
+    than raising \u2014 the field is optional in the schema.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None

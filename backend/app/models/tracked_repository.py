@@ -62,6 +62,11 @@ class TrackedRepository(BaseModel):
     )
     main_branch: Mapped[str | None] = mapped_column(String(100), nullable=True)
     develop_branch: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Optional UAT branch (e.g. "release/uat"). When set AND the org has
+    # bud_stages.uat_enabled=true, PR merges into this branch trigger
+    # release-stage detection that records merged_to_uat events on every
+    # BUD whose commits are included.
+    uat_branch: Mapped[str | None] = mapped_column(String(100), nullable=True)
     github_repo_full_name: Mapped[str | None] = mapped_column(
         String(255), nullable=True, index=True,
     )

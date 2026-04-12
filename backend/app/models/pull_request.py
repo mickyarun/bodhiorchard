@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -45,6 +46,15 @@ class PullRequest(BaseModel):
         UniqueConstraint("org_id", "github_pr_id", name="uq_pr_org_github_id"),
         Index("ix_pr_bud_id", "bud_id"),
         Index("ix_pr_org_state", "org_id", "state"),
+        # Lookup by the SHA written to the base branch on merge — used by
+        # release-stage detection to find which BUD a release-PR commit
+        # belongs to. Partial index keeps it small (most rows are unmerged).
+        Index(
+            "ix_pr_merge_commit_sha",
+            "org_id",
+            "merge_commit_sha",
+            postgresql_where=text("merge_commit_sha IS NOT NULL"),
+        ),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -83,6 +93,13 @@ class PullRequest(BaseModel):
     )
     merged_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
+    )
+    # SHA written to the base branch on merge (works for merge / squash /
+    # rebase strategies). Captured from GitHub's pull_request.closed payload
+    # via GitHubPullRequest.merge_commit_sha. Used by release-stage detection
+    # to match which BUDs a downstream release PR carries.
+    merge_commit_sha: Mapped[str | None] = mapped_column(
+        String(40), nullable=True,
     )
     review_status: Mapped[PRReviewStatus] = mapped_column(
         Enum(

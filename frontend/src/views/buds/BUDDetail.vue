@@ -411,6 +411,7 @@
                   :bud-id="bud.id"
                   stage="uat"
                   :has-stage-branch-configured="hasUatBranchConfigured"
+                  :impacted-repos="bud.impacted_repos"
                 />
               </v-tabs-window-item>
 
@@ -420,6 +421,7 @@
                   :bud-id="bud.id"
                   stage="prod"
                   :has-stage-branch-configured="hasMainBranchConfigured"
+                  :impacted-repos="bud.impacted_repos"
                 />
               </v-tabs-window-item>
 
@@ -918,6 +920,8 @@ const STATUS_TAB_MAP: Record<string, string> = {
   development: 'development',
   code_review: 'code-review',
   testing: 'testing',
+  uat: 'uat',
+  prod: 'prod',
 }
 watch(
   () => bud.value?.status,

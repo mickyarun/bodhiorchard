@@ -534,6 +534,60 @@ async def _trigger_status_jobs(
             force=force,
         )
 
+    # Re-estimate delivery dates in the background on UAT/Prod transitions.
+    # Uses its own DB session so the request can return immediately — the
+    # frontend polls estimates via the existing useEstimates composable.
+    if (
+        "status" in update_data
+        and update_data["status"] in (BUDStatus.UAT, BUDStatus.PROD)
+    ):
+        import asyncio
+
+        asyncio.create_task(
+            _bg_estimate(
+                bud.id,
+                current_user.org_id,
+                update_data["status"].value,
+                current_user.id,
+                current_user.name,
+            )
+        )
+
+
+async def _bg_estimate(
+    bud_id: uuid.UUID,
+    org_id: uuid.UUID,
+    trigger: str,
+    actor_id: uuid.UUID,
+    actor_name: str,
+) -> None:
+    """Run estimation in the background with its own DB session."""
+    from app.database import AsyncSessionLocal
+    from app.services.bud_estimation import estimate_bud_dates
+
+    try:
+        async with AsyncSessionLocal() as db:
+            from app.repositories.bud import BUDRepository
+
+            bud_repo = BUDRepository(db, org_id=org_id)
+            bud = await bud_repo.get_by_id(bud_id)
+            if bud is None:
+                return
+            await estimate_bud_dates(
+                db, org_id, bud,
+                trigger=f"status_to_{trigger}",
+                actor_id=actor_id,
+                actor_name=actor_name,
+            )
+            await db.commit()
+    except Exception:
+        logger.warning(
+            "bg_estimation_failed",
+            bud_id=str(bud_id),
+            trigger=trigger,
+            exc_info=True,
+        )
+
 
 @router.get(
     "/{bud_id}/code-review/status",

@@ -453,6 +453,7 @@ export interface BUDReleaseStage {
   status: ReleaseStageStatus
   firstReachedAt: string | null
   releasePRs: ReleasePR[]
+  openPRs: ReleasePR[]
   commits: ReleaseCommit[]
   events: ReleaseTimelineEvent[]
 }

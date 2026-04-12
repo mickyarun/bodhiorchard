@@ -161,6 +161,12 @@ async def _handle_pr_closed(
 
         pr.merged_at = datetime.fromisoformat(pr_data.merged_at.replace("Z", "+00:00"))
 
+    # Capture the post-merge SHA so downstream release-stage detection
+    # can match this BUD's commits to release PRs (e.g. develop \u2192 uat),
+    # regardless of whether the merge strategy was merge / squash / rebase.
+    if is_merged and pr_data.merge_commit_sha:
+        pr.merge_commit_sha = pr_data.merge_commit_sha
+
     if pr.bud_id and is_merged:
         await record_event(
             db,
@@ -193,6 +199,14 @@ async def _handle_pr_closed(
             except Exception:
                 logger.warning("xp_award_failed_pr_merged", exc_info=True)
 
+    # Release-stage detection: if this PR was merged into a configured
+    # uat / main branch, walk its commits and record merged_to_{stage}
+    # events on every BUD whose work is included. Runs for ANY merged PR,
+    # not just BUD-branch PRs \u2014 a release PR (e.g. develop \u2192 release/uat)
+    # has no bud-NNN head branch but is exactly what we want to detect.
+    if is_merged:
+        await _maybe_detect_release_promotion(org_id, repo, pr_data, db)
+
     await db.commit()
 
     if pr.bud_id:
@@ -209,6 +223,66 @@ async def _handle_pr_closed(
         pr_number=pr_data.number,
         merged=is_merged,
     )
+
+
+def _branch_matches(ref: str, pattern: str) -> bool:
+    """Check if a branch ref matches a configured pattern.
+
+    Supports exact match (``release/uat``) and ``fnmatch``-style wildcards
+    (``release*`` matches ``release/uat``, ``release/v2.1``). Patterns
+    without glob characters fall back to simple equality — no regex.
+    """
+    if "*" in pattern or "?" in pattern or "[" in pattern:
+        from fnmatch import fnmatch
+
+        return fnmatch(ref, pattern)
+    return ref == pattern
+
+
+async def _maybe_detect_release_promotion(
+    org_id: uuid.UUID,
+    repo: TrackedRepository,
+    pr_data: GitHubPullRequest,
+    db: AsyncSession,
+) -> None:
+    """Run release-stage detection if the PR's base branch is a release target.
+
+    Compares ``pr_data.base.ref`` against ``repo.uat_branch`` (gated by the
+    org-level ``bud_stages.uat_enabled`` toggle) and ``repo.main_branch``.
+    On match, fans out via ``release_detection.detect_release_promotion``.
+    Failures are logged but never break the parent webhook handler \u2014
+    detection is observational and must not block PR state updates.
+    """
+    from app.services.release_detection import ReleaseStage, detect_release_promotion
+
+    base_ref = pr_data.base.ref
+    if not base_ref:
+        return
+
+    stage: ReleaseStage | None = None
+    if repo.uat_branch and _branch_matches(base_ref, repo.uat_branch):
+        from app.models.organization import Organization
+        from app.services.org_settings import is_uat_enabled
+
+        org = await db.get(Organization, org_id)
+        if org is not None and is_uat_enabled(org.config):
+            stage = "uat"
+    elif repo.main_branch and base_ref == repo.main_branch:
+        stage = "prod"
+
+    if stage is None:
+        return
+
+    try:
+        await detect_release_promotion(db, org_id, repo, pr_data, stage)
+    except Exception:
+        logger.warning(
+            "release_detection_failed",
+            stage=stage,
+            pr_number=pr_data.number,
+            repo=repo.name,
+            exc_info=True,
+        )
 
 
 async def _handle_pr_synchronize(
