@@ -83,6 +83,9 @@ export class GardenEngine {
   // Throttle move broadcasts to OrgRoom at ~20Hz during takeover
   private takeoverMoveAccumulator = 0
   private seatToggleCooldown = 0
+  private currentOccupiedSeatId: string | null = null
+  /** Tracks which seat each remote member occupies (userId → seatId). */
+  private remoteSeatMap = new Map<string, string>()
   /** Name of the zone the player is currently inside (during takeover). */
   private _currentZone: string | null = null
   private static readonly TAKEOVER_MOVE_INTERVAL = 0.05  // seconds
@@ -326,14 +329,17 @@ export class GardenEngine {
 
     this.orgRoomClient.onMemberAdd = (_userId, snapshot) => {
       void charSystem.spawnFromSnapshot(snapshot)
+      this.syncSeatOccupancy(snapshot.userId, snapshot)
     }
     this.orgRoomClient.onMemberUpdate = (_userId, snapshot) => {
       charSystem.updateFromSnapshot(snapshot)
       this.syncRemoteVehicle(charSystem, snapshot)
+      this.syncSeatOccupancy(snapshot.userId, snapshot)
     }
     this.orgRoomClient.onMemberRemove = (userId) => {
       this.vehicleSystem?.unregisterCharacter(userId)
       charSystem.removeByUserId(userId)
+      this.releaseSeatForMember(userId)
     }
 
     if (agentSystem) {
@@ -381,6 +387,59 @@ export class GardenEngine {
       z: snapshot.z,
       yaw: snapshot.yaw,
     })
+  }
+
+  // ─── Seat occupancy sync ──────────────────────
+
+  /**
+   * Sync a remote member's seat occupancy from their server snapshot.
+   * If the member is sitting near an InteractionPoint, mark it occupied.
+   * If they moved away or stopped sitting, release the old seat.
+   * Skip the local takeover user — their seat is managed locally.
+   */
+  private syncSeatOccupancy(
+    userId: string,
+    snapshot: { x: number; z: number; animState: string },
+  ): void {
+    if (userId === this.takeoverUserId) return
+    const layout = this.sceneManager?.worldLayout
+    if (!layout) return
+
+    const prevSeatId = this.remoteSeatMap.get(userId)
+    const isSitting = snapshot.animState === 'sit'
+
+    if (isSitting) {
+      // Find nearest seat to this member's position
+      const seats = layout.getSeats()
+      let nearestId: string | null = null
+      let nearestDist = 1.0  // max 1 unit proximity
+      for (const s of seats) {
+        const dx = snapshot.x - s.x
+        const dz = snapshot.z - s.z
+        const dist = dx * dx + dz * dz
+        if (dist < nearestDist) {
+          nearestDist = dist
+          nearestId = s.id
+        }
+      }
+      if (nearestId && nearestId !== prevSeatId) {
+        if (prevSeatId) layout.release(prevSeatId)
+        layout.occupy(nearestId, userId)
+        this.remoteSeatMap.set(userId, nearestId)
+      }
+    } else if (prevSeatId) {
+      layout.release(prevSeatId)
+      this.remoteSeatMap.delete(userId)
+    }
+  }
+
+  /** Release any seat occupied by this member (on remove or disconnect). */
+  private releaseSeatForMember(userId: string): void {
+    const seatId = this.remoteSeatMap.get(userId)
+    if (seatId) {
+      this.sceneManager?.worldLayout.release(seatId)
+      this.remoteSeatMap.delete(userId)
+    }
   }
 
   /** Temporary dev tool: simulate a dev_activity event for the current user. */
@@ -468,19 +527,24 @@ export class GardenEngine {
           if (this.input?.wasPressed(pc.KEY_E) && this.sceneManager && !this.vehicleCtrl?.isActive && this.seatToggleCooldown <= 0) {
             this.seatToggleCooldown = 0.3  // 300ms debounce
             if (this.takeoverCtrl.isSitting) {
+              // Release the occupied seat
+              if (this.currentOccupiedSeatId) {
+                this.sceneManager.worldLayout.release(this.currentOccupiedSeatId)
+                this.currentOccupiedSeatId = null
+              }
               this.takeoverCtrl.standUp()
               this.takeoverUI?.hideSeatPrompt()
-              // Broadcast stand-up to other clients
               const sp = this.takeoverCtrl.getPosition()
               this.orgRoomClient?.sendMove(sp.x, sp.y, sp.z, this.takeoverCtrl.getYaw(), 'idle')
             } else {
-              // Find nearest seat within proximity
+              // Find nearest UNOCCUPIED seat within proximity
               const pos = this.takeoverCtrl.getPosition()
               const seats = this.sceneManager.worldLayout.getSeats()
               const PROXIMITY_SQ = 2.5 * 2.5
-              let nearest: { x: number; y: number; z: number; yaw: number } | null = null
+              let nearest: typeof seats[number] | null = null
               let nearestDist = PROXIMITY_SQ
               for (const seat of seats) {
+                if (seat.occupied) continue
                 const dx = pos.x - seat.x
                 const dz = pos.z - seat.z
                 const distSq = dx * dx + dz * dz
@@ -490,9 +554,10 @@ export class GardenEngine {
                 }
               }
               if (nearest) {
+                this.sceneManager.worldLayout.occupy(nearest.id, this.takeoverUserId!)
+                this.currentOccupiedSeatId = nearest.id
                 this.takeoverCtrl.sitAt(nearest.x, nearest.y, nearest.z, nearest.yaw)
                 this.takeoverUI?.hideSeatPrompt()
-                // Broadcast sit to other clients
                 this.orgRoomClient?.sendMove(nearest.x, nearest.y, nearest.z, nearest.yaw, 'sit')
               }
             }
@@ -538,6 +603,7 @@ export class GardenEngine {
             const pos = this.takeoverCtrl.getPosition()
             const seats = this.sceneManager.worldLayout.getSeats()
             const nearSeat = seats.some(s => {
+              if (s.occupied) return false
               const dx = pos.x - s.x
               const dz = pos.z - s.z
               return dx * dx + dz * dz < 6.25  // 2.5 unit radius
@@ -882,6 +948,12 @@ export class GardenEngine {
     if (this.vehicleCtrl?.isActive) {
       this.vehicleCtrl.dismount()
       this.takeoverCtrl.mounted = false
+    }
+
+    // Release any occupied seat
+    if (this.currentOccupiedSeatId && this.sceneManager) {
+      this.sceneManager.worldLayout.release(this.currentOccupiedSeatId)
+      this.currentOccupiedSeatId = null
     }
 
     // Immediately transition to 'exiting' state + clear ctrl to block the takeover update loop

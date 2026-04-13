@@ -86,6 +86,9 @@ export function generateBreakSeats(teamSize: number): BreakSeat[] {
  * Layout: rows of 2 long tables, each with a bench on both sides.
  * 4 seats per row (2 tables × 2 sides). Rows spaced 2.8 units apart.
  * First row starts at local z=3.5 (in front of the kitchen hut).
+ *
+ * Iteration order: outer=side, inner=tableX — must match
+ * CafeteriaBuilder.ts so seat indices align for occupancy tracking.
  */
 function generateCafeteriaSeats(
   zoneX: number, zoneZ: number, count: number,
@@ -95,21 +98,26 @@ function generateCafeteriaSeats(
   const ROW_SPACING = 2.8
   const TABLE_XS = [1.0, 3.0]
   const SEAT_Y = 0.23
+  // Must match SEAT_OFFSETS.benchCushion.forwardOffset in
+  // frontend/src/engine/characters/InteractionPoint.ts
+  const FORWARD_OFFSET = 0.10
 
   const seats: BreakSeat[] = []
   const rows = Math.ceil(count / 4)
 
   for (let row = 0; row < rows; row++) {
     const tz = ROW_START_Z + row * ROW_SPACING
-    for (const tableX of TABLE_XS) {
-      for (const side of [-1, 1]) {
+    for (const side of [-1, 1]) {
+      const yaw = side > 0 ? 180 : 0
+      const yawRad = yaw * Math.PI / 180
+      for (const tableX of TABLE_XS) {
         if (seats.length >= count) return seats
         seats.push({
           zone: "cafeteria",
-          x: zoneX + tableX,
+          x: zoneX + tableX + Math.sin(yawRad) * FORWARD_OFFSET,
           y: SEAT_Y,
-          z: zoneZ + tz + side * BENCH_OFFSET,
-          yaw: side > 0 ? 180 : 0,
+          z: zoneZ + tz + side * BENCH_OFFSET + Math.cos(yawRad) * FORWARD_OFFSET,
+          yaw,
         })
       }
     }
@@ -124,6 +132,9 @@ function generateCafeteriaSeats(
  * Left column at localX=-1.0 (chairs at -1.8 and -0.2).
  * Right column at localX=2.5 (chairs at 1.7 and 3.3).
  * Tables spaced 2.0 units apart, starting at local z=3.5.
+ *
+ * Iteration order: outer=column, inner=table — must match
+ * CoffeeBarBuilder.ts so seat indices align for occupancy tracking.
  */
 function generateCoffeeBarSeats(
   zoneX: number, zoneZ: number, count: number,
@@ -135,29 +146,33 @@ function generateCoffeeBarSeats(
   const TABLE_START_Z = 3.5
   const TABLE_SPACING = 2.0
   const SEAT_Y = 0.23
+  // Must match SEAT_OFFSETS.chairCushion.forwardOffset in
+  // frontend/src/engine/characters/InteractionPoint.ts
+  const FORWARD_OFFSET = 0.15
 
   const seats: BreakSeat[] = []
   const tablesPerCol = Math.ceil(count / 4) // 4 seats per 2 columns
-  // Ensure at least 1 table per column to avoid empty zones
   const maxTables = Math.max(tablesPerCol, 1)
 
-  for (let t = 0; t < maxTables; t++) {
-    const tz = TABLE_START_Z + t * TABLE_SPACING
-    for (const col of COLUMNS) {
+  for (const col of COLUMNS) {
+    for (let t = 0; t < maxTables; t++) {
+      const tz = TABLE_START_Z + t * TABLE_SPACING
       if (seats.length >= count) return seats
+      // Left chair (facing right, yaw=90)
       seats.push({
         zone: "coffee_bar",
-        x: zoneX + col.baseX + col.leftOffset,
+        x: zoneX + col.baseX + col.leftOffset + Math.sin(90 * Math.PI / 180) * FORWARD_OFFSET,
         y: SEAT_Y,
-        z: zoneZ + tz,
+        z: zoneZ + tz + Math.cos(90 * Math.PI / 180) * FORWARD_OFFSET,
         yaw: 90,
       })
       if (seats.length >= count) return seats
+      // Right chair (facing left, yaw=-90)
       seats.push({
         zone: "coffee_bar",
-        x: zoneX + col.baseX + col.rightOffset,
+        x: zoneX + col.baseX + col.rightOffset + Math.sin(-90 * Math.PI / 180) * FORWARD_OFFSET,
         y: SEAT_Y,
-        z: zoneZ + tz,
+        z: zoneZ + tz + Math.cos(-90 * Math.PI / 180) * FORWARD_OFFSET,
         yaw: -90,
       })
     }
