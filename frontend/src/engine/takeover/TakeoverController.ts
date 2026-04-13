@@ -90,7 +90,6 @@ export class TakeoverController {
     this.entity.anim?.setBoolean('jumping', false)
     this.entity.anim?.setBoolean('sitting', true)
     this.entity.anim?.setInteger('speed', 0)
-    this.entity.anim?.setInteger('working', 0)
     this.physics?.setDoorsEnabled(false)
     this._inactivityTimer = 0
   }

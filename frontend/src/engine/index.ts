@@ -466,7 +466,6 @@ export class GardenEngine {
           if (this.input?.wasPressed(pc.KEY_E) && this.sceneManager && !this.vehicleCtrl?.isActive && this.seatToggleCooldown <= 0) {
             this.seatToggleCooldown = 0.3  // 300ms debounce
             if (this.takeoverCtrl.isSitting) {
-              console.log('[GardenEngine] E pressed → standUp (was sitting)')
               this.takeoverCtrl.standUp()
               this.takeoverUI?.hideSeatPrompt()
               // Broadcast stand-up to other clients
@@ -489,13 +488,10 @@ export class GardenEngine {
                 }
               }
               if (nearest) {
-                console.log(`[GardenEngine] E pressed → sitAt seat (${nearest.x}, ${nearest.y}, ${nearest.z}) yaw=${nearest.yaw}, dist=${Math.sqrt(nearestDist).toFixed(2)}`)
                 this.takeoverCtrl.sitAt(nearest.x, nearest.y, nearest.z, nearest.yaw)
                 this.takeoverUI?.hideSeatPrompt()
                 // Broadcast sit to other clients
                 this.orgRoomClient?.sendMove(nearest.x, nearest.y, nearest.z, nearest.yaw, 'sit')
-              } else {
-                console.log(`[GardenEngine] E pressed → no seat in range (pos: ${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}, ${seats.length} seats checked)`)
               }
             }
           }

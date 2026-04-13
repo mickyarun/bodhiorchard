@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **bodhigrove** (8274 symbols, 23086 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **bodhigrove** (8393 symbols, 23526 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -126,6 +126,17 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 4. **Use MaterialFactory** — don't create ad-hoc `StandardMaterial` instances. Use `MaterialFactory.getColor()` for cached, properly-lit materials.
 5. **Return exclusion zones** — any subsystem that occupies ground space must return `{ x, z, radius }` zones so grass/rocks avoid it.
 6. **Old engine backup** — the previous engine lives in `frontend/src/engine_bkup/` for reference. It is excluded from TypeScript compilation via `tsconfig.json`.
+
+### KayKit Animation Track Gotcha
+- `simulation.glb` has multiple tracks with `Sit` prefix: `Sit_Chair_Down` (0.8s transition) and `Sit_Chair_Idle` (3.6s loop). **Always use the exact track name** `Sit_Chair_Idle` — fuzzy keyword `'Sit'` matches `Sit_Chair_Down` first, which is a one-shot transition that looks like idle.
+- `findAnimTrack()` in `AnimUtils.ts` does substring matching and returns the first hit. When assigning via keywords, put the most specific name first: `['Sit_Chair_Idle', 'Sit']`.
+- `KayKitCharacterFactory.ANIM_TRACK_MAP` is the authoritative mapping for NPC characters. `TakeoverAnimGraph.assignCoreAnimations` must match these exact track names.
+- The same pattern applies to any future animations with shared prefixes (e.g. `Walk_Forward` vs `Walk_Backward`).
+
+### Takeover Seat Interaction
+- E-key fires `wasPressed` which can trigger twice rapidly — a 300ms cooldown (`seatToggleCooldown`) in `GardenEngine.onUpdate` prevents sit/stand toggle loops.
+- `TakeoverController.getAnimState()` must return `"sit"` when `_sitting` is true, otherwise the periodic broadcast sends `"idle"` to the server and other clients see the character standing on the chair.
+- `TakeoverController.sitAt()` must clear `jumpProgress` and `anim.setBoolean('jumping', false)` to cleanly transition from any prior state.
 
 ### Engine Phases
 

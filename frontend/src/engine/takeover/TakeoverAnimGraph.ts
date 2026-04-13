@@ -196,7 +196,7 @@ async function assignCoreAnimations(
   const coreGlbs = [
     { path: getAnimationGLB('general'),        state: 'Idle', keywords: ['Idle'] },
     { path: getAnimationGLB('movement_basic'), state: 'Walk', keywords: ['Walking', 'Walk'] },
-    { path: getAnimationGLB('simulation'),     state: 'Sit',  keywords: ['Sit'] },
+    { path: getAnimationGLB('simulation'),     state: 'Sit',  keywords: ['Sit_Chair_Idle', 'Sit'] },
   ]
 
   for (const { path, state, keywords } of coreGlbs) {
