@@ -77,6 +77,7 @@ export interface BUDListItem {
   current_phase_deadline: string | null
   assignee_id: string | null
   assignee_name: string | null
+  open_bug_count: number
   created_at: string
   updated_at: string
 }

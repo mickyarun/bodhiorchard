@@ -188,6 +188,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { useBugsStore } from '@/stores/bugs'
 import { BUG_SEVERITY_COLORS, BUG_STATUS_COLORS } from '@/types'
@@ -195,8 +196,12 @@ import type { BugListItem, BugRead, BugStatusValue } from '@/types'
 import { formatDateTime } from '@/utils/date'
 import BugCreateDialog from './BugCreateDialog.vue'
 
+const route = useRoute()
 const budStore = useBUDStore()
 const bugsStore = useBugsStore()
+
+// Pre-populate filter from URL query (e.g. /bugs?budId=xxx from BUD board badge)
+const filterBudId = ref<string | null>((route.query.budId as string) || null)
 
 const showCreate = ref(false)
 const linkBudId = ref<string | null>(null)
@@ -244,6 +249,7 @@ function loadBugs(): void {
   bugsStore.fetchBugs({
     status: filterStatus.value || undefined,
     severity: filterSeverity.value || undefined,
+    budId: filterBudId.value || undefined,
     page: currentPage.value,
   })
 }

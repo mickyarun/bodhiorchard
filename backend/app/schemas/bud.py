@@ -168,6 +168,7 @@ class BUDListItem(BaseModel):
     current_phase_deadline: datetime | None = None
     assignee_id: uuid.UUID | None = None
     assignee_name: str | None = None
+    open_bug_count: int = 0
     created_at: datetime
     updated_at: datetime
 

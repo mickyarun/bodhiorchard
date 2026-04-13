@@ -105,8 +105,21 @@
                 </div>
               </div>
 
-              <!-- Row 2: Title -->
-              <div class="text-body-2 font-weight-medium mb-2">{{ bud.title }}</div>
+              <!-- Row 2: Title + bug badge -->
+              <div class="d-flex align-center mb-2">
+                <div class="text-body-2 font-weight-medium flex-grow-1 text-truncate">{{ bud.title }}</div>
+                <v-chip
+                  v-if="bud.open_bug_count > 0"
+                  size="x-small"
+                  variant="tonal"
+                  color="error"
+                  prepend-icon="mdi-bug-outline"
+                  class="ml-2 flex-shrink-0"
+                  @click.stop="$router.push(`/bugs?budId=${bud.id}`)"
+                >
+                  {{ bud.open_bug_count }}
+                </v-chip>
+              </div>
 
               <!-- Row 3: Phase deadline + go-live (only if estimates exist) -->
               <div v-if="bud.current_phase_deadline" class="text-caption mb-1" :class="deadlineColor(bud.current_phase_deadline)">

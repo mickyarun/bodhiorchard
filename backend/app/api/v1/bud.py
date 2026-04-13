@@ -102,7 +102,38 @@ async def list_buds(
             ) from None
 
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
-    return await bud_repo.list_buds(status_filter=status_filter)
+    buds = await bud_repo.list_buds(status_filter=status_filter)
+
+    # Batch-fetch open bug counts for all BUDs in one query
+    from sqlalchemy import func, select
+
+    from app.models.bug import Bug
+    from app.models.bug import BugStatus as BugStatusEnum
+
+    bud_ids = [b.id for b in buds]
+    bug_counts: dict[uuid.UUID, int] = {}
+    if bud_ids:
+        stmt = (
+            select(Bug.bud_id, func.count(Bug.id))
+            .where(
+                Bug.org_id == current_user.org_id,
+                Bug.bud_id.in_(bud_ids),
+                Bug.status.in_([
+                    BugStatusEnum.OPEN,
+                    BugStatusEnum.IN_PROGRESS,
+                    BugStatusEnum.BLOCKED,
+                ]),
+            )
+            .group_by(Bug.bud_id)
+        )
+        result = await db.execute(stmt)
+        bug_counts = dict(result.all())
+
+    # Inject open_bug_count as a transient attribute so Pydantic's
+    # from_attributes picks it up alongside the ORM columns.
+    for b in buds:
+        b.open_bug_count = bug_counts.get(b.id, 0)  # type: ignore[attr-defined]
+    return buds
 
 
 @router.post(
