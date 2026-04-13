@@ -77,6 +77,25 @@ class UnlockedItems:
     accessories: list[str]
 
 
+# ─── Skill Points ─────────────────────────────
+
+SKILL_POINTS_PER_XP = 1
+
+# ─── Vehicle Unlock Costs ─────────────────────
+
+VEHICLE_UNLOCKS: dict[str, int] = {
+    "horse": 50,
+}
+
+# ─── House Tier Costs ─────────────────────────
+
+HOUSE_TIER_COSTS: dict[int, int] = {
+    1: 0,
+    2: 0,
+    3: 100,
+}
+
+
 def get_unlocked_items_for_level(level: int) -> UnlockedItems:
     """Return unlocked character/accessory IDs for a given level."""
     return UnlockedItems(

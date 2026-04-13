@@ -446,6 +446,7 @@ async def collect_members(
             func.coalesce(func.sum(SkillProfile.touch_count), 0).label("total_touches"),
             DeveloperXP.level,
             DeveloperXP.level_name,
+            DeveloperXP.house_level,
         )
         # OrgToUser is the authoritative membership join — ensures every
         # org member appears regardless of contribution activity.
@@ -472,6 +473,7 @@ async def collect_members(
             User.slack_id,
             DeveloperXP.level,
             DeveloperXP.level_name,
+            DeveloperXP.house_level,
         )
         # MUST match the ordering in internal_colyseus._collect_org_members
         # (ORDER BY User.id) so the housing grid slot assignment is identical
@@ -521,5 +523,6 @@ async def collect_members(
                 presence=presence,
                 level=row.level or 1,
                 level_name=row.level_name or "seedling",
+                house_level=row.house_level or 2,
             )
         )

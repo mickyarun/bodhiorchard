@@ -39,6 +39,7 @@ export interface MemberActivity {
   presence?: 'active' | 'on_break' | 'at_home'
   level?: number
   level_name?: string
+  house_level?: number
 }
 
 export interface SecurityThreat {

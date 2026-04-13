@@ -41,8 +41,8 @@ const VEHICLES: VehicleDef[] = [
     speedMultiplier: 2.0,
     physicsRadius: 0.5,
     physicsHalfHeight: 0.5,
-    mountOffset: { x: 0, y: 0.85, z: 0 },
-    scale: 0.45,
+    mountOffset: { x: 0, y: 0.55, z: 0 },
+    scale: 0.22,
     animations: {
       idle: 'Idle',
       walk: 'Walk',

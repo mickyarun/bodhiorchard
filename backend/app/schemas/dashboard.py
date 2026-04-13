@@ -50,6 +50,7 @@ class MemberActivity(BaseModel):
     presence: str = Field(default="active", description="active | on_break | at_home")
     level: int = 1
     level_name: str = "seedling"
+    house_level: int = 2
 
 
 class SecurityThreat(BaseModel):

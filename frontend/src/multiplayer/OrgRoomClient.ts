@@ -35,6 +35,7 @@ export interface MemberStateSnapshot {
   labelMessage: string
   takeoverSessionId: string
   locationContext: string
+  vehicleId: string
 }
 
 /** Read-only snapshot of an agent's state (mirrors server AgentState schema). */
@@ -71,6 +72,7 @@ interface RawMember {
   labelMessage?: string
   takeoverSessionId?: string
   locationContext?: string
+  vehicleId?: string
 }
 
 interface RawAgent {
@@ -206,6 +208,11 @@ export class OrgRoomClient {
     this.room?.send("dismount_vehicle", {})
   }
 
+  /** Notify server of house tier upgrade (live update for all viewers). */
+  sendUpgradeHouse(tier: number): void {
+    this.room?.send("upgrade_house", { tier })
+  }
+
   /** Temporary dev tool: fire a simulated dev_activity for the current user. */
   sendSimulateDevActivity(): void {
     this.room?.send("simulate_dev_activity")
@@ -322,6 +329,7 @@ function memberToSnapshot(m: RawMember): MemberStateSnapshot {
     labelMessage:   m.labelMessage    ?? '',
     takeoverSessionId: m.takeoverSessionId ?? '',
     locationContext: m.locationContext ?? 'garden',
+    vehicleId:      m.vehicleId       ?? '',
   }
 }
 

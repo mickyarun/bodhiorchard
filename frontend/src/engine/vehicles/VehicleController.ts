@@ -26,9 +26,7 @@ export class VehicleController {
   private physics: PhysicsWorld | null = null
   private input: InputManager
   private _active = false
-
-  // Animation dedup — only transition when anim changes
-  private _lastVehicleAnim = ''
+  private _mounting = false
 
   // Scratch vector
   private readonly _dir = new pc.Vec3()
@@ -63,7 +61,8 @@ export class VehicleController {
     physics: PhysicsWorld,
     parentRoot: pc.Entity,
   ): Promise<void> {
-    if (this._active) return
+    if (this._active || this._mounting) return
+    this._mounting = true
 
     this.characterEntity = characterEntity
     this.physics = physics
@@ -75,21 +74,24 @@ export class VehicleController {
     this.vehicle = await this.factory.create(def, pos.x, pos.z, yaw)
     parentRoot.addChild(this.vehicle.entity)
 
-    // Parent character to the vehicle's mount offset
-    // Store original world position, reparent, then set local to mount offset
+    // Parent character to the vehicle's mount offset.
+    // Counter-scale so the character stays at world-scale 1.0
+    // despite the vehicle being scaled to def.scale.
+    const inv = 1 / def.scale
     characterEntity.reparent(this.vehicle.entity)
     characterEntity.setLocalPosition(
-      def.mountOffset.x / def.scale,
-      def.mountOffset.y / def.scale,
-      def.mountOffset.z / def.scale,
+      def.mountOffset.x * inv,
+      def.mountOffset.y * inv,
+      def.mountOffset.z * inv,
     )
+    characterEntity.setLocalScale(inv, inv, inv)
     characterEntity.setLocalEulerAngles(0, 0, 0)
 
-    // Switch character to sitting/riding pose
+    // Freeze character in idle pose while mounted
     const anim = characterEntity.anim
     if (anim) {
-      anim.setBoolean('sitting', true)
       anim.setInteger('speed', 0)
+      anim.setBoolean('sitting', false)
     }
 
     // Resize physics capsule for the vehicle
@@ -97,6 +99,7 @@ export class VehicleController {
     physics.createPlayer(pos.x, pos.z, def.physicsRadius, def.physicsHalfHeight)
 
     this._active = true
+    this._mounting = false
   }
 
   /**
@@ -138,7 +141,7 @@ export class VehicleController {
     this.physics.createPlayer(dismountX, dismountZ)
 
     this._active = false
-    this._lastVehicleAnim = ''
+    this._mounting = false
     this.characterEntity = null
     this.physics = null
 
@@ -194,28 +197,12 @@ export class VehicleController {
   private updateVehicleAnimation(moving: boolean, sprinting: boolean): void {
     if (!this.vehicle) return
 
-    const def = this.vehicle.def
     const anim = this.vehicle.entity.anim
     if (!anim) return
 
-    let targetAnim: string
-    if (!moving) {
-      targetAnim = def.animations.idle
-    } else if (sprinting) {
-      targetAnim = def.animations.gallop
-    } else {
-      targetAnim = def.animations.walk
-    }
-
-    // Only transition when animation changes — calling transition() every
-    // frame restarts the blend weight and causes stuttering.
-    if (targetAnim !== this._lastVehicleAnim) {
-      this._lastVehicleAnim = targetAnim
-      try {
-        anim.baseLayer?.transition(targetAnim, 0.3)
-      } catch {
-        // Animation state not configured for this clip name; silently ignore.
-      }
-    }
+    // Drive the state graph via the "speed" parameter:
+    //   0 = Idle, 1 = Walk, 2 = Gallop
+    const speed = !moving ? 0 : sprinting ? 2 : 1
+    anim.setInteger('speed', speed)
   }
 }

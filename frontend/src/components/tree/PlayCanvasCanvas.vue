@@ -25,6 +25,7 @@ import type { TreeData } from '@/types/dashboard'
 import { GardenEngine } from '@/engine/index'
 import type { EngineData, RepoHealth, ThreatSeverity, BUDStatus, RelType } from '@/engine/types'
 import { useAuthStore } from '@/stores/auth'
+import { useXPStore } from '@/stores/xp'
 import api from '@/services/api'
 
 const authStore = useAuthStore()
@@ -207,6 +208,13 @@ async function initEngine(): Promise<void> {
   // Connect to the Colyseus OrgRoom (if auth is already available). The
   // watcher on authStore.user handles the case where auth resolves later.
   await tryConnectOrgRoom()
+
+  // Fetch XP profile to get vehicle unlocks for the engine
+  const xpStore = useXPStore()
+  await xpStore.fetchProfile()
+  if (xpStore.profile) {
+    engine.setVehicleUnlocks(xpStore.profile.vehicle_unlocks)
+  }
 }
 
 /** Push the auth store's user into the engine (if available). */

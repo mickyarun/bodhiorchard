@@ -183,6 +183,9 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     this.onMessage("dismount_vehicle", (client) =>
       this.handleDismountVehicle(client),
     )
+    this.onMessage("upgrade_house", (client, data: { tier: number }) =>
+      this.handleUpgradeHouse(client, data),
+    )
 
     // Drive the server-side simulation at 20Hz — walking, phrase cycles, idle timeouts.
     // setSimulationInterval passes dt in milliseconds; sim tick expects seconds.
@@ -738,6 +741,16 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     const member = this.resolveTakeoverMember(client)
     if (!member) return
     member.vehicleId = ""
+  }
+
+  private handleUpgradeHouse(client: Client, data: { tier: number }): void {
+    const userId = (client.userData as { userId?: string } | undefined)?.userId
+    if (!userId) return
+    const member = this.state.members.get(userId)
+    if (!member) return
+    if (typeof data.tier === "number" && data.tier >= 1 && data.tier <= 3) {
+      member.houseLevel = data.tier
+    }
   }
 
   /**

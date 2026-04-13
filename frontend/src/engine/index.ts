@@ -37,9 +37,11 @@ import {
   loadTakeoverAnimations,
   restoreLocomotionAnimations,
 } from './takeover'
-import { OrgRoomClient } from '../multiplayer'
+import { OrgRoomClient, type MemberStateSnapshot } from '../multiplayer'
+import type { CharacterSystem } from './characters/CharacterSystem'
 import { SerializedExecutor } from './utils/SerializedExecutor'
 import { VehicleController } from './vehicles/VehicleController'
+import { VehicleSystem } from './vehicles/VehicleSystem'
 import { getVehicleDef } from './vehicles/VehicleManifest'
 
 export { type EngineData, type EngineCallbacks } from './types'
@@ -75,8 +77,12 @@ export class GardenEngine {
   private takeoverProximity: ProximitySystem | null = null
   private takeoverUserId: string | null = null
   private vehicleCtrl: VehicleController | null = null
+  private vehicleSystem: VehicleSystem | null = null
+  /** Set of unlocked vehicle IDs — gates V-key mount. */
+  private vehicleUnlocks = new Set<string>()
   // Throttle move broadcasts to OrgRoom at ~20Hz during takeover
   private takeoverMoveAccumulator = 0
+  private seatToggleCooldown = 0
   private static readonly TAKEOVER_MOVE_INTERVAL = 0.05  // seconds
 
   /** The currently authenticated user — set by Vue layer via setCurrentUser(). */
@@ -305,13 +311,26 @@ export class GardenEngine {
     if (!charSystem) return
     const agentSystem = this.sceneManager.agentSystemRef
 
+    // (Re)create VehicleSystem for remote player vehicle rendering.
+    // Destroyed + recreated on scene rebuild to match CharacterSystem lifecycle.
+    this.vehicleSystem?.destroy()
+    const gardenRoot = this.sceneManager.gardenRootEntity
+    if (gardenRoot) {
+      this.vehicleSystem = new VehicleSystem(this.sceneManager.assetLoader, gardenRoot)
+      this.vehicleSystem.setLocalUserId(this.currentUser?.id ?? null)
+      // Let CharacterSystem skip position updates for mounted characters
+      charSystem.isUserMounted = (userId) => this.vehicleSystem?.isMounted(userId) ?? false
+    }
+
     this.orgRoomClient.onMemberAdd = (_userId, snapshot) => {
       void charSystem.spawnFromSnapshot(snapshot)
     }
     this.orgRoomClient.onMemberUpdate = (_userId, snapshot) => {
       charSystem.updateFromSnapshot(snapshot)
+      this.syncRemoteVehicle(charSystem, snapshot)
     }
     this.orgRoomClient.onMemberRemove = (userId) => {
+      this.vehicleSystem?.unregisterCharacter(userId)
       charSystem.removeByUserId(userId)
     }
 
@@ -331,8 +350,35 @@ export class GardenEngine {
     // that was present before the rebuild. First-connect replays are no-ops
     // because the cache is empty until after `room.joinOrCreate` resolves.
     for (const [, snapshot] of this.orgRoomClient.members) {
-      void charSystem.spawnFromSnapshot(snapshot)
+      // Spawn character first, then sync vehicle once the entity is ready.
+      // spawnFromSnapshot is async (GLB load), so vehicle sync runs after.
+      void charSystem.spawnFromSnapshot(snapshot).then(() => {
+        this.syncRemoteVehicle(charSystem, snapshot)
+      })
     }
+  }
+
+  /**
+   * Sync a remote player's vehicle state from their snapshot.
+   * Skips the local takeover user (local mount is handled by VehicleController).
+   */
+  private syncRemoteVehicle(
+    charSystem: CharacterSystem,
+    snapshot: MemberStateSnapshot,
+  ): void {
+    if (!this.vehicleSystem) return
+
+    // Lazily register the character entity for parenting
+    const entity = charSystem.getEntity(snapshot.userId)
+    if (entity) this.vehicleSystem.registerCharacter(snapshot.userId, entity)
+
+    void this.vehicleSystem.updateFromSnapshot({
+      userId: snapshot.userId,
+      vehicleId: snapshot.vehicleId,
+      x: snapshot.x,
+      z: snapshot.z,
+      yaw: snapshot.yaw,
+    })
   }
 
   /** Temporary dev tool: simulate a dev_activity event for the current user. */
@@ -348,6 +394,8 @@ export class GardenEngine {
       this.connectedOrgId = null
     }
     this.sceneManager?.agentSystemRef?.setServerDriven(false)
+    this.vehicleSystem?.destroy()
+    this.vehicleSystem = null
   }
 
   /** Per-frame update — called by core app. */
@@ -397,7 +445,7 @@ export class GardenEngine {
               const yaw = this.vehicleCtrl?.isActive
                 ? this.vehicleCtrl.getYaw()
                 : this.takeoverCtrl.getYaw()
-              const animState = this.vehicleCtrl?.isActive ? 'walk' : this.takeoverCtrl.getAnimState()
+              const animState = this.vehicleCtrl?.isActive ? 'sit' : this.takeoverCtrl.getAnimState()
               this.orgRoomClient.sendMove(pos.x, pos.y, pos.z, yaw, animState)
             }
           }
@@ -414,8 +462,11 @@ export class GardenEngine {
           }
 
           // ─── Seat interaction: E-key to sit/stand at nearby chairs ───
-          if (this.input?.wasPressed(pc.KEY_E) && this.sceneManager && !this.vehicleCtrl?.isActive) {
+          if (this.seatToggleCooldown > 0) this.seatToggleCooldown -= dt
+          if (this.input?.wasPressed(pc.KEY_E) && this.sceneManager && !this.vehicleCtrl?.isActive && this.seatToggleCooldown <= 0) {
+            this.seatToggleCooldown = 0.3  // 300ms debounce
             if (this.takeoverCtrl.isSitting) {
+              console.log('[GardenEngine] E pressed → standUp (was sitting)')
               this.takeoverCtrl.standUp()
               this.takeoverUI?.hideSeatPrompt()
               // Broadcast stand-up to other clients
@@ -438,10 +489,13 @@ export class GardenEngine {
                 }
               }
               if (nearest) {
+                console.log(`[GardenEngine] E pressed → sitAt seat (${nearest.x}, ${nearest.y}, ${nearest.z}) yaw=${nearest.yaw}, dist=${Math.sqrt(nearestDist).toFixed(2)}`)
                 this.takeoverCtrl.sitAt(nearest.x, nearest.y, nearest.z, nearest.yaw)
                 this.takeoverUI?.hideSeatPrompt()
                 // Broadcast sit to other clients
                 this.orgRoomClient?.sendMove(nearest.x, nearest.y, nearest.z, nearest.yaw, 'sit')
+              } else {
+                console.log(`[GardenEngine] E pressed → no seat in range (pos: ${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}, ${seats.length} seats checked)`)
               }
             }
           }
@@ -453,13 +507,14 @@ export class GardenEngine {
               const dismountPos = this.vehicleCtrl.dismount()
               if (dismountPos) {
                 this.takeoverCtrl.mounted = false
+
                 this.sceneManager.physicsWorld?.teleportPlayer(dismountPos.x, dismountPos.z)
                 this.orgRoomClient?.sendDismountVehicle()
               }
             } else {
-              // Mount — default to horse for V1
+              // Mount — default to horse for V1 (must be unlocked)
               const horseDef = getVehicleDef('horse')
-              if (horseDef && this.sceneManager.physicsWorld) {
+              if (horseDef && this.vehicleUnlocks.has('horse') && this.sceneManager.physicsWorld) {
                 if (!this.vehicleCtrl) {
                   this.vehicleCtrl = new VehicleController(this.input, this.sceneManager.assetLoader)
                 }
@@ -887,6 +942,13 @@ export class GardenEngine {
     user: { id: string; name: string; characterModel: string | null; token: string | null } | null,
   ): void {
     this.currentUser = user
+    // Keep VehicleSystem in sync so it always skips the local user
+    this.vehicleSystem?.setLocalUserId(user?.id ?? null)
+  }
+
+  /** Update the set of unlocked vehicle IDs (gates V-key mount). */
+  setVehicleUnlocks(unlocks: string[]): void {
+    this.vehicleUnlocks = new Set(unlocks)
   }
 
   /** True whenever the player is actively controlling a character (takeover OR house interior). */

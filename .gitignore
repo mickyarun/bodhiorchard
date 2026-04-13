@@ -44,3 +44,6 @@ Thumbs.db
 *.sqlite3
 *.db
 .gitnexus
+
+# Colyseus dev mode state (may contain JWTs)
+.devmode.json

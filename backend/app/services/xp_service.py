@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.developer_xp import DeveloperXPRepository, XPEventRepository
 from app.services.event_bus import publish
 from app.services.xp_rules import (
+    SKILL_POINTS_PER_XP,
     UnlockedItems,
     compute_level,
     get_unlocked_items_for_level,
@@ -88,6 +89,7 @@ async def award_xp(
 
     # Update aggregate
     row.total_xp += effective_xp
+    row.skill_points += effective_xp * SKILL_POINTS_PER_XP
     new_level, new_name = compute_level(row.total_xp)
     row.level = new_level
     row.level_name = new_name
@@ -126,6 +128,7 @@ async def award_xp(
             "xp_amount": effective_xp,
             "source": source,
             "new_total": row.total_xp,
+            "skill_points": row.skill_points,
             "level": new_level,
             "level_name": new_name,
             "level_changed": level_changed,

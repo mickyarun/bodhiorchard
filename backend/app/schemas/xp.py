@@ -38,6 +38,34 @@ class LeaderboardEntry(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class VehicleUnlockRequest(BaseModel):
+    """Request to unlock a vehicle with skill points."""
+
+    vehicle_id: str
+
+
+class VehicleUnlockResponse(BaseModel):
+    """Response after unlocking a vehicle."""
+
+    success: bool
+    remaining_skill_points: int
+    vehicle_unlocks: list[str]
+
+
+class HouseUpgradeRequest(BaseModel):
+    """Request to upgrade house tier with skill points."""
+
+    target_tier: int
+
+
+class HouseUpgradeResponse(BaseModel):
+    """Response after upgrading house."""
+
+    success: bool
+    remaining_skill_points: int
+    house_level: int
+
+
 class XPEventRead(BaseModel):
     """Individual XP award event."""
 

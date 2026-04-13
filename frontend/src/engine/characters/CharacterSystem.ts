@@ -53,6 +53,9 @@ export class CharacterSystem {
   // Track pending spawns to prevent duplicate async spawn races
   private spawning = new Set<string>()
 
+  /** Optional callback to check if a user is mounted (set by GardenEngine). */
+  isUserMounted: ((userId: string) => boolean) | null = null
+
   constructor(loader: AssetLoader) {
     this.factory = new CharacterFactory(loader)
     this.kayKitFactory = new KayKitCharacterFactory(loader)
@@ -165,6 +168,10 @@ export class CharacterSystem {
 
     if (snapshot.userId === this.takeoverUserId) return
 
+    // Skip position + animation updates for characters mounted on a vehicle.
+    // Their position is driven by VehicleSystem (parented to the horse entity).
+    if (this.isUserMounted?.(snapshot.userId)) return
+
     character.entity.setPosition(snapshot.x, snapshot.y, snapshot.z)
     character.entity.setEulerAngles(0, snapshot.yaw, 0)
 
@@ -212,6 +219,11 @@ export class CharacterSystem {
   /** Find a character by member ID. */
   getCharacter(memberId: string): CharacterEntity | undefined {
     return this.characters.find(c => c.memberId === memberId)
+  }
+
+  /** Get the pc.Entity for a member (used by VehicleSystem to parent vehicles). */
+  getEntity(memberId: string): pc.Entity | undefined {
+    return this.getCharacter(memberId)?.entity
   }
 
   destroy(): void {

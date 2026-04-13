@@ -55,12 +55,16 @@ export const useXPStore = defineStore('xp', () => {
     level: number
     level_name: string
     streak_count: number
+    skill_points?: number
   }): void {
     if (!profile.value) return
     profile.value.total_xp = update.new_total
     profile.value.level = update.level
     profile.value.level_name = update.level_name
     profile.value.streak_count = update.streak_count
+    if (update.skill_points !== undefined) {
+      profile.value.skill_points = update.skill_points
+    }
   }
 
   return {

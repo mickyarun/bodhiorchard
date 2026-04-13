@@ -31,10 +31,24 @@ export class VehicleSystem {
   private pendingSpawns = new Set<string>()
   /** Character entities by userId — provided by CharacterSystem for parenting. */
   private characterEntities = new Map<string, pc.Entity>()
+  /** Local user ID to skip — their vehicle is handled by VehicleController. */
+  private localUserId: string | null = null
+  /** Set of userIds currently mounted — used by CharacterSystem to skip position updates. */
+  private mountedUsers = new Set<string>()
 
   constructor(loader: AssetLoader, parentRoot: pc.Entity) {
     this.factory = new VehicleFactory(loader)
     this.parentRoot = parentRoot
+  }
+
+  /** Set the local user ID — VehicleSystem will skip this user entirely. */
+  setLocalUserId(userId: string | null): void {
+    this.localUserId = userId
+  }
+
+  /** Check if a user is currently mounted on a vehicle (for CharacterSystem). */
+  isMounted(userId: string): boolean {
+    return this.mountedUsers.has(userId)
   }
 
   /**
@@ -59,6 +73,7 @@ export class VehicleSystem {
    * Called each frame or on snapshot change.
    */
   async updateFromSnapshot(snapshot: VehicleSnapshot): Promise<void> {
+    if (snapshot.userId === this.localUserId) return
     const existingVehicle = this.vehicles.get(snapshot.userId)
 
     if (snapshot.vehicleId && !existingVehicle) {
@@ -84,17 +99,28 @@ export class VehicleSystem {
     const vehicle = await this.factory.create(def, snapshot.x, snapshot.z, snapshot.yaw)
     this.parentRoot.addChild(vehicle.entity)
     this.vehicles.set(snapshot.userId, vehicle)
+    this.mountedUsers.add(snapshot.userId)
 
-    // Parent the character to the vehicle if we have their entity
+    // Parent the character to the vehicle if we have their entity.
+    // The vehicle is scaled to def.scale (e.g. 0.45), so we must
+    // counter-scale the character to keep it at world-scale 1.0.
     const charEntity = this.characterEntities.get(snapshot.userId)
     if (charEntity) {
+      const inv = 1 / def.scale
       charEntity.reparent(vehicle.entity)
       charEntity.setLocalPosition(
-        def.mountOffset.x / def.scale,
-        def.mountOffset.y / def.scale,
-        def.mountOffset.z / def.scale,
+        def.mountOffset.x * inv,
+        def.mountOffset.y * inv,
+        def.mountOffset.z * inv,
       )
+      charEntity.setLocalScale(inv, inv, inv)
       charEntity.setLocalEulerAngles(0, 0, 0)
+      // Freeze character in idle pose while mounted
+      const anim = charEntity.anim
+      if (anim) {
+        anim.setInteger('speed', 0)
+        anim.setBoolean('sitting', false)
+      }
     }
   }
 
@@ -109,17 +135,24 @@ export class VehicleSystem {
       charEntity.reparent(this.parentRoot)
       charEntity.setPosition(pos.x, 0, pos.z)
       charEntity.setLocalScale(1, 1, 1)
+      // Restore character animation
+      const anim = charEntity.anim
+      if (anim) {
+        anim.setBoolean('sitting', false)
+        anim.setInteger('speed', 0)
+      }
     }
 
     this.factory.destroy(vehicle)
     this.vehicles.delete(userId)
+    this.mountedUsers.delete(userId)
   }
 
   /**
    * Clean up all vehicles on scene teardown.
    */
   destroy(): void {
-    for (const [userId] of this.vehicles) {
+    for (const userId of [...this.vehicles.keys()]) {
       this.removeVehicle(userId)
     }
     this.vehicles.clear()

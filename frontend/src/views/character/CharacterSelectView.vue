@@ -53,12 +53,20 @@
             />
           </v-card>
 
-          <v-card color="surface" class="pa-5">
+          <v-card color="surface" class="pa-5 mb-4">
             <AccessoryPicker
               :right-hand="config.rightHand"
               :left-hand="config.leftHand"
               @update="onAccessoryUpdate"
             />
+          </v-card>
+
+          <v-card color="surface" class="pa-5 mb-4">
+            <VehicleUnlockPanel />
+          </v-card>
+
+          <v-card color="surface" class="pa-5">
+            <HouseUpgradePanel />
           </v-card>
         </v-col>
       </v-row>
@@ -88,6 +96,8 @@ import CharacterGrid from '@/components/character/CharacterGrid.vue'
 import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import ColorCustomizer from '@/components/character/ColorCustomizer.vue'
 import AccessoryPicker from '@/components/character/AccessoryPicker.vue'
+import VehicleUnlockPanel from '@/components/xp/VehicleUnlockPanel.vue'
+import HouseUpgradePanel from '@/components/xp/HouseUpgradePanel.vue'
 import {
   type CharacterConfig,
   parseCharacterModel,

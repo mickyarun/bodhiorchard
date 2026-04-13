@@ -1,12 +1,21 @@
 """XP/gamification API endpoints."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.models.user import User
 from app.repositories.developer_xp import DeveloperXPRepository, XPEventRepository
-from app.schemas.xp import LeaderboardEntry, XPEventRead, XPProfileRead
+from app.schemas.xp import (
+    HouseUpgradeRequest,
+    HouseUpgradeResponse,
+    LeaderboardEntry,
+    VehicleUnlockRequest,
+    VehicleUnlockResponse,
+    XPEventRead,
+    XPProfileRead,
+)
+from app.services.xp_rules import HOUSE_TIER_COSTS, VEHICLE_UNLOCKS
 from app.services.xp_service import get_unlocked_items, xp_for_next_level
 
 router = APIRouter(prefix="/xp", tags=["xp"])
@@ -42,6 +51,9 @@ async def get_my_xp(
         streak_best=streak_best,
         unlocked_characters=unlocks.characters,
         unlocked_accessories=unlocks.accessories,
+        skill_points=row.skill_points if row else 0,
+        house_level=row.house_level if row else 2,
+        vehicle_unlocks=list(row.vehicle_unlocks) if row and row.vehicle_unlocks else [],
     )
 
 
@@ -88,3 +100,64 @@ async def get_xp_history(
         )
         for e in events
     ]
+
+
+@router.post("/unlock-vehicle", response_model=VehicleUnlockResponse)
+async def unlock_vehicle(
+    body: VehicleUnlockRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> VehicleUnlockResponse:
+    """Spend skill points to unlock a vehicle."""
+    cost = VEHICLE_UNLOCKS.get(body.vehicle_id)
+    if cost is None:
+        raise HTTPException(400, f"Unknown vehicle '{body.vehicle_id}'")
+
+    xp_repo = DeveloperXPRepository(db, org_id=current_user.org_id)
+    row = await xp_repo.get_or_create(current_user.id)
+
+    current_unlocks = list(row.vehicle_unlocks) if row.vehicle_unlocks else []
+    if body.vehicle_id in current_unlocks:
+        raise HTTPException(409, f"Vehicle '{body.vehicle_id}' already unlocked")
+    if row.skill_points < cost:
+        raise HTTPException(400, f"Insufficient skill points ({row.skill_points}/{cost})")
+
+    row.skill_points -= cost
+    row.vehicle_unlocks = [*current_unlocks, body.vehicle_id]
+    await db.commit()
+
+    return VehicleUnlockResponse(
+        success=True,
+        remaining_skill_points=row.skill_points,
+        vehicle_unlocks=list(row.vehicle_unlocks),
+    )
+
+
+@router.post("/upgrade-house", response_model=HouseUpgradeResponse)
+async def upgrade_house(
+    body: HouseUpgradeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> HouseUpgradeResponse:
+    """Spend skill points to upgrade house tier."""
+    cost = HOUSE_TIER_COSTS.get(body.target_tier)
+    if cost is None:
+        raise HTTPException(400, f"Unknown house tier {body.target_tier}")
+
+    xp_repo = DeveloperXPRepository(db, org_id=current_user.org_id)
+    row = await xp_repo.get_or_create(current_user.id)
+
+    if body.target_tier != row.house_level + 1:
+        raise HTTPException(400, "Can only upgrade to the next tier")
+    if row.skill_points < cost:
+        raise HTTPException(400, f"Insufficient skill points ({row.skill_points}/{cost})")
+
+    row.skill_points -= cost
+    row.house_level = body.target_tier
+    await db.commit()
+
+    return HouseUpgradeResponse(
+        success=True,
+        remaining_skill_points=row.skill_points,
+        house_level=row.house_level,
+    )
