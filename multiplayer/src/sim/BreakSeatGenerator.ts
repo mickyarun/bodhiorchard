@@ -175,7 +175,10 @@ function generateCoffeeBarSeats(
 function generatePoolSeats(
   zoneX: number, zoneZ: number, count: number,
 ): BreakSeat[] {
-  const SEAT_Y = 0.25  // ProceduralBeachChair.SEAT_HEIGHT
+  // Characters stand/sit at ground level (Y=0). The sit animation handles
+  // lowering the body to the chair surface height. Setting Y=0.25 (the
+  // chair surface) would elevate the character above the chair.
+  const SEAT_Y = 0
 
   const ALL_POOL_SEATS: BreakSeat[] = [
     { zone: "pool_resort", x: zoneX - 5,   y: SEAT_Y, z: zoneZ - 1.5, yaw: 90 },
