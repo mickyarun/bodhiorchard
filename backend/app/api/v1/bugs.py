@@ -36,6 +36,18 @@ async def create_bug(
     """Create a new bug report, optionally linked to a BUD."""
     bud_uuid = uuid.UUID(body.bud_id) if body.bud_id else None
 
+    # Auto-set bug_type based on the linked BUD's current status:
+    # testing/code_review/development → "testing" (internal QA bug)
+    # uat/prod/closed → "production" (post-release bug)
+    bug_type = "testing"
+    if bud_uuid:
+        from app.repositories.bud import BUDRepository
+
+        bud_repo_check = BUDRepository(db, org_id=current_user.org_id)
+        linked = await bud_repo_check.get_by_id(bud_uuid)
+        if linked and linked.status in ("uat", "prod", "closed"):
+            bug_type = "production"
+
     bug = Bug(
         org_id=current_user.org_id,
         title=body.title,
@@ -43,6 +55,7 @@ async def create_bug(
         severity=body.severity,
         module=body.module,
         bud_id=bud_uuid,
+        bug_type=bug_type,
         reporter_id=current_user.id,
     )
 
@@ -142,6 +155,7 @@ async def list_bugs(
                 title=b.title,
                 severity=b.severity.value,
                 status=b.status.value,
+                bug_type=b.bug_type.value,
                 module=b.module,
                 bud_id=str(b.bud_id) if b.bud_id else None,
                 bud_number=bud_info.get(b.bud_id, {}).get("number") if b.bud_id else None,
@@ -282,6 +296,7 @@ async def _bug_to_read(
         description=bug.description,
         severity=bug.severity.value,
         status=bug.status.value,
+        bug_type=bug.bug_type.value,
         module=bug.module,
         linked_pr=bug.linked_pr,
         bud_id=str(bug.bud_id) if bug.bud_id else None,

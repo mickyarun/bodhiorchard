@@ -21,6 +21,13 @@ class BugSeverity(StrEnum):
     CRITICAL = "critical"
 
 
+class BugType(StrEnum):
+    """Classification of when/where the bug was found."""
+
+    TESTING = "testing"
+    PRODUCTION = "production"
+
+
 class BugStatus(StrEnum):
     """Lifecycle status of a bug."""
 
@@ -54,6 +61,12 @@ class Bug(BaseModel):
         Enum(BugStatus, name="bug_status", values_callable=lambda e: [x.value for x in e]),
         nullable=False,
         default=BugStatus.OPEN,
+    )
+    bug_type: Mapped[BugType] = mapped_column(
+        Enum(BugType, name="bug_type", values_callable=lambda e: [x.value for x in e]),
+        nullable=False,
+        default=BugType.TESTING,
+        server_default="testing",
     )
     module: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reporter_id: Mapped[uuid.UUID] = mapped_column(

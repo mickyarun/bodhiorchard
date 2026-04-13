@@ -461,12 +461,14 @@ export interface BUDReleaseStage {
 // ── Bug Types ────────────────────────────────────────────────────
 export type BugSeverity = 'low' | 'medium' | 'high' | 'critical'
 export type BugStatusValue = 'open' | 'in-progress' | 'resolved' | 'closed' | 'blocked'
+export type BugType = 'testing' | 'production'
 
 export interface BugListItem {
   id: string
   title: string
   severity: BugSeverity
   status: BugStatusValue
+  bugType: BugType
   module: string | null
   budId: string | null
   budNumber: number | null
@@ -481,6 +483,7 @@ export interface BugRead {
   description: string | null
   severity: BugSeverity
   status: BugStatusValue
+  bugType: BugType
   module: string | null
   linkedPr: string | null
   budId: string | null

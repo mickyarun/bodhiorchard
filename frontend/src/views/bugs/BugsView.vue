@@ -73,6 +73,14 @@
               <span>{{ formatDate(bug.createdAt) }}</span>
             </div>
           </div>
+          <v-chip
+            :color="bug.bugType === 'production' ? 'error' : 'info'"
+            size="x-small"
+            variant="tonal"
+            class="mr-1"
+          >
+            {{ bug.bugType }}
+          </v-chip>
           <v-chip :color="BUG_STATUS_COLORS[bug.status]" size="small" variant="tonal">
             {{ bug.status }}
           </v-chip>

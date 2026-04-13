@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 BugSeverityValue = Literal["low", "medium", "high", "critical"]
 BugStatusValue = Literal["open", "in-progress", "resolved", "closed", "blocked"]
+BugTypeValue = Literal["testing", "production"]
 
 
 class BugCreate(BaseModel):
@@ -44,6 +45,7 @@ class BugRead(BaseModel):
     description: str | None = None
     severity: BugSeverityValue
     status: BugStatusValue
+    bug_type: BugTypeValue = Field(alias="bugType")
     module: str | None = None
     linked_pr: str | None = Field(None, alias="linkedPr")
     bud_id: str | None = Field(None, alias="budId")
@@ -67,6 +69,7 @@ class BugListItem(BaseModel):
     title: str
     severity: BugSeverityValue
     status: BugStatusValue
+    bug_type: BugTypeValue = Field(alias="bugType")
     module: str | None = None
     bud_id: str | None = Field(None, alias="budId")
     bud_number: int | None = Field(None, alias="budNumber")
