@@ -14,7 +14,7 @@ class BugCreate(BaseModel):
     """Request body for creating a bug."""
 
     title: str = Field(max_length=500)
-    description: str | None = None
+    description: str | None = Field(None, max_length=10000)
     severity: BugSeverityValue = "medium"
     module: str | None = Field(None, max_length=255)
     bud_id: str | None = Field(None, alias="budId")
@@ -26,12 +26,12 @@ class BugUpdate(BaseModel):
     """Request body for updating a bug (all fields optional)."""
 
     title: str | None = Field(None, max_length=500)
-    description: str | None = None
+    description: str | None = Field(None, max_length=10000)
     status: BugStatusValue | None = None
     severity: BugSeverityValue | None = None
     assignee_id: str | None = Field(None, alias="assigneeId")
-    module: str | None = None
-    linked_pr: str | None = Field(None, alias="linkedPr")
+    module: str | None = Field(None, max_length=255)
+    linked_pr: str | None = Field(None, alias="linkedPr", max_length=500)
     bud_id: str | None = Field(None, alias="budId")
 
     model_config = {"populate_by_name": True}

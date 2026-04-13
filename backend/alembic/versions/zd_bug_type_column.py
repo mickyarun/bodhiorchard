@@ -21,7 +21,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Add bug_type enum + column with default 'testing'."""
+    """Add bug_type enum + column with default 'testing', and composite index."""
     bug_type_enum = sa.Enum("testing", "production", name="bug_type")
     bug_type_enum.create(op.get_bind(), checkfirst=True)
     op.add_column(
@@ -33,9 +33,15 @@ def upgrade() -> None:
             server_default="testing",
         ),
     )
+    op.create_index(
+        "ix_bugs_bud_id_status",
+        "bugs",
+        ["bud_id", "status"],
+    )
 
 
 def downgrade() -> None:
-    """Drop bug_type column and enum."""
+    """Drop index, bug_type column, and enum."""
+    op.drop_index("ix_bugs_bud_id_status", table_name="bugs")
     op.drop_column("bugs", "bug_type")
     sa.Enum(name="bug_type").drop(op.get_bind(), checkfirst=True)

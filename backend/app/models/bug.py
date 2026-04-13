@@ -42,7 +42,10 @@ class Bug(BaseModel):
     """Bug report linked to an organization and optionally to a BUD."""
 
     __tablename__ = "bugs"
-    __table_args__ = (Index("ix_bugs_org_status_created", "org_id", "status", "created_at"),)
+    __table_args__ = (
+        Index("ix_bugs_org_status_created", "org_id", "status", "created_at"),
+        Index("ix_bugs_bud_id_status", "bud_id", "status"),
+    )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True

@@ -209,6 +209,13 @@ async def update_bug(
     update = body.model_dump(exclude_unset=True, by_alias=False)
     if "bud_id" in update:
         update["bud_id"] = uuid.UUID(update["bud_id"]) if update["bud_id"] else None
+        # Validate the target BUD belongs to this org (prevent cross-tenant leak)
+        if update["bud_id"]:
+            from app.repositories.bud import BUDRepository as BudRepoCheck
+
+            bud_check = BudRepoCheck(db, org_id=current_user.org_id)
+            if not await bud_check.get_by_id(update["bud_id"]):
+                raise HTTPException(status_code=404, detail="BUD not found")
     if "assignee_id" in update:
         update["assignee_id"] = uuid.UUID(update["assignee_id"]) if update["assignee_id"] else None
 
