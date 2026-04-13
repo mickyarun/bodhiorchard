@@ -199,6 +199,24 @@ async def _handle_pr_closed(
             except Exception:
                 logger.warning("xp_award_failed_pr_merged", exc_info=True)
 
+            # SP award for PR merged (role-based)
+            try:
+                from app.services.sp_rules import SP_DEV_PR_MERGED
+                from app.services.sp_service import award_sp, get_user_role
+
+                role = await get_user_role(db, author_user_id, org_id)
+                if role == "developer":
+                    await award_sp(
+                        db,
+                        user_id=author_user_id,
+                        org_id=org_id,
+                        amount=SP_DEV_PR_MERGED,
+                        source="sp_pr_merged",
+                        source_ref=f"sp_pr_merged:{pr_data.id}",
+                    )
+            except Exception:
+                logger.warning("sp_award_failed_pr_merged", exc_info=True)
+
     # Release-stage detection: if this PR was merged into a configured
     # uat / main branch, walk its commits and record merged_to_{stage}
     # events on every BUD whose work is included. Runs for ANY merged PR,
@@ -421,6 +439,25 @@ async def _handle_review_submitted(
                 )
             except Exception:
                 logger.warning("xp_award_failed_review", exc_info=True)
+
+            # SP award for code review (role-based)
+            try:
+                from app.services.sp_rules import REVIEW_SP
+                from app.services.sp_service import award_sp, get_user_role
+
+                role = await get_user_role(db, reviewer_user_id, org_id)
+                sp_amount = REVIEW_SP.get(role)
+                if sp_amount:
+                    await award_sp(
+                        db,
+                        user_id=reviewer_user_id,
+                        org_id=org_id,
+                        amount=sp_amount,
+                        source="sp_review",
+                        source_ref=f"sp_review:{pr_data.id}:{review.user.login}",
+                    )
+            except Exception:
+                logger.warning("sp_award_failed_review", exc_info=True)
 
     await db.commit()
 

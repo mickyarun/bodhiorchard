@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.developer_xp import DeveloperXPRepository, XPEventRepository
 from app.services.event_bus import publish
 from app.services.xp_rules import (
-    SKILL_POINTS_PER_XP,
     UnlockedItems,
     compute_level,
     get_unlocked_items_for_level,
@@ -89,7 +88,6 @@ async def award_xp(
 
     # Update aggregate
     row.total_xp += effective_xp
-    row.skill_points += effective_xp * SKILL_POINTS_PER_XP
     new_level, new_name = compute_level(row.total_xp)
     row.level = new_level
     row.level_name = new_name
@@ -128,7 +126,6 @@ async def award_xp(
             "xp_amount": effective_xp,
             "source": source,
             "new_total": row.total_xp,
-            "skill_points": row.skill_points,
             "level": new_level,
             "level_name": new_name,
             "level_changed": level_changed,
@@ -214,6 +211,24 @@ async def check_and_award_streak(
                 "level_changed": True, "streak_count": row.streak_count,
             })
 
+    # SP milestones for streak achievements
+    if row.streak_count in (14, 30):
+        try:
+            from app.services.sp_rules import SP_STREAK_14, SP_STREAK_30
+            from app.services.sp_service import award_sp
+
+            sp_amount = SP_STREAK_30 if row.streak_count == 30 else SP_STREAK_14
+            await award_sp(
+                db,
+                user_id=user_id,
+                org_id=org_id,
+                amount=sp_amount,
+                source="sp_streak",
+                source_ref=f"sp_streak_{row.streak_count}:{user_id}:{today.isoformat()}",
+            )
+        except Exception:
+            logger.warning("sp_streak_award_failed", exc_info=True)
+
     return row.streak_count
 
 
@@ -271,6 +286,23 @@ async def award_quality_bonus(
         source_ref=f"quality:{user_id}:{bud_id}",
         metadata={"effectiveness_score": score},
     )
+
+    # SP bonus for high-quality work (score > 80)
+    if score > 80:
+        try:
+            from app.services.sp_rules import SP_DEV_QUALITY_HIGH
+            from app.services.sp_service import award_sp
+
+            await award_sp(
+                db,
+                user_id=user_id,
+                org_id=org_id,
+                amount=SP_DEV_QUALITY_HIGH,
+                source="sp_quality",
+                source_ref=f"sp_quality:{user_id}:{bud_id}",
+            )
+        except Exception:
+            logger.warning("sp_award_failed_quality", exc_info=True)
 
     return bonus_xp
 

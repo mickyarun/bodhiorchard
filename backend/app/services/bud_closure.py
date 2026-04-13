@@ -41,6 +41,7 @@ async def on_bud_closed(
     and the scan is a fresh incremental run.
     """
     await _award_contributor_xp(db, org_id, bud)
+    await _award_bud_shipped_sp(db, org_id, bud)
     _trigger_impacted_repo_scan(org_id, bud)
 
 
@@ -203,3 +204,31 @@ async def _bg_scan(
             bud_number=bud_number,
             exc_info=True,
         )
+
+
+async def _award_bud_shipped_sp(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud: BUDDocument,
+) -> None:
+    """Award role-based SP to the BUD assignee when a BUD ships to PROD."""
+    if not bud.assignee_id:
+        return
+
+    try:
+        from app.services.sp_rules import BUD_SHIPPED_SP
+        from app.services.sp_service import award_sp, get_user_role
+
+        role = await get_user_role(db, bud.assignee_id, org_id)
+        sp_amount = BUD_SHIPPED_SP.get(role)
+        if sp_amount:
+            await award_sp(
+                db,
+                user_id=bud.assignee_id,
+                org_id=org_id,
+                amount=sp_amount,
+                source="sp_bud_shipped",
+                source_ref=f"sp_bud_shipped:{bud.bud_number}:{bud.assignee_id}",
+            )
+    except Exception:
+        logger.warning("sp_award_failed_bud_shipped", exc_info=True)

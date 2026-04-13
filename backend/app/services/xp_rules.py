@@ -50,7 +50,7 @@ def streak_multiplier(streak_days: int) -> float:
 
 CHARACTER_UNLOCKS: dict[str, int] = {
     "barbarian": 1,
-    "knight": 1,
+    "knight": 3,
     "mage": 2,
     "ranger": 3,
     "rogue": 4,
@@ -76,10 +76,6 @@ class UnlockedItems:
     characters: list[str]
     accessories: list[str]
 
-
-# ─── Skill Points ─────────────────────────────
-
-SKILL_POINTS_PER_XP = 1
 
 # ─── Vehicle Unlock Costs ─────────────────────
 

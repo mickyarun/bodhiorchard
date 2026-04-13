@@ -45,9 +45,13 @@ class DeveloperXP(BaseModel):
     last_active_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     streak_best: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    # Skill points — earned alongside XP, spent on upgrades
-    skill_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    house_level: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    # Skill points — scarce currency earned through role-based quality outcomes
+    skill_points: Mapped[float] = mapped_column(
+        Numeric(10, 2), nullable=False, default=0, server_default="0",
+    )
+    house_level: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default="2",
+    )
     vehicle_unlocks: Mapped[list[str]] = mapped_column(
         ARRAY(String(30)), nullable=False, server_default="{}",
     )

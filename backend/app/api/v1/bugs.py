@@ -107,6 +107,9 @@ async def create_bug(
                 "bug_threshold_check_failed", bug_id=str(bug.id), exc_info=True,
             )
 
+    # SP triggers: penalize BUD developer, reward QA reporter
+    await _award_bug_sp(db, current_user, bug, bug_type)
+
     return await _bug_to_read(db, bug, current_user.org_id)
 
 
@@ -352,3 +355,91 @@ async def _resolve_bud_info(
         row.id: {"number": row.bud_number, "title": row.title}
         for row in result.all()
     }
+
+
+async def _award_bug_sp(
+    db: AsyncSession,
+    reporter: User,
+    bug: Bug,
+    bug_type: str,
+) -> None:
+    """Award/penalize SP when a bug is created.
+
+    - Penalize the BUD assignee (developer) based on bug_type
+    - Reward the QA reporter (batch: every 5th testing bug → +1 SP)
+    """
+    import structlog
+
+    logger = structlog.get_logger(__name__)
+
+    try:
+        from app.services.sp_rules import (
+            SP_DEV_BUG_PRODUCTION,
+            SP_DEV_BUG_TESTING,
+            SP_QA_BUGS_BATCH,
+            SP_QA_BUGS_BATCH_SIZE,
+            SP_QA_PROD_BUG_FOUND,
+        )
+        from app.services.sp_service import award_sp, get_user_role, penalize_sp
+
+        org_id = reporter.org_id
+
+        # Penalize the BUD assignee (developer) if bug is linked to a BUD
+        if bug.bud_id:
+            from app.repositories.bud import BUDRepository
+
+            bud_repo = BUDRepository(db, org_id=org_id)
+            linked_bud = await bud_repo.get_by_id(bug.bud_id)
+            if linked_bud and linked_bud.assignee_id:
+                penalty = SP_DEV_BUG_PRODUCTION if bug_type == "production" else SP_DEV_BUG_TESTING
+                await penalize_sp(
+                    db,
+                    user_id=linked_bud.assignee_id,
+                    org_id=org_id,
+                    amount=abs(penalty),
+                    source="sp_bug_penalty",
+                    source_ref=f"sp_bug_dev:{bug.id}",
+                )
+
+        # Reward QA reporter
+        reporter_role = await get_user_role(db, reporter.id, org_id)
+        if reporter_role == "qa":
+            if bug_type == "production":
+                # Production bug found by QA — direct reward
+                await award_sp(
+                    db,
+                    user_id=reporter.id,
+                    org_id=org_id,
+                    amount=SP_QA_PROD_BUG_FOUND,
+                    source="sp_qa_prod_bug",
+                    source_ref=f"sp_qa_prod:{bug.id}",
+                )
+            else:
+                # Testing bug — batch reward (every Nth bug)
+                from sqlalchemy import func
+                from sqlalchemy import select as sa_select
+
+                from app.models.bug import Bug as BugModel
+
+                count_stmt = (
+                    sa_select(func.count())
+                    .select_from(BugModel)
+                    .where(
+                        BugModel.org_id == org_id,
+                        BugModel.reporter_id == reporter.id,
+                        BugModel.bug_type == "testing",
+                    )
+                )
+                total = (await db.execute(count_stmt)).scalar() or 0
+                if total > 0 and total % SP_QA_BUGS_BATCH_SIZE == 0:
+                    batch_num = total // SP_QA_BUGS_BATCH_SIZE
+                    await award_sp(
+                        db,
+                        user_id=reporter.id,
+                        org_id=org_id,
+                        amount=SP_QA_BUGS_BATCH,
+                        source="sp_qa_bug_batch",
+                        source_ref=f"sp_qa_batch:{reporter.id}:{batch_num}",
+                    )
+    except Exception:
+        logger.warning("sp_bug_award_failed", exc_info=True)

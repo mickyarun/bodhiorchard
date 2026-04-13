@@ -12,6 +12,17 @@
 
       <v-spacer />
 
+      <!-- Skill Points -->
+      <v-chip
+        v-if="skillPoints !== undefined"
+        variant="tonal"
+        color="primary"
+        size="small"
+      >
+        <v-icon start size="14">mdi-star-four-points</v-icon>
+        {{ formatSP(skillPoints) }} SP
+      </v-chip>
+
       <!-- Total XP -->
       <span class="text-h6 font-weight-bold" style="color: rgb(var(--v-theme-secondary));">
         {{ totalXp.toLocaleString() }}
@@ -62,6 +73,7 @@ const props = defineProps<{
   xpToNextLevel: number
   nextLevelThreshold: number
   streakCount: number
+  skillPoints?: number
 }>()
 
 const LEVEL_ICONS: Record<string, string> = {
@@ -70,6 +82,10 @@ const LEVEL_ICONS: Record<string, string> = {
 const LEVEL_NAMES = ['seedling', 'sprout', 'sapling', 'tree', 'ancient_oak']
 
 const levelIcon = computed(() => LEVEL_ICONS[props.levelName] || '⭐')
+
+function formatSP(sp: number): string {
+  return Number.isInteger(sp) ? sp.toString() : sp.toFixed(2)
+}
 
 const progress = computed(() => {
   if (props.nextLevelThreshold === 0) return 100

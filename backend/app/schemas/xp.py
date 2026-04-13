@@ -17,7 +17,7 @@ class XPProfileRead(BaseModel):
     streak_best: int
     unlocked_characters: list[str]
     unlocked_accessories: list[str]
-    skill_points: int = 0
+    skill_points: float = 0.0
     house_level: int = 2
     vehicle_unlocks: list[str] = []
 
@@ -48,7 +48,7 @@ class VehicleUnlockResponse(BaseModel):
     """Response after unlocking a vehicle."""
 
     success: bool
-    remaining_skill_points: int
+    remaining_skill_points: float
     vehicle_unlocks: list[str]
 
 
@@ -62,7 +62,7 @@ class HouseUpgradeResponse(BaseModel):
     """Response after upgrading house."""
 
     success: bool
-    remaining_skill_points: int
+    remaining_skill_points: float
     house_level: int
 
 

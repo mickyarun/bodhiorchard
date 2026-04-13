@@ -41,6 +41,74 @@
         {{ lvl.icon }} {{ lvl.xp }} XP
       </v-chip>
     </div>
+
+    <v-divider class="my-3" />
+
+    <div class="text-subtitle-1 font-weight-bold mb-2">
+      <v-icon icon="mdi-star-four-points" size="18" class="mr-1" />
+      Skill Points (SP)
+    </div>
+    <div class="text-caption text-medium-emphasis mb-3">
+      SP is a scarce currency earned through quality outcomes. Spend SP to unlock vehicles and upgrade your house.
+    </div>
+
+    <div class="text-caption font-weight-bold mb-1 text-uppercase" style="letter-spacing: 0.05em;">Developer</div>
+    <v-table density="compact" class="bg-transparent mb-2">
+      <tbody>
+        <tr v-for="rule in SP_DEV" :key="rule.label">
+          <td class="text-caption">{{ rule.label }}</td>
+          <td class="text-right text-caption font-weight-bold" :class="rule.sp > 0 ? 'text-success' : 'text-error'">
+            {{ rule.sp > 0 ? '+' : '' }}{{ rule.sp }} SP
+          </td>
+        </tr>
+      </tbody>
+    </v-table>
+
+    <div class="text-caption font-weight-bold mb-1 text-uppercase" style="letter-spacing: 0.05em;">QA</div>
+    <v-table density="compact" class="bg-transparent mb-2">
+      <tbody>
+        <tr v-for="rule in SP_QA" :key="rule.label">
+          <td class="text-caption">{{ rule.label }}</td>
+          <td class="text-right text-caption font-weight-bold" :class="rule.sp > 0 ? 'text-success' : 'text-error'">
+            {{ rule.sp > 0 ? '+' : '' }}{{ rule.sp }} SP
+          </td>
+        </tr>
+      </tbody>
+    </v-table>
+
+    <div class="text-caption font-weight-bold mb-1 text-uppercase" style="letter-spacing: 0.05em;">PM</div>
+    <v-table density="compact" class="bg-transparent mb-2">
+      <tbody>
+        <tr v-for="rule in SP_PM" :key="rule.label">
+          <td class="text-caption">{{ rule.label }}</td>
+          <td class="text-right text-caption font-weight-bold" :class="rule.sp > 0 ? 'text-success' : 'text-error'">
+            {{ rule.sp > 0 ? '+' : '' }}{{ rule.sp }} SP
+          </td>
+        </tr>
+      </tbody>
+    </v-table>
+
+    <div class="text-caption font-weight-bold mb-1 text-uppercase" style="letter-spacing: 0.05em;">Tech Lead</div>
+    <v-table density="compact" class="bg-transparent mb-2">
+      <tbody>
+        <tr v-for="rule in SP_TL" :key="rule.label">
+          <td class="text-caption">{{ rule.label }}</td>
+          <td class="text-right text-caption font-weight-bold" :class="rule.sp > 0 ? 'text-success' : 'text-error'">
+            {{ rule.sp > 0 ? '+' : '' }}{{ rule.sp }} SP
+          </td>
+        </tr>
+      </tbody>
+    </v-table>
+
+    <div class="text-caption font-weight-bold mb-1 text-uppercase" style="letter-spacing: 0.05em;">Everyone</div>
+    <v-table density="compact" class="bg-transparent">
+      <tbody>
+        <tr v-for="rule in SP_ALL" :key="rule.label">
+          <td class="text-caption">{{ rule.label }}</td>
+          <td class="text-right text-caption font-weight-bold text-success">+{{ rule.sp }} SP</td>
+        </tr>
+      </tbody>
+    </v-table>
   </v-card>
 </template>
 
@@ -67,5 +135,38 @@ const LEVELS = [
   { name: 'sapling', xp: 500, icon: '🌲' },
   { name: 'tree', xp: 1500, icon: '🌳' },
   { name: 'ancient_oak', xp: 5000, icon: '🏔️' },
+]
+
+const SP_DEV = [
+  { label: 'PR merged', sp: 0.5 },
+  { label: 'Code review given', sp: 0.25 },
+  { label: 'BUD shipped to PROD', sp: 1.0 },
+  { label: 'Quality score > 80%', sp: 0.5 },
+  { label: 'Bug found in testing', sp: -0.25 },
+  { label: 'Bug found in production', sp: -1.0 },
+]
+
+const SP_QA = [
+  { label: 'Every 5 testing bugs filed', sp: 1.0 },
+  { label: 'Production bug found', sp: 0.5 },
+  { label: 'All tests executed for BUD', sp: 0.5 },
+  { label: 'False positive bug', sp: -0.25 },
+]
+
+const SP_PM = [
+  { label: 'BUD shipped to PROD', sp: 0.5 },
+  { label: 'BUD approved promptly', sp: 0.25 },
+  { label: 'BUD discarded', sp: -0.5 },
+]
+
+const SP_TL = [
+  { label: 'Code review completed', sp: 0.25 },
+  { label: 'Tech arch approved', sp: 0.25 },
+  { label: 'Prod bug on reviewed BUD', sp: -0.5 },
+]
+
+const SP_ALL = [
+  { label: '14-day streak', sp: 1.0 },
+  { label: '30-day streak', sp: 2.0 },
 ]
 </script>

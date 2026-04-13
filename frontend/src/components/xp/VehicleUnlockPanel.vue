@@ -8,7 +8,7 @@
       <v-spacer />
       <v-chip size="x-small" variant="tonal" color="secondary">
         <v-icon start size="12">mdi-star-four-points</v-icon>
-        {{ skillPoints }} SP
+        {{ formatSP(skillPoints) }} SP
       </v-chip>
     </div>
 
@@ -68,6 +68,10 @@ const vehicles = [
 ]
 
 const skillPoints = computed(() => xpStore.profile?.skill_points ?? 0)
+
+function formatSP(sp: number): string {
+  return Number.isInteger(sp) ? sp.toString() : sp.toFixed(2)
+}
 
 function isUnlocked(vehicleId: string): boolean {
   return xpStore.profile?.vehicle_unlocks?.includes(vehicleId) ?? false
