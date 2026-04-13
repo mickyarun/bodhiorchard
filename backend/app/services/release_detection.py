@@ -327,6 +327,15 @@ async def _maybe_auto_close_bud(
     # All impacted repos have merged to prod \u2014 auto-close
     bud.status = BUDStatus.CLOSED
 
+    # Record FeatureLearning (cycle time) — the manual PATCH handler calls
+    # transition_feature_for_bud but the auto-close path was missing it.
+    try:
+        from app.services.feature_lifecycle import transition_feature_for_bud
+
+        await transition_feature_for_bud(db, org_id, bud.bud_number, BUDStatus.CLOSED)
+    except Exception:
+        logger.warning("auto_close_feature_transition_failed", bud_id=str(bud_id), exc_info=True)
+
     await record_event(
         db,
         org_id,
