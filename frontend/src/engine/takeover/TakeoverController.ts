@@ -84,8 +84,10 @@ export class TakeoverController {
   sitAt(x: number, y: number, z: number, yaw: number): void {
     if (!this.entity) return
     this._sitting = true
+    this.jumpProgress = -1
     this.entity.setPosition(x, y, z)
     this.entity.setEulerAngles(0, yaw, 0)
+    this.entity.anim?.setBoolean('jumping', false)
     this.entity.anim?.setBoolean('sitting', true)
     this.entity.anim?.setInteger('speed', 0)
     this.entity.anim?.setInteger('working', 0)
@@ -130,6 +132,7 @@ export class TakeoverController {
    * OrgRoom's VALID_ANIMS: idle | walk | sprint | jump.
    */
   getAnimState(): string {
+    if (this._sitting) return "sit"
     const anim = this.entity?.anim
     if (!anim) return "idle"
     if (this.jumpProgress >= 0) return "jump"
