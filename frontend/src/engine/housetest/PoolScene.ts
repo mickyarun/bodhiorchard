@@ -112,10 +112,16 @@ export class PoolScene {
     parent: pc.Entity,
     def: PoolChairDef,
   ): Promise<PoolChairResult> {
-    // Use pool_chairs.glb — unit-scale, no FBX hacks needed.
+    // pool_chairs.glb contains 4 color variants as sibling nodes under
+    // RootNode. We instance the full GLB then disable 3 of the 4 chairs,
+    // keeping only one (cycling through colors by chair index).
     const entity = await this.factory.placeFurnitureCentered(
       parent, POOL_CHAIR_GLB, def.x, 0, def.z, def.yaw,
     )
+    // Find the RootNode's children (the 4 chair color groups)
+    const CHAIR_NAMES = ['poolChair_Green', 'poolChair_Red', 'poolChair_Blue', 'poolChair_Yellow']
+    const chairIndex = POOL_CHAIRS.indexOf(def) % CHAIR_NAMES.length
+    this.hideAllChairsExcept(entity, CHAIR_NAMES[chairIndex])
 
     // Probe seat surface Y from actual mesh geometry — same approach as
     // the house interior's lounge chair / desk chair sitting.
@@ -134,6 +140,26 @@ export class PoolScene {
       seatWorldY: seatY,
       seatWorldZ: def.z,
       seatYaw: def.yaw,
+    }
+  }
+
+  /**
+   * Disable all chair color variants except the one with the given name.
+   * The GLB has 4 chairs (Green/Red/Blue/Yellow) as siblings — we keep
+   * one visible per placement so each pool position gets a different color.
+   */
+  private hideAllChairsExcept(root: pc.Entity, keepName: string): void {
+    // Walk the entity tree to find the chair group nodes
+    const stack = [root]
+    while (stack.length > 0) {
+      const node = stack.pop()!
+      // Chair groups are named poolChair_Green, poolChair_Red, etc.
+      if (node.name.startsWith('poolChair_') && !node.name.includes('_poolChair_')) {
+        node.enabled = (node.name === keepName)
+      }
+      for (let i = 0; i < node.children.length; i++) {
+        stack.push(node.children[i] as pc.Entity)
+      }
     }
   }
 
