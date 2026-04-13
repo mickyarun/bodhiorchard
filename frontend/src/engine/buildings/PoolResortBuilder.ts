@@ -1,45 +1,36 @@
 /**
- * PoolResortBuilder — Pool area with procedural water + individual deck chairs.
+ * PoolResortBuilder — Pool area with procedural water + beach loungers.
  *
- * Uses the `WaterSurface` effect for a sunken pool basin with caustic-
- * textured water, surrounded by individual `deck_chair.glb` chairs
- * placed via `BuildingFactory.placeSeat()` — the same pattern used by
- * CoffeeBarBuilder and CafeteriaBuilder for precise SeatProber-calibrated
- * seating.
+ * Uses `buildBeachChair()` (procedural PlayCanvas primitives) for chairs
+ * and `WaterSurface` for the pool. No GLB loading for chairs — the seat
+ * height is a compile-time constant from ProceduralBeachChair.SEAT_HEIGHT.
  */
-import * as pc from "playcanvas";
-import type { Application } from "../core/Application";
-import { BuildingFactory } from "./BuildingFactory";
-import { POOL } from "../assets/AssetManifest";
-import type { AssetLoader } from "../assets/AssetLoader";
-import type { MaterialFactory } from "../rendering/MaterialFactory";
-import type { InteractionPoint } from "../characters/InteractionPoint";
-import type { ExclusionZone } from "../utils/MathUtils";
-import { WaterSurface } from "../effects/WaterSurface";
+import * as pc from "playcanvas"
+import type { Application } from "../core/Application"
+import { BuildingFactory } from "./BuildingFactory"
+import { buildBeachChair, SEAT_HEIGHT } from "./ProceduralBeachChair"
+import type { AssetLoader } from "../assets/AssetLoader"
+import type { MaterialFactory } from "../rendering/MaterialFactory"
+import type { InteractionPoint } from "../characters/InteractionPoint"
+import type { ExclusionZone } from "../utils/MathUtils"
+import { WaterSurface } from "../effects/WaterSurface"
 
 export interface PoolResortResult {
-  entity: pc.Entity;
-  exclusionZone: ExclusionZone;
-  seats: InteractionPoint[];
-  /** Pond obstacle for takeover physics (player blocked from entering water). */
-  pondObstacle: { x: number; z: number; radius: number };
-  /** Water surface effect — caller must call update(dt) each frame. */
-  waterSurface: WaterSurface;
+  entity: pc.Entity
+  exclusionZone: ExclusionZone
+  seats: InteractionPoint[]
+  pondObstacle: { x: number; z: number; radius: number }
+  waterSurface: WaterSurface
 }
 
-// ─── Pool dimensions ───
-
-/** World-space width/depth of the water body. */
-const POOL_WIDTH = 6;
-const POOL_DEPTH = 6;
+const POOL_WIDTH = 6
+const POOL_DEPTH = 6
 
 export class PoolResortBuilder {
-  private factory: BuildingFactory;
-  private materials: MaterialFactory | null;
+  private materials: MaterialFactory | null
 
   constructor(factory: BuildingFactory, _loader: AssetLoader) {
-    this.factory = factory;
-    this.materials = factory.materialFactory;
+    this.materials = factory.materialFactory
   }
 
   async build(
@@ -47,61 +38,47 @@ export class PoolResortBuilder {
     x: number,
     z: number,
   ): Promise<PoolResortResult> {
-    const root = new pc.Entity("PoolResort");
-    root.setPosition(x, 0, z);
+    const root = new pc.Entity("PoolResort")
+    root.setPosition(x, 0, z)
 
-    const seats: InteractionPoint[] = [];
-    let seatIndex = 0;
+    const seats: InteractionPoint[] = []
+    let seatIndex = 0
 
     // ─── Procedural water body ───
-    const waterSurface = new WaterSurface();
+    const waterSurface = new WaterSurface()
     waterSurface.build(app, this.materials!, {
       x, z,
       width: POOL_WIDTH,
       depth: POOL_DEPTH,
-    });
+    })
 
-    // ─── Individual deck chairs around the pool ───
-    // Each chair is placed via placeSeat (same pattern as cafeteria benches)
-    // so SeatProber detects the correct seat surface from the mesh geometry.
-    // 6 chairs: 2 left, 2 right, 2 far end — each facing the pool.
-
+    // ─── Procedural beach loungers around the pool ───
     const chairPositions: Array<{ lx: number; lz: number; yaw: number }> = [
-      // Left side: facing pool (+X → yaw 90)
       { lx: -5.0, lz: -1.5, yaw: 90 },
       { lx: -5.0, lz: 2.5,  yaw: 90 },
-      // Right side: facing pool (-X → yaw -90)
       { lx: 5.0,  lz: -1.5, yaw: -90 },
       { lx: 5.0,  lz: 2.5,  yaw: -90 },
-      // Far end: facing pool (-Z → yaw 180)
       { lx: -2.5, lz: 5.0,  yaw: 180 },
       { lx: 2.5,  lz: 5.0,  yaw: 180 },
-    ];
-
-    // The deck_chair.glb has a Sketchfab FBX 0.01 scale baked in, making
-    // the model only ~0.6 units at raw size. Scale up to ~1.5 units.
-    const CHAIR_SCALE = 2.5;
+    ]
 
     for (const pos of chairPositions) {
-      const result = await this.factory.placeSeat(
-        root,
-        POOL.deckChair,
-        pos.lx,
-        pos.lz,
-        pos.yaw,
-        'pool_resort',
-        seatIndex++,
-        x, z,
-        'deckChair',
-        'sit',
-      );
-      // Scale up the tiny Sketchfab model
-      const s = result.entity.getLocalScale();
-      result.entity.setLocalScale(s.x * CHAIR_SCALE, s.y * CHAIR_SCALE, s.z * CHAIR_SCALE);
-      seats.push(result.seat);
+      if (!this.materials) continue
+
+      const chair = buildBeachChair(this.materials)
+      chair.setLocalPosition(pos.lx, 0, pos.lz)
+      chair.setLocalEulerAngles(0, pos.yaw, 0)
+      root.addChild(chair)
+
+      // InteractionSeat with known SEAT_HEIGHT — no SeatProber needed
+      seats.push(BuildingFactory.createInteractionSeat(
+        'pool_resort', seatIndex++,
+        x + pos.lx, z + pos.lz,
+        pos.yaw, 'poolChair', 'sit', 0, SEAT_HEIGHT,
+      ))
     }
 
-    app.root.addChild(root);
+    app.root.addChild(root)
 
     return {
       entity: root,
@@ -109,6 +86,6 @@ export class PoolResortBuilder {
       seats,
       pondObstacle: { x, z, radius: POOL_WIDTH / 2 + 0.5 },
       waterSurface,
-    };
+    }
   }
 }

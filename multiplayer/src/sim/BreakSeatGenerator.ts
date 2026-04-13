@@ -166,34 +166,24 @@ function generateCoffeeBarSeats(
 }
 
 /**
- * Pool seats — mirrors PoolResortBuilder.ts layout.
+ * Pool seats — procedural beach loungers around the pool.
  *
- * Fixed positions around the pond (6 umbrella+chair sets). The pool
- * doesn't scale dynamically because each seat needs a visible umbrella
- * GLB set — adding more requires a frontend builder change.
+ * Seat height matches ProceduralBeachChair.SEAT_HEIGHT (0.25).
+ * Positions are raw placement coords — no GLB offset math needed
+ * because the procedural chairs have center-origin geometry.
  */
 function generatePoolSeats(
   zoneX: number, zoneZ: number, count: number,
 ): BreakSeat[] {
-  // Individual deck chairs (replaced umbrella+chairs GLB). SeatProber on the
-  // frontend detects the exact seat Y from the deck_chair.glb mesh; the server
-  // uses the deckChair SEAT_OFFSETS value (seatY=0.20) as a close approximation.
-  // Positions match the frontend's placeSeat local offsets exactly.
-  const SEAT_Y = 0.20
-  const FWD = 0.10  // deckChair forwardOffset
-
-  const seat = (baseX: number, baseZ: number, yaw: number) => ({
-    x: baseX + Math.sin(yaw * Math.PI / 180) * FWD,
-    z: baseZ + Math.cos(yaw * Math.PI / 180) * FWD,
-  })
+  const SEAT_Y = 0.25  // ProceduralBeachChair.SEAT_HEIGHT
 
   const ALL_POOL_SEATS: BreakSeat[] = [
-    { zone: "pool_resort", ...seat(zoneX - 5, zoneZ - 1.5, 90),     y: SEAT_Y, yaw: 90 },
-    { zone: "pool_resort", ...seat(zoneX - 5, zoneZ + 2.5, 90),     y: SEAT_Y, yaw: 90 },
-    { zone: "pool_resort", ...seat(zoneX + 5, zoneZ - 1.5, -90),    y: SEAT_Y, yaw: -90 },
-    { zone: "pool_resort", ...seat(zoneX + 5, zoneZ + 2.5, -90),    y: SEAT_Y, yaw: -90 },
-    { zone: "pool_resort", ...seat(zoneX - 2.5, zoneZ + 5, 180),    y: SEAT_Y, yaw: 180 },
-    { zone: "pool_resort", ...seat(zoneX + 2.5, zoneZ + 5, 180),    y: SEAT_Y, yaw: 180 },
+    { zone: "pool_resort", x: zoneX - 5,   y: SEAT_Y, z: zoneZ - 1.5, yaw: 90 },
+    { zone: "pool_resort", x: zoneX - 5,   y: SEAT_Y, z: zoneZ + 2.5, yaw: 90 },
+    { zone: "pool_resort", x: zoneX + 5,   y: SEAT_Y, z: zoneZ - 1.5, yaw: -90 },
+    { zone: "pool_resort", x: zoneX + 5,   y: SEAT_Y, z: zoneZ + 2.5, yaw: -90 },
+    { zone: "pool_resort", x: zoneX - 2.5, y: SEAT_Y, z: zoneZ + 5,   yaw: 180 },
+    { zone: "pool_resort", x: zoneX + 2.5, y: SEAT_Y, z: zoneZ + 5,   yaw: 180 },
   ]
   return ALL_POOL_SEATS.slice(0, Math.min(count, POOL_MAX))
 }

@@ -50,6 +50,5 @@ export const SEAT_OFFSETS: Record<string, { forwardOffset: number; seatY: number
   loungeSofa:    { forwardOffset: 0.08, seatY: 0.23 },
   loungeChair:   { forwardOffset: 0.10, seatY: 0.23 },
   pavilionBench: { forwardOffset: 0.10, seatY: 0.23 },
-  poolChair:     { forwardOffset: 0.15, seatY: 0.91 },  // SeatProber-verified (house-demo calibration)
-  deckChair:     { forwardOffset: 0.10, seatY: 0.20 },  // Individual deck chair GLB (Sketchfab)
+  poolChair:     { forwardOffset: 0, seatY: 0.25 },  // ProceduralBeachChair.SEAT_HEIGHT
 }

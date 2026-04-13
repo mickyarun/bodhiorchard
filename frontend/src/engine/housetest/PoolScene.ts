@@ -7,7 +7,7 @@
  */
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
-import { buildBeachChair, SEAT_HEIGHT } from './ProceduralBeachChair'
+import { buildBeachChair, SEAT_HEIGHT } from '../buildings/ProceduralBeachChair'
 import { POOL_CHAIRS, type PoolChairDef } from './SceneConfig'
 import { InteractableItem } from './InteractableItem'
 
