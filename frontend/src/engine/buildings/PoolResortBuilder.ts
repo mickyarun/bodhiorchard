@@ -78,6 +78,10 @@ export class PoolResortBuilder {
       { lx: 2.5,  lz: 5.0,  yaw: 180 },
     ];
 
+    // The deck_chair.glb has a Sketchfab FBX 0.01 scale baked in, making
+    // the model only ~0.6 units at raw size. Scale up to ~1.5 units.
+    const CHAIR_SCALE = 2.5;
+
     for (const pos of chairPositions) {
       const result = await this.factory.placeSeat(
         root,
@@ -91,6 +95,9 @@ export class PoolResortBuilder {
         'deckChair',
         'sit',
       );
+      // Scale up the tiny Sketchfab model
+      const s = result.entity.getLocalScale();
+      result.entity.setLocalScale(s.x * CHAIR_SCALE, s.y * CHAIR_SCALE, s.z * CHAIR_SCALE);
       seats.push(result.seat);
     }
 

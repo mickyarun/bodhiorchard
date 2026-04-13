@@ -110,15 +110,25 @@ export class PoolScene {
     parent: pc.Entity,
     def: PoolChairDef,
   ): Promise<PoolChairResult> {
-    // Place using AABB centering (same as BuildingFactory.placeFurnitureCentered)
+    // The deck_chair.glb has a Sketchfab FBX scale (0.01) baked into the
+    // node hierarchy, making the model only ~0.6 units long at raw size.
+    // We apply an explicit scale so the chair is a reasonable size (~1.5 units).
+    const CHAIR_SCALE = 2.5
     const entity = await this.factory.placeFurnitureCentered(
       parent, POOL.deckChair, def.x, 0, def.z, def.yaw,
+    )
+    // Scale the model entity up (placeFurnitureCentered returns the wrapper)
+    const currentScale = entity.getLocalScale()
+    entity.setLocalScale(
+      currentScale.x * CHAIR_SCALE,
+      currentScale.y * CHAIR_SCALE,
+      currentScale.z * CHAIR_SCALE,
     )
 
     // Probe seat surface Y from actual mesh geometry — same approach as
     // the house interior's lounge chair / desk chair sitting.
     const probedSeatY = SeatProber.probeSeatY(entity)
-    const seatY = probedSeatY ?? 0.20
+    const seatY = probedSeatY != null ? probedSeatY * CHAIR_SCALE : 0.40
 
     // Seat position = EXACT placement coords (same pattern as house interior:
     // the seat position matches the placeFurnitureCentered coordinates, no
