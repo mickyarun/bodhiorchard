@@ -370,6 +370,7 @@ export class StandupPavilion {
    * convincing flicker without a particle system.
    */
   private tickFlames(dt: number): void {
+    if (!this.pcApp) return  // destroyed — stale handler firing during teardown
     this.fireT += dt
     for (const f of this.flames) {
       const wobble = Math.sin(this.fireT * f.rate + f.phase)

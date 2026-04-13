@@ -59,14 +59,14 @@ export class CafeteriaBuilder {
     // ─── Outdoor dining (in front of kitchen) ───
     // Two rows of long tables with benches on each side, properly spaced
     let seatIndex = 0
-    const benchOffset = 0.55 // distance from table center to bench center
+    const benchOffset = 0.55 // distance from table center to bench AABB center
 
     for (let row = 0; row < 2; row++) {
       const tz = 3.5 + row * 2.8
 
-      // Two tables side by side (each ~1 unit wide)
+      // Two tables side by side (each ~1 unit wide) — same model for consistent alignment
       await this.factory.placeFurnitureCentered(root, BUILDING.tableCloth, 1.0, 0, tz)
-      await this.factory.placeFurnitureCentered(root, BUILDING.tableCross, 3.0, 0, tz)
+      await this.factory.placeFurnitureCentered(root, BUILDING.tableCloth, 3.0, 0, tz)
 
       // Benches snug against table on both sides
       // Model front faces +Z after centering — flip so each bench faces the table
