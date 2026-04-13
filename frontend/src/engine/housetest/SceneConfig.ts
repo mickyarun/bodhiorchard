@@ -199,38 +199,52 @@ export const INTERIOR_FURNITURE_TIER_2: FurnitureDef[] = [
   { asset: 'kaykit_bedSingle',    x: 0.6,  z: 0.3, scale: KS },
   { asset: 'kaykit_tableSmall',   x: 1.4,  z: 0.3, scale: KSM },
   { asset: 'kaykit_lampTable',    x: 1.4,  z: 0.3, stackOn: 'kaykit_tableSmall', scale: KSM },
-  // Living area — center-right
-  { asset: 'kaykit_couchPillows', x: 3.3,  z: 2.5, rotation: 270, scale: KS },
-  { asset: 'kaykit_tableMedium',  x: 2.0,  z: 2.5, scale: KS },
-  { asset: 'kaykit_chair',        x: 2.0,  z: 1.5, rotation: 180, scale: KS },
-  // Reading corner — back-right
-  { asset: 'kaykit_bookshelf',    x: 3.5,  z: 0.2, rotation: 270, scale: KS },
-  { asset: 'kaykit_books',        x: 2.0,  z: 2.5, stackOn: 'kaykit_tableMedium', scale: KSM },
-  // Lighting + decor
-  { asset: 'kaykit_lampStanding', x: 0.3,  z: 2.8, scale: KSM },
+  // Desk + laptop — back-right (work area, Kenney desk at full size)
+  { asset: 'desk',                x: 3.3,  z: 0.5 },
+  { asset: 'laptop',              x: 3.3,  z: 0.5, stackOn: 'desk' },
+  { asset: 'chairDesk',           x: 3.3,  z: 1.0, rotation: 180 },
+  // Living area — couch + coffee table
+  { asset: 'kaykit_couchPillows', x: 3.3,  z: 2.8, rotation: 270, scale: KS },
+  { asset: 'kaykit_tableMedium',  x: 2.2,  z: 2.8, scale: KSM },
+  // TV area — left wall + lounge chair facing TV
+  { asset: 'cabinetTelevision',   x: 0.4,  z: 2.5, rotation: 90 },
+  { asset: 'televisionModern',    x: 0.4,  z: 2.5, rotation: 90, stackOn: 'cabinetTelevision' },
+  { asset: 'loungeChair',         x: 1.5,  z: 2.5, rotation: 270 },
+  // Decor
+  { asset: 'kaykit_lampStanding', x: 0.3,  z: 3.5, scale: KSM },
   { asset: 'kaykit_rugRectangle', x: 2.0,  y: 0.01, z: 2.0, scale: KS },
-  { asset: 'kaykit_cactus',       x: 0.3,  z: 3.5, scale: KSM },
+  { asset: 'kaykit_bookshelf',    x: 3.5,  z: 0.2, rotation: 270, scale: KSM },
+  { asset: 'kaykit_cactus',       x: 0.3,  z: 0.3, scale: KSM },
 ]
 
 export const INTERIOR_INTERACTABLES_TIER_2: InteractableDef[] = [
   {
-    id: 'bed', pos: { x: 0.8, z: 0.3 },
+    id: 'bed', pos: { x: 0.6, z: 0.8 },
     prompt: '[E] Sleep', info: 'Zzzz...',
     action: 'sleep',
-    seat: { x: 0.8, z: 0.55, yaw: 90 },
+    seat: { x: 0.6, z: 0.5, yaw: 0, y: 0.25 },
+    radius: 1.0,
   },
   {
-    id: 'couch', pos: { x: 3.2, z: 2.5 },
-    prompt: '[E] Sit on couch', info: 'Comfortable...',
+    id: 'laptop', pos: { x: 3.3, z: 0.5 },
+    prompt: '[E] Work', info: 'Coding away...',
     action: 'sit',
-    seat: { x: 3.2, z: 2.5, yaw: 270 },
+    seat: { x: 3.15, z: 0.95, yaw: 180, y: 0.15 },
     radius: 1.3,
   },
   {
-    id: 'chair', pos: { x: 2.0, z: 1.5 },
-    prompt: '[E] Sit', info: 'Reading...',
+    id: 'tv', pos: { x: 0.4, z: 2.5 },
+    prompt: '[E] Watch TV', info: 'Watching TV...',
     action: 'sit',
-    seat: { x: 2.0, z: 1.5, yaw: 180 },
+    seat: { x: 1.5, z: 2.5, yaw: 270 },
+    radius: 1.5,
+  },
+  {
+    id: 'couch', pos: { x: 3.3, z: 2.8 },
+    prompt: '[E] Sit on couch', info: 'Relaxing...',
+    action: 'sit',
+    seat: { x: 3.3, z: 2.8, yaw: 270, y: 0.15 },
+    radius: 1.3,
   },
 ]
 
