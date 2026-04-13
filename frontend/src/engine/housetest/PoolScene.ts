@@ -115,26 +115,22 @@ export class PoolScene {
       parent, POOL.deckChair, def.x, 0, def.z, def.yaw,
     )
 
-    // Probe seat surface Y from actual mesh geometry
+    // Probe seat surface Y from actual mesh geometry — same approach as
+    // the house interior's lounge chair / desk chair sitting.
     const probedSeatY = SeatProber.probeSeatY(entity)
+    const seatY = probedSeatY ?? 0.20
 
-    // Fallback if probing fails
-    const FALLBACK_SEAT_Y = 0.20
-    const seatY = probedSeatY ?? FALLBACK_SEAT_Y
-
-    // Forward offset along yaw direction (same as SEAT_OFFSETS.deckChair.forwardOffset)
-    const FORWARD_OFFSET = 0.10
-    const yawRad = (def.yaw * Math.PI) / 180
-    const fwdX = Math.sin(yawRad) * FORWARD_OFFSET
-    const fwdZ = Math.cos(yawRad) * FORWARD_OFFSET
-
+    // Seat position = EXACT placement coords (same pattern as house interior:
+    // the seat position matches the placeFurnitureCentered coordinates, no
+    // forward offset or mesh-center math needed. AABB centering already puts
+    // the model's visual center at def.x/def.z).
     return {
       def,
       entity,
       probedSeatY,
-      seatWorldX: def.x + fwdX,
+      seatWorldX: def.x,
       seatWorldY: seatY,
-      seatWorldZ: def.z + fwdZ,
+      seatWorldZ: def.z,
       seatYaw: def.yaw,
     }
   }
