@@ -243,7 +243,9 @@ export class HouseTestEngine {
       }
 
       // Proximity prompts for interactable items
-      if (!this.player?.isSitting && !this.player?.isSleeping) {
+      if (this.player?.isSitting || this.player?.isSleeping) {
+        this.ui?.hidePrompt()
+      } else {
         let nearItem = false
         for (const item of this.interior.items) {
           if (item.isNear(playerPos)) {

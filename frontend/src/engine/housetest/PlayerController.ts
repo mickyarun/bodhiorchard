@@ -240,10 +240,20 @@ export class PlayerController {
     }
   }
 
-  /** End sit — clear working state and force back to Idle. */
+  /** End sit — nudge away from furniture to avoid collision trapping. */
   standUp(): void {
     if (!this.entity) return
     this._sitting = false
+
+    // Nudge player backward (away from furniture) to escape collision
+    const pos = this.entity.getPosition()
+    const yaw = this.entity.getEulerAngles().y * (Math.PI / 180)
+    this.entity.setPosition(
+      pos.x + Math.sin(yaw) * 0.5,
+      0,
+      pos.z + Math.cos(yaw) * 0.5,
+    )
+
     const anim = this.entity.anim
     if (!anim) return
     try { anim.setInteger('working', 0) } catch (e) { if (import.meta.env.DEV) console.debug('[PlayerCtrl] anim param missing:', e) }
@@ -313,8 +323,13 @@ export class PlayerController {
       if (dir.length() > 0) {
         if (this._sitting)  this.standUp()
         if (this._sleeping) this.wakeUp()
+        return  // skip movement on the stand-up frame
       } else {
-        this.entity.anim!.setInteger('speed', 0)
+        if (this._isKayKit) {
+          this.entity.anim?.setInteger('speed', 0)
+        } else {
+          this.entity.anim!.setInteger('speed', 0)
+        }
         return
       }
     }
