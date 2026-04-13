@@ -37,12 +37,16 @@ interface ActivityState {
   userId: string
   displayName: string
   originalX: number
+  originalY: number
   originalZ: number
   originalYaw: number
+  originalLocationContext: string
   wasSitting: boolean
   currentRepoName: string | null
   targetX: number
+  targetY: number
   targetZ: number
+  targetLocationContext: string
   moveState: MoveState
   idleTimer: number
   phraseTimer: number
@@ -85,9 +89,11 @@ export function parseDevActivityEvent(raw: unknown): DevActivityEvent | null {
 /** Live home coordinates for a member, computed from current room state. */
 export interface HomeCoords {
   x: number
+  y: number
   z: number
   yaw: number
   sitting: boolean
+  locationContext: string
 }
 
 /**
@@ -162,20 +168,26 @@ export class DevActivitySim {
   walkHome(
     member: MemberState,
     targetX: number,
+    targetY: number,
     targetZ: number,
     targetYaw: number,
     wasSitting: boolean,
+    targetLocationContext: string,
   ): void {
     this.activeDevs.set(member.userId, {
       userId:          member.userId,
       displayName:     member.name,
       originalX:       targetX,
+      originalY:       targetY,
       originalZ:       targetZ,
       originalYaw:     targetYaw,
+      originalLocationContext: targetLocationContext,
       wasSitting,
       currentRepoName: null,
       targetX,
+      targetY,
       targetZ,
+      targetLocationContext,
       moveState:       "walking_home",
       idleTimer:       0,
       phraseTimer:     0,
@@ -221,12 +233,16 @@ export class DevActivitySim {
         userId:         member.userId,
         displayName:    event.actor_name ?? member.name,
         originalX:      member.x,
+        originalY:      member.y,
         originalZ:      member.z,
         originalYaw:    member.yaw,
+        originalLocationContext: member.locationContext,
         wasSitting:     member.animState === "sit",
         currentRepoName: null,
         targetX:        member.x,
+        targetY:        member.y,
         targetZ:        member.z,
+        targetLocationContext: member.locationContext,
         moveState:      "idle",
         idleTimer:      0,
         phraseTimer:    0,
@@ -295,14 +311,15 @@ export class DevActivitySim {
         case "walking_home": {
           const arrived = this.tickWalking(member, state, dt, "idle")
           if (arrived) {
-            // Restore original facing (tickWalking left yaw pointing along the
-            // last walk vector). animState was already set by tickWalking.
+            // Restore facing + height (tickWalking pins Y=0 and yaw to walk
+            // vector). animState was already set by tickWalking.
             member.yaw = state.originalYaw
+            member.y = state.targetY
             member.labelName = ""
             member.labelMessage = ""
-            // Arrived at seat → update locationContext so interior visitors
-            // now see the owner NPC (see C5 in Code Review 4).
-            member.locationContext = `house_${member.userId}`
+            // Restore the target locationContext — may be a house desk
+            // ("house_{userId}") or a break seat ("break_pool_resort_3").
+            member.locationContext = state.targetLocationContext
             this.activeDevs.delete(userId)
           }
           break
@@ -325,6 +342,10 @@ export class DevActivitySim {
 
     if (distSq < ARRIVE_DIST_SQ) {
       state.moveState = arrivalState
+      // Snap to exact target so characters land precisely on chairs/seats.
+      // Without this, they stop up to 1 unit away (ARRIVE_DIST_SQ radius).
+      member.x = state.targetX
+      member.z = state.targetZ
       // When arriving at a tree to "work", randomly play one of two
       // animations so the garden feels alive — interact (watering/tending)
       // or use-item (typing/working). Both Kenney and KayKit character
@@ -359,12 +380,16 @@ export class DevActivitySim {
     const liveHome = this.homeResolver?.(member.userId)
     if (liveHome) {
       state.targetX = liveHome.x
+      state.targetY = liveHome.y
       state.targetZ = liveHome.z
+      state.targetLocationContext = liveHome.locationContext
       state.originalYaw = liveHome.yaw
       state.wasSitting = liveHome.sitting
     } else {
       state.targetX = state.originalX
+      state.targetY = state.originalY
       state.targetZ = state.originalZ
+      state.targetLocationContext = state.originalLocationContext
     }
     state.moveState = "walking_home"
     state.currentRepoName = null

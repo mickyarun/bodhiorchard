@@ -25,6 +25,7 @@ import type { TreeData } from '@/types/dashboard'
 import { GardenEngine } from '@/engine/index'
 import type { EngineData, RepoHealth, ThreatSeverity, BUDStatus, RelType } from '@/engine/types'
 import { useAuthStore } from '@/stores/auth'
+import api from '@/services/api'
 
 const authStore = useAuthStore()
 
@@ -115,6 +116,7 @@ function adaptTreeData(data: TreeData): EngineData {
       presence: m.presence,
       level: m.level,
       level_name: m.level_name,
+      house_level: m.house_level,
     })),
     agent_activity: data.agent_activity.map(a => ({
       agent_name: a.agent_name,
@@ -232,10 +234,19 @@ function applyCurrentUser(): void {
 /** Connect to the Colyseus OrgRoom if both auth and org_id are ready. */
 async function tryConnectOrgRoom(): Promise<void> {
   if (!engine || !authStore.user || !props.treeData.org_id) return
-  // Re-apply auth state in case it resolved AFTER the initial applyCurrentUser()
-  // in initEngine (e.g. fetchUser finishing during setData's await). Without
-  // this, engine.currentUser stays null and connectToOrgRoom early-returns with
-  // "sceneManager or currentUser not set".
+
+  // Colyseus WebSocket joins bypass the axios 401 interceptor, so an expired
+  // JWT causes "invalid auth token" with no automatic refresh. A lightweight
+  // axios call forces the interceptor to refresh the token if needed — then
+  // applyCurrentUser reads the fresh token from localStorage.
+  try {
+    await api.get('/v1/auth/me')
+  } catch {
+    // Refresh failed — interceptor will redirect to login if unrecoverable.
+    return
+  }
+
+  // Re-apply auth state so the engine gets the (possibly just-refreshed) token.
   applyCurrentUser()
   try {
     await engine.connectToOrgRoom(props.treeData.org_id)

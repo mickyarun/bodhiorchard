@@ -86,6 +86,10 @@ interface TakeoverMessage {
   userId: string
 }
 
+interface VehicleMountMessage {
+  vehicleId: string
+}
+
 export class OrgRoom extends Room<{ state: OrgRoomState }> {
   maxClients = 100
 
@@ -140,6 +144,9 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     "idle", "walk", "sit", "sleep", "sprint", "jump",
   ]
 
+  // Known vehicle IDs that clients are allowed to mount
+  private static readonly VALID_VEHICLES = ["horse"]
+
   async onCreate(options: OrgRoomCreateOptions) {
     this.setState(new OrgRoomState())
     this.state.orgId = options.orgId ?? ""
@@ -169,6 +176,13 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       })
       this.inferredSim.recordDevActivity(userId, new Date())
     })
+
+    this.onMessage("mount_vehicle", (client, data: VehicleMountMessage) =>
+      this.handleMountVehicle(client, data),
+    )
+    this.onMessage("dismount_vehicle", (client) =>
+      this.handleDismountVehicle(client),
+    )
 
     // Drive the server-side simulation at 20Hz — walking, phrase cycles, idle timeouts.
     // setSimulationInterval passes dt in milliseconds; sim tick expects seconds.
@@ -287,7 +301,17 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     }
     const result = await verifyUserToken(options.token, orgId)
     if (!result.valid) {
-      throw new Error("invalid auth token")
+      const reason = result.reason ?? "token_invalid"
+      console.warn(
+        `[OrgRoom] auth failed org=${orgId} userId=${options.userId} reason=${reason}`,
+      )
+      if (reason === "backend_unreachable") {
+        throw new Error("auth backend unreachable — is the Python server running?")
+      }
+      if (reason === "backend_http_error") {
+        throw new Error("auth backend rejected request — check bridge secret and endpoint URL")
+      }
+      throw new Error("invalid auth token — JWT may be expired, try refreshing the page")
     }
     // The token's org claim must match the room's org — prevents cross-org spying.
     if (orgId && result.org_id && result.org_id !== orgId) {
@@ -348,6 +372,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (member.takeoverSessionId !== client.sessionId) return
 
     member.y = 0
+    member.vehicleId = ""
     if (member.animState === "jump" || member.animState === "sprint") {
       member.animState = "idle"
     }
@@ -357,7 +382,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       userId,
       member.presence as PresenceState,
     )
-    this.devSim.walkHome(member, home.x, home.z, home.yaw, home.sitting)
+    this.devSim.walkHome(member, home.x, home.y, home.z, home.yaw, home.sitting, home.locationContext)
     console.log(
       `[OrgRoom] ${name} disconnect-while-takeover → walking home to ${home.locationContext}`,
     )
@@ -604,9 +629,11 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     )
     return {
       x: home.x,
+      y: home.y,
       z: home.z,
       yaw: home.yaw,
       sitting: home.sitting,
+      locationContext: home.locationContext,
     }
   }
 
@@ -662,7 +689,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     // Without this, multiple members changing presence simultaneously all
     // read stale "garden" contexts and get assigned the same break seat.
     member.locationContext = home.locationContext
-    this.devSim.walkHome(member, home.x, home.z, home.yaw, home.sitting)
+    this.devSim.walkHome(member, home.x, home.y, home.z, home.yaw, home.sitting, home.locationContext)
     console.log(
       `[OrgRoom] ${member.name} presence → ${newPresence}, walking to ${home.locationContext}`,
     )
@@ -698,6 +725,36 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     member.animState = data.animState
   }
 
+  // ─── Vehicle mount/dismount ────────────────────
+
+  private handleMountVehicle(client: Client, data: VehicleMountMessage): void {
+    const member = this.resolveTakeoverMember(client)
+    if (!member) return
+    if (!OrgRoom.VALID_VEHICLES.includes(data.vehicleId)) return
+    member.vehicleId = data.vehicleId
+  }
+
+  private handleDismountVehicle(client: Client): void {
+    const member = this.resolveTakeoverMember(client)
+    if (!member) return
+    member.vehicleId = ""
+  }
+
+  /**
+   * Resolve the MemberState that this client is actively controlling via
+   * takeover. Returns null if the client has no userId, no matching member,
+   * or isn't the active takeover controller. Shared by mount/dismount and
+   * any future client-authoritative actions.
+   */
+  private resolveTakeoverMember(client: Client): MemberState | null {
+    const userId = (client.userData as { userId?: string } | undefined)?.userId
+    if (!userId) return null
+    const member = this.state.members.get(userId)
+    if (!member) return null
+    if (member.takeoverSessionId !== client.sessionId) return null
+    return member
+  }
+
   private handleTakeoverStart(client: Client, data: TakeoverMessage): void {
     const clientUserId = (client.userData as { userId?: string } | undefined)?.userId
     if (!clientUserId) return
@@ -721,10 +778,11 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (!member) return
     if (member.takeoverSessionId !== client.sessionId) return
 
-    // Clean up any transient takeover pose (mid-jump, sprint) before handing
-    // control back to the sim. Prevents other viewers from seeing the member
-    // frozen in the air until the walk-home below takes over on the next tick.
+    // Clean up any transient takeover pose (mid-jump, sprint, mounted) before
+    // handing control back to the sim. Prevents other viewers from seeing the
+    // member frozen in the air or on a horse until walk-home takes over.
     member.y = 0
+    member.vehicleId = ""
     if (member.animState === "jump" || member.animState === "sprint") {
       member.animState = "idle"
     }
@@ -739,7 +797,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       data.userId,
       member.presence as PresenceState,
     )
-    this.devSim.walkHome(member, home.x, home.z, home.yaw, home.sitting)
+    this.devSim.walkHome(member, home.x, home.y, home.z, home.yaw, home.sitting, home.locationContext)
     console.log(
       `[OrgRoom] ${member.name} takeover END → walking home to ${home.locationContext}`,
     )

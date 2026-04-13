@@ -126,9 +126,13 @@ export class TakeoverUI {
     if (!this.seatPrompt) {
       this.seatPrompt = this.makeLabel(
         '\u24ba Press E to sit',
-        'bottom: 80px; left: 50%; transform: translateX(-50%); ' +
-        'background: rgba(0,0,0,0.7); padding: 6px 14px; border-radius: 6px; ' +
-        'font-size: 13px; pointer-events: none;',
+        {
+          position: 'absolute', bottom: '80px', left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.7)', color: 'rgba(255,255,255,0.8)',
+          padding: '6px 14px', borderRadius: '6px',
+          fontSize: '13px', pointerEvents: 'none',
+        },
       )
     }
     this.seatPrompt.style.display = 'block'

@@ -35,6 +35,7 @@ export interface OrgSnapshotMember {
    */
   has_slack?: boolean
   house_level?: number
+  vehicle_unlocks?: string[]
 }
 
 /** Valid day-of-week keys for `PresenceSettingsPayload.workingDays`. */
@@ -73,6 +74,8 @@ export interface TokenVerification {
   user_id?: string
   org_id?: string
   name?: string
+  /** Reason for failure — set when valid=false to aid diagnostics. */
+  reason?: "token_invalid" | "backend_http_error" | "backend_unreachable"
 }
 
 const FETCH_TIMEOUT_MS = 3000
@@ -115,10 +118,16 @@ export async function verifyUserToken(
       body: JSON.stringify({ token, org_id: orgId }),
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
-    if (!response.ok) return { valid: false }
+    if (!response.ok) {
+      console.warn(
+        `[BackendClient] verify-token HTTP ${response.status} — ` +
+        `check BACKEND_URL (${BACKEND_URL}) and COLYSEUS_BRIDGE_SECRET`,
+      )
+      return { valid: false, reason: "backend_http_error" }
+    }
     return (await response.json()) as TokenVerification
   } catch (err) {
-    console.warn(`[BackendClient] verify-token error:`, err)
-    return { valid: false }
+    console.warn(`[BackendClient] verify-token unreachable (${BACKEND_URL}):`, err)
+    return { valid: false, reason: "backend_unreachable" }
   }
 }
