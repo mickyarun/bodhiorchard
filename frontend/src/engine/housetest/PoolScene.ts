@@ -1,32 +1,26 @@
 /**
- * PoolScene — Pool resort test scene with individual deck chairs.
+ * PoolScene — Pool resort test scene with individual beach chairs.
  *
- * Places 6 individual `deck_chair.glb` chairs around a central pool.
- * Uses `placeFurnitureCentered`-style AABB centering + SeatProber to
- * detect the exact chair seat surface, then creates InteractableItems
- * for E-key sit interaction.
- *
- * This scene serves as the test harness for calibrating production
- * PoolResortBuilder's seat positions. The SeatProber results logged
- * to console should match the `deckChair` entry in SEAT_OFFSETS.
+ * Places 6 individual beach chairs (from beach_chair.glb) around a pool.
+ * Uses world-space AABB centering after instantiation (handles Sketchfab
+ * FBX scale matrices correctly) + SeatProber for sit height.
  */
 import * as pc from 'playcanvas'
 import type { AssetLoader } from '../assets/AssetLoader'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
-import { BuildingFactory } from '../buildings/BuildingFactory'
 import { SeatProber } from '../characters/SeatProber'
-
-/** Path to the pool lounge chair GLB (4 color variants in one model). */
-const POOL_CHAIR_GLB = 'assets/garden/pool_chairs.glb'
 import { POOL_CHAIRS, type PoolChairDef } from './SceneConfig'
 import { InteractableItem } from './InteractableItem'
+
+const BEACH_CHAIR_GLB = 'assets/garden/beach_chair.glb'
+
+/** Target width for the beach chair in world units. */
+const TARGET_CHAIR_WIDTH = 0.8
 
 export interface PoolChairResult {
   def: PoolChairDef
   entity: pc.Entity
-  /** SeatProber-detected seat surface Y, or null if detection failed. */
   probedSeatY: number | null
-  /** Final seat world position (x, y, z) + yaw for the character. */
   seatWorldX: number
   seatWorldY: number
   seatWorldZ: number
@@ -34,14 +28,15 @@ export interface PoolChairResult {
 }
 
 export class PoolScene {
-  private factory: BuildingFactory
+  private loader: AssetLoader
+  private materials: MaterialFactory | null
   private chairResults: PoolChairResult[] = []
 
-  /** Interactable items — one per chair, for E-key sit interaction. */
   readonly items: InteractableItem[] = []
 
   constructor(loader: AssetLoader, materials: MaterialFactory | null) {
-    this.factory = new BuildingFactory(loader, materials ?? undefined)
+    this.loader = loader
+    this.materials = materials
   }
 
   async build(root: pc.Entity): Promise<void> {
@@ -49,34 +44,34 @@ export class PoolScene {
     const ground = new pc.Entity('PoolGround')
     ground.addComponent('render', { type: 'plane' })
     ground.setLocalScale(30, 1, 30)
-    const matFactory = this.factory.materialFactory
-    if (matFactory) {
+    if (this.materials) {
       ground.render!.meshInstances[0].material =
-        matFactory.getColor('pool_ground', 0.35, 0.55, 0.25)
+        this.materials.getColor('pool_ground', 0.35, 0.55, 0.25)
     }
     root.addChild(ground)
 
-    // Simple pool water placeholder (flat blue plane)
+    // Pool water
     const water = new pc.Entity('PoolWater')
     water.addComponent('render', { type: 'plane' })
     water.setLocalScale(6, 1, 6)
     water.setPosition(0, 0.05, 0)
-    if (matFactory) {
+    if (this.materials) {
       water.render!.meshInstances[0].material =
-        matFactory.getColor('pool_water', 0.2, 0.5, 0.8, { emissive: [0.1, 0.25, 0.4] })
+        this.materials.getColor('pool_water', 0.2, 0.5, 0.8, { emissive: [0.1, 0.25, 0.4] })
     }
     root.addChild(water)
 
-    // Place each deck chair using placeFurnitureCentered + SeatProber
+    // Load beach chair asset once, instance per placement
+    const chairAsset = await this.loader.load(BEACH_CHAIR_GLB)
+
     for (const chairDef of POOL_CHAIRS) {
-      const result = await this.placeChairWithProbing(root, chairDef)
+      const result = await this.placeChair(root, chairAsset, chairDef)
       this.chairResults.push(result)
 
-      // Create interactable for E-key sit
       const item = new InteractableItem(
         chairDef.id,
         new pc.Vec3(result.seatWorldX, 0, result.seatWorldZ),
-        '[E] Sit in deck chair',
+        '[E] Sit in beach chair',
         `Relaxing... (seatY=${result.probedSeatY?.toFixed(3) ?? 'fallback'})`,
         'sit',
         {
@@ -85,12 +80,11 @@ export class PoolScene {
           yaw: chairDef.yaw,
           y: result.seatWorldY,
         },
-        2.0, // proximity radius
+        2.0,
       )
       this.items.push(item)
     }
 
-    // Log all probed values for calibration
     console.log('[PoolScene] SeatProber results:')
     for (const r of this.chairResults) {
       console.log(
@@ -101,40 +95,61 @@ export class PoolScene {
   }
 
   /**
-   * Place an individual deck chair using placeFurnitureCentered (AABB-centered)
-   * and probe its seat surface with SeatProber.
+   * Place a beach chair using world-space AABB centering.
    *
-   * This is the same approach used by CoffeeBarBuilder/CafeteriaBuilder —
-   * the chair is a single-entity GLB so SeatProber detects the actual chair
-   * seat surface, not the center of a composite umbrella+chairs model.
+   * Sketchfab FBX exports have a 0.01 scale matrix baked into the node
+   * hierarchy. `placeFurnitureCentered` uses local-space Mesh.aabb which
+   * doesn't account for this, producing wrong offsets. Instead we:
+   *   1. Instance the GLB and add to scene (so world transforms resolve)
+   *   2. Measure the world-space AABB from MeshInstance.aabb
+   *   3. Scale to fit TARGET_CHAIR_WIDTH
+   *   4. Re-measure and offset so bottom-center is at placement coords
    */
-  private async placeChairWithProbing(
+  private async placeChair(
     parent: pc.Entity,
+    asset: pc.Asset,
     def: PoolChairDef,
   ): Promise<PoolChairResult> {
-    // pool_chairs.glb contains 4 color variants as sibling nodes under
-    // RootNode. We instance the full GLB then disable 3 of the 4 chairs,
-    // keeping only one (cycling through colors by chair index).
-    const entity = await this.factory.placeFurnitureCentered(
-      parent, POOL_CHAIR_GLB, def.x, 0, def.z, def.yaw,
-    )
-    // Find the RootNode's children (the 4 chair color groups)
-    const CHAIR_NAMES = ['poolChair_Green', 'poolChair_Red', 'poolChair_Blue', 'poolChair_Yellow']
-    const chairIndex = POOL_CHAIRS.indexOf(def) % CHAIR_NAMES.length
-    this.hideAllChairsExcept(entity, CHAIR_NAMES[chairIndex])
+    const model = this.loader.instance(asset)
 
-    // Probe seat surface Y from actual mesh geometry — same approach as
-    // the house interior's lounge chair / desk chair sitting.
-    const probedSeatY = SeatProber.probeSeatY(entity)
-    const seatY = probedSeatY ?? 0.20
+    const wrapper = new pc.Entity(`BeachChair_${def.id}`)
+    wrapper.addChild(model)
+    wrapper.setLocalPosition(def.x, 0, def.z)
+    if (def.yaw !== 0) wrapper.setLocalEulerAngles(0, def.yaw, 0)
+    parent.addChild(wrapper)
 
-    // Seat position = EXACT placement coords (same pattern as house interior:
-    // the seat position matches the placeFurnitureCentered coordinates, no
-    // forward offset or mesh-center math needed. AABB centering already puts
-    // the model's visual center at def.x/def.z).
+    // World transforms now valid — measure AABB
+    const meshInstances = this.collectMeshInstances(model)
+    if (meshInstances.length === 0) {
+      return { def, entity: wrapper, probedSeatY: null, seatWorldX: def.x, seatWorldY: 0.3, seatWorldZ: def.z, seatYaw: def.yaw }
+    }
+
+    // 1. Measure raw world AABB
+    const rawAabb = this.worldAabb(meshInstances)
+    const rawWidth = rawAabb.halfExtents.x * 2
+    const scale = rawWidth > 0 ? TARGET_CHAIR_WIDTH / rawWidth : 1
+    model.setLocalScale(scale, scale, scale)
+
+    // 2. Force world transform update + re-measure
+    wrapper.getWorldTransform()
+    const scaledAabb = this.worldAabb(meshInstances)
+
+    // 3. Offset so bottom-center is at (def.x, 0, def.z)
+    const wrapperPos = wrapper.getPosition()
+    const dx = scaledAabb.center.x - wrapperPos.x
+    const dz = scaledAabb.center.z - wrapperPos.z
+    const dy = (scaledAabb.center.y - scaledAabb.halfExtents.y) - wrapperPos.y
+    const prev = model.getLocalPosition()
+    model.setLocalPosition(prev.x - dx / scale, prev.y - dy / scale, prev.z - dz / scale)
+
+    // 4. Probe seat Y from mesh geometry
+    wrapper.getWorldTransform()
+    const probedSeatY = SeatProber.probeSeatY(wrapper)
+    const seatY = probedSeatY ?? 0.30
+
     return {
       def,
-      entity,
+      entity: wrapper,
       probedSeatY,
       seatWorldX: def.x,
       seatWorldY: seatY,
@@ -143,27 +158,22 @@ export class PoolScene {
     }
   }
 
-  /**
-   * Disable all chair color variants except the one with the given name.
-   * The GLB has 4 chairs (Green/Red/Blue/Yellow) as siblings — we keep
-   * one visible per placement so each pool position gets a different color.
-   */
-  private hideAllChairsExcept(root: pc.Entity, keepName: string): void {
-    // Walk the entity tree to find the chair group nodes
-    const stack = [root]
-    while (stack.length > 0) {
-      const node = stack.pop()!
-      // Chair groups are named poolChair_Green, poolChair_Red, etc.
-      if (node.name.startsWith('poolChair_') && !node.name.includes('_poolChair_')) {
-        node.enabled = (node.name === keepName)
-      }
-      for (let i = 0; i < node.children.length; i++) {
-        stack.push(node.children[i] as pc.Entity)
-      }
-    }
+  private collectMeshInstances(entity: pc.Entity): pc.MeshInstance[] {
+    const out: pc.MeshInstance[] = []
+    const renders = entity.findComponents('render') as pc.RenderComponent[]
+    for (const rc of renders) out.push(...rc.meshInstances)
+    return out
   }
 
-  /** Get the average probed seatY for calibrating production code. */
+  private worldAabb(instances: pc.MeshInstance[]): pc.BoundingBox {
+    const aabb = new pc.BoundingBox()
+    aabb.copy(instances[0].aabb)
+    for (let i = 1; i < instances.length; i++) {
+      aabb.add(instances[i].aabb)
+    }
+    return aabb
+  }
+
   getAverageProbedSeatY(): number | null {
     const probed = this.chairResults
       .map(r => r.probedSeatY)
