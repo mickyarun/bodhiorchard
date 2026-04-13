@@ -16,12 +16,13 @@ import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 
 // ─── Dimensions (world units) ───────────────────────────────────────────────
+// Elongated seat makes it look like a pool sun lounger, not a dining chair.
 const WIDTH = 0.5
-const SEAT_DEPTH = 0.45
+const SEAT_DEPTH = 0.9     // doubled for lounger proportions
 const SEAT_THICK = 0.03
 const LEG_THICK = 0.025
-const BACK_HEIGHT = 0.35
-const BACK_ANGLE = 65  // degrees from horizontal
+const BACK_HEIGHT = 0.3
+const BACK_ANGLE = 55  // degrees from horizontal (more reclined)
 
 /** Known seat surface Y — use this for InteractionPoint.y */
 export const SEAT_HEIGHT = 0.25
@@ -86,16 +87,17 @@ export function buildBeachChair(materials: MaterialFactory): pc.Entity {
   seat.render!.castShadows = true
   root.addChild(seat)
 
-  // ─── Backrest (angled) ────────────────────────────────────────────────────
+  // ─── Backrest (angled, at -Z = behind the sitter) ─────────────────────────
+  // The sitter faces +Z (toward the pool when yaw points at it).
+  // The backrest goes at -Z so it's behind them.
   const back = new pc.Entity('Backrest')
   back.addComponent('render', { type: 'box' })
   back.setLocalScale(WIDTH, BACK_HEIGHT, SEAT_THICK)
-  // Position at back edge of seat, angled backward
   const backRad = BACK_ANGLE * Math.PI / 180
   const backCenterY = SEAT_HEIGHT + Math.sin(backRad) * BACK_HEIGHT / 2
-  const backCenterZ = SEAT_DEPTH / 2 - Math.cos(backRad) * BACK_HEIGHT / 2
+  const backCenterZ = -SEAT_DEPTH / 2 + Math.cos(backRad) * BACK_HEIGHT / 2
   back.setLocalPosition(0, backCenterY, backCenterZ)
-  back.setLocalEulerAngles(BACK_ANGLE - 90, 0, 0)
+  back.setLocalEulerAngles(-(BACK_ANGLE - 90), 0, 0)
   back.render!.meshInstances[0].material = fabric
   back.render!.castShadows = true
   root.addChild(back)
