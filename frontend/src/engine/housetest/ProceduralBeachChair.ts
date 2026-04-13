@@ -95,9 +95,9 @@ export function buildBeachChair(materials: MaterialFactory): pc.Entity {
   back.setLocalScale(WIDTH, BACK_HEIGHT, SEAT_THICK)
   const backRad = BACK_ANGLE * Math.PI / 180
   const backCenterY = SEAT_HEIGHT + Math.sin(backRad) * BACK_HEIGHT / 2
-  const backCenterZ = -SEAT_DEPTH / 2 + Math.cos(backRad) * BACK_HEIGHT / 2
+  const backCenterZ = -SEAT_DEPTH / 2 - Math.cos(backRad) * BACK_HEIGHT / 2
   back.setLocalPosition(0, backCenterY, backCenterZ)
-  back.setLocalEulerAngles(-(BACK_ANGLE - 90), 0, 0)
+  back.setLocalEulerAngles(BACK_ANGLE - 90, 0, 0)
   back.render!.meshInstances[0].material = fabric
   back.render!.castShadows = true
   root.addChild(back)
