@@ -59,6 +59,7 @@
 import { ref, computed } from 'vue'
 import api from '@/services/api'
 import { useXPStore } from '@/stores/xp'
+import { formatSP } from '@/utils/format'
 
 const xpStore = useXPStore()
 const unlocking = ref<string | null>(null)
@@ -68,10 +69,6 @@ const vehicles = [
 ]
 
 const skillPoints = computed(() => xpStore.profile?.skill_points ?? 0)
-
-function formatSP(sp: number): string {
-  return Number.isInteger(sp) ? sp.toString() : sp.toFixed(2)
-}
 
 function isUnlocked(vehicleId: string): boolean {
   return xpStore.profile?.vehicle_unlocks?.includes(vehicleId) ?? false

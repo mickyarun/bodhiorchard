@@ -66,6 +66,8 @@ async def award_sp(
                     metadata={"sp_amount": amount, "sp_balance": new_sp},
                 )
         except IntegrityError:
+            # Restore balance — the ORM mutation happened before the savepoint
+            row.skill_points = Decimal(str(round(old_sp, 2)))
             logger.debug("sp_dedup_integrity", source_ref=source_ref)
             return None
 

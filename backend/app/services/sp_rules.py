@@ -34,6 +34,7 @@ SP_PM_BUD_DISCARDED = -0.5       # BUD discarded (wasted team effort)
 
 SP_TL_REVIEW_DONE = 0.25         # code review completed
 SP_TL_ARCH_APPROVED = 0.25       # tech architecture approved
+SP_TL_BUD_SHIPPED = 0.5          # BUD reached PROD (as tech lead)
 SP_TL_PROD_BUG_MISSED = -0.5     # production bug on BUDs they reviewed
 
 # ─── Designer ──────────────────────────────────
@@ -55,7 +56,7 @@ BUD_SHIPPED_SP: dict[str, float] = {
     "developer": SP_DEV_BUD_SHIPPED,
     "pm": SP_PM_BUD_SHIPPED,
     "designer": SP_DESIGNER_BUD_SHIPPED,
-    "tech_lead": SP_TL_ARCH_APPROVED,
+    "tech_lead": SP_TL_BUD_SHIPPED,
 }
 
 # ─── Role → Review SP mapping ─────────────────

@@ -47,7 +47,7 @@ class DeveloperXP(BaseModel):
 
     # Skill points — scarce currency earned through role-based quality outcomes
     skill_points: Mapped[float] = mapped_column(
-        Numeric(10, 2), nullable=False, default=0, server_default="0",
+        Numeric(10, 2, asdecimal=False), nullable=False, default=0, server_default="0",
     )
     house_level: Mapped[int] = mapped_column(
         Integer, nullable=False, default=2, server_default="2",

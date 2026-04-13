@@ -65,6 +65,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatSP } from '@/utils/format'
 
 const props = defineProps<{
   totalXp: number
@@ -82,10 +83,6 @@ const LEVEL_ICONS: Record<string, string> = {
 const LEVEL_NAMES = ['seedling', 'sprout', 'sapling', 'tree', 'ancient_oak']
 
 const levelIcon = computed(() => LEVEL_ICONS[props.levelName] || '⭐')
-
-function formatSP(sp: number): string {
-  return Number.isInteger(sp) ? sp.toString() : sp.toFixed(2)
-}
 
 const progress = computed(() => {
   if (props.nextLevelThreshold === 0) return 100
