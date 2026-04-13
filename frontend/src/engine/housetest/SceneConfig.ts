@@ -50,7 +50,7 @@ export interface FurnitureDef {
 
 /** All valid interactable IDs — typed so string comparisons get compile-time safety. */
 export type InteractableId = 'tv' | 'laptop' | 'bed'
-  | 'couch' | 'chair' | 'armchair' | 'dining'
+  | 'couch' | 'chair' | 'dining' | 'fridge' | 'stove'
   | 'pool_chair_0' | 'pool_chair_1' | 'pool_chair_2'
   | 'pool_chair_3' | 'pool_chair_4' | 'pool_chair_5'
 
@@ -283,7 +283,7 @@ export const INTERIOR_FURNITURE_TIER_3: FurnitureDef[] = [
   { asset: 'kaykit_lampStanding', x: 4.5,  z: 4.5, scale: KSM },
   { asset: 'kaykit_rugRectangle', x: 3.5,  y: 0.01, z: 3.0, scale: KS },
   { asset: 'kaykit_rugOval',      x: 1.0,  y: 0.01, z: 1.5, scale: KS },
-  { asset: 'kaykit_cactus',       x: 4.7,  z: 2.0, scale: KSM },
+  { asset: 'kaykit_cactus',       x: 4.5,  z: 2.0, scale: KSM },
 ]
 
 export const INTERIOR_INTERACTABLES_TIER_3: InteractableDef[] = [
@@ -306,7 +306,7 @@ export const INTERIOR_INTERACTABLES_TIER_3: InteractableDef[] = [
     prompt: '[E] Watch TV', info: 'Premium channels...',
     action: 'sit',
     seat: { x: 1.8, z: 2.5, yaw: 270 },
-    radius: 1.0,
+    radius: 0.8,
   },
   {
     id: 'couch', pos: { x: 4.3, z: 2.8 },
@@ -322,22 +322,16 @@ export const INTERIOR_INTERACTABLES_TIER_3: InteractableDef[] = [
     seat: { x: 2.3, z: 4.0, yaw: 90 },
   },
   {
-    id: 'chair', pos: { x: 0.3, z: 3.3 },
+    id: 'fridge', pos: { x: 0.3, z: 3.5 },
     prompt: '🧊 Midnight snack?', info: 'Just pizza boxes and one sad lemon. The dev life.',
     action: 'use',
-    radius: 1.0,
+    radius: 0.8,
   },
   {
-    id: 'chair', pos: { x: 0.3, z: 4.2 },
+    id: 'stove', pos: { x: 0.3, z: 4.2 },
     prompt: '🍳 Chef mode?', info: 'You burned water last time. Maybe order in.',
     action: 'use',
-    radius: 1.0,
-  },
-  {
-    id: 'dining', pos: { x: 0.5, z: 3.5 },
-    prompt: '[E] Sit at table', info: 'Dinner time...',
-    action: 'sit',
-    seat: { x: 0.5, z: 3.5, yaw: 90 },
+    radius: 0.8,
   },
 ]
 
