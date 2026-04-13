@@ -250,53 +250,88 @@ export const INTERIOR_INTERACTABLES_TIER_2: InteractableDef[] = [
 
 /** Tier 3 — Mansion: luxury KayKit estate (5×5) */
 export const INTERIOR_FURNITURE_TIER_3: FurnitureDef[] = [
-  // Master bedroom — back-left
+  // ── Back-left: Bedroom ──────────────────────
   { asset: 'kaykit_bedDouble',    x: 1.0,  z: 0.3, scale: KS },
   { asset: 'kaykit_tableSmall',   x: 0.2,  z: 0.3, scale: KSM },
   { asset: 'kaykit_lampTable',    x: 0.2,  z: 0.3, stackOn: 'kaykit_tableSmall', scale: KSM },
   { asset: 'kaykit_tableSmall',   x: 2.0,  z: 0.3, scale: KSM },
   { asset: 'kaykit_lampTable',    x: 2.0,  z: 0.3, stackOn: 'kaykit_tableSmall', scale: KSM },
-  // Living room — right side
-  { asset: 'kaykit_couchPillows', x: 4.3,  z: 3.0, rotation: 270, scale: KS },
-  { asset: 'kaykit_armchair',     x: 3.2,  z: 4.0, rotation: 0, scale: KS },
-  { asset: 'kaykit_tableMedium',  x: 3.2,  z: 2.8, scale: KS },
-  // Dining area — front-left
-  { asset: 'kaykit_tableMedium',  x: 1.2,  z: 3.5, scale: KS },
-  { asset: 'kaykit_chair',        x: 0.5,  z: 3.5, rotation: 90, scale: KS },
-  { asset: 'kaykit_chair',        x: 1.9,  z: 3.5, rotation: 270, scale: KS },
-  // Study corner — back-right
-  { asset: 'kaykit_bookshelf',    x: 4.5,  z: 0.2, rotation: 270, scale: KS },
-  { asset: 'kaykit_cabinet',      x: 3.5,  z: 0.2, scale: KS },
-  { asset: 'kaykit_books',        x: 3.2,  z: 2.8, stackOn: 'kaykit_tableMedium', scale: KSM },
-  // Lighting
-  { asset: 'kaykit_lampStanding', x: 0.3,  z: 2.0, scale: KSM },
+  // ── Back-right: Study ───────────────────────
+  { asset: 'desk',                x: 4.2,  z: 0.5 },
+  { asset: 'laptop',              x: 4.2,  z: 0.5, stackOn: 'desk' },
+  { asset: 'chairDesk',           x: 4.2,  z: 1.0, rotation: 180 },
+  { asset: 'kaykit_bookshelf',    x: 3.2,  z: 0.2, rotation: 270, scale: KS },
+  { asset: 'kaykit_cabinet',      x: 3.2,  z: 1.0, scale: KSM },
+  // ── Mid-left: TV area ───────────────────────
+  { asset: 'cabinetTelevision',   x: 0.4,  z: 2.5, rotation: 90 },
+  { asset: 'televisionModern',    x: 0.4,  z: 2.5, rotation: 90, stackOn: 'cabinetTelevision' },
+  { asset: 'loungeChair',         x: 1.8,  z: 2.5, rotation: 270 },
+  // ── Mid-right: Living room ──────────────────
+  { asset: 'kaykit_couchPillows', x: 4.3,  z: 2.8, rotation: 270, scale: KS },
+  { asset: 'kaykit_tableMedium',  x: 3.2,  z: 2.8, scale: KSM },
+  // ── Front-left: Kitchen along left wall ──────
+  //   All facing right (rot 90), lined up along X≈0.3
+  { asset: 'kitchenFridge',       x: 0.3,  z: 3.3, rotation: 90 },
+  { asset: 'kitchenStove',        x: 0.3,  z: 4.0, rotation: 90 },
+  { asset: 'kitchenSink',         x: 0.3,  z: 4.5, rotation: 90 },
+  // ── Front-center: Dining ────────────────────
+  { asset: 'kaykit_tableMedium',  x: 3.0,  z: 4.0, scale: KS },
+  { asset: 'kaykit_chair',        x: 2.3,  z: 4.0, rotation: 90, scale: KS },
+  { asset: 'kaykit_chair',        x: 3.7,  z: 4.0, rotation: 270, scale: KS },
+  // ── Lighting + Decor ────────────────────────
+  { asset: 'kaykit_lampStanding', x: 0.3,  z: 1.5, scale: KSM },
   { asset: 'kaykit_lampStanding', x: 4.5,  z: 4.5, scale: KSM },
-  // Decor
-  { asset: 'kaykit_rugRectangle', x: 3.2,  y: 0.01, z: 3.2, scale: KS },
+  { asset: 'kaykit_rugRectangle', x: 3.5,  y: 0.01, z: 3.0, scale: KS },
   { asset: 'kaykit_rugOval',      x: 1.0,  y: 0.01, z: 1.5, scale: KS },
-  { asset: 'kaykit_cactus',       x: 0.3,  z: 4.5, scale: KSM },
-  { asset: 'kaykit_cactus',       x: 4.7,  z: 1.5, scale: KSM },
+  { asset: 'kaykit_cactus',       x: 4.7,  z: 2.0, scale: KSM },
 ]
 
 export const INTERIOR_INTERACTABLES_TIER_3: InteractableDef[] = [
   {
-    id: 'bed', pos: { x: 1.2, z: 0.3 },
+    id: 'bed', pos: { x: 1.0, z: 0.8 },
     prompt: '[E] Sleep', info: 'Luxury sleep...',
     action: 'sleep',
-    seat: { x: 1.2, z: 0.55, yaw: 90 },
+    seat: { x: 1.0, z: 0.5, yaw: 0, y: 0.25 },
+    radius: 1.0,
   },
   {
-    id: 'couch', pos: { x: 4.2, z: 3.0 },
-    prompt: '[E] Relax on couch', info: 'Living the dream...',
+    id: 'laptop', pos: { x: 4.2, z: 0.5 },
+    prompt: '[E] Work', info: 'Executive coding...',
     action: 'sit',
-    seat: { x: 4.2, z: 3.0, yaw: 270 },
+    seat: { x: 4.0, z: 0.95, yaw: 180, y: 0.15 },
     radius: 1.3,
   },
   {
-    id: 'armchair', pos: { x: 3.0, z: 4.0 },
-    prompt: '[E] Sit in armchair', info: 'Cozy...',
+    id: 'tv', pos: { x: 1.0, z: 2.5 },
+    prompt: '[E] Watch TV', info: 'Premium channels...',
     action: 'sit',
-    seat: { x: 3.0, z: 4.0, yaw: 0 },
+    seat: { x: 1.8, z: 2.5, yaw: 270 },
+    radius: 1.0,
+  },
+  {
+    id: 'couch', pos: { x: 4.3, z: 2.8 },
+    prompt: '[E] Relax on couch', info: 'Living the dream...',
+    action: 'sit',
+    seat: { x: 4.3, z: 2.8, yaw: 270, y: 0.15 },
+    radius: 1.3,
+  },
+  {
+    id: 'dining', pos: { x: 2.3, z: 4.0 },
+    prompt: '[E] Sit at table', info: 'Dinner time...',
+    action: 'sit',
+    seat: { x: 2.3, z: 4.0, yaw: 90 },
+  },
+  {
+    id: 'chair', pos: { x: 0.3, z: 3.3 },
+    prompt: '🧊 Midnight snack?', info: 'Just pizza boxes and one sad lemon. The dev life.',
+    action: 'use',
+    radius: 1.0,
+  },
+  {
+    id: 'chair', pos: { x: 0.3, z: 4.2 },
+    prompt: '🍳 Chef mode?', info: 'You burned water last time. Maybe order in.',
+    action: 'use',
+    radius: 1.0,
   },
   {
     id: 'dining', pos: { x: 0.5, z: 3.5 },
