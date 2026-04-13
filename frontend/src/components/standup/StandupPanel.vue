@@ -225,8 +225,11 @@ function memberTotal(m: MemberStandupItem): number {
 function navigateDay(offset: number): void {
   const d = new Date(currentDate.value + 'T00:00:00')
   d.setDate(d.getDate() + offset)
-  currentDate.value = d.toISOString().slice(0, 10)
-  if (isToday.value) {
+  const today = new Date().toISOString().slice(0, 10)
+  const target = d.toISOString().slice(0, 10)
+  if (target > today) return // don't navigate past today
+  currentDate.value = target
+  if (target === today) {
     store.fetchToday()
   } else {
     store.fetchByDate(currentDate.value)
