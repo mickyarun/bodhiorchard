@@ -38,10 +38,9 @@ const JUMP_HEIGHT  = 0.5  // peak Y
 const JUMP_DURATION = 0.45 // seconds
 
 // ─── Animation state graph ──────────────────────────────────
-// Extended from LOCOMOTION_STATE_GRAPH (AnimUtils.ts) with Sleep state for house interiors.
-// NOTE: uses INTEGER parameters (sitting=0/1, sleeping=0/1) vs BOOLEAN in LOCOMOTION_STATE_GRAPH.
-// This is intentional — the house interior needs integer tri-state (idle/sit/sleep) logic.
-// KayKit characters in houses use their own factory animations (Sit_Chair_Idle, Lie_Idle).
+// Extended from LOCOMOTION_STATE_GRAPH (AnimUtils.ts) for house interiors.
+// NOTE: uses INTEGER parameters (sitting=0/1) vs BOOLEAN in LOCOMOTION_STATE_GRAPH.
+// KayKit characters use Sit for both chair sitting and bed sleeping (no lie-down clip).
 const STATE_GRAPH = {
   layers: [{
     name: 'locomotion',
@@ -70,20 +69,11 @@ const STATE_GRAPH = {
         from: 'Sit', to: 'Idle', time: 0.2, priority: 0,
         conditions: [{ parameterName: 'sitting', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
       },
-      {
-        from: 'Idle', to: 'Sleep', time: 0.3, priority: 1,
-        conditions: [{ parameterName: 'sleeping', predicate: pc.ANIM_EQUAL_TO, value: 1 }],
-      },
-      {
-        from: 'Sleep', to: 'Idle', time: 0.3, priority: 0,
-        conditions: [{ parameterName: 'sleeping', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
-      },
     ],
   }],
   parameters: {
     speed:    { name: 'speed',    type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
     sitting:  { name: 'sitting',  type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
-    sleeping: { name: 'sleeping', type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
   },
 }
 
@@ -93,6 +83,7 @@ export class PlayerController {
   private loader: AssetLoader
   private input: InputManager
   private entity: pc.Entity | null = null
+  private _isKayKit = false
   private collisionBoxes: CollisionBox[] = []
   private physics: PhysicsWorld | null = null
   private _sitting  = false
@@ -105,6 +96,7 @@ export class PlayerController {
 
   get isSitting():  boolean { return this._sitting  }
   get isSleeping(): boolean { return this._sleeping }
+
 
   constructor(loader: AssetLoader, input: InputManager) {
     this.loader = loader
@@ -137,8 +129,50 @@ export class PlayerController {
         renderChild.setLocalScale(s.x * interiorScale, s.y * interiorScale, s.z * interiorScale)
       }
 
+      // Load extra animation GLBs and assign them as additional states
+      const anim = result.entity.anim
+      if (anim?.baseLayer) {
+        const layer = anim.baseLayer
+        const loadTracks = async (glb: string) => {
+          const a = await this.loader.load(glb)
+          return a.resource as ContainerWithAnims
+        }
+        const [general, simulation, tools] = await Promise.all([
+          loadTracks('characters/kaykit/animations/general.glb'),
+          loadTracks('characters/kaykit/animations/simulation.glb'),
+          loadTracks('characters/kaykit/animations/tools.glb'),
+        ])
+
+        // Sleep — Death_A plays once and holds collapsed pose
+        const death = findAnimTrack(general, 'Death_A')
+        if (death) layer.assignAnimation('Sleep', death, 1, false)
+
+        // Working — for laptop/desk interaction
+        const working = findAnimTrack(tools, 'Working_A')
+        if (working) layer.assignAnimation('Working', working)
+
+        // Extra animations for the picker
+        const extras: [string, ContainerWithAnims, string, boolean][] = [
+          ['Cheering',    simulation, 'Cheering',        true],
+          ['Waving',      simulation, 'Waving',          true],
+          ['LieIdle',     simulation, 'Lie_Idle',        true],
+          ['SitFloor',    simulation, 'Sit_Floor_Idle',  true],
+          ['PushUps',     simulation, 'Push_Ups',        true],
+          ['Interact',    general,    'Interact',        true],
+          ['UseItem',     general,    'Use_Item',        true],
+          ['Chopping',    tools,      'Chopping',        true],
+          ['Hammering',   tools,      'Hammering',       true],
+          ['Fishing',     tools,      'Fishing_Idle',    true],
+        ]
+        for (const [state, container, trackName, loop] of extras) {
+          const track = findAnimTrack(container, trackName)
+          if (track) layer.assignAnimation(state, track, 1, loop)
+        }
+      }
+
       root.addChild(result.entity)
       this.entity = result.entity
+      this._isKayKit = true
       return result.entity
     }
 
@@ -167,11 +201,11 @@ export class PlayerController {
       const walk = findAnimTrack(container, 'walk')
       // Fallback chain: try common keyword variants, then fall back to idle.
       const sit   = findAnimTrack(container, 'sit')   ?? idle
-      const sleep = findAnimTrack(container, 'sleep') ?? findAnimTrack(container, 'lie') ?? findAnimTrack(container, 'death') ?? idle
+      const sleep = findAnimTrack(container, 'death') ?? findAnimTrack(container, 'lie') ?? idle
       if (idle)  layer.assignAnimation('Idle',  idle)
       if (walk)  layer.assignAnimation('Walk',  walk)
       if (sit)   layer.assignAnimation('Sit',   sit)
-      if (sleep) layer.assignAnimation('Sleep', sleep)
+      if (sleep) layer.assignAnimation('Sleep', sleep, 1, false)
     }
 
     root.addChild(wrapper)
@@ -196,32 +230,72 @@ export class PlayerController {
     this._sitting = true
     this.entity.setPosition(x, y, z)
     this.entity.setEulerAngles(0, yaw, 0)
-    this.entity.anim?.setInteger('speed', 0)
-    this.entity.anim?.setInteger('sitting', 1)
+    const anim = this.entity.anim
+    if (this._isKayKit) {
+      anim?.setBoolean('sitting', true)
+      anim?.setInteger('speed', 0)
+    } else {
+      anim?.setInteger('speed', 0)
+      anim?.setInteger('sitting', 1)
+    }
   }
 
-  /** End sit — resume normal movement. */
+  /** End sit — clear working state and force back to Idle. */
   standUp(): void {
     if (!this.entity) return
     this._sitting = false
-    this.entity.anim?.setInteger('sitting', 0)
+    const anim = this.entity.anim
+    if (!anim) return
+    try { anim.setInteger('working', 0) } catch (e) { if (import.meta.env.DEV) console.debug('[PlayerCtrl] anim param missing:', e) }
+    if (this._isKayKit) {
+      anim.setBoolean('sitting', false)
+    } else {
+      anim.setInteger('sitting', 0)
+    }
+    try { anim.baseLayer?.transition('Idle', 0.2) } catch (e) { if (import.meta.env.DEV) console.debug('[PlayerCtrl] anim transition:', e) }
   }
 
-  /** Teleport to bed position and play sleep animation. WASD wakes up. */
-  sleepAt(x: number, z: number, yaw: number): void {
+  /** Teleport to bed and play Death_A animation for sleep. */
+  sleepAt(x: number, z: number, yaw: number, y = 0): void {
     if (!this.entity) return
     this._sleeping = true
-    this.entity.setPosition(x, 0, z)
+    this.entity.setPosition(x, y, z)
     this.entity.setEulerAngles(0, yaw, 0)
-    this.entity.anim?.setInteger('speed', 0)
-    this.entity.anim?.setInteger('sleeping', 1)
+    const anim = this.entity.anim
+    if (!anim) return
+    anim.setInteger('speed', 0)
+    if (this._isKayKit) {
+      anim.setBoolean('sitting', false)
+    } else {
+      anim.setInteger('sitting', 0)
+    }
+    try { anim.baseLayer?.transition('Sleep', 0.3) } catch { /* state missing */ }
   }
 
-  /** End sleep — resume normal movement. */
+  /** End sleep — reset to floor level and resume idle. */
   wakeUp(): void {
     if (!this.entity) return
     this._sleeping = false
-    this.entity.anim?.setInteger('sleeping', 0)
+    // Move character off the bed to floor level, slightly in front
+    const pos = this.entity.getPosition()
+    this.entity.setPosition(pos.x, 0, pos.z + 0.8)
+    const anim = this.entity.anim
+    if (!anim) return
+    try { anim.baseLayer?.transition('Idle', 0.3) } catch (e) { if (import.meta.env.DEV) console.debug('[PlayerCtrl] anim transition:', e) }
+  }
+
+  /** Play a named animation state (for the animation picker UI). */
+  playAnimation(stateName: string): void {
+    const anim = this.entity?.anim
+    if (!anim?.baseLayer) return
+    try { anim.baseLayer.transition(stateName, 0.3) } catch (e) { if (import.meta.env.DEV) console.debug('[PlayerCtrl] anim state:', e) }
+  }
+
+  /** Get list of available animation state names. */
+  getAnimationStates(): string[] {
+    return ['Idle', 'Walk', 'Sit', 'Sleep', 'Working', 'Cheering', 'Waving',
+            'LieIdle', 'SitFloor', 'PushUps', 'Interact', 'UseItem',
+            'Chopping', 'Hammering', 'Fishing']
   }
 
   update(dt: number, camYaw = 0): void {

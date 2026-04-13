@@ -28,6 +28,7 @@ import { PhysicsWorld } from '../physics'
 import {
   EXTERIOR_HOUSES,
   HOUSE_EXIT_LOCAL,
+  ROOM_SIZE_BY_TIER,
   type InteractableId,
 } from './SceneConfig'
 import type { CollisionBox } from './CollisionSystem'
@@ -78,6 +79,7 @@ export class HouseTestEngine {
 
   // Multi-house state
   private currentHouseId: string | null = null
+  private currentHouseTier = 0
   private doorReEnableTimer: ReturnType<typeof setTimeout> | null = null
 
   // E-key interaction state
@@ -118,14 +120,11 @@ export class HouseTestEngine {
     this.poolRoot.enabled = false
 
     // ── 5. Build scenes ─────────────────────────────────────────────────────
-    this.exterior = new ExteriorScene(this.factory)
-    this.interior = new InteriorScene(this.factory)
-
-    // Exterior: builds 4 houses + registers physics (walls + door colliders)
+    this.exterior = new ExteriorScene(this.loader, this.factory.materialFactory ?? undefined)
+    // Exterior: builds houses + registers physics (walls + door colliders)
     await this.exterior.build(this.exteriorRoot, this.physics)
 
-    // Interior: builds shared room (returns manual AABB collision boxes)
-    this.intBoxes = await this.interior.build(this.interiorRoot)
+    // Interior is built on-demand in enterHouse() with the correct tier
 
     // Pool: builds umbrella+chair sets with SeatProber detection
     this.pool = new PoolScene(this.loader, new MaterialFactory())
@@ -148,17 +147,7 @@ export class HouseTestEngine {
     this.transition = new SceneTransition()
     this.transition.init(container)
 
-    // ── 9. Interior interactables ───────────────────────────────────────────
-    for (const item of this.interior.items) {
-      item.onUse(() => {
-        const { seat } = item
-        if (item.action === 'sit'   && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw, seat.y)
-        if (item.action === 'sleep' && seat) this.player?.sleepAt(seat.x, seat.z, seat.yaw)
-        this.ui?.showInfo(item.infoText)
-        this._activeSeatId = item.id
-        if (item.id === 'tv') this.interior?.tvEffect.turnOn()
-      })
-    }
+    // ── 9. Interior interactables — wired on each enterHouse() ──────────────
 
     // ── 9b. Pool interactables ───────────────────────────────────────────
     for (const item of this.pool.items) {
@@ -175,6 +164,15 @@ export class HouseTestEngine {
     this.ui.init(container)
     this.ui.setScene('exterior')
 
+    // Animation picker — show all available animations for testing
+    if (this.player) {
+      const states = this.player.getAnimationStates()
+      this.ui.showAnimPicker(states)
+      this.ui.onAnimSelect = (name) => {
+        this.player?.playAnimation(name)
+      }
+    }
+
     // ── 11. Camera + loop ───────────────────────────────────────────────────
     this.positionExteriorCamera()
     this.application.setConfig({ onUpdate: (dt) => this.onUpdate(dt) })
@@ -185,6 +183,20 @@ export class HouseTestEngine {
 
     const camYaw = this.orbit?.yaw ?? 0
     this.player.update(dt, camYaw)
+
+    // Billboard labels: rotate to face camera
+    const cam = this.application.app.root.findByName('Camera') as pc.Entity | null
+    if (cam) {
+      const camPos = cam.getPosition()
+      const billboards = this.application.app.root.findByTag('billboard') as pc.Entity[]
+      for (const b of billboards) {
+        const pos = b.getPosition()
+        const dx = camPos.x - pos.x
+        const dz = camPos.z - pos.z
+        const yaw = Math.atan2(dx, dz) * (180 / Math.PI) + 180
+        b.setEulerAngles(90, yaw, 0)
+      }
+    }
 
     if (this.scene === 'exterior') {
       // Step Rapier AFTER movePlayer (applies kinematic translation + updates narrow phase)
@@ -215,8 +227,10 @@ export class HouseTestEngine {
         if (this.player?.isSitting) { this.player.standUp() }
         else if (this.player?.isSleeping) { this.player.wakeUp() }
         else {
-          for (const item of this.interior.items) {
-            if (item.isNear(playerPos)) { item.use(); break }
+          if (this.interior) {
+            for (const item of this.interior.items) {
+              if (item.isNear(playerPos)) { item.use(); break }
+            }
           }
         }
       }
@@ -228,15 +242,31 @@ export class HouseTestEngine {
         this._activeSeatId = null
       }
 
+      // Proximity prompts for interactable items
+      if (!this.player?.isSitting && !this.player?.isSleeping) {
+        let nearItem = false
+        for (const item of this.interior.items) {
+          if (item.isNear(playerPos)) {
+            this.ui?.showPrompt(item.promptText)
+            nearItem = true
+            break
+          }
+        }
+        if (!nearItem) this.ui?.hidePrompt()
+      }
+
       // TV flicker
-      this.interior.tvEffect.update(dt)
+      this.interior?.tvEffect.update(dt)
 
       // ESC or door exit — manual AABB DoorTrigger for interior exit
       if (this.input.wasPressed(pc.KEY_ESCAPE)) {
         this.exitHouse()
       }
-      // Interior door exit: check if player walks near the door (Z > 3.5)
-      if (playerPos.z > 3.8 && Math.abs(playerPos.x - 1.5) < 0.7) {
+      // Interior door exit: tier-aware door position from room config
+      const roomCfg = ROOM_SIZE_BY_TIER[this.currentHouseTier] ?? ROOM_SIZE_BY_TIER[0]
+      const doorZ = roomCfg.depth - 0.2
+      const doorX = (roomCfg.doorIndex + 0.5)
+      if (playerPos.z > doorZ && Math.abs(playerPos.x - doorX) < 0.7) {
         this.exitHouse()
       }
     }
@@ -286,14 +316,41 @@ export class HouseTestEngine {
   // ─── Scene transitions ───────────────────────────────────────────────────
 
   private enterHouse(houseId: string): void {
-    if (!this.transition || this.transition.isActive || this.scene !== 'exterior') return
+    if (!this.transition || this.transition.isActive || this.scene !== 'exterior' || !this.factory) return
 
     this.currentHouseId = houseId
     this.physics?.setDoorsEnabled(false) // disable door detection during transition
 
+    // Resolve house tier for interior layout
+    const house = EXTERIOR_HOUSES.find(h => h.id === houseId)
+    const tier = house?.tier ?? 0
+    this.currentHouseTier = tier
+
     this.scene = 'entering'  // prevent re-entrant door collision triggers
 
-    void this.transition.perform(() => {
+    void this.transition.perform(async () => {
+      this._activeSeatId = null
+
+      // Destroy all old interior children (snapshot to avoid mutation during iteration)
+      if (this.interiorRoot) {
+        const oldChildren = [...this.interiorRoot.children] as pc.Entity[]
+        for (const child of oldChildren) child.destroy()
+      }
+      this.interior = new InteriorScene(this.factory)
+      this.intBoxes = await this.interior.build(this.interiorRoot!, tier)
+
+      // Wire interactables for this interior
+      for (const item of this.interior.items) {
+        item.onUse(() => {
+          const { seat } = item
+          if (item.action === 'sit' && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw, seat.y)
+          if (item.action === 'sleep' && seat) this.player?.sleepAt(seat.x, seat.z, seat.yaw, seat.y)
+          this.ui?.showInfo(item.infoText)
+          this._activeSeatId = item.id
+          if (item.id === 'tv') this.interior?.tvEffect.turnOn()
+        })
+      }
+
       this.scene = 'interior'
       this.exteriorRoot!.enabled = false
       this.interiorRoot!.enabled = true

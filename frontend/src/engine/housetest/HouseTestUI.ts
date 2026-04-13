@@ -87,13 +87,53 @@ export class HouseTestUI {
     }, 2000)
   }
 
+  /** Callback set by HouseTestEngine when player presses an anim button. */
+  onAnimSelect: ((name: string) => void) | null = null
+
+  /** Show the animation picker panel with buttons for each animation. */
+  showAnimPicker(states: string[]): void {
+    if (!this.container || this.animPanel) return
+    this.animPanel = document.createElement('div')
+    Object.assign(this.animPanel.style, {
+      position: 'absolute', top: '50px', right: '10px',
+      background: 'rgba(0,0,0,0.7)', color: '#fff',
+      padding: '8px', borderRadius: '8px',
+      display: 'flex', flexDirection: 'column', gap: '4px',
+      pointerEvents: 'auto', maxHeight: '80vh', overflowY: 'auto',
+      fontSize: '12px',
+    })
+    const title = document.createElement('div')
+    title.textContent = 'Animations'
+    Object.assign(title.style, { fontWeight: 'bold', marginBottom: '4px', textAlign: 'center' })
+    this.animPanel.appendChild(title)
+
+    for (const name of states) {
+      const btn = document.createElement('button')
+      btn.textContent = name
+      Object.assign(btn.style, {
+        background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none',
+        padding: '4px 8px', borderRadius: '4px', cursor: 'pointer',
+        fontSize: '11px', textAlign: 'left',
+      })
+      btn.onmouseenter = () => { btn.style.background = 'rgba(255,255,255,0.3)' }
+      btn.onmouseleave = () => { btn.style.background = 'rgba(255,255,255,0.15)' }
+      btn.onclick = () => this.onAnimSelect?.(name)
+      this.animPanel.appendChild(btn)
+    }
+    this.container.appendChild(this.animPanel)
+  }
+
+  private animPanel: HTMLElement | null = null
+
   destroy(): void {
     if (this.promptTimeout) clearTimeout(this.promptTimeout)
+    this.animPanel?.remove()
     this.container?.remove()
     this.container = null
     this.sceneLabel = null
     this.prompt = null
     this.infoText = null
+    this.animPanel = null
   }
 
   private makeLabel(text: string, styles: Partial<CSSStyleDeclaration>): HTMLElement {

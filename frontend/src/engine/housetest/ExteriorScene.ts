@@ -1,16 +1,19 @@
 /**
- * ExteriorScene — Multi-house village with Rapier physics.
+ * ExteriorScene — Multi-house village with tiered building models.
  *
- * Builds N houses from EXTERIOR_HOUSES config, each as a 4×4-tile Kenney
- * house shell with roof, stone path, and name label. Registers all wall
- * collision and door sensors with PhysicsWorld.
+ * Tier 0 (Standard)  — Original Kenney procedural house (walls + flat roof)
+ * Tier 1 (Hut)       — KayKit home_small.glb
+ * Tier 2 (Cottage)   — KayKit home_medium.glb
+ * Tier 3 (Mansion)   — KayKit home_large.glb (tavern/manor)
  *
- * Visual entities are created under the provided root entity.
- * Physics bodies are created in the shared PhysicsWorld instance.
+ * Standard is the default every member starts with. KayKit tiers are
+ * visual upgrades unlocked with SP.
  */
 import * as pc from 'playcanvas'
 import { BuildingFactory } from '../buildings/BuildingFactory'
 import { PATH } from '../assets/AssetManifest'
+import type { AssetLoader } from '../assets/AssetLoader'
+import type { MaterialFactory } from '../rendering/MaterialFactory'
 import {
   WALL_COLLISION,
   EXTERIOR_HOUSES,
@@ -18,35 +21,67 @@ import {
   type ExteriorHouseDef,
 } from './SceneConfig'
 import type { PhysicsWorld } from '../physics'
+import { createNameLabel } from '../characters/NameLabel'
 
 const WALL_HEIGHT  = 1.29
 const GROUND_SIZE  = 30
 const GROUND_COLOR = { r: 0.45, g: 0.65, b: 0.35 }
 
+// ─── KayKit tier model config ─────────────────────
+
+interface TierModel {
+  glb: string
+  scale: number
+  footprint: { w: number; d: number }
+}
+
+const KAYKIT_MODELS: Record<1 | 2 | 3, TierModel> = {
+  1: {
+    glb: 'assets/buildings/kaykit/home_small.glb',
+    scale: 1.8,
+    footprint: { w: 1.8, d: 1.8 },
+  },
+  2: {
+    glb: 'assets/buildings/kaykit/home_medium.glb',
+    scale: 1.8,
+    footprint: { w: 2.2, d: 2.2 },
+  },
+  3: {
+    glb: 'assets/buildings/kaykit/home_barracks.glb',
+    scale: 1.5,
+    footprint: { w: 3.0, d: 3.0 },
+  },
+}
+
 export class ExteriorScene {
+  private loader: AssetLoader
+  private materials: MaterialFactory | null
   private factory: BuildingFactory
 
-  constructor(factory: BuildingFactory) {
-    this.factory = factory
+  constructor(loader: AssetLoader, materials?: MaterialFactory) {
+    this.loader = loader
+    this.materials = materials ?? null
+    this.factory = new BuildingFactory(loader, materials)
   }
 
-  /**
-   * Build the multi-house village and register physics.
-   * @param root - Parent entity for all visual elements
-   * @param physics - PhysicsWorld to register wall bodies and door sensors
-   */
   async build(root: pc.Entity, physics: PhysicsWorld): Promise<void> {
     this.buildGround(root, physics)
 
     for (const house of EXTERIOR_HOUSES) {
-      await this.buildHouse(root, house, physics)
+      if (house.tier === 0) {
+        await this.buildStandardHouse(root, house, physics)
+      } else {
+        await this.buildKayKitHouse(root, house, physics)
+      }
     }
   }
+
+  // ─── Ground ─────────────────────────────────────
 
   private buildGround(root: pc.Entity, physics: PhysicsWorld): void {
     const ground = new pc.Entity('Ground')
     ground.addComponent('render', { type: 'plane' })
-    const mat = this.factory.materialFactory?.getColor(
+    const mat = this.materials?.getColor(
       'housetest_ground', GROUND_COLOR.r, GROUND_COLOR.g, GROUND_COLOR.b,
     ) ?? (() => {
       const m = new pc.StandardMaterial()
@@ -58,22 +93,21 @@ export class ExteriorScene {
     ground.setLocalScale(GROUND_SIZE, 1, GROUND_SIZE)
     ground.setLocalPosition(GROUND_SIZE / 2 - 5, -0.005, GROUND_SIZE / 2 - 3)
     root.addChild(ground)
-
-    // Physics ground plane
     physics.addGround(-0.05, GROUND_SIZE)
   }
 
-  private async buildHouse(
+  // ─── Tier 0: Standard Kenney house (procedural) ─
+
+  private async buildStandardHouse(
     root: pc.Entity,
     house: ExteriorHouseDef,
     physics: PhysicsWorld,
   ): Promise<void> {
-    // Parent entity offset to house world position
     const houseRoot = new pc.Entity(`House_${house.id}`)
     houseRoot.setPosition(house.x, 0, house.z)
     root.addChild(houseRoot)
 
-    // Visual: floor, walls, roof
+    // Floor + walls + flat roof (original code)
     await this.factory.createFloor(houseRoot, 4, 4)
     await this.factory.createWalls(houseRoot, 4, 4, [
       { side: 'front', index: 1, type: 'door' },
@@ -84,52 +118,86 @@ export class ExteriorScene {
     ])
     this.factory.createRoof(houseRoot, 4, 4, WALL_HEIGHT)
 
-    // Visual: stone path leading to door
-    const stoneZPositions = [4.4, 5.0, 5.6]
-    for (let i = 0; i < stoneZPositions.length; i++) {
+    // Stone path
+    for (let i = 0; i < 3; i++) {
       const stone = await this.factory.placeFurniture(
-        houseRoot, PATH.stone, 1.5, 0.01, stoneZPositions[i], i * 30,
+        houseRoot, PATH.stone, 1.5, 0.01, 4.4 + i * 0.6, i * 30,
       )
       stone.setLocalScale(1.5, 1.5, 1.5)
     }
 
-    // Visual: name label above house
-    const label = new pc.Entity(`Label_${house.id}`)
-    label.addComponent('render', { type: 'plane' })
-    label.setLocalPosition(2, WALL_HEIGHT + 0.5, 2)
-    label.setLocalScale(2, 1, 0.4)
-    label.setLocalEulerAngles(90, 0, 0)
+    // Name label
+    const label = createNameLabel(house.label, this.loader.app.graphicsDevice, WALL_HEIGHT + 0.4)
+    label.setLocalPosition(2, 0, 2)
     houseRoot.addChild(label)
 
-    // Physics: register wall collision bodies (world-space)
-    this.registerWallPhysics(house.x, house.z, physics)
-
-    // Physics: door collider (thin box in the door gap — character bumps into it)
+    // Physics
+    for (const box of WALL_COLLISION) {
+      physics.addStaticBox(
+        house.x + (box.minX + box.maxX) / 2,
+        WALL_HEIGHT / 2,
+        house.z + (box.minZ + box.maxZ) / 2,
+        (box.maxX - box.minX) / 2,
+        WALL_HEIGHT / 2,
+        (box.maxZ - box.minZ) / 2,
+      )
+    }
     physics.addDoor(
       house.id,
-      house.x + HOUSE_DOOR_LOCAL.x,   // center X of door gap
-      WALL_HEIGHT / 2,                 // center Y
-      house.z + 4.0,                   // Z at the front wall
-      0.45,                            // halfW — slightly narrower than 1-unit gap
-      WALL_HEIGHT / 2,                 // halfH — full wall height
-      0.05,                            // halfD — very thin so it feels like a door
+      house.x + HOUSE_DOOR_LOCAL.x,
+      WALL_HEIGHT / 2,
+      house.z + 4.0,
+      0.45, WALL_HEIGHT / 2, 0.05,
     )
   }
 
-  /**
-   * Register wall physics bodies for one house at world position (hx, hz).
-   * Creates 5 static cuboid colliders matching WALL_COLLISION boxes
-   * (4 walls + front wall split for door gap).
-   */
-  private registerWallPhysics(hx: number, hz: number, physics: PhysicsWorld): void {
-    for (const box of WALL_COLLISION) {
-      const cx = hx + (box.minX + box.maxX) / 2
-      const cy = WALL_HEIGHT / 2
-      const cz = hz + (box.minZ + box.maxZ) / 2
-      const halfW = (box.maxX - box.minX) / 2
-      const halfH = WALL_HEIGHT / 2
-      const halfD = (box.maxZ - box.minZ) / 2
-      physics.addStaticBox(cx, cy, cz, halfW, halfH, halfD)
+  // ─── Tier 1-3: KayKit whole-model buildings ─────
+
+  private async buildKayKitHouse(
+    root: pc.Entity,
+    house: ExteriorHouseDef,
+    physics: PhysicsWorld,
+  ): Promise<void> {
+    const tier = house.tier as 1 | 2 | 3
+    const model = KAYKIT_MODELS[tier]
+
+    const asset = await this.loader.load(model.glb)
+    const building = this.loader.instance(asset)
+    building.name = `House_${house.id}`
+    building.setPosition(house.x, 0, house.z)
+    building.setLocalScale(model.scale, model.scale, model.scale)
+    root.addChild(building)
+
+    // Stone path leading to front
+    const stoneCount = tier + 1
+    for (let i = 0; i < stoneCount; i++) {
+      const stone = await this.factory.placeFurniture(
+        root, PATH.stone,
+        house.x, 0.01, house.z + (model.footprint.d * model.scale) / 2 + 0.4 + i * 0.6,
+        i * 30,
+      )
+      stone.setLocalScale(1.5, 1.5, 1.5)
     }
+
+    // Name label above building
+    const labelY = model.footprint.w * model.scale + 0.3
+    const label = createNameLabel(house.label, this.loader.app.graphicsDevice, labelY)
+    label.setLocalPosition(house.x, 0, house.z)
+    root.addChild(label)
+
+    // Physics: simple box collider matching footprint
+    const { w, d } = model.footprint
+    const s = model.scale
+    physics.addStaticBox(
+      house.x, WALL_HEIGHT / 2, house.z,
+      (w * s) / 2, WALL_HEIGHT / 2, (d * s) / 2,
+    )
+    physics.addDoor(
+      house.id,
+      house.x,
+      WALL_HEIGHT / 2,
+      house.z + (d * s) / 2,
+      0.45, WALL_HEIGHT / 2, 0.05,
+    )
   }
 }

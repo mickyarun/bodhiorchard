@@ -37,6 +37,8 @@ export interface FurnitureDef {
   z: number
   /** Euler Y rotation in degrees (default 0). */
   rotation?: number
+  /** Uniform scale (default 1.0). KayKit furniture needs ~0.5. */
+  scale?: number
   /**
    * If set, this item's y is computed from the height of the last entity
    * placed with the given asset key. Use for lamps-on-tables, TVs-on-cabinets, etc.
@@ -48,6 +50,7 @@ export interface FurnitureDef {
 
 /** All valid interactable IDs — typed so string comparisons get compile-time safety. */
 export type InteractableId = 'tv' | 'laptop' | 'bed'
+  | 'couch' | 'chair' | 'armchair' | 'dining'
   | 'pool_chair_0' | 'pool_chair_1' | 'pool_chair_2'
   | 'pool_chair_3' | 'pool_chair_4' | 'pool_chair_5'
 
@@ -101,28 +104,25 @@ export const INTERIOR_INTERACTABLES: InteractableDef[] = [
     prompt: '[E] Watch TV',
     info: 'Watching TV... (WASD to stop)',
     action: 'sit',
-    // Player sits in the lounge chair at (2.2, 3.0), yaw=90° faces +X toward TV.
-    seat: { x: 2.2, z: 3.0, yaw: 90 },
+    seat: { x: 2.2, z: 3.0, yaw: 90, y: 0.15 },
     radius: 1.5,
   },
   {
     id: 'laptop',
     pos: { x: 3.3, z: 0.5 },
-    prompt: '[E] Check emails',
-    info: 'You have 3 unread messages.',
+    prompt: '[E] Work',
+    info: 'Coding away...',
     action: 'sit',
-    // z=1.1: bottom edge at 1.1-0.28=0.82 > desk box maxZ(0.72) → outside box ✓
-    seat: { x: 3.3, z: 1.1, yaw: 180 },
+    seat: { x: 3.15, z: 0.95, yaw: 180, y: 0.15 },
     radius: 1.3,
   },
   {
     id: 'bed',
-    pos: { x: 1.0, z: 0.3 },
+    pos: { x: 1.0, z: 0.8 },
     prompt: '[E] Sleep',
     info: 'Zzzz... (WASD to wake up)',
     action: 'sleep',
-    // z=0.55: bottom edge at 0.55-0.28=0.27 > back wall box maxZ(0.15) → outside box ✓
-    seat: { x: 1.0, z: 0.55, yaw: 90 },
+    seat: { x: 1.0, z: 0.9, yaw: 0, y: 0.45 },
     radius: 1.3,
   },
 ]
@@ -140,6 +140,194 @@ export const WALL_COLLISION: CollisionBox[] = [
   { minX: 2.0,   maxX: 4.1,  minZ: 3.85,  maxZ: 4.15  },  // front-right panel
 ]
 
+// ─── Tier-specific interior configs ──────────────────────────────────────────
+
+export interface RoomSize { width: number; depth: number; doorIndex: number }
+
+export const ROOM_SIZE_BY_TIER: Record<number, RoomSize> = {
+  0: { width: 4, depth: 4, doorIndex: 1 },
+  1: { width: 3, depth: 3, doorIndex: 1 },
+  2: { width: 4, depth: 4, doorIndex: 1 },
+  3: { width: 5, depth: 5, doorIndex: 2 },
+}
+
+/** Tier 1 — Hut: cozy minimal KayKit room (3×3) */
+const KS = 0.3   // KayKit furniture scale (models are ~3x Kenney size)
+const KSM = 0.2  // smaller items (lamps, decor)
+export const INTERIOR_FURNITURE_TIER_1: FurnitureDef[] = [
+  // Bed — back-left against wall
+  { asset: 'kaykit_bedSingle',  x: 0.5,  z: 0.3,  scale: KS },
+  // Side table + lamp — tight next to bed
+  { asset: 'kaykit_tableSmall', x: 1.1,  z: 0.3,  scale: KSM },
+  { asset: 'kaykit_lampTable',  x: 1.1,  z: 0.3,  stackOn: 'kaykit_tableSmall', scale: KSM },
+  // Desk + laptop + chair — right wall, work area (use Kenney desk+laptop, they align)
+  { asset: 'desk',              x: 2.3, z: 0.4, scale: 0.8 },
+  { asset: 'laptop',            x: 2.3, z: 0.4, stackOn: 'desk', scale: 0.8 },
+  { asset: 'kaykit_chair',      x: 2.3, z: 1.0, rotation: 180, scale: KS },
+  // Cactus — front-left corner
+  { asset: 'kaykit_cactus',     x: 0.3,  z: 2.4,  scale: KSM },
+]
+
+export const INTERIOR_INTERACTABLES_TIER_1: InteractableDef[] = [
+  {
+    id: 'bed', pos: { x: 0.6, z: 0.5 },
+    prompt: '[E] Sleep', info: 'Zzzz...',
+    action: 'sleep',
+    seat: { x: 0.5, z: 0.5, yaw: 0, y: 0.25 },
+    radius: 1.0,
+  },
+  {
+    id: 'laptop', pos: { x: 2.3, z: 0.5 },
+    prompt: '[E] Work', info: 'Coding away...',
+    action: 'sit',
+    seat: { x: 2.3, z: 0.8, yaw: 180 },
+    radius: 1.0,
+  },
+]
+
+export const INTERIOR_COLLISION_TIER_1: CollisionBox[] = [
+  { minX: -0.1,  maxX: 3.1,  minZ: -0.15, maxZ: 0.15 },  // back
+  { minX: -0.15, maxX: 0.15, minZ: -0.1,  maxZ: 3.1  },  // left
+  { minX: 2.85,  maxX: 3.15, minZ: -0.1,  maxZ: 3.1  },  // right
+  { minX: -0.1,  maxX: 1.0,  minZ: 2.85,  maxZ: 3.15 },  // front-left
+  { minX: 2.0,   maxX: 3.1,  minZ: 2.85,  maxZ: 3.15 },  // front-right
+]
+
+/** Tier 2 — Cottage: comfortable KayKit home (4×4) */
+export const INTERIOR_FURNITURE_TIER_2: FurnitureDef[] = [
+  // Bed area — back-left
+  { asset: 'kaykit_bedSingle',    x: 0.6,  z: 0.3, scale: KS },
+  { asset: 'kaykit_tableSmall',   x: 1.4,  z: 0.3, scale: KSM },
+  { asset: 'kaykit_lampTable',    x: 1.4,  z: 0.3, stackOn: 'kaykit_tableSmall', scale: KSM },
+  // Living area — center-right
+  { asset: 'kaykit_couchPillows', x: 3.3,  z: 2.5, rotation: 270, scale: KS },
+  { asset: 'kaykit_tableMedium',  x: 2.0,  z: 2.5, scale: KS },
+  { asset: 'kaykit_chair',        x: 2.0,  z: 1.5, rotation: 180, scale: KS },
+  // Reading corner — back-right
+  { asset: 'kaykit_bookshelf',    x: 3.5,  z: 0.2, rotation: 270, scale: KS },
+  { asset: 'kaykit_books',        x: 2.0,  z: 2.5, stackOn: 'kaykit_tableMedium', scale: KSM },
+  // Lighting + decor
+  { asset: 'kaykit_lampStanding', x: 0.3,  z: 2.8, scale: KSM },
+  { asset: 'kaykit_rugRectangle', x: 2.0,  y: 0.01, z: 2.0, scale: KS },
+  { asset: 'kaykit_cactus',       x: 0.3,  z: 3.5, scale: KSM },
+]
+
+export const INTERIOR_INTERACTABLES_TIER_2: InteractableDef[] = [
+  {
+    id: 'bed', pos: { x: 0.8, z: 0.3 },
+    prompt: '[E] Sleep', info: 'Zzzz...',
+    action: 'sleep',
+    seat: { x: 0.8, z: 0.55, yaw: 90 },
+  },
+  {
+    id: 'couch', pos: { x: 3.2, z: 2.5 },
+    prompt: '[E] Sit on couch', info: 'Comfortable...',
+    action: 'sit',
+    seat: { x: 3.2, z: 2.5, yaw: 270 },
+    radius: 1.3,
+  },
+  {
+    id: 'chair', pos: { x: 2.0, z: 1.5 },
+    prompt: '[E] Sit', info: 'Reading...',
+    action: 'sit',
+    seat: { x: 2.0, z: 1.5, yaw: 180 },
+  },
+]
+
+/** Tier 3 — Mansion: luxury KayKit estate (5×5) */
+export const INTERIOR_FURNITURE_TIER_3: FurnitureDef[] = [
+  // Master bedroom — back-left
+  { asset: 'kaykit_bedDouble',    x: 1.0,  z: 0.3, scale: KS },
+  { asset: 'kaykit_tableSmall',   x: 0.2,  z: 0.3, scale: KSM },
+  { asset: 'kaykit_lampTable',    x: 0.2,  z: 0.3, stackOn: 'kaykit_tableSmall', scale: KSM },
+  { asset: 'kaykit_tableSmall',   x: 2.0,  z: 0.3, scale: KSM },
+  { asset: 'kaykit_lampTable',    x: 2.0,  z: 0.3, stackOn: 'kaykit_tableSmall', scale: KSM },
+  // Living room — right side
+  { asset: 'kaykit_couchPillows', x: 4.3,  z: 3.0, rotation: 270, scale: KS },
+  { asset: 'kaykit_armchair',     x: 3.2,  z: 4.0, rotation: 0, scale: KS },
+  { asset: 'kaykit_tableMedium',  x: 3.2,  z: 2.8, scale: KS },
+  // Dining area — front-left
+  { asset: 'kaykit_tableMedium',  x: 1.2,  z: 3.5, scale: KS },
+  { asset: 'kaykit_chair',        x: 0.5,  z: 3.5, rotation: 90, scale: KS },
+  { asset: 'kaykit_chair',        x: 1.9,  z: 3.5, rotation: 270, scale: KS },
+  // Study corner — back-right
+  { asset: 'kaykit_bookshelf',    x: 4.5,  z: 0.2, rotation: 270, scale: KS },
+  { asset: 'kaykit_cabinet',      x: 3.5,  z: 0.2, scale: KS },
+  { asset: 'kaykit_books',        x: 3.2,  z: 2.8, stackOn: 'kaykit_tableMedium', scale: KSM },
+  // Lighting
+  { asset: 'kaykit_lampStanding', x: 0.3,  z: 2.0, scale: KSM },
+  { asset: 'kaykit_lampStanding', x: 4.5,  z: 4.5, scale: KSM },
+  // Decor
+  { asset: 'kaykit_rugRectangle', x: 3.2,  y: 0.01, z: 3.2, scale: KS },
+  { asset: 'kaykit_rugOval',      x: 1.0,  y: 0.01, z: 1.5, scale: KS },
+  { asset: 'kaykit_cactus',       x: 0.3,  z: 4.5, scale: KSM },
+  { asset: 'kaykit_cactus',       x: 4.7,  z: 1.5, scale: KSM },
+]
+
+export const INTERIOR_INTERACTABLES_TIER_3: InteractableDef[] = [
+  {
+    id: 'bed', pos: { x: 1.2, z: 0.3 },
+    prompt: '[E] Sleep', info: 'Luxury sleep...',
+    action: 'sleep',
+    seat: { x: 1.2, z: 0.55, yaw: 90 },
+  },
+  {
+    id: 'couch', pos: { x: 4.2, z: 3.0 },
+    prompt: '[E] Relax on couch', info: 'Living the dream...',
+    action: 'sit',
+    seat: { x: 4.2, z: 3.0, yaw: 270 },
+    radius: 1.3,
+  },
+  {
+    id: 'armchair', pos: { x: 3.0, z: 4.0 },
+    prompt: '[E] Sit in armchair', info: 'Cozy...',
+    action: 'sit',
+    seat: { x: 3.0, z: 4.0, yaw: 0 },
+  },
+  {
+    id: 'dining', pos: { x: 0.5, z: 3.5 },
+    prompt: '[E] Sit at table', info: 'Dinner time...',
+    action: 'sit',
+    seat: { x: 0.5, z: 3.5, yaw: 90 },
+  },
+]
+
+export const INTERIOR_COLLISION_TIER_3: CollisionBox[] = [
+  { minX: -0.1,  maxX: 5.1,  minZ: -0.15, maxZ: 0.15 },  // back
+  { minX: -0.15, maxX: 0.15, minZ: -0.1,  maxZ: 5.1  },  // left
+  { minX: 4.85,  maxX: 5.15, minZ: -0.1,  maxZ: 5.1  },  // right
+  { minX: -0.1,  maxX: 2.0,  minZ: 4.85,  maxZ: 5.15 },  // front-left
+  { minX: 3.0,   maxX: 5.1,  minZ: 4.85,  maxZ: 5.15 },  // front-right
+]
+
+/** Lookup helpers for tier-specific configs */
+export function getFurnitureForTier(tier: number): FurnitureDef[] {
+  switch (tier) {
+    case 1: return INTERIOR_FURNITURE_TIER_1
+    case 2: return INTERIOR_FURNITURE_TIER_2
+    case 3: return INTERIOR_FURNITURE_TIER_3
+    default: return INTERIOR_FURNITURE  // tier 0 = standard
+  }
+}
+
+export function getInteractablesForTier(tier: number): InteractableDef[] {
+  switch (tier) {
+    case 1: return INTERIOR_INTERACTABLES_TIER_1
+    case 2: return INTERIOR_INTERACTABLES_TIER_2
+    case 3: return INTERIOR_INTERACTABLES_TIER_3
+    default: return INTERIOR_INTERACTABLES
+  }
+}
+
+export function getCollisionForTier(tier: number): CollisionBox[] {
+  switch (tier) {
+    case 0: return INTERIOR_COLLISION  // standard walls + furniture footprints
+    case 1: return INTERIOR_COLLISION_TIER_1
+    case 3: return INTERIOR_COLLISION_TIER_3
+    default: return WALL_COLLISION  // tier 2 uses wall-only collision
+  }
+}
+
 // ─── Multi-house exterior layout ─────────────────────────────────────────────
 
 export interface ExteriorHouseDef {
@@ -147,14 +335,16 @@ export interface ExteriorHouseDef {
   x: number       // world X of house origin (lower-left corner in local space)
   z: number       // world Z
   label: string   // member name shown above house
+  tier: 0 | 1 | 2 | 3 // 0=standard (old Kenney), 1-3=KayKit upgrades
 }
 
-/** 4 houses in a 2×2 grid, 6-unit spacing. Door faces +Z (front wall). */
+/** 5 houses showing all tiers: standard (old Kenney) + 3 KayKit upgrades. */
 export const EXTERIOR_HOUSES: ExteriorHouseDef[] = [
-  { id: 'house_a', x: 0,  z: 0,  label: 'Alice' },
-  { id: 'house_b', x: 6,  z: 0,  label: 'Bob' },
-  { id: 'house_c', x: 0,  z: 8,  label: 'Carol' },
-  { id: 'house_d', x: 6,  z: 8,  label: 'Dave' },
+  { id: 'house_a', x: 0,   z: 0,  label: 'Alice (Standard)', tier: 0 },
+  { id: 'house_b', x: 7,   z: 0,  label: 'Bob (Hut)',        tier: 1 },
+  { id: 'house_c', x: 0,   z: 9,  label: 'Carol (Cottage)',  tier: 2 },
+  { id: 'house_d', x: 7,   z: 9,  label: 'Dave (Mansion)',   tier: 3 },
+  { id: 'house_e', x: 14,  z: 0,  label: 'Eve (Standard)',   tier: 0 },
 ]
 
 /** Door center in house-local coordinates (X=1.5 centered in door gap, Z=4.0 front wall). */

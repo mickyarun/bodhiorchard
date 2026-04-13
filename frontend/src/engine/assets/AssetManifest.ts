@@ -221,6 +221,24 @@ export const BUILDING = {
   lampRoundTable: `${FURNITURE}/lampRoundTable.glb`,
   table: `${FURNITURE}/table.glb`,
   rugRectangle: `${FURNITURE}/rugRectangle.glb`,
+
+  // KayKit Furniture Bits
+  kaykit_bedSingle: `${FURNITURE}/kaykit/bed_single_A.glb`,
+  kaykit_bedDouble: `${FURNITURE}/kaykit/bed_double_A.glb`,
+  kaykit_chair: `${FURNITURE}/kaykit/chair_A.glb`,
+  kaykit_armchair: `${FURNITURE}/kaykit/armchair_pillows.glb`,
+  kaykit_couch: `${FURNITURE}/kaykit/couch.glb`,
+  kaykit_couchPillows: `${FURNITURE}/kaykit/couch_pillows.glb`,
+  kaykit_tableMedium: `${FURNITURE}/kaykit/table_medium.glb`,
+  kaykit_tableSmall: `${FURNITURE}/kaykit/table_small.glb`,
+  kaykit_lampStanding: `${FURNITURE}/kaykit/lamp_standing.glb`,
+  kaykit_lampTable: `${FURNITURE}/kaykit/lamp_table.glb`,
+  kaykit_rugRectangle: `${FURNITURE}/kaykit/rug_rectangle_A.glb`,
+  kaykit_rugOval: `${FURNITURE}/kaykit/rug_oval_A.glb`,
+  kaykit_cabinet: `${FURNITURE}/kaykit/cabinet_medium.glb`,
+  kaykit_bookshelf: `${FURNITURE}/kaykit/shelf_B_large_decorated.glb`,
+  kaykit_books: `${FURNITURE}/kaykit/book_set.glb`,
+  kaykit_cactus: `${FURNITURE}/kaykit/cactus_small_A.glb`,
 } as const
 
 // Campfire / pavilion

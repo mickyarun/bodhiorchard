@@ -116,6 +116,31 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 
 ---
 
+## KayKit Character Animations
+
+**Two different state graph types** — KayKit vs Kenney characters use DIFFERENT parameter types:
+- **KayKit** (via KayKitCharacterFactory): Uses `LOCOMOTION_STATE_GRAPH` from AnimUtils.ts with **BOOLEAN** `sitting` and **INTEGER** `speed`, `working`
+- **Kenney** (legacy blocky): Uses custom state graphs with **INTEGER** params for all
+
+**When setting anim params, ALWAYS check `_isKayKit`:**
+```typescript
+if (this._isKayKit) {
+  anim.setBoolean('sitting', true)   // BOOLEAN for KayKit
+} else {
+  anim.setInteger('sitting', 1)      // INTEGER for Kenney
+}
+```
+
+**Available KayKit animations** (from `characters/kaykit/animations/*.glb`):
+- `simulation.glb`: `Sit_Chair_Idle`, `Sit_Chair_Down`, `Sit_Floor_Idle`, `Lie_Down`, `Lie_Idle`, `Lie_StandUp`, `Cheering`, `Waving`
+- `general.glb`: `Idle_A`, `Idle_B`, `Interact`, `Use_Item`, `PickUp`, `Death_A`
+- `movement_basic.glb`: `Walking_A`, `Running_A`, `Jump_Full_Short`
+- `tools.glb`: `Work_A`, `Working_A`, `Chop`, `Hammer`, `Fishing_Idle`
+
+**Use exact track names** with `findAnimTrack()` — not fuzzy keywords.
+
+---
+
 ## Garden Engine (3D Visualization)
 
 **Before making ANY changes to `frontend/src/engine/`**, you MUST:
