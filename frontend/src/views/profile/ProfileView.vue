@@ -32,6 +32,7 @@
       :xp-to-next-level="xpStore.profile.xp_to_next_level"
       :next-level-threshold="xpStore.profile.next_level_threshold"
       :streak-count="xpStore.profile.streak_count"
+      :skill-points="xpStore.profile.skill_points"
       class="mb-6"
     />
 

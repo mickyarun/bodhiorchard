@@ -1,6 +1,16 @@
 <template>
   <div class="setup-gradient d-flex flex-column" style="min-height: 100vh;">
     <v-container class="flex-grow-1 py-6" fluid>
+      <v-btn
+        variant="text"
+        size="small"
+        class="mb-2"
+        @click="router.back()"
+      >
+        <v-icon start>mdi-arrow-left</v-icon>
+        Back
+      </v-btn>
+
       <div class="text-h4 font-weight-bold text-center mb-2">
         Choose Your Character
       </div>
@@ -17,6 +27,7 @@
         :xp-to-next-level="xpStore.profile.xp_to_next_level"
         :next-level-threshold="xpStore.profile.next_level_threshold"
         :streak-count="xpStore.profile.streak_count"
+        :skill-points="xpStore.profile.skill_points"
         class="mb-5 mx-auto"
         style="max-width: 650px;"
       />
