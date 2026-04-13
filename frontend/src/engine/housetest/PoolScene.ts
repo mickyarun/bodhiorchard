@@ -1,33 +1,27 @@
 /**
- * PoolScene — Pool resort test scene with SeatProber-based chair seating.
+ * PoolScene — Pool resort test scene with individual deck chairs.
  *
- * Places 6 umbrella+chair sets around a ground plane. Unlike the production
- * PoolResortBuilder (which uses hardcoded seat heights), this scene uses
- * SeatProber.probeSeatY() to detect the actual chair cushion surface from
- * mesh geometry — the same approach used by all other buildings.
+ * Places 6 individual `deck_chair.glb` chairs around a central pool.
+ * Uses `placeFurnitureCentered`-style AABB centering + SeatProber to
+ * detect the exact chair seat surface, then creates InteractableItems
+ * for E-key sit interaction.
  *
- * The detected seatY is logged to console so it can be used to calibrate
- * the production SEAT_OFFSETS and server BreakSeatGenerator.
+ * This scene serves as the test harness for calibrating production
+ * PoolResortBuilder's seat positions. The SeatProber results logged
+ * to console should match the `deckChair` entry in SEAT_OFFSETS.
  */
 import * as pc from 'playcanvas'
 import type { AssetLoader } from '../assets/AssetLoader'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
+import { BuildingFactory } from '../buildings/BuildingFactory'
 import { POOL } from '../assets/AssetManifest'
 import { SeatProber } from '../characters/SeatProber'
 import { POOL_CHAIRS, type PoolChairDef } from './SceneConfig'
 import { InteractableItem } from './InteractableItem'
 
-/** Model-space constants for the umbrella+chairs GLB (same as PoolResortBuilder). */
-const UC_NATIVE_WIDTH = 361.25
-const UC_CENTER_X = -20.74
-const UC_CENTER_Z = 32.28
-const UC_Y_MIN = -218.68
-const UC_TARGET_WIDTH = 2.5
-const UC_SCALE = UC_TARGET_WIDTH / UC_NATIVE_WIDTH
-
 export interface PoolChairResult {
   def: PoolChairDef
-  wrapper: pc.Entity
+  entity: pc.Entity
   /** SeatProber-detected seat surface Y, or null if detection failed. */
   probedSeatY: number | null
   /** Final seat world position (x, y, z) + yaw for the character. */
@@ -38,16 +32,14 @@ export interface PoolChairResult {
 }
 
 export class PoolScene {
-  private loader: AssetLoader
-  private materials: MaterialFactory | null
+  private factory: BuildingFactory
   private chairResults: PoolChairResult[] = []
 
   /** Interactable items — one per chair, for E-key sit interaction. */
   readonly items: InteractableItem[] = []
 
   constructor(loader: AssetLoader, materials: MaterialFactory | null) {
-    this.loader = loader
-    this.materials = materials
+    this.factory = new BuildingFactory(loader, materials ?? undefined)
   }
 
   async build(root: pc.Entity): Promise<void> {
@@ -55,9 +47,10 @@ export class PoolScene {
     const ground = new pc.Entity('PoolGround')
     ground.addComponent('render', { type: 'plane' })
     ground.setLocalScale(30, 1, 30)
-    if (this.materials) {
+    const matFactory = this.factory.materialFactory
+    if (matFactory) {
       ground.render!.meshInstances[0].material =
-        this.materials.getColor('pool_ground', 0.35, 0.55, 0.25)
+        matFactory.getColor('pool_ground', 0.35, 0.55, 0.25)
     }
     root.addChild(ground)
 
@@ -66,25 +59,22 @@ export class PoolScene {
     water.addComponent('render', { type: 'plane' })
     water.setLocalScale(6, 1, 6)
     water.setPosition(0, 0.05, 0)
-    if (this.materials) {
+    if (matFactory) {
       water.render!.meshInstances[0].material =
-        this.materials.getColor('pool_water', 0.2, 0.5, 0.8, { emissive: [0.1, 0.25, 0.4] })
+        matFactory.getColor('pool_water', 0.2, 0.5, 0.8, { emissive: [0.1, 0.25, 0.4] })
     }
     root.addChild(water)
 
-    // Load umbrella+chair asset
-    const ucAsset = await this.loader.load(POOL.umbrellaChairs)
-
-    // Place each chair and probe its seat surface
+    // Place each deck chair using placeFurnitureCentered + SeatProber
     for (const chairDef of POOL_CHAIRS) {
-      const result = this.placeChairWithProbing(root, ucAsset, chairDef)
+      const result = await this.placeChairWithProbing(root, chairDef)
       this.chairResults.push(result)
 
       // Create interactable for E-key sit
       const item = new InteractableItem(
         chairDef.id,
-        new pc.Vec3(chairDef.x, 0, chairDef.z),
-        '[E] Sit in lounge chair',
+        new pc.Vec3(result.seatWorldX, 0, result.seatWorldZ),
+        '[E] Sit in deck chair',
         `Relaxing... (seatY=${result.probedSeatY?.toFixed(3) ?? 'fallback'})`,
         'sit',
         {
@@ -109,47 +99,38 @@ export class PoolScene {
   }
 
   /**
-   * Place an umbrella+chair set and use SeatProber to detect the seat surface.
-   * Uses the same model-space centering as PoolResortBuilder.placeUmbrellaSet(),
-   * then calls SeatProber.probeSeatY() on the wrapper entity.
+   * Place an individual deck chair using placeFurnitureCentered (AABB-centered)
+   * and probe its seat surface with SeatProber.
+   *
+   * This is the same approach used by CoffeeBarBuilder/CafeteriaBuilder —
+   * the chair is a single-entity GLB so SeatProber detects the actual chair
+   * seat surface, not the center of a composite umbrella+chairs model.
    */
-  private placeChairWithProbing(
+  private async placeChairWithProbing(
     parent: pc.Entity,
-    ucAsset: pc.Asset,
     def: PoolChairDef,
-  ): PoolChairResult {
-    // Instance the model
-    const model = this.loader.instance(ucAsset)
-    model.setLocalScale(UC_SCALE, UC_SCALE, UC_SCALE)
-    model.setLocalPosition(
-      -UC_CENTER_X * UC_SCALE,
-      -UC_Y_MIN * UC_SCALE,
-      -UC_CENTER_Z * UC_SCALE,
+  ): Promise<PoolChairResult> {
+    // Place using AABB centering (same as BuildingFactory.placeFurnitureCentered)
+    const entity = await this.factory.placeFurnitureCentered(
+      parent, POOL.deckChair, def.x, 0, def.z, def.yaw,
     )
 
-    // Wrapper for centering + rotation
-    const wrapper = new pc.Entity(`PoolChair_${def.id}`)
-    wrapper.addChild(model)
-    wrapper.setLocalPosition(def.x, 0, def.z)
-    if (def.yaw !== 0) wrapper.setLocalEulerAngles(0, def.yaw, 0)
-    parent.addChild(wrapper)
-
     // Probe seat surface Y from actual mesh geometry
-    const probedSeatY = SeatProber.probeSeatY(wrapper)
+    const probedSeatY = SeatProber.probeSeatY(entity)
 
-    // Fallback to the SEAT_OFFSETS value if probing fails
-    const FALLBACK_SEAT_Y = 0.47
+    // Fallback if probing fails
+    const FALLBACK_SEAT_Y = 0.20
     const seatY = probedSeatY ?? FALLBACK_SEAT_Y
 
-    // Compute seat world position — apply forward offset along yaw direction
-    const FORWARD_OFFSET = 0.15
+    // Forward offset along yaw direction (same as SEAT_OFFSETS.deckChair.forwardOffset)
+    const FORWARD_OFFSET = 0.10
     const yawRad = (def.yaw * Math.PI) / 180
     const fwdX = Math.sin(yawRad) * FORWARD_OFFSET
     const fwdZ = Math.cos(yawRad) * FORWARD_OFFSET
 
     return {
       def,
-      wrapper,
+      entity,
       probedSeatY,
       seatWorldX: def.x + fwdX,
       seatWorldY: seatY,
