@@ -83,6 +83,8 @@ export class GardenEngine {
   // Throttle move broadcasts to OrgRoom at ~20Hz during takeover
   private takeoverMoveAccumulator = 0
   private seatToggleCooldown = 0
+  /** Name of the zone the player is currently inside (during takeover). */
+  private _currentZone: string | null = null
   private static readonly TAKEOVER_MOVE_INTERVAL = 0.05  // seconds
 
   /** The currently authenticated user — set by Vue layer via setCurrentUser(). */
@@ -544,6 +546,27 @@ export class GardenEngine {
             else this.takeoverUI?.hideSeatPrompt()
           }
 
+          // ─── Zone proximity: fire callbacks when entering/exiting named zones ───
+          if (this.sceneManager) {
+            const pos = this.takeoverCtrl.getPosition()
+            const zones = this.sceneManager.worldLayout.getAllZones()
+            let insideZone: string | null = null
+            for (const z of zones) {
+              if (z.name === 'orchard') continue // orchard overlaps everything
+              const dx = pos.x - z.x
+              const dz = pos.z - z.z
+              if (dx * dx + dz * dz < z.radius * z.radius) {
+                insideZone = z.name
+                break
+              }
+            }
+            if (insideZone !== this._currentZone) {
+              if (this._currentZone) this.callbacks.onZoneExit?.(this._currentZone)
+              this._currentZone = insideZone
+              if (insideZone) this.callbacks.onZoneEnter?.(insideZone)
+            }
+          }
+
           // Inactivity warning / auto-exit
           if (this.takeoverCtrl.showWarning) {
             this.takeoverUI?.showWarning(this.takeoverCtrl.warningSecondsLeft)
@@ -918,6 +941,12 @@ export class GardenEngine {
         this.camera.restoreState(this.savedCameraState)
         this.savedCameraState = null
       }
+    }
+
+    // Clear zone tracking — fire exit callback if inside a zone
+    if (this._currentZone) {
+      this.callbacks.onZoneExit?.(this._currentZone)
+      this._currentZone = null
     }
 
     this.sceneState = 'garden'

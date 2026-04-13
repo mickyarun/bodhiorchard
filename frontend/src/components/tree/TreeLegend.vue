@@ -40,9 +40,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
-const collapsed = ref(false)
+const STORAGE_KEY = 'bodhigrove_legend_collapsed'
+const collapsed = ref(localStorage.getItem(STORAGE_KEY) === 'true')
+
+watch(collapsed, (v) => localStorage.setItem(STORAGE_KEY, String(v)))
 
 const treeSizes = [
   { icon: 'mdi-sprout',       color: 'green-lighten-2', label: 'Small (few features)' },

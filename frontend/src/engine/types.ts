@@ -198,6 +198,8 @@ export interface EngineCallbacks {
   onFeatureClick?: (info: EngineFeatureInfo) => void
   onAgentClick?: (info: EngineAgentInfo) => void
   onHover?: (tooltip: { text: string; screenX: number; screenY: number } | null) => void
+  onZoneEnter?: (zone: string) => void
+  onZoneExit?: (zone: string) => void
 }
 
 // ─── Event Bus Types ────────────────────────────────

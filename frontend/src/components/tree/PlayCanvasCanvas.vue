@@ -40,6 +40,8 @@ const emit = defineEmits<{
   (e: 'tree-click', info: { repoName: string }): void
   (e: 'developer-click', info: { name: string; modelName: string }): void
   (e: 'house-click', info: { name: string }): void
+  (e: 'zone-enter', zone: string): void
+  (e: 'zone-exit', zone: string): void
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
@@ -186,6 +188,8 @@ async function initEngine(): Promise<void> {
         tooltipText.value = null
       }
     },
+    onZoneEnter: (zone) => emit('zone-enter', zone),
+    onZoneExit: (zone) => emit('zone-exit', zone),
   })
 
   // Tell engine who the authenticated user is (for identity preservation in

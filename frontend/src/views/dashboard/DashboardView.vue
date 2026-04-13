@@ -29,6 +29,17 @@
       <v-chip v-if="displayData && displayData.threats.length > 0" size="small" variant="tonal" color="error" prepend-icon="mdi-bug-outline">
         {{ displayData.threats.length }} Threats
       </v-chip>
+      <v-chip
+        v-if="displayData"
+        size="small"
+        variant="tonal"
+        :color="showStandup ? 'warning' : undefined"
+        prepend-icon="mdi-calendar-clock-outline"
+        style="cursor: pointer;"
+        @click="showStandup = !showStandup"
+      >
+        Standup
+      </v-chip>
 
       <v-spacer />
 
@@ -75,15 +86,6 @@
           {{ showRelations ? 'Relations ON' : 'Relations' }}
         </v-btn>
 
-        <v-btn
-          size="small"
-          variant="tonal"
-          color="deep-purple"
-          prepend-icon="mdi-gamepad-variant-outline"
-          @click="handleTakeoverClick"
-        >
-          {{ isTakeover ? 'Exit Control' : 'Take Control' }}
-        </v-btn>
       </template>
 
       <!-- Graph-mode controls -->
@@ -96,14 +98,6 @@
           @click="graphContentRef?.backToOverview()"
         />
       </template>
-
-      <v-btn
-        icon="mdi-refresh"
-        size="small"
-        variant="text"
-        :loading="store.loading"
-        @click="store.fetchTreeData(true)"
-      />
     </div>
 
     <!-- Loading state -->
@@ -124,6 +118,8 @@
           key="tree"
           ref="treeContentRef"
           :display-data="displayData"
+          @zone-enter="onZoneEnter"
+          @zone-exit="onZoneExit"
         />
         <GraphContent
           v-else-if="viewMode === 'graph' && displayData"
@@ -141,6 +137,25 @@
           <div class="text-body-2">Add repositories in Settings to see your garden</div>
         </div>
       </div>
+
+      <!-- Standup overlay panel -->
+      <Transition name="slide-panel">
+        <StandupPanel v-if="showStandup" @close="showStandup = false" />
+      </Transition>
+
+      <!-- Takeover hint overlay -->
+      <div
+        v-if="viewMode === 'tree' && displayData && !isTakeover"
+        class="takeover-hint"
+      >
+        Press <kbd>T</kbd> to take control
+      </div>
+      <div
+        v-if="isTakeover"
+        class="takeover-hint"
+      >
+        <kbd>ESC</kbd> to exit
+      </div>
     </div>
 
     <!-- Setup checklist widget -->
@@ -156,6 +171,7 @@ import type { TreeData } from '@/types/dashboard'
 import TreeContent from './TreeContent.vue'
 import GraphContent from './GraphContent.vue'
 import SetupChecklist from '@/components/SetupChecklist.vue'
+import StandupPanel from '@/components/standup/StandupPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -183,6 +199,7 @@ watch(viewMode, (mode) => {
 // ─── Shared State ────────────────────────────────
 
 const showRelations = ref(false)
+const showStandup = ref(false)
 const isTakeover = ref(false)
 const visibleRepos = ref<string[]>([])
 
@@ -268,16 +285,21 @@ function toggleTakeover(): void {
   }, 100)
 }
 
-/**
- * Handle Take Control button click. Blurs the button so that subsequent
- * keyboard events (Space/Enter) don't re-trigger it via browser default
- * focused-button activation behavior.
- */
-function handleTakeoverClick(event: Event): void {
-  // Remove focus from the button so Space/Enter won't re-click it
-  const target = event.currentTarget as HTMLElement | null
-  target?.blur()
-  toggleTakeover()
+function onKeyDown(e: KeyboardEvent): void {
+  // T key toggles takeover when not typing in an input
+  if (e.key === 't' || e.key === 'T') {
+    const tag = (e.target as HTMLElement)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+    if (viewMode.value === 'tree') toggleTakeover()
+  }
+}
+
+function onZoneEnter(zone: string): void {
+  if (zone === 'pavilion') showStandup.value = true
+}
+
+function onZoneExit(zone: string): void {
+  if (zone === 'pavilion') showStandup.value = false
 }
 
 function selectAllRepos(): void {
@@ -294,10 +316,10 @@ let takeoverSyncInterval: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   store.fetchTreeData()
+  window.addEventListener('keydown', onKeyDown)
 
-  // Poll control state every 500ms so the button label stays in sync
+  // Poll control state every 500ms so the hint stays in sync
   // when state changes via auto-exit, door entry, ESC, etc.
-  // `isInControl` covers both takeover mode AND house interior mode.
   takeoverSyncInterval = setInterval(() => {
     const engineState = treeContentRef.value?.isInControl() ?? false
     if (engineState !== isTakeover.value) {
@@ -307,6 +329,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown)
   if (takeoverSyncInterval !== null) {
     clearInterval(takeoverSyncInterval)
     takeoverSyncInterval = null
@@ -326,5 +349,41 @@ onUnmounted(() => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+.slide-panel-enter-active,
+.slide-panel-leave-active {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.slide-panel-enter-from,
+.slide-panel-leave-to {
+  transform: translateX(40px);
+  opacity: 0;
+}
+
+.takeover-hint {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 10;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(15, 20, 30, 0.55);
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.takeover-hint kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  margin: 0 2px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  font-family: inherit;
+  font-weight: 600;
 }
 </style>

@@ -6,6 +6,8 @@
       @tree-click="(info) => onTreeClick(info.repoName)"
       @developer-click="(info) => onDeveloperClick({ name: info.name, modelName: info.modelName, isAgent: false, careMode: null, member: null, clipNames: [] })"
       @house-click="(info) => onHouseClick({ name: info.name, activity: 'home' })"
+      @zone-enter="(zone) => emit('zone-enter', zone)"
+      @zone-exit="(zone) => emit('zone-exit', zone)"
     />
     <TreeLegend v-if="!selectedRepo && !selectedDeveloper && !selectedHouse" />
 
@@ -54,6 +56,11 @@ import TreeLegend from '@/components/tree/TreeLegend.vue'
 
 const props = defineProps<{
   displayData: TreeData
+}>()
+
+const emit = defineEmits<{
+  (e: 'zone-enter', zone: string): void
+  (e: 'zone-exit', zone: string): void
 }>()
 
 const canvasRef = ref<InstanceType<typeof PlayCanvasCanvas> | null>(null)
