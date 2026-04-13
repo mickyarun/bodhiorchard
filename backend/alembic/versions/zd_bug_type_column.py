@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "zd_bug_type_column"
-down_revision: str | None = "zc_triage_session_type"
+down_revision: str | None = "3922c4bb35ad"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
