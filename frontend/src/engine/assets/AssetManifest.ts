@@ -246,6 +246,7 @@ export const ANIMALS = {
 
 export const POOL = {
   umbrellaChairs: `${GARDEN}/umbrella_chairs.glb`,
+  deckChair: `${GARDEN}/deck_chair.glb`,
   lilyLarge: `${GARDEN}/lily_large.glb`,
   lilySmall: `${GARDEN}/lily_small.glb`,
 } as const
