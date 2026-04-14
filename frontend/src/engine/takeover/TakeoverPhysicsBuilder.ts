@@ -67,33 +67,62 @@ export class TakeoverPhysicsBuilder {
    */
   registerHouses(memberHouseMap: Map<string, HouseResult>): void {
     for (const [memberId, house] of memberHouseMap) {
-      const pos = house.entity.getPosition()
-      const yawDeg = house.entity.getEulerAngles().y
+      // Use explicit pivot data (plain numbers, no entity transform dependencies)
+      const px = house.pivotX ?? house.entity.getPosition().x
+      const pz = house.pivotZ ?? house.entity.getPosition().z
+      const yawDeg = house.pivotYaw ?? house.entity.getEulerAngles().y
       const yawRad = yawDeg * Math.PI / 180
 
-      const tierDef = getHouseTier(house.tier ?? 2)
-      const doorIdx = TIER_DOOR_INDEX[tierDef.tier] ?? 1
+      const tierDef = getHouseTier(house.tier ?? 1)
 
-      // Walls: segments around the perimeter with door gap on front wall
-      const walls = computeHutWallBoxes(tierDef.width, tierDef.depth, [doorIdx])
-      for (const wall of walls) {
-        this.addRotatedWall(pos.x, pos.z, yawRad, wall, HOUSE_WALL_HEIGHT)
+      if (tierDef.exteriorGlb && tierDef.exteriorFootprint) {
+        // KayKit house: pivot is at center, collider centered on pivot
+        const s = tierDef.exteriorScale ?? 1.0
+        const { w, d } = tierDef.exteriorFootprint
+        const halfW = (w * s) / 2
+        const halfD = (d * s) / 2
+
+        // Wall collider centered on pivot (no local offset needed)
+        const boxHalf = rotateHalfSize(halfW, halfD, yawRad)
+        this.physics.addStaticBox(
+          px, HOUSE_WALL_HEIGHT / 2, pz,
+          boxHalf.halfW, HOUSE_WALL_HEIGHT / 2, boxHalf.halfD,
+        )
+
+        // Door at front edge: center-local (0, halfD + 0.3)
+        const doorLocal = rotatePointYaw(0, halfD + 0.3, yawRad)
+        const doorHalf = rotateHalfSize(HOUSE_DOOR_HALF_W, HOUSE_DOOR_HALF_D, yawRad)
+        this.physics.addDoor(
+          memberId,
+          px + doorLocal.x, HOUSE_WALL_HEIGHT / 2, pz + doorLocal.z,
+          doorHalf.halfW, HOUSE_WALL_HEIGHT / 2, doorHalf.halfD,
+        )
+      } else {
+        // Kenney house: shift wall boxes from corner-local to center-local
+        const ox = -tierDef.width / 2
+        const oz = -tierDef.depth / 2
+        const doorIdx = TIER_DOOR_INDEX[tierDef.tier] ?? 1
+        const walls = computeHutWallBoxes(tierDef.width, tierDef.depth, [doorIdx])
+
+        for (const wall of walls) {
+          const shifted: LocalWallBox = {
+            minX: wall.minX + ox, maxX: wall.maxX + ox,
+            minZ: wall.minZ + oz, maxZ: wall.maxZ + oz,
+          }
+          this.addRotatedWall(px, pz, yawRad, shifted, HOUSE_WALL_HEIGHT)
+        }
+
+        // Door: shift from corner-local to center-local before rotation
+        const doorXLocal = ox + doorIdx + 0.5
+        const doorZLocal = oz + tierDef.depth
+        const doorWorld = rotatePointYaw(doorXLocal, doorZLocal, yawRad)
+        const doorHalf = rotateHalfSize(HOUSE_DOOR_HALF_W, HOUSE_DOOR_HALF_D, yawRad)
+        this.physics.addDoor(
+          memberId,
+          px + doorWorld.x, HOUSE_WALL_HEIGHT / 2, pz + doorWorld.z,
+          doorHalf.halfW, HOUSE_WALL_HEIGHT / 2, doorHalf.halfD,
+        )
       }
-
-      // Door: thin collider in the door gap on front wall
-      const doorXLocal = doorIdx + 0.5  // center of the door tile
-      const doorZLocal = tierDef.depth   // front wall Z
-      const doorWorld = rotatePointYaw(doorXLocal, doorZLocal, yawRad)
-      const doorHalf = rotateHalfSize(HOUSE_DOOR_HALF_W, HOUSE_DOOR_HALF_D, yawRad)
-      this.physics.addDoor(
-        memberId,
-        pos.x + doorWorld.x,
-        HOUSE_WALL_HEIGHT / 2,
-        pos.z + doorWorld.z,
-        doorHalf.halfW,
-        HOUSE_WALL_HEIGHT / 2,
-        doorHalf.halfD,
-      )
     }
   }
 

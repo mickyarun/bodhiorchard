@@ -335,6 +335,7 @@ export class GardenEngine {
       charSystem.updateFromSnapshot(snapshot)
       this.syncRemoteVehicle(charSystem, snapshot)
       this.syncSeatOccupancy(snapshot.userId, snapshot)
+      this.syncHouseLevel(snapshot)
     }
     this.orgRoomClient.onMemberRemove = (userId) => {
       this.vehicleSystem?.unregisterCharacter(userId)
@@ -387,6 +388,30 @@ export class GardenEngine {
       z: snapshot.z,
       yaw: snapshot.yaw,
     })
+  }
+
+  // ─── House level live sync ────────────────────
+
+  /** Track previous houseLevel per member to detect changes. */
+  private memberHouseLevels = new Map<string, number>()
+
+  /**
+   * Detect houseLevel changes and rebuild the member's house in the village.
+   * If the current user is inside the changed house, exit first.
+   */
+  private syncHouseLevel(snapshot: MemberStateSnapshot): void {
+    const prev = this.memberHouseLevels.get(snapshot.userId)
+    const curr = snapshot.houseLevel
+    this.memberHouseLevels.set(snapshot.userId, curr)
+
+    if (prev !== undefined && prev !== curr && this.sceneManager) {
+      // If we're inside this member's house, exit first
+      if (this.sceneState === 'interior' && this._interiorMemberId === snapshot.userId) {
+        void this.exitHouse()
+      }
+      // Rebuild the exterior house with new tier
+      void this.sceneManager.housingVillageRef?.rebuildByMemberId(snapshot.userId, curr)
+    }
   }
 
   // ─── Seat occupancy sync ──────────────────────

@@ -97,6 +97,8 @@ export class SceneManager {
 
   // Shared data for Phase 3+
   private _memberHouseMap = new Map<string, HouseResult>()
+  private _housingVillage: HousingVillage | null = null
+  private _housingGatePosition: { x: number; z: number } | null = null
 
   /** Member lookup by user_id — includes character_model for identity preservation when visiting houses. */
   private _memberDataMap = new Map<string, { user_id: string; name: string; character_model: string | null }>()
@@ -223,15 +225,17 @@ export class SceneManager {
       })
     }
 
-    // Housing village
+    // Housing village (builds its own fence + roads + driveways)
     if (data.members.length > 0) {
-      const village = new HousingVillage(this.loader)
-      const housingResult = await village.build(this.app, data.members, this.layout)
+      this._housingVillage = new HousingVillage(this.loader)
+      const village = this._housingVillage
+      const housingResult = await village.build(this.app, data.members, this.layout, this.materials)
       if (checkCancelled()) return
       this.buildingEntities.push(housingResult.entity)
       this.layout.addExclusionZones([housingResult.exclusionZone])
       this.layout.registerSeats(housingResult.seats)
       this._memberHouseMap = housingResult.memberHouseMap
+      this._housingGatePosition = housingResult.gatePosition
     }
 
     if (poolZone) {
@@ -279,7 +283,14 @@ export class SceneManager {
 
     // 5. Paths between zones + zone signs
     const zones = this.layout.getAllZones()
-    const pathRoutes = PathSystem.defaultRoutes([...zones])
+    // Housing: route to the gate entrance (world-space, accounts for village rotation)
+    const pathZones = zones.map(z => {
+      if (z.name === 'housing' && this._housingGatePosition) {
+        return { ...z, ...this._housingGatePosition }
+      }
+      return z
+    })
+    const pathRoutes = PathSystem.defaultRoutes([...pathZones])
     this.paths = new PathSystem()
     await this.paths.build(this.app, this.loader, pathRoutes)
     if (checkCancelled()) return
@@ -393,6 +404,7 @@ export class SceneManager {
   get repoVisualization(): RepoVisualization | null { return this.repoVis }
   get arcsRef(): RelationshipArcs | null { return this.arcs }
   get memberHouseMap(): Map<string, HouseResult> { return this._memberHouseMap }
+  get housingVillageRef(): HousingVillage | null { return this._housingVillage }
   get characterSystemRef(): CharacterSystem | null { return this.characterSystem }
   get worldLayout(): WorldLayout { return this.layout }
   get gardenRootEntity(): pc.Entity | null { return this._gardenRoot }
@@ -514,17 +526,13 @@ export class SceneManager {
     const fence = new CircularFence(factory.materialFactory)
 
     // ── Zone property fences (solid) ──────────────────────────────────────────
-    // Zones to skip entirely (no fence).
-    const noFence = new Set(['orchard', 'pool'])
-    // Per-zone radius overrides — use zone.radius when not listed.
-    const radiusOverride: Record<string, number> = {
-      housing: 18,   // wider ring to encompass the full village spread
-    }
+    // Housing fence is built inside HousingVillage (rotated with the village).
+    const noFence = new Set(['orchard', 'pool', 'housing'])
 
     for (const zone of this.layout.getAllZones()) {
       if (noFence.has(zone.name)) continue
 
-      const radius    = radiusOverride[zone.name] ?? zone.radius
+      const radius    = zone.radius
       const gateAngle = Math.atan2(-zone.x, -zone.z)
       this.buildingEntities.push(fence.build(this.app.root, {
         radius,
@@ -594,6 +602,8 @@ export class SceneManager {
       entity.destroy()
     }
     this.buildingEntities = []
+    this._housingVillage = null
+    this._housingGatePosition = null
     this._memberHouseMap.clear()
     this._memberDataMap.clear()
 

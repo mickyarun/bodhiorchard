@@ -388,7 +388,7 @@ export class StandupPavilion {
       )
     }
     // Flicker the omni light in sync with the dominant flame
-    if (this.fireLight) {
+    if (this.fireLight?.entity) {
       const pulse = Math.sin(this.fireT * 9) * 0.25 + Math.sin(this.fireT * 13.7) * 0.15
       this.fireLight.intensity = 2.2 + pulse
     }

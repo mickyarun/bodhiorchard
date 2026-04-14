@@ -68,7 +68,12 @@ export function createNameLabel(
   material.opacityMap = texture
   material.opacityMapChannel = 'a'
   material.blendType = pc.BLEND_NORMAL
+  // depthWrite=false: don't occlude later transparency.
+  // depthTest=false: don't let scene geometry (path stones, walls, other characters)
+  // z-clip the billboard plane. Name labels must always be readable regardless of
+  // camera angle, so we accept rendering them over any world geometry.
   material.depthWrite = false
+  material.depthTest = false
   material.cull = pc.CULLFACE_NONE
   material.update()
 

@@ -4,7 +4,7 @@
  * Supports 3 tiers with different footprints and furniture:
  *
  *   Tier 1 (Hut)     — 3×3 tiles, basic furniture (bed, desk, lamp)
- *   Tier 2 (Cottage)  — 4×4 tiles, standard layout (current default)
+ *   Tier 2 (Cottage)  — 4×4 tiles, standard layout (KayKit exterior)
  *   Tier 3 (Mansion)  — 5×5 tiles, expanded with luxury items
  *
  * Each tier uses BuildingFactory primitives (createFloor, createWalls,
@@ -12,7 +12,7 @@
  * operations (stacking, SeatProber) that don't reduce to config data,
  * so each tier has its own layout method.
  *
- * The public `build()` method accepts a tier parameter (default 2) so
+ * The public `build()` method accepts a tier parameter (default 1) so
  * existing callers work without modification.
  */
 import * as pc from 'playcanvas'
@@ -24,6 +24,108 @@ import type { InteractionPoint } from '../characters/InteractionPoint'
 
 /** Shared wall height constant — exported so takeover physics can match visual walls. */
 export const WALL_HEIGHT = 1.29
+
+// ─── House Nameboard ─────────────────────────────
+
+const BOARD_TEX_W = 320
+const BOARD_TEX_H = 80
+const BOARD_WORLD_W = 1.6
+const BOARD_WORLD_H = BOARD_WORLD_W * (BOARD_TEX_H / BOARD_TEX_W)
+
+/**
+ * Create a wooden-plank-style nameboard for a house.
+ * Uses canvas pre-flip so text reads correctly under billboard rotation.
+ * Tagged 'billboard' for Application's per-frame camera-facing loop.
+ */
+function createHouseNameboard(
+  name: string,
+  device: pc.GraphicsDevice,
+  height: number,
+): pc.Entity {
+  const canvas = document.createElement('canvas')
+  canvas.width = BOARD_TEX_W
+  canvas.height = BOARD_TEX_H
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, BOARD_TEX_W, BOARD_TEX_H)
+
+  // Pre-flip horizontally — billboard lookAt views the plane from behind,
+  // so mirroring the canvas content makes text read correctly in 3D.
+  ctx.translate(BOARD_TEX_W, 0)
+  ctx.scale(-1, 1)
+
+  // Wooden plank background
+  const pad = 6
+  const r = 8
+  ctx.fillStyle = '#3E2723' // dark wood brown
+  ctx.beginPath()
+  ctx.moveTo(pad + r, pad)
+  ctx.arcTo(BOARD_TEX_W - pad, pad, BOARD_TEX_W - pad, BOARD_TEX_H - pad, r)
+  ctx.arcTo(BOARD_TEX_W - pad, BOARD_TEX_H - pad, pad, BOARD_TEX_H - pad, r)
+  ctx.arcTo(pad, BOARD_TEX_H - pad, pad, pad, r)
+  ctx.arcTo(pad, pad, BOARD_TEX_W - pad, pad, r)
+  ctx.closePath()
+  ctx.fill()
+
+  // Subtle wood grain line
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(pad + 10, BOARD_TEX_H / 2)
+  ctx.lineTo(BOARD_TEX_W - pad - 10, BOARD_TEX_H / 2)
+  ctx.stroke()
+
+  // Light border
+  ctx.strokeStyle = '#5D4037'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(pad + r, pad)
+  ctx.arcTo(BOARD_TEX_W - pad, pad, BOARD_TEX_W - pad, BOARD_TEX_H - pad, r)
+  ctx.arcTo(BOARD_TEX_W - pad, BOARD_TEX_H - pad, pad, BOARD_TEX_H - pad, r)
+  ctx.arcTo(pad, BOARD_TEX_H - pad, pad, pad, r)
+  ctx.arcTo(pad, pad, BOARD_TEX_W - pad, pad, r)
+  ctx.closePath()
+  ctx.stroke()
+
+  // White text with slight shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.5)'
+  ctx.shadowBlur = 3
+  ctx.shadowOffsetY = 1
+  ctx.fillStyle = '#FFFDE7' // warm white
+  ctx.font = 'bold 28px "Segoe UI", Arial, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(name, BOARD_TEX_W / 2, BOARD_TEX_H / 2, BOARD_TEX_W - pad * 4)
+
+  const texture = new pc.Texture(device, {
+    width: BOARD_TEX_W, height: BOARD_TEX_H,
+    format: pc.PIXELFORMAT_RGBA8,
+    minFilter: pc.FILTER_LINEAR, magFilter: pc.FILTER_LINEAR,
+  })
+  const pixels = texture.lock()
+  pixels.set(ctx.getImageData(0, 0, BOARD_TEX_W, BOARD_TEX_H).data)
+  texture.unlock()
+
+  const mat = new pc.StandardMaterial()
+  mat.diffuseMap = texture
+  mat.emissiveMap = texture
+  mat.emissive = new pc.Color(1, 1, 1)
+  mat.opacityMap = texture
+  mat.opacityMapChannel = 'a'
+  mat.blendType = pc.BLEND_NORMAL
+  mat.depthWrite = false
+  mat.cull = pc.CULLFACE_NONE
+  mat.update()
+
+  const entity = new pc.Entity('HouseNameboard')
+  entity.addComponent('render', { type: 'plane' })
+  entity.render!.meshInstances[0].material = mat
+  entity.setLocalPosition(0, height, 0)
+  entity.setLocalScale(BOARD_WORLD_W, 1, BOARD_WORLD_H)
+  entity.setLocalEulerAngles(90, 0, 0)
+  entity.tags.add('billboard')
+
+  return entity
+}
 
 /** Max seats per house across all tiers — used as seat index stride to prevent collisions in mixed-tier villages. */
 const SEATS_PER_HOUSE = 4
@@ -37,13 +139,19 @@ export interface HouseResult {
   bedPosition: { x: number; y: number; z: number }
   seats: InteractionPoint[]
   exitPosition: { x: number; z: number; yaw: number }
+  /** Pivot center + yaw, set by HousingVillage. Used by TakeoverPhysicsBuilder. */
+  pivotX?: number
+  pivotZ?: number
+  pivotYaw?: number
 }
 
 export class HouseBuilder {
   private factory: BuildingFactory
+  private device: pc.GraphicsDevice
 
-  constructor(factory: BuildingFactory) {
+  constructor(factory: BuildingFactory, device: pc.GraphicsDevice) {
     this.factory = factory
+    this.device = device
   }
 
   async build(
@@ -53,7 +161,7 @@ export class HouseBuilder {
     worldX: number,
     worldZ: number,
     index: number,
-    tier = 2,
+    tier = 1,
   ): Promise<HouseResult> {
     const tierDef = getHouseTier(tier)
     const root = new pc.Entity(`House_${memberName}`)
@@ -64,27 +172,54 @@ export class HouseBuilder {
 
     const seats: InteractionPoint[] = []
 
-    // Floor + Walls (sized by tier)
-    await this.factory.createFloor(root, tierDef.width, tierDef.depth)
-
-    // Tier-specific interior layout
     let bedPos: { x: number; y: number; z: number }
     let exitPos: { x: number; z: number; yaw: number }
 
-    switch (tier) {
-      case 1:
-        ({ bedPos, exitPos } = await this.layoutTier1(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth))
-        break
-      case 3:
-        ({ bedPos, exitPos } = await this.layoutTier3(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth))
-        break
-      default:
-        ({ bedPos, exitPos } = await this.layoutTier2(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth))
-        break
-    }
+    if (tierDef.exteriorGlb) {
+      // KayKit whole-building model (tier 2/3)
+      const s = tierDef.exteriorScale ?? 1.0
+      const fp = tierDef.exteriorFootprint ?? { w: 2, d: 2 }
+      const halfW = (fp.w * s) / 2
+      const halfD = (fp.d * s) / 2
 
-    // Roof
-    this.factory.createRoof(root, tierDef.width, tierDef.depth, WALL_HEIGHT)
+      const building = await this.factory.placeFurniture(
+        root, tierDef.exteriorGlb, halfW, 0, halfD,
+      )
+      building.setLocalScale(s, s, s)
+
+      // Nameboard above the building
+      const labelY = fp.w * s + 0.3
+      const board = createHouseNameboard(memberName, this.device, labelY)
+      board.setLocalPosition(halfW, 0, halfD)
+      root.addChild(board)
+
+      // Default bed/exit positions for KayKit tiers (interior handles actual placement)
+      bedPos = { x: worldX + 1, y: 0, z: worldZ + 0.5 }
+      exitPos = { x: halfW, z: fp.d * s + 0.5, yaw: 180 }
+    } else {
+      // Kenney procedural house (tier 1)
+      await this.factory.createFloor(root, tierDef.width, tierDef.depth)
+
+      switch (tier) {
+        case 1:
+          ({ bedPos, exitPos } = await this.layoutTier1(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth))
+          break
+        case 3:
+          ({ bedPos, exitPos } = await this.layoutTier3(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth))
+          break
+        default:
+          ({ bedPos, exitPos } = await this.layoutTier2(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth))
+          break
+      }
+
+      // Roof (Kenney only)
+      this.factory.createRoof(root, tierDef.width, tierDef.depth, WALL_HEIGHT)
+
+      // Nameboard above roof
+      const board = createHouseNameboard(memberName, this.device, WALL_HEIGHT + 0.4)
+      board.setLocalPosition(tierDef.width / 2, 0, tierDef.depth / 2)
+      root.addChild(board)
+    }
 
     return {
       entity: root,
@@ -144,7 +279,7 @@ export class HouseBuilder {
     return { bedPos, exitPos }
   }
 
-  // ─── Tier 2: Cottage (4×4) — current default layout ──────
+  // ─── Tier 2: Cottage (4×4) ──────
   //
   //   z=0 [======= BACK WALL (solid) =======]
   //       | Lamp       Bed          Desk    |

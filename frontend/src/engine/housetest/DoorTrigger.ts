@@ -11,9 +11,9 @@
  */
 import * as pc from 'playcanvas'
 
-/** Door opening is at house local X=1.5, Z=4 (front wall). */
-const ENTRY_CENTER = new pc.Vec3(1.5, 0, 4.7)  // exterior side
-const EXIT_CENTER  = new pc.Vec3(1.5, 0, 3.8)  // interior side
+/** Default door positions for 4×4 room. */
+const DEFAULT_ENTRY = new pc.Vec3(1.5, 0, 4.7)
+const DEFAULT_EXIT  = new pc.Vec3(1.5, 0, 3.8)
 const TRIGGER_RADIUS = 0.7
 const COOLDOWN_MS = 1500
 
@@ -29,11 +29,19 @@ export class DoorTrigger {
   private cooldown      = false
   private cooldownTimer: ReturnType<typeof setTimeout> | null = null
   private scene: 'exterior' | 'interior' = 'exterior'
+  private entryCenter = DEFAULT_ENTRY.clone()
+  private exitCenter  = DEFAULT_EXIT.clone()
 
   onEnter(fn: () => void): void { this.onEnterCb = fn }
   onExit(fn: () => void):  void { this.onExitCb  = fn }
 
   setScene(s: 'exterior' | 'interior'): void { this.scene = s }
+
+  /** Update door position for tier-specific room sizes. */
+  setDoorPosition(doorX: number, frontZ: number): void {
+    this.entryCenter.set(doorX, 0, frontZ + 0.7)
+    this.exitCenter.set(doorX, 0, frontZ - 0.2)
+  }
 
   destroy(): void {
     if (this.cooldownTimer !== null) clearTimeout(this.cooldownTimer)
@@ -44,13 +52,13 @@ export class DoorTrigger {
     if (this.cooldown) return
 
     if (this.scene === 'exterior') {
-      const d = dist2D(playerPos, ENTRY_CENTER)
+      const d = dist2D(playerPos, this.entryCenter)
       if (d < TRIGGER_RADIUS) {
         this.fireCooldown()
         this.onEnterCb?.()
       }
     } else {
-      const d = dist2D(playerPos, EXIT_CENTER)
+      const d = dist2D(playerPos, this.exitCenter)
       if (d < TRIGGER_RADIUS) {
         this.fireCooldown()
         this.onExitCb?.()

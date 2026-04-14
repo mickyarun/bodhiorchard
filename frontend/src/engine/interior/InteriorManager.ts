@@ -64,7 +64,6 @@ export class InteriorManager {
   private transition: SceneTransition
 
   private collisionBoxes: CollisionBox[] = []
-  private built = false
   private currentMember: string | null = null
   private currentHouseOwnerId: string | null = null
 
@@ -115,29 +114,37 @@ export class InteriorManager {
     this.door.onExit(() => this.onExit?.())
   }
 
-  /** Build the interior scene (called once, reused for every house). */
-  async build(): Promise<void> {
-    if (this.built) return
-    this.interiorRoot = new pc.Entity('InteriorRoot')
-    this.interiorRoot.enabled = false
-    this.app.root.addChild(this.interiorRoot)
+  /**
+   * Build (or rebuild) the interior scene for a specific house tier.
+   * Destroys previous interior children and creates fresh layout.
+   */
+  async buildForTier(tier: number): Promise<void> {
+    if (!this.interiorRoot) {
+      this.interiorRoot = new pc.Entity('InteriorRoot')
+      this.interiorRoot.enabled = false
+      this.app.root.addChild(this.interiorRoot)
+    }
+
+    // Destroy old interior children (snapshot to avoid mutation during iteration)
+    const oldChildren = [...this.interiorRoot.children] as pc.Entity[]
+    for (const child of oldChildren) child.destroy()
 
     this.scene = new InteriorScene(this.factory)
-    this.collisionBoxes = await this.scene.build(this.interiorRoot)
+    this.collisionBoxes = await this.scene.build(this.interiorRoot, tier)
 
     // Wire interactable actions
     for (const item of this.scene.items) {
       item.onUse(() => {
         const { seat } = item
-        if (item.action === 'sit' && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw)
-        if (item.action === 'sleep' && seat) this.player?.sleepAt(seat.x, seat.z, seat.yaw)
+        if (item.action === 'sit' && seat) this.player?.sitAt(seat.x, seat.z, seat.yaw, seat.y)
+        if (item.action === 'sleep' && seat) this.player?.sleepAt(seat.x, seat.z, seat.yaw, seat.y)
         this.ui.showInfo(item.infoText)
         this.interaction.setActiveSeat(item.id)
         if (item.id === 'tv') this.scene?.tvEffect.turnOn()
       })
     }
 
-    this.built = true
+    // Interior built — ready for interaction
   }
 
   /**
@@ -158,7 +165,13 @@ export class InteriorManager {
     house: HouseResult,
     visitor?: { userId: string; name: string; characterModel: string | null } | null,
   ): Promise<void> {
-    if (!this.built) await this.build()
+    await this.buildForTier(house.tier)
+
+    // Set door exit trigger for this tier's room size
+    const { ROOM_SIZE_BY_TIER } = await import('../housetest/SceneConfig')
+    const room = ROOM_SIZE_BY_TIER[house.tier] ?? ROOM_SIZE_BY_TIER[0]
+    this.door.setDoorPosition(room.doorIndex + 0.5, room.depth)
+
     this.currentMember = house.memberName
     this.currentHouseOwnerId = house.memberId
 
@@ -283,7 +296,6 @@ export class InteriorManager {
     this.interiorRoot?.destroy()
     this.interiorRoot = null
     this.scene = null
-    this.built = false
   }
 
   // ─── Multiplayer helpers ───────────────────────

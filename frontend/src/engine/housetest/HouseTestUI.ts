@@ -87,6 +87,47 @@ export class HouseTestUI {
     }, 2000)
   }
 
+  /** Callback for member count slider changes. */
+  onMemberCountChange: ((count: number) => void) | null = null
+
+  /** Show a member count slider (top-left). */
+  showMemberCountSlider(initial: number): void {
+    if (!this.container) return
+    const wrapper = document.createElement('div')
+    Object.assign(wrapper.style, {
+      position: 'absolute', top: '16px', left: '16px',
+      background: 'rgba(0,0,0,0.6)', color: '#fff',
+      padding: '8px 14px', borderRadius: '10px',
+      fontSize: '12px', pointerEvents: 'auto',
+      display: 'flex', alignItems: 'center', gap: '8px',
+    })
+
+    const label = document.createElement('span')
+    label.textContent = 'Members:'
+    wrapper.appendChild(label)
+
+    const slider = document.createElement('input')
+    slider.type = 'range'
+    slider.min = '1'
+    slider.max = '60'
+    slider.value = String(initial)
+    Object.assign(slider.style, { width: '120px', cursor: 'pointer' })
+    wrapper.appendChild(slider)
+
+    const valueLabel = document.createElement('span')
+    valueLabel.textContent = String(initial)
+    valueLabel.style.minWidth = '24px'
+    wrapper.appendChild(valueLabel)
+
+    slider.oninput = () => {
+      valueLabel.textContent = slider.value
+    }
+    slider.onchange = () => {
+      this.onMemberCountChange?.(parseInt(slider.value, 10))
+    }
+    this.container.appendChild(wrapper)
+  }
+
   /** Callback set by HouseTestEngine when player presses an anim button. */
   onAnimSelect: ((name: string) => void) | null = null
 

@@ -26,8 +26,6 @@ import { SceneTransition } from './SceneTransition'
 import { HouseTestUI } from './HouseTestUI'
 import { PhysicsWorld } from '../physics'
 import {
-  EXTERIOR_HOUSES,
-  HOUSE_EXIT_LOCAL,
   ROOM_SIZE_BY_TIER,
   type InteractableId,
 } from './SceneConfig'
@@ -36,7 +34,7 @@ import type { CollisionBox } from './CollisionSystem'
 // ─── Camera presets ─────────────────────────────────────────────────────────
 const CAM_EXT_YAW   = 0
 const CAM_EXT_PITCH = 35
-const CAM_EXT_DIST  = 12   // wider view for multi-house village
+const CAM_EXT_DIST  = 30   // wider view for multi-house village
 
 const CAM_INT_YAW   = 0
 const CAM_INT_PITCH = 60
@@ -122,7 +120,7 @@ export class HouseTestEngine {
     // ── 5. Build scenes ─────────────────────────────────────────────────────
     this.exterior = new ExteriorScene(this.loader, this.factory.materialFactory ?? undefined)
     // Exterior: builds houses + registers physics (walls + door colliders)
-    await this.exterior.build(this.exteriorRoot, this.physics)
+    await this.exterior.build(this.exteriorRoot, this.physics, 8)
 
     // Interior is built on-demand in enterHouse() with the correct tier
 
@@ -171,6 +169,12 @@ export class HouseTestEngine {
       this.ui.onAnimSelect = (name) => {
         this.player?.playAnimation(name)
       }
+    }
+
+    // Member count slider — rebuild exterior on change
+    this.ui.showMemberCountSlider(8)
+    this.ui.onMemberCountChange = (count) => {
+      this.rebuildExterior(count)
     }
 
     // ── 11. Camera + loop ───────────────────────────────────────────────────
@@ -317,15 +321,39 @@ export class HouseTestEngine {
 
   // ─── Scene transitions ───────────────────────────────────────────────────
 
+  /** Destroy + rebuild the exterior scene with a new member count. */
+  private async rebuildExterior(memberCount: number): Promise<void> {
+    if (!this.exteriorRoot || !this.physics || this.scene !== 'exterior') return
+
+    // Destroy all exterior children
+    const oldChildren = [...this.exteriorRoot.children] as pc.Entity[]
+    for (const child of oldChildren) child.destroy()
+
+    // Reset physics (remove old colliders, create fresh world)
+    this.physics.destroy()
+    this.physics = await PhysicsWorld.create({ x: 0, y: 0, z: 0 })
+    this.player?.setPhysics(this.physics)
+
+    // Rebuild
+    this.exterior = new ExteriorScene(this.loader!, this.factory?.materialFactory ?? undefined)
+    await this.exterior.build(this.exteriorRoot, this.physics, memberCount)
+
+    // Re-register player outside the village fence (south gate)
+    const spawnZ = (this.exterior.layout?.fenceBounds.maxZ ?? 10) + 2
+    this.physics.createPlayer(0, spawnZ)
+    this.player?.teleport(0, spawnZ, 0)
+    this.physics.teleportPlayer(0, spawnZ)
+  }
+
   private enterHouse(houseId: string): void {
     if (!this.transition || this.transition.isActive || this.scene !== 'exterior' || !this.factory) return
 
     this.currentHouseId = houseId
     this.physics?.setDoorsEnabled(false) // disable door detection during transition
 
-    // Resolve house tier for interior layout
-    const house = EXTERIOR_HOUSES.find(h => h.id === houseId)
-    const tier = house?.tier ?? 0
+    // Resolve house tier from VillageLayout placements
+    const placement = this.exterior?.layout?.placements.find(p => p.memberId === houseId)
+    const tier = placement?.tier ?? 1
     this.currentHouseTier = tier
 
     this.scene = 'entering'  // prevent re-entrant door collision triggers
@@ -338,7 +366,7 @@ export class HouseTestEngine {
         const oldChildren = [...this.interiorRoot.children] as pc.Entity[]
         for (const child of oldChildren) child.destroy()
       }
-      this.interior = new InteriorScene(this.factory)
+      this.interior = new InteriorScene(this.factory!)
       this.intBoxes = await this.interior.build(this.interiorRoot!, tier)
 
       // Wire interactables for this interior
@@ -372,10 +400,14 @@ export class HouseTestEngine {
 
     this.scene = 'exiting'  // prevent re-entrant calls from door proximity check
 
-    // Find the house we entered to compute exit position
-    const house = EXTERIOR_HOUSES.find(h => h.id === this.currentHouseId)
-    const exitX = (house?.x ?? 0) + HOUSE_EXIT_LOCAL.x
-    const exitZ = (house?.z ?? 0) + HOUSE_EXIT_LOCAL.z
+    // Find the house we entered and compute exit position in front of door.
+    // With the pivot layout, placement.z is the house center. The door is at
+    // +d/2 (yaw=0, north) or -d/2 (yaw=180, south). Exit 3 units past the door.
+    const placement = this.exterior?.layout?.placements.find(p => p.memberId === this.currentHouseId)
+    const exitX = placement?.x ?? 0
+    const exitZ = placement
+      ? placement.z + (placement.yawDeg === 0 ? 4.5 : -4.5)
+      : 0
 
     void this.transition.perform(() => {
       this.scene = 'exterior'

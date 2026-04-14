@@ -1,11 +1,11 @@
 /**
- * WorldLayout — Shared layout data mirrored from frontend WorldLayout.
+ * WorldLayout — Shared layout data mirrored from frontend.
  *
- * Must match `frontend/src/engine/world/WorldLayout.ts` ZONES and the
- * house grid layout in `frontend/src/engine/buildings/HousingVillage.ts`.
+ * Must match:
+ *   - `frontend/src/engine/world/WorldLayout.ts` — ZONES
+ *   - `frontend/src/engine/buildings/VillageLayout.ts` — house placement algorithm
  *
- * Used by the server to compute initial member placement without needing
- * to actually render anything.
+ * Used by the server to compute initial member placement without rendering.
  */
 
 export interface Zone {
@@ -30,18 +30,22 @@ export function getZone(name: string): Zone | null {
   return ZONES.find(z => z.name === name) ?? null
 }
 
-// ─── House grid layout ───────────────────────
-// Mirror of HousingVillage constants
+// ─── VillageLayout constants (mirror frontend/src/engine/buildings/VillageLayout.ts) ───
 
-export const HOUSE_SPACING_X = 8
-export const HOUSE_SPACING_Z = 8
-export const HOUSES_PER_ROW = 4
+const HOUSE_SPACING_ALONG = 5.5
+const ROW_OFFSET = 6
+const STREET_GAP = 18
+const HOUSES_PER_SIDE = 4
+const HOUSES_PER_STREET = HOUSES_PER_SIDE * 2
 
-/** Desk/bed offsets per house tier (local space, before 90° rotation). */
+/**
+ * Desk/bed offsets per house tier (corner-local space, before centering + rotation).
+ * These match HouseBuilder's layout methods (corner origin at 0,0).
+ */
 const TIER_DESK: Record<number, { x: number; z: number; yaw: number }> = {
-  1: { x: 2.2, z: 2.3, yaw: 180 },   // Hut 3×3 (matches chairDesk placeSeat z)
-  2: { x: 3.2, z: 1.3, yaw: 180 },   // Cottage 4×4 (current default)
-  3: { x: 3.4, z: 1.3, yaw: 180 },   // Mansion 5×5
+  1: { x: 2.2, z: 2.3, yaw: 180 },
+  2: { x: 3.2, z: 1.3, yaw: 180 },
+  3: { x: 3.4, z: 1.3, yaw: 180 },
 }
 const TIER_BED: Record<number, { x: number; z: number }> = {
   1: { x: 1.5, z: 0.7 },
@@ -50,79 +54,134 @@ const TIER_BED: Record<number, { x: number; z: number }> = {
 }
 
 /**
- * Compute the world-space position of a member's house origin.
- * Houses are laid out in a grid centered on the housing zone.
+ * Centering offset per tier — shifts from corner-origin to center-origin.
+ * Must match the pivot wrapper in frontend HousingVillage.wrapWithPivot().
  *
- * @param memberIndex - Index of this member in the members array (stable ordering)
- * @param totalMembers - Total number of members in the org
+ * Kenney (tier 1): house is width×depth tiles → offset = (-w/2, -d/2)
+ * KayKit (tier 2/3): house uses exteriorFootprint × scale
  */
-export function getHouseOrigin(memberIndex: number, totalMembers: number): { x: number; z: number } | null {
+const TIER_CENTER_OFFSET: Record<number, { x: number; z: number }> = {
+  1: { x: -1.5,  z: -1.5  },   // 3×3 / 2
+  2: { x: -2.2,  z: -2.2  },   // (2.2 * 2.0) / 2
+  3: { x: -2.7,  z: -2.7  },   // (3.0 * 1.8) / 2
+}
+
+/**
+ * Compute the world-space position and rotation of a member's house.
+ * Mirrors frontend VillageLayout.computeVillageLayout() exactly.
+ * One road per street, houses on both sides facing inward.
+ */
+export function getHouseOrigin(
+  memberIndex: number,
+  totalMembers: number,
+): { x: number; z: number; yawDeg: number } | null {
   const zone = getZone("housing")
   if (!zone || totalMembers === 0) return null
 
-  const cols = Math.min(HOUSES_PER_ROW, totalMembers)
-  const rows = Math.ceil(totalMembers / cols)
-  const totalWidth = (cols - 1) * HOUSE_SPACING_X
-  const totalDepth = (rows - 1) * HOUSE_SPACING_Z
+  const streetCount = Math.max(1, Math.ceil(totalMembers / HOUSES_PER_STREET))
+  const totalDepth = (streetCount - 1) * STREET_GAP
+  const baseZ = zone.z - totalDepth / 2
 
-  const col = memberIndex % cols
-  const row = Math.floor(memberIndex / cols)
+  const streetIdx = Math.floor(memberIndex / HOUSES_PER_STREET)
+  const posInStreet = memberIndex % HOUSES_PER_STREET
+  const streetStart = streetIdx * HOUSES_PER_STREET
+  const membersOnStreet = Math.min(HOUSES_PER_STREET, totalMembers - streetStart)
+
+  // Determine side
+  let side: 'north' | 'south'
+  if (membersOnStreet <= HOUSES_PER_SIDE) {
+    side = 'north'
+  } else {
+    side = posInStreet % 2 === 0 ? 'north' : 'south'
+  }
+
+  // Count per side for X layout
+  let northCount = 0, southCount = 0
+  for (let i = streetStart; i < streetStart + membersOnStreet; i++) {
+    const pos = i % HOUSES_PER_STREET
+    if (membersOnStreet <= HOUSES_PER_SIDE) { northCount++ }
+    else if (pos % 2 === 0) { northCount++ }
+    else { southCount++ }
+  }
+
+  // Compute slot on this member's side
+  let slotOnSide = 0
+  for (let i = streetStart; i < memberIndex; i++) {
+    const pos = i % HOUSES_PER_STREET
+    const iSide = membersOnStreet <= HOUSES_PER_SIDE ? 'north' : (pos % 2 === 0 ? 'north' : 'south')
+    if (iSide === side) slotOnSide++
+  }
+
+  const streetZ = baseZ + streetIdx * STREET_GAP
+  const maxPerSide = Math.max(northCount, southCount)
+  const rowWidth = (maxPerSide - 1) * HOUSE_SPACING_ALONG
+  const startX = zone.x - rowWidth / 2
 
   return {
-    x: zone.x + col * HOUSE_SPACING_X - totalWidth / 2,
-    z: zone.z + row * HOUSE_SPACING_Z - totalDepth / 2,
+    x: startX + slotOnSide * HOUSE_SPACING_ALONG,
+    z: side === 'north' ? streetZ - ROW_OFFSET : streetZ + ROW_OFFSET,
+    yawDeg: side === 'north' ? 0 : 180,
   }
 }
 
 /**
  * Compute world-space desk seat position for a member's house.
- * Applies the 90° Y rotation that HousingVillage applies to house entities:
- *   local (dx, dz) → world offset (dz, -dx)
+ * Applies centering offset (corner → center) then house rotation.
  */
 export function getHouseDeskSeat(
   memberIndex: number,
   totalMembers: number,
-  houseLevel = 2,
+  houseLevel = 1,
 ): { x: number; y: number; z: number; yaw: number } | null {
   const origin = getHouseOrigin(memberIndex, totalMembers)
   if (!origin) return null
 
-  const local = TIER_DESK[houseLevel] ?? TIER_DESK[2]
+  const local = TIER_DESK[houseLevel] ?? TIER_DESK[1]
+  const offset = TIER_CENTER_OFFSET[houseLevel] ?? TIER_CENTER_OFFSET[1]
+  // Shift from corner-local to center-local, then rotate
+  const cx = offset.x + local.x
+  const cz = offset.z + local.z
+  const rad = origin.yawDeg * Math.PI / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
 
-  // Apply 90° rotation: (dx, dz) → (dz, -dx)
   return {
-    x: origin.x + local.z,
+    x: origin.x + cx * cos + cz * sin,
     y: 0,
-    z: origin.z - local.x,
-    yaw: local.yaw + 90,  // add 90° for house rotation
+    z: origin.z - cx * sin + cz * cos,
+    yaw: local.yaw + origin.yawDeg,
   }
 }
 
 /**
  * Compute world-space bed position for a member's house.
- * Same 90° rotation applied.
+ * Applies centering offset (corner → center) then house rotation.
  */
 export function getHouseBedPosition(
   memberIndex: number,
   totalMembers: number,
-  houseLevel = 2,
+  houseLevel = 1,
 ): { x: number; y: number; z: number; yaw: number } | null {
   const origin = getHouseOrigin(memberIndex, totalMembers)
   if (!origin) return null
 
-  const local = TIER_BED[houseLevel] ?? TIER_BED[2]
+  const local = TIER_BED[houseLevel] ?? TIER_BED[1]
+  const offset = TIER_CENTER_OFFSET[houseLevel] ?? TIER_CENTER_OFFSET[1]
+  const cx = offset.x + local.x
+  const cz = offset.z + local.z
+  const rad = origin.yawDeg * Math.PI / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
 
   return {
-    x: origin.x + local.z,
+    x: origin.x + cx * cos + cz * sin,
     y: 0.38,
-    z: origin.z - local.x,
-    yaw: 90,
+    z: origin.z - cx * sin + cz * cos,
+    yaw: origin.yawDeg,
   }
 }
 
 // ─── Tree positions (repo trees in orchard) ─────
-// Mirror of frontend WorldLayout.getTreePositions() so the server
-// can compute tree positions without needing to render anything.
 
 export function getTreePositions(count: number): Array<{ x: number; z: number }> {
   const orchard = getZone("orchard")
@@ -130,7 +189,6 @@ export function getTreePositions(count: number): Array<{ x: number; z: number }>
   const positions: Array<{ x: number; z: number }> = []
 
   if (count <= 8) {
-    // Single arc for small counts
     const arcRadius = orchard.radius * 0.65
     for (let i = 0; i < count; i++) {
       const angle = (i / Math.max(count - 1, 1)) * Math.PI * 1.5 - Math.PI * 0.75
@@ -140,7 +198,6 @@ export function getTreePositions(count: number): Array<{ x: number; z: number }>
       })
     }
   } else {
-    // Multi-ring spiral for larger counts
     const rings = Math.ceil(count / 6)
     let placed = 0
     for (let ring = 0; ring < rings && placed < count; ring++) {

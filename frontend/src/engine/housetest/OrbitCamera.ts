@@ -19,7 +19,7 @@ const SENSITIVITY = 0.4   // degrees per pixel dragged
 const MIN_PITCH   = 5     // degrees — prevents clipping the ground
 const MAX_PITCH   = 80    // degrees — prevents flipping overhead
 const MIN_DIST    = 2     // world units
-const MAX_DIST    = 20    // world units
+const MAX_DIST    = 80    // world units — allows zooming out to see full village
 
 export class OrbitCamera {
   private camera: pc.Entity | null = null
