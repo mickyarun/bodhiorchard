@@ -180,6 +180,12 @@ const router = createRouter({
           meta: { permission: 'integrations:configure' },
           component: () => import('@/views/settings/SettingsPresence.vue'),
         },
+        {
+          path: 'settings/jira-import',
+          name: 'settings-jira-import',
+          meta: { permission: 'integrations:configure' },
+          component: () => import('@/views/settings/SettingsJiraImport.vue'),
+        },
       ],
     },
   ],

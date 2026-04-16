@@ -312,18 +312,49 @@
                   placeholder="Write requirements in markdown..."
                   @blur="saveContent"
                 />
-                <div
-                  v-else-if="bud.requirements_md"
-                  class="rendered-markdown"
-                  v-html="renderMarkdown(bud.requirements_md)"
-                />
+                <template v-else-if="bud.requirements_md">
+                  <!-- Jira import hint: thin content that could be enriched -->
+                  <v-alert
+                    v-if="isJiraImported && !agentLocked && bud.requirements_md.length < 200"
+                    type="info"
+                    variant="tonal"
+                    density="compact"
+                    class="mx-4 mt-3 mb-0"
+                  >
+                    <div class="d-flex align-center ga-3">
+                      <div class="text-caption flex-grow-1">
+                        Imported from Jira — use AI to expand into a full PRD with acceptance criteria
+                      </div>
+                      <v-btn size="small" variant="flat" color="primary" @click="enrichWithAI()">
+                        <v-icon start size="15">mdi-creation-outline</v-icon>
+                        Enrich
+                      </v-btn>
+                    </div>
+                  </v-alert>
+                  <div
+                    class="rendered-markdown"
+                    v-html="renderMarkdown(bud.requirements_md)"
+                  />
+                </template>
                 <div v-else class="section-empty">
                   <v-icon icon="mdi-text-box-outline" size="40" class="mb-3" />
                   <div>No requirements written yet</div>
-                  <v-btn variant="tonal" size="small" class="mt-3" @click="toggleContentEdit">
-                    <v-icon start size="15">mdi-pencil-outline</v-icon>
-                    Start writing
-                  </v-btn>
+                  <div class="d-flex ga-2 mt-3">
+                    <v-btn variant="tonal" size="small" @click="toggleContentEdit">
+                      <v-icon start size="15">mdi-pencil-outline</v-icon>
+                      Start writing
+                    </v-btn>
+                    <v-btn
+                      v-if="!agentLocked"
+                      variant="tonal"
+                      size="small"
+                      color="primary"
+                      @click="enrichWithAI()"
+                    >
+                      <v-icon start size="15">mdi-creation-outline</v-icon>
+                      Enrich with AI
+                    </v-btn>
+                  </div>
                 </div>
               </v-tabs-window-item>
 
@@ -998,6 +1029,25 @@ const agentLocked = computed(() => {
   return !!t && (t.status === 'pending' || t.status === 'running')
 })
 
+const isJiraImported = computed(() => {
+  return bud.value?.metadata?.source === 'jira_import'
+})
+
+function enrichWithAI(): void {
+  activeTab.value = 'requirements'
+  chatOpen.value = true
+  nextTick(() => {
+    handleChatSend(
+      'This BUD was imported from Jira with minimal description. '
+      + 'DO NOT update the content yet. Instead, put your clarifying questions '
+      + 'directly in the "reply" field and set "updated_content" to null. '
+      + 'Ask me 2-3 questions about: what this feature does, who it\'s for, '
+      + 'acceptance criteria, and edge cases. I will answer, then you write the PRD.',
+      [],
+    )
+  })
+}
+
 // ── Markdown rendering ────────────────────────────────
 function renderMarkdown(md: string | null): string {
   if (!md) return ''
@@ -1290,8 +1340,10 @@ async function handleChatSend(msg: string, images: string[] = []): Promise<void>
     },
     async onComplete(data) {
       chatLoading.value = false
-      const { reply, updated_content } = data as unknown as { reply: string; updated_content: string | null }
-      chatMessages.value.push({ role: 'ai', text: reply })
+      const result = (data as unknown as Record<string, unknown>).result as { reply: string; updated_content: string | null } | null
+      const reply = result?.reply || ''
+      const updated_content = result?.updated_content ?? null
+      if (reply) chatMessages.value.push({ role: 'ai', text: reply })
       if (updated_content !== null) {
         if (budStore.currentBUD) {
           (budStore.currentBUD as Record<string, unknown>)[currentSection.value] = updated_content

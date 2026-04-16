@@ -87,6 +87,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("agent_task_recovery_failed", exc_info=True)
 
+    # 6b. Recover stuck Jira import sessions from prior crash/restart
+    from app.repositories.jira_import import recover_stuck_import_sessions
+
+    try:
+        async with AsyncSessionLocal() as session:
+            recovered = await recover_stuck_import_sessions(session)
+            await session.commit()
+        if recovered:
+            logger.info("recovered_stuck_import_sessions", count=recovered)
+    except Exception:
+        logger.warning("import_session_recovery_failed", exc_info=True)
+
     # 7. Periodic Slack presence polling
     from app.services.presence_cache import refresh_all_presence
 

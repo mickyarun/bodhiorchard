@@ -28,6 +28,7 @@ export function usePermissions() {
   // Presence / Auto Mode page mirrors the same "configure" permission —
   // anyone who can touch QA automation can also touch presence settings.
   const canViewPresenceSettings = computed(() => hasPermission('integrations:configure'))
+  const canViewJiraImport = computed(() => hasPermission('integrations:configure'))
 
   return {
     hasPermission,
@@ -40,5 +41,6 @@ export function usePermissions() {
     canViewAgentPrompts,
     canViewQAAutomation,
     canViewPresenceSettings,
+    canViewJiraImport,
   }
 }

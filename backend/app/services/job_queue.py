@@ -22,6 +22,9 @@ JOB_TRIAGE = "triage"
 JOB_DESIGN_AGENT = "design_agent"
 JOB_DESIGN_EXTRACT = "design_extract"
 JOB_BUD_AGENT = "bud_agent"
+JOB_JIRA_DISCOVERY = "jira_discovery"
+JOB_JIRA_IMPORT = "jira_import"
+JOB_JIRA_ENRICH = "jira_enrich"
 JOB_SCAN = "scan"  # Future
 JOB_AGENT_RUN = "agent_run"  # Future
 

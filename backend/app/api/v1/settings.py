@@ -26,12 +26,14 @@ from app.schemas.settings import (
     ConnectionsRead,
     ConnectionsUpdate,
     GitHubSettings,
+    JiraSettingsRead,
     ScanSettings,
     SlackSettings,
     SourceCodeSettings,
 )
 from app.services.org_settings import (
     get_bud_stage_settings,
+    get_jira_settings,
     get_presence_settings,
     get_qa_settings,
 )
@@ -118,6 +120,7 @@ async def get_connections(
         qa_automation=qa_cfg,
         bud_stages=stage_cfg,
         presence=presence_cfg,
+        jira=_build_jira_read(config),
     )
 
 
@@ -361,3 +364,12 @@ def _is_masked(value: str | None) -> bool:
     return bool(value and "****" in value)
 
 
+def _build_jira_read(config: dict) -> JiraSettingsRead:
+    """Build the read-only Jira settings (no token) from org config."""
+    jira = get_jira_settings(config)
+    return JiraSettingsRead(
+        enabled=jira.is_connected,
+        site_url=jira.site_url,
+        email=jira.email,
+        connected_at=jira.connected_at,
+    )

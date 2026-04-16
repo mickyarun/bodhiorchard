@@ -107,6 +107,13 @@
               rounded="lg"
               class="pl-10"
             />
+            <v-list-item
+              v-if="canViewJiraImport"
+              title="Jira Import"
+              to="/settings/jira-import"
+              rounded="lg"
+              class="pl-10"
+            />
           </v-list-group>
         </v-list>
 
@@ -203,6 +210,7 @@ const {
   canViewAgentPrompts,
   canViewQAAutomation,
   canViewPresenceSettings,
+  canViewJiraImport,
 } = usePermissions()
 
 const userInitials = computed(() => {

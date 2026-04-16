@@ -171,14 +171,13 @@ class PresenceSettings(BaseModel):
     @model_validator(mode="after")
     def _start_before_end(self) -> "PresenceSettings":
         """Assert the working day's start time is strictly before its end."""
+
         def to_tuple(hhmm: str) -> tuple[int, int]:
             hour, minute = hhmm.split(":")
             return (int(hour), int(minute))
 
         if to_tuple(self.working_hours_start) >= to_tuple(self.working_hours_end):
-            raise ValueError(
-                "working_hours_start must be strictly before working_hours_end"
-            )
+            raise ValueError("working_hours_start must be strictly before working_hours_end")
         return self
 
     model_config = {"populate_by_name": True}
@@ -201,6 +200,7 @@ class ConnectionsRead(BaseModel):
         alias="budStages",
     )
     presence: PresenceSettings = Field(default_factory=PresenceSettings)
+    jira: "JiraSettingsRead" = Field(default_factory=lambda: JiraSettingsRead())
 
     model_config = {"populate_by_name": True}
 
@@ -261,6 +261,49 @@ class RepoStatusRequest(BaseModel):
     status: str
 
 
+class JiraSettings(BaseModel):
+    """Jira Cloud connection settings for internal use (includes token).
+
+    Used by ``get_jira_settings()`` to construct a ``JiraClient``.
+    Never serialized directly to the frontend — use ``JiraSettingsRead``
+    for API responses.
+    """
+
+    site_id: str = Field(default="", alias="siteId")
+    site_url: str = Field(default="", alias="siteUrl")
+    email: str = ""
+    api_token: str = Field(default="", alias="apiToken")
+    connected_at: str = Field(default="", alias="connectedAt")
+
+    @property
+    def is_connected(self) -> bool:
+        """Return True if Jira credentials are configured."""
+        return bool(self.site_url and self.email and self.api_token)
+
+    model_config = {"populate_by_name": True}
+
+
+class JiraSettingsRead(BaseModel):
+    """Jira connection status for GET responses (token masked)."""
+
+    enabled: bool = False
+    site_url: str = Field(default="", alias="siteUrl")
+    email: str = ""
+    connected_at: str = Field(default="", alias="connectedAt")
+
+    model_config = {"populate_by_name": True}
+
+
+class JiraSettingsUpdate(BaseModel):
+    """Jira credentials for PATCH (accepts token, never echoed back)."""
+
+    site_url: str | None = Field(None, alias="siteUrl")
+    email: str | None = None
+    api_token: str | None = Field(None, alias="apiToken")
+
+    model_config = {"populate_by_name": True}
+
+
 class ConnectionsUpdate(BaseModel):
     """Request schema for PATCH /settings/connections.
 
@@ -275,5 +318,6 @@ class ConnectionsUpdate(BaseModel):
     qa_automation: QAAutomationSettings | None = Field(None, alias="qaAutomation")
     bud_stages: BUDStageSettings | None = Field(None, alias="budStages")
     presence: PresenceSettings | None = None
+    jira: JiraSettingsUpdate | None = None
 
     model_config = {"populate_by_name": True}

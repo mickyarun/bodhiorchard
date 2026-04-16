@@ -20,6 +20,7 @@ and the shipped defaults fill any gaps.
 
 from app.schemas.settings import (
     BUDStageSettings,
+    JiraSettings,
     PresenceSettings,
     QAAutomationSettings,
 )
@@ -126,3 +127,30 @@ def get_phase_order(org_config: dict | None) -> list[str]:
     if is_uat_enabled(org_config):
         return list(PHASE_ORDER)
     return [p for p in PHASE_ORDER if p != "uat"]
+
+
+def get_jira_settings(org_config: dict | None) -> JiraSettings:
+    """Resolve Jira connection settings from an organization config dict.
+
+    Accepts ``None`` / missing / partial ``jira`` sections and fills in
+    the shipped defaults (all empty strings). A fresh org with no jira
+    section simply returns ``JiraSettings()`` with ``is_connected = False``.
+
+    The ``api_token`` is stored encrypted via ``encrypt_secret()`` and
+    decrypted here so callers receive a ready-to-use token.
+
+    Args:
+        org_config: The raw ``organization.config`` JSONB dict, or None.
+
+    Returns:
+        A ``JiraSettings`` with all fields populated (token decrypted).
+    """
+    raw = dict((org_config or {}).get("jira") or {})
+    if raw.get("api_token"):
+        import contextlib
+
+        from app.core.encryption import decrypt_secret
+
+        with contextlib.suppress(Exception):
+            raw["api_token"] = decrypt_secret(raw["api_token"])
+    return JiraSettings(**raw)
