@@ -233,15 +233,16 @@ export class HouseBuilder {
     }
   }
 
-  // ─── Tier 1: Hut (3×3) ───────────────────────
+  // ─── Tier 1: Hut (4×4) ───────────────────────
   //
-  //   z=0 [====== BACK WALL (solid) ======]
-  //       | Lamp       Bed              |
-  //   z=1 |                             |
-  //       |            Desk    Chair    |
-  //   z=2 |                             |
-  //   z=3 [====== FRONT WALL (door) ====]
-  //       x=0       door(x=1)       x=3
+  //   z=0 [======== BACK WALL (solid) ========]
+  //       | Lamp       Bed                    |
+  //   z=1 |                                   |
+  //       |                   Desk    Chair   |
+  //   z=2 |                                   |
+  //       |                                   |
+  //   z=3 [======== FRONT WALL (door) ========]
+  //       x=0        door(x=1)            x=4
 
   private async layoutTier1(
     root: pc.Entity,
@@ -260,9 +261,9 @@ export class HouseBuilder {
     await this.factory.placeFurnitureCentered(root, BUILDING.bedSingle, 1.5, 0, 0.7)
     const bedPos = { x: worldX + 1.5, y: 0.38, z: worldZ + 0.7 }
 
-    // Desk + chair — front-right area
-    await this.factory.placeFurnitureCentered(root, BUILDING.desk, 2.2, 0, 1.8)
-    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, 2.2, 2.3, 180, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
+    // Desk + chair — back-right area (uses the extra space in 4×4)
+    await this.factory.placeFurnitureCentered(root, BUILDING.desk, 3.3, 0, 0.5)
+    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, 3.3, 1.3, 180, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
     seats.push(deskChair.seat)
 
     // Lamp — back-left corner

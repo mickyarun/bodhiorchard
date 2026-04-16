@@ -9,9 +9,16 @@ export class TaskBoardPage {
 
   constructor(page: Page) {
     this.page = page
-    this.heading = page.getByRole('heading', { name: /tasks/i })
+    // TaskBoard.vue renders <h1>Task Board</h1> — the old /tasks/i regex
+    // doesn't match because there's no trailing 's' on "Task".
+    this.heading = page.getByRole('heading', { name: /task board/i })
     this.newTaskButton = page.getByRole('button', { name: /new task/i })
-    this.taskCards = page.locator('[data-testid="task-card"]')
+    // Example app uses class="task-card", not data-testid="task-card".
+    // Adding a data-testid would be more robust but requires changing the
+    // example app itself — out of scope for this test suite.
+    this.taskCards = page.locator('.task-card')
+    // NOTE: the example TaskBoard.vue does NOT have a search input. Tests
+    // that use this locator are skipped until the feature ships.
     this.searchInput = page.getByPlaceholder(/search/i)
   }
 

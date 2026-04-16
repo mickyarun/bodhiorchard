@@ -87,7 +87,7 @@ VEHICLE_UNLOCKS: dict[str, int] = {
 
 HOUSE_TIER_COSTS: dict[int, int] = {
     1: 0,
-    2: 0,
+    2: 50,
     3: 100,
 }
 

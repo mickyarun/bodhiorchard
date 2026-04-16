@@ -7,7 +7,11 @@
           Mark all read
         </button>
         <template v-if="!showClearConfirm">
-          <button class="danger-action" @click="showClearConfirm = true">Clear all</button>
+          <button
+            class="danger-action"
+            @click="showClearConfirm = true"
+            :disabled="store.visibleItems.length === 0"
+          >Clear all</button>
         </template>
         <template v-else>
           <div class="confirm-row" role="group" aria-label="Confirm clear all notifications">
@@ -20,6 +24,15 @@
     </div>
 
     <div class="notif-list" role="list">
+      <div
+        v-if="store.loading && store.visibleItems.length === 0"
+        class="notif-loading"
+        role="status"
+        aria-live="polite"
+      >
+        Loading notifications…
+      </div>
+
       <div
         v-for="n in store.visibleItems"
         :key="n.id"
@@ -34,7 +47,7 @@
           <div class="notif-body">{{ n.body }}</div>
           <time class="notif-time">{{ n.time }}</time>
         </div>
-        <div class="notif-actions" role="group" :aria-label="'Actions for: ' + n.title">
+        <div class="notif-actions" role="group" :aria-label="'Actions for notification: ' + n.title">
           <button
             v-if="!n.isRead"
             class="action-btn mark-read"
@@ -58,7 +71,7 @@
         aria-live="polite"
       >
         <span class="empty-icon" aria-hidden="true">✓</span>
-        <p class="empty-label">You're all caught up</p>
+        <p class="empty-label">No notifications</p>
       </div>
     </div>
   </div>
@@ -75,7 +88,9 @@ const showClearConfirm = ref(false)
 async function handleClear() {
   await store.dismissAll()
   showClearConfirm.value = false
-  emit('close')
+  // `dismissAll` swallows errors and sets `store.error`; keep the panel open
+  // on failure so the user can see that their notifications were restored.
+  if (!store.error) emit('close')
 }
 
 defineExpose({ resetConfirm: () => { showClearConfirm.value = false } })
@@ -195,6 +210,12 @@ defineExpose({ resetConfirm: () => { showClearConfirm.value = false } })
 .action-btn.dismiss { color: var(--color-text-muted, #6b7280); }
 .action-btn.dismiss:hover { background: #fef2f2; color: var(--color-danger, #ef4444); }
 
+.notif-loading {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-muted, #6b7280);
+}
 .empty-state { padding: 48px 16px; text-align: center; color: var(--color-text-muted, #6b7280); }
 .empty-icon { font-size: 28px; display: block; margin-bottom: 8px; color: var(--color-success, #10b981); }
 .empty-label { font-size: 14px; }

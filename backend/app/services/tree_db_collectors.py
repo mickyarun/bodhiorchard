@@ -523,6 +523,6 @@ async def collect_members(
                 presence=presence,
                 level=row.level or 1,
                 level_name=row.level_name or "seedling",
-                house_level=row.house_level or 2,
+                house_level=row.house_level or 1,
             )
         )

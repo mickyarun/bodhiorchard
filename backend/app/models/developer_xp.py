@@ -50,7 +50,7 @@ class DeveloperXP(BaseModel):
         Numeric(10, 2, asdecimal=False), nullable=False, default=0, server_default="0",
     )
     house_level: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=2, server_default="2",
+        Integer, nullable=False, default=1, server_default="1",
     )
     vehicle_unlocks: Mapped[list[str]] = mapped_column(
         ARRAY(String(30)), nullable=False, server_default="{}",

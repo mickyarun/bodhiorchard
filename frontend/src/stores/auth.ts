@@ -11,6 +11,18 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!token.value)
 
+  // The axios 401-refresh interceptor writes new tokens to localStorage and
+  // fires this event so we can update our reactive ref. Without the listener,
+  // `token.value` would stay stale after an automatic refresh (any consumer
+  // reading `authStore.token` would send the old expired JWT to services like
+  // the Colyseus OrgRoom, which rejects it via onAuth).
+  window.addEventListener('bodhigrove:token-refreshed', ((event: Event) => {
+    const detail = (event as CustomEvent<{ accessToken: string }>).detail
+    if (detail?.accessToken) {
+      token.value = detail.accessToken
+    }
+  }) as EventListener)
+
   async function login(email: string, password: string, orgSlug: string): Promise<boolean> {
     loginError.value = null
     mustChangePassword.value = false

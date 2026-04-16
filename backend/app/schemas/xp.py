@@ -18,7 +18,7 @@ class XPProfileRead(BaseModel):
     unlocked_characters: list[str]
     unlocked_accessories: list[str]
     skill_points: float = 0.0
-    house_level: int = 2
+    house_level: int = 1
     vehicle_unlocks: list[str] = []
 
     model_config = {"from_attributes": True}

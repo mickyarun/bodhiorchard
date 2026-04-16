@@ -7,7 +7,8 @@
     "test:cucumber": "npx cucumber-js --require-module ts-node/register --require src/steps/**/*.ts src/features/**/*.feature",
     "test:smoke": "npx playwright test tests/smoke/",
     "test:e2e": "npx playwright test tests/e2e/",
-    "report": "npx playwright show-report"
+    "report": "npx playwright show-report",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

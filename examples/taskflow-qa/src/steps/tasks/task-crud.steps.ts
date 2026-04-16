@@ -4,7 +4,7 @@ Given('I am logged in as {string}', async function (email: string) {
   await this.page.goto('/login')
   await this.page.getByLabel('Email').fill(email)
   await this.page.getByLabel('Password').fill('Test1234!')
-  await this.page.getByRole('button', { name: /log in/i }).click()
+  await this.page.getByRole('button', { name: /log ?in/i }).click()
   await this.page.waitForURL(/\/tasks/)
 })
 
@@ -15,7 +15,7 @@ Given('I am on the task board', async function () {
 
 Given('a task {string} exists', async function (title: string) {
   // Create via API for speed
-  const resp = await fetch(`${process.env.API_URL || 'http://localhost:8000'}/api/v1/tasks`, {
+  const resp = await fetch(`${process.env.API_URL || 'http://localhost:9001'}/api/v1/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` },
     body: JSON.stringify({ title, description: 'Created by QA automation' }),

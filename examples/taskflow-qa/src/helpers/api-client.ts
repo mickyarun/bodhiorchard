@@ -1,4 +1,4 @@
-const API_URL = process.env.API_URL || 'http://localhost:8000'
+const API_URL = process.env.API_URL || 'http://localhost:9001'
 
 interface ApiOptions {
   method?: string

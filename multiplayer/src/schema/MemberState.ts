@@ -42,7 +42,7 @@ export class MemberState extends Schema {
   @type("string") labelMessage = ""
 
   // House tier (1=Hut, 2=Cottage, 3=Mansion)
-  @type("number") houseLevel = 2
+  @type("number") houseLevel = 1
 
   // Vehicle (empty = on foot, "horse" = riding)
   @type("string") vehicleId = ""

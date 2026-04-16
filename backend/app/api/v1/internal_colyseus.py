@@ -199,7 +199,7 @@ async def _collect_org_members(
                 "presence": presence,
                 "level": row.level or 1,
                 "level_name": row.level_name or "seedling",
-                "house_level": row.house_level or 2,
+                "house_level": row.house_level or 1,
                 "vehicle_unlocks": list(row.vehicle_unlocks) if row.vehicle_unlocks else [],
                 "has_slack": has_slack,
             }

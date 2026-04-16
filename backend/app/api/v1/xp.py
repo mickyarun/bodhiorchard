@@ -52,7 +52,7 @@ async def get_my_xp(
         unlocked_characters=unlocks.characters,
         unlocked_accessories=unlocks.accessories,
         skill_points=row.skill_points if row else 0,
-        house_level=row.house_level if row else 2,
+        house_level=row.house_level if row else 1,
         vehicle_unlocks=list(row.vehicle_unlocks) if row and row.vehicle_unlocks else [],
     )
 

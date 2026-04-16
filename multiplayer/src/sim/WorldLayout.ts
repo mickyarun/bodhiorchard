@@ -43,7 +43,7 @@ const HOUSES_PER_STREET = HOUSES_PER_SIDE * 2
  * These match HouseBuilder's layout methods (corner origin at 0,0).
  */
 const TIER_DESK: Record<number, { x: number; z: number; yaw: number }> = {
-  1: { x: 2.2, z: 2.3, yaw: 180 },
+  1: { x: 3.3, z: 1.3, yaw: 180 },
   2: { x: 3.2, z: 1.3, yaw: 180 },
   3: { x: 3.4, z: 1.3, yaw: 180 },
 }
@@ -61,7 +61,7 @@ const TIER_BED: Record<number, { x: number; z: number }> = {
  * KayKit (tier 2/3): house uses exteriorFootprint × scale
  */
 const TIER_CENTER_OFFSET: Record<number, { x: number; z: number }> = {
-  1: { x: -1.5,  z: -1.5  },   // 3×3 / 2
+  1: { x: -2.0,  z: -2.0  },   // 4×4 / 2
   2: { x: -2.2,  z: -2.2  },   // (2.2 * 2.0) / 2
   3: { x: -2.7,  z: -2.7  },   // (3.0 * 1.8) / 2
 }

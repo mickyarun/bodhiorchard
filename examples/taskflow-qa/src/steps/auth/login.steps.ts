@@ -2,7 +2,7 @@ import { Given, When, Then } from '@cucumber/cucumber'
 
 Given('the TaskFlow application is running', async function () {
   // Health check - application should be reachable
-  const resp = await fetch(process.env.BASE_URL || 'http://localhost:5173')
+  const resp = await fetch(process.env.BASE_URL || 'http://localhost:9002')
   if (!resp.ok) throw new Error('Application not running')
 })
 
@@ -19,7 +19,7 @@ When('I enter password {string}', async function (password: string) {
 })
 
 When('I click the login button', async function () {
-  await this.page.getByRole('button', { name: /log in/i }).click()
+  await this.page.getByRole('button', { name: /log ?in/i }).click()
 })
 
 Then('I should be redirected to the task board', async function () {

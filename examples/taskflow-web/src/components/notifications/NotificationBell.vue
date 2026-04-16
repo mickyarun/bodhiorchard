@@ -42,6 +42,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useNotificationStore } from '@/stores/notifications'
 import { useNotificationSocket } from '@/composables/useNotificationSocket'
+import { getCurrentUserId } from '@/services/auth'
 import NotificationPanel from './NotificationPanel.vue'
 
 const store = useNotificationStore()
@@ -71,7 +72,7 @@ let errorTimer: ReturnType<typeof setTimeout> | undefined
 watch(() => store.error, (msg) => {
   if (errorTimer) clearTimeout(errorTimer)
   if (msg) {
-    errorTimer = setTimeout(() => { store.error = '' }, 3000)
+    errorTimer = setTimeout(() => { store.clearError() }, 3000)
   }
 })
 
@@ -85,8 +86,11 @@ onUnmounted(() => {
   if (errorTimer) clearTimeout(errorTimer)
 })
 
-// Wire real-time updates (userId would come from auth context)
-useNotificationSocket('current-user')
+// Wire real-time updates using the current user's ID from the auth service.
+// Passing a getter lets the composable re-evaluate the user ID on reconnect,
+// so a refreshed token (or late-arriving auth) is picked up without remount.
+// Composable no-ops when the user is unauthenticated.
+useNotificationSocket(() => getCurrentUserId())
 </script>
 
 <style scoped>

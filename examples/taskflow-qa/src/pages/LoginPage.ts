@@ -11,7 +11,7 @@ export class LoginPage {
     this.page = page
     this.emailInput = page.getByLabel('Email')
     this.passwordInput = page.getByLabel('Password')
-    this.loginButton = page.getByRole('button', { name: 'Log in' })
+    this.loginButton = page.getByRole('button', { name: /log ?in/i })
     this.errorMessage = page.getByRole('alert')
   }
 

@@ -72,14 +72,14 @@ const upgrading = ref(false)
 
 const tiers = [
   { tier: 1, name: 'Hut', cost: 0, icon: 'mdi-home-outline' },
-  { tier: 2, name: 'Cottage', cost: 0, icon: 'mdi-home' },
+  { tier: 2, name: 'Cottage', cost: 50, icon: 'mdi-home' },
   { tier: 3, name: 'Mansion', cost: 100, icon: 'mdi-home-city' },
 ]
 
-const currentTier = computed(() => xpStore.profile?.house_level ?? 2)
+const currentTier = computed(() => xpStore.profile?.house_level ?? 1)
 const currentTierData = computed(() => tiers.find(t => t.tier === currentTier.value))
-const currentTierName = computed(() => currentTierData.value?.name ?? 'Cottage')
-const currentTierIcon = computed(() => currentTierData.value?.icon ?? 'mdi-home')
+const currentTierName = computed(() => currentTierData.value?.name ?? 'Hut')
+const currentTierIcon = computed(() => currentTierData.value?.icon ?? 'mdi-home-outline')
 const skillPoints = computed(() => xpStore.profile?.skill_points ?? 0)
 
 const nextTier = computed(() => tiers.find(t => t.tier === currentTier.value + 1) ?? null)

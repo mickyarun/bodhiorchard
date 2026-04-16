@@ -92,6 +92,16 @@ api.interceptors.response.use(
       localStorage.setItem('bodhigrove_token', data.access_token)
       localStorage.setItem('bodhigrove_refresh_token', data.refresh_token)
 
+      // Notify listeners (e.g. Pinia auth store) that the token was refreshed.
+      // Window-event pattern avoids a circular import between this file and
+      // the auth store — stores can't import from here, but they can listen.
+      // Consumers like PlayCanvasCanvas read localStorage directly for the
+      // hot path, so this event is belt-and-suspenders for anyone caching
+      // the token in a reactive ref.
+      window.dispatchEvent(new CustomEvent('bodhigrove:token-refreshed', {
+        detail: { accessToken: data.access_token },
+      }))
+
       processQueue(null, data.access_token)
 
       originalRequest.headers.Authorization = `Bearer ${data.access_token}`

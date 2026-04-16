@@ -10,11 +10,11 @@ test.describe('Smoke Tests', () => {
     await page.goto('/login')
     await expect(page.getByLabel('Email')).toBeVisible()
     await expect(page.getByLabel('Password')).toBeVisible()
-    await expect(page.getByRole('button', { name: /log in/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /log ?in/i })).toBeVisible()
   })
 
   test('API health endpoint responds', async ({ request }) => {
-    const apiUrl = process.env.API_URL || 'http://localhost:8000'
+    const apiUrl = process.env.API_URL || 'http://localhost:9001'
     const response = await request.get(`${apiUrl}/health`)
     expect(response.status()).toBe(200)
   })

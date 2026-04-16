@@ -25,7 +25,7 @@ export interface HouseTierDef {
 }
 
 export const HOUSE_TIERS: readonly HouseTierDef[] = [
-  { tier: 1, name: 'Hut',     width: 3, depth: 3, unlockCost: 0 },
+  { tier: 1, name: 'Hut',     width: 4, depth: 4, unlockCost: 0 },
   {
     tier: 2, name: 'Cottage',  width: 4, depth: 4, unlockCost: 50,
     exteriorGlb: 'assets/buildings/kaykit/home_medium.glb',

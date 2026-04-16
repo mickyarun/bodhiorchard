@@ -36,6 +36,7 @@ export interface MemberStateSnapshot {
   takeoverSessionId: string
   locationContext: string
   vehicleId: string
+  houseLevel: number
 }
 
 /** Read-only snapshot of an agent's state (mirrors server AgentState schema). */
@@ -73,6 +74,7 @@ interface RawMember {
   takeoverSessionId?: string
   locationContext?: string
   vehicleId?: string
+  houseLevel?: number
 }
 
 interface RawAgent {
@@ -330,6 +332,7 @@ function memberToSnapshot(m: RawMember): MemberStateSnapshot {
     takeoverSessionId: m.takeoverSessionId ?? '',
     locationContext: m.locationContext ?? 'garden',
     vehicleId:      m.vehicleId       ?? '',
+    houseLevel:     m.houseLevel      ?? 1,
   }
 }
 

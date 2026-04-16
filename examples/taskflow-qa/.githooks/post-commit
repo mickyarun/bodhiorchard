@@ -1,0 +1,38 @@
+#!/bin/sh
+        # installed-by-bodhigrove (post-commit)
+        # Source shared utilities from Claude hooks dir
+        HOOKS_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/hooks"
+        if [ -f "$HOOKS_DIR/_common.sh" ]; then
+          . "$HOOKS_DIR/_common.sh"
+        else
+          exit 0
+        fi
+
+        BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+        BUD_NUM=$(get_bud_from_branch)
+        SHA=$(git rev-parse HEAD)
+        EMAIL=$(get_git_email)
+        MSG=$(git log -1 --format=%s | head -c 400)
+        FILES=$(git diff-tree --no-commit-id --name-only -r HEAD | tr '\n' ',')
+        REPO=$(git rev-parse --show-toplevel 2>/dev/null)
+
+        # Find active Claude session ID from session temp file
+        ACTIVE_SID=""
+        for SF in /tmp/.bodhigrove-session-*.json; do
+          [ -f "$SF" ] || continue
+          ACTIVE_SID=$(python3 -c "
+import json
+try:
+    d=json.load(open('$SF')); print(d.get('session_id',''))
+except: pass
+" 2>/dev/null)
+          [ -n "$ACTIVE_SID" ] && break
+        done
+        SESSION_ID="${ACTIVE_SID:-git-hook}"
+
+        J=$(build_json session_id "$SESSION_ID" event_type commit \
+          author_email "$EMAIL" branch "$BRANCH" repo_path "$REPO" \
+          message "$MSG" commit_sha "$SHA" files_changed "$FILES")
+        [ -n "$BUD_NUM" ] && \
+          J=$(printf '%s' "$J" | sed "s/}$/,\"bud_number\":$BUD_NUM}/")
+        bg_post "$J"
