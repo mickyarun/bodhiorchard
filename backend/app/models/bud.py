@@ -23,6 +23,7 @@ from app.models.base import BaseModel
 
 if TYPE_CHECKING:
     from app.models.bud_agent_task import BUDAgentTask
+    from app.models.bud_todo import BUDTodo
 
 
 class BUDTimelineEventType(StrEnum):
@@ -121,6 +122,9 @@ class BUDDocument(BaseModel):
         back_populates="bud", cascade="all, delete-orphan", lazy="noload"
     )
     agent_tasks: Mapped[list["BUDAgentTask"]] = relationship(
+        back_populates="bud", cascade="all, delete-orphan", lazy="noload"
+    )
+    todos: Mapped[list["BUDTodo"]] = relationship(
         back_populates="bud", cascade="all, delete-orphan", lazy="noload"
     )
 

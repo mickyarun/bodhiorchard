@@ -364,6 +364,7 @@
 
               <!-- Development -->
               <v-tabs-window-item value="development">
+                <BUDTodoBoard :bud-id="bud.id" />
                 <BUDPRChecklist
                   v-if="bud.impacted_repos?.length"
                   :bud-id="bud.id"
@@ -774,6 +775,7 @@ import BUDEstimateTimeline from '@/components/buds/BUDEstimateTimeline.vue'
 import BUDTimeline from '@/components/buds/BUDTimeline.vue'
 import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
 import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
+import BUDTodoBoard from '@/components/buds/BUDTodoBoard.vue'
 import BUDPRChecklist from '@/components/buds/BUDPRChecklist.vue'
 import BUDCodeReviewStatus from '@/components/buds/BUDCodeReviewStatus.vue'
 import BUDQAPanel from '@/components/buds/BUDQAPanel.vue'

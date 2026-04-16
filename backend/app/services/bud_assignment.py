@@ -122,6 +122,9 @@ async def auto_assign_for_phase(
                 assignee_id=str(chosen_user.id),
                 assignee_name=chosen_user.name,
             )
+            await _assign_todos_to_lead_if_development(
+                db, org_id, bud.id, new_status, chosen_user.id
+            )
             return chosen_user.id
         # Fall through to round-robin if smart assignment returns None
 
@@ -204,7 +207,34 @@ async def auto_assign_for_phase(
         role=role_name,
     )
 
+    await _assign_todos_to_lead_if_development(
+        db, org_id, bud.id, new_status, chosen.id
+    )
     return chosen.id
+
+
+async def _assign_todos_to_lead_if_development(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_id: uuid.UUID,
+    new_status: BUDStatus,
+    lead_user_id: uuid.UUID,
+) -> None:
+    """Assign all unassigned TODOs to the phase lead on DEVELOPMENT entry.
+
+    Preserves the existing single-owner-per-BUD mental model — one person
+    is responsible by default. Other developers can still self-assign
+    individual TODOs via the Claim button or MCP ``takeover_todo``.
+    Failure is non-fatal — primary assignment still succeeds.
+    """
+    if new_status != BUDStatus.DEVELOPMENT:
+        return
+    try:
+        from app.services.todo_assignment import assign_all_todos_to_lead
+
+        await assign_all_todos_to_lead(db, org_id, bud_id, lead_user_id)
+    except Exception:
+        logger.warning("todo_lead_assignment_failed", bud_id=str(bud_id))
 
 
 async def assign_bud(

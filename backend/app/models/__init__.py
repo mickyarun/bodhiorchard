@@ -20,12 +20,14 @@ from app.models.bud import (
 )
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.bud_estimate_snapshot import BUDEstimateSnapshot
+from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.design_system import DesignSystemRef
 from app.models.dev_activity import DevActivityLog
 from app.models.developer_xp import DeveloperXP, XPEvent
 from app.models.enterprise_rule import EnterpriseRule
 from app.models.feature_learning import FeatureLearning
+from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
 from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
 from app.models.notification import Notification, NotificationType
@@ -60,6 +62,8 @@ __all__ = [
     "BUDDesignStatus",
     "BUDDocument",
     "BUDEstimateSnapshot",
+    "BUDTodo",
+    "BUDTodoStatus",
     "BUDStatus",
     "BUDTimelineEvent",
     "BUDTimelineEventType",
@@ -71,9 +75,13 @@ __all__ = [
     "DeveloperXP",
     "EnterpriseRule",
     "FeatureLearning",
+    "ImportStatus",
+    "JiraImportSession",
+    "JiraIssueBudMap",
     "JWTToken",
     "KnowledgeItem",
     "KnowledgeRepoLink",
+    "MapStatus",
     "Notification",
     "NotificationType",
     "Organization",

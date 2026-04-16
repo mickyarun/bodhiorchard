@@ -13,6 +13,7 @@ from app.api.v1.bud_designs import router as designs_router
 from app.api.v1.bud_estimates import router as estimates_router
 from app.api.v1.bud_prs import router as prs_router
 from app.api.v1.bud_qa import router as qa_router
+from app.api.v1.bud_todos import router as todos_router
 from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
@@ -76,6 +77,7 @@ router.include_router(prs_router, tags=["bud-prs"])
 router.include_router(qa_router, prefix="/{bud_id}/qa", tags=["bud-qa"])
 router.include_router(workflows_router, prefix="/{bud_id}", tags=["bud-workflows"])
 router.include_router(chat_router, prefix="/{bud_id}", tags=["bud-chat"])
+router.include_router(todos_router, tags=["bud-todos"])
 
 
 # ── CRUD ──────────────────────────────────────────────────────────

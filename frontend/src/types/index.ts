@@ -111,6 +111,28 @@ export interface BUDDocument extends BUDListItem {
   active_agent_task: BUDAgentTask | null
 }
 
+// ── BUD TODO Types ────────────────────────────────────────
+
+export type BUDTodoStatus = 'pending' | 'in_progress' | 'completed' | 'blocked'
+
+export interface BUDTodo {
+  id: string
+  budId: string
+  sequence: number
+  title: string
+  phase: string
+  status: BUDTodoStatus
+  isCheckpoint: boolean
+  assigneeId: string | null
+  assigneeName: string | null
+  contextMd: string | null
+  summary: string | null
+  takenAt: string | null
+  detail: Record<string, unknown> | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface CodeReviewComment {
   github_comment_id?: number
   review_id?: number

@@ -35,6 +35,11 @@ from app.mcp.handlers_team import (
     handle_list_design_systems,
     handle_post_slack_message,
 )
+from app.mcp.handlers_todo import (
+    handle_complete_todo,
+    handle_get_bud_plan,
+    handle_takeover_todo,
+)
 from app.mcp.synthesis_queue import (  # noqa: F401
     clear_synthesis_queue,
     get_queue_remaining,
@@ -326,6 +331,69 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             },
         },
     ),
+    MCPToolDefinition(
+        name="get_bud_plan",
+        description=(
+            "Get the implementation plan for a BUD with your assigned TODOs. "
+            "Call this when starting work on a bud-NNN/ branch. Returns TODO "
+            "titles and which are yours vs assigned to others. The per-TODO "
+            "context_md is intentionally NOT included — call takeover_todo "
+            "to claim a TODO and receive its implementation details."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_number": {
+                    "type": "integer",
+                    "description": "BUD number (detect from branch bud-NNN/).",
+                },
+            },
+            "required": ["bud_number"],
+        },
+    ),
+    MCPToolDefinition(
+        name="takeover_todo",
+        description=(
+            "Claim a pending TODO and move it to in_progress. MUST be called "
+            "before implementing any TODO. On success returns the full "
+            "context_md. On failure (already in_progress/completed or not "
+            "yours) returns an explanatory error — skip and try another."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_number": {"type": "integer"},
+                "sequence": {
+                    "type": "integer",
+                    "description": "The TODO sequence number from get_bud_plan.",
+                },
+            },
+            "required": ["bud_number", "sequence"],
+        },
+    ),
+    MCPToolDefinition(
+        name="complete_todo",
+        description=(
+            "Mark an in_progress TODO as completed with a short summary of "
+            "what was implemented. Only the current assignee can complete "
+            "a TODO. The summary is shown to other developers via get_bud_plan."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_number": {"type": "integer"},
+                "sequence": {"type": "integer"},
+                "summary": {
+                    "type": "string",
+                    "description": (
+                        "Brief description of what was implemented "
+                        "(e.g., 'Added preferences JSONB column and migration')."
+                    ),
+                },
+            },
+            "required": ["bud_number", "sequence", "summary"],
+        },
+    ),
 ]
 
 
@@ -370,6 +438,11 @@ async def call_tool(
         params=body.params,
     )
 
+    # Auth-aware handlers receive the full MCPAuthResult (needs user).
+    auth_handler = AUTH_TOOL_HANDLERS.get(tool_name)
+    if auth_handler is not None:
+        return await auth_handler(db, auth, body.params)
+
     handler = TOOL_HANDLERS.get(tool_name)
     if handler is None:
         raise HTTPException(
@@ -382,6 +455,7 @@ async def call_tool(
 
 # --- Tool handler dispatch ---
 
+# Handlers that only need the org. Signature: ``(db, org, params)``.
 TOOL_HANDLERS: dict[str, Any] = {
     "get_bud_context": handle_get_bud_context,
     "write_bud": handle_write_bud,
@@ -395,6 +469,14 @@ TOOL_HANDLERS: dict[str, Any] = {
     "merge_features": handle_merge_features,
     "list_design_systems": handle_list_design_systems,
     "get_design_system": handle_get_design_system,
+}
+
+# Handlers that need the authenticated user (per-user MCP token).
+# Signature: ``(db, auth, params)``.
+AUTH_TOOL_HANDLERS: dict[str, Any] = {
+    "get_bud_plan": handle_get_bud_plan,
+    "takeover_todo": handle_takeover_todo,
+    "complete_todo": handle_complete_todo,
 }
 
 
