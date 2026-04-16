@@ -37,15 +37,24 @@ import {
   type MemberStateSnapshot,
   type PlayerData,
 } from '../../multiplayer'
+import { getInteractablesForTier } from '../housetest/SceneConfig'
 
 // Player spawn inside the room — clear of all furniture collision boxes
 const PLAYER_ENTER_X = 2.0
 const PLAYER_ENTER_Z = 1.5
 
-// Owner NPC interior seats — hand-tuned against the InteriorScene layout.
-// The owner is spawned here when OrgRoomState says they're currently at home.
-const OWNER_DESK_SEAT = { x: 3.3, z: 1.1, yaw: 180 }  // sitting at desk, facing -Z
-const OWNER_BED_SEAT  = { x: 1.0, z: 0.55, yaw: 90 }  // lying on bed, facing +X
+/**
+ * Get owner NPC seat position from the tier's interactable config.
+ * Reads the actual laptop/bed seat coordinates so positions match the visual furniture.
+ */
+function getOwnerSeat(tier: number, type: 'desk' | 'bed'): { x: number; z: number; yaw: number } {
+  const interactables = getInteractablesForTier(tier)
+  const id = type === 'desk' ? 'laptop' : 'bed'
+  const item = interactables.find(i => i.id === id)
+  if (item?.seat) return { x: item.seat.x, z: item.seat.z, yaw: item.seat.yaw }
+  // Fallback: center of room
+  return type === 'desk' ? { x: 2.0, z: 1.0, yaw: 180 } : { x: 1.0, z: 0.5, yaw: 0 }
+}
 
 export class InteriorManager {
   private app: Application
@@ -66,6 +75,7 @@ export class InteriorManager {
   private collisionBoxes: CollisionBox[] = []
   private currentMember: string | null = null
   private currentHouseOwnerId: string | null = null
+  private currentHouseTier = 1
 
   // Multiplayer — visitor identity (the authenticated user visiting the house)
   private visitorId: string | null = null
@@ -174,6 +184,7 @@ export class InteriorManager {
 
     this.currentMember = house.memberName
     this.currentHouseOwnerId = house.memberId
+    this.currentHouseTier = house.tier
 
     // Store visitor identity for multiplayer broadcast
     this.visitorId = visitor?.userId ?? house.memberId
@@ -364,8 +375,9 @@ export class InteriorManager {
     // tree_*) means they're not currently inside the house.
     if (snapshot.locationContext !== `house_${ownerId}`) return null
     // Presence dictates the pose: at_home → bed, active → desk.
-    if (snapshot.presence === 'at_home') return OWNER_BED_SEAT
-    return OWNER_DESK_SEAT
+    // Seat position is tier-specific (3×3 hut vs 4×4 cottage vs 5×5 mansion).
+    const type = snapshot.presence === 'at_home' ? 'bed' : 'desk'
+    return getOwnerSeat(this.currentHouseTier, type)
   }
 
   /** Spawn (or respawn) the owner NPC based on current OrgRoomState. */
