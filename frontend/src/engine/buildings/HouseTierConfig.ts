@@ -13,27 +13,36 @@
 export interface HouseTierDef {
   tier: number
   name: string
-  width: number   // floor tiles (X axis) — Kenney procedural; unused for KayKit
-  depth: number   // floor tiles (Z axis) — Kenney procedural; unused for KayKit
+  width: number   // floor tiles (X axis) — also the target exterior width for KayKit tiers (scaled to match)
+  depth: number   // floor tiles (Z axis) — also the target exterior depth for KayKit tiers
   unlockCost: number // skill points required (0 = free)
+  /** Tile index of the door on the front wall (interior AND exterior share this). */
+  doorIndex: number
   /** If set, use this whole-building GLB instead of Kenney procedural walls+roof. */
   exteriorGlb?: string
-  /** Scale for KayKit exterior models (default 1.0). */
+  /**
+   * Fallback scale for KayKit exterior models (default 1.0). Only used when
+   * BuildingFactory.getEntityFootprint() returns 0 for a loaded GLB; normally
+   * the scale is computed dynamically to fit the width × depth tile footprint.
+   */
   exteriorScale?: number
-  /** Raw GLB footprint (world units before scaling). Used for collision + label height. */
+  /**
+   * Fallback raw GLB footprint (world units before scaling). Only used when
+   * dynamic measurement fails. Normally superseded by the measured AABB.
+   */
   exteriorFootprint?: { w: number; d: number }
 }
 
 export const HOUSE_TIERS: readonly HouseTierDef[] = [
-  { tier: 1, name: 'Hut',     width: 4, depth: 4, unlockCost: 0 },
+  { tier: 1, name: 'Hut',     width: 3, depth: 3, doorIndex: 1, unlockCost: 0 },
   {
-    tier: 2, name: 'Cottage',  width: 4, depth: 4, unlockCost: 50,
+    tier: 2, name: 'Cottage',  width: 4, depth: 4, doorIndex: 1, unlockCost: 50,
     exteriorGlb: 'assets/buildings/kaykit/home_medium.glb',
     exteriorScale: 2.0,
     exteriorFootprint: { w: 2.2, d: 2.2 },
   },
   {
-    tier: 3, name: 'Mansion',  width: 5, depth: 5, unlockCost: 100,
+    tier: 3, name: 'Mansion',  width: 5, depth: 5, doorIndex: 2, unlockCost: 100,
     exteriorGlb: 'assets/buildings/kaykit/home_barracks.glb',
     exteriorScale: 1.8,
     exteriorFootprint: { w: 3.0, d: 3.0 },

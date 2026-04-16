@@ -58,9 +58,10 @@ export class PhysicsWorld {
 
   // ─── Static Bodies (Walls, Ground) ─────────
 
-  addStaticBox(x: number, y: number, z: number, halfW: number, halfH: number, halfD: number): void {
+  addStaticBox(x: number, y: number, z: number, halfW: number, halfH: number, halfD: number): RAPIER_NS.RigidBody {
     const body = this.world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(x, y, z))
     this.world.createCollider(R.ColliderDesc.cuboid(halfW, halfH, halfD), body)
+    return body
   }
 
   addGround(y = -0.05, halfSize = 100): void {
@@ -75,7 +76,7 @@ export class PhysicsWorld {
     x: number, y: number, z: number,
     halfW: number, halfH: number, halfD: number,
     yawRad: number,
-  ): void {
+  ): RAPIER_NS.RigidBody {
     // Y-axis rotation quaternion: (0, sin(yaw/2), 0, cos(yaw/2))
     const half = yawRad * 0.5
     const body = this.world.createRigidBody(
@@ -84,16 +85,32 @@ export class PhysicsWorld {
         .setRotation({ x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) }),
     )
     this.world.createCollider(R.ColliderDesc.cuboid(halfW, halfH, halfD), body)
+    return body
+  }
+
+  /**
+   * Remove a previously-added static body and its colliders.
+   * Also clears any door-handle registrations for this body's colliders so
+   * stale entries don't leak into `consumeDoorHit` after a rebuild.
+   */
+  removeBody(body: RAPIER_NS.RigidBody): void {
+    const count = body.numColliders()
+    for (let i = 0; i < count; i++) {
+      const collider = body.collider(i)
+      this.doorHandles.delete(collider.handle)
+    }
+    this.world.removeRigidBody(body)
   }
 
   // ─── Door Colliders ────────────────────────
   // A door is a thin static box in the door gap.
   // Character bumps into it → we detect the collision.
 
-  addDoor(id: string, x: number, y: number, z: number, halfW: number, halfH: number, halfD: number): void {
+  addDoor(id: string, x: number, y: number, z: number, halfW: number, halfH: number, halfD: number): RAPIER_NS.RigidBody {
     const body = this.world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(x, y, z))
     const collider = this.world.createCollider(R.ColliderDesc.cuboid(halfW, halfH, halfD), body)
     this.doorHandles.set(collider.handle, id)
+    return body
   }
 
   /**
@@ -212,6 +229,43 @@ export class PhysicsWorld {
 
   step(): void {
     this.world.step()
+  }
+
+  // ─── Debug Introspection ───────────────────
+
+  /**
+   * Return every rigid body currently in the world along with its primary
+   * collider's half-extents, translation, and rotation. Used by debug overlays
+   * to draw wireframe boxes matching the Rapier collision state.
+   *
+   * Only cuboid colliders are inspected (everything we add is a cuboid). Non-
+   * cuboid shapes would return null halfExtents and callers should skip them.
+   */
+  forEachColliderBox(
+    cb: (b: { x: number; y: number; z: number; halfW: number; halfH: number; halfD: number; yawRad: number; isDoor: boolean; isPlayer: boolean }) => void,
+  ): void {
+    this.world.forEachRigidBody((body) => {
+      const count = body.numColliders()
+      for (let i = 0; i < count; i++) {
+        const collider = body.collider(i)
+        const shape = collider.shape
+        // Only cuboids (and capsules for player) — skip anything else
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const he = (shape as any).halfExtents as { x: number; y: number; z: number } | undefined
+        if (!he) continue
+        const t = body.translation()
+        const r = body.rotation()
+        // Extract yaw from quaternion (Y-axis only rotation)
+        const yawRad = 2 * Math.atan2(r.y, r.w)
+        cb({
+          x: t.x, y: t.y, z: t.z,
+          halfW: he.x, halfH: he.y, halfD: he.z,
+          yawRad,
+          isDoor: this.doorHandles.has(collider.handle),
+          isPlayer: body === this.playerBody,
+        })
+      }
+    })
   }
 
   // ─── Cleanup ───────────────────────────────

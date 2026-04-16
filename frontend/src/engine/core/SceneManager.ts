@@ -91,6 +91,11 @@ export class SceneManager {
 
   // Takeover physics (created async, null if Rapier WASM fails to load)
   private _physics: PhysicsWorld | null = null
+  /**
+   * Kept alive for the lifetime of the physics world so its `houseBodies`
+   * tracking persists across tier upgrades. Recreated per `initPhysics` run.
+   */
+  private _takeoverPhysicsBuilder: TakeoverPhysicsBuilder | null = null
   private buildingHuts: HutInfo[] = []
   private pondObstacle: PondObstacle | null = null
   private poolWater: WaterSurface | null = null
@@ -485,6 +490,9 @@ export class SceneManager {
         builder.registerPond(this.pondObstacle)
       }
       builder.registerPerimeter(this.layout.getWorldRadius() + 8)
+      // Keep the builder alive so rebuildHousePhysics can reuse its
+      // per-member body tracking on tier upgrades.
+      this._takeoverPhysicsBuilder = builder
 
       // Doors disabled until takeover starts (prevents fire on scene build)
       this._physics.setDoorsEnabled(false)
@@ -495,6 +503,22 @@ export class SceneManager {
       console.warn('[SceneManager] Physics init failed — takeover will be disabled:', err)
       this._physics = null
     }
+  }
+
+  /**
+   * Rebuild just one house's physics colliders to match the current
+   * `HouseResult` in `_memberHouseMap`. Call after `HousingVillage.rebuildByMemberId`
+   * completes so the Rapier walls/door match the freshly-built visual tier.
+   *
+   * No-op when physics never initialized (WASM load failed), the builder
+   * was never created, or the member has no entry in the house map.
+   */
+  rebuildHousePhysics(memberId: string): void {
+    if (!this._physics || !this._takeoverPhysicsBuilder) return
+    const house = this._memberHouseMap.get(memberId)
+    if (!house) return
+    this._takeoverPhysicsBuilder.removeHouse(memberId)
+    this._takeoverPhysicsBuilder.registerHouse(memberId, house)
   }
 
   /**
@@ -648,6 +672,7 @@ export class SceneManager {
 
     this._physics?.destroy()
     this._physics = null
+    this._takeoverPhysicsBuilder = null
     this.buildingHuts = []
     this.pondObstacle = null
 

@@ -37,6 +37,7 @@ import {
   loadTakeoverAnimations,
   restoreLocomotionAnimations,
 } from './takeover'
+import { drawColliderWireframes } from './physics'
 import { OrgRoomClient, type MemberStateSnapshot } from '../multiplayer'
 import type { CharacterSystem } from './characters/CharacterSystem'
 import { SerializedExecutor } from './utils/SerializedExecutor'
@@ -83,6 +84,8 @@ export class GardenEngine {
   // Throttle move broadcasts to OrgRoom at ~20Hz during takeover
   private takeoverMoveAccumulator = 0
   private seatToggleCooldown = 0
+  /** When true, `onUpdate` renders wireframe boxes over every Rapier collider. */
+  private _debugColliders = false
   private currentOccupiedSeatId: string | null = null
   /** Tracks which seat each remote member occupies (userId → seatId). */
   private remoteSeatMap = new Map<string, string>()
@@ -409,8 +412,14 @@ export class GardenEngine {
       if (this.sceneState === 'interior' && this._interiorMemberId === snapshot.userId) {
         void this.exitHouse()
       }
-      // Rebuild the exterior house with new tier
-      void this.sceneManager.housingVillageRef?.rebuildByMemberId(snapshot.userId, curr)
+      // Rebuild the exterior house with new tier, then refresh physics colliders
+      // so walls/door match the new footprint. Physics must run after visual
+      // because rebuildByMemberId updates memberHouseMap and rebuildHousePhysics
+      // reads from it.
+      const sceneManager = this.sceneManager
+      void sceneManager.housingVillageRef
+        ?.rebuildByMemberId(snapshot.userId, curr)
+        .then(() => sceneManager.rebuildHousePhysics(snapshot.userId))
     }
   }
 
@@ -690,6 +699,14 @@ export class GardenEngine {
         this.camera?.update(dt)
         break
     }
+
+    // Collider wireframes — drawn last so they overlay other geometry.
+    // Active in garden + takeover (skipped in interior since physics is garden-only).
+    if (this._debugColliders && this.app
+        && (this.sceneState === 'garden' || this.sceneState === 'takeover')) {
+      const physics = this.sceneManager?.physicsWorld
+      if (physics) drawColliderWireframes(this.app, physics)
+    }
   }
 
   // ─── Interior exploration ─────────────────────────────
@@ -843,6 +860,20 @@ export class GardenEngine {
     return new Promise(resolve => setTimeout(resolve, ms))
   }
 
+  // ─── Debug visualization ─────────────────────────
+
+  /**
+   * Toggle wireframe rendering of every Rapier collider (walls, door triggers,
+   * player capsule). Exposed so the Vue layer / browser console can flip it
+   * at runtime: `window.__engine?.toggleColliderDebug()`.
+   * @returns the new enabled state
+   */
+  toggleColliderDebug(): boolean {
+    this._debugColliders = !this._debugColliders
+    console.log('[GardenEngine] collider debug =', this._debugColliders)
+    return this._debugColliders
+  }
+
   // ─── Garden takeover ─────────────────────────────
 
   /**
@@ -883,21 +914,32 @@ export class GardenEngine {
     // interior mode — the plan keeps takeover == garden WASD and
     // interior is only reached via the house-click or door-walk paths.
     const ownHouse = this.sceneManager.memberHouseMap.get(userId)
+    const cpInit = character.entity.getPosition()
+    console.log('[Takeover][diag] userId=', userId,
+      'characterPos=', { x: cpInit.x.toFixed(2), y: cpInit.y.toFixed(2), z: cpInit.z.toFixed(2) },
+      'houseMapKeys=', [...this.sceneManager.memberHouseMap.keys()],
+      'ownHouseFound=', !!ownHouse)
+
     if (ownHouse) {
       const cp = character.entity.getPosition()
-      // Check if the character is near any of the house's known interior
-      // positions (bed, seats). This is more robust than a hardcoded AABB
-      // because it works regardless of house grid layout, rotation, or
-      // member ordering changes.
       const bed = ownHouse.bedPosition
       const dx = cp.x - bed.x
       const dz = cp.z - bed.z
-      const nearBed = (dx * dx + dz * dz) < 9  // within 3 units of bed
-      const nearSeat = ownHouse.seats.some(s => {
+      const bedDist2 = dx * dx + dz * dz
+      const nearBed = bedDist2 < 9  // within 3 units of bed
+      const seatDistances = ownHouse.seats.map(s => {
         const sx = cp.x - s.x
         const sz = cp.z - s.z
-        return (sx * sx + sz * sz) < 4  // within 2 units of a seat
+        return sx * sx + sz * sz
       })
+      const nearSeat = seatDistances.some(d2 => d2 < 4)
+      console.log('[Takeover][diag] house pivot=', { x: ownHouse.pivotX, z: ownHouse.pivotZ, yaw: ownHouse.pivotYaw },
+        'tier=', ownHouse.tier,
+        'bed=', { x: bed.x.toFixed(2), z: bed.z.toFixed(2) }, 'bedDist2=', bedDist2.toFixed(2),
+        'seatDist2=', seatDistances.map(d => d.toFixed(2)),
+        'exit=', ownHouse.exitPosition,
+        'nearBed=', nearBed, 'nearSeat=', nearSeat)
+
       if (nearBed || nearSeat) {
         const exit = ownHouse.exitPosition
         character.entity.setPosition(exit.x, 0, exit.z)
@@ -908,8 +950,12 @@ export class GardenEngine {
         // Extend the door cooldown so the first physics tick after
         // capsule creation can't re-fire the door sensor.
         this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
-        console.debug('[GardenEngine] teleported', userId, 'to house exit at', exit.x, exit.z)
+        console.log('[Takeover][diag] teleported to exit at', { x: exit.x.toFixed(2), z: exit.z.toFixed(2), yaw: exit.yaw })
+      } else {
+        console.log('[Takeover][diag] NOT teleporting — character is outside their own house, will spawn at current pos')
       }
+    } else {
+      console.warn('[Takeover][diag] ownHouse NOT FOUND for', userId, '— spawning at current character position')
     }
 
     this.takeoverUserId = userId

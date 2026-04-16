@@ -14,6 +14,7 @@
  *   y (default 0)        →  floor level; set to 0.01 for rugs etc.
  */
 import type { CollisionBox } from './CollisionSystem'
+import { HOUSE_TIERS } from '../buildings/HouseTierConfig'
 
 // ─── Action types ─────────────────────────────────────────────────────────────
 
@@ -144,14 +145,22 @@ export const WALL_COLLISION: CollisionBox[] = [
 
 export interface RoomSize { width: number; depth: number; doorIndex: number }
 
-export const ROOM_SIZE_BY_TIER: Record<number, RoomSize> = {
-  0: { width: 4, depth: 4, doorIndex: 1 },
-  1: { width: 4, depth: 4, doorIndex: 1 },
-  2: { width: 4, depth: 4, doorIndex: 1 },
-  3: { width: 5, depth: 5, doorIndex: 2 },
-}
+/**
+ * Interior room size per tier, derived from the single HOUSE_TIERS source.
+ * Tier 0 is a legacy "standard" size used by the original housetest layout;
+ * it mirrors tier 1 until/unless a distinct tier-0 entry is added.
+ */
+export const ROOM_SIZE_BY_TIER: Record<number, RoomSize> = (() => {
+  const byTier = Object.fromEntries(
+    HOUSE_TIERS.map(t => [t.tier, { width: t.width, depth: t.depth, doorIndex: t.doorIndex }]),
+  ) as Record<number, RoomSize>
+  // Tier 0 is "standard" — alias to tier 1 for backward-compat with old scenes.
+  const tier1 = byTier[1]
+  if (tier1) byTier[0] = { ...tier1 }
+  return byTier
+})()
 
-/** Tier 1 — Hut: cozy minimal KayKit room (4×4) */
+/** Tier 1 — Hut: cozy minimal KayKit room (3×3) */
 const KS = 0.3   // KayKit furniture scale (models are ~3x Kenney size)
 const KSM = 0.2  // smaller items (lamps, decor)
 export const INTERIOR_FURNITURE_TIER_1: FurnitureDef[] = [
@@ -161,11 +170,11 @@ export const INTERIOR_FURNITURE_TIER_1: FurnitureDef[] = [
   { asset: 'kaykit_tableSmall', x: 1.2,  z: 0.3,  scale: KSM },
   { asset: 'kaykit_lampTable',  x: 1.2,  z: 0.3,  stackOn: 'kaykit_tableSmall', scale: KSM },
   // Desk + laptop + chair — back-right area
-  { asset: 'desk',              x: 3.3, z: 0.5, scale: 0.8 },
-  { asset: 'laptop',            x: 3.3, z: 0.5, stackOn: 'desk', scale: 0.8 },
-  { asset: 'kaykit_chair',      x: 3.3, z: 1.1, rotation: 180, scale: KS },
+  { asset: 'desk',              x: 2.2, z: 0.5, scale: 0.8 },
+  { asset: 'laptop',            x: 2.2, z: 0.5, stackOn: 'desk', scale: 0.8 },
+  { asset: 'kaykit_chair',      x: 2.2, z: 1.1, rotation: 180, scale: KS },
   // Cactus — front-left corner
-  { asset: 'kaykit_cactus',     x: 0.3,  z: 3.4,  scale: KSM },
+  { asset: 'kaykit_cactus',     x: 0.3,  z: 2.4,  scale: KSM },
 ]
 
 export const INTERIOR_INTERACTABLES_TIER_1: InteractableDef[] = [
@@ -177,20 +186,20 @@ export const INTERIOR_INTERACTABLES_TIER_1: InteractableDef[] = [
     radius: 1.0,
   },
   {
-    id: 'laptop', pos: { x: 3.3, z: 0.5 },
+    id: 'laptop', pos: { x: 2.2, z: 0.5 },
     prompt: '[E] Work', info: 'Coding away...',
     action: 'sit',
-    seat: { x: 3.3, z: 0.95, yaw: 180 },
+    seat: { x: 2.2, z: 0.95, yaw: 180 },
     radius: 1.0,
   },
 ]
 
 export const INTERIOR_COLLISION_TIER_1: CollisionBox[] = [
-  { minX: -0.1,  maxX: 4.1,  minZ: -0.15, maxZ: 0.15 },  // back
-  { minX: -0.15, maxX: 0.15, minZ: -0.1,  maxZ: 4.1  },  // left
-  { minX: 3.85,  maxX: 4.15, minZ: -0.1,  maxZ: 4.1  },  // right
-  { minX: -0.1,  maxX: 1.0,  minZ: 3.85,  maxZ: 4.15 },  // front-left
-  { minX: 2.0,   maxX: 4.1,  minZ: 3.85,  maxZ: 4.15 },  // front-right
+  { minX: -0.1,  maxX: 3.1,  minZ: -0.15, maxZ: 0.15 },  // back
+  { minX: -0.15, maxX: 0.15, minZ: -0.1,  maxZ: 3.1  },  // left
+  { minX: 2.85,  maxX: 3.15, minZ: -0.1,  maxZ: 3.1  },  // right
+  { minX: -0.1,  maxX: 1.0,  minZ: 2.85,  maxZ: 3.15 },  // front-left
+  { minX: 2.0,   maxX: 3.1,  minZ: 2.85,  maxZ: 3.15 },  // front-right
 ]
 
 /** Tier 2 — Cottage: comfortable KayKit home (4×4) */

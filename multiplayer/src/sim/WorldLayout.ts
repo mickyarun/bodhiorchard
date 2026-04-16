@@ -43,27 +43,28 @@ const HOUSES_PER_STREET = HOUSES_PER_SIDE * 2
  * These match HouseBuilder's layout methods (corner origin at 0,0).
  */
 const TIER_DESK: Record<number, { x: number; z: number; yaw: number }> = {
-  1: { x: 3.3, z: 1.3, yaw: 180 },
+  1: { x: 2.2, z: 1.3, yaw: 180 },
   2: { x: 3.2, z: 1.3, yaw: 180 },
   3: { x: 3.4, z: 1.3, yaw: 180 },
 }
 const TIER_BED: Record<number, { x: number; z: number }> = {
-  1: { x: 1.5, z: 0.7 },
+  1: { x: 1.0, z: 0.7 },
   2: { x: 1.0, z: 1.1 },
   3: { x: 1.5, z: 0.8 },
 }
 
 /**
  * Centering offset per tier — shifts from corner-origin to center-origin.
- * Must match the pivot wrapper in frontend HousingVillage.wrapWithPivot().
+ * Must match frontend HousingVillage.wrapWithPivot(), which now uses
+ * (-tierDef.width/2, -tierDef.depth/2) uniformly because KayKit exteriors
+ * are scaled at build time to fit the same tile footprint as the interior.
  *
- * Kenney (tier 1): house is width×depth tiles → offset = (-w/2, -d/2)
- * KayKit (tier 2/3): house uses exteriorFootprint × scale
+ * Derived from HouseTierConfig: { 1: 3×3, 2: 4×4, 3: 5×5 }
  */
 const TIER_CENTER_OFFSET: Record<number, { x: number; z: number }> = {
-  1: { x: -2.0,  z: -2.0  },   // 4×4 / 2
-  2: { x: -2.2,  z: -2.2  },   // (2.2 * 2.0) / 2
-  3: { x: -2.7,  z: -2.7  },   // (3.0 * 1.8) / 2
+  1: { x: -1.5, z: -1.5 },   // 3×3 / 2
+  2: { x: -2.0, z: -2.0 },   // 4×4 / 2
+  3: { x: -2.5, z: -2.5 },   // 5×5 / 2
 }
 
 /**

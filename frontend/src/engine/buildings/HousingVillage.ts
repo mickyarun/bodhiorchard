@@ -146,15 +146,13 @@ export class HousingVillage {
   ): void {
     const tierDef = getHouseTier(tier)
 
-    // Centering offset: from corner-origin to center-origin
-    let ox: number, oz: number
-    if (tierDef.exteriorFootprint && tierDef.exteriorScale) {
-      ox = -(tierDef.exteriorFootprint.w * tierDef.exteriorScale) / 2
-      oz = -(tierDef.exteriorFootprint.d * tierDef.exteriorScale) / 2
-    } else {
-      ox = -tierDef.width / 2
-      oz = -tierDef.depth / 2
-    }
+    // Centering offset: from corner-origin to center-origin. The HouseBuilder
+    // lays out the house (procedural walls or scaled KayKit GLB) within a
+    // tierDef.width × tierDef.depth tile footprint, so halving those gives the
+    // pivot-to-corner delta consistently across all tiers — no special case
+    // for KayKit. This is the single source of truth for house centering.
+    const ox = -tierDef.width / 2
+    const oz = -tierDef.depth / 2
 
     // Create pivot at placement center with rotation
     const pivot = new pc.Entity(`HousePivot_${result.memberId}`)

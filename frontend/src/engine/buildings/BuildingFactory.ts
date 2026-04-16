@@ -256,6 +256,32 @@ export class BuildingFactory {
   }
 
   /**
+   * Get the model-space XZ footprint of a placed entity as half-extents.
+   *
+   * Unions every Mesh.aabb on the entity (local/model space — always valid
+   * without a render pass) so the returned half-extents cover the full visual
+   * exterior, including roof overhangs and porches. Callers scale the result
+   * by the entity's local scale to obtain the world-space footprint.
+   *
+   * Returns { halfW: 0, halfD: 0 } for entities with no render meshes.
+   */
+  static getEntityFootprint(entity: pc.Entity): { halfW: number; halfD: number } {
+    const renders = entity.findComponents('render') as pc.RenderComponent[]
+    const meshInstances = renders.flatMap(
+      (rc: pc.RenderComponent) => rc.meshInstances,
+    )
+    if (meshInstances.length === 0) return { halfW: 0, halfD: 0 }
+
+    const aabb = new pc.BoundingBox()
+    aabb.copy(meshInstances[0].mesh.aabb)
+    for (let i = 1; i < meshInstances.length; i++) {
+      aabb.add(meshInstances[i].mesh.aabb)
+    }
+    const he = aabb.halfExtents
+    return { halfW: he.x, halfD: he.z }
+  }
+
+  /**
    * Create string lights as children of a building entity.
    * All coordinates are LOCAL to the parent.
    *

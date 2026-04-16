@@ -165,6 +165,8 @@ async function initEngine(): Promise<void> {
   const h = containerRef.value.clientHeight || 800
 
   engine = new GardenEngine()
+  // Expose for console debugging: `__engine.toggleColliderDebug()`
+  ;(window as unknown as { __engine?: GardenEngine }).__engine = engine
   await engine.init(containerRef.value, w, h, {
     onSceneReady: () => emit('scene-ready'),
     onTreeClick: (info) => emit('tree-click', { repoName: info.repoName }),

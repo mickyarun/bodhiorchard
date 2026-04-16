@@ -143,6 +143,14 @@ export interface HouseResult {
   pivotX?: number
   pivotZ?: number
   pivotYaw?: number
+  /**
+   * Measured world-space half-extents of the KayKit exterior GLB after scaling.
+   * Set only for tier 2/3 where the visual comes from a loaded model whose
+   * real footprint (including roof overhangs) differs from the interior floor
+   * plan. Physics uses this to size the wall collider to match the visual.
+   */
+  exteriorHalfW?: number
+  exteriorHalfD?: number
 }
 
 export class HouseBuilder {
@@ -174,41 +182,65 @@ export class HouseBuilder {
 
     let bedPos: { x: number; y: number; z: number }
     let exitPos: { x: number; z: number; yaw: number }
+    let measuredHalfW: number | undefined
+    let measuredHalfD: number | undefined
 
     if (tierDef.exteriorGlb) {
-      // KayKit whole-building model (tier 2/3)
-      const s = tierDef.exteriorScale ?? 1.0
-      const fp = tierDef.exteriorFootprint ?? { w: 2, d: 2 }
-      const halfW = (fp.w * s) / 2
-      const halfD = (fp.d * s) / 2
+      // KayKit whole-building model (tier 2/3).
+      //
+      // Scale the GLB so its visible footprint matches the interior tile size
+      // (tierDef.width × depth, TILE_SIZE=1m). Without this, tier 3's mansion
+      // renders visibly larger than the interior floor plan — characters
+      // standing next to the collider edge appear to be "inside" the mansion
+      // walls in takeover mode.
+      //
+      // placeFurnitureCentered wraps the GLB in an entity that offsets the
+      // model to center-bottom, so the visual center ends up exactly at
+      // (targetHalfW, 0, targetHalfD) — the interior center.
+      const targetHalfW = tierDef.width / 2
+      const targetHalfD = tierDef.depth / 2
 
-      const building = await this.factory.placeFurniture(
-        root, tierDef.exteriorGlb, halfW, 0, halfD,
+      const building = await this.factory.placeFurnitureCentered(
+        root, tierDef.exteriorGlb, targetHalfW, 0, targetHalfD,
       )
+
+      // Measure raw (unscaled) mesh AABB — always valid, independent of the
+      // wrapper's local scale. Compute a uniform scale so the most-constrained
+      // axis exactly hits the interior size; the other axis can only be
+      // smaller or equal, never exceeding the interior footprint.
+      const raw = BuildingFactory.getEntityFootprint(building)
+      let s = tierDef.exteriorScale ?? 1.0
+      if (raw.halfW > 0 && raw.halfD > 0) {
+        s = Math.min(targetHalfW / raw.halfW, targetHalfD / raw.halfD)
+      }
       building.setLocalScale(s, s, s)
 
-      // Nameboard above the building
-      const labelY = fp.w * s + 0.3
+      measuredHalfW = raw.halfW * s
+      measuredHalfD = raw.halfD * s
+
+      // Nameboard above the building — sits at interior center, height scaled
+      // with the building so it floats just above the roof.
+      const labelY = targetHalfW * 2 * s + 0.3
       const board = createHouseNameboard(memberName, this.device, labelY)
-      board.setLocalPosition(halfW, 0, halfD)
+      board.setLocalPosition(targetHalfW, 0, targetHalfD)
       root.addChild(board)
 
       // Default bed/exit positions for KayKit tiers (interior handles actual placement)
       bedPos = { x: worldX + 1, y: 0, z: worldZ + 0.5 }
-      exitPos = { x: halfW, z: fp.d * s + 0.5, yaw: 180 }
+      exitPos = { x: targetHalfW, z: targetHalfD * 2 + 0.5, yaw: 180 }
     } else {
       // Kenney procedural house (tier 1)
       await this.factory.createFloor(root, tierDef.width, tierDef.depth)
 
       switch (tier) {
         case 1:
-          ({ bedPos, exitPos } = await this.layoutTier1(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth))
+          ({ bedPos, exitPos } = await this.layoutTier1(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth, tierDef.doorIndex))
           break
         case 3:
-          ({ bedPos, exitPos } = await this.layoutTier3(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth))
+          ({ bedPos, exitPos } = await this.layoutTier3(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth, tierDef.doorIndex))
           break
         default:
-          ({ bedPos, exitPos } = await this.layoutTier2(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth))
+          ({ bedPos, exitPos } = await this.layoutTier2(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth, tierDef.doorIndex))
           break
       }
 
@@ -230,19 +262,19 @@ export class HouseBuilder {
       bedPosition: bedPos,
       seats,
       exitPosition: exitPos,
+      exteriorHalfW: measuredHalfW,
+      exteriorHalfD: measuredHalfD,
     }
   }
 
-  // ─── Tier 1: Hut (4×4) ───────────────────────
+  // ─── Tier 1: Hut (3×3) ───────────────────────
   //
-  //   z=0 [======== BACK WALL (solid) ========]
-  //       | Lamp       Bed                    |
-  //   z=1 |                                   |
-  //       |                   Desk    Chair   |
-  //   z=2 |                                   |
-  //       |                                   |
-  //   z=3 [======== FRONT WALL (door) ========]
-  //       x=0        door(x=1)            x=4
+  //   z=0 [====== BACK WALL (solid) ======]
+  //       | Lamp  Bed                     |
+  //   z=1 |                  Desk  Chair  |
+  //       |                               |
+  //   z=2 [====== FRONT WALL (door) ======]
+  //       x=0     door(x=1)            x=3
 
   private async layoutTier1(
     root: pc.Entity,
@@ -252,25 +284,27 @@ export class HouseBuilder {
     index: number,
     width: number,
     depth: number,
+    doorIndex: number,
   ) {
     await this.factory.createWalls(root, width, depth, [
-      { side: 'front', index: 1, type: 'door' },
+      { side: 'front', index: doorIndex, type: 'door' },
     ])
 
     // Bed — back-left
-    await this.factory.placeFurnitureCentered(root, BUILDING.bedSingle, 1.5, 0, 0.7)
-    const bedPos = { x: worldX + 1.5, y: 0.38, z: worldZ + 0.7 }
+    await this.factory.placeFurnitureCentered(root, BUILDING.bedSingle, 1.0, 0, 0.7)
+    const bedPos = { x: worldX + 1.0, y: 0.38, z: worldZ + 0.7 }
 
-    // Desk + chair — back-right area (uses the extra space in 4×4)
-    await this.factory.placeFurnitureCentered(root, BUILDING.desk, 3.3, 0, 0.5)
-    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, 3.3, 1.3, 180, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
+    // Desk + chair — back-right
+    await this.factory.placeFurnitureCentered(root, BUILDING.desk, 2.2, 0, 0.5)
+    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, 2.2, 1.3, 180, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
     seats.push(deskChair.seat)
 
     // Lamp — back-left corner
     await this.factory.placeFurnitureCentered(root, BUILDING.lampRoundFloor, 0.4, 0, 0.4)
 
-    // Exit position — door at x=1, front wall at z=3
-    const doorCenterX = 1.0
+    // Exit position — door spans corner-local x=[doorIndex, doorIndex+1].
+    // Front wall at z=depth. Exit is 1 unit in front of the wall, centered on the door.
+    const doorCenterX = doorIndex + 0.5
     const exitPos = {
       x: worldX + doorCenterX,
       z: worldZ + depth + 1.0,
@@ -301,9 +335,10 @@ export class HouseBuilder {
     index: number,
     width: number,
     depth: number,
+    doorIndex: number,
   ) {
     await this.factory.createWalls(root, width, depth, [
-      { side: 'front', index: 1, type: 'door' },
+      { side: 'front', index: doorIndex, type: 'door' },
       { side: 'left', index: 1, type: 'window' },
       { side: 'left', index: 2, type: 'window' },
       { side: 'right', index: 1, type: 'window' },
@@ -341,8 +376,8 @@ export class HouseBuilder {
     await this.factory.placeFurnitureCentered(root, BUILDING.rugRound, 2.0, 0.01, 2.0)
     await this.factory.placeFurnitureCentered(root, BUILDING.plantSmall1, 0.5, 0, 3.5)
 
-    // Front door stone path
-    const doorCenterX = 1.5
+    // Front door stone path — door spans x=[doorIndex, doorIndex+1], center at +0.5.
+    const doorCenterX = doorIndex + 0.5
     const stonePositions = [4.4, 5.0, 5.6]
     for (let j = 0; j < stonePositions.length; j++) {
       const stone = await this.factory.placeFurniture(
@@ -383,9 +418,10 @@ export class HouseBuilder {
     index: number,
     width: number,
     depth: number,
+    doorIndex: number,
   ) {
     await this.factory.createWalls(root, width, depth, [
-      { side: 'front', index: 2, type: 'door' },
+      { side: 'front', index: doorIndex, type: 'door' },
       { side: 'left', index: 1, type: 'window' },
       { side: 'left', index: 2, type: 'window' },
       { side: 'left', index: 3, type: 'window' },
@@ -433,8 +469,8 @@ export class HouseBuilder {
     await this.factory.placeFurnitureCentered(root, BUILDING.pottedPlant, 1.5, 0, 4.2)
     await this.factory.placeFurnitureCentered(root, BUILDING.lampRoundTable, 4.5, 0, 4.2)
 
-    // Front door stone path (longer for mansion)
-    const doorCenterX = 2.0
+    // Front door stone path (longer for mansion). Door spans x=[doorIndex, doorIndex+1].
+    const doorCenterX = doorIndex + 0.5
     const stonePositions = [5.4, 6.0, 6.6, 7.2]
     for (let j = 0; j < stonePositions.length; j++) {
       const stone = await this.factory.placeFurniture(
