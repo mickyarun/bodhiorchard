@@ -508,6 +508,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
           presence: m.presence,
           memberIndex: index,
           totalMembers: sorted.length,
+          houseLevel: m.house_level ?? 1,
         },
         takenBreakSeats,
         this.breakSeats,
@@ -519,7 +520,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       member.characterModel = m.character_model ?? ""
       member.level = m.level ?? 0
       member.levelName = m.level_name ?? ""
-      member.houseLevel = m.house_level ?? 2
+      member.houseLevel = m.house_level ?? 1
       member.presence = m.presence
       member.x = placement.x
       member.y = placement.y
@@ -600,12 +601,14 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       }
     }
 
+    const member = sorted[memberIndex]
     return computePlacement(
       {
         userId,
         presence,
         memberIndex,
         totalMembers: sorted.length,
+        houseLevel: member?.houseLevel ?? 1,
       },
       takenBreakSeats,
       this.breakSeats,
