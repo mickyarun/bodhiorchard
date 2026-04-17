@@ -38,6 +38,9 @@ const STREET_GAP = 18
 const HOUSES_PER_SIDE = 4
 const HOUSES_PER_STREET = HOUSES_PER_SIDE * 2
 
+/** Desk chair seat height — mirrors frontend HouseTierConfig.DESK_SEAT_Y. */
+const DESK_SEAT_Y = 0.15
+
 /**
  * ── Tier geometry (mirrors frontend/src/engine/buildings/HouseTierConfig.ts) ──
  *
@@ -145,7 +148,7 @@ export function getHouseDeskSeat(
 
   return {
     x: origin.x + cx * cos + cz * sin,
-    y: 0,
+    y: DESK_SEAT_Y,
     z: origin.z - cx * sin + cz * cos,
     yaw: cfg.desk.yaw + origin.yawDeg,
   }

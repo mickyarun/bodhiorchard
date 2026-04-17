@@ -39,6 +39,9 @@ export interface HouseTierDef {
 /** Bed mattress surface height — same for all tiers. */
 export const BED_SURFACE_Y = 0.38
 
+/** Desk chair seat surface height — same for all tiers. */
+export const DESK_SEAT_Y = 0.15
+
 export const HOUSE_TIERS: readonly HouseTierDef[] = [
   {
     tier: 1, name: 'Hut', width: 3, depth: 3, doorIndex: 1, unlockCost: 0,
