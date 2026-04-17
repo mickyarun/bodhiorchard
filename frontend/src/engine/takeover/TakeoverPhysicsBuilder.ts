@@ -20,6 +20,7 @@ import type RAPIER_NS from '@dimforge/rapier3d'
 import type { PhysicsWorld } from '../physics'
 import { WALL_HEIGHT, type HouseResult } from '../buildings/HouseBuilder'
 import { getHouseTier } from '../buildings/HouseTierConfig'
+import type { FenceBounds } from '../buildings/VillageLayout'
 
 // ─── Constants ─────────────────────────────────
 
@@ -211,6 +212,94 @@ export class TakeoverPhysicsBuilder {
       segments,
       overlap: 1.1,
     })
+  }
+
+  /**
+   * Register a rectangular fence as 4 wall colliders matching a visual
+   * RectangularFence. A gate gap is created on the wall closest to
+   * `gatePosition` (same logic as RectangularFence.computeGateSide).
+   */
+  registerRectFence(
+    bounds: FenceBounds,
+    gatePosition: { x: number; z: number },
+    gateWidth = 3.0,
+  ): void {
+    const { minX, maxX, minZ, maxZ } = bounds
+    const halfH = HOUSE_WALL_HEIGHT / 2
+    const thick = HOUSE_WALL_THICK
+
+    // 4 walls: each is a thin box along one edge of the rectangle.
+    // The gate gap is cut into whichever wall the gate sits on.
+    const walls: Array<{
+      cx: number; cz: number; halfW: number; halfD: number; yawRad: number
+      isGateSide: boolean; wallLen: number
+    }> = [
+      // north (minZ edge, runs along X)
+      { cx: (minX + maxX) / 2, cz: minZ, halfW: (maxX - minX) / 2, halfD: thick, yawRad: 0,
+        isGateSide: false, wallLen: maxX - minX },
+      // south (maxZ edge, runs along X)
+      { cx: (minX + maxX) / 2, cz: maxZ, halfW: (maxX - minX) / 2, halfD: thick, yawRad: 0,
+        isGateSide: false, wallLen: maxX - minX },
+      // west (minX edge, runs along Z)
+      { cx: minX, cz: (minZ + maxZ) / 2, halfW: (maxZ - minZ) / 2, halfD: thick, yawRad: Math.PI / 2,
+        isGateSide: false, wallLen: maxZ - minZ },
+      // east (maxX edge, runs along Z)
+      { cx: maxX, cz: (minZ + maxZ) / 2, halfW: (maxZ - minZ) / 2, halfD: thick, yawRad: Math.PI / 2,
+        isGateSide: false, wallLen: maxZ - minZ },
+    ]
+
+    // Find which wall the gate is closest to
+    const dists = [
+      Math.abs(gatePosition.z - minZ),  // north
+      Math.abs(gatePosition.z - maxZ),  // south
+      Math.abs(gatePosition.x - minX),  // west
+      Math.abs(gatePosition.x - maxX),  // east
+    ]
+    const gateIdx = dists.indexOf(Math.min(...dists))
+    walls[gateIdx].isGateSide = true
+
+    for (const wall of walls) {
+      if (!wall.isGateSide) {
+        // Full wall — single box
+        this.physics.addStaticBoxRotated(
+          wall.cx, halfH, wall.cz,
+          wall.halfW, halfH, wall.halfD,
+          wall.yawRad,
+        )
+      } else {
+        // Split wall into two panels around the gate gap.
+        // Gate is centered on the wall; each panel covers from wall edge to gap edge.
+        const gapHalf = gateWidth / 2
+        const panelLen = (wall.wallLen - gateWidth) / 2
+        if (panelLen <= 0) continue  // gate wider than wall — skip
+
+        const panelHalfW = panelLen / 2
+        // Offset from wall center to panel center along the wall's long axis
+        const offset = gapHalf + panelHalfW
+
+        if (wall.yawRad === 0) {
+          // X-aligned wall: panels offset along X
+          this.physics.addStaticBoxRotated(
+            wall.cx - offset, halfH, wall.cz,
+            panelHalfW, halfH, wall.halfD, 0,
+          )
+          this.physics.addStaticBoxRotated(
+            wall.cx + offset, halfH, wall.cz,
+            panelHalfW, halfH, wall.halfD, 0,
+          )
+        } else {
+          // Z-aligned wall: panels offset along Z
+          this.physics.addStaticBoxRotated(
+            wall.cx, halfH, wall.cz - offset,
+            panelHalfW, halfH, wall.halfD, Math.PI / 2,
+          )
+          this.physics.addStaticBoxRotated(
+            wall.cx, halfH, wall.cz + offset,
+            panelHalfW, halfH, wall.halfD, Math.PI / 2,
+          )
+        }
+      }
+    }
   }
 
   // ─── Private helpers ───────────────────────

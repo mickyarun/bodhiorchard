@@ -104,6 +104,7 @@ export class SceneManager {
   private _memberHouseMap = new Map<string, HouseResult>()
   private _housingVillage: HousingVillage | null = null
   private _housingGatePosition: { x: number; z: number } | null = null
+  private _housingFenceBounds: import('../buildings/VillageLayout').FenceBounds | null = null
 
   /** Member lookup by user_id — includes character_model for identity preservation when visiting houses. */
   private _memberDataMap = new Map<string, { user_id: string; name: string; character_model: string | null }>()
@@ -241,6 +242,7 @@ export class SceneManager {
       this.layout.registerSeats(housingResult.seats)
       this._memberHouseMap = housingResult.memberHouseMap
       this._housingGatePosition = housingResult.gatePosition
+      this._housingFenceBounds = housingResult.fenceBounds
     }
 
     if (poolZone) {
@@ -490,6 +492,9 @@ export class SceneManager {
         builder.registerPond(this.pondObstacle)
       }
       builder.registerPerimeter(this.layout.getWorldRadius() + 8)
+      if (this._housingFenceBounds && this._housingGatePosition) {
+        builder.registerRectFence(this._housingFenceBounds, this._housingGatePosition)
+      }
       // Keep the builder alive so rebuildHousePhysics can reuse its
       // per-member body tracking on tier upgrades.
       this._takeoverPhysicsBuilder = builder
@@ -628,6 +633,7 @@ export class SceneManager {
     this.buildingEntities = []
     this._housingVillage = null
     this._housingGatePosition = null
+    this._housingFenceBounds = null
     this._memberHouseMap.clear()
     this._memberDataMap.clear()
 
