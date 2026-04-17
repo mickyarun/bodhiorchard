@@ -192,23 +192,12 @@ export class TakeoverPhysicsBuilder {
    * Player bumps into the ring and can't enter the pond.
    */
   registerPond(pond: PondObstacle, segments = 12): void {
-    const segAngle = (2 * Math.PI) / segments
-    // Slight overlap (1.15×) ensures no gaps between segments
-    const halfW = pond.radius * Math.sin(segAngle / 2) * 1.15
-    const halfD = 0.15  // segment thickness
-    const halfH = HOUSE_WALL_HEIGHT / 2
-
-    for (let i = 0; i < segments; i++) {
-      const angle = i * segAngle
-      const cx = pond.x + Math.cos(angle) * pond.radius
-      const cz = pond.z + Math.sin(angle) * pond.radius
-      // Each segment's local X axis is tangent to the circle
-      this.physics.addStaticBoxRotated(
-        cx, halfH, cz,
-        halfW, halfH, halfD,
-        angle + Math.PI / 2,  // tangent direction
-      )
-    }
+    this.addPhysicsRing(pond.x, pond.z, pond.radius, {
+      halfH: HOUSE_WALL_HEIGHT / 2,
+      thickness: 0.15,
+      segments,
+      overlap: 1.15,
+    })
   }
 
   /**
@@ -216,24 +205,46 @@ export class TakeoverPhysicsBuilder {
    * Prevents the player from walking beyond the world edge.
    */
   registerPerimeter(worldRadius: number, segments = 24): void {
-    const segAngle = (2 * Math.PI) / segments
-    const halfW = worldRadius * Math.sin(segAngle / 2) * 1.1
-    const halfD = 0.5
-    const halfH = 2.0
-
-    for (let i = 0; i < segments; i++) {
-      const angle = i * segAngle
-      const cx = Math.cos(angle) * worldRadius
-      const cz = Math.sin(angle) * worldRadius
-      this.physics.addStaticBoxRotated(
-        cx, halfH, cz,
-        halfW, halfH, halfD,
-        angle + Math.PI / 2,
-      )
-    }
+    this.addPhysicsRing(0, 0, worldRadius, {
+      halfH: 2.0,
+      thickness: 0.5,
+      segments,
+      overlap: 1.1,
+    })
   }
 
   // ─── Private helpers ───────────────────────
+
+  /**
+   * Build a ring of rotated box segments at (cx, cz) with the given radius.
+   *
+   * Convention matches CircularFence (visual): x = sin(angle) * r,
+   * z = cos(angle) * r, yaw = angle. angle=0 starts at +Z and sweeps
+   * clockwise — so physics rings overlap visual fence posts exactly.
+   *
+   * Each segment's tangent half-width is computed from the arc length so
+   * adjacent segments overlap by `overlap` (default 1.1×) to prevent gaps.
+   * The box bottom sits at y=0 and top at y=2×halfH.
+   */
+  private addPhysicsRing(
+    cx: number, cz: number, radius: number,
+    opts: { halfH: number; thickness: number; segments: number; overlap?: number },
+  ): void {
+    const { halfH, thickness, segments, overlap = 1.1 } = opts
+    const segAngle = (2 * Math.PI) / segments
+    const halfW = radius * Math.sin(segAngle / 2) * overlap
+
+    for (let i = 0; i < segments; i++) {
+      const angle = i * segAngle
+      this.physics.addStaticBoxRotated(
+        cx + Math.sin(angle) * radius,
+        halfH,
+        cz + Math.cos(angle) * radius,
+        halfW, halfH, thickness,
+        angle,
+      )
+    }
+  }
 
   /**
    * Add a wall box at (rootX + rotated local offset, wallCenterY, rootZ + rotated local offset)
