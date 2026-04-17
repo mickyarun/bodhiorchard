@@ -17,7 +17,7 @@
  */
 import * as pc from 'playcanvas'
 import { BuildingFactory } from './BuildingFactory'
-import { BUILDING, PATH } from '../assets/AssetManifest'
+import { BUILDING } from '../assets/AssetManifest'
 import { setTreeData } from '../world/TreeNodeData'
 import { getHouseTier, BED_SURFACE_Y } from './HouseTierConfig'
 import type { InteractionPoint } from '../characters/InteractionPoint'
@@ -233,17 +233,9 @@ export class HouseBuilder {
       // Kenney procedural house (tier 1)
       await this.factory.createFloor(root, tierDef.width, tierDef.depth)
 
-      switch (tier) {
-        case 1:
-          ({ bedPos, exitPos } = await this.layoutTier1(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth, tierDef.doorIndex))
-          break
-        case 3:
-          ({ bedPos, exitPos } = await this.layoutTier3(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth, tierDef.doorIndex))
-          break
-        default:
-          ({ bedPos, exitPos } = await this.layoutTier2(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth, tierDef.doorIndex))
-          break
-      }
+      // Only tier 1 uses Kenney procedural — tiers with exteriorGlb take the
+      // KayKit branch above. If a future Kenney tier is added, restore a switch.
+      ;({ bedPos, exitPos } = await this.layoutTier1(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth, tierDef.doorIndex))
 
       // Roof (Kenney only)
       this.factory.createRoof(root, tierDef.width, tierDef.depth, WALL_HEIGHT)
@@ -316,180 +308,4 @@ export class HouseBuilder {
     return { bedPos, exitPos }
   }
 
-  // ─── Tier 2: Cottage (4×4) ──────
-  //
-  //   z=0 [======= BACK WALL (solid) =======]
-  //       | Lamp       Bed          Desk    |
-  //   z=1 |                         Chair   |
-  //       |                                 |
-  //   z=2 |            Rug                  |
-  //       |     Sofa          LoungeChair   |
-  //   z=3 |                                 |
-  //       | Plant       TV                  |
-  //   z=4 [======= FRONT WALL (door) =======]
-  //       x=0        door(x=1.5)       x=4
-
-  private async layoutTier2(
-    root: pc.Entity,
-    seats: InteractionPoint[],
-    worldX: number,
-    worldZ: number,
-    index: number,
-    width: number,
-    depth: number,
-    doorIndex: number,
-  ) {
-    await this.factory.createWalls(root, width, depth, [
-      { side: 'front', index: doorIndex, type: 'door' },
-      { side: 'left', index: 1, type: 'window' },
-      { side: 'left', index: 2, type: 'window' },
-      { side: 'right', index: 1, type: 'window' },
-      { side: 'right', index: 2, type: 'window' },
-    ])
-
-    // Bed — position from tier config
-    const tierDef2 = getHouseTier(2)
-    await this.factory.placeFurnitureCentered(root, BUILDING.bedSingle, tierDef2.bed.x, 0, tierDef2.bed.z)
-    const bedPos = { x: worldX + tierDef2.bed.x, y: BED_SURFACE_Y, z: worldZ + tierDef2.bed.z }
-
-    // Desk + laptop — back-right corner
-    const desk = await this.factory.placeFurnitureCentered(root, BUILDING.desk, 3.3, 0, 0.5)
-    const deskHeight = BuildingFactory.getEntityHeight(desk)
-    await this.factory.placeFurnitureCentered(root, BUILDING.laptop, 3.3, deskHeight, 0.5)
-
-    // Chair at desk — position from tier config
-    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, tierDef2.desk.x, tierDef2.desk.z, tierDef2.desk.yaw, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
-    seats.push(deskChair.seat)
-
-    // TV cabinet + TV
-    const cabinet = await this.factory.placeFurnitureCentered(root, BUILDING.cabinetTelevision, 2.0, 0, 3.7, 180)
-    const cabinetHeight = BuildingFactory.getEntityHeight(cabinet)
-    await this.factory.placeFurnitureCentered(root, BUILDING.televisionModern, 2.0, cabinetHeight, 3.7, 180)
-
-    // Sofa
-    const sofa = await this.factory.placeSeat(root, BUILDING.loungeSofa, 1.5, 2.5, 0, 'housing', index * SEATS_PER_HOUSE + 1, worldX, worldZ, 'loungeSofa')
-    seats.push(sofa.seat)
-
-    // Lounge chair
-    const loungeChair = await this.factory.placeSeat(root, BUILDING.loungeChair, 3.2, 2.5, 0, 'housing', index * SEATS_PER_HOUSE + 2, worldX, worldZ, 'loungeChair')
-    seats.push(loungeChair.seat)
-
-    // Decorations
-    await this.factory.placeFurnitureCentered(root, BUILDING.lampRoundFloor, 0.4, 0, 0.4)
-    await this.factory.placeFurnitureCentered(root, BUILDING.rugRound, 2.0, 0.01, 2.0)
-    await this.factory.placeFurnitureCentered(root, BUILDING.plantSmall1, 0.5, 0, 3.5)
-
-    // Front door stone path — door spans x=[doorIndex, doorIndex+1], center at +0.5.
-    const doorCenterX = doorIndex + 0.5
-    const stonePositions = [4.4, 5.0, 5.6]
-    for (let j = 0; j < stonePositions.length; j++) {
-      const stone = await this.factory.placeFurniture(
-        root, PATH.stone, doorCenterX, 0.01, stonePositions[j], j * 30,
-      )
-      stone.setLocalScale(1.5, 1.5, 1.5)
-    }
-
-    // Exit position
-    const exitPos = {
-      x: worldX + doorCenterX,
-      z: worldZ + 5.6,
-      yaw: 0,
-    }
-
-    return { bedPos, exitPos }
-  }
-
-  // ─── Tier 3: Mansion (5×5) ────────────────────
-  //
-  //   z=0 [========== BACK WALL (solid) ==========]
-  //       | Lamp  BedDouble       Desk    Books   |
-  //   z=1 |       SideTable       Chair           |
-  //       |                                       |
-  //   z=2 |              RugRect                  |
-  //       |     Sofa                LoungeChair   |
-  //   z=3 |                                       |
-  //       |  Plant  PottedPlant    TV    LampTbl  |
-  //   z=4 |                                       |
-  //   z=5 [========== FRONT WALL (door) ==========]
-  //       x=0         door(x=2)              x=5
-
-  private async layoutTier3(
-    root: pc.Entity,
-    seats: InteractionPoint[],
-    worldX: number,
-    worldZ: number,
-    index: number,
-    width: number,
-    depth: number,
-    doorIndex: number,
-  ) {
-    await this.factory.createWalls(root, width, depth, [
-      { side: 'front', index: doorIndex, type: 'door' },
-      { side: 'left', index: 1, type: 'window' },
-      { side: 'left', index: 2, type: 'window' },
-      { side: 'left', index: 3, type: 'window' },
-      { side: 'right', index: 1, type: 'window' },
-      { side: 'right', index: 2, type: 'window' },
-      { side: 'right', index: 3, type: 'window' },
-    ])
-
-    // Double bed — position from tier config
-    const tierDef3 = getHouseTier(3)
-    await this.factory.placeFurnitureCentered(root, BUILDING.bedDouble, tierDef3.bed.x, 0, tierDef3.bed.z)
-    const bedPos = { x: worldX + tierDef3.bed.x, y: BED_SURFACE_Y, z: worldZ + tierDef3.bed.z }
-
-    // Side table next to bed
-    await this.factory.placeFurnitureCentered(root, BUILDING.sideTable, 0.5, 0, 0.8)
-
-    // Desk + laptop — back-right area
-    const desk = await this.factory.placeFurnitureCentered(root, BUILDING.desk, 3.5, 0, 0.5)
-    const deskHeight = BuildingFactory.getEntityHeight(desk)
-    await this.factory.placeFurnitureCentered(root, BUILDING.laptop, 3.5, deskHeight, 0.5)
-
-    // Chair at desk — position from tier config
-    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, tierDef3.desk.x, tierDef3.desk.z, tierDef3.desk.yaw, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
-    seats.push(deskChair.seat)
-
-    // Books on far-right back wall
-    await this.factory.placeFurnitureCentered(root, BUILDING.books, 4.5, 0, 0.4)
-
-    // TV cabinet + TV — near front wall
-    const cabinet = await this.factory.placeFurnitureCentered(root, BUILDING.cabinetTelevision, 3.0, 0, 4.2, 180)
-    const cabinetHeight = BuildingFactory.getEntityHeight(cabinet)
-    await this.factory.placeFurnitureCentered(root, BUILDING.televisionModern, 3.0, cabinetHeight, 4.2, 180)
-
-    // Sofa — center-left, facing TV
-    const sofa = await this.factory.placeSeat(root, BUILDING.loungeSofa, 1.5, 3.0, 0, 'housing', index * SEATS_PER_HOUSE + 1, worldX, worldZ, 'loungeSofa')
-    seats.push(sofa.seat)
-
-    // Lounge chair — center-right, facing TV
-    const loungeChair = await this.factory.placeSeat(root, BUILDING.loungeChair, 4.0, 3.0, 0, 'housing', index * SEATS_PER_HOUSE + 2, worldX, worldZ, 'loungeChair')
-    seats.push(loungeChair.seat)
-
-    // Decorations
-    await this.factory.placeFurnitureCentered(root, BUILDING.lampRoundFloor, 0.4, 0, 0.4)
-    await this.factory.placeFurnitureCentered(root, BUILDING.rugRectangle, 2.5, 0.01, 2.5)
-    await this.factory.placeFurnitureCentered(root, BUILDING.plantSmall1, 0.5, 0, 4.2)
-    await this.factory.placeFurnitureCentered(root, BUILDING.pottedPlant, 1.5, 0, 4.2)
-    await this.factory.placeFurnitureCentered(root, BUILDING.lampRoundTable, 4.5, 0, 4.2)
-
-    // Front door stone path (longer for mansion). Door spans x=[doorIndex, doorIndex+1].
-    const doorCenterX = doorIndex + 0.5
-    const stonePositions = [5.4, 6.0, 6.6, 7.2]
-    for (let j = 0; j < stonePositions.length; j++) {
-      const stone = await this.factory.placeFurniture(
-        root, PATH.stone, doorCenterX, 0.01, stonePositions[j], j * 25,
-      )
-      stone.setLocalScale(1.5, 1.5, 1.5)
-    }
-
-    // Exit position
-    const exitPos = {
-      x: worldX + doorCenterX,
-      z: worldZ + 7.2,
-      yaw: 0,
-    }
-
-    return { bedPos, exitPos }
-  }
 }
