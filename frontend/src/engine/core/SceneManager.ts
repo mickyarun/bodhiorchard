@@ -495,6 +495,10 @@ export class SceneManager {
       if (this._housingFenceBounds && this._housingGatePosition) {
         builder.registerRectFence(this._housingFenceBounds, this._housingGatePosition)
       }
+      // Zone circular fences — same exclusion set as buildZoneFences()
+      const noFencePhysics = new Set(['orchard', 'pool', 'housing'])
+      const fencedZones = this.layout.getAllZones().filter(z => !noFencePhysics.has(z.name))
+      builder.registerCircularFences(fencedZones)
       // Keep the builder alive so rebuildHousePhysics can reuse its
       // per-member body tracking on tier upgrades.
       this._takeoverPhysicsBuilder = builder

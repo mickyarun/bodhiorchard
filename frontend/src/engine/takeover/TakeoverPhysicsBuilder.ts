@@ -215,6 +215,34 @@ export class TakeoverPhysicsBuilder {
   }
 
   /**
+   * Register circular fence colliders for zone boundaries (coffee bar,
+   * cafeteria, pavilion). Matches the visual CircularFence built by
+   * SceneManager.buildZoneFences — same radius, gate angle, and gate width.
+   *
+   * Segment count scales with circumference (SOLID_SEGMENT_WIDTH ≈ 0.95 arc
+   * length per segment, same as the visual fence), so the collider ring
+   * tracks the visual posts regardless of zone radius.
+   */
+  registerCircularFences(
+    zones: ReadonlyArray<{ x: number; z: number; radius: number }>,
+    gateWidth = 3.0,
+  ): void {
+    const SOLID_SEGMENT_WIDTH = 0.95  // matches CircularFence constant
+    for (const zone of zones) {
+      const segments = Math.max(16, Math.round((2 * Math.PI * zone.radius) / SOLID_SEGMENT_WIDTH))
+      const gateAngle = Math.atan2(-zone.x, -zone.z)
+      this.addPhysicsRing(zone.x, zone.z, zone.radius, {
+        halfH: HOUSE_WALL_HEIGHT / 2,
+        thickness: HOUSE_WALL_THICK,
+        segments,
+        overlap: 1.1,
+        gateAngle,
+        gateWidth,
+      })
+    }
+  }
+
+  /**
    * Register a rectangular fence as 4 wall colliders matching a visual
    * RectangularFence. A gate gap is created on the wall closest to
    * `gatePosition` (same logic as RectangularFence.computeGateSide).
@@ -314,17 +342,34 @@ export class TakeoverPhysicsBuilder {
    * Each segment's tangent half-width is computed from the arc length so
    * adjacent segments overlap by `overlap` (default 1.1×) to prevent gaps.
    * The box bottom sits at y=0 and top at y=2×halfH.
+   *
+   * Optional `gateAngle` + `gateWidth` skip segments inside the gate arc,
+   * matching CircularFence's visual gate gap.
    */
   private addPhysicsRing(
     cx: number, cz: number, radius: number,
-    opts: { halfH: number; thickness: number; segments: number; overlap?: number },
+    opts: {
+      halfH: number; thickness: number; segments: number
+      overlap?: number; gateAngle?: number; gateWidth?: number
+    },
   ): void {
-    const { halfH, thickness, segments, overlap = 1.1 } = opts
+    const { halfH, thickness, segments, overlap = 1.1, gateAngle, gateWidth } = opts
     const segAngle = (2 * Math.PI) / segments
     const halfW = radius * Math.sin(segAngle / 2) * overlap
+    // Gate arc half-angle (0 when no gate)
+    const gateHalfArc = (gateWidth && gateWidth > 0 && radius > 0)
+      ? (gateWidth / radius) / 2
+      : 0
 
     for (let i = 0; i < segments; i++) {
       const angle = i * segAngle
+      // Skip segments inside the gate gap (same logic as CircularFence)
+      if (gateHalfArc > 0 && gateAngle !== undefined) {
+        let diff = angle - gateAngle
+        // Normalize to [-π, π]
+        diff = diff - Math.round(diff / (2 * Math.PI)) * 2 * Math.PI
+        if (Math.abs(diff) < gateHalfArc) continue
+      }
       this.physics.addStaticBoxRotated(
         cx + Math.sin(angle) * radius,
         halfH,
