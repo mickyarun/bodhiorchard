@@ -847,11 +847,16 @@ export class GardenEngine {
       this._transitioning = false
     }
 
-    // Re-attach WASD takeover on the visitor. Kept outside the
-    // `_transitioning` window so `takeoverCharacter`'s own guards (which
-    // check `sceneState === 'garden'`) can run unblocked.
+    // Re-attach WASD takeover on the visitor. Pass the exit position so
+    // the physics capsule spawns there — without it, the async animation
+    // load yields to the event loop and a server-driven position update
+    // can snap the character to their sim position (bed/desk) before the
+    // capsule is created.
     if (visitorId) {
-      await this.takeoverCharacter(visitorId)
+      const exitPos = exitMemberId
+        ? this.sceneManager?.memberHouseMap.get(exitMemberId)?.exitPosition
+        : null
+      await this.takeoverCharacter(visitorId, exitPos ?? undefined)
     }
   }
 
@@ -881,7 +886,10 @@ export class GardenEngine {
    * Camera follows the character, WASD drives movement.
    * @param userId - The member's user_id (must match a character in the scene)
    */
-  async takeoverCharacter(userId: string): Promise<void> {
+  async takeoverCharacter(
+    userId: string,
+    spawnOverride?: { x: number; z: number; yaw: number },
+  ): Promise<void> {
     if (this.sceneState !== 'garden' || !this.camera || !this.input || !this.sceneManager || !this.app) return
 
     const charSystem = this.sceneManager.characterSystemRef
@@ -905,57 +913,41 @@ export class GardenEngine {
     // routing used to produce.
     console.log('[GardenEngine] takeoverCharacter → entering garden WASD mode')
 
-    // If the character is currently inside their own house (e.g. sitting
-    // at their desk as the auto-sim had them doing), spit them out the
-    // front door BEFORE the physics capsule is created. Without this,
-    // `TakeoverController.enter` would spawn the capsule inside the walls
-    // and WASD mode would show the garden exterior with the character
-    // stuck in interior geometry. We deliberately don't route them to
-    // interior mode — the plan keeps takeover == garden WASD and
-    // interior is only reached via the house-click or door-walk paths.
-    const ownHouse = this.sceneManager.memberHouseMap.get(userId)
-    const cpInit = character.entity.getPosition()
-    console.log('[Takeover][diag] userId=', userId,
-      'characterPos=', { x: cpInit.x.toFixed(2), y: cpInit.y.toFixed(2), z: cpInit.z.toFixed(2) },
-      'houseMapKeys=', [...this.sceneManager.memberHouseMap.keys()],
-      'ownHouseFound=', !!ownHouse)
-
-    if (ownHouse) {
-      const cp = character.entity.getPosition()
-      const bed = ownHouse.bedPosition
-      const dx = cp.x - bed.x
-      const dz = cp.z - bed.z
-      const bedDist2 = dx * dx + dz * dz
-      const nearBed = bedDist2 < 9  // within 3 units of bed
-      const seatDistances = ownHouse.seats.map(s => {
-        const sx = cp.x - s.x
-        const sz = cp.z - s.z
-        return sx * sx + sz * sz
-      })
-      const nearSeat = seatDistances.some(d2 => d2 < 4)
-      console.log('[Takeover][diag] house pivot=', { x: ownHouse.pivotX, z: ownHouse.pivotZ, yaw: ownHouse.pivotYaw },
-        'tier=', ownHouse.tier,
-        'bed=', { x: bed.x.toFixed(2), z: bed.z.toFixed(2) }, 'bedDist2=', bedDist2.toFixed(2),
-        'seatDist2=', seatDistances.map(d => d.toFixed(2)),
-        'exit=', ownHouse.exitPosition,
-        'nearBed=', nearBed, 'nearSeat=', nearSeat)
-
-      if (nearBed || nearSeat) {
-        const exit = ownHouse.exitPosition
-        character.entity.setPosition(exit.x, 0, exit.z)
-        character.entity.setEulerAngles(0, exit.yaw, 0)
-        character.entity.anim?.setBoolean('sitting', false)
-        character.entity.anim?.setInteger('speed', 0)
-        character.entity.anim?.setInteger('working', 0)
-        // Extend the door cooldown so the first physics tick after
-        // capsule creation can't re-fire the door sensor.
-        this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
-        console.log('[Takeover][diag] teleported to exit at', { x: exit.x.toFixed(2), z: exit.z.toFixed(2), yaw: exit.yaw })
-      } else {
-        console.log('[Takeover][diag] NOT teleporting — character is outside their own house, will spawn at current pos')
-      }
+    // Determine spawn position: explicit override (from exitHouse) takes
+    // priority, otherwise check if the character is inside their own house
+    // (server-sim had them at bed/desk) and spit them out the front door.
+    if (spawnOverride) {
+      character.entity.setPosition(spawnOverride.x, 0, spawnOverride.z)
+      character.entity.setEulerAngles(0, spawnOverride.yaw, 0)
+      character.entity.anim?.setBoolean('sitting', false)
+      character.entity.anim?.setInteger('speed', 0)
+      character.entity.anim?.setInteger('working', 0)
+      this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+      console.log('[Takeover] spawn override at', { x: spawnOverride.x.toFixed(2), z: spawnOverride.z.toFixed(2), yaw: spawnOverride.yaw })
     } else {
-      console.warn('[Takeover][diag] ownHouse NOT FOUND for', userId, '— spawning at current character position')
+      const ownHouse = this.sceneManager.memberHouseMap.get(userId)
+      if (ownHouse) {
+        const cp = character.entity.getPosition()
+        const bed = ownHouse.bedPosition
+        const dx = cp.x - bed.x
+        const dz = cp.z - bed.z
+        const nearBed = (dx * dx + dz * dz) < 9
+        const nearSeat = ownHouse.seats.some(s => {
+          const sx = cp.x - s.x
+          const sz = cp.z - s.z
+          return (sx * sx + sz * sz) < 4
+        })
+        if (nearBed || nearSeat) {
+          const exit = ownHouse.exitPosition
+          character.entity.setPosition(exit.x, 0, exit.z)
+          character.entity.setEulerAngles(0, exit.yaw, 0)
+          character.entity.anim?.setBoolean('sitting', false)
+          character.entity.anim?.setInteger('speed', 0)
+          character.entity.anim?.setInteger('working', 0)
+          this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+          console.log('[Takeover] teleported to own house exit at', { x: exit.x.toFixed(2), z: exit.z.toFixed(2), yaw: exit.yaw })
+        }
+      }
     }
 
     this.takeoverUserId = userId
@@ -990,6 +982,16 @@ export class GardenEngine {
 
     this.takeoverCtrl = new TakeoverController(this.input)
     this.takeoverCtrl.enter(character.entity, physics)
+
+    // Re-apply spawn override AFTER capsule creation — the async animation
+    // load above can yield to the event loop, allowing a server-driven
+    // position update to snap the entity away from the exit position before
+    // the capsule reads entity.getPosition().
+    if (spawnOverride) {
+      character.entity.setPosition(spawnOverride.x, 0, spawnOverride.z)
+      character.entity.setEulerAngles(0, spawnOverride.yaw, 0)
+      physics.teleportPlayer(spawnOverride.x, spawnOverride.z)
+    }
 
     // Claim server-side takeover: OrgRoom will suspend its NPC sim for this
     // member and accept move messages only from this session.
