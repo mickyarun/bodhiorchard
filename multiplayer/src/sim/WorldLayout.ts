@@ -39,32 +39,30 @@ const HOUSES_PER_SIDE = 4
 const HOUSES_PER_STREET = HOUSES_PER_SIDE * 2
 
 /**
- * Desk/bed offsets per house tier (corner-local space, before centering + rotation).
- * These match HouseBuilder's layout methods (corner origin at 0,0).
+ * ── Tier geometry (mirrors frontend/src/engine/buildings/HouseTierConfig.ts) ──
+ *
+ * Single source of truth is the frontend HouseTierConfig. These values MUST
+ * stay in sync. When adding a new tier, update both files.
+ *
+ * Layout:  { width, depth, doorIndex, bed: {x,z}, desk: {x,z,yaw} }
+ *   Tier 1 (Hut):     3×3, door=1, bed=(1.0, 0.7), desk=(2.2, 1.3, 180)
+ *   Tier 2 (Cottage):  4×4, door=1, bed=(1.0, 1.1), desk=(3.2, 1.3, 180)
+ *   Tier 3 (Mansion):  5×5, door=2, bed=(1.5, 0.8), desk=(3.4, 1.3, 180)
  */
-const TIER_DESK: Record<number, { x: number; z: number; yaw: number }> = {
-  1: { x: 2.2, z: 1.3, yaw: 180 },
-  2: { x: 3.2, z: 1.3, yaw: 180 },
-  3: { x: 3.4, z: 1.3, yaw: 180 },
-}
-const TIER_BED: Record<number, { x: number; z: number }> = {
-  1: { x: 1.0, z: 0.7 },
-  2: { x: 1.0, z: 1.1 },
-  3: { x: 1.5, z: 0.8 },
+const TIER_CONFIG: Record<number, {
+  width: number; depth: number
+  bed: { x: number; z: number }
+  desk: { x: number; z: number; yaw: number }
+}> = {
+  1: { width: 3, depth: 3, bed: { x: 1.0, z: 0.7 }, desk: { x: 2.2, z: 1.3, yaw: 180 } },
+  2: { width: 4, depth: 4, bed: { x: 1.0, z: 1.1 }, desk: { x: 3.2, z: 1.3, yaw: 180 } },
+  3: { width: 5, depth: 5, bed: { x: 1.5, z: 0.8 }, desk: { x: 3.4, z: 1.3, yaw: 180 } },
 }
 
-/**
- * Centering offset per tier — shifts from corner-origin to center-origin.
- * Must match frontend HousingVillage.wrapWithPivot(), which now uses
- * (-tierDef.width/2, -tierDef.depth/2) uniformly because KayKit exteriors
- * are scaled at build time to fit the same tile footprint as the interior.
- *
- * Derived from HouseTierConfig: { 1: 3×3, 2: 4×4, 3: 5×5 }
- */
-const TIER_CENTER_OFFSET: Record<number, { x: number; z: number }> = {
-  1: { x: -1.5, z: -1.5 },   // 3×3 / 2
-  2: { x: -2.0, z: -2.0 },   // 4×4 / 2
-  3: { x: -2.5, z: -2.5 },   // 5×5 / 2
+/** Centering offset derived from width/depth — no longer hardcoded. */
+function centerOffset(houseLevel: number): { x: number; z: number } {
+  const c = TIER_CONFIG[houseLevel] ?? TIER_CONFIG[1]
+  return { x: -c.width / 2, z: -c.depth / 2 }
 }
 
 /**
@@ -137,11 +135,10 @@ export function getHouseDeskSeat(
   const origin = getHouseOrigin(memberIndex, totalMembers)
   if (!origin) return null
 
-  const local = TIER_DESK[houseLevel] ?? TIER_DESK[1]
-  const offset = TIER_CENTER_OFFSET[houseLevel] ?? TIER_CENTER_OFFSET[1]
-  // Shift from corner-local to center-local, then rotate
-  const cx = offset.x + local.x
-  const cz = offset.z + local.z
+  const cfg = TIER_CONFIG[houseLevel] ?? TIER_CONFIG[1]
+  const offset = centerOffset(houseLevel)
+  const cx = offset.x + cfg.desk.x
+  const cz = offset.z + cfg.desk.z
   const rad = origin.yawDeg * Math.PI / 180
   const cos = Math.cos(rad)
   const sin = Math.sin(rad)
@@ -150,7 +147,7 @@ export function getHouseDeskSeat(
     x: origin.x + cx * cos + cz * sin,
     y: 0,
     z: origin.z - cx * sin + cz * cos,
-    yaw: local.yaw + origin.yawDeg,
+    yaw: cfg.desk.yaw + origin.yawDeg,
   }
 }
 
@@ -166,10 +163,10 @@ export function getHouseBedPosition(
   const origin = getHouseOrigin(memberIndex, totalMembers)
   if (!origin) return null
 
-  const local = TIER_BED[houseLevel] ?? TIER_BED[1]
-  const offset = TIER_CENTER_OFFSET[houseLevel] ?? TIER_CENTER_OFFSET[1]
-  const cx = offset.x + local.x
-  const cz = offset.z + local.z
+  const cfg = TIER_CONFIG[houseLevel] ?? TIER_CONFIG[1]
+  const offset = centerOffset(houseLevel)
+  const cx = offset.x + cfg.bed.x
+  const cz = offset.z + cfg.bed.z
   const rad = origin.yawDeg * Math.PI / 180
   const cos = Math.cos(rad)
   const sin = Math.sin(rad)

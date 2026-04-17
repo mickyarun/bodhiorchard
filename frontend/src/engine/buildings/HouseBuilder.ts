@@ -19,7 +19,7 @@ import * as pc from 'playcanvas'
 import { BuildingFactory } from './BuildingFactory'
 import { BUILDING, PATH } from '../assets/AssetManifest'
 import { setTreeData } from '../world/TreeNodeData'
-import { getHouseTier } from './HouseTierConfig'
+import { getHouseTier, BED_SURFACE_Y } from './HouseTierConfig'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 
 /** Shared wall height constant — exported so takeover physics can match visual walls. */
@@ -225,11 +225,9 @@ export class HouseBuilder {
       board.setLocalPosition(targetHalfW, 0, targetHalfD)
       root.addChild(board)
 
-      // Default bed/exit positions for KayKit tiers (interior handles actual placement).
-      // Exit is centered on the door (doorIndex + 0.5), 1 unit past the front
-      // wall (depth + 1), facing away (yaw 0) — same convention as Kenney tiers.
+      // Bed/exit from tier config — same source of truth as Kenney and multiplayer.
+      bedPos = { x: worldX + tierDef.bed.x, y: BED_SURFACE_Y, z: worldZ + tierDef.bed.z }
       const doorCenterX = tierDef.doorIndex + 0.5
-      bedPos = { x: worldX + 1, y: 0, z: worldZ + 0.5 }
       exitPos = { x: worldX + doorCenterX, z: worldZ + tierDef.depth + 1.0, yaw: 0 }
     } else {
       // Kenney procedural house (tier 1)
@@ -293,13 +291,14 @@ export class HouseBuilder {
       { side: 'front', index: doorIndex, type: 'door' },
     ])
 
-    // Bed — back-left
-    await this.factory.placeFurnitureCentered(root, BUILDING.bedSingle, 1.0, 0, 0.7)
-    const bedPos = { x: worldX + 1.0, y: 0.38, z: worldZ + 0.7 }
+    // Bed — position from tier config
+    const tierDef1 = getHouseTier(1)
+    await this.factory.placeFurnitureCentered(root, BUILDING.bedSingle, tierDef1.bed.x, 0, tierDef1.bed.z)
+    const bedPos = { x: worldX + tierDef1.bed.x, y: BED_SURFACE_Y, z: worldZ + tierDef1.bed.z }
 
-    // Desk + chair — back-right
-    await this.factory.placeFurnitureCentered(root, BUILDING.desk, 2.2, 0, 0.5)
-    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, 2.2, 1.3, 180, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
+    // Desk + chair — position from tier config
+    await this.factory.placeFurnitureCentered(root, BUILDING.desk, tierDef1.desk.x, 0, 0.5)
+    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, tierDef1.desk.x, tierDef1.desk.z, tierDef1.desk.yaw, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
     seats.push(deskChair.seat)
 
     // Lamp — back-left corner
@@ -348,17 +347,18 @@ export class HouseBuilder {
       { side: 'right', index: 2, type: 'window' },
     ])
 
-    // Bed — back-left area
-    await this.factory.placeFurnitureCentered(root, BUILDING.bedSingle, 1.0, 0, 1.1)
-    const bedPos = { x: worldX + 1.0, y: 0.38, z: worldZ + 1.1 }
+    // Bed — position from tier config
+    const tierDef2 = getHouseTier(2)
+    await this.factory.placeFurnitureCentered(root, BUILDING.bedSingle, tierDef2.bed.x, 0, tierDef2.bed.z)
+    const bedPos = { x: worldX + tierDef2.bed.x, y: BED_SURFACE_Y, z: worldZ + tierDef2.bed.z }
 
     // Desk + laptop — back-right corner
     const desk = await this.factory.placeFurnitureCentered(root, BUILDING.desk, 3.3, 0, 0.5)
     const deskHeight = BuildingFactory.getEntityHeight(desk)
     await this.factory.placeFurnitureCentered(root, BUILDING.laptop, 3.3, deskHeight, 0.5)
 
-    // Chair at desk
-    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, 3.2, 1.3, 180, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
+    // Chair at desk — position from tier config
+    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, tierDef2.desk.x, tierDef2.desk.z, tierDef2.desk.yaw, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
     seats.push(deskChair.seat)
 
     // TV cabinet + TV
@@ -433,9 +433,10 @@ export class HouseBuilder {
       { side: 'right', index: 3, type: 'window' },
     ])
 
-    // Double bed — back-left area
-    await this.factory.placeFurnitureCentered(root, BUILDING.bedDouble, 1.5, 0, 0.8)
-    const bedPos = { x: worldX + 1.5, y: 0.38, z: worldZ + 0.8 }
+    // Double bed — position from tier config
+    const tierDef3 = getHouseTier(3)
+    await this.factory.placeFurnitureCentered(root, BUILDING.bedDouble, tierDef3.bed.x, 0, tierDef3.bed.z)
+    const bedPos = { x: worldX + tierDef3.bed.x, y: BED_SURFACE_Y, z: worldZ + tierDef3.bed.z }
 
     // Side table next to bed
     await this.factory.placeFurnitureCentered(root, BUILDING.sideTable, 0.5, 0, 0.8)
@@ -445,8 +446,8 @@ export class HouseBuilder {
     const deskHeight = BuildingFactory.getEntityHeight(desk)
     await this.factory.placeFurnitureCentered(root, BUILDING.laptop, 3.5, deskHeight, 0.5)
 
-    // Chair at desk
-    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, 3.4, 1.3, 180, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
+    // Chair at desk — position from tier config
+    const deskChair = await this.factory.placeSeat(root, BUILDING.chairDesk, tierDef3.desk.x, tierDef3.desk.z, tierDef3.desk.yaw, 'housing', index * SEATS_PER_HOUSE, worldX, worldZ, 'chairDesk', 'typing')
     seats.push(deskChair.seat)
 
     // Books on far-right back wall
