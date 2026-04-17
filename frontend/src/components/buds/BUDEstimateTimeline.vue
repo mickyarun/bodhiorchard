@@ -57,7 +57,7 @@
     <!-- Phase stepper -->
     <div class="phase-stepper">
       <div
-        v-for="(phase, index) in estimates.phases"
+        v-for="(phase, index) in sortedPhases"
         :key="phase.phase"
         class="phase-step"
         :class="{
@@ -68,7 +68,7 @@
         @click="$emit('override-phase', phase.phase)"
       >
         <div class="phase-dot" />
-        <div v-if="index < estimates.phases.length - 1" class="phase-connector" />
+        <div v-if="index < sortedPhases.length - 1" class="phase-connector" />
         <div class="phase-info">
           <div class="text-caption font-weight-medium">{{ phaseLabel(phase.phase) }}</div>
           <div class="text-caption" :class="deadlineClass(phase.p70_date)">
@@ -105,6 +105,14 @@ defineEmits<{
   'recalculate': []
   'override-phase': [phase: string]
 }>()
+
+const sortedPhases = computed(() =>
+  [...(props.estimates?.phases ?? [])].sort(
+    (a, b) =>
+      BUD_STATUS_ORDER.indexOf(a.phase as BUDStatus) -
+      BUD_STATUS_ORDER.indexOf(b.phase as BUDStatus),
+  ),
+)
 
 const currentPhaseIndex = computed(() =>
   BUD_STATUS_ORDER.indexOf(props.currentPhase as BUDStatus),

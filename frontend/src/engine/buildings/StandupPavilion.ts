@@ -236,6 +236,10 @@ export class StandupPavilion {
     fire.setLocalPosition(0, y, 0)
     parent.addChild(fire)
     this.fireLight = fire.light ?? null
+    // When the fire entity is destroyed (e.g., parent scene teardown without
+    // StandupPavilion.destroy() being called), null out the ref so tickFlames
+    // doesn't poke at a detached LightComponent whose internal _light is null.
+    fire.once('destroy', () => { this.fireLight = null })
   }
 
   // ─── Fireplace GLB loader ────────────────────────────────────────────────
@@ -387,8 +391,10 @@ export class StandupPavilion {
         f.baseZ + wobble * 0.02,
       )
     }
-    // Flicker the omni light in sync with the dominant flame
-    if (this.fireLight?.entity) {
+    // Flicker the omni light in sync with the dominant flame.
+    // Guard: entity.parent is null once removed from scene graph — the
+    // LightComponent.intensity setter reads internal _light which is null by then.
+    if (this.fireLight?.entity?.parent) {
       const pulse = Math.sin(this.fireT * 9) * 0.25 + Math.sin(this.fireT * 13.7) * 0.15
       this.fireLight.intensity = 2.2 + pulse
     }

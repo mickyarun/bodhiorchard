@@ -19,7 +19,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    allowedHosts: ['frontendchat.ngrok.app'],
+    allowedHosts: ['frontendchat.ngrok.app', 'macbook-pro.taile1406f.ts.net'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
