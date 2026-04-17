@@ -225,9 +225,12 @@ export class HouseBuilder {
       board.setLocalPosition(targetHalfW, 0, targetHalfD)
       root.addChild(board)
 
-      // Default bed/exit positions for KayKit tiers (interior handles actual placement)
+      // Default bed/exit positions for KayKit tiers (interior handles actual placement).
+      // Exit is centered on the door (doorIndex + 0.5), 1 unit past the front
+      // wall (depth + 1), facing away (yaw 0) — same convention as Kenney tiers.
+      const doorCenterX = tierDef.doorIndex + 0.5
       bedPos = { x: worldX + 1, y: 0, z: worldZ + 0.5 }
-      exitPos = { x: targetHalfW, z: targetHalfD * 2 + 0.5, yaw: 180 }
+      exitPos = { x: doorCenterX, z: tierDef.depth + 1.0, yaw: 0 }
     } else {
       // Kenney procedural house (tier 1)
       await this.factory.createFloor(root, tierDef.width, tierDef.depth)
