@@ -10,18 +10,11 @@
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { FenceBounds } from '../buildings/VillageLayout'
-
-// ─── Constants (match CircularFence solid style) ─────────────────────────────
-
-const POST_HEIGHT     = 1.10
-const POST_WIDTH      = 0.10
-const PANEL_HEIGHT    = 0.85
-const PANEL_THICKNESS = 0.07
-const SEGMENT_WIDTH   = 0.95  // spacing between posts along each wall
-
-const GATE_POST_W = 0.16
-const GATE_POST_H = 1.28
-const GATE_WIDTH  = 3.0  // gap width for the gate
+import {
+  POST_HEIGHT, POST_WIDTH, PANEL_HEIGHT, PANEL_THICKNESS,
+  GATE_POST_W, GATE_POST_H, GATE_WIDTH,
+  SOLID_SEGMENT_WIDTH,
+} from './FenceConstants'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -85,7 +78,7 @@ export class RectangularFence {
     const wallLen = Math.sqrt(dx * dx + dz * dz)
     if (wallLen < 0.1) return
 
-    const segments = Math.max(1, Math.round(wallLen / SEGMENT_WIDTH))
+    const segments = Math.max(1, Math.round(wallLen / SOLID_SEGMENT_WIDTH))
     const panelWidth = wallLen / segments
 
     // Gate center is at the midpoint of the wall

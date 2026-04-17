@@ -67,7 +67,12 @@ export const HOUSE_TIERS: readonly HouseTierDef[] = [
 export const MAX_TIER_FOOTPRINT = Math.max(...HOUSE_TIERS.map(t => Math.max(t.width, t.depth)))
 
 export function getHouseTier(tier: number): HouseTierDef {
-  return HOUSE_TIERS.find(t => t.tier === tier) ?? HOUSE_TIERS[0] // default to Hut
+  const found = HOUSE_TIERS.find(t => t.tier === tier)
+  if (!found) {
+    console.warn(`[HouseTierConfig] Unknown tier ${tier} — falling back to tier 1 (Hut). ` +
+      `If this is a new tier, add it to HOUSE_TIERS.`)
+  }
+  return found ?? HOUSE_TIERS[0]
 }
 
 /**

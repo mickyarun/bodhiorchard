@@ -923,7 +923,7 @@ export class GardenEngine {
       character.entity.anim?.setInteger('speed', 0)
       character.entity.anim?.setInteger('working', 0)
       this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
-      console.log('[Takeover] spawn override at', { x: spawnOverride.x.toFixed(2), z: spawnOverride.z.toFixed(2), yaw: spawnOverride.yaw })
+      console.debug('[GardenEngine] spawn override at', { x: spawnOverride.x.toFixed(2), z: spawnOverride.z.toFixed(2), yaw: spawnOverride.yaw })
     } else {
       const ownHouse = this.sceneManager.memberHouseMap.get(userId)
       if (ownHouse) {
@@ -945,7 +945,7 @@ export class GardenEngine {
           character.entity.anim?.setInteger('speed', 0)
           character.entity.anim?.setInteger('working', 0)
           this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
-          console.log('[Takeover] teleported to own house exit at', { x: exit.x.toFixed(2), z: exit.z.toFixed(2), yaw: exit.yaw })
+          console.debug('[GardenEngine] teleported to own house exit at', { x: exit.x.toFixed(2), z: exit.z.toFixed(2), yaw: exit.yaw })
         }
       }
     }

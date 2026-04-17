@@ -58,6 +58,7 @@ import {
   type HutInfo,
   type PondObstacle,
 } from '../takeover/TakeoverPhysicsBuilder'
+import { GATE_WIDTH } from '../world/FenceConstants'
 
 export class SceneManager {
   private app: Application
@@ -88,6 +89,9 @@ export class SceneManager {
 
   // Building entities (for destruction)
   private buildingEntities: pc.Entity[] = []
+
+  /** Zones that have NO fence (orchard = hub, pool = own collider, housing = RectangularFence). */
+  private readonly ZONES_WITHOUT_FENCES = new Set(['orchard', 'pool', 'housing'])
 
   // Takeover physics (created async, null if Rapier WASM fails to load)
   private _physics: PhysicsWorld | null = null
@@ -495,9 +499,7 @@ export class SceneManager {
       if (this._housingFenceBounds && this._housingGatePosition) {
         builder.registerRectFence(this._housingFenceBounds, this._housingGatePosition)
       }
-      // Zone circular fences — same exclusion set as buildZoneFences()
-      const noFencePhysics = new Set(['orchard', 'pool', 'housing'])
-      const fencedZones = this.layout.getAllZones().filter(z => !noFencePhysics.has(z.name))
+      const fencedZones = this.layout.getAllZones().filter(z => !this.ZONES_WITHOUT_FENCES.has(z.name))
       builder.registerCircularFences(fencedZones)
       // Keep the builder alive so rebuildHousePhysics can reuse its
       // per-member body tracking on tier upgrades.
@@ -559,11 +561,8 @@ export class SceneManager {
     const fence = new CircularFence(factory.materialFactory)
 
     // ── Zone property fences (solid) ──────────────────────────────────────────
-    // Housing fence is built inside HousingVillage (rotated with the village).
-    const noFence = new Set(['orchard', 'pool', 'housing'])
-
     for (const zone of this.layout.getAllZones()) {
-      if (noFence.has(zone.name)) continue
+      if (this.ZONES_WITHOUT_FENCES.has(zone.name)) continue
 
       const radius    = zone.radius
       const gateAngle = Math.atan2(-zone.x, -zone.z)
@@ -572,7 +571,7 @@ export class SceneManager {
         cx:        zone.x,
         cz:        zone.z,
         gateAngle,
-        gateWidth: 3.0,
+        gateWidth: GATE_WIDTH,
         style:     'solid',
       }))
     }

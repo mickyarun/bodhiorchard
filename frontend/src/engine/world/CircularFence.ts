@@ -17,29 +17,13 @@
  */
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
-
-// ─── Solid-fence constants ────────────────────────────────────────────────────
-
-const POST_HEIGHT     = 1.10
-const POST_WIDTH      = 0.10
-const PANEL_HEIGHT    = 0.85
-const PANEL_THICKNESS = 0.07
-const GATE_POST_W     = 0.16
-const GATE_POST_H     = 1.28
-
-/** Arc length per segment for solid zone fences (dense spacing). */
-const SOLID_SEGMENT_WIDTH = 0.95
-
-// ─── Rail-fence constants ─────────────────────────────────────────────────────
-
-const RAIL_POST_HEIGHT   = 1.00
-const RAIL_POST_WIDTH    = 0.12
-const RAIL_THICKNESS     = 0.06  // both width and height of the horizontal rail bar
-/** Two horizontal rails: 30% and 78% of post height. */
-const RAIL_Y_FRACTIONS   = [0.30, 0.78]
-
-/** Arc length per segment for rail fences (wide, open spacing). */
-const RAIL_SEGMENT_WIDTH  = 4.0
+import {
+  POST_HEIGHT, POST_WIDTH, PANEL_HEIGHT, PANEL_THICKNESS,
+  GATE_POST_W, GATE_POST_H, GATE_WIDTH,
+  SOLID_SEGMENT_WIDTH,
+  RAIL_POST_HEIGHT, RAIL_POST_WIDTH, RAIL_THICKNESS, RAIL_Y_FRACTIONS,
+  RAIL_SEGMENT_WIDTH,
+} from './FenceConstants'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -85,7 +69,7 @@ export class CircularFence {
     const {
       radius, cx, cz,
       gateAngle = 0,
-      gateWidth = 1.6,
+      gateWidth = GATE_WIDTH,
       style = 'solid',
     } = opts
 

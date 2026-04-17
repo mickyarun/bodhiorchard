@@ -21,6 +21,7 @@ import type { PhysicsWorld } from '../physics'
 import { WALL_HEIGHT, type HouseResult } from '../buildings/HouseBuilder'
 import { getHouseTier } from '../buildings/HouseTierConfig'
 import type { FenceBounds } from '../buildings/VillageLayout'
+import { SOLID_SEGMENT_WIDTH, GATE_WIDTH } from '../world/FenceConstants'
 
 // ─── Constants ─────────────────────────────────
 
@@ -225,9 +226,8 @@ export class TakeoverPhysicsBuilder {
    */
   registerCircularFences(
     zones: ReadonlyArray<{ x: number; z: number; radius: number }>,
-    gateWidth = 3.0,
+    gateW = GATE_WIDTH,
   ): void {
-    const SOLID_SEGMENT_WIDTH = 0.95  // matches CircularFence constant
     for (const zone of zones) {
       const segments = Math.max(16, Math.round((2 * Math.PI * zone.radius) / SOLID_SEGMENT_WIDTH))
       const gateAngle = Math.atan2(-zone.x, -zone.z)
@@ -237,7 +237,7 @@ export class TakeoverPhysicsBuilder {
         segments,
         overlap: 1.1,
         gateAngle,
-        gateWidth,
+        gateWidth: gateW,
       })
     }
   }
@@ -250,7 +250,7 @@ export class TakeoverPhysicsBuilder {
   registerRectFence(
     bounds: FenceBounds,
     gatePosition: { x: number; z: number },
-    gateWidth = 3.0,
+    gateWidth = GATE_WIDTH,
   ): void {
     const { minX, maxX, minZ, maxZ } = bounds
     const halfH = HOUSE_WALL_HEIGHT / 2

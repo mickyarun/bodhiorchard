@@ -218,9 +218,8 @@ export class HouseBuilder {
       measuredHalfW = raw.halfW * s
       measuredHalfD = raw.halfD * s
 
-      // Nameboard above the building — sits at interior center, height scaled
-      // with the building so it floats just above the roof.
-      const labelY = targetHalfW * 2 * s + 0.3
+      // Nameboard above the building — measured from the actual GLB roof height.
+      const labelY = BuildingFactory.getEntityHeight(building) * s + 0.3
       const board = createHouseNameboard(memberName, this.device, labelY)
       board.setLocalPosition(targetHalfW, 0, targetHalfD)
       root.addChild(board)
