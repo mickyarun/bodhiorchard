@@ -11,8 +11,8 @@ import * as pc from 'playcanvas'
 import { OrbitCamera } from '../housetest/OrbitCamera'
 
 const GARDEN_YAW   = 0
-const GARDEN_PITCH  = 25   // lower angle than interior (60°) for outdoor feel
-const GARDEN_DIST   = 10   // wider view of garden surroundings
+const GARDEN_PITCH  = 50   // top-down-ish angle — keeps character visible with surrounding context
+const GARDEN_DIST   = 12   // wider view of garden surroundings
 
 export class TakeoverCamera {
   private orbit: OrbitCamera

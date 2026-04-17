@@ -230,7 +230,7 @@ export class HouseBuilder {
       // wall (depth + 1), facing away (yaw 0) — same convention as Kenney tiers.
       const doorCenterX = tierDef.doorIndex + 0.5
       bedPos = { x: worldX + 1, y: 0, z: worldZ + 0.5 }
-      exitPos = { x: doorCenterX, z: tierDef.depth + 1.0, yaw: 0 }
+      exitPos = { x: worldX + doorCenterX, z: worldZ + tierDef.depth + 1.0, yaw: 0 }
     } else {
       // Kenney procedural house (tier 1)
       await this.factory.createFloor(root, tierDef.width, tierDef.depth)
