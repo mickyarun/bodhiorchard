@@ -220,7 +220,6 @@ export const INTERIOR_FURNITURE_TIER_2: FurnitureDef[] = [
   { asset: 'televisionModern',    x: 0.4,  z: 2.5, rotation: 90, stackOn: 'cabinetTelevision' },
   { asset: 'loungeChair',         x: 1.5,  z: 2.5, rotation: 270 },
   // Decor
-  { asset: 'kaykit_lampStanding', x: 0.3,  z: 3.5, scale: KSM },
   { asset: 'kaykit_rugRectangle', x: 2.0,  y: 0.01, z: 2.0, scale: KS },
   { asset: 'kaykit_bookshelf',    x: 3.5,  z: 0.2, rotation: 270, scale: KSM },
   { asset: 'kaykit_cactus',       x: 0.3,  z: 0.3, scale: KSM },
@@ -287,9 +286,7 @@ export const INTERIOR_FURNITURE_TIER_3: FurnitureDef[] = [
   { asset: 'kaykit_tableMedium',  x: 3.0,  z: 4.0, scale: KS },
   { asset: 'kaykit_chair',        x: 2.3,  z: 4.0, rotation: 90, scale: KS },
   { asset: 'kaykit_chair',        x: 3.7,  z: 4.0, rotation: 270, scale: KS },
-  // ── Lighting + Decor ────────────────────────
-  { asset: 'kaykit_lampStanding', x: 0.3,  z: 1.5, scale: KSM },
-  { asset: 'kaykit_lampStanding', x: 4.5,  z: 4.5, scale: KSM },
+  // ── Decor ───────────────────────────────────
   { asset: 'kaykit_rugRectangle', x: 3.5,  y: 0.01, z: 3.0, scale: KS },
   { asset: 'kaykit_rugOval',      x: 1.0,  y: 0.01, z: 1.5, scale: KS },
   { asset: 'kaykit_cactus',       x: 4.5,  z: 2.0, scale: KSM },
