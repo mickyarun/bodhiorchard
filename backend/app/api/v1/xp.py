@@ -1,6 +1,7 @@
 """XP/gamification API endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -161,3 +162,35 @@ async def upgrade_house(
         remaining_skill_points=row.skill_points,
         house_level=row.house_level,
     )
+
+
+@router.post("/claim-greeting-bonus")
+async def claim_greeting_bonus(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Award 1 SP for first-ever greeting emote near another player. One-time only."""
+    from app.models.developer_xp import XPEvent
+
+    xp_repo = DeveloperXPRepository(db, org_id=current_user.org_id)
+    row = await xp_repo.get_or_create(current_user.id)
+
+    # source_ref unique index prevents duplicate awards
+    source_ref = f"greeting_bonus_{current_user.id}"
+    existing = await db.execute(
+        select(XPEvent.id).where(XPEvent.source_ref == source_ref)
+    )
+    if existing.scalar_one_or_none() is not None:
+        return {"awarded": False, "reason": "already_claimed"}
+
+    row.skill_points += 1
+    db.add(XPEvent(
+        user_id=current_user.id,
+        org_id=current_user.org_id,
+        xp_amount=0,
+        source="greeting_bonus",
+        source_ref=source_ref,
+    ))
+    await db.commit()
+
+    return {"awarded": True, "skill_points": row.skill_points}

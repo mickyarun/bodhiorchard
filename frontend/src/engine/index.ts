@@ -86,6 +86,8 @@ export class GardenEngine {
   private seatToggleCooldown = 0
   /** When true, `onUpdate` renders wireframe boxes over every Rapier collider. */
   private _debugColliders = false
+  /** Prevents repeated greeting bonus API calls (one-time only). */
+  private _greetingBonusClaimed = false
   private currentOccupiedSeatId: string | null = null
   /** Tracks which seat each remote member occupies (userId → seatId). */
   private remoteSeatMap = new Map<string, string>()
@@ -557,8 +559,14 @@ export class GardenEngine {
           }
 
           // ─── Emotes: 1=Wave, 2=Cheer ────────────────────────────────
-          if (this.input?.wasPressed(pc.KEY_1)) this.takeoverCtrl.playEmote(1)
-          if (this.input?.wasPressed(pc.KEY_2)) this.takeoverCtrl.playEmote(2)
+          if (this.input?.wasPressed(pc.KEY_1)) {
+            this.takeoverCtrl.playEmote(1)
+            this.tryClaimGreetingBonus()
+          }
+          if (this.input?.wasPressed(pc.KEY_2)) {
+            this.takeoverCtrl.playEmote(2)
+            this.tryClaimGreetingBonus()
+          }
 
           // ─── Seat interaction: E-key to sit/stand at nearby chairs ───
           if (this.seatToggleCooldown > 0) this.seatToggleCooldown -= dt
@@ -867,6 +875,26 @@ export class GardenEngine {
   /** Helper — wait for a duration (used to let camera fly-to complete). */
   private waitForTransition(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  // ─── Greeting bonus (one-time 1 SP) ──────────────
+
+  /**
+   * Claim 1 SP greeting bonus if emoting near another player for the first time.
+   * Silent no-op if already claimed or no nearby character.
+   */
+  private tryClaimGreetingBonus(): void {
+    if (this._greetingBonusClaimed) return
+    // Only award if near another character (ProximitySystem detects within 3 units)
+    if (!this.takeoverProximity?.hasNearbyMember) return
+    this._greetingBonusClaimed = true
+    import('@/services/api').then(({ default: api }) => {
+      api.post('/v1/xp/claim-greeting-bonus').then(res => {
+        if (res.data?.awarded) {
+          console.log('[GardenEngine] Greeting bonus awarded! +1 SP')
+        }
+      }).catch(() => { /* silently ignore — non-critical */ })
+    })
   }
 
   // ─── Debug visualization ─────────────────────────
