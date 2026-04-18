@@ -15,19 +15,27 @@
             <v-icon icon="mdi-close" size="20" />
             <span class="text-caption">None</span>
           </div>
-          <div
+          <v-tooltip
             v-for="acc in rightHandItems"
             :key="acc.id"
-            class="accessory-picker__item"
-            :class="{
-              'accessory-picker__item--active': rightHand === acc.id,
-              'accessory-picker__item--locked': acc.locked,
-            }"
-            @click="!acc.locked && emit('update', 'rightHand', acc.id)"
+            :text="acc.locked ? `Reach Lv.${acc.unlockLevel} to unlock` : acc.name"
+            location="top"
           >
-            <v-icon :icon="acc.locked ? 'mdi-lock' : acc.icon" size="20" />
-            <span class="text-caption">{{ acc.name }}</span>
-          </div>
+            <template #activator="{ props: tp }">
+              <div
+                v-bind="tp"
+                class="accessory-picker__item"
+                :class="{
+                  'accessory-picker__item--active': rightHand === acc.id,
+                  'accessory-picker__item--locked': acc.locked,
+                }"
+                @click="!acc.locked && emit('update', 'rightHand', acc.id)"
+              >
+                <v-icon :icon="acc.locked ? 'mdi-lock' : acc.icon" size="20" />
+                <span class="text-caption">{{ acc.name }}</span>
+              </div>
+            </template>
+          </v-tooltip>
         </div>
       </div>
       <div class="accessory-picker__slot">
@@ -41,19 +49,27 @@
             <v-icon icon="mdi-close" size="20" />
             <span class="text-caption">None</span>
           </div>
-          <div
+          <v-tooltip
             v-for="acc in leftHandItems"
             :key="acc.id"
-            class="accessory-picker__item"
-            :class="{
-              'accessory-picker__item--active': leftHand === acc.id,
-              'accessory-picker__item--locked': acc.locked,
-            }"
-            @click="!acc.locked && emit('update', 'leftHand', acc.id)"
+            :text="acc.locked ? `Reach Lv.${acc.unlockLevel} to unlock` : acc.name"
+            location="top"
           >
-            <v-icon :icon="acc.locked ? 'mdi-lock' : acc.icon" size="20" />
-            <span class="text-caption">{{ acc.name }}</span>
-          </div>
+            <template #activator="{ props: tp }">
+              <div
+                v-bind="tp"
+                class="accessory-picker__item"
+                :class="{
+                  'accessory-picker__item--active': leftHand === acc.id,
+                  'accessory-picker__item--locked': acc.locked,
+                }"
+                @click="!acc.locked && emit('update', 'leftHand', acc.id)"
+              >
+                <v-icon :icon="acc.locked ? 'mdi-lock' : acc.icon" size="20" />
+                <span class="text-caption">{{ acc.name }}</span>
+              </div>
+            </template>
+          </v-tooltip>
         </div>
       </div>
     </div>

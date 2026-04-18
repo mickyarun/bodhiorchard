@@ -105,17 +105,19 @@ export interface KayKitAccessoryDef {
   glb: string
   slot: AccessorySlot
   locked: boolean
+  /** Minimum level required to unlock. Mirrors backend ACCESSORY_UNLOCKS. */
+  unlockLevel: number
 }
 
 const ACCESSORIES: KayKitAccessoryDef[] = [
-  { id: 'sword',   name: 'Sword',      icon: 'mdi-sword',                glb: `${BASE}/accessories/sword_1handed.glb`, slot: 'right_hand', locked: false },
-  { id: 'axe',     name: 'Axe',        icon: 'mdi-axe',                  glb: `${BASE}/accessories/axe_1handed.glb`,   slot: 'right_hand', locked: false },
-  { id: 'dagger',  name: 'Dagger',     icon: 'mdi-knife-military',       glb: `${BASE}/accessories/dagger.glb`,        slot: 'right_hand', locked: false },
-  { id: 'staff',   name: 'Staff',      icon: 'mdi-magic-staff',          glb: `${BASE}/accessories/staff.glb`,         slot: 'right_hand', locked: false },
-  { id: 'wand',    name: 'Wand',       icon: 'mdi-auto-fix',             glb: `${BASE}/accessories/wand.glb`,          slot: 'right_hand', locked: false },
-  { id: 'bow',     name: 'Bow',        icon: 'mdi-bow-arrow',            glb: `${BASE}/accessories/bow.glb`,           slot: 'right_hand', locked: false },
-  { id: 'shield',  name: 'Shield',     icon: 'mdi-shield',               glb: `${BASE}/accessories/shield_badge.glb`,  slot: 'left_hand',  locked: false },
-  { id: 'mug',     name: 'Coffee Mug', icon: 'mdi-coffee',               glb: `${BASE}/accessories/mug_full.glb`,      slot: 'right_hand', locked: false },
+  { id: 'sword',   name: 'Sword',      icon: 'mdi-sword',          glb: `${BASE}/accessories/sword_1handed.glb`, slot: 'right_hand', locked: false, unlockLevel: 2 },
+  { id: 'axe',     name: 'Axe',        icon: 'mdi-axe',            glb: `${BASE}/accessories/axe_1handed.glb`,   slot: 'right_hand', locked: false, unlockLevel: 2 },
+  { id: 'dagger',  name: 'Dagger',     icon: 'mdi-knife-military', glb: `${BASE}/accessories/dagger.glb`,        slot: 'right_hand', locked: false, unlockLevel: 2 },
+  { id: 'staff',   name: 'Staff',      icon: 'mdi-magic-staff',    glb: `${BASE}/accessories/staff.glb`,         slot: 'right_hand', locked: false, unlockLevel: 3 },
+  { id: 'wand',    name: 'Wand',       icon: 'mdi-auto-fix',       glb: `${BASE}/accessories/wand.glb`,          slot: 'right_hand', locked: false, unlockLevel: 3 },
+  { id: 'bow',     name: 'Bow',        icon: 'mdi-bow-arrow',      glb: `${BASE}/accessories/bow.glb`,           slot: 'right_hand', locked: false, unlockLevel: 4 },
+  { id: 'shield',  name: 'Shield',     icon: 'mdi-shield',         glb: `${BASE}/accessories/shield_badge.glb`,  slot: 'left_hand',  locked: false, unlockLevel: 5 },
+  { id: 'mug',     name: 'Coffee Mug', icon: 'mdi-coffee',         glb: `${BASE}/accessories/mug_full.glb`,      slot: 'right_hand', locked: false, unlockLevel: 2 },
 ]
 
 export function getAccessoryDef(id: string): KayKitAccessoryDef | undefined {

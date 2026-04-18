@@ -50,16 +50,16 @@ def streak_multiplier(streak_days: int) -> float:
 
 CHARACTER_UNLOCKS: dict[str, int] = {
     "barbarian": 1,
+    "mage": 1,
     "knight": 3,
-    "mage": 2,
     "ranger": 3,
     "rogue": 4,
     "rogue_hooded": 5,
 }
 
 ACCESSORY_UNLOCKS: dict[str, int] = {
-    "sword": 1,
-    "mug": 1,
+    "sword": 2,
+    "mug": 2,
     "axe": 2,
     "dagger": 2,
     "staff": 3,
