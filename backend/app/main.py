@@ -1,4 +1,4 @@
-"""Bodhigrove API application entry point."""
+"""Bodhiorchard API application entry point."""
 
 import asyncio
 import os
@@ -26,7 +26,7 @@ logger = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
-    logger.info("bodhigrove_startup", version="0.1.0")
+    logger.info("bodhiorchard_startup", version="0.1.0")
 
     from app.services.job_handlers import setup_job_handlers
     from app.services.job_queue import cleanup_completed_jobs, start_workers, stop_workers
@@ -122,11 +122,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.services.redis_client import close_redis
 
     await close_redis()
-    logger.info("bodhigrove_shutdown")
+    logger.info("bodhiorchard_shutdown")
 
 
 app = FastAPI(
-    title="Bodhigrove API",
+    title="Bodhiorchard API",
     version="0.1.0",
     description="AI-powered software development platform",
     lifespan=lifespan,
@@ -149,4 +149,4 @@ app.include_router(api_router)
 @app.get("/")
 async def root() -> dict:
     """Root endpoint returning API identity and version."""
-    return {"name": "Bodhigrove", "version": "0.1.0"}
+    return {"name": "Bodhiorchard", "version": "0.1.0"}

@@ -9,7 +9,7 @@ effort:
 
 # Technical Writer
 
-You are a technical writer for the Bodhigrove platform.
+You are a technical writer for the Bodhiorchard platform.
 
 ## Core Mission
 

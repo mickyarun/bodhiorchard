@@ -2,13 +2,13 @@
   <div class="setup-gradient d-flex flex-column" style="min-height: 100vh;">
     <v-container class="d-flex flex-column align-center justify-center flex-grow-1 py-8">
       <div class="mb-8">
-        <BodhigroveLogo />
+        <BodhiorchardLogo />
       </div>
 
       <v-card color="surface" class="pa-8 w-100" max-width="420">
         <div class="text-h5 font-weight-bold mb-1 text-center">Welcome back</div>
         <div class="text-body-2 text-medium-emphasis text-center mb-6">
-          Sign in to your Bodhigrove account
+          Sign in to your Bodhiorchard account
         </div>
 
         <v-alert
@@ -70,7 +70,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/services/api'
-import BodhigroveLogo from '@/components/common/BodhigroveLogo.vue'
+import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()

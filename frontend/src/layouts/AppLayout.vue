@@ -3,7 +3,7 @@
     <!-- Sidebar -->
     <v-navigation-drawer permanent color="surface" width="240" class="app-sidebar">
       <div class="pa-4 pb-2 d-flex align-center justify-space-between">
-        <BodhigroveLogo :size="28" />
+        <BodhiorchardLogo :size="28" />
         <NotificationBell v-if="authStore.user?.id" :user-id="authStore.user.id" />
       </div>
 
@@ -190,7 +190,7 @@
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import BodhigroveLogo from '@/components/common/BodhigroveLogo.vue'
+import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
 import XPToast from '@/components/common/XPToast.vue'
 import { usePermissions } from '@/composables/usePermissions'

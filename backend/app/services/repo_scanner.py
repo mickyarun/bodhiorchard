@@ -29,12 +29,12 @@ from app.services.gitnexus_indexer import (  # noqa: F401
     index_repo_with_gitnexus,
 )
 from app.services.repo_setup import (  # noqa: F401
-    add_bodhigrove_gitignore,
+    add_bodhiorchard_gitignore,
     add_prepare_script,
-    commit_and_push_bodhigrove_setup,
+    commit_and_push_bodhiorchard_setup,
     create_setup_pr,
     detect_repo_type,
     ensure_repo_worktrees,
-    init_bodhigrove_mcp_in_repo,
+    init_bodhiorchard_mcp_in_repo,
     install_hooks,
 )

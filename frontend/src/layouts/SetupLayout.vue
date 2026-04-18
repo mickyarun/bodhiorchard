@@ -2,7 +2,7 @@
   <div class="setup-gradient d-flex flex-column">
     <v-container class="d-flex flex-column align-center flex-grow-1 py-8">
       <div class="mb-8">
-        <BodhigroveLogo />
+        <BodhiorchardLogo />
       </div>
       <v-sheet
         class="flex-grow-1 w-100"
@@ -16,5 +16,5 @@
 </template>
 
 <script setup lang="ts">
-import BodhigroveLogo from '@/components/common/BodhigroveLogo.vue'
+import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
 </script>

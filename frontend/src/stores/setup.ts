@@ -116,13 +116,13 @@ export const useSetupStore = defineStore('setup', () => {
       }
 
       const { data } = await api.post('/setup/initialize', payload)
-      localStorage.setItem('bodhigrove_setup_complete', 'true')
+      localStorage.setItem('bodhiorchard_setup_complete', 'true')
       if (data.access_token) {
-        localStorage.setItem('bodhigrove_token', data.access_token)
+        localStorage.setItem('bodhiorchard_token', data.access_token)
       }
       if (data.scanId) {
         scanId.value = data.scanId
-        localStorage.setItem('bodhigrove_scan_id', data.scanId)
+        localStorage.setItem('bodhiorchard_scan_id', data.scanId)
       }
       resetSetupCache()
       return true
@@ -130,7 +130,7 @@ export const useSetupStore = defineStore('setup', () => {
       if (err && typeof err === 'object' && 'response' in err) {
         const axiosErr = err as { response?: { status?: number; data?: { detail?: string; message?: string } } }
         if (axiosErr.response?.status === 409) {
-          localStorage.setItem('bodhigrove_setup_complete', 'true')
+          localStorage.setItem('bodhiorchard_setup_complete', 'true')
           resetSetupCache()
           return true
         }

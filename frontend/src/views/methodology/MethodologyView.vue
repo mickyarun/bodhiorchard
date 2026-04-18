@@ -3,7 +3,7 @@
     <!-- Top header bar -->
     <v-app-bar flat color="surface" density="compact" class="methodology-appbar">
       <div class="d-flex align-center justify-space-between w-100 px-4">
-        <BodhigroveLogo :size="28" />
+        <BodhiorchardLogo :size="28" />
         <v-btn
           v-if="!isLoggedIn"
           color="primary"
@@ -36,11 +36,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import BodhigroveLogo from '@/components/common/BodhigroveLogo.vue'
+import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
 import MethodologyStep from '@/views/setup/steps/MethodologyStep.vue'
 
 const router = useRouter()
-const isLoggedIn = computed(() => !!localStorage.getItem('bodhigrove_token'))
+const isLoggedIn = computed(() => !!localStorage.getItem('bodhiorchard_token'))
 
 function handleStartBuilding(): void {
   if (isLoggedIn.value) {

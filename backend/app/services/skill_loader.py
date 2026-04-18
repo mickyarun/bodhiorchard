@@ -1,4 +1,4 @@
-"""Skill loader for Bodhigrove agent skills.
+"""Skill loader for Bodhiorchard agent skills.
 
 Reads skill definition markdown files from backend/app/agents/skills/,
 parses YAML frontmatter, and returns structured Skill objects.

@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the Bodhigrove test suite."""
+"""Shared pytest fixtures for the Bodhiorchard test suite."""
 
 import asyncio
 
@@ -18,7 +18,7 @@ from app.models import Base
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql+asyncpg://bodhigrove:bodhigrove@localhost:5432/bodhigrove_test",
+    "postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard_test",
 )
 
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)

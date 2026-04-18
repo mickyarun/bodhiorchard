@@ -1,4 +1,4 @@
-# CLAUDE.md - Bodhigrove Backend Development Guidelines
+# CLAUDE.md - Bodhiorchard Backend Development Guidelines
 
 ## Tech Stack
 - **Python 3.12+** with strict type hints

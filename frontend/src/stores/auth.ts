@@ -5,7 +5,7 @@ import api from '@/services/api'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
-  const token = ref<string | null>(localStorage.getItem('bodhigrove_token'))
+  const token = ref<string | null>(localStorage.getItem('bodhiorchard_token'))
   const loginError = ref<string | null>(null)
   const mustChangePassword = ref(false)
 
@@ -16,7 +16,7 @@ export const useAuthStore = defineStore('auth', () => {
   // `token.value` would stay stale after an automatic refresh (any consumer
   // reading `authStore.token` would send the old expired JWT to services like
   // the Colyseus OrgRoom, which rejects it via onAuth).
-  window.addEventListener('bodhigrove:token-refreshed', ((event: Event) => {
+  window.addEventListener('bodhiorchard:token-refreshed', ((event: Event) => {
     const detail = (event as CustomEvent<{ accessToken: string }>).detail
     if (detail?.accessToken) {
       token.value = detail.accessToken
@@ -33,9 +33,9 @@ export const useAuthStore = defineStore('auth', () => {
         org_slug: orgSlug,
       })
       token.value = response.data.access_token
-      localStorage.setItem('bodhigrove_token', response.data.access_token)
+      localStorage.setItem('bodhiorchard_token', response.data.access_token)
       if (response.data.refresh_token) {
-        localStorage.setItem('bodhigrove_refresh_token', response.data.refresh_token)
+        localStorage.setItem('bodhiorchard_refresh_token', response.data.refresh_token)
       }
       mustChangePassword.value = response.data.must_change_password === true
       // Fetch user profile — don't block login but surface the error
@@ -63,8 +63,8 @@ export const useAuthStore = defineStore('auth', () => {
   function logout(): void {
     token.value = null
     user.value = null
-    localStorage.removeItem('bodhigrove_token')
-    localStorage.removeItem('bodhigrove_refresh_token')
+    localStorage.removeItem('bodhiorchard_token')
+    localStorage.removeItem('bodhiorchard_refresh_token')
   }
 
   async function fetchUser(): Promise<void> {

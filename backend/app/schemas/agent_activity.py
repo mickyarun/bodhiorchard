@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 class AgentActivityHookRequest(BaseModel):
     """Request body for agent activity reports.
 
-    Sent by hook scripts (when BODHIGROVE_AGENT_SKILL_SLUG is set)
+    Sent by hook scripts (when BODHIORCHARD_AGENT_SKILL_SLUG is set)
     to POST /mcp/agent-activity, or by backend directly for
     skill lifecycle events.
     """

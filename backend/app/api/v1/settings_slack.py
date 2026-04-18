@@ -22,7 +22,7 @@ router = APIRouter(tags=["settings-slack"])
 
 
 class SlackMemberPreview(BaseModel):
-    """A Slack workspace member with optional auto-matched Bodhigrove user."""
+    """A Slack workspace member with optional auto-matched Bodhiorchard user."""
 
     slack_id: str
     slack_name: str
@@ -34,13 +34,13 @@ class SlackMemberPreview(BaseModel):
 
 
 class SlackLinkRequest(BaseModel):
-    """Mapping of Slack ID → Bodhigrove user ID for bulk linking."""
+    """Mapping of Slack ID → Bodhiorchard user ID for bulk linking."""
 
     links: list[dict[str, str]]
 
 
 class SlackImportItem(BaseModel):
-    """A Slack member to import as a new Bodhigrove user."""
+    """A Slack member to import as a new Bodhiorchard user."""
 
     slack_id: str
     slack_name: str
@@ -49,7 +49,7 @@ class SlackImportItem(BaseModel):
 
 
 class SlackImportRequest(BaseModel):
-    """Batch import of Slack members as new Bodhigrove users."""
+    """Batch import of Slack members as new Bodhiorchard users."""
 
     imports: list[SlackImportItem]
 
@@ -66,10 +66,10 @@ async def sync_slack_members(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[SlackMemberPreview]:
-    """Fetch all Slack workspace members and match against Bodhigrove users.
+    """Fetch all Slack workspace members and match against Bodhiorchard users.
 
     Returns a preview list showing each Slack user with their best-guess
-    Bodhigrove match (by email or existing slack_id link). The admin then
+    Bodhiorchard match (by email or existing slack_id link). The admin then
     confirms/adjusts the mappings before calling link-members.
 
     Args:
@@ -77,7 +77,7 @@ async def sync_slack_members(
         db: The async database session.
 
     Returns:
-        List of Slack members with suggested Bodhigrove user matches.
+        List of Slack members with suggested Bodhiorchard user matches.
     """
     from app.services import slack_client
 
@@ -93,7 +93,7 @@ async def sync_slack_members(
     bot_token = decrypt_secret(org.slack_bot_token)
     slack_members = await slack_client.users_list(bot_token)
 
-    # Load all Bodhigrove users for this org
+    # Load all Bodhiorchard users for this org
     user_repo = UserRepository(db, org_id=org.id)
     users = await user_repo.list_by_org(org.id)
 
@@ -136,7 +136,7 @@ async def sync_slack_members(
 
         if not matched_user and display_name:
             # Match by name tokens (case-insensitive):
-            # any Slack name token matching any Bodhigrove user name token
+            # any Slack name token matching any Bodhiorchard user name token
             slack_tokens = {t.lower() for t in display_name.split() if len(t) >= 3}
             for user in users:
                 if not user.name:
@@ -170,7 +170,7 @@ async def link_slack_members(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
-    """Bulk-link Slack IDs to Bodhigrove users.
+    """Bulk-link Slack IDs to Bodhiorchard users.
 
     Args:
         body: List of {slack_id, user_id} mappings.
@@ -219,7 +219,7 @@ async def unlink_slack_member(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
-    """Remove the Slack link from a Bodhigrove user.
+    """Remove the Slack link from a Bodhiorchard user.
 
     Args:
         body: Dict with ``slack_id`` to unlink.
@@ -270,7 +270,7 @@ async def import_slack_members(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SlackImportResponse:
-    """Import Slack workspace members as new Bodhigrove users.
+    """Import Slack workspace members as new Bodhiorchard users.
 
     Creates a User + OrgToUser membership for each Slack member that does
     not already exist (by email). Automatically links the Slack ID.

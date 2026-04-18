@@ -105,7 +105,7 @@
           </li>
           <li class="mb-1">
             In a fresh terminal, <code>cd</code> to the repo and run
-            <code>export BODHIGROVE_MCP_TOKEN="your-token"</code>
+            <code>export BODHIORCHARD_MCP_TOKEN="your-token"</code>
           </li>
           <li class="mb-1">
             Run <code>claude</code> in the <strong>same terminal</strong> —
@@ -121,7 +121,7 @@
         <div class="stale-zshrc-warning mt-2">
           <v-icon icon="mdi-alert-outline" size="12" color="warning" class="mr-1" />
           <span class="text-caption">
-            Watch out for old <code>BODHIGROVE_MCP_TOKEN</code> exports in
+            Watch out for old <code>BODHIORCHARD_MCP_TOKEN</code> exports in
             <code>~/.zshrc</code> — they override new ones on every shell.
           </span>
         </div>
@@ -165,7 +165,7 @@ const introText = computed(() =>
 )
 
 const exportLine = computed(() =>
-  newToken.value ? `export BODHIGROVE_MCP_TOKEN="${newToken.value}"` : '',
+  newToken.value ? `export BODHIORCHARD_MCP_TOKEN="${newToken.value}"` : '',
 )
 
 // ── Actions ─────────────────────────────────────────────────────────

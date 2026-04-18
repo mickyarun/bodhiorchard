@@ -1,4 +1,4 @@
-"""Data access repositories for Bodhigrove."""
+"""Data access repositories for Bodhiorchard."""
 
 from app.repositories.agent_skill import AgentSkillRepository
 from app.repositories.agent_skill_bud_stage import AgentSkillBudStageRepository

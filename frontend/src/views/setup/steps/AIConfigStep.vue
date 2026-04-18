@@ -3,7 +3,7 @@
     <v-icon icon="mdi-robot-outline" size="48" color="primary" class="mb-4" />
     <h2 class="text-h5 font-weight-bold mb-2">AI Engine</h2>
     <p class="text-body-2 text-medium-emphasis mb-6" style="max-width: 480px; text-align: center;">
-      Bodhigrove uses Claude Code to analyze your codebase.
+      Bodhiorchard uses Claude Code to analyze your codebase.
       Verify it's installed and working.
     </p>
 

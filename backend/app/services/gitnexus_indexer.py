@@ -105,7 +105,7 @@ async def index_repo_with_gitnexus(
     if not npx:
         raise GitNexusNotInstalledError(
             "Node.js (npx) is required for codebase indexing. "
-            "Install Node.js from https://nodejs.org/ and restart Bodhigrove."
+            "Install Node.js from https://nodejs.org/ and restart Bodhiorchard."
         )
 
     # Step 1: Run gitnexus analyze

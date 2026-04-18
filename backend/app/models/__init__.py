@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for Bodhigrove.
+"""SQLAlchemy ORM models for Bodhiorchard.
 
 All models are imported here so that Alembic can discover them for
 auto-generation of migration scripts.

@@ -1,5 +1,5 @@
 /**
- * Bodhigrove Multiplayer Server — Colyseus WebSocket server.
+ * Bodhiorchard Multiplayer Server — Colyseus WebSocket server.
  *
  * Rooms:
  *   "org"   — One per org, holds authoritative state for all members + agents.
@@ -50,4 +50,4 @@ const server = defineServer({
 })
 
 server.listen(port)
-console.log(`[Bodhigrove Multiplayer] Listening on ws://localhost:${port}`)
+console.log(`[Bodhiorchard Multiplayer] Listening on ws://localhost:${port}`)

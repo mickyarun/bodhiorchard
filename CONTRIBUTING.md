@@ -1,6 +1,6 @@
-# Contributing to Bodhigrove
+# Contributing to Bodhiorchard
 
-Thank you for your interest in contributing to Bodhigrove! This guide will help you get started.
+Thank you for your interest in contributing to Bodhiorchard! This guide will help you get started.
 
 ## Table of Contents
 
@@ -40,7 +40,7 @@ Have an idea? [Open a feature request](../../issues/new?template=feature_request
 - The problem you're trying to solve
 - Your proposed solution
 - Any alternatives you've considered
-- How it fits into Bodhigrove's philosophy (AI doing busywork, humans doing decisions)
+- How it fits into Bodhiorchard's philosophy (AI doing busywork, humans doing decisions)
 
 ### Contributing Code
 
@@ -370,7 +370,7 @@ If applicable (especially for frontend changes).
 
 ## Contributor License Agreement
 
-By submitting a pull request to Bodhigrove, you agree to the following:
+By submitting a pull request to Bodhiorchard, you agree to the following:
 
 1. Your contributions are your original work (or you have the right to submit them)
 2. Your contributions are licensed under the [AGPL-3.0 license](LICENSE)
@@ -386,4 +386,4 @@ This CLA allows the project to offer dual licensing (open source + commercial) w
 - **Bug reports** — use [Issues](../../issues)
 - **Security vulnerabilities** — email privately (do not open a public issue)
 
-Thank you for helping make Bodhigrove better!
+Thank you for helping make Bodhiorchard better!

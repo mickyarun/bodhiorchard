@@ -91,7 +91,7 @@ async def main() -> None:
     # Build connection URL — strip the SQLAlchemy driver prefix if present.
     raw_url = os.environ.get(
         "DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/bodhigrove",
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/bodhiorchard",
     )
     dsn = raw_url.replace("postgresql+asyncpg://", "postgresql://")
 

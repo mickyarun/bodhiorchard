@@ -27,7 +27,7 @@ target_metadata = Base.metadata
 # Override sqlalchemy.url from environment variable
 database_url = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://bodhigrove:bodhigrove@localhost:5432/bodhigrove",
+    "postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard",
 )
 config.set_main_option("sqlalchemy.url", database_url)
 

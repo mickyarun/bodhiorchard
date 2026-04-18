@@ -1,7 +1,7 @@
 """Handlers for agent activity reports.
 
 Processes activity events from two sources:
-1. Claude Code hooks in tracked repos (when BODHIGROVE_AGENT_SKILL_SLUG is set)
+1. Claude Code hooks in tracked repos (when BODHIORCHARD_AGENT_SKILL_SLUG is set)
 2. Backend direct logging (skill lifecycle events)
 
 All events are stored in agent_activity_logs, linked to agent_skills.

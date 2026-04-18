@@ -1,4 +1,4 @@
-"""MCP token verification for Bodhigrove tool calls from Claude Code."""
+"""MCP token verification for Bodhiorchard tool calls from Claude Code."""
 
 import hashlib
 import secrets

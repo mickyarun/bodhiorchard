@@ -1,6 +1,6 @@
 """Repository setup: MCP init, hooks, gitignore, package.json, commit/push, PR creation.
 
-Handles all the file-level setup that Bodhigrove performs on a tracked
+Handles all the file-level setup that Bodhiorchard performs on a tracked
 repository: writing ``.claude/settings.json``, installing git hooks,
 updating ``.gitignore``, adding a ``prepare`` script to ``package.json``,
 and committing + pushing the result as a PR-ready branch.
@@ -41,30 +41,30 @@ _FRONTEND_DEPS = frozenset(
     }
 )
 
-_HOOK_MARKER = "# installed-by-bodhigrove"
+_HOOK_MARKER = "# installed-by-bodhiorchard"
 
 _PREPARE_CMD = "git config core.hooksPath .githooks"
 
-_SETUP_BRANCH = "bodhigrove/init-setup"
-_BG_START = "<!-- bodhigrove:start -->"
-_BG_END = "<!-- bodhigrove:end -->"
+_SETUP_BRANCH = "bodhiorchard/init-setup"
+_BG_START = "<!-- bodhiorchard:start -->"
+_BG_END = "<!-- bodhiorchard:end -->"
 
-_BODHIGROVE_CLAUDE_SECTION = """\
-<!-- bodhigrove:start -->
+_BODHIORCHARD_CLAUDE_SECTION = """\
+<!-- bodhiorchard:start -->
 ---
 
-## Bodhigrove — Development Workflow
+## Bodhiorchard — Development Workflow
 
-This repo is tracked by Bodhigrove. MCP tools are configured in `.mcp.json`.
+This repo is tracked by Bodhiorchard. MCP tools are configured in `.mcp.json`.
 
 ### MCP Setup
 
-Before starting any BUD work, verify Bodhigrove MCP is connected:
+Before starting any BUD work, verify Bodhiorchard MCP is connected:
 1. Check that `get_bud_context` tool is available
 2. If NOT available, set up your token:
-   - Go to Bodhigrove Settings → Integrations → MCP Token
+   - Go to Bodhiorchard Settings → Integrations → MCP Token
    - Copy your token
-   - Run: `export BODHIGROVE_MCP_TOKEN="your-token"` in your shell profile
+   - Run: `export BODHIORCHARD_MCP_TOKEN="your-token"` in your shell profile
    - Restart Claude Code
 
 ### Always Do
@@ -110,7 +110,7 @@ stay consistent with their work.
 
 ### Commit Tracking
 
-- Commits on `bud-NNN/` branches are automatically tracked by Bodhigrove
+- Commits on `bud-NNN/` branches are automatically tracked by Bodhiorchard
 - Post-commit hooks report author, files, and message to the team dashboard
 
 ### Claude Code Hooks (Automatic)
@@ -121,15 +121,15 @@ Claude Code hooks in `.claude/hooks/` run automatically — no developer action 
 - **Stop**: Reports activity summaries after each Claude response
 - **UserPromptSubmit**: Detects BUD references in your prompts
 
-These hooks use your `BODHIGROVE_MCP_TOKEN` for authentication.
+These hooks use your `BODHIORCHARD_MCP_TOKEN` for authentication.
 If the token is not set, hooks silently do nothing.
-<!-- bodhigrove:end -->
+<!-- bodhiorchard:end -->
 """
 
-assert _BODHIGROVE_CLAUDE_SECTION.lstrip().startswith(_BG_START), "Marker mismatch"
-assert _BODHIGROVE_CLAUDE_SECTION.rstrip().endswith(_BG_END), "Marker mismatch"
+assert _BODHIORCHARD_CLAUDE_SECTION.lstrip().startswith(_BG_START), "Marker mismatch"
+assert _BODHIORCHARD_CLAUDE_SECTION.rstrip().endswith(_BG_END), "Marker mismatch"
 
-_CLAUDE_HOOK_MARKER = "# bodhigrove-claude-hook"
+_CLAUDE_HOOK_MARKER = "# bodhiorchard-claude-hook"
 
 _SETUP_FILES = [
     ".claude/settings.json",
@@ -154,11 +154,11 @@ _SETUP_FILES = [
 ]
 
 
-def append_bodhigrove_claude_instructions(repo_path: str) -> bool:
-    """Append Bodhigrove workflow instructions to CLAUDE.md.
+def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
+    """Append Bodhiorchard workflow instructions to CLAUDE.md.
 
     Inserts after ``<!-- gitnexus:end -->`` if present, otherwise appends
-    at end of file. Uses ``<!-- bodhigrove:start/end -->`` markers for
+    at end of file. Uses ``<!-- bodhiorchard:start/end -->`` markers for
     idempotent updates.
 
     Args:
@@ -169,25 +169,25 @@ def append_bodhigrove_claude_instructions(repo_path: str) -> bool:
     """
     claude_md = Path(repo_path) / "CLAUDE.md"
     if not claude_md.exists():
-        # Create CLAUDE.md with just the Bodhigrove section
-        claude_md.write_text(_BODHIGROVE_CLAUDE_SECTION.strip() + "\n")
+        # Create CLAUDE.md with just the Bodhiorchard section
+        claude_md.write_text(_BODHIORCHARD_CLAUDE_SECTION.strip() + "\n")
         return True
 
     content = claude_md.read_text()
 
-    # Already has Bodhigrove section — check if content changed
+    # Already has Bodhiorchard section — check if content changed
     if _BG_START in content:
         start = content.index(_BG_START)
         if _BG_END not in content:
             logger.warning(
-                "bodhigrove_claude_md_malformed",
+                "bodhiorchard_claude_md_malformed",
                 repo=repo_path,
                 detail="start marker without end marker — skipping",
             )
             return False
         end = content.index(_BG_END) + len(_BG_END)
         existing = content[start:end]
-        new_section = _BODHIGROVE_CLAUDE_SECTION.strip()
+        new_section = _BODHIORCHARD_CLAUDE_SECTION.strip()
         if existing.strip() == new_section:
             return False  # Already up to date
         # Replace existing section, avoid accumulating blank lines
@@ -197,10 +197,10 @@ def append_bodhigrove_claude_instructions(repo_path: str) -> bool:
         gitnexus_end = "<!-- gitnexus:end -->"
         if gitnexus_end in content:
             idx = content.index(gitnexus_end) + len(gitnexus_end)
-            section = _BODHIGROVE_CLAUDE_SECTION.strip()
+            section = _BODHIORCHARD_CLAUDE_SECTION.strip()
             content = content[:idx] + "\n\n" + section + "\n" + content[idx:]
         else:
-            content = content.rstrip() + "\n\n" + _BODHIGROVE_CLAUDE_SECTION.strip() + "\n"
+            content = content.rstrip() + "\n\n" + _BODHIORCHARD_CLAUDE_SECTION.strip() + "\n"
 
     claude_md.write_text(content)
     return True
@@ -235,8 +235,8 @@ def detect_repo_type(repo_path: str) -> str | None:
 async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]:
     """Create main + develop worktrees for a repo.
 
-    Creates worktrees under ``<repo>/.bodhigrove/main/`` and
-    ``<repo>/.bodhigrove/develop/``. Pulls both to latest.
+    Creates worktrees under ``<repo>/.bodhiorchard/main/`` and
+    ``<repo>/.bodhiorchard/develop/``. Pulls both to latest.
 
     Args:
         repo_path: Absolute path to the git repository.
@@ -246,7 +246,7 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
         Either may be None if the branch doesn't exist.
     """
     repo = Path(repo_path)
-    worktree_dir = repo / ".bodhigrove"
+    worktree_dir = repo / ".bodhiorchard"
     worktree_dir.mkdir(exist_ok=True)
 
     main_branch = await _detect_main_branch(repo_path)
@@ -297,19 +297,19 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
     return results[0], results[1]
 
 
-# ── Bodhigrove MCP server init ─────────────────────────────────────
+# ── Bodhiorchard MCP server init ─────────────────────────────────────
 
 
-async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
-    """Write .mcp.json and .claude/settings.json with Bodhigrove MCP config.
+async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
+    """Write .mcp.json and .claude/settings.json with Bodhiorchard MCP config.
 
-    Copies the MCP bridge script into the repo at .bodhigrove/mcp_bridge.py
+    Copies the MCP bridge script into the repo at .bodhiorchard/mcp_bridge.py
     and writes config with a relative path. Token is NOT included — developers
-    set BODHIGROVE_MCP_TOKEN env var themselves.
+    set BODHIORCHARD_MCP_TOKEN env var themselves.
 
     Args:
         repo_path: Absolute path to the git repository.
-        backend_url: URL of the Bodhigrove backend.
+        backend_url: URL of the Bodhiorchard backend.
 
     Returns:
         True if the file was written (changed), False if already up to date.
@@ -318,18 +318,18 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
 
     repo = Path(repo_path)
     source_bridge = Path(__file__).resolve().parents[1] / "mcp" / "stdio_bridge.py"
-    dest_dir = repo / ".bodhigrove"
+    dest_dir = repo / ".bodhiorchard"
     dest_bridge = dest_dir / "mcp_bridge.py"
 
     # Build config (token NOT included — developer sets env var)
     mcp_json_path = repo / ".mcp.json"
     mcp_config = {
         "mcpServers": {
-            "bodhigrove": {
+            "bodhiorchard": {
                 "command": "python3",
-                "args": [".bodhigrove/mcp_bridge.py"],
+                "args": [".bodhiorchard/mcp_bridge.py"],
                 "env": {
-                    "BODHIGROVE_BACKEND_URL": backend_url,
+                    "BODHIORCHARD_BACKEND_URL": backend_url,
                 },
             },
         },
@@ -340,7 +340,7 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
     if mcp_json_path.exists() and dest_bridge.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
             if mcp_json_path.read_text().strip() == expected_json.strip():
-                logger.debug("bodhigrove_mcp_already_configured", repo=repo_path)
+                logger.debug("bodhiorchard_mcp_already_configured", repo=repo_path)
                 return False
 
     # Copy bridge script (after early-return check)
@@ -361,10 +361,10 @@ async def init_bodhigrove_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
 
     settings.setdefault("mcpServers", {})
     # Overwrite with token-free config (replaces any stale token from old setups)
-    settings["mcpServers"]["bodhigrove"] = mcp_config["mcpServers"]["bodhigrove"]
+    settings["mcpServers"]["bodhiorchard"] = mcp_config["mcpServers"]["bodhiorchard"]
     settings_path.write_text(json.dumps(settings, indent=2))
 
-    logger.info("bodhigrove_mcp_written", repo=repo_path)
+    logger.info("bodhiorchard_mcp_written", repo=repo_path)
     return True
 
 
@@ -375,10 +375,10 @@ def _build_pre_commit_hook(backend_url: str, org_id: str) -> str:
     """Build the pre-commit hook script content.
 
     The hook validates that BUD branches (bud-NNN/...) reference a BUD
-    that exists in Bodhigrove. Non-BUD branches are allowed through.
+    that exists in Bodhiorchard. Non-BUD branches are allowed through.
 
     Args:
-        backend_url: Public URL of the Bodhigrove backend.
+        backend_url: Public URL of the Bodhiorchard backend.
         org_id: Organization UUID string (baked into hook for org scoping).
 
     Returns:
@@ -393,7 +393,7 @@ def _build_pre_commit_hook(backend_url: str, org_id: str) -> str:
         'STATUS=$(curl -s -o /dev/null -w "%{http_code}" \\\n'
         f'  "{backend_url}/api/v1/public/{org_id}/bud-check/$BUD_NUM" 2>/dev/null)\n'
         'if [ "$STATUS" = "404" ]; then\n'
-        '  echo "BUD-$BUD_NUM not found in Bodhigrove. Commit blocked."\n'
+        '  echo "BUD-$BUD_NUM not found in Bodhiorchard. Commit blocked."\n'
         "  exit 1\n"
         "fi\n"
     )
@@ -402,12 +402,12 @@ def _build_pre_commit_hook(backend_url: str, org_id: str) -> str:
 def _build_post_commit_hook(backend_url: str, org_id: str) -> str:
     """Build the post-commit hook script content.
 
-    Reports each commit to Bodhigrove via /mcp/dev-activity (authenticated).
+    Reports each commit to Bodhiorchard via /mcp/dev-activity (authenticated).
     Sources _common.sh from .claude/hooks/ for shared utilities.
     Fire-and-forget (backgrounded, never blocks the commit).
 
     Args:
-        backend_url: Public URL of the Bodhigrove backend.
+        backend_url: Public URL of the Bodhiorchard backend.
         org_id: Organization UUID string (unused, kept for API compat).
 
     Returns:
@@ -433,7 +433,7 @@ def _build_post_commit_hook(backend_url: str, org_id: str) -> str:
 
         # Find active Claude session ID from session temp file
         ACTIVE_SID=""
-        for SF in /tmp/.bodhigrove-session-*.json; do
+        for SF in /tmp/.bodhiorchard-session-*.json; do
           [ -f "$SF" ] || continue
           ACTIVE_SID=$(python3 -c "
 import json
@@ -461,13 +461,13 @@ async def install_hooks(repo_path: str, backend_url: str, org_id: str) -> bool:
     ``.git/hooks/`` (local-only). Then sets ``core.hooksPath`` so git
     uses the committed directory. This way all devs pulling the repo
     get the hook scripts; they just need ``core.hooksPath`` configured
-    once (done automatically by the Bodhigrove MCP server on init).
+    once (done automatically by the Bodhiorchard MCP server on init).
 
     Idempotent: checks for the marker string before writing.
 
     Args:
         repo_path: Absolute path to the git repository.
-        backend_url: Public URL of the Bodhigrove backend.
+        backend_url: Public URL of the Bodhiorchard backend.
         org_id: Organization UUID string (baked into hook URLs for scoping).
 
     Returns:
@@ -494,7 +494,7 @@ async def install_hooks(repo_path: str, backend_url: str, org_id: str) -> bool:
                 # Overwrite with updated hook content
                 hook_path.write_text(full_content)
             else:
-                # Append to existing non-Bodhigrove hook
+                # Append to existing non-Bodhiorchard hook
                 with hook_path.open("a") as f:
                     f.write(f"\n{hook_content}")
         else:
@@ -521,11 +521,11 @@ def _build_common_sh(backend_url: str) -> str:
     """Build the shared utility script sourced by all hooks."""
     return textwrap.dedent("""\
         {marker}
-        # Shared utilities for Bodhigrove hooks.
+        # Shared utilities for Bodhiorchard hooks.
         # Sourced by individual hook scripts — not executed directly.
 
         BACKEND_URL="{url}"
-        TOKEN="${{BODHIGROVE_MCP_TOKEN:-}}"
+        TOKEN="${{BODHIORCHARD_MCP_TOKEN:-}}"
 
         escape_json() {{
           printf '%s' "$1" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\\n\\r\\t' '   '
@@ -584,7 +584,7 @@ def _build_common_sh(backend_url: str) -> str:
 
         # Read a field from the session context file
         session_file() {{
-          echo "${{TMPDIR:-/tmp}}/.bodhigrove-session-$1.json"
+          echo "${{TMPDIR:-/tmp}}/.bodhiorchard-session-$1.json"
         }}
 
         session_get() {{
@@ -994,14 +994,14 @@ async def install_claude_hooks(repo_path: str, backend_url: str) -> bool:
     """Install Claude Code hook scripts in a repository.
 
     Writes hooks to ``.claude/hooks/`` and configures them in
-    ``.claude/settings.json``. Scripts use ``$BODHIGROVE_MCP_TOKEN``
+    ``.claude/settings.json``. Scripts use ``$BODHIORCHARD_MCP_TOKEN``
     for auth — no org_id baked in.
 
     Idempotent: checks for marker string before writing.
 
     Args:
         repo_path: Absolute path to the git repository.
-        backend_url: Public URL of the Bodhigrove backend.
+        backend_url: Public URL of the Bodhiorchard backend.
 
     Returns:
         True if hook files were written (changed), False if already up to date.
@@ -1177,8 +1177,8 @@ async def install_claude_hooks(repo_path: str, backend_url: str) -> bool:
 # ── .gitignore management ──────────────────────────────────────────
 
 
-def add_bodhigrove_gitignore(repo_path: str) -> bool:
-    """Append .bodhigrove/ to .gitignore if not already present.
+def add_bodhiorchard_gitignore(repo_path: str) -> bool:
+    """Append .bodhiorchard/ to .gitignore if not already present.
 
     Idempotent.
 
@@ -1189,7 +1189,7 @@ def add_bodhigrove_gitignore(repo_path: str) -> bool:
         True if the file was changed, False if already up to date.
     """
     gitignore = Path(repo_path) / ".gitignore"
-    entry = ".bodhigrove/"
+    entry = ".bodhiorchard/"
 
     if gitignore.exists():
         content = gitignore.read_text()
@@ -1213,7 +1213,7 @@ def add_prepare_script(repo_path: str) -> bool:
     """Add a ``prepare`` script to package.json that sets core.hooksPath.
 
     This runs automatically on every ``npm install`` / ``yarn install``,
-    ensuring all developers get Bodhigrove's git hooks without manual
+    ensuring all developers get Bodhiorchard's git hooks without manual
     setup — the same pattern used by Husky.
 
     If the repo has no package.json, creates a minimal one.
@@ -1258,14 +1258,14 @@ def add_prepare_script(repo_path: str) -> bool:
     return True
 
 
-# ── Commit Bodhigrove setup files ─────────────────────────────────
+# ── Commit Bodhiorchard setup files ─────────────────────────────────
 
 
-async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> str | None:
-    """Create a branch, commit Bodhigrove setup files, and push to origin.
+async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -> str | None:
+    """Create a branch, commit Bodhiorchard setup files, and push to origin.
 
-    Creates ``bodhigrove/init-setup`` from the base branch, stages only
-    the files Bodhigrove modifies, commits, and pushes. The team can
+    Creates ``bodhiorchard/init-setup`` from the base branch, stages only
+    the files Bodhiorchard modifies, commits, and pushes. The team can
     then review via PR in their hosting platform.
 
     Idempotent: if the branch already exists on the remote, skips.
@@ -1295,7 +1295,7 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
                 ["checkout", "-b", _SETUP_BRANCH, f"origin/{_SETUP_BRANCH}"], cwd=repo_path
             )
         if rc != 0:
-            logger.warning("bodhigrove_setup_checkout_failed", error=stderr[:200])
+            logger.warning("bodhiorchard_setup_checkout_failed", error=stderr[:200])
             return None
     else:
         # Try checking out existing local branch first
@@ -1306,7 +1306,7 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
                 ["checkout", "-b", _SETUP_BRANCH, base_branch], cwd=repo_path
             )
         if rc != 0:
-            logger.warning("bodhigrove_setup_branch_failed", error=stderr[:200])
+            logger.warning("bodhiorchard_setup_branch_failed", error=stderr[:200])
             return None
 
     try:
@@ -1328,7 +1328,7 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
                 staged_any = True
 
         if not staged_any:
-            logger.debug("bodhigrove_setup_nothing_to_commit", repo=repo_path)
+            logger.debug("bodhiorchard_setup_nothing_to_commit", repo=repo_path)
             return None
 
         # Commit
@@ -1336,19 +1336,19 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
             [
                 "commit",
                 "-m",
-                "chore(bodhigrove): add MCP tools, git hooks, and config\n\n"
-                "Auto-committed by Bodhigrove scan pipeline.\n"
-                "- .claude/settings.json: Bodhigrove MCP server config\n"
+                "chore(bodhiorchard): add MCP tools, git hooks, and config\n\n"
+                "Auto-committed by Bodhiorchard scan pipeline.\n"
+                "- .claude/settings.json: Bodhiorchard MCP server config\n"
                 "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
                 "- package.json: prepare script sets core.hooksPath on npm install\n"
-                "- .gitignore: exclude .bodhigrove/ worktrees\n"
+                "- .gitignore: exclude .bodhiorchard/ worktrees\n"
                 "- CLAUDE.md: GitNexus code intelligence integration\n"
                 "- .claude/skills/: GitNexus agent skill definitions",
             ],
             cwd=repo_path,
         )
         if rc != 0:
-            logger.warning("bodhigrove_setup_commit_failed", error=stderr[:200])
+            logger.warning("bodhiorchard_setup_commit_failed", error=stderr[:200])
             return None
 
         # Push to origin (force-with-lease when updating existing branch)
@@ -1358,11 +1358,11 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
         _, stderr, rc = await run_git(push_cmd, cwd=repo_path)
         if rc != 0:
             # No remote or push failed — merge setup into base branch directly
-            logger.info("bodhigrove_setup_no_remote_merging", repo=repo_path)
+            logger.info("bodhiorchard_setup_no_remote_merging", repo=repo_path)
 
             # Remove worktrees that may lock the base branch
             for wt_name in ("main", "develop"):
-                wt_path = Path(repo_path) / ".bodhigrove" / wt_name
+                wt_path = Path(repo_path) / ".bodhiorchard" / wt_name
                 if wt_path.exists():
                     await run_git(
                         ["worktree", "remove", str(wt_path), "--force"],
@@ -1376,24 +1376,24 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
             )
             if merge_rc == 0:
                 await run_git(["branch", "-d", _SETUP_BRANCH], cwd=repo_path)
-                logger.info("bodhigrove_setup_merged_locally", repo=repo_path)
+                logger.info("bodhiorchard_setup_merged_locally", repo=repo_path)
                 return _SETUP_BRANCH
             logger.warning(
-                "bodhigrove_setup_merge_failed",
+                "bodhiorchard_setup_merge_failed",
                 repo=repo_path,
                 error=merge_err[:200],
             )
             return None
 
         logger.info(
-            "bodhigrove_setup_pushed",
+            "bodhiorchard_setup_pushed",
             repo=repo_path,
             branch=_SETUP_BRANCH,
         )
         return _SETUP_BRANCH
     finally:
         # Remove worktrees that may lock the base branch, then switch back
-        wt_main = Path(repo_path) / ".bodhigrove" / "main"
+        wt_main = Path(repo_path) / ".bodhiorchard" / "main"
         if wt_main.exists():
             await run_git(
                 ["worktree", "remove", str(wt_main), "--force"],
@@ -1403,14 +1403,14 @@ async def commit_and_push_bodhigrove_setup(repo_path: str, base_branch: str) -> 
 
 
 async def create_setup_pr(repo_path: str, base_branch: str, pushed_branch: str) -> str | None:
-    """Create a pull request for the Bodhigrove setup branch via ``gh`` CLI.
+    """Create a pull request for the Bodhiorchard setup branch via ``gh`` CLI.
 
     Falls back gracefully when ``gh`` is not installed or not authenticated.
 
     Args:
         repo_path: Absolute path to the git repository.
         base_branch: Target branch for the PR (e.g. "main").
-        pushed_branch: Source branch that was pushed (e.g. "bodhigrove/init-setup").
+        pushed_branch: Source branch that was pushed (e.g. "bodhiorchard/init-setup").
 
     Returns:
         PR URL if created or already exists, None if ``gh`` is unavailable.
@@ -1447,15 +1447,15 @@ async def create_setup_pr(repo_path: str, base_branch: str, pushed_branch: str) 
                 "--head",
                 pushed_branch,
                 "--title",
-                "chore: add Bodhigrove MCP tools, git hooks, and config",
+                "chore: add Bodhiorchard MCP tools, git hooks, and config",
                 "--body",
                 "## Summary\n\n"
-                "Auto-generated by Bodhigrove scan pipeline.\n\n"
-                "- `.claude/settings.json` — Bodhigrove MCP server config\n"
+                "Auto-generated by Bodhiorchard scan pipeline.\n\n"
+                "- `.claude/settings.json` — Bodhiorchard MCP server config\n"
                 "- `.githooks/` — pre-commit (BUD validation) + "
                 "post-commit (tracking)\n"
                 "- `package.json` — prepare script sets `core.hooksPath`\n"
-                "- `.gitignore` — exclude `.bodhigrove/` worktrees\n"
+                "- `.gitignore` — exclude `.bodhiorchard/` worktrees\n"
                 "- `CLAUDE.md` — GitNexus code intelligence integration\n"
                 "- `.claude/skills/` — GitNexus agent skill definitions\n",
             ],

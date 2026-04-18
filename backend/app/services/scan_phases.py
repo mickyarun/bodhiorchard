@@ -133,13 +133,13 @@ async def phase_b1_repo_setup(
     from app.config import settings as app_settings
     from app.services.git_operations import _detect_develop_branch, _detect_main_branch
     from app.services.repo_setup import (
-        add_bodhigrove_gitignore,
+        add_bodhiorchard_gitignore,
         add_prepare_script,
-        append_bodhigrove_claude_instructions,
-        commit_and_push_bodhigrove_setup,
+        append_bodhiorchard_claude_instructions,
+        commit_and_push_bodhiorchard_setup,
         create_setup_pr,
         ensure_repo_worktrees,
-        init_bodhigrove_mcp_in_repo,
+        init_bodhiorchard_mcp_in_repo,
         install_claude_hooks,
         install_hooks,
     )
@@ -166,13 +166,13 @@ async def phase_b1_repo_setup(
                 if detected_dev:
                     tracked_repo.develop_branch = detected_dev  # type: ignore[union-attr]
 
-        # Init Bodhigrove MCP in repo (skips if already configured)
+        # Init Bodhiorchard MCP in repo (skips if already configured)
         await update_scan_progress(
             scan_id,
             status="setting_up_mcp",
             progress_pct=base_pct + 22,
         )
-        mcp_changed = await init_bodhigrove_mcp_in_repo(
+        mcp_changed = await init_bodhiorchard_mcp_in_repo(
             repo_path,
             app_settings.public_url,
         )
@@ -196,14 +196,14 @@ async def phase_b1_repo_setup(
 
         await run_git(["config", "core.hooksPath", ".githooks"], cwd=repo_path)
 
-        # Add .bodhigrove/ to .gitignore
-        gitignore_changed = add_bodhigrove_gitignore(repo_path)
+        # Add .bodhiorchard/ to .gitignore
+        gitignore_changed = add_bodhiorchard_gitignore(repo_path)
 
         # Add prepare script to package.json
         prepare_changed = add_prepare_script(repo_path)
 
-        # Add Bodhigrove workflow instructions to CLAUDE.md
-        claude_md_changed = append_bodhigrove_claude_instructions(repo_path)
+        # Add Bodhiorchard workflow instructions to CLAUDE.md
+        claude_md_changed = append_bodhiorchard_claude_instructions(repo_path)
 
         # Branch, commit, push setup files, and create PR
         any_changed = (
@@ -225,17 +225,17 @@ async def phase_b1_repo_setup(
                 if tracked_repo and tracked_repo.main_branch  # type: ignore[union-attr]
                 else "main"
             )
-            pushed_branch = await commit_and_push_bodhigrove_setup(repo_path, base)
+            pushed_branch = await commit_and_push_bodhiorchard_setup(repo_path, base)
             if pushed_branch:
                 logger.info(
-                    "bodhigrove_setup_branch_pushed",
+                    "bodhiorchard_setup_branch_pushed",
                     repo=repo_name,
                     branch=pushed_branch,
                 )
                 pr_url = await create_setup_pr(repo_path, base, pushed_branch)
                 if pr_url:
                     logger.info(
-                        "bodhigrove_setup_pr_created",
+                        "bodhiorchard_setup_pr_created",
                         repo=repo_name,
                         url=pr_url,
                     )
@@ -243,7 +243,7 @@ async def phase_b1_repo_setup(
                     setup_pr_message = (
                         f"Setup branch '{pushed_branch}' pushed "
                         f"to {repo_name}. Create a PR manually "
-                        "to merge the Bodhigrove config files."
+                        "to merge the Bodhiorchard config files."
                     )
 
             await db.flush()

@@ -58,7 +58,7 @@
           <div class="text-body-2 font-weight-medium mb-1">How to get your API token:</div>
           <ol class="text-caption pl-4" style="line-height: 1.6">
             <li>Go to <strong>id.atlassian.com/manage-profile/security/api-tokens</strong></li>
-            <li>Click <strong>Create API token</strong> and give it a label (e.g. "Bodhigrove")</li>
+            <li>Click <strong>Create API token</strong> and give it a label (e.g. "Bodhiorchard")</li>
             <li>Copy the generated token and paste it below</li>
           </ol>
         </v-alert>

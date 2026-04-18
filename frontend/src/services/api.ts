@@ -10,7 +10,7 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('bodhigrove_token')
+  const token = localStorage.getItem('bodhiorchard_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -63,7 +63,7 @@ api.interceptors.response.use(
     }
 
     // Try to refresh the token
-    const refreshToken = localStorage.getItem('bodhigrove_refresh_token')
+    const refreshToken = localStorage.getItem('bodhiorchard_refresh_token')
     if (!refreshToken) {
       clearAuthAndRedirect()
       return Promise.reject(error)
@@ -89,8 +89,8 @@ api.interceptors.response.use(
         { headers: { 'Content-Type': 'application/json' } },
       )
 
-      localStorage.setItem('bodhigrove_token', data.access_token)
-      localStorage.setItem('bodhigrove_refresh_token', data.refresh_token)
+      localStorage.setItem('bodhiorchard_token', data.access_token)
+      localStorage.setItem('bodhiorchard_refresh_token', data.refresh_token)
 
       // Notify listeners (e.g. Pinia auth store) that the token was refreshed.
       // Window-event pattern avoids a circular import between this file and
@@ -98,7 +98,7 @@ api.interceptors.response.use(
       // Consumers like PlayCanvasCanvas read localStorage directly for the
       // hot path, so this event is belt-and-suspenders for anyone caching
       // the token in a reactive ref.
-      window.dispatchEvent(new CustomEvent('bodhigrove:token-refreshed', {
+      window.dispatchEvent(new CustomEvent('bodhiorchard:token-refreshed', {
         detail: { accessToken: data.access_token },
       }))
 
@@ -117,8 +117,8 @@ api.interceptors.response.use(
 )
 
 function clearAuthAndRedirect(): void {
-  localStorage.removeItem('bodhigrove_token')
-  localStorage.removeItem('bodhigrove_refresh_token')
+  localStorage.removeItem('bodhiorchard_token')
+  localStorage.removeItem('bodhiorchard_refresh_token')
   // Only redirect if not already on login/setup pages
   if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/setup')) {
     window.location.href = '/login'

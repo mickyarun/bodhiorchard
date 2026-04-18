@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""MCP stdio bridge — translates MCP JSON-RPC (stdio) to Bodhigrove REST API calls.
+"""MCP stdio bridge — translates MCP JSON-RPC (stdio) to Bodhiorchard REST API calls.
 
 Claude Code spawns this script as a subprocess. It reads JSON-RPC requests
-from stdin, forwards tool calls to the Bodhigrove backend via HTTP, and writes
+from stdin, forwards tool calls to the Bodhiorchard backend via HTTP, and writes
 JSON-RPC responses to stdout.
 
 Register with Claude Code CLI:
-    claude mcp add bodhigrove -s user \\
-        -e BODHIGROVE_BACKEND_URL=http://localhost:8000 \\
-        -e BODHIGROVE_MCP_TOKEN_FILE=~/.bodhigrove/mcp_token \\
+    claude mcp add bodhiorchard -s user \\
+        -e BODHIORCHARD_BACKEND_URL=http://localhost:8000 \\
+        -e BODHIORCHARD_MCP_TOKEN_FILE=~/.bodhiorchard/mcp_token \\
         -- python /path/to/stdio_bridge.py
 
 Environment variables:
-    BODHIGROVE_BACKEND_URL: Backend base URL (e.g. http://localhost:8000)
-    BODHIGROVE_MCP_TOKEN: Bearer token for MCP authentication (preferred, direct)
-    BODHIGROVE_MCP_TOKEN_FILE: Path to file containing the token (fallback for global registration)
-    BODHIGROVE_MCP_TOOLS: Comma-separated tool names to expose (optional, all if empty)
+    BODHIORCHARD_BACKEND_URL: Backend base URL (e.g. http://localhost:8000)
+    BODHIORCHARD_MCP_TOKEN: Bearer token for MCP authentication (preferred, direct)
+    BODHIORCHARD_MCP_TOKEN_FILE: Path to file containing the token (fallback for global registration)
+    BODHIORCHARD_MCP_TOOLS: Comma-separated tool names to expose (optional, all if empty)
 """
 
 import contextlib
@@ -25,13 +25,13 @@ import sys
 import urllib.error
 import urllib.request
 
-BACKEND_URL = os.environ.get("BODHIGROVE_BACKEND_URL", "http://localhost:8000")
-MCP_TOOLS_FILTER = os.environ.get("BODHIGROVE_MCP_TOOLS", "")
+BACKEND_URL = os.environ.get("BODHIORCHARD_BACKEND_URL", "http://localhost:8000")
+MCP_TOOLS_FILTER = os.environ.get("BODHIORCHARD_MCP_TOOLS", "")
 
 
 def _log(msg: str) -> None:
     """Write a diagnostic line to stderr (visible in Claude CLI logs)."""
-    print(f"[bodhigrove-bridge] {msg}", file=sys.stderr, flush=True)
+    print(f"[bodhiorchard-bridge] {msg}", file=sys.stderr, flush=True)
 
 
 def _get_token() -> str:
@@ -41,11 +41,11 @@ def _get_token() -> str:
     it explicitly.  File-based tokens are a fallback for global
     ``claude mcp add`` registrations where the token refreshes on disk.
     """
-    direct = os.environ.get("BODHIGROVE_MCP_TOKEN", "")
+    direct = os.environ.get("BODHIORCHARD_MCP_TOKEN", "")
     if direct:
         _log(f"token_source=env token_prefix={direct[:8]}")
         return direct
-    token_file = os.environ.get("BODHIGROVE_MCP_TOKEN_FILE", "")
+    token_file = os.environ.get("BODHIORCHARD_MCP_TOKEN_FILE", "")
     if token_file:
         expanded = os.path.expanduser(token_file)
         if os.path.isfile(expanded):
@@ -59,7 +59,7 @@ def _get_token() -> str:
 
 
 def _api_request(method: str, path: str, body: dict | None = None) -> dict:
-    """Make an HTTP request to the Bodhigrove backend.
+    """Make an HTTP request to the Bodhiorchard backend.
 
     Returns a structured error dict on HTTP failures (e.g. 401) so that
     Claude sees a clean MCP error instead of a raw exception traceback.
@@ -88,7 +88,7 @@ def _api_request(method: str, path: str, body: dict | None = None) -> dict:
 
 
 def _get_tools() -> list[dict]:
-    """Fetch tool definitions from the Bodhigrove backend."""
+    """Fetch tool definitions from the Bodhiorchard backend."""
     _log("tools/list requested")
     tools = _api_request("GET", "/mcp/tools")
     allowed = (
@@ -109,7 +109,7 @@ def _get_tools() -> list[dict]:
 
 
 def _call_tool(name: str, arguments: dict) -> dict:
-    """Execute a tool call via the Bodhigrove backend."""
+    """Execute a tool call via the Bodhiorchard backend."""
     _log(f"tools/call name={name}")
     return _api_request("POST", f"/mcp/tools/{name}", {"params": arguments})
 
@@ -154,7 +154,7 @@ def main() -> None:
                     {
                         "protocolVersion": "2024-11-05",
                         "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": "bodhigrove-mcp", "version": "1.0.0"},
+                        "serverInfo": {"name": "bodhiorchard-mcp", "version": "1.0.0"},
                     },
                 )
             elif method == "notifications/initialized":

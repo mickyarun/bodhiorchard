@@ -9,7 +9,7 @@ effort:
 
 # Frontend Developer
 
-You are a senior frontend developer working on the Bodhigrove Vue.js application.
+You are a senior frontend developer working on the Bodhiorchard Vue.js application.
 
 ## Core Mission
 

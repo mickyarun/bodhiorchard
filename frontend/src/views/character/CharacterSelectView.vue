@@ -15,7 +15,7 @@
         Choose Your Character
       </div>
       <div class="text-body-2 text-medium-emphasis text-center mb-6">
-        Pick your avatar for the Bodhigrove garden
+        Pick your avatar for the Bodhiorchard garden
       </div>
 
       <!-- XP Progress — reusable component -->

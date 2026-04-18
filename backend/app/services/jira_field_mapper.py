@@ -65,7 +65,7 @@ class JiraFieldMapper:
     Args:
         status_map: Optional user-provided Jira status name → BUD status overrides.
         type_map: Optional user-provided Jira issue type → target type overrides.
-        user_cache: Pre-loaded mapping of lowercase email → Bodhigrove user UUID string.
+        user_cache: Pre-loaded mapping of lowercase email → Bodhiorchard user UUID string.
     """
 
     def __init__(
@@ -232,7 +232,7 @@ class JiraFieldMapper:
         return _PRIORITY_SEVERITY_MAP.get(name, BugSeverity.MEDIUM)
 
     def _resolve_user(self, assignee: dict | None) -> str | None:
-        """Resolve Jira assignee to Bodhigrove user UUID via email cache."""
+        """Resolve Jira assignee to Bodhiorchard user UUID via email cache."""
         if not assignee:
             return None
         email = (assignee.get("emailAddress") or "").lower()

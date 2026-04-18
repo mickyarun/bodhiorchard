@@ -233,7 +233,7 @@ function applyCurrentUser(): void {
     // be stale (old expired JWT) while localStorage holds the fresh one.
     // Using localStorage ensures Colyseus receives the latest token and
     // onAuth's verifyUserToken doesn't reject with "invalid auth token".
-    const freshToken = localStorage.getItem('bodhigrove_token') ?? authStore.token ?? null
+    const freshToken = localStorage.getItem('bodhiorchard_token') ?? authStore.token ?? null
     engine.setCurrentUser({
       id: authStore.user.id,
       name: authStore.user.name,

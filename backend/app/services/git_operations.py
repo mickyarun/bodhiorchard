@@ -143,7 +143,7 @@ async def stash_and_checkout_main(repo_path: str, main_branch: str) -> tuple[str
     had_stash = False
     if await detect_uncommitted_changes(repo_path):
         await run_git(
-            ["stash", "push", "-u", "-m", "bodhigrove-scan-auto-stash"],
+            ["stash", "push", "-u", "-m", "bodhiorchard-scan-auto-stash"],
             cwd=repo_path,
         )
         had_stash = True
@@ -153,7 +153,7 @@ async def stash_and_checkout_main(repo_path: str, main_branch: str) -> tuple[str
         _, stderr, rc = await run_git(["checkout", main_branch], cwd=repo_path)
         if rc != 0 and "already used by worktree" in stderr:
             # Stale worktree locks the branch — remove it and retry
-            worktree_dir = Path(repo_path) / ".bodhigrove" / main_branch
+            worktree_dir = Path(repo_path) / ".bodhiorchard" / main_branch
             if worktree_dir.exists():
                 await run_git(
                     ["worktree", "remove", str(worktree_dir), "--force"],
@@ -218,7 +218,7 @@ async def restore_after_scan(repo_path: str, orig_branch: str, had_stash: bool) 
 async def create_scan_worktree(repo_path: str, main_branch: str) -> str:
     """Create a temporary git worktree for scanning without touching the working tree.
 
-    Creates a detached worktree at ``<repo>/.bodhigrove/scan-wt`` pointing at
+    Creates a detached worktree at ``<repo>/.bodhiorchard/scan-wt`` pointing at
     the tip of ``main_branch``. This allows scanning the mainline code while
     the user continues working on their current branch.
 
@@ -232,7 +232,7 @@ async def create_scan_worktree(repo_path: str, main_branch: str) -> str:
     Raises:
         RuntimeError: If worktree creation fails.
     """
-    wt_path = str(Path(repo_path) / ".bodhigrove" / "scan-wt")
+    wt_path = str(Path(repo_path) / ".bodhiorchard" / "scan-wt")
 
     # Clean up any stale worktree from a previous interrupted scan
     if Path(wt_path).exists():
@@ -262,7 +262,7 @@ async def remove_scan_worktree(repo_path: str) -> None:
     Args:
         repo_path: Absolute path to the git repository (not the worktree).
     """
-    wt_path = str(Path(repo_path) / ".bodhigrove" / "scan-wt")
+    wt_path = str(Path(repo_path) / ".bodhiorchard" / "scan-wt")
     if not Path(wt_path).exists():
         return
     _, stderr, rc = await run_git(["worktree", "remove", wt_path, "--force"], cwd=repo_path)

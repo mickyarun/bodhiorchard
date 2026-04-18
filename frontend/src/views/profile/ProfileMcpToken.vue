@@ -139,13 +139,13 @@
         <li class="mb-2">
           In the <strong>same terminal</strong>, launch Claude Code:
           <div class="inline-cmd mt-1"><code>claude</code></div>
-          Hooks will inherit <code>BODHIGROVE_MCP_TOKEN</code> from the shell
+          Hooks will inherit <code>BODHIORCHARD_MCP_TOKEN</code> from the shell
           and start pushing activity.
         </li>
         <li>
           <strong>Verify it's set</strong> in the shell that launched Claude
           Code:
-          <div class="inline-cmd mt-1"><code>echo $BODHIGROVE_MCP_TOKEN</code></div>
+          <div class="inline-cmd mt-1"><code>echo $BODHIORCHARD_MCP_TOKEN</code></div>
           If this is empty, the hooks will silently do nothing.
         </li>
       </ol>
@@ -159,7 +159,7 @@
       >
         <div class="text-body-2 font-weight-medium mb-1">Common gotcha</div>
         <div class="text-caption">
-          If you have an <strong>old</strong> <code>BODHIGROVE_MCP_TOKEN</code>
+          If you have an <strong>old</strong> <code>BODHIORCHARD_MCP_TOKEN</code>
           exported in <code>~/.zshrc</code> or <code>~/.bashrc</code>, every
           new terminal will re-export the stale value and override what you
           just set. Remove or comment out the old line, then open a fresh
@@ -185,7 +185,7 @@ const tokenCopied = ref(false)
 const exportCopied = ref(false)
 
 const exportLine = computed(() =>
-  newToken.value ? `export BODHIGROVE_MCP_TOKEN="${newToken.value}"` : '',
+  newToken.value ? `export BODHIORCHARD_MCP_TOKEN="${newToken.value}"` : '',
 )
 
 async function loadStatus(): Promise<void> {

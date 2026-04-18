@@ -388,7 +388,7 @@ def _build_repo_diff_sections(
             )
         else:
             last_sha = last_shas.get(repo_path, "HEAD")
-            develop_wt = Path(repo_path) / ".bodhigrove" / "develop"
+            develop_wt = Path(repo_path) / ".bodhiorchard" / "develop"
             diff_base = "develop" if develop_wt.exists() else "HEAD~10"
             sections.append(
                 f"- **{repo_name}**: `{repo_path}`\n"

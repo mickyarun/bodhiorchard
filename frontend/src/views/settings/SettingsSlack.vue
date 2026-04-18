@@ -212,7 +212,7 @@
           </div>
 
           <div class="text-caption text-medium-emphasis mb-3">
-            Link Slack workspace users to Bodhigrove members, or import them as new members.
+            Link Slack workspace users to Bodhiorchard members, or import them as new members.
             <br />
             <strong>Required scopes:</strong>
             <v-chip size="x-small" variant="tonal" color="primary" class="ml-1">users:read</v-chip>
@@ -386,12 +386,12 @@ const slackEventsOpen = ref(false)
 // Slack manifest for quick app creation
 const slackManifest = JSON.stringify({
   display_information: {
-    name: 'Bodhigrove',
-    description: 'Bodhigrove code intelligence notifications and agent triggers',
+    name: 'Bodhiorchard',
+    description: 'Bodhiorchard code intelligence notifications and agent triggers',
   },
   features: {
     bot_user: {
-      display_name: 'Bodhigrove',
+      display_name: 'Bodhiorchard',
       always_online: true,
     },
   },

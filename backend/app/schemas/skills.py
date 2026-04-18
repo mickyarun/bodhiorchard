@@ -29,7 +29,7 @@ STATUS_LABELS: dict[str, str] = {
     "indexing_code": "Indexing code structure",
     "setting_up_gitnexus": "Setting up GitNexus",
     "setting_up_worktrees": "Configuring worktrees",
-    "setting_up_mcp": "Setting up Bodhigrove MCP",
+    "setting_up_mcp": "Setting up Bodhiorchard MCP",
     "installing_hooks": "Installing git hooks",
     "pushing_setup": "Pushing setup files",
     "cleaning_stale": "Cleaning stale references",

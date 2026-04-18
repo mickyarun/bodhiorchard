@@ -1,5 +1,5 @@
-"""Model Context Protocol (MCP) server integration for Bodhigrove.
+"""Model Context Protocol (MCP) server integration for Bodhiorchard.
 
 Provides tools that Claude Code on execution nodes can call to interact
-with Bodhigrove data: BUDs, knowledge base, bugs, task status, and Slack.
+with Bodhiorchard data: BUDs, knowledge base, bugs, task status, and Slack.
 """

@@ -1,7 +1,7 @@
 """Claude Code CLI runner for executing AI tasks locally.
 
 This module provides the interface for triggering Claude Code from the
-Bodhigrove backend via local subprocess execution.
+Bodhiorchard backend via local subprocess execution.
 """
 
 import asyncio
@@ -42,9 +42,9 @@ class ClaudeRunResult:
 class MCPServerConfig:
     """Configuration for an MCP server to expose to the Claude CLI.
 
-    Generates a stdio-based MCP config that spawns the Bodhigrove bridge script,
+    Generates a stdio-based MCP config that spawns the Bodhiorchard bridge script,
     which translates MCP JSON-RPC calls into REST API calls back to the
-    running Bodhigrove backend.
+    running Bodhiorchard backend.
     """
 
     backend_url: str
@@ -308,21 +308,21 @@ async def run_claude_code(
         bridge_path = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridge.py")
         mcp_json = {
             "mcpServers": {
-                "bodhigrove": {
+                "bodhiorchard": {
                     "command": sys.executable,
                     "args": [bridge_path],
                     "env": {
-                        "BODHIGROVE_BACKEND_URL": config.mcp.backend_url,
-                        "BODHIGROVE_MCP_TOKEN": config.mcp.mcp_token,
-                        "BODHIGROVE_MCP_TOKEN_FILE": "",
-                        "BODHIGROVE_MCP_TOOLS": ",".join(config.mcp.tool_names),
+                        "BODHIORCHARD_BACKEND_URL": config.mcp.backend_url,
+                        "BODHIORCHARD_MCP_TOKEN": config.mcp.mcp_token,
+                        "BODHIORCHARD_MCP_TOKEN_FILE": "",
+                        "BODHIORCHARD_MCP_TOOLS": ",".join(config.mcp.tool_names),
                     },
                 },
             },
         }
         with tempfile.NamedTemporaryFile(
             suffix=".json",
-            prefix="bodhigrove_mcp_",
+            prefix="bodhiorchard_mcp_",
             delete=False,
             mode="w",
         ) as tmp:
@@ -584,7 +584,7 @@ async def test_claude_connection() -> dict:
     logger.info("claude_connection_test_start", cli_version=version)
 
     test_result = await run_claude_code(
-        prompt="Reply with exactly: BODHIGROVE_CONNECTION_OK",
+        prompt="Reply with exactly: BODHIORCHARD_CONNECTION_OK",
         config=ClaudeRunnerConfig(max_turns=1, timeout_seconds=90),
     )
 

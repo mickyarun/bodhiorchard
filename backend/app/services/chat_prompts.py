@@ -123,7 +123,7 @@ async def build_design_prompt(
             "dark theme as default.\n"
         )
     elif ds_content:
-        fd, tmp_path = tempfile.mkstemp(suffix=".md", prefix="bodhigrove_design_system_")
+        fd, tmp_path = tempfile.mkstemp(suffix=".md", prefix="bodhiorchard_design_system_")
         os.close(fd)
         ds_file = Path(tmp_path)
         ds_file.write_text(ds_content, encoding="utf-8")
@@ -157,7 +157,7 @@ async def build_design_prompt(
     parts.append(
         "## Instructions\n\n"
         f"1. Write the wireframe as a complete HTML file to:\n"
-        f"   `.bodhigrove/wireframes/{bud_ref}/wireframe.html`\n"
+        f"   `.bodhiorchard/wireframes/{bud_ref}/wireframe.html`\n"
         "   Create the directory if it doesn't exist.\n\n"
         "2. The HTML file must:\n"
         "   - Use Vuetify CDN (with Vue 3)\n"

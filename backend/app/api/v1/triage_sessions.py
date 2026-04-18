@@ -80,7 +80,7 @@ async def list_triage_sessions(
 async def _resolve_slack_names(
     db: AsyncSession, org_id: uuid.UUID, slack_ids: set[str]
 ) -> dict[str, str]:
-    """Look up Bodhigrove user names by their Slack IDs.
+    """Look up Bodhiorchard user names by their Slack IDs.
 
     Args:
         db: Async database session.

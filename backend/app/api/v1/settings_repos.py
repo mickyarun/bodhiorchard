@@ -51,7 +51,7 @@ def _detect_design_system_status(repo_id: str, ds_repo_ids: set[str]) -> str:
 
 
 def _detect_setup_status(repo_path: str) -> str:
-    """Check if Bodhigrove MCP + hooks are set up in a repo.
+    """Check if Bodhiorchard MCP + hooks are set up in a repo.
 
     Returns: 'merged' | 'not_setup'
     """
@@ -470,7 +470,7 @@ async def list_github_org_members(
             *[_fetch_profile(profile_client, m.get("login", "")) for m in members]
         )
 
-    # Filter out members already added to Bodhigrove
+    # Filter out members already added to Bodhiorchard
     user_repo = UserRepository(db, org_id=org.id)
     existing_users = await user_repo.list_by_org(org.id)
     existing_github = {u.github_username.lower() for u in existing_users if u.github_username}

@@ -155,14 +155,14 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
     reply = "Design wireframe generated."
     rel_path: str | None = None
     expected_path = (
-        Path(repo_path) / ".bodhigrove" / "wireframes" / bud_ref / "wireframe.html"
+        Path(repo_path) / ".bodhiorchard" / "wireframes" / bud_ref / "wireframe.html"
         if repo_path
         else None
     )
 
     if expected_path and expected_path.exists():
         wireframe_html = expected_path.read_text(encoding="utf-8")
-        rel_path = f".bodhigrove/wireframes/{bud_ref}/wireframe.html"
+        rel_path = f".bodhiorchard/wireframes/{bud_ref}/wireframe.html"
         # Try to get reply from Claude's JSON response
         response = _parse_chat_response(result.output)
         if response and response.get("reply"):

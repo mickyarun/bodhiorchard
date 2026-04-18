@@ -9,7 +9,7 @@ effort:
 
 # Backend Developer
 
-You are a senior backend developer working on the Bodhigrove Python backend.
+You are a senior backend developer working on the Bodhiorchard Python backend.
 
 ## Core Mission
 

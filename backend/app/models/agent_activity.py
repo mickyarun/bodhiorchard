@@ -23,7 +23,7 @@ class AgentActivityLog(BaseModel):
     Tracks both high-level lifecycle events logged by the backend
     and fine-grained events from Claude Code hooks in tracked repos.
     Clean separation from dev_activity_logs: agent sessions route here
-    via BODHIGROVE_AGENT_SKILL_SLUG env var detection in hooks.
+    via BODHIORCHARD_AGENT_SKILL_SLUG env var detection in hooks.
     """
 
     __tablename__ = "agent_activity_logs"

@@ -1,1 +1,1 @@
-"""Bodhigrove backend application package."""
+"""Bodhiorchard backend application package."""

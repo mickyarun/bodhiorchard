@@ -1,4 +1,4 @@
-"""Structured JSON logging configuration for Bodhigrove.
+"""Structured JSON logging configuration for Bodhiorchard.
 
 Configures structlog to output JSON-formatted logs with timestamps,
 log level, logger name, and request correlation context.

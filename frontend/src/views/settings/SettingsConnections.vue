@@ -65,7 +65,7 @@
           <div>
             <div class="text-body-2 font-weight-medium">Claude Code MCP</div>
             <div class="text-caption text-medium-emphasis">
-              Connect Claude Code to Bodhigrove for BUDs, knowledge, and team context
+              Connect Claude Code to Bodhiorchard for BUDs, knowledge, and team context
             </div>
           </div>
         </div>
@@ -372,31 +372,31 @@ const newMcpToken = ref('')
 const regeneratingToken = ref(false)
 
 const envVarSnippet = computed(() => {
-  const token = newMcpToken.value || '<your-bodhigrove-token>'
-  return `export BODHIGROVE_MCP_TOKEN="${token}"`
+  const token = newMcpToken.value || '<your-bodhiorchard-token>'
+  return `export BODHIORCHARD_MCP_TOKEN="${token}"`
 })
 
 const macInstructions = computed(() => {
-  const token = newMcpToken.value || '<your-bodhigrove-token>'
+  const token = newMcpToken.value || '<your-bodhiorchard-token>'
   return `# Add to ~/.zshrc (default shell on macOS)
-echo 'export BODHIGROVE_MCP_TOKEN="${token}"' >> ~/.zshrc
+echo 'export BODHIORCHARD_MCP_TOKEN="${token}"' >> ~/.zshrc
 source ~/.zshrc`
 })
 
 const linuxInstructions = computed(() => {
-  const token = newMcpToken.value || '<your-bodhigrove-token>'
+  const token = newMcpToken.value || '<your-bodhiorchard-token>'
   return `# Add to ~/.bashrc (or ~/.zshrc if using zsh)
-echo 'export BODHIGROVE_MCP_TOKEN="${token}"' >> ~/.bashrc
+echo 'export BODHIORCHARD_MCP_TOKEN="${token}"' >> ~/.bashrc
 source ~/.bashrc`
 })
 
 const windowsInstructions = computed(() => {
-  const token = newMcpToken.value || '<your-bodhigrove-token>'
+  const token = newMcpToken.value || '<your-bodhiorchard-token>'
   return `# PowerShell — set permanently for current user
-[Environment]::SetEnvironmentVariable("BODHIGROVE_MCP_TOKEN", "${token}", "User")
+[Environment]::SetEnvironmentVariable("BODHIORCHARD_MCP_TOKEN", "${token}", "User")
 
 # Or via CMD
-setx BODHIGROVE_MCP_TOKEN "${token}"`
+setx BODHIORCHARD_MCP_TOKEN "${token}"`
 })
 
 onMounted(async () => {

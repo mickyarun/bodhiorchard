@@ -1,4 +1,4 @@
-"""Shared user resolution logic for mapping emails to Bodhigrove users.
+"""Shared user resolution logic for mapping emails to Bodhiorchard users.
 
 Used by git hook endpoints and Claude Code hook handlers to resolve
 commit authors and session owners to platform user IDs.
@@ -21,7 +21,7 @@ async def resolve_user_by_email(
     org_id: uuid.UUID,
     email: str,
 ) -> User | None:
-    """Resolve an email address to a Bodhigrove user within an organization.
+    """Resolve an email address to a Bodhiorchard user within an organization.
 
     Checks the primary user email first, then falls back to email aliases.
 

@@ -9,7 +9,7 @@ effort:
 
 # DevOps
 
-You are a DevOps engineer for the Bodhigrove platform.
+You are a DevOps engineer for the Bodhiorchard platform.
 
 ## Core Mission
 

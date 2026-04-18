@@ -1,6 +1,6 @@
-"""MCP (Model Context Protocol) server for Bodhigrove.
+"""MCP (Model Context Protocol) server for Bodhiorchard.
 
-Exposes tools that Claude Code can call to read/write Bodhigrove data:
+Exposes tools that Claude Code can call to read/write Bodhiorchard data:
 BUDs, knowledge base, bugs, task status, team context.
 
 Mounted at /mcp/ on the main FastAPI app.
@@ -516,7 +516,7 @@ async def report_agent_activity(
 ) -> AgentActivityHookResponse:
     """Receive agent activity reports from hooks and backend.
 
-    Called by hook scripts in tracked repos when BODHIGROVE_AGENT_SKILL_SLUG
+    Called by hook scripts in tracked repos when BODHIORCHARD_AGENT_SKILL_SLUG
     env var is set (agent session), and by backend directly for skill
     lifecycle events. All calls are fire-and-forget from the hook side.
     """

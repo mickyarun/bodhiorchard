@@ -1,6 +1,6 @@
-"""Mapping from Bodhigrove agent names to skill definition files.
+"""Mapping from Bodhiorchard agent names to skill definition files.
 
-Each Bodhigrove agent (triage, bud, status, etc.) maps to a skill markdown
+Each Bodhiorchard agent (triage, bud, status, etc.) maps to a skill markdown
 file in backend/app/agents/skills/ that defines its persona, tools, and workflow.
 """
 
@@ -30,7 +30,7 @@ SECTION_SKILL_MAP: dict[str, str] = {
 
 
 def get_skill_for_agent(agent_name: str) -> str | None:
-    """Look up the skill name for a given Bodhigrove agent.
+    """Look up the skill name for a given Bodhiorchard agent.
 
     Args:
         agent_name: The agent key (e.g., 'triage', 'bud').

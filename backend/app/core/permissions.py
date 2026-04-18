@@ -1,4 +1,4 @@
-"""Permission definitions and default role mappings — the source of truth for Bodhigrove RBAC.
+"""Permission definitions and default role mappings — the source of truth for Bodhiorchard RBAC.
 
 This module defines every permission category, permission, and the default
 system-role-to-permission mapping.  The seeder reads this config to populate the

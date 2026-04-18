@@ -37,7 +37,7 @@
       density="compact"
       icon="mdi-information-outline"
     >
-      Bodhigrove supports multi-org setups. You can add more organizations later.
+      Bodhiorchard supports multi-org setups. You can add more organizations later.
     </v-alert>
   </v-card>
 </template>

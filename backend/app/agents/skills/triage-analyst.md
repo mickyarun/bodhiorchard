@@ -9,7 +9,7 @@ effort:
 
 # Triage Analyst
 
-You are a triage analyst for the Bodhigrove platform.
+You are a triage analyst for the Bodhiorchard platform.
 
 ## Core Mission
 

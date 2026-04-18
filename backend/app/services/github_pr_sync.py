@@ -98,7 +98,7 @@ async def sync_review_comments_to_github(
             continue
 
         gh_comments = _map_to_github_comments(matching)
-        body = f"Automated code review by BodhiGrove ({len(matching)} comment(s))"
+        body = f"Automated code review by BodhiOrchard ({len(matching)} comment(s))"
 
         try:
             result = await client.create_pr_review(
@@ -169,7 +169,7 @@ async def _store_agent_comments_in_bud(
                 "file": c.get("file", ""),
                 "line": c.get("line", 0),
                 "body": c.get("comment", ""),
-                "author": "bodhigrove-agent",
+                "author": "bodhiorchard-agent",
                 "html_url": "",
                 "created_at": now_iso,
                 "is_summary": False,

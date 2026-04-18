@@ -3,14 +3,14 @@
     <!-- Section 1: Header -->
     <div class="d-flex flex-column align-center text-center mb-10">
       <img
-        src="/assets/bodhigrove-logo-sm.png"
+        src="/assets/bodhiorchard-logo-sm.png"
         width="48"
         height="48"
-        alt="Bodhigrove"
+        alt="Bodhiorchard"
         class="mb-4"
       />
       <h1 class="text-h4 font-weight-bold mb-2">
-        The Bodhigrove Methodology
+        The Bodhiorchard Methodology
       </h1>
       <p class="text-body-1 text-medium-emphasis mb-5" style="max-width: 600px;">
         An AI-native way to build software. From conversation to production — every phase powered by intelligent agents working alongside humans.
@@ -311,34 +311,34 @@
       </v-col>
     </v-row>
 
-    <!-- Section 10: Bodhigrove vs Agile (comparison) -->
+    <!-- Section 10: Bodhiorchard vs Agile (comparison) -->
     <v-card class="pa-6 mb-8 card-border-dark" color="surface">
-      <div class="text-overline text-medium-emphasis mb-4">Bodhigrove vs Agile</div>
+      <div class="text-overline text-medium-emphasis mb-4">Bodhiorchard vs Agile</div>
       <div style="overflow-x: auto;">
         <table class="methodology-comparison">
           <thead>
             <tr>
               <th>Phase</th>
               <th>Agile / Scrum</th>
-              <th>Bodhigrove</th>
+              <th>Bodhiorchard</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in comparisonRows" :key="row.phase">
               <td>{{ row.phase }}</td>
               <td>{{ row.agile }}</td>
-              <td>{{ row.bodhigrove }}</td>
+              <td>{{ row.bodhiorchard }}</td>
             </tr>
           </tbody>
         </table>
       </div>
     </v-card>
 
-    <!-- Section 11: Why Bodhigrove -->
+    <!-- Section 11: Why Bodhiorchard -->
     <v-card class="pa-8 mb-8 card-border-dark" color="surface">
       <div class="d-flex flex-column align-center text-center mb-6">
-        <img src="/assets/bodhigrove-logo-sm.png" width="40" height="40" alt="" class="mb-3" style="border-radius: 50%;" />
-        <div class="text-h6 font-weight-medium">Why "Bodhigrove"?</div>
+        <img src="/assets/bodhiorchard-logo-sm.png" width="40" height="40" alt="" class="mb-3" style="border-radius: 50%;" />
+        <div class="text-h6 font-weight-medium">Why "Bodhiorchard"?</div>
       </div>
 
       <div class="story-content mx-auto" style="max-width: 680px;">
@@ -349,7 +349,7 @@
         <p class="text-body-2 text-medium-emphasis mb-4" style="line-height: 1.8;">
           <strong class="text-primary">Bodhi</strong> (Sanskrit: "awakening, enlightenment") is the state
           of understanding that the Buddha attained under the Bodhi tree.
-          <strong class="text-primary">Grove</strong> is a small, living community of trees growing together.
+          <strong class="text-primary">Orchard</strong> is a cultivated grove &mdash; trees tended with intention so they can bear fruit.
         </p>
 
         <p class="text-body-2 text-medium-emphasis mb-4" style="line-height: 1.8;">
@@ -361,7 +361,7 @@
         </p>
 
         <p class="text-body-2 text-medium-emphasis mb-4" style="line-height: 1.8;">
-          Bodhigrove exists because <strong class="text-high-emphasis">AI should give humans their time back</strong>.
+          Bodhiorchard exists because <strong class="text-high-emphasis">AI should give humans their time back</strong>.
           Not to write more code. Not to ship faster. But to reclaim the hours lost to busywork &mdash;
           so a developer can leave at 5pm and take their kid to the park. So a PM can spend their
           morning thinking deeply about what users need instead of copy-pasting tickets. So a team
@@ -370,15 +370,15 @@
 
         <p class="text-body-2 text-medium-emphasis mb-4" style="line-height: 1.8;">
           The living tree dashboard isn't just a visualization &mdash; it's the philosophy made visible.
-          Your organization is a grove. Each repository is a tree. Each feature is a branch.
-          The AI agents are the gardeners: they water, they prune, they tend the soil. They do the
-          repetitive labor so the trees can grow naturally, and the humans who planted them can step
-          back, breathe, and enjoy the forest they've built.
+          Your organization is an orchard. Each repository is a tree. Each feature is a branch.
+          The AI agents are the orchardists: they water, they prune, they tend the soil. They do the
+          repetitive labor so the trees can grow naturally and bear fruit, and the humans who planted them can step
+          back, breathe, and enjoy the harvest they've built.
         </p>
 
         <p class="text-body-2 text-medium-emphasis" style="line-height: 1.8;">
           The Bodhi tree is where awakening happened &mdash; not through more effort, but through
-          stillness and clarity. Bodhigrove is an invitation to build software the same way:
+          stillness and clarity. Bodhiorchard is an invitation to build software the same way:
           let the machines handle the noise, so humans can focus on what actually matters.
           <strong class="text-success">Build well. Then go outside.</strong>
         </p>
@@ -420,19 +420,19 @@ const principles = [
 ]
 
 const comparisonRows = [
-  { phase: 'Intake', agile: 'Ticket in Jira, manual triage, sprint planning', bodhigrove: 'Chat message → Triage Agent analyzes, finds duplicates, estimates capacity' },
-  { phase: 'Estimation', agile: 'Story points, planning poker, team debate', bodhigrove: 'AI-PERT + Monte Carlo simulation — per-phase dates with P50/P70/P85 confidence, factoring developer skill profiles, backlog depth, and workload' },
-  { phase: 'Specification', agile: 'PM writes BUD manually, reviews in meetings', bodhigrove: 'BUD Agent drafts spec with codebase context, enterprise rules, prior art' },
-  { phase: 'Design', agile: 'Designer creates in Figma, hands off specs', bodhigrove: 'AI generates wireframes; Designer reviews, edits, and advances to Tech Architecture' },
-  { phase: 'Tech Arch', agile: 'Architect writes design doc, reviews in meetings', bodhigrove: 'AI generates tech plan; Tech Lead reviews; Smart Assignment Agent suggests developer' },
-  { phase: 'Development', agile: 'Dev picks up ticket, starts from scratch', bodhigrove: 'Best-fit dev assigned by AI, implements from tech plan, human reviews code' },
-  { phase: 'Testing', agile: 'QA writes test cases manually, runs regression', bodhigrove: 'Auto-generated test plan (unit, integration, e2e, perf, security, UAT)' },
-  { phase: 'QA & UAT', agile: 'QA writes test cases, manual handoff', bodhigrove: 'QA approves/refines automation plan, executes manual tests, signs off for UAT' },
-  { phase: 'Deployment', agile: 'Release train, manual status updates', bodhigrove: 'Status Agent auto-detects PR merges, BUD becomes Feature on deploy' },
-  { phase: 'Bug Mgmt', agile: 'Manual triage, reassign in standup', bodhigrove: 'External bugs reopen Features, auto-classify and restart flow from triage' },
-  { phase: 'Knowledge', agile: 'Confluence pages go stale, tribal knowledge', bodhigrove: 'Learning Agent captures patterns, knowledge auto-syncs from code' },
-  { phase: 'Skills', agile: 'Manager intuition, annual reviews', bodhigrove: 'Skill Agent rebuilds daily from git/BUD/bug history, recommends assignments' },
-  { phase: 'Retrospective', agile: 'Biweekly meeting, action items forgotten', bodhigrove: 'Learning Agent auto-generates retrospective on every deployment' },
+  { phase: 'Intake', agile: 'Ticket in Jira, manual triage, sprint planning', bodhiorchard: 'Chat message → Triage Agent analyzes, finds duplicates, estimates capacity' },
+  { phase: 'Estimation', agile: 'Story points, planning poker, team debate', bodhiorchard: 'AI-PERT + Monte Carlo simulation — per-phase dates with P50/P70/P85 confidence, factoring developer skill profiles, backlog depth, and workload' },
+  { phase: 'Specification', agile: 'PM writes BUD manually, reviews in meetings', bodhiorchard: 'BUD Agent drafts spec with codebase context, enterprise rules, prior art' },
+  { phase: 'Design', agile: 'Designer creates in Figma, hands off specs', bodhiorchard: 'AI generates wireframes; Designer reviews, edits, and advances to Tech Architecture' },
+  { phase: 'Tech Arch', agile: 'Architect writes design doc, reviews in meetings', bodhiorchard: 'AI generates tech plan; Tech Lead reviews; Smart Assignment Agent suggests developer' },
+  { phase: 'Development', agile: 'Dev picks up ticket, starts from scratch', bodhiorchard: 'Best-fit dev assigned by AI, implements from tech plan, human reviews code' },
+  { phase: 'Testing', agile: 'QA writes test cases manually, runs regression', bodhiorchard: 'Auto-generated test plan (unit, integration, e2e, perf, security, UAT)' },
+  { phase: 'QA & UAT', agile: 'QA writes test cases, manual handoff', bodhiorchard: 'QA approves/refines automation plan, executes manual tests, signs off for UAT' },
+  { phase: 'Deployment', agile: 'Release train, manual status updates', bodhiorchard: 'Status Agent auto-detects PR merges, BUD becomes Feature on deploy' },
+  { phase: 'Bug Mgmt', agile: 'Manual triage, reassign in standup', bodhiorchard: 'External bugs reopen Features, auto-classify and restart flow from triage' },
+  { phase: 'Knowledge', agile: 'Confluence pages go stale, tribal knowledge', bodhiorchard: 'Learning Agent captures patterns, knowledge auto-syncs from code' },
+  { phase: 'Skills', agile: 'Manager intuition, annual reviews', bodhiorchard: 'Skill Agent rebuilds daily from git/BUD/bug history, recommends assignments' },
+  { phase: 'Retrospective', agile: 'Biweekly meeting, action items forgotten', bodhiorchard: 'Learning Agent auto-generates retrospective on every deployment' },
 ]
 
 const phases = [

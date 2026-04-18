@@ -80,7 +80,7 @@ import type { ScanStatusData } from '@/composables/useScanSocket'
 import type { SetupChecklistStatus } from '@/types/setup'
 
 const checklist = ref<SetupChecklistStatus | null>(null)
-const dismissed = ref(localStorage.getItem('bodhigrove_checklist_dismissed') === 'true')
+const dismissed = ref(localStorage.getItem('bodhiorchard_checklist_dismissed') === 'true')
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 // WS-driven progress (real-time, replaces stale poll data)
@@ -185,7 +185,7 @@ async function fetchStatus(): Promise<void> {
     if (!data.orgCreated || !data.scanComplete) {
       if (dismissed.value) {
         dismissed.value = false
-        localStorage.removeItem('bodhigrove_checklist_dismissed')
+        localStorage.removeItem('bodhiorchard_checklist_dismissed')
         // Start polling now that we're un-dismissed
         if (!pollInterval) {
           pollInterval = setInterval(fetchStatus, 10_000)
@@ -208,7 +208,7 @@ async function fetchStatus(): Promise<void> {
 
 function dismiss(): void {
   dismissed.value = true
-  localStorage.setItem('bodhigrove_checklist_dismissed', 'true')
+  localStorage.setItem('bodhiorchard_checklist_dismissed', 'true')
   stopPolling()
   stopTracking()
   wsScanActive.value = false

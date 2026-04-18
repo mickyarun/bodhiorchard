@@ -1,5 +1,5 @@
 #!/bin/sh
-        # installed-by-bodhigrove (post-commit)
+        # installed-by-bodhiorchard (post-commit)
         # Source shared utilities from Claude hooks dir
         HOOKS_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/hooks"
         if [ -f "$HOOKS_DIR/_common.sh" ]; then
@@ -18,7 +18,7 @@
 
         # Find active Claude session ID from session temp file
         ACTIVE_SID=""
-        for SF in /tmp/.bodhigrove-session-*.json; do
+        for SF in /tmp/.bodhiorchard-session-*.json; do
           [ -f "$SF" ] || continue
           ACTIVE_SID=$(python3 -c "
 import json

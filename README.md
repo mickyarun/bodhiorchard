@@ -1,6 +1,6 @@
 <div align="center">
 
-# Bodhigrove
+# Bodhiorchard
 
 ### AI-Native Software Development Operations Platform
 
@@ -19,9 +19,9 @@
 
 ---
 
-## What is Bodhigrove?
+## What is Bodhiorchard?
 
-Bodhigrove is an **open-source, AI-first alternative to Agile project management tools** like Jira, Linear, and Shortcut. It runs locally on your laptop or Mac Mini with **11 specialized AI agents** that orchestrate the entire software development lifecycle — from feature intake to production deployment, learning, and continuous improvement. Choose your AI engine: [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware intelligence, [**Ollama**](https://ollama.com) for fully local/free inference, or cloud APIs from **Anthropic** and **OpenAI** — mix and match per agent.
+Bodhiorchard is an **open-source, AI-first alternative to Agile project management tools** like Jira, Linear, and Shortcut. It runs locally on your laptop or Mac Mini with **11 specialized AI agents** that orchestrate the entire software development lifecycle — from feature intake to production deployment, learning, and continuous improvement. Choose your AI engine: [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware intelligence, [**Ollama**](https://ollama.com) for fully local/free inference, or cloud APIs from **Anthropic** and **OpenAI** — mix and match per agent.
 
 ### The Problem
 
@@ -29,9 +29,9 @@ Traditional Agile tools create busywork: manual ticket creation, estimation poke
 
 ### The Solution
 
-Bodhigrove replaces human busywork with AI automation while keeping humans in control of decisions that matter:
+Bodhiorchard replaces human busywork with AI automation while keeping humans in control of decisions that matter:
 
-| What Changes | Agile / Jira | Bodhigrove |
+| What Changes | Agile / Jira | Bodhiorchard |
 |---|---|---|
 | **Feature Intake** | Manual ticket creation, sprint planning | Slack message triggers AI triage with duplicate detection and priority scoring |
 | **Estimation** | Story points, planning poker | AI predicts cycle time from historical data (85% confidence) |
@@ -90,7 +90,7 @@ Submit features directly from Slack. The Triage Agent conducts a structured inte
 3. Checks for duplicates via vector search
 4. Estimates complexity from codebase analysis
 5. Suggests priority with capacity check
-6. PM approves in the Bodhigrove UI
+6. PM approves in the Bodhiorchard UI
 7. BUD Agent generates the full specification
 
 ### Multi-Repo Code Intelligence
@@ -104,7 +104,7 @@ Powered by **GitNexus** code graph analysis:
 
 ### Model Context Protocol (MCP) Integration
 
-Bodhigrove exposes **10 MCP tools** for Claude Code and other MCP-compatible AI assistants:
+Bodhiorchard exposes **10 MCP tools** for Claude Code and other MCP-compatible AI assistants:
 
 | Tool | Purpose |
 |---|---|
@@ -114,7 +114,7 @@ Bodhigrove exposes **10 MCP tools** for Claude Code and other MCP-compatible AI 
 | `write_feature_registry` | Save synthesized features |
 | `check_feature_exists` | Deduplicate before creating |
 | `search_bugs` | Find related bugs |
-| `update_task_status` | Report progress back to Bodhigrove |
+| `update_task_status` | Report progress back to Bodhiorchard |
 | `post_slack_message` | Send messages to Slack |
 | `get_team_context` | Get team capacity and skills |
 | `get_pending_features` | Get next batch for synthesis |
@@ -131,7 +131,7 @@ Bodhigrove exposes **10 MCP tools** for Claude Code and other MCP-compatible AI 
 
 ## AI Agents
 
-Bodhigrove ships with **11 specialized agents**, each triggered automatically and connected to each other:
+Bodhiorchard ships with **11 specialized agents**, each triggered automatically and connected to each other:
 
 ### Intake & Planning
 
@@ -172,7 +172,7 @@ Every agent logs actions to an audit trail, uses the organization's configured L
 
 ### Runs on Your Machine — Not in the Cloud
 
-Bodhigrove is designed to run **locally on your laptop or a Mac Mini** sitting under your desk. No expensive cloud servers. No per-seat SaaS subscriptions. One machine runs the entire platform — AI agents, database, vector search, and all.
+Bodhiorchard is designed to run **locally on your laptop or a Mac Mini** sitting under your desk. No expensive cloud servers. No per-seat SaaS subscriptions. One machine runs the entire platform — AI agents, database, vector search, and all.
 
 Need Slack integration or internet access? A **Cloudflare Tunnel** exposes just the webhook endpoints — your data stays on your hardware while the world can talk to it. This means:
 
@@ -183,7 +183,7 @@ Need Slack integration or internet access? A **Cloudflare Tunnel** exposes just 
 
 ### AI Configuration — 4 Presets, Your Choice
 
-Bodhigrove uses [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) as its core AI engine for codebase-aware agents (Tech Plan, Test Plan, BUD generation). For other agents, you choose the provider. The Settings page offers four presets:
+Bodhiorchard uses [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) as its core AI engine for codebase-aware agents (Tech Plan, Test Plan, BUD generation). For other agents, you choose the provider. The Settings page offers four presets:
 
 | Preset | Codebase Agents | Other Agents | Best For |
 |---|---|---|---|
@@ -272,8 +272,8 @@ Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cl
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/bodhigrove.git
-cd bodhigrove
+git clone https://github.com/YOUR_USERNAME/bodhiorchard.git
+cd bodhiorchard
 
 # Copy environment config
 cp backend/.env.example backend/.env
@@ -315,7 +315,7 @@ npm run dev
 
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | PostgreSQL connection | `postgresql+asyncpg://bodhigrove:bodhigrove@localhost:5432/bodhigrove` |
+| `DATABASE_URL` | PostgreSQL connection | `postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard` |
 | `SECRET_KEY` | JWT signing key | `change-me-in-production` |
 | `ENCRYPTION_KEY` | AES key for secrets at rest | (generated) |
 | `LLM_PROVIDER` | LLM provider | `ollama` |
@@ -331,7 +331,7 @@ npm run dev
 ## Project Structure
 
 ```
-bodhigrove/
+bodhiorchard/
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/          # REST API endpoints
@@ -355,7 +355,7 @@ bodhigrove/
 │   │   └── data/            # Shared data (agent definitions)
 │   └── package.json
 │
-├── BODHIGROVE-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
+├── BODHIORCHARD-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
 ├── AGENTS.md                # Agent capabilities documentation
 ├── TODO.md                  # Roadmap and progress tracking
 └── LICENSE                  # AGPL-3.0 + Commercial dual license
@@ -447,13 +447,13 @@ We welcome contributions! Please read our contributing guidelines before submitt
 
 ### Contributor License Agreement
 
-By contributing to Bodhigrove, you agree that your contributions will be licensed under the same license as the project, and you grant the project maintainer (Arun Rajkumar) a perpetual, worldwide, non-exclusive, royalty-free license to use, modify, sublicense, and distribute your contributions. This ensures the project can offer commercial licensing alongside the open-source version.
+By contributing to Bodhiorchard, you agree that your contributions will be licensed under the same license as the project, and you grant the project maintainer (Arun Rajkumar) a perpetual, worldwide, non-exclusive, royalty-free license to use, modify, sublicense, and distribute your contributions. This ensures the project can offer commercial licensing alongside the open-source version.
 
 ---
 
 ## License
 
-Bodhigrove is **dual-licensed**:
+Bodhiorchard is **dual-licensed**:
 
 ### Open Source — AGPL-3.0
 
@@ -465,7 +465,7 @@ The open-source version is licensed under the [GNU Affero General Public License
 
 ### Commercial License
 
-For organizations that want to use Bodhigrove **without AGPL obligations** (e.g., in proprietary SaaS products, internal tools without source disclosure, or OEM embedding), a **commercial license** is available.
+For organizations that want to use Bodhiorchard **without AGPL obligations** (e.g., in proprietary SaaS products, internal tools without source disclosure, or OEM embedding), a **commercial license** is available.
 
 **Contact**: YOUR_EMAIL@example.com
 
@@ -477,7 +477,7 @@ The commercial license includes:
 
 ---
 
-## Why "Bodhigrove"?
+## Why "Bodhiorchard"?
 
 <div align="center">
 <em>"The purpose of technology is not to keep humans chained to screens, but to set them free."</em>
@@ -485,19 +485,19 @@ The commercial license includes:
 
 <br>
 
-**Bodhi** (Sanskrit/Pali: "awakening, enlightenment") is the state of understanding that the Buddha attained under the Bodhi tree. **Grove** is a small, living community of trees growing together.
+**Bodhi** (Sanskrit/Pali: "awakening, enlightenment") is the state of understanding that the Buddha attained under the Bodhi tree. **Orchard** is a cultivated grove &mdash; trees tended with intention so they can bear fruit.
 
 The name carries a deeper belief about what AI should do for us.
 
 The software industry has a paradox: we build tools to make life better, but the process of building them consumes our lives. Developers work late nights. PMs spend weekends writing specs. Teams sit through hours of ceremonies — standups, sprint planning, retrospectives, estimation poker — rituals that were meant to help but became the work itself.
 
-Bodhigrove exists because **AI should give humans their time back**.
+Bodhiorchard exists because **AI should give humans their time back**.
 
 Not to write more code. Not to ship faster. But to reclaim the hours lost to busywork — so a developer can leave at 5pm and take their kid to the park. So a PM can spend their morning thinking deeply about what users need instead of copy-pasting Jira tickets. So a team lead can mentor junior engineers instead of chasing status updates across five tools.
 
-The 3D tree dashboard isn't just a visualization — it's the philosophy made visible. Your organization is a living grove. Each repository is a tree. Each feature is a branch. The AI agents are the gardeners: they water, they prune, they tend the soil. They do the repetitive labor so the trees can grow naturally, and the humans who planted them can step back, breathe, and enjoy the forest they've built.
+The 3D tree dashboard isn't just a visualization — it's the philosophy made visible. Your organization is a living orchard. Each repository is a tree. Each feature is a branch. The AI agents are the orchardists: they water, they prune, they tend the soil. They do the repetitive labor so the trees can grow naturally and bear fruit, and the humans who planted them can step back, breathe, and enjoy the harvest they've built.
 
-The Bodhi tree is where awakening happened — not through more effort, but through stillness and clarity. Bodhigrove is an invitation to build software the same way: let the machines handle the noise, so humans can focus on what actually matters.
+The Bodhi tree is where awakening happened — not through more effort, but through stillness and clarity. Bodhiorchard is an invitation to build software the same way: let the machines handle the noise, so humans can focus on what actually matters.
 
 Build well. Then go outside.
 
@@ -507,6 +507,6 @@ Build well. Then go outside.
 
 **Built by [Arun Rajkumar](https://github.com/arunrajkumar)**
 
-If Bodhigrove helps your team, give it a star and spread the word.
+If Bodhiorchard helps your team, give it a star and spread the word.
 
 </div>

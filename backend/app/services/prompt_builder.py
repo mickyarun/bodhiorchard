@@ -1,4 +1,4 @@
-"""Prompt builder for Bodhigrove agent execution.
+"""Prompt builder for Bodhiorchard agent execution.
 
 Combines a skill definition, backlog item context, org knowledge, and repo
 information into a complete prompt for Claude Code CLI execution.
@@ -107,7 +107,7 @@ async def build_agent_prompt(
     sections.append("\n---\n\n## Instructions\n")
     sections.append(
         "Complete the task described above. Use the available MCP tools to read context "
-        "and write results back to Bodhigrove. Update your task status when done."
+        "and write results back to Bodhiorchard. Update your task status when done."
     )
 
     prompt = "\n".join(sections)

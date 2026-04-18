@@ -1,1 +1,1 @@
-"""AI agent orchestration layer for Bodhigrove."""
+"""AI agent orchestration layer for Bodhiorchard."""

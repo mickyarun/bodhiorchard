@@ -42,7 +42,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 
-const STORAGE_KEY = 'bodhigrove_legend_collapsed'
+const STORAGE_KEY = 'bodhiorchard_legend_collapsed'
 const collapsed = ref(localStorage.getItem(STORAGE_KEY) === 'true')
 
 watch(collapsed, (v) => localStorage.setItem(STORAGE_KEY, String(v)))

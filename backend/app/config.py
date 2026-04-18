@@ -12,7 +12,7 @@ class DatabaseConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
 
     database_url: str = Field(
-        default="postgresql+asyncpg://bodhigrove:bodhigrove@localhost:5432/bodhigrove",
+        default="postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard",
         alias="DATABASE_URL",
     )
 

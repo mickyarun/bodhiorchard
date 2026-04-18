@@ -3,7 +3,7 @@
     <v-icon icon="mdi-source-repository" size="48" color="primary" class="mb-4" />
     <h2 class="text-h5 font-weight-bold mb-2">Repositories</h2>
     <p class="text-body-2 text-medium-emphasis mb-6" style="max-width: 560px; text-align: center;">
-      Point to the repos you want to work with. Bodhigrove uses Claude Code to
+      Point to the repos you want to work with. Bodhiorchard uses Claude Code to
       auto-detect developer skills, extract existing features, and build full
       context so AI agents can help manage your workflow.
     </p>

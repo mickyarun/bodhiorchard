@@ -32,7 +32,7 @@ None.
 
 ### Design References
 
-- **Wireframe:** `/Users/arunrajkumar/Documents/code/bodhigrove/examples/taskflow-web/.bodhigrove/wireframes/BUD-001/wireframe.html`
+- **Wireframe:** `/Users/arunrajkumar/Documents/code/bodhiorchard/examples/taskflow-web/.bodhiorchard/wireframes/BUD-001/wireframe.html`
 
 | Wireframe screen | Maps to |
 |------------------|---------|

@@ -4,11 +4,11 @@
       :src="logoSrc"
       :width="size"
       :height="size"
-      alt="Bodhigrove"
-      class="bodhigrove-logo"
+      alt="Bodhiorchard"
+      class="bodhiorchard-logo"
     />
     <span v-if="showText" class="font-weight-bold" :class="titleClass" style="letter-spacing: -0.5px;">
-      <span class="text-primary">Bodhi</span><span class="text-on-background">grove</span>
+      <span class="text-primary">Bodhi</span><span class="text-on-background">orchard</span>
     </span>
   </div>
 </template>
@@ -26,15 +26,15 @@ const props = withDefaults(defineProps<{
 
 const logoSrc = computed(() =>
   props.size <= 64
-    ? '/assets/bodhigrove-logo-sm.png'
-    : '/assets/bodhigrove-logo.png'
+    ? '/assets/bodhiorchard-logo-sm.png'
+    : '/assets/bodhiorchard-logo.png'
 )
 
 const titleClass = computed(() => props.size >= 32 ? 'text-h5' : 'text-h6')
 </script>
 
 <style scoped>
-.bodhigrove-logo {
+.bodhiorchard-logo {
   border-radius: 50%;
   object-fit: contain;
 }

@@ -1,6 +1,6 @@
-# Bodhigrove Multiplayer Server
+# Bodhiorchard Multiplayer Server
 
-Real-time multiplayer server using [Colyseus](https://colyseus.io/) for the Bodhigrove 3D garden.
+Real-time multiplayer server using [Colyseus](https://colyseus.io/) for the Bodhiorchard 3D garden.
 
 ## Quick Start
 

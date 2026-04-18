@@ -17,7 +17,7 @@ logger = structlog.get_logger(__name__)
 
 # Derive a 32-byte Fernet key from the configured encryption key using PBKDF2.
 # The salt is fixed per deployment — changing it would invalidate all encrypted data.
-_SALT = b"bodhigrove-secret-encryption-v1"
+_SALT = b"bodhiorchard-secret-encryption-v1"
 
 
 def _get_fernet() -> Fernet:
