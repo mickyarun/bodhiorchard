@@ -358,9 +358,13 @@ export class SceneManager {
     // String lights are now built as part of each building's entity tree
     // (created by BuildingFactory.createStringLights in each builder)
 
-    // 8b. Ambient effects — lanterns along paths
+    // 8b. Ambient effects — lanterns along paths (skip housing compound)
     this.lanterns = new LanternSystem(this.app.app)
-    this.lanterns.buildAlongRoutes(PathSystem.defaultRoutes([...zones]))
+    const housingZone = this.layout.getZone('housing')
+    const lanternExclusions = housingZone
+      ? [{ x: housingZone.x, z: housingZone.z, radius: housingZone.radius + 4 }]
+      : []
+    this.lanterns.buildAlongRoutes(PathSystem.defaultRoutes([...zones]), lanternExclusions)
 
     // 8c. Zone fences — circular wooden fences around each building zone.
     // Gate angle points toward orchard (0,0) so it aligns with the path entrance.

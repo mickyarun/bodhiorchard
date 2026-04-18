@@ -40,10 +40,14 @@ export class LanternSystem {
   }
 
   /**
-   * Place lanterns along path routes.
+   * Place lanterns along path routes, skipping any positions inside exclusion zones.
    * @param routes — array of {fromX, fromZ, toX, toZ} path segments
+   * @param exclusionZones — circular zones where lanterns should NOT be placed (e.g., housing village)
    */
-  buildAlongRoutes(routes: Array<{ fromX: number; fromZ: number; toX: number; toZ: number }>): void {
+  buildAlongRoutes(
+    routes: Array<{ fromX: number; fromZ: number; toX: number; toZ: number }>,
+    exclusionZones: ReadonlyArray<{ x: number; z: number; radius: number }> = [],
+  ): void {
     for (const route of routes) {
       const dx = route.toX - route.fromX
       const dz = route.toZ - route.fromZ
@@ -61,6 +65,13 @@ export class LanternSystem {
         const t = i / count
         const x = route.fromX + dx * t + px * PATH_OFFSET
         const z = route.fromZ + dz * t + pz * PATH_OFFSET
+
+        // Skip if inside an exclusion zone (housing compound, etc.)
+        const excluded = exclusionZones.some(zone => {
+          const ex = x - zone.x, ez = z - zone.z
+          return ex * ex + ez * ez < zone.radius * zone.radius
+        })
+        if (excluded) continue
 
         this.createLantern(x, z)
       }
