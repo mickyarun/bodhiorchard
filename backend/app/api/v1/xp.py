@@ -166,31 +166,40 @@ async def upgrade_house(
 
 @router.post("/claim-greeting-bonus")
 async def claim_greeting_bonus(
+    body: dict,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Award 1 SP for first-ever greeting emote near another player. One-time only."""
+    """Award 0.25 SP for first greeting emote near each unique user.
+
+    One award per (greeter, target) pair — greet 4 different people = 1 SP.
+    The source_ref unique index prevents duplicate awards per pair.
+    """
     from app.models.developer_xp import XPEvent
+
+    target_user_id = body.get("target_user_id")
+    if not target_user_id:
+        raise HTTPException(400, "target_user_id required")
 
     xp_repo = DeveloperXPRepository(db, org_id=current_user.org_id)
     row = await xp_repo.get_or_create(current_user.id)
 
-    # source_ref unique index prevents duplicate awards
-    source_ref = f"greeting_bonus_{current_user.id}"
+    # Unique per (greeter, target) pair — greet same person twice = no-op
+    source_ref = f"greeting_{current_user.id}_{target_user_id}"
     existing = await db.execute(
         select(XPEvent.id).where(XPEvent.source_ref == source_ref)
     )
     if existing.scalar_one_or_none() is not None:
-        return {"awarded": False, "reason": "already_claimed"}
+        return {"awarded": False, "reason": "already_greeted"}
 
-    row.skill_points += 1
+    row.skill_points += 0.25
     db.add(XPEvent(
         user_id=current_user.id,
         org_id=current_user.org_id,
-        xp_amount=1,
+        xp_amount=0,
         source="greeting_bonus",
         source_ref=source_ref,
     ))
     await db.commit()
 
-    return {"awarded": True, "skill_points": row.skill_points}
+    return {"awarded": True, "skill_points": row.skill_points, "sp_earned": 0.25}

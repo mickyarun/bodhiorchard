@@ -57,6 +57,9 @@ export class ProximitySystem {
   /** Whether a non-self character is currently within proximity range. */
   get hasNearbyMember(): boolean { return this.lastShownId !== null }
 
+  /** The memberId of the nearest character, or null if none nearby. */
+  get nearbyMemberId(): string | null { return this.lastShownId }
+
   reset(): void {
     this.lastShownId = null
   }

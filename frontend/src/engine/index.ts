@@ -86,8 +86,8 @@ export class GardenEngine {
   private seatToggleCooldown = 0
   /** When true, `onUpdate` renders wireframe boxes over every Rapier collider. */
   private _debugColliders = false
-  /** Prevents repeated greeting bonus API calls (one-time only). */
-  private _greetingBonusClaimed = false
+  /** Tracks which users we've already claimed greeting bonus for (per session). */
+  private _greetedUsers = new Set<string>()
   private currentOccupiedSeatId: string | null = null
   /** Tracks which seat each remote member occupies (userId → seatId). */
   private remoteSeatMap = new Map<string, string>()
@@ -884,15 +884,15 @@ export class GardenEngine {
    * Silent no-op if already claimed or no nearby character.
    */
   private tryClaimGreetingBonus(): void {
-    if (this._greetingBonusClaimed) return
-    // Only award if near another character (ProximitySystem detects within 3 units)
-    if (!this.takeoverProximity?.hasNearbyMember) return
-    this._greetingBonusClaimed = true
+    const targetId = this.takeoverProximity?.nearbyMemberId
+    if (!targetId) return
+    if (this._greetedUsers.has(targetId)) return
+    this._greetedUsers.add(targetId)
     import('@/services/api').then(({ default: api }) => {
-      api.post('/v1/xp/claim-greeting-bonus').then(res => {
+      api.post('/v1/xp/claim-greeting-bonus', { target_user_id: targetId }).then(res => {
         if (res.data?.awarded) {
-          console.log('[GardenEngine] Greeting bonus awarded! +1 SP')
-          this.takeoverUI?.showCelebration('+1 SP — First greeting bonus!')
+          console.log('[GardenEngine] Greeting bonus! +0.25 SP')
+          this.takeoverUI?.showCelebration('+0.25 SP — New greeting!')
         }
       }).catch(() => { /* silently ignore — non-critical */ })
     })
