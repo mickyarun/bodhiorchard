@@ -78,18 +78,3 @@ export function getHouseTier(tier: number): HouseTierDef {
   return found ?? HOUSE_TIERS[0]
 }
 
-/**
- * Compute corner-local exit position from tier config. Derived — not stored.
- * x = door center, z = 1 unit past front wall, yaw = 0 (facing away).
- */
-export function getTierExitLocal(tier: HouseTierDef): { x: number; z: number; yaw: number } {
-  return { x: tier.doorIndex + 0.5, z: tier.depth + 1.0, yaw: 0 }
-}
-
-/**
- * Centering offset: corner-origin → center-origin. Derived from width/depth.
- * Used by HousingVillage.wrapWithPivot and multiplayer WorldLayout.
- */
-export function getTierCenterOffset(tier: HouseTierDef): { x: number; z: number } {
-  return { x: -tier.width / 2, z: -tier.depth / 2 }
-}

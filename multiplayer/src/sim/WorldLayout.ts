@@ -40,6 +40,8 @@ const HOUSES_PER_STREET = HOUSES_PER_SIDE * 2
 
 /** Desk chair seat height — mirrors frontend HouseTierConfig.DESK_SEAT_Y. */
 const DESK_SEAT_Y = 0.15
+/** Bed mattress surface height — mirrors frontend HouseTierConfig.BED_SURFACE_Y. */
+const BED_SURFACE_Y = 0.38
 
 /**
  * ── Tier geometry (mirrors frontend/src/engine/buildings/HouseTierConfig.ts) ──
@@ -176,7 +178,7 @@ export function getHouseBedPosition(
 
   return {
     x: origin.x + cx * cos + cz * sin,
-    y: 0.38,
+    y: BED_SURFACE_Y,
     z: origin.z - cx * sin + cz * cos,
     yaw: origin.yawDeg,
   }
