@@ -28,6 +28,8 @@ export interface HouseTierDef {
   bed: { x: number; z: number }
   /** Desk chair position + facing in corner-local space. Used by HouseBuilder + multiplayer NPC sim. */
   desk: { x: number; z: number; yaw: number }
+  /** Preview thumbnail for the upgrade shop UI. Path relative to /public. */
+  thumbnail: string
   /** If set, use this whole-building GLB instead of Kenney procedural walls+roof. */
   exteriorGlb?: string
   /** Fallback scale for KayKit exterior models (used only when AABB measurement fails). */
@@ -47,11 +49,13 @@ export const HOUSE_TIERS: readonly HouseTierDef[] = [
     tier: 1, name: 'Hut', width: 3, depth: 3, doorIndex: 1, unlockCost: 0,
     bed: { x: 1.0, z: 0.7 },
     desk: { x: 2.2, z: 1.3, yaw: 180 },
+    thumbnail: 'assets/buildings/kaykit/thumbnails/home_small.png',
   },
   {
     tier: 2, name: 'Cottage', width: 4, depth: 4, doorIndex: 1, unlockCost: 50,
     bed: { x: 1.0, z: 1.1 },
     desk: { x: 3.2, z: 1.3, yaw: 180 },
+    thumbnail: 'assets/buildings/kaykit/thumbnails/home_medium.png',
     exteriorGlb: 'assets/buildings/kaykit/home_medium.glb',
     exteriorScale: 2.0,
     exteriorFootprint: { w: 2.2, d: 2.2 },
@@ -60,6 +64,7 @@ export const HOUSE_TIERS: readonly HouseTierDef[] = [
     tier: 3, name: 'Mansion', width: 5, depth: 5, doorIndex: 2, unlockCost: 100,
     bed: { x: 1.5, z: 0.8 },
     desk: { x: 3.4, z: 1.3, yaw: 180 },
+    thumbnail: 'assets/buildings/kaykit/thumbnails/home_barracks.png',
     exteriorGlb: 'assets/buildings/kaykit/home_barracks.glb',
     exteriorScale: 1.8,
     exteriorFootprint: { w: 3.0, d: 3.0 },
