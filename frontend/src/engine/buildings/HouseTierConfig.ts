@@ -77,7 +77,7 @@ export const HOUSE_TIERS: readonly HouseTierDef[] = [
     tier: 4, name: 'Villa', width: 5, depth: 5, doorIndex: 2, unlockCost: 200,
     bed: { x: 1.5, z: 0.8 },
     desk: { x: 3.4, z: 1.3, yaw: 180 },
-    thumbnail: 'assets/buildings/kaykit/thumbnails/home_small.png',  // placeholder until Villa screenshot
+    thumbnail: 'assets/buildings/kaykit/thumbnails/villa.png',
   },
 ]
 
