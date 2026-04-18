@@ -187,7 +187,7 @@ async def claim_greeting_bonus(
     db.add(XPEvent(
         user_id=current_user.id,
         org_id=current_user.org_id,
-        xp_amount=0,
+        xp_amount=1,
         source="greeting_bonus",
         source_ref=source_ref,
     ))
