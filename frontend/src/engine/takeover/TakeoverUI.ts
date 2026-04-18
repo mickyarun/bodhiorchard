@@ -142,6 +142,69 @@ export class TakeoverUI {
     if (this.seatPrompt) this.seatPrompt.style.display = 'none'
   }
 
+  /**
+   * Show a brief confetti + toast celebration for SP rewards.
+   * CSS-only confetti — no dependencies.
+   */
+  showCelebration(message: string): void {
+    if (!this.container) return
+
+    // Toast banner
+    const toast = document.createElement('div')
+    Object.assign(toast.style, {
+      position: 'absolute', top: '80px', left: '50%',
+      transform: 'translateX(-50%)',
+      background: 'linear-gradient(135deg, #D4A843 0%, #F9A825 100%)',
+      color: '#1a1a1a', padding: '10px 24px', borderRadius: '8px',
+      fontSize: '15px', fontWeight: '700', pointerEvents: 'none',
+      zIndex: '10', boxShadow: '0 4px 20px rgba(212, 168, 67, 0.5)',
+      animation: 'toast-pop 0.4s ease-out',
+    } as Partial<CSSStyleDeclaration>)
+    toast.textContent = message
+    this.container.appendChild(toast)
+
+    // Confetti particles
+    const colors = ['#D4A843', '#F9A825', '#66BB6A', '#42A5F5', '#EF5350', '#AB47BC']
+    for (let i = 0; i < 30; i++) {
+      const p = document.createElement('div')
+      const x = (Math.random() - 0.5) * 300
+      const y = -(Math.random() * 200 + 100)
+      const rot = Math.random() * 720
+      const color = colors[Math.floor(Math.random() * colors.length)]
+      const size = 6 + Math.random() * 6
+      Object.assign(p.style, {
+        position: 'absolute', top: '50%', left: '50%',
+        width: size + 'px', height: size + 'px',
+        background: color, borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+        pointerEvents: 'none', zIndex: '9',
+        animation: `confetti-burst 1.2s ease-out forwards`,
+        '--cx': x + 'px', '--cy': y + 'px', '--cr': rot + 'deg',
+      } as unknown as Partial<CSSStyleDeclaration>)
+      this.container.appendChild(p)
+      setTimeout(() => p.remove(), 1300)
+    }
+
+    // Inject keyframes if not already present
+    if (!document.getElementById('takeover-confetti-css')) {
+      const style = document.createElement('style')
+      style.id = 'takeover-confetti-css'
+      style.textContent = `
+        @keyframes confetti-burst {
+          0% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+          100% { transform: translate(var(--cx), var(--cy)) rotate(var(--cr)); opacity: 0; }
+        }
+        @keyframes toast-pop {
+          0% { transform: translateX(-50%) scale(0.5); opacity: 0; }
+          100% { transform: translateX(-50%) scale(1); opacity: 1; }
+        }
+      `
+      document.head.appendChild(style)
+    }
+
+    // Auto-remove toast after 3s
+    setTimeout(() => toast.remove(), 3000)
+  }
+
   destroy(): void {
     if (this.parentEl) {
       this.parentEl.style.position = this.originalParentPosition

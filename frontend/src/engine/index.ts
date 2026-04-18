@@ -892,6 +892,7 @@ export class GardenEngine {
       api.post('/v1/xp/claim-greeting-bonus').then(res => {
         if (res.data?.awarded) {
           console.log('[GardenEngine] Greeting bonus awarded! +1 SP')
+          this.takeoverUI?.showCelebration('+1 SP — First greeting bonus!')
         }
       }).catch(() => { /* silently ignore — non-critical */ })
     })

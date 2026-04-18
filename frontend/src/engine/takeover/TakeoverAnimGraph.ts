@@ -31,6 +31,8 @@ export const TAKEOVER_STATE_GRAPH = {
       { name: 'Sprint', speed: 1.0 },
       { name: 'Jump',   speed: 1.0, loop: false },
       { name: 'Sit',    speed: 1.0 },
+      { name: 'Wave',   speed: 1.0 },
+      { name: 'Cheer',  speed: 1.0 },
     ],
     transitions: [
       { from: 'START', to: 'Idle', time: 0, priority: 0 },
@@ -85,12 +87,30 @@ export const TAKEOVER_STATE_GRAPH = {
         from: 'Sit', to: 'Idle', time: 0.3, priority: 0,
         conditions: [{ parameterName: 'sitting', predicate: pc.ANIM_EQUAL_TO, value: false }],
       },
+      // Emotes: Idle ↔ Wave (emote=1), Idle ↔ Cheer (emote=2)
+      {
+        from: 'Idle', to: 'Wave', time: 0.2, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 1 }],
+      },
+      {
+        from: 'Wave', to: 'Idle', time: 0.2, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
+      },
+      {
+        from: 'Idle', to: 'Cheer', time: 0.2, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 2 }],
+      },
+      {
+        from: 'Cheer', to: 'Idle', time: 0.2, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
+      },
     ],
   }],
   parameters: {
     speed:   { name: 'speed',   type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
     jumping: { name: 'jumping', type: pc.ANIM_PARAMETER_BOOLEAN, value: false },
     sitting: { name: 'sitting', type: pc.ANIM_PARAMETER_BOOLEAN, value: false },
+    emote:   { name: 'emote',   type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
   },
 }
 
@@ -194,9 +214,11 @@ async function assignCoreAnimations(
   layer: pc.AnimComponentLayer,
 ): Promise<void> {
   const coreGlbs = [
-    { path: getAnimationGLB('general'),        state: 'Idle', keywords: ['Idle'] },
-    { path: getAnimationGLB('movement_basic'), state: 'Walk', keywords: ['Walking', 'Walk'] },
-    { path: getAnimationGLB('simulation'),     state: 'Sit',  keywords: ['Sit_Chair_Idle', 'Sit'] },
+    { path: getAnimationGLB('general'),        state: 'Idle',  keywords: ['Idle'] },
+    { path: getAnimationGLB('movement_basic'), state: 'Walk',  keywords: ['Walking', 'Walk'] },
+    { path: getAnimationGLB('simulation'),     state: 'Sit',   keywords: ['Sit_Chair_Idle', 'Sit'] },
+    { path: getAnimationGLB('simulation'),     state: 'Wave',  keywords: ['Waving'] },
+    { path: getAnimationGLB('simulation'),     state: 'Cheer', keywords: ['Cheering'] },
   ]
 
   for (const { path, state, keywords } of coreGlbs) {
