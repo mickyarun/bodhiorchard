@@ -357,7 +357,8 @@ export function getFurnitureForTier(tier: number): FurnitureDef[] {
   switch (tier) {
     case 1: return INTERIOR_FURNITURE_TIER_1
     case 2: return INTERIOR_FURNITURE_TIER_2
-    case 3: return INTERIOR_FURNITURE_TIER_3
+    case 3:
+    case 4: return INTERIOR_FURNITURE_TIER_3  // Villa reuses Mansion layout (same 5×5)
     default: return INTERIOR_FURNITURE  // tier 0 = standard
   }
 }
@@ -366,7 +367,8 @@ export function getInteractablesForTier(tier: number): InteractableDef[] {
   switch (tier) {
     case 1: return INTERIOR_INTERACTABLES_TIER_1
     case 2: return INTERIOR_INTERACTABLES_TIER_2
-    case 3: return INTERIOR_INTERACTABLES_TIER_3
+    case 3:
+    case 4: return INTERIOR_INTERACTABLES_TIER_3  // Villa reuses Mansion layout
     default: return INTERIOR_INTERACTABLES
   }
 }
@@ -375,7 +377,8 @@ export function getCollisionForTier(tier: number): CollisionBox[] {
   switch (tier) {
     case 0: return INTERIOR_COLLISION  // standard walls + furniture footprints
     case 1: return INTERIOR_COLLISION_TIER_1
-    case 3: return INTERIOR_COLLISION_TIER_3
+    case 3:
+    case 4: return INTERIOR_COLLISION_TIER_3  // Villa reuses Mansion collision (5×5)
     default: return WALL_COLLISION  // tier 2 uses wall-only collision
   }
 }
