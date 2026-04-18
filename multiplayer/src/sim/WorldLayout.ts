@@ -53,6 +53,7 @@ const BED_SURFACE_Y = 0.38
  *   Tier 1 (Hut):     3×3, door=1, bed=(1.0, 0.7), desk=(2.2, 1.3, 180)
  *   Tier 2 (Cottage):  4×4, door=1, bed=(1.0, 1.1), desk=(3.2, 1.3, 180)
  *   Tier 3 (Mansion):  5×5, door=2, bed=(1.5, 0.8), desk=(3.4, 1.3, 180)
+ *   Tier 4 (Villa):    5×5, door=2, bed=(1.5, 0.8), desk=(3.4, 1.3, 180)
  */
 const TIER_CONFIG: Record<number, {
   width: number; depth: number
@@ -62,6 +63,7 @@ const TIER_CONFIG: Record<number, {
   1: { width: 3, depth: 3, bed: { x: 1.0, z: 0.7 }, desk: { x: 2.2, z: 1.3, yaw: 180 } },
   2: { width: 4, depth: 4, bed: { x: 1.0, z: 1.1 }, desk: { x: 3.2, z: 1.3, yaw: 180 } },
   3: { width: 5, depth: 5, bed: { x: 1.5, z: 0.8 }, desk: { x: 3.4, z: 1.3, yaw: 180 } },
+  4: { width: 5, depth: 5, bed: { x: 1.5, z: 0.8 }, desk: { x: 3.4, z: 1.3, yaw: 180 } },
 }
 
 /** Centering offset derived from width/depth — no longer hardcoded. */

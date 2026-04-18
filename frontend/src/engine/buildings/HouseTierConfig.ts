@@ -6,9 +6,10 @@
  * defined here. Adding a new tier = one new entry in HOUSE_TIERS; all
  * consuming code derives from it automatically.
  *
- * Tier 1 (Hut):     Default for all members. Kenney procedural house.
+ * Tier 1 (Hut):     Default. KayKit home_small.glb.
  * Tier 2 (Cottage):  KayKit home_medium.glb. Unlocked with 50 SP.
  * Tier 3 (Mansion):  KayKit home_barracks.glb. Unlocked with 100 SP.
+ * Tier 4 (Villa):    Kenney procedural modern building. Unlocked with 200 SP.
  *
  * Coordinate system: corner-local space (0,0 = back-left corner of the
  * house floor). X increases rightward, Z increases toward the front door.
@@ -50,6 +51,9 @@ export const HOUSE_TIERS: readonly HouseTierDef[] = [
     bed: { x: 1.0, z: 0.7 },
     desk: { x: 2.2, z: 1.3, yaw: 180 },
     thumbnail: 'assets/buildings/kaykit/thumbnails/home_small.png',
+    exteriorGlb: 'assets/buildings/kaykit/home_small.glb',
+    exteriorScale: 2.0,
+    exteriorFootprint: { w: 1.8, d: 1.8 },
   },
   {
     tier: 2, name: 'Cottage', width: 4, depth: 4, doorIndex: 1, unlockCost: 50,
@@ -68,6 +72,12 @@ export const HOUSE_TIERS: readonly HouseTierDef[] = [
     exteriorGlb: 'assets/buildings/kaykit/home_barracks.glb',
     exteriorScale: 1.8,
     exteriorFootprint: { w: 3.0, d: 3.0 },
+  },
+  {
+    tier: 4, name: 'Villa', width: 5, depth: 5, doorIndex: 2, unlockCost: 200,
+    bed: { x: 1.5, z: 0.8 },
+    desk: { x: 3.4, z: 1.3, yaw: 180 },
+    thumbnail: 'assets/buildings/kaykit/thumbnails/home_small.png',  // placeholder until Villa screenshot
   },
 ]
 
