@@ -75,5 +75,8 @@ export default createVuetify({
       color: 'primary',
       inset: true,
     },
+    VTooltip: {
+      contentClass: 'bg-grey-darken-4 text-white',
+    },
   },
 })
