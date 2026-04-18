@@ -62,6 +62,8 @@ const ANIM_TRACK_MAP: Record<string, string> = {
   'Sit':      'Sit_Chair_Idle',
   'Interact': 'Interact',    // general.glb — reaching/tending animation
   'UseItem':  'Use_Item',    // general.glb — using a held object animation
+  'Wave':     'Waving',      // simulation.glb — social emote
+  'Cheer':    'Cheering',    // simulation.glb — social emote
 }
 
 // ─── Hex Color Helper ──────────────────────────
@@ -173,11 +175,15 @@ export class KayKitCharacterFactory {
 
     const clonedMaterials: pc.StandardMaterial[] = []
     const renderComponents = renderEntity.findComponents('render') as pc.RenderComponent[]
+    const allMeshNames: string[] = []
+    const tintedMeshes: string[] = []
     for (const rc of renderComponents) {
       for (const mi of rc.meshInstances) {
         const meshName = mi.node?.name || ''
+        allMeshNames.push(meshName)
         const region = this.getRegionForMesh(meshName)
         if (!region) continue
+        tintedMeshes.push(`${meshName}→${region}`)
 
         const mat = (mi.material as pc.StandardMaterial).clone()
         // Blend user color toward white to create a light wash (preserves texture detail)
@@ -189,6 +195,9 @@ export class KayKitCharacterFactory {
         clonedMaterials.push(mat)
       }
     }
+    console.debug('[KayKitCharacterFactory] meshes:', allMeshNames.join(', '),
+      '| tinted:', tintedMeshes.join(', ') || 'NONE',
+      '| colors:', { shirt: config.shirtColor, pants: config.pantsColor, skin: config.skinColor })
     return clonedMaterials
   }
 

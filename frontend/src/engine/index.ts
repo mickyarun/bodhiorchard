@@ -556,6 +556,10 @@ export class GardenEngine {
             )
           }
 
+          // ─── Emotes: 1=Wave, 2=Cheer ────────────────────────────────
+          if (this.input?.wasPressed(pc.KEY_1)) this.takeoverCtrl.playEmote(1)
+          if (this.input?.wasPressed(pc.KEY_2)) this.takeoverCtrl.playEmote(2)
+
           // ─── Seat interaction: E-key to sit/stand at nearby chairs ───
           if (this.seatToggleCooldown > 0) this.seatToggleCooldown -= dt
           if (this.input?.wasPressed(pc.KEY_E) && this.sceneManager && !this.vehicleCtrl?.isActive && this.seatToggleCooldown <= 0) {

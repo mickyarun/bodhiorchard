@@ -37,7 +37,7 @@ export class TakeoverUI {
 
     // Controls hint (bottom center)
     this.makeLabel(
-      'WASD \u2014 Move   Shift \u2014 Sprint   Space \u2014 Jump   Drag \u2014 Orbit   ESC \u2014 Exit',
+      'WASD \u2014 Move   Shift \u2014 Sprint   Space \u2014 Jump   Drag \u2014 Orbit   ESC \u2014 Exit   1 \u2014 Wave   2 \u2014 Cheer',
       {
         position: 'absolute', bottom: '20px', left: '50%',
         transform: 'translateX(-50%)',

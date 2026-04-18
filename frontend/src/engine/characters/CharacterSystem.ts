@@ -186,6 +186,11 @@ export class CharacterSystem {
         : snapshot.animState === 'use-item' ? 2
         : 0
       anim.setInteger('working', working)
+      // Emotes: wave=1, cheer=2
+      const emote = snapshot.animState === 'wave' ? 1
+        : snapshot.animState === 'cheer' ? 2
+        : 0
+      anim.setInteger('emote', emote)
     }
   }
 

@@ -68,6 +68,8 @@ export const LOCOMOTION_STATE_GRAPH = {
       { name: 'Sit', speed: 1.0 },
       { name: 'Interact', speed: 1.0 },
       { name: 'UseItem', speed: 1.0 },
+      { name: 'Wave', speed: 1.0 },
+      { name: 'Cheer', speed: 1.0 },
     ],
     transitions: [
       { from: 'START', to: 'Idle', time: 0, priority: 0 },
@@ -105,11 +107,29 @@ export const LOCOMOTION_STATE_GRAPH = {
         from: 'UseItem', to: 'Idle', time: 0.3, priority: 0,
         conditions: [{ parameterName: 'working', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
       },
+      // Emotes: Idle → Wave (emote=1), Idle → Cheer (emote=2)
+      {
+        from: 'Idle', to: 'Wave', time: 0.2, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 1 }],
+      },
+      {
+        from: 'Wave', to: 'Idle', time: 0.2, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
+      },
+      {
+        from: 'Idle', to: 'Cheer', time: 0.2, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 2 }],
+      },
+      {
+        from: 'Cheer', to: 'Idle', time: 0.2, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
+      },
     ],
   }],
   parameters: {
     speed: { name: 'speed', type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
     sitting: { name: 'sitting', type: pc.ANIM_PARAMETER_BOOLEAN, value: false },
     working: { name: 'working', type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
+    emote: { name: 'emote', type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
   },
 }

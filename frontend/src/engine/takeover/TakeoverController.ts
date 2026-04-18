@@ -53,6 +53,11 @@ export class TakeoverController {
   // Door re-enable delay (prevents false trigger on spawn overlap)
   private doorEnableTimer: ReturnType<typeof setTimeout> | null = null
 
+  // Emote — plays for EMOTE_DURATION then returns to idle
+  private _emoteId: 0 | 1 | 2 = 0  // 0=none, 1=wave, 2=cheer
+  private _emoteTimer = 0
+  private static readonly EMOTE_DURATION = 2.0  // seconds
+
   // Scratch vector
   private readonly _dir = new pc.Vec3()
 
@@ -110,6 +115,22 @@ export class TakeoverController {
     this.physics?.teleportPlayer(pos.x, pos.z)
   }
 
+  /**
+   * Play an emote animation (wave or cheer). Freezes movement for the
+   * duration. Ignored if already sitting, mounted, or mid-emote.
+   */
+  playEmote(emoteId: 1 | 2): void {
+    if (!this.entity || this._sitting || this._mounted || this._emoteId !== 0) return
+    this._emoteId = emoteId
+    this._emoteTimer = TakeoverController.EMOTE_DURATION
+    this.entity.anim?.setInteger('emote', emoteId)
+    this.entity.anim?.setInteger('speed', 0)
+    this._inactivityTimer = 0
+  }
+
+  /** Whether an emote is currently playing. */
+  get isEmoting(): boolean { return this._emoteId !== 0 }
+
   /** Door collision from last physics step. Consumed on read. */
   consumeDoorHit(): DoorCollision | null {
     return this.physics?.consumeDoorHit() ?? null
@@ -132,6 +153,8 @@ export class TakeoverController {
    */
   getAnimState(): string {
     if (this._sitting) return "sit"
+    if (this._emoteId === 1) return "wave"
+    if (this._emoteId === 2) return "cheer"
     const anim = this.entity?.anim
     if (!anim) return "idle"
     if (this.jumpProgress >= 0) return "jump"
@@ -187,6 +210,18 @@ export class TakeoverController {
       if (anyInput) this._inactivityTimer = 0
       else this._inactivityTimer += dt
       return
+    }
+
+    // ─── Emote: freeze movement while animation plays ─────────────
+    if (this._emoteId !== 0) {
+      this._emoteTimer -= dt
+      if (this._emoteTimer <= 0) {
+        this._emoteId = 0
+        this._emoteTimer = 0
+        this.entity.anim?.setInteger('emote', 0)
+      }
+      this._inactivityTimer = 0
+      return  // skip physics + movement while emoting
     }
 
     // ─── Sitting: freeze all movement, WASD auto-stands ──────────
