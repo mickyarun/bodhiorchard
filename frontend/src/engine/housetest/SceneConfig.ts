@@ -75,6 +75,7 @@ export const INTERIOR_FURNITURE: FurnitureDef[] = [
   // ── Bed area — back-left wall ────────────────────────────────────────────
   { asset: 'bedSingle',      x: 1.0,  z: 0.3 },
   { asset: 'sideTable',      x: 1.75, z: 0.3 },
+  { asset: 'lampRoundTable', x: 1.75, z: 0.3, stackOn: 'sideTable' },
 
   // ── TV area — right wall, near door (front-right area) ──────────────────
   // rotation=270° → screen faces -X (into room). Chair to the left (smaller X)
@@ -167,6 +168,7 @@ export const INTERIOR_FURNITURE_TIER_1: FurnitureDef[] = [
   { asset: 'kaykit_bedSingle',  x: 0.5,  z: 0.3,  scale: KS },
   // Side table + lamp — next to bed
   { asset: 'kaykit_tableSmall', x: 1.2,  z: 0.3,  scale: KSM },
+  { asset: 'kaykit_lampTable',  x: 1.2,  z: 0.3,  stackOn: 'kaykit_tableSmall', scale: KSM },
   // Desk + laptop + chair — back-right area
   { asset: 'desk',              x: 2.2, z: 0.5, scale: 0.8 },
   { asset: 'laptop',            x: 2.2, z: 0.5, stackOn: 'desk', scale: 0.8 },
@@ -205,6 +207,7 @@ export const INTERIOR_FURNITURE_TIER_2: FurnitureDef[] = [
   // Bed area — back-left
   { asset: 'kaykit_bedSingle',    x: 0.6,  z: 0.3, scale: KS },
   { asset: 'kaykit_tableSmall',   x: 1.4,  z: 0.3, scale: KSM },
+  { asset: 'kaykit_lampTable',    x: 1.4,  z: 0.3, stackOn: 'kaykit_tableSmall', scale: KSM },
   // Desk + laptop — back-right (work area, Kenney desk at full size)
   { asset: 'desk',                x: 3.3,  z: 0.5 },
   { asset: 'laptop',              x: 3.3,  z: 0.5, stackOn: 'desk' },
@@ -217,6 +220,7 @@ export const INTERIOR_FURNITURE_TIER_2: FurnitureDef[] = [
   { asset: 'televisionModern',    x: 0.4,  z: 2.5, rotation: 90, stackOn: 'cabinetTelevision' },
   { asset: 'loungeChair',         x: 1.5,  z: 2.5, rotation: 270 },
   // Decor
+  { asset: 'kaykit_lampStanding', x: 0.3,  z: 3.5, scale: KSM },
   { asset: 'kaykit_rugRectangle', x: 2.0,  y: 0.01, z: 2.0, scale: KS },
   { asset: 'kaykit_bookshelf',    x: 3.5,  z: 0.2, rotation: 270, scale: KSM },
   { asset: 'kaykit_cactus',       x: 0.3,  z: 0.3, scale: KSM },
@@ -258,7 +262,9 @@ export const INTERIOR_FURNITURE_TIER_3: FurnitureDef[] = [
   // ── Back-left: Bedroom ──────────────────────
   { asset: 'kaykit_bedDouble',    x: 1.0,  z: 0.3, scale: KS },
   { asset: 'kaykit_tableSmall',   x: 0.2,  z: 0.3, scale: KSM },
+  { asset: 'kaykit_lampTable',    x: 0.2,  z: 0.3, stackOn: 'kaykit_tableSmall', scale: KSM },
   { asset: 'kaykit_tableSmall',   x: 2.0,  z: 0.3, scale: KSM },
+  { asset: 'kaykit_lampTable',    x: 2.0,  z: 0.3, stackOn: 'kaykit_tableSmall', scale: KSM },
   // ── Back-right: Study ───────────────────────
   { asset: 'desk',                x: 4.2,  z: 0.5 },
   { asset: 'laptop',              x: 4.2,  z: 0.5, stackOn: 'desk' },
@@ -282,6 +288,8 @@ export const INTERIOR_FURNITURE_TIER_3: FurnitureDef[] = [
   { asset: 'kaykit_chair',        x: 2.3,  z: 4.0, rotation: 90, scale: KS },
   { asset: 'kaykit_chair',        x: 3.7,  z: 4.0, rotation: 270, scale: KS },
   // ── Lighting + Decor ────────────────────────
+  { asset: 'kaykit_lampStanding', x: 0.3,  z: 1.5, scale: KSM },
+  { asset: 'kaykit_lampStanding', x: 4.5,  z: 4.5, scale: KSM },
   { asset: 'kaykit_rugRectangle', x: 3.5,  y: 0.01, z: 3.0, scale: KS },
   { asset: 'kaykit_rugOval',      x: 1.0,  y: 0.01, z: 1.5, scale: KS },
   { asset: 'kaykit_cactus',       x: 4.5,  z: 2.0, scale: KSM },
