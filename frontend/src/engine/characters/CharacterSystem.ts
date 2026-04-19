@@ -36,6 +36,16 @@ export interface CharacterSnapshot {
   animState: string  // idle | walk | sit | sleep | sprint | jump
   labelName: string
   labelMessage: string
+  /** Server-authoritative location hint. Interior contexts hide the entity. */
+  locationContext?: string
+}
+
+/** locationContext values that should hide the avatar (user is inside a
+ *  shared interior). Keep in sync with multiplayer/OrgRoom INTERIOR_LOCATIONS. */
+const INTERIOR_LOCATIONS = new Set(['cafeteria', 'coffeebar'])
+
+function isInteriorLocation(ctx: string | undefined): boolean {
+  return !!ctx && INTERIOR_LOCATIONS.has(ctx)
 }
 
 export class CharacterSystem {
@@ -140,6 +150,12 @@ export class CharacterSystem {
       }
 
       (this.characterRoot ?? this.app.root).addChild(character.entity)
+      // If the member was already inside an interior when we first saw them,
+      // render the entity hidden — updateFromSnapshot re-enables it when
+      // locationContext returns to the garden.
+      if (isInteriorLocation(snapshot.locationContext)) {
+        character.entity.enabled = false
+      }
       this.characters.push(character)
 
       // Register name label for billboard facing
@@ -175,6 +191,19 @@ export class CharacterSystem {
     }
 
     if (snapshot.userId === this.takeoverUserId) return
+
+    // Hide the avatar while the user is inside a shared interior. The server
+    // stops simulating movement and stamps locationContext="cafeteria" (or
+    // "coffeebar") — every observer hides the entity for the duration so
+    // nobody sees it frozen at the door. On takeover_start the server resets
+    // locationContext to "garden" and the entity re-enables here.
+    const shouldHide = isInteriorLocation(snapshot.locationContext)
+    if (character.entity.enabled === shouldHide) {
+      character.entity.enabled = !shouldHide
+    }
+    // Skip position updates while hidden — saves work and avoids visible
+    // teleport when the server re-places the member on exit.
+    if (shouldHide) return
 
     // Skip position + animation updates for characters mounted on a vehicle.
     // Their position is driven by VehicleSystem (parented to the horse entity).

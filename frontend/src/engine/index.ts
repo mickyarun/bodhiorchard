@@ -730,9 +730,10 @@ export class GardenEngine {
                 if (dx * dx + dz * dz < 0.8 * 0.8) {
                   console.log('[GardenEngine] Coffee bar door hit → entering')
                   this._coffeeBarReentryCooldownMs = Date.now() + 2000
-                  // keepServerTakeover: don't start walkHome — the user is
-                  // stepping inside, not abandoning the character.
-                  this.exitTakeover({ keepServerTakeover: true })
+                  // location: 'coffeebar' tells OrgRoom to park the avatar
+                  // at locationContext='coffeebar' (no walkHome). Other
+                  // clients hide it while the user is inside.
+                  this.exitTakeover({ location: 'coffeebar' })
                     .then(() => this.enterCoffeeBar())
                     .catch(e => console.error('[GardenEngine] coffee bar entry failed:', e))
                 }
@@ -754,10 +755,8 @@ export class GardenEngine {
                 if (dx * dx + dz * dz < 0.8 * 0.8) {
                   console.log('[GardenEngine] Cafeteria door hit → entering')
                   this._cafeteriaReentryCooldownMs = Date.now() + 2000
-                  // keepServerTakeover: prevents OrgRoom walkHome from
-                  // marching the org-member character across world origin,
-                  // which would visually appear inside the cafeteria.
-                  this.exitTakeover({ keepServerTakeover: true })
+                  // location: 'cafeteria' — see coffee-bar equivalent above.
+                  this.exitTakeover({ location: 'cafeteria' })
                     .then(() => this.enterCafeteria())
                     .catch(e => console.error('[GardenEngine] cafeteria entry failed:', e))
                 }
@@ -1397,18 +1396,15 @@ export class GardenEngine {
   /**
    * Exit takeover mode — restore camera and resume NPC behavior.
    *
-   * @param opts.keepServerTakeover  When true, skip the `takeover_end`
-   *   message to OrgRoom. The server keeps the character frozen in
-   *   "takeover" state (no walkHome simulation) which we want when the
-   *   client is transitioning into an interior (cafeteria / coffee bar)
-   *   rather than actually releasing the character. The server-side
-   *   takeover persists until either (a) the OrgRoom client disconnects
-   *   (tab close → OrgRoom.onLeave fires) or (b) the user calls
-   *   exitTakeover() without this flag back in the garden. Side effect:
-   *   other org members see the avatar frozen at the cafeteria door while
-   *   the user is inside — acceptable UX, matches the coffee bar.
+   * @param opts.location  Optional interior destination the user is
+   *   stepping into (e.g. "cafeteria", "coffeebar"). When set, the
+   *   server skips walkHome and stamps `member.locationContext = location`,
+   *   which every other client's CharacterSystem reads to hide the
+   *   avatar while the visit is in progress. Re-acquiring takeover on
+   *   exit sends takeover_start, which resets locationContext to
+   *   "garden" — the avatar reappears automatically.
    */
-  async exitTakeover(opts: { keepServerTakeover?: boolean } = {}): Promise<void> {
+  async exitTakeover(opts: { location?: string } = {}): Promise<void> {
     // Re-entry guard: takeoverCtrl is cleared first thing to prevent any concurrent calls
     if (!this.takeoverCtrl) return
 
@@ -1429,12 +1425,12 @@ export class GardenEngine {
     const ctrl = this.takeoverCtrl
     this.takeoverCtrl = null
 
-    // Release server-side takeover unless the caller is doing an interior
-    // hand-off (cafeteria / coffee bar entry). Without this gate, the
-    // server starts walkHome the instant the user walks through a door,
-    // and the NPC can visually cross through the interior's world coords.
-    if (this.takeoverUserId && !opts.keepServerTakeover) {
-      this.orgRoomClient?.sendTakeoverEnd(this.takeoverUserId)
+    // Release server-side takeover. The optional `location` tells the
+    // server this is an interior hand-off (cafeteria / coffee bar)
+    // rather than a release-to-NPC; the server then parks the avatar
+    // at locationContext=location and every viewer hides it.
+    if (this.takeoverUserId) {
+      this.orgRoomClient?.sendTakeoverEnd(this.takeoverUserId, opts.location)
     }
 
     // Clear the client-side prediction block BEFORE any async work. Snapshot
