@@ -125,6 +125,51 @@ export class ColyseusClient {
   }
 
   /**
+   * Join the cafeteria room. One room per org — every visitor across the org
+   * joins the same `cafeteria-{orgId}` so the queue and cooking state are
+   * globally consistent. Mirrors joinCoffeeBarRoom.
+   */
+  async joinCafeteriaRoom(
+    orgId: string,
+    userData: { userId: string; name: string; characterModel?: string },
+  ): Promise<Room> {
+    if (this.currentRoom) {
+      await this.leaveRoom()
+    }
+
+    try {
+      this.currentRoom = await this.client.joinOrCreate("cafeteria", {
+        roomId: `cafeteria-${orgId}`,
+        orgId,
+        userId: userData.userId,
+        name: userData.name,
+        characterModel: userData.characterModel ?? '',
+      })
+
+      this.setupStateListeners()
+      return this.currentRoom
+    } catch (err) {
+      console.warn("[ColyseusClient] Failed to join cafeteria room:", err)
+      throw err
+    }
+  }
+
+  /** Send a cafeteria meal enqueue request. Server validates the meal. */
+  sendCafeteriaEnqueue(meal: string): void {
+    this.currentRoom?.send("cafe_enqueue", { meal })
+  }
+
+  /** Drop out of the cafeteria queue. Ignored server-side if already active. */
+  sendCafeteriaLeaveQueue(): void {
+    this.currentRoom?.send("cafe_leave_queue", {})
+  }
+
+  /** Ack that the meal was collected; advances dispensed -> idle immediately. */
+  sendCafeteriaAckDispense(): void {
+    this.currentRoom?.send("cafe_ack_dispense", {})
+  }
+
+  /**
    * Join the org-wide room. One room per org holds authoritative state
    * for all members + agents. Creates `org-{orgId}` if not exists.
    *

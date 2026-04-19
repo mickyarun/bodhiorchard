@@ -49,6 +49,11 @@ export class CharacterSystem {
   // hidden when interior mode sets gardenRoot.enabled = false.
   private characterRoot: pc.Entity | null = null
 
+  /** Exposed so interior modes (cafeteria, coffee bar) can hide org-member
+   *  avatars explicitly. Usually redundant — characterRoot is reparented
+   *  into gardenRoot — but acts as a safety net. */
+  get root(): pc.Entity | null { return this.characterRoot }
+
   // Takeover mode — the userId whose character is under local WASD control.
   // Used to skip snapshot updates for that character (client-side prediction).
   private takeoverUserId: string | null = null
