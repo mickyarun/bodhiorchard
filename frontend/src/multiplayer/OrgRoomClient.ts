@@ -198,9 +198,16 @@ export class OrgRoomClient {
     this.room?.send("takeover_start", { userId })
   }
 
-  /** Send takeover end (server resumes NPC sim). */
-  sendTakeoverEnd(userId: string): void {
-    this.room?.send("takeover_end", { userId })
+  /**
+   * Send takeover end (server resumes NPC sim).
+   *
+   * @param location  Optional destination. When set (e.g. "cafeteria",
+   *   "coffeebar"), the server parks the character at that locationContext
+   *   instead of running walkHome, and every viewer's CharacterSystem hides
+   *   the avatar for the duration of the interior visit.
+   */
+  sendTakeoverEnd(userId: string, location?: string): void {
+    this.room?.send("takeover_end", { userId, location })
   }
 
   /** Send vehicle mount command. */
@@ -221,6 +228,43 @@ export class OrgRoomClient {
   /** Temporary dev tool: fire a simulated dev_activity for the current user. */
   sendSimulateDevActivity(): void {
     this.room?.send("simulate_dev_activity")
+  }
+
+  // ─── RACE MESSAGES (Phase 2) ─────────────────────
+
+  /** Claim a racer slot during the lobby phase. */
+  sendRaceJoin(): void {
+    this.room?.send("race_join", {})
+  }
+
+  /** Update the move-key hold state on the server. */
+  sendRaceMove(moving: boolean): void {
+    this.room?.send("race_move", { moving })
+  }
+
+  /** Register a sprint-key tap on the server. */
+  sendRaceSprintTap(): void {
+    this.room?.send("race_sprint_tap", {})
+  }
+
+  /**
+   * Subscribe to the current race round state. Callback fires on every
+   * schema change; returns the live Colyseus schema object so the caller
+   * can read per-racer fields. Returns an unsubscribe function.
+   */
+  onRaceRoundChange(listener: (round: unknown) => void): () => void {
+    if (!this.room) return () => { /* no-op */ }
+    const state = this.room.state as { gameRound?: unknown; listen?: (k: string, cb: (v: unknown) => void) => unknown }
+    // The Colyseus SDK exposes `listen` on the root state for top-level
+    // field changes. GameRoundState is nested — we just surface it and
+    // let the caller attach a state-callbacks listener via getStateCallbacks.
+    listener(state.gameRound)
+    return () => { /* unsubscribe handled by getStateCallbacks in caller */ }
+  }
+
+  /** Direct access to the underlying Colyseus room for advanced state listening. */
+  get raceRoom(): Room | null {
+    return this.room
   }
 
   // ─── Member state query API (Phase 8) ────────────

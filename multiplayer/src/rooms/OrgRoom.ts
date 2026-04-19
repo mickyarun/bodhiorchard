@@ -40,6 +40,7 @@ import {
 } from "../sim/DevActivitySim"
 import { AgentActivitySim, parseAgentActivityEvent } from "../sim/AgentActivitySim"
 import { InferredPresenceSim, buildPresenceConfig } from "../sim/InferredPresenceSim"
+import { RaceSim } from "../sim/RaceSim"
 import {
   fetchOrgSnapshot,
   verifyUserToken,
@@ -87,7 +88,19 @@ interface MoveMessage {
 
 interface TakeoverMessage {
   userId: string
+  /**
+   * Optional destination context when ending takeover. When set (e.g.
+   * "cafeteria", "coffeebar"), the server skips walkHome and parks the
+   * character at `locationContext = location`. Other clients hide the
+   * avatar while in an interior instead of seeing it frozen at the door.
+   * Omit (or set to empty) for normal takeover-end → walk-home behaviour.
+   */
+  location?: string
 }
+
+/** locationContext values that represent "inside a shared interior".
+ *  Clients use these to hide the avatar while the user is inside. */
+const INTERIOR_LOCATIONS = new Set(["cafeteria", "coffeebar"])
 
 interface VehicleMountMessage {
   vehicleId: string
@@ -114,6 +127,10 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
 
   // Server-side agent/robot simulation (spawn, walk between repo trees, despawn)
   private agentSim = new AgentActivitySim(this.repoPositions)
+
+  // Server-side race simulation (Phase 2). Instantiated in onCreate after
+  // setState so state.gameRound exists.
+  private raceSim: RaceSim | null = null
 
   // Inferred presence simulation — drives pseudo-presence for non-Slack users
   // from their dev-activity history + time of day. Skips Slack-driven members
@@ -155,9 +172,18 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     this.state.orgId = options.orgId ?? ""
     console.log(`[OrgRoom] Created org=${this.state.orgId}`)
 
+    this.raceSim = new RaceSim(this.state.gameRound)
+
     this.onMessage("move", (client, data: MoveMessage) => this.handleMove(client, data))
     this.onMessage("takeover_start", (client, data: TakeoverMessage) => this.handleTakeoverStart(client, data))
     this.onMessage("takeover_end", (client, data: TakeoverMessage) => this.handleTakeoverEnd(client, data))
+
+    // ─── RACE MESSAGE HANDLERS (Phase 2) ──────────────────────────────
+    this.onMessage("race_join", (client) => this.handleRaceJoin(client))
+    this.onMessage("race_move", (client, data: { moving: boolean }) =>
+      this.handleRaceMove(client, data),
+    )
+    this.onMessage("race_sprint_tap", (client) => this.handleRaceSprintTap(client))
 
     // Temporary dev tool: simulate a dev_activity event for the current user.
     // Picks a random repo tree and walks the character there. Remove when
@@ -201,6 +227,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       const dt = dtMs / 1000
       this.devSim.tick(this.state.members, dt)
       this.agentSim.tick(this.state.agents, dt)
+      this.raceSim?.tick(dtMs, this.clock.currentTime)
     }, SIM_TICK_MS)
 
     // Separate slow-tick loop for InferredPresenceSim (once per minute).
@@ -360,6 +387,11 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   onLeave(client: Client) {
     const name = (client.userData as { name?: string } | undefined)?.name ?? client.sessionId
     console.log(`[OrgRoom] ${name} left org=${this.state.orgId}`)
+
+    // Release any active race slot so other members aren't waiting on a
+    // ghost player to move.
+    const userIdEarly = (client.userData as { userId?: string } | undefined)?.userId
+    if (userIdEarly) this.raceSim?.leave(userIdEarly)
 
     // If this client was controlling a member via takeover, release the
     // takeover lock AND start a walk-home so the character doesn't strand
@@ -706,6 +738,24 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
 
   // ─── Message handlers ────────────────────────
 
+  private handleRaceJoin(client: Client): void {
+    const userData = client.userData as { userId?: string; name?: string } | undefined
+    if (!userData?.userId) return
+    this.raceSim?.join(userData.userId, userData.name ?? userData.userId)
+  }
+
+  private handleRaceMove(client: Client, data: { moving: boolean }): void {
+    const userData = client.userData as { userId?: string } | undefined
+    if (!userData?.userId) return
+    this.raceSim?.setMoving(userData.userId, !!data.moving)
+  }
+
+  private handleRaceSprintTap(client: Client): void {
+    const userData = client.userData as { userId?: string } | undefined
+    if (!userData?.userId) return
+    this.raceSim?.tapSprint(userData.userId)
+  }
+
   private handleMove(client: Client, data: MoveMessage): void {
     if (!this.validateMove(data)) return
 
@@ -806,6 +856,19 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       member.animState = "idle"
     }
     member.takeoverSessionId = ""
+
+    // Interior hand-off: user walked through a cafeteria/coffee-bar door.
+    // Don't run walkHome — they'll reacquire takeover via takeover_start on
+    // exit. Set locationContext so every viewer's CharacterSystem hides the
+    // avatar while the user is inside.
+    if (data.location && INTERIOR_LOCATIONS.has(data.location)) {
+      member.animState = "idle"
+      member.locationContext = data.location
+      console.log(
+        `[OrgRoom] ${member.name} takeover END → entering ${data.location} (avatar hidden)`,
+      )
+      return
+    }
 
     // Walk the character back to its presence-based seat. Without this, the
     // character would freeze wherever the player left them until the next
