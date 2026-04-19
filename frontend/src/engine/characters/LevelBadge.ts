@@ -81,15 +81,18 @@ export function createLevelBadge(
   material.opacityMapChannel = 'a'
   material.blendType = pc.BLEND_NORMAL
   material.depthWrite = false
-  material.cull = pc.CULLFACE_NONE
+  // Cull the back face: Application.updateBillboards keeps the plane's +Y
+  // normal pointed at the camera, so only the front face is ever viewed.
+  // Default CULLFACE_BACK.
   material.update()
 
   const entity = new pc.Entity('LevelBadge')
   entity.addComponent('render', { type: 'plane' })
   entity.render!.meshInstances[0].material = material
   entity.setLocalPosition(0, height, 0)
-  entity.setLocalScale(-BADGE_WIDTH, 1, BADGE_WIDTH * (BADGE_CANVAS_H / BADGE_CANVAS_W))
-  entity.setLocalEulerAngles(90, 0, 0)
+  // See NameLabel — Application.updateBillboards handles the per-frame
+  // facing, so the plane's local XZ scale maps directly to screen width/height.
+  entity.setLocalScale(BADGE_WIDTH, 1, BADGE_WIDTH * (BADGE_CANVAS_H / BADGE_CANVAS_W))
   entity.tags.add('billboard')
 
   return entity
