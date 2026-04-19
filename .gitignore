@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+*.egg
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files
+.env
+*.env.local
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# Docker
+*.log
+
+# Database
+*.sqlite3
+*.db
+.gitnexus
+
+# Colyseus dev mode state (may contain JWTs)
+.devmode.json

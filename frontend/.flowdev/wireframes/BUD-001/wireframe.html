@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BUD-001 — Notification Bell Wireframe</title>
+
+  <!-- Vuetify 3 + Vue 3 CDN (matches taskflow-web design system) -->
+  <link href="https://cdn.jsdelivr.net/npm/vuetify@3.4.0/dist/vuetify.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.3.67/css/materialdesignicons.min.css" rel="stylesheet" />
+  <script src="https://unpkg.com/vue@3.4.0/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vuetify@3.4.0/dist/vuetify.min.js"></script>
+
+  <!-- Design system tokens — taskflow-web (repo: 3cc2f228-6d89-410c-80be-818000a7972c) -->
+  <style>
+    :root {
+      --color-accent:      #2563EB;
+      --color-surface:     #1a1d2e;
+      --color-surface-alt: #242738;
+      --color-bg:          #0f1117;
+      --color-text:        #e2e8f0;
+      --color-text-muted:  #94a3b8;
+      --color-danger:      #ef4444;
+      --color-success:     #22c55e;
+      --color-warning:     #f59e0b;
+      --color-info:        #0ea5e9;
+      --color-secondary:   #8b5cf6;
+      --color-border:      rgba(255,255,255,0.08);
+      --radius-panel:      12px;
+      --shadow-panel:      0 8px 32px rgba(0,0,0,0.5);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    @keyframes shimmer {
+      0%   { opacity: 0.35 }
+      50%  { opacity: 0.75 }
+      100% { opacity: 0.35 }
+    }
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-6px) }
+      to   { opacity: 1; transform: translateY(0) }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0 }
+      to   { opacity: 1 }
+    }
+
+    .notification-panel { animation: slideDown 0.15s ease-out; }
+
+    /* UX: actions revealed on hover to keep list scannable */
+    .notif-item .action-btns { opacity: 0; transition: opacity 0.1s; }
+    .notif-item:hover .action-btns { opacity: 1; }
+    .notif-item:hover { background: rgba(255,255,255,0.025) !important; }
+
+    .bell-btn { transition: background 0.15s, color 0.15s; }
+    .bell-btn:hover { background: rgba(255,255,255,0.07) !important; }
+    /* A11Y: visible focus ring for keyboard nav */
+    .bell-btn:focus-visible {
+      outline: 2px solid var(--color-accent);
+      outline-offset: 2px;
+    }
+
+    .action-btn { transition: color 0.1s, background 0.1s; }
+    .action-btn:hover { background: rgba(255,255,255,0.08) !important; }
+    .action-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+
+    .state-tab {
+      padding: 5px 13px;
+      border-radius: 6px;
+      border: 1px solid;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      font-family: system-ui, sans-serif;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .state-tab:hover { opacity: 0.85; }
+
+    .anno-chip {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: monospace;
+      margin-right: 4px;
+    }
+    .anno-ux  { background: rgba(37,99,235,0.18);  color: #60a5fa; border: 1px solid rgba(37,99,235,0.35); }
+    .anno-a11y{ background: rgba(16,185,129,0.14); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+
+    /* UX: panel right-anchored, max-width so it never clips on small viewports */
+    @media (max-width: 440px) {
+      .notification-panel { width: calc(100vw - 16px) !important; right: -8px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0; background:#080b12; font-family: system-ui, sans-serif;">
+<div id="app"></div>
+
+<script>
+const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue
+const { createVuetify } = Vuetify
+
+const vuetify = createVuetify({
+  theme: {
+    defaultTheme: 'dark',
+    themes: {
+      dark: {
+        colors: {
+          background: '#0f1117',
+          surface:    '#1a1d2e',
+          primary:    '#2563EB',
+          secondary:  '#7C3AED',
+          error:      '#ef4444',
+          success:    '#22c55e',
+          warning:    '#f59e0b',
+          info:       '#3b82f6',
+        }
+      }
+    }
+  }
+})
+
+// ── Fixture data ──────────────────────────────────────────────────────────────
+const MOCK_NOTIFICATIONS = [
+  {
+    id: 1, unread: true, type: 'task_assigned',
+    icon: 'mdi-account-arrow-right-outline', iconColor: '#2563EB',
+    title: 'Task assigned to you',
+    body:  'Alex assigned "Update API documentation" to you in Sprint 14',
+    time:  '2m ago',
+  },
+  {
+    id: 2, unread: true, type: 'task_comment',
+    icon: 'mdi-comment-outline', iconColor: '#0ea5e9',
+    title: 'New comment on your task',
+    body:  'Jordan: "This looks good, but we need to update the schema first"',
+    time:  '18m ago',
+  },
+  {
+    id: 3, unread: true, type: 'task_status_changed',
+    icon: 'mdi-swap-horizontal', iconColor: '#f59e0b',
+    title: 'Status changed: In Review',
+    body:  '"Sprint planning" was moved to In Review by Marcus',
+    time:  '1h ago',
+  },
+  {
+    id: 4, unread: false, type: 'invoice_ready',
+    icon: 'mdi-file-document-outline', iconColor: '#10b981',
+    title: 'Invoice ready for review',
+    body:  'Invoice #INV-2024-089 is ready for your approval — $4,200.00',
+    time:  '3h ago',
+  },
+  {
+    id: 5, unread: false, type: 'reminder',
+    icon: 'mdi-clock-alert-outline', iconColor: '#8b5cf6',
+    title: 'Reminder: Sprint review tomorrow',
+    body:  'Sprint 14 review is scheduled for tomorrow at 2:00 PM',
+    time:  '5h ago',
+  },
+]
+
+const STATES = [
+  { id: 'filled',   label: 'Filled (mixed read/unread)' },
+  { id: 'loading',  label: 'Loading skeleton' },
+  { id: 'empty',    label: 'Empty state' },
+  { id: 'error',    label: 'Error state' },
+  { id: 'overflow', label: '99+ badge overflow' },
+]
+
+const STATE_META = {
+  filled:   { title: 'Main happy path',    desc: '3 unread + 2 read notifications. Actions visible on hover.' },
+  loading:  { title: 'Initial fetch',      desc: 'Skeleton prevents layout shift. Staggered shimmer animation.' },
+  empty:    { title: 'Zero notifications', desc: 'Friendly terminal state — no CTA needed.' },
+  error:    { title: 'API fetch failed',   desc: 'Non-blocking in-panel error. App nav remains usable.' },
+  overflow: { title: '100+ unread items',  desc: 'Badge shows 99+. Panel shows 20 of N with "Load more".' },
+}
+
+const UX_NOTES = {
+  filled: [
+    'Optimistic UI: mark-as-read / delete update local state first; revert + toast on API failure',
+    '"Mark all as read" is debounced to prevent duplicate API calls on rapid clicks',
+    'Unread rows have a 7% opacity primary-color tint — subtle, not distracting',
+    'Actions (✓ Delete) are opacity-0 by default; revealed on row hover for scannability',
+    'Clicking outside the panel or pressing Escape closes it',
+    'On window re-focus, re-fetch the list to reconcile state across tabs',
+  ],
+  loading: [
+    'Skeleton height matches real item height — zero layout shift when data arrives',
+    'Staggered animation delay (150 ms per item) softens the "wall of shimmer"',
+    'No artificial delay before skeleton appears — show immediately on open',
+  ],
+  empty: [
+    'Bell-check icon communicates completion positively, not absence',
+    '3-line formula: icon + heading + subtext (no CTA needed in terminal state)',
+    'Badge should be hidden (count = 0) before the panel is opened',
+  ],
+  error: [
+    'wifi-off icon is more specific than a generic alert — maps to network failure',
+    'Error is in-panel and non-blocking; no modal or page crash',
+    'If cached data exists (previous fetch), render it above the error banner',
+    'Single "Retry" CTA — do not add a "Dismiss" (the only goal is to load data)',
+  ],
+  overflow: [
+    'Badge caps visually at "99+" but aria-label carries the true count',
+    '"Showing 20 of N" context prevents confusion about list completeness',
+    '"Load more" button preferred over auto infinite-scroll inside a dropdown (scroll conflict)',
+  ],
+}
+
+const A11Y_NOTES = [
+  'Bell button: aria-label="Notifications, N unread" (updates dynamically)',
+  'aria-expanded="true/false" reflects open / closed panel state',
+  'aria-haspopup="dialog" signals the popup type to screen readers',
+  'Panel: role="dialog", aria-modal="true", aria-label="Notifications"',
+  'Each action button: aria-label referencing the specific notification title',
+  'Unread badge: aria-hidden="true" — count communicated via button label only',
+  'On panel close: focus returns to bell button (keyboard nav continuity)',
+  'Keyboard: Tab → items → actions; Enter/Space → activate; Escape → close panel',
+]
+
+const TOKENS = [
+  { name: '--color-accent',      hex: '#2563EB' },
+  { name: '--color-surface',     hex: '#1a1d2e' },
+  { name: '--color-surface-alt', hex: '#242738' },
+  { name: '--color-bg',          hex: '#0f1117' },
+  { name: '--color-danger',      hex: '#ef4444' },
+  { name: '--color-text',        hex: '#e2e8f0' },
+  { name: '--color-text-muted',  hex: '#94a3b8' },
+]
+
+const NOTIF_TYPES = [
+  { icon: 'mdi-account-arrow-right-outline', color: '#2563EB', label: 'task_assigned' },
+  { icon: 'mdi-comment-outline',             color: '#0ea5e9', label: 'task_comment' },
+  { icon: 'mdi-swap-horizontal',             color: '#f59e0b', label: 'task_status_changed' },
+  { icon: 'mdi-file-document-outline',       color: '#10b981', label: 'invoice_ready' },
+  { icon: 'mdi-clock-alert-outline',         color: '#8b5cf6', label: 'reminder' },
+]
+
+const SPECS = [
+  { label: 'Panel width',         value: '360px (440px breakpoint: 100vw − 16px)' },
+  { label: 'Panel max-height',    value: '480px, overflow-y: auto' },
+  { label: 'Bell button size',    value: '36 × 36px touch target' },
+  { label: 'Badge dimensions',    value: '17 × 17px min, 9px border-radius' },
+  { label: 'Badge cap',           value: '99+ (aria-label carries true count)' },
+  { label: 'Item padding',        value: '10px 14px' },
+  { label: 'Panel border-radius', value: 'var(--radius-panel) = 12px' },
+  { label: 'Transition timing',   value: '150ms ease-out' },
+  { label: 'Panel z-index',       value: '1001 (backdrop: 1000)' },
+  { label: 'Badge update freq',   value: 'WebSocket push (fallback: 30s poll)' },
+  { label: 'Initial page size',   value: '20 items; "Load more" for remainder' },
+  { label: 'Min viewport',        value: '320px — panel right-anchored, no clip' },
+]
+
+// ── App component ─────────────────────────────────────────────────────────────
+const App = {
+  setup() {
+    const activeState = ref('filled')
+    const panelOpen   = ref(true)
+
+    const setActive = (id) => {
+      activeState.value = id
+      panelOpen.value   = true
+    }
+
+    const togglePanel = () => { panelOpen.value = !panelOpen.value }
+    const closePanel  = ()  => { panelOpen.value = false }
+
+    // Close on Escape key
+    // A11Y: keyboard close returns focus to trigger (handled by :focus in CSS)
+    const onKeydown = (e) => { if (e.key === 'Escape' && panelOpen.value) closePanel() }
+    onMounted(()   => window.addEventListener('keydown', onKeydown))
+    onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+
+    const displayUnread = computed(() => {
+      if (activeState.value === 'overflow') return 120
+      if (activeState.value === 'empty' || activeState.value === 'error') return 0
+      return MOCK_NOTIFICATIONS.filter(n => n.unread).length
+    })
+
+    const badgeLabel = computed(() => {
+      const c = displayUnread.value
+      return c > 99 ? '99+' : String(c)
+    })
+
+    const stateMeta  = computed(() => STATE_META[activeState.value] || {})
+    const uxNotes    = computed(() => UX_NOTES[activeState.value] || [])
+
+    return {
+      activeState, panelOpen,
+      STATES, MOCK_NOTIFICATIONS, TOKENS, NOTIF_TYPES, SPECS,
+      A11Y_NOTES,
+      setActive, togglePanel, closePanel,
+      displayUnread, badgeLabel, stateMeta, uxNotes,
+    }
+  },
+
+  template: /* html */ `
+    <v-app theme="dark" style="background:#080b12;">
+      <v-main style="background:#080b12; padding:0;">
+
+        <!-- ── Backdrop (closes panel on outside click) ── -->
+        <!-- UX: z-index 1000; panel is 1001 so it sits above the backdrop -->
+        <!-- A11Y: aria-hidden, does not steal keyboard focus -->
+        <teleport to="body">
+          <div
+            v-if="panelOpen"
+            @click="closePanel"
+            aria-hidden="true"
+            style="position:fixed; inset:0; z-index:1000;"
+          ></div>
+        </teleport>
+
+        <div style="max-width:1200px; margin:0 auto; padding:24px;">
+
+          <!-- ─────────────── Wireframe Header ─────────────── -->
+          <div style="margin-bottom:22px; padding-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.06);">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap;">
+              <span style="background:#2563EB; color:white; font-size:11px; font-weight:700; padding:2px 8px; border-radius:4px; font-family:monospace;">BUD-001</span>
+              <span style="color:#e2e8f0; font-size:18px; font-weight:700;">Notification Bell Improvement</span>
+              <span style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-size:10px; font-weight:600; padding:2px 7px; border-radius:4px;">WIREFRAME v1</span>
+            </div>
+            <p style="color:#64748b; font-size:13px; margin:0;">
+              Interactive wireframe — click a state tab to preview different conditions. The bell button is clickable.
+            </p>
+          </div>
+
+          <!-- ─────────────── State Selector ─────────────── -->
+          <div style="display:flex; gap:7px; margin-bottom:20px; flex-wrap:wrap;">
+            <button
+              v-for="s in STATES" :key="s.id"
+              @click="setActive(s.id)"
+              class="state-tab"
+              :style="activeState === s.id
+                ? 'background:rgba(37,99,235,0.2); color:#60a5fa; border-color:rgba(37,99,235,0.5);'
+                : 'background:rgba(255,255,255,0.04); color:#94a3b8; border-color:rgba(255,255,255,0.08);'"
+            >{{ s.label }}</button>
+          </div>
+
+          <!-- ─────────────── Two-column layout ─────────────── -->
+          <div style="display:grid; grid-template-columns:1fr 330px; gap:20px; align-items:start;">
+
+            <!-- ═══ LEFT: Mockup Canvas ═══ -->
+            <div>
+              <div style="font-size:11px; font-weight:600; color:#475569; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">Mockup</div>
+
+              <!-- Browser chrome -->
+              <div style="border-radius:10px; overflow:visible; border:1px solid rgba(255,255,255,0.08); background:#1a1d2e; box-shadow:0 4px 24px rgba(0,0,0,0.4);">
+
+                <!-- Browser address bar -->
+                <div style="background:#242738; padding:8px 12px; display:flex; align-items:center; gap:6px; border-radius:10px 10px 0 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                  <div style="width:8px;height:8px;border-radius:50%;background:#ef4444;opacity:.6;"></div>
+                  <div style="width:8px;height:8px;border-radius:50%;background:#f59e0b;opacity:.6;"></div>
+                  <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;opacity:.6;"></div>
+                  <div style="flex:1;background:rgba(255,255,255,0.05);border-radius:4px;height:20px;margin:0 8px;display:flex;align-items:center;padding:0 8px;">
+                    <span style="font-size:11px;color:#475569;">app.bodhiorchard.io/dashboard</span>
+                  </div>
+                </div>
+
+                <!-- ── App viewport ── -->
+                <!-- UX: min-height gives realistic panel positioning context -->
+                <div style="background:#0f1117; position:relative; min-height:540px; border-radius:0 0 9px 9px; overflow:visible;">
+
+                  <!-- ─── App Nav Bar ─── -->
+                  <!-- UX: mirrors real AppLayout.vue — 56px height, #1a1d2e bg, same border -->
+                  <div style="background:#1a1d2e; padding:0 20px; height:56px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.06); position:relative; z-index:10;">
+
+                    <!-- Logo -->
+                    <div style="display:flex; align-items:center; gap:9px;">
+                      <div style="width:28px;height:28px;background:#2563EB;border-radius:6px;display:flex;align-items:center;justify-content:center;">
+                        <span style="color:white;font-size:13px;font-weight:800;">F</span>
+                      </div>
+                      <span style="color:#e2e8f0;font-size:15px;font-weight:600;">Bodhiorchard</span>
+                    </div>
+
+                    <!-- Nav right side -->
+                    <div style="display:flex; align-items:center; gap:6px; position:relative; z-index:1001;">
+
+                      <!-- ★ Bell Button ★ -->
+                      <!-- A11Y: aria-label carries unread count; aria-expanded reflects panel state; aria-haspopup signals dialog type -->
+                      <!-- UX: 36x36 touch target; active tint (#2563EB 15%) when panel is open -->
+                      <div style="position:relative;">
+                        <button
+                          @click.stop="togglePanel"
+                          class="bell-btn"
+                          :aria-label="'Notifications' + (displayUnread > 0 ? ', ' + displayUnread + ' unread' : '')"
+                          :aria-expanded="panelOpen ? 'true' : 'false'"
+                          aria-haspopup="dialog"
+                          :style="{
+                            width:'36px', height:'36px', borderRadius:'8px', border:'none',
+                            background: panelOpen ? 'rgba(37,99,235,0.15)' : 'transparent',
+                            cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+                            position:'relative',
+                            color: panelOpen ? '#60a5fa' : '#94a3b8',
+                          }"
+                        >
+                          <!-- UX: mdi-bell-outline matches stroke weight of other nav icons (mdi-view-dashboard-outline, etc.) -->
+                          <span class="mdi mdi-bell-outline" style="font-size:20px; pointer-events:none;"></span>
+
+                          <!-- ★ Unread badge ★ -->
+                          <!-- UX: hidden when count = 0 (no "0" badge); capped at 99+; 2px border creates separation -->
+                          <!-- A11Y: aria-hidden — count communicated via parent button's aria-label -->
+                          <span
+                            v-if="displayUnread > 0"
+                            aria-hidden="true"
+                            :style="{
+                              position:'absolute', top:'-3px', right:'-3px',
+                              background:'#ef4444', color:'white',
+                              fontSize: displayUnread > 99 ? '9px' : '10px',
+                              fontWeight:'700',
+                              minWidth:'17px', height:'17px',
+                              borderRadius:'9px', padding:'0 3px',
+                              display:'flex', alignItems:'center', justifyContent:'center',
+                              border:'2px solid #1a1d2e',
+                              lineHeight:'1', fontFamily:'system-ui',
+                              pointerEvents:'none',
+                            }"
+                          >{{ badgeLabel }}</span>
+                        </button>
+
+                        <!-- ★ Notification Panel ★ -->
+                        <!-- A11Y: role="dialog", aria-modal="true", aria-label — focus trap should be wired in impl -->
+                        <!-- UX: max-height 480px + overflow-y:auto = scrollable; right-anchored avoids right-edge clip -->
+                        <!-- UX: slideDown animation on open (0.15s ease-out matches design system transition timing) -->
+                        <div
+                          v-if="panelOpen"
+                          @click.stop
+                          role="dialog"
+                          aria-modal="true"
+                          aria-label="Notifications"
+                          class="notification-panel"
+                          style="
+                            position:absolute; top:calc(100% + 10px); right:0;
+                            width:360px;
+                            background:var(--color-surface);
+                            border-radius:var(--radius-panel);
+                            box-shadow:var(--shadow-panel);
+                            border:1px solid var(--color-border);
+                            z-index:1001;
+                            overflow:hidden;
+                            max-height:480px;
+                            display:flex; flex-direction:column;
+                          "
+                        >
+
+                          <!-- Panel header -->
+                          <!-- UX: "Mark all as read" only shown when unread count > 0 -->
+                          <div style="padding:14px 16px 11px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.06); flex-shrink:0;">
+                            <span style="font-size:14px; font-weight:700; color:var(--color-text);">Notifications</span>
+
+                            <!-- UX: debounced in real impl to prevent duplicate PATCH /notifications/read-all calls -->
+                            <button
+                              v-if="(activeState === 'filled' || activeState === 'overflow') && displayUnread > 0"
+                              style="font-size:12px; color:#60a5fa; background:none; border:none; cursor:pointer; padding:3px 6px; border-radius:4px; font-family:system-ui; font-weight:500;"
+                              aria-label="Mark all notifications as read"
+                            >Mark all as read</button>
+                          </div>
+
+                          <!-- Panel scroll body -->
+                          <div style="overflow-y:auto; flex:1;">
+
+                            <!-- ──────────────── STATE: LOADING ──────────────── -->
+                            <!-- UX: skeleton item count (4) matches expected real count to minimise reflow -->
+                            <!-- UX: animationDelay staggers shimmer so rows animate individually -->
+                            <div v-if="activeState === 'loading'" style="padding:6px 4px;">
+                              <div
+                                v-for="i in 4" :key="i"
+                                style="display:flex; gap:10px; padding:10px 12px; border-radius:8px;"
+                              >
+                                <div :style="{
+                                  width:'34px', height:'34px', borderRadius:'50%',
+                                  background:'rgba(255,255,255,0.07)', flexShrink:0,
+                                  animation:'shimmer 1.5s ease-in-out infinite',
+                                  animationDelay: (i * 0.15) + 's',
+                                }"></div>
+                                <div style="flex:1;">
+                                  <div :style="{
+                                    height:'12px', background:'rgba(255,255,255,0.07)',
+                                    borderRadius:'4px', marginBottom:'7px',
+                                    width: (50 + i * 10) + '%',
+                                    animation:'shimmer 1.5s ease-in-out infinite',
+                                    animationDelay: (i * 0.15) + 's',
+                                  }"></div>
+                                  <div :style="{
+                                    height:'10px', background:'rgba(255,255,255,0.07)',
+                                    borderRadius:'4px', width:'88%',
+                                    animation:'shimmer 1.5s ease-in-out infinite',
+                                    animationDelay: (i * 0.15 + 0.08) + 's',
+                                  }"></div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <!-- ──────────────── STATE: FILLED ──────────────── -->
+                            <div v-else-if="activeState === 'filled'">
+                              <div
+                                v-for="n in MOCK_NOTIFICATIONS" :key="n.id"
+                                class="notif-item"
+                                style="display:flex; gap:10px; padding:10px 14px; cursor:pointer; position:relative; transition:background 0.1s;"
+                                :style="n.unread ? 'background:rgba(37,99,235,0.07);' : ''"
+                              >
+                                <!-- Notification type icon bubble -->
+                                <!-- UX: icon color maps to type (blue=task_assigned, sky=comment, amber=status, green=invoice, purple=reminder) -->
+                                <!-- UX: icon bubble uses 13% opacity of type color as background — avoids harsh solid circles -->
+                                <div :style="{
+                                  width:'34px', height:'34px', borderRadius:'50%',
+                                  background: n.iconColor + '22',
+                                  display:'flex', alignItems:'center', justifyContent:'center',
+                                  flexShrink:0, marginTop:'1px',
+                                }">
+                                  <span class="mdi" :class="n.icon" :style="{ fontSize:'17px', color:n.iconColor }"></span>
+                                </div>
+
+                                <!-- Content -->
+                                <div style="flex:1; min-width:0;">
+                                  <div style="display:flex; align-items:center; justify-content:space-between; gap:4px; margin-bottom:3px;">
+                                    <div style="display:flex; align-items:center; gap:5px; min-width:0; flex:1;">
+                                      <!-- Title — bold for unread; 1-line clamp; full text via title attr -->
+                                      <!-- UX: font-weight 600 for unread, 400 for read — avoids colour-only distinction (a11y) -->
+                                      <span
+                                        :title="n.title"
+                                        :style="{
+                                          fontSize:'13px', color:'var(--color-text)',
+                                          fontWeight: n.unread ? '600' : '400',
+                                          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                                        }"
+                                      >{{ n.title }}</span>
+                                      <!-- Unread accent dot — aria-hidden; visual only complement to bold -->
+                                      <!-- A11Y: state communicated via font-weight + aria-label, not colour alone -->
+                                      <span
+                                        v-if="n.unread"
+                                        aria-hidden="true"
+                                        style="width:6px;height:6px;border-radius:50%;background:#2563EB;flex-shrink:0;"
+                                      ></span>
+                                    </div>
+                                    <span style="font-size:11px;color:#475569;flex-shrink:0;white-space:nowrap;">{{ n.time }}</span>
+                                  </div>
+                                  <!-- Body — 1-line clamp; full text via title attr for hover/focus -->
+                                  <!-- UX: 1 line keeps list compact; title attr is the accessibility complement -->
+                                  <p
+                                    :title="n.body"
+                                    style="font-size:12px;color:var(--color-text-muted);margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                                  >{{ n.body }}</p>
+                                </div>
+
+                                <!-- Row actions -->
+                                <!-- UX: opacity:0 by default, 1 on hover (.notif-item:hover .action-btns in CSS) -->
+                                <!-- A11Y: each action has aria-label referencing notification title (not just "Delete") -->
+                                <div class="action-btns" style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;justify-content:center;">
+                                  <!-- Mark as read — only for unread items -->
+                                  <button
+                                    v-if="n.unread"
+                                    class="action-btn"
+                                    :aria-label="'Mark as read: ' + n.title"
+                                    title="Mark as read"
+                                    style="width:22px;height:22px;border-radius:4px;border:none;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#60a5fa;padding:0;"
+                                  ><span class="mdi mdi-check-circle-outline" style="font-size:15px;pointer-events:none;"></span></button>
+                                  <!-- Delete -->
+                                  <button
+                                    class="action-btn"
+                                    :aria-label="'Delete notification: ' + n.title"
+                                    title="Delete"
+                                    style="width:22px;height:22px;border-radius:4px;border:none;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#64748b;padding:0;"
+                                  ><span class="mdi mdi-close" style="font-size:14px;pointer-events:none;"></span></button>
+                                </div>
+                              </div>
+
+                              <!-- Load more -->
+                              <!-- UX: shows when total > 20; preferred over auto-scroll in a constrained dropdown -->
+                              <div style="padding:10px;text-align:center;border-top:1px solid rgba(255,255,255,0.05);">
+                                <button style="font-size:12px;color:#60a5fa;background:none;border:none;cursor:pointer;font-family:system-ui;">
+                                  Load more
+                                </button>
+                              </div>
+                            </div>
+
+                            <!-- ──────────────── STATE: EMPTY ──────────────── -->
+                            <!-- UX: bell-check icon signals "done", not absence — positive framing -->
+                            <div v-else-if="activeState === 'empty'" style="padding:52px 24px 48px;text-align:center;animation:fadeIn 0.2s ease-out;">
+                              <div style="width:56px;height:56px;background:rgba(255,255,255,0.04);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;">
+                                <span class="mdi mdi-bell-check-outline" style="font-size:28px;color:#334155;"></span>
+                              </div>
+                              <p style="font-size:14px;font-weight:600;color:#94a3b8;margin:0 0 4px;">You're all caught up!</p>
+                              <p style="font-size:12px;color:#475569;margin:0;">No notifications to show right now</p>
+                            </div>
+
+                            <!-- ──────────────── STATE: ERROR ──────────────── -->
+                            <!-- UX: in-panel error — page nav stays usable; single Retry CTA -->
+                            <!-- UX: wifi-off icon is more specific than generic alert — maps to network failure -->
+                            <!-- UX: if cached data available, render it above this error banner (not shown in wireframe) -->
+                            <div v-else-if="activeState === 'error'" style="padding:40px 24px 36px;text-align:center;animation:fadeIn 0.2s ease-out;">
+                              <div style="width:52px;height:52px;background:rgba(239,68,68,0.1);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;">
+                                <span class="mdi mdi-wifi-off" style="font-size:26px;color:#ef4444;"></span>
+                              </div>
+                              <p style="font-size:13px;font-weight:600;color:var(--color-text);margin:0 0 4px;">Couldn't load notifications</p>
+                              <p style="font-size:12px;color:var(--color-text-muted);margin:0 0 18px;">Check your connection and try again</p>
+                              <!-- A11Y: Retry button is the primary action — no dismiss -->
+                              <button style="font-size:12px;font-weight:500;color:white;background:#2563EB;border:none;cursor:pointer;padding:7px 18px;border-radius:6px;font-family:system-ui;">
+                                Retry
+                              </button>
+                            </div>
+
+                            <!-- ──────────────── STATE: 99+ OVERFLOW ──────────────── -->
+                            <!-- UX: badge shows "99+" but aria-label carries "120 unread" -->
+                            <!-- UX: "Showing X of N" context prevents user confusion about completeness -->
+                            <div v-else-if="activeState === 'overflow'">
+                              <div style="padding:7px 16px 8px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <span style="font-size:11px;color:#475569;">Showing 20 of 120</span>
+                              </div>
+                              <div
+                                v-for="n in MOCK_NOTIFICATIONS" :key="n.id"
+                                class="notif-item"
+                                style="display:flex;gap:10px;padding:10px 14px;cursor:pointer;background:rgba(37,99,235,0.07);"
+                              >
+                                <div :style="{
+                                  width:'34px', height:'34px', borderRadius:'50%',
+                                  background: n.iconColor + '22',
+                                  display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
+                                }">
+                                  <span class="mdi" :class="n.icon" :style="{ fontSize:'17px', color:n.iconColor }"></span>
+                                </div>
+                                <div style="flex:1;min-width:0;">
+                                  <div style="font-size:13px;font-weight:600;color:var(--color-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px;">{{ n.title }}</div>
+                                  <div style="font-size:12px;color:var(--color-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ n.body }}</div>
+                                </div>
+                                <div class="action-btns" style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;justify-content:center;">
+                                  <button class="action-btn" :aria-label="'Mark as read: ' + n.title" style="width:22px;height:22px;border-radius:4px;border:none;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#60a5fa;padding:0;"><span class="mdi mdi-check-circle-outline" style="font-size:15px;"></span></button>
+                                  <button class="action-btn" :aria-label="'Delete: ' + n.title" style="width:22px;height:22px;border-radius:4px;border:none;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#64748b;padding:0;"><span class="mdi mdi-close" style="font-size:14px;"></span></button>
+                                </div>
+                              </div>
+                              <div style="padding:10px;text-align:center;border-top:1px solid rgba(255,255,255,0.05);">
+                                <button style="font-size:12px;color:#60a5fa;background:none;border:none;cursor:pointer;font-family:system-ui;">Load more (100 remaining)</button>
+                              </div>
+                            </div>
+
+                          </div><!-- /scroll body -->
+                        </div><!-- /panel -->
+                      </div><!-- /bell container -->
+
+                      <!-- User avatar -->
+                      <div style="width:32px;height:32px;background:rgba(37,99,235,0.18);border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;margin-left:2px;">
+                        <span style="color:#60a5fa;font-size:11px;font-weight:700;">AR</span>
+                      </div>
+                    </div><!-- /nav right -->
+                  </div><!-- /nav bar -->
+
+                  <!-- Mock page content (faded — shows context only) -->
+                  <div style="padding:20px;opacity:0.18;pointer-events:none;user-select:none;">
+                    <div style="height:18px;background:rgba(255,255,255,0.1);border-radius:4px;width:180px;margin-bottom:16px;"></div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px;">
+                      <div v-for="i in 3" :key="i" style="height:72px;background:rgba(255,255,255,0.05);border-radius:8px;border:1px solid rgba(255,255,255,0.05);"></div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;">
+                      <div style="height:140px;background:rgba(255,255,255,0.04);border-radius:8px;border:1px solid rgba(255,255,255,0.04);"></div>
+                      <div style="height:140px;background:rgba(255,255,255,0.04);border-radius:8px;border:1px solid rgba(255,255,255,0.04);"></div>
+                    </div>
+                  </div>
+
+                </div><!-- /viewport -->
+              </div><!-- /browser chrome -->
+            </div><!-- /left col -->
+
+            <!-- ═══ RIGHT: Annotation Sidebar ═══ -->
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;">Design Notes</div>
+
+              <!-- Current state card -->
+              <div style="background:#1a1d2e;border-radius:8px;padding:12px;border:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;">Current State</div>
+                <div style="font-size:13px;color:#e2e8f0;font-weight:600;margin-bottom:3px;">{{ stateMeta.title }}</div>
+                <div style="font-size:12px;color:#64748b;line-height:1.4;">{{ stateMeta.desc }}</div>
+              </div>
+
+              <!-- UX notes -->
+              <div style="background:#1a1d2e;border-radius:8px;padding:12px;border:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">
+                  <span class="anno-chip anno-ux">UX</span>
+                </div>
+                <ul style="margin:0;padding:0 0 0 14px;list-style:disc;display:flex;flex-direction:column;gap:5px;">
+                  <li v-for="note in uxNotes" :key="note" style="font-size:12px;color:#94a3b8;line-height:1.45;">{{ note }}</li>
+                </ul>
+              </div>
+
+              <!-- A11Y notes (constant across states) -->
+              <div style="background:#1a1d2e;border-radius:8px;padding:12px;border:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">
+                  <span class="anno-chip anno-a11y">A11Y</span>
+                </div>
+                <ul style="margin:0;padding:0 0 0 14px;list-style:disc;display:flex;flex-direction:column;gap:5px;">
+                  <li v-for="note in A11Y_NOTES" :key="note" style="font-size:12px;color:#94a3b8;line-height:1.45;">{{ note }}</li>
+                </ul>
+              </div>
+
+              <!-- Token reference -->
+              <div style="background:#1a1d2e;border-radius:8px;padding:12px;border:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Design Tokens</div>
+                <div style="display:flex;flex-direction:column;gap:5px;">
+                  <div v-for="t in TOKENS" :key="t.name" style="display:flex;align-items:center;gap:6px;">
+                    <div :style="{ width:'11px', height:'11px', borderRadius:'3px', background:t.hex, flexShrink:0, border:'1px solid rgba(255,255,255,0.1)' }"></div>
+                    <span style="font-size:11px;color:#64748b;font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t.name }}</span>
+                    <span style="font-size:11px;color:#475569;font-family:monospace;">{{ t.hex }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Notification type legend -->
+              <div style="background:#1a1d2e;border-radius:8px;padding:12px;border:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Notification Types</div>
+                <div style="display:flex;flex-direction:column;gap:7px;">
+                  <div v-for="t in NOTIF_TYPES" :key="t.label" style="display:flex;align-items:center;gap:7px;">
+                    <div :style="{ width:'22px', height:'22px', borderRadius:'50%', background: t.color + '20', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }">
+                      <span class="mdi" :class="t.icon" :style="{ fontSize:'13px', color:t.color }"></span>
+                    </div>
+                    <span style="font-size:12px;color:#94a3b8;font-family:monospace;">{{ t.label }}</span>
+                  </div>
+                </div>
+              </div>
+            </div><!-- /annotation sidebar -->
+
+          </div><!-- /two-column grid -->
+
+          <!-- ─────────────── Component Spec Table ─────────────── -->
+          <div style="margin-top:24px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.06);">
+            <div style="font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Component Spec</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(230px, 1fr));gap:8px;">
+              <div
+                v-for="s in SPECS" :key="s.label"
+                style="background:#1a1d2e;border-radius:8px;padding:10px 12px;border:1px solid rgba(255,255,255,0.06);"
+              >
+                <div style="font-size:11px;color:#475569;margin-bottom:3px;">{{ s.label }}</div>
+                <div style="font-size:12px;color:#94a3b8;font-family:monospace;">{{ s.value }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div style="margin-top:24px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.04);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <span style="font-size:11px;color:#334155;">BUD-001 — Notification Bell Improvement — Wireframe v1</span>
+            <span style="font-size:11px;color:#334155;">Design system: taskflow-web · Stack: Vue 3.4 + Vuetify 3.4 + MDI</span>
+          </div>
+
+        </div><!-- /max-width container -->
+      </v-main>
+    </v-app>
+  `,
+}
+
+const app = createApp(App)
+app.use(vuetify)
+app.mount('#app')
+</script>
+</body>
+</html>

@@ -1,0 +1,371 @@
+body {
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.setup-gradient {
+  background: linear-gradient(135deg, #0D1B0F 0%, #152415 50%, #1E3220 100%);
+  min-height: 100vh;
+}
+
+.card-border-dark {
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.step-glow {
+  box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.25);
+}
+
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+// Manifesto principles — compact with icon
+.methodology-principle {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  &.border-primary {
+    border-left: 3px solid rgb(var(--v-theme-primary));
+  }
+
+  &.border-secondary {
+    border-left: 3px solid rgb(var(--v-theme-secondary));
+  }
+}
+
+// Methodology comparison table
+.methodology-comparison {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.875rem;
+
+  th {
+    background: rgba(37, 99, 235, 0.15);
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    vertical-align: top;
+  }
+
+  tr:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  tr:hover td {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  td:first-child {
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.85);
+    white-space: nowrap;
+  }
+
+  td:nth-child(2) {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  td:nth-child(3) {
+    color: rgb(var(--v-theme-primary));
+  }
+}
+
+// Circular lifecycle — wrapper (circle stays centered, panel floats right)
+.cycle-wrapper {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 520px;
+  margin: 0 auto;
+}
+
+.cycle-flow {
+  position: relative;
+  width: 480px;
+  min-width: 480px;
+  aspect-ratio: 1;
+}
+
+// Right-side agent panel (absolute — circle never moves)
+.cycle-info {
+  position: absolute;
+  left: calc(50% + 260px);
+  top: 50%;
+  width: 340px;
+  z-index: 10;
+  opacity: 0;
+  transform: translateY(-50%) translateX(30px);
+  pointer-events: none;
+  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cycle-info--visible {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+  pointer-events: auto;
+}
+
+.cycle-info__card {
+  padding: 20px;
+  border-radius: 12px;
+  background: rgba(15, 17, 23, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.cycle-info__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cycle-info__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cycle-flow__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.cycle-flow__dash {
+  animation: cycle-dash-rotate 60s linear infinite;
+}
+
+@keyframes cycle-dash-rotate {
+  to { stroke-dashoffset: -1131; /* 2π×180 */ }
+}
+
+// Dot + glow follow active phase via CSS transitions
+.cycle-flow__dot,
+.cycle-flow__glow {
+  transition: cx 0.6s ease, cy 0.6s ease;
+}
+
+.cycle-flow__dot {
+  filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.8));
+}
+
+// Center description hub
+.cycle-flow__center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 170px;
+  height: 170px;
+  border-radius: 50%;
+  background: rgba(15, 17, 23, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+// Bug → Feature animated line
+.cycle-flow__bug-line {
+  animation: bug-line-flow 2s linear infinite;
+}
+
+@keyframes bug-line-flow {
+  to { stroke-dashoffset: -20; }
+}
+
+// Bug node styles
+.cycle-node--bug {
+  z-index: 2;
+
+  .cycle-node__icon {
+    width: 38px;
+    height: 38px;
+    border: 1px dashed rgba(239, 68, 68, 0.4);
+  }
+}
+
+// Phase nodes around the circle
+.cycle-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 80px;
+  cursor: pointer;
+  z-index: 1;
+  transition: transform 0.3s ease;
+
+  &:hover {
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+
+  .cycle-node__icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgb(var(--node-color));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 6px;
+    transition: box-shadow 0.3s ease, transform 0.3s ease;
+    border: 2px solid transparent;
+
+    .v-icon {
+      color: white;
+    }
+  }
+
+  .cycle-node__label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.2;
+    margin-bottom: 1px;
+    transition: color 0.3s ease;
+  }
+
+  .cycle-node__agent {
+    font-size: 0.55rem;
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.2;
+    transition: color 0.3s ease;
+  }
+
+  // Active state
+  &--active {
+    .cycle-node__icon {
+      box-shadow: 0 0 20px rgba(46, 125, 50, 0.5), 0 0 40px rgba(46, 125, 50, 0.2);
+      border-color: rgba(46, 125, 50, 0.6);
+      transform: scale(1.15);
+    }
+
+    .cycle-node__label {
+      color: rgba(255, 255, 255, 1);
+    }
+
+    .cycle-node__agent {
+      color: rgba(255, 255, 255, 0.6);
+    }
+  }
+}
+
+// Agent card
+.agent-card {
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+
+  &:hover {
+    border-color: rgba(46, 125, 50, 0.3) !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    transform: translateY(-2px);
+  }
+
+  .agent-card__accent {
+    height: 3px;
+    width: 100%;
+    opacity: 0.7;
+  }
+
+  .agent-cap-chip {
+    font-size: 0.65rem !important;
+    height: 20px !important;
+  }
+}
+
+// Knowledge layer rows
+.methodology-knowledge-layer {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid rgb(var(--v-theme-primary));
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .layer-number {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(37, 99, 235, 0.2);
+    color: rgb(var(--v-theme-primary));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.7rem;
+  }
+}
+
+// Expansion panels for phase details
+.phase-expansion-panels {
+  .v-expansion-panel {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    margin-bottom: 4px;
+
+    &::before {
+      box-shadow: none !important;
+    }
+  }
+
+  .v-expansion-panel-title {
+    font-size: 0.9rem;
+    min-height: 48px;
+  }
+
+  .v-expansion-panel-text__wrapper {
+    padding: 8px 16px 16px;
+  }
+}
