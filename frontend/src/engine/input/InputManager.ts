@@ -69,7 +69,6 @@ export class InputManager {
   private canvas: HTMLCanvasElement | null = null
   private nativeWheelHandler: ((e: WheelEvent) => void) | null = null
   private app: pc.AppBase | null = null
-  private postUpdateHandler: (() => void) | null = null
 
   init(canvas: HTMLCanvasElement, app?: pc.AppBase): void {
     this.canvas = canvas
@@ -101,17 +100,16 @@ export class InputManager {
       this.touch.on(pc.EVENT_TOUCHCANCEL, this.onTouchEnd, this)
     }
 
-    // wasPressed() needs keyboard.update() called each frame to snapshot
-    // _keymap → _lastmap; otherwise wasPressed stays true every frame a key
-    // is held, causing toggle actions (mount/dismount) to flip multiple times
-    // per physical press.
+    // wasPressed() needs keyboard.update() each frame to snapshot
+    // _keymap → _lastmap; otherwise it stays true every frame a key is held,
+    // making toggle actions (V to mount/dismount, E to sit) flip twice per
+    // press. pc.AppBase.inputUpdate() handles this automatically for any
+    // device assigned to app.keyboard / app.mouse — the 'postupdate' event
+    // does NOT fire on the app itself (it fires on app.systems).
     if (app) {
       this.app = app
-      this.postUpdateHandler = () => {
-        this.keyboard.update()
-        this.mouse.update()
-      }
-      app.on('postupdate', this.postUpdateHandler)
+      app.keyboard = this.keyboard
+      app.mouse = this.mouse
     }
   }
 
@@ -351,10 +349,10 @@ export class InputManager {
       this.touch.off(pc.EVENT_TOUCHCANCEL, this.onTouchEnd, this)
     }
 
-    if (this.app && this.postUpdateHandler) {
-      this.app.off('postupdate', this.postUpdateHandler)
+    if (this.app) {
+      if (this.app.keyboard === this.keyboard) this.app.keyboard = null as unknown as pc.Keyboard
+      if (this.app.mouse === this.mouse) this.app.mouse = null as unknown as pc.Mouse
       this.app = null
-      this.postUpdateHandler = null
     }
   }
 }
