@@ -1042,6 +1042,13 @@ export class GardenEngine {
 
     const visitorId = this.currentUser?.id ?? null
 
+    // Lock the visitor under takeover before the fade so stale
+    // locationContext="coffeebar" snapshots can't re-hide the avatar
+    // during the transition. See exitCafeteria for the full rationale.
+    if (visitorId) {
+      this.sceneManager?.characterSystemRef?.setTakeoverUser(visitorId)
+    }
+
     this._transitioning = true
     try {
       this.sceneState = 'exiting'
@@ -1063,6 +1070,8 @@ export class GardenEngine {
         if (outside && visitorId) {
           const character = this.sceneManager?.characterSystemRef?.getCharacter(visitorId)
           if (character) {
+            // Force visible — hidden by snapshot updates during the visit.
+            character.entity.enabled = true
             character.entity.setPosition(outside.x, 0, outside.z)
             character.entity.setEulerAngles(0, outside.yaw, 0)
             character.entity.anim?.setBoolean('sitting', false)
@@ -1177,6 +1186,17 @@ export class GardenEngine {
 
     const visitorId = this.currentUser?.id ?? null
 
+    // Reserve the local user as "under takeover" before any fade work
+    // starts. During the visit, OrgRoom has been broadcasting
+    // locationContext="cafeteria" snapshots which CharacterSystem uses to
+    // hide the avatar. The moment we begin exit, lock the visitor's userId
+    // as takeover so updateFromSnapshot ignores any stale "cafeteria"
+    // snapshots that arrive during the fade — otherwise the entity stays
+    // hidden until a fresh server broadcast resets locationContext.
+    if (visitorId) {
+      this.sceneManager?.characterSystemRef?.setTakeoverUser(visitorId)
+    }
+
     this._transitioning = true
     try {
       this.sceneState = 'exiting'
@@ -1199,6 +1219,10 @@ export class GardenEngine {
         if (outside && visitorId) {
           const character = this.sceneManager?.characterSystemRef?.getCharacter(visitorId)
           if (character) {
+            // Force visible — the entity was disabled by snapshot updates
+            // during the visit; enable it here before the fade reveals the
+            // garden again.
+            character.entity.enabled = true
             character.entity.setPosition(outside.x, 0, outside.z)
             character.entity.setEulerAngles(0, outside.yaw, 0)
             character.entity.anim?.setBoolean('sitting', false)
