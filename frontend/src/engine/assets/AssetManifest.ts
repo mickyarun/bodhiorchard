@@ -17,6 +17,8 @@ const CHARACTERS = 'characters'
 /** Coffeehouse Lounge Pack by majesticmaje (CC-BY via Poly.Pizza). See
  *  `public/models/coffeebar/ATTRIBUTION.md` for the full notice. */
 const CAFE_PACK = 'models/coffeebar'
+/** Single-scene Cafeteria GLB from fab.com (styloo, free under Standard License). */
+const CAFETERIA_PACK = 'models/cafeteria'
 
 // ─── Tree GLBs ──────────────────────────────────
 
@@ -325,6 +327,16 @@ export const CAFE = {
   rug:          `${CAFE_PACK}/Rug.glb`,
   roundRug:     `${CAFE_PACK}/Round_Rug.glb`,
   bins:         `${CAFE_PACK}/Bins.glb`,
+} as const
+
+// ─── Cafeteria GLB (single-scene interior) ──────
+
+/**
+ * Cafeteria interior — one GLB contains the entire dining hall
+ * (walls, tables, chairs, vending machines, food display).
+ */
+export const CAFETERIA = {
+  room: `${CAFETERIA_PACK}/cafeteria.glb`,
 } as const
 
 // ─── Character GLBs ─────────────────────────────
