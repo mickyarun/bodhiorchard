@@ -142,7 +142,7 @@ export class GraphEngine {
     // Subsystems
     this.camera = new GraphCameraController(this.root);
     this.input = new InputManager();
-    this.input.init(this.canvas);
+    this.input.init(this.canvas, this.app);
     this.materials = new MaterialFactory();
     this.nodeBuilder = new GraphNodeBuilder(this.materials);
     this.edgeBuilder = new GraphEdgeBuilder(this.materials);

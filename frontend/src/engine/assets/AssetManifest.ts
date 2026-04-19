@@ -14,6 +14,9 @@ import type { RepoHealth, ThreatSeverity, BUDStatus } from '../types'
 const GARDEN = 'assets/garden'
 const FURNITURE = 'assets/furniture'
 const CHARACTERS = 'characters'
+/** Coffeehouse Lounge Pack by majesticmaje (CC-BY via Poly.Pizza). See
+ *  `public/models/coffeebar/ATTRIBUTION.md` for the full notice. */
+const CAFE_PACK = 'models/coffeebar'
 
 // ─── Tree GLBs ──────────────────────────────────
 
@@ -270,6 +273,60 @@ export const POOL = {
   lilySmall: `${GARDEN}/lily_small.glb`,
 } as const
 
+// ─── Café pack GLBs (Coffeehouse Lounge Pack by majesticmaje, CC-BY) ──
+
+/**
+ * Individual café props from the Coffeehouse Lounge Pack. Subset of the
+ * 81-model pack — only the ones we actually place in the coffee bar.
+ * Full inventory lives in `public/models/coffeebar/`.
+ */
+export const CAFE = {
+  // Equipment on / around the bar counter
+  coffeeMachine: `${CAFE_PACK}/Coffee_Machine.glb`,
+  cashRegister:  `${CAFE_PACK}/Cash_register.glb`,
+  coffeePot:     `${CAFE_PACK}/Coffee_Pot.glb`,
+  espressoPot:   `${CAFE_PACK}/Espresso_Pot.glb`,
+  tripleSink:    `${CAFE_PACK}/Triple_Sink.glb`,
+  kitchenCabinetCorner: `${CAFE_PACK}/Kitchen_Cabinet_Corner.glb`,
+
+  // Display / countertop treats
+  fancyDonuts:  `${CAFE_PACK}/Fancy_Donuts.glb`,
+  donut:        `${CAFE_PACK}/Donut.glb`,
+  cupcake:      `${CAFE_PACK}/Cupcake.glb`,
+  frappe:       `${CAFE_PACK}/Frappe.glb`,
+  cup:          `${CAFE_PACK}/Cup.glb`,
+  mug:          `${CAFE_PACK}/Mug.glb`,
+  mugs:         `${CAFE_PACK}/Mugs.glb`,
+  coffeeCup:    `${CAFE_PACK}/Coffee_cup.glb`,
+  coffeeBean:   `${CAFE_PACK}/Coffee_bean.glb`,
+  fruitBowl:    `${CAFE_PACK}/Fruit_Bowl.glb`,
+  heartChocolates: `${CAFE_PACK}/Heart_Chocolates.glb`,
+
+  // Seating
+  coffeeTable: `${CAFE_PACK}/Coffee_Table.glb`,
+  table:       `${CAFE_PACK}/Table.glb`,
+  sideTable:   `${CAFE_PACK}/Side_table.glb`,
+  barStool:    `${CAFE_PACK}/Bar_Stool.glb`,
+  barStoolAlt: `${CAFE_PACK}/Barstool.glb`,
+  couchSmall:  `${CAFE_PACK}/Couch_Small.glb`,
+  couchMedium: `${CAFE_PACK}/Couch_Medium.glb`,
+  cushions:    `${CAFE_PACK}/Cushions.glb`,
+
+  // Decor
+  coffeeSign:   `${CAFE_PACK}/Coffee_sign.glb`,
+  coatRack:     `${CAFE_PACK}/Coat_Rack.glb`,
+  ceilingLight: `${CAFE_PACK}/Ceiling_Light.glb`,
+  analogClock:  `${CAFE_PACK}/Analog_clock.glb`,
+  calendar:     `${CAFE_PACK}/Calendar.glb`,
+  bookStack:    `${CAFE_PACK}/Book_Stack.glb`,
+  houseplant:   `${CAFE_PACK}/Houseplant.glb`,
+  houseplant2:  `${CAFE_PACK}/Houseplant-bfLOqIV5uP.glb`,
+  houseplant3:  `${CAFE_PACK}/Houseplant-IBLX2Jz90O.glb`,
+  rug:          `${CAFE_PACK}/Rug.glb`,
+  roundRug:     `${CAFE_PACK}/Round_Rug.glb`,
+  bins:         `${CAFE_PACK}/Bins.glb`,
+} as const
+
 // ─── Character GLBs ─────────────────────────────
 
 /** Legacy Kenney Blocky Characters (18 variants, moved to legacy/ subfolder). */
@@ -317,6 +374,11 @@ export function getEnvironmentGLBs(): string[] {
 /** All GLBs needed for buildings. */
 export function getBuildingGLBs(): string[] {
   return Object.values(BUILDING)
+}
+
+/** All GLBs from the Coffeehouse Lounge Pack used in the café interior. */
+export function getCafeGLBs(): string[] {
+  return Object.values(CAFE)
 }
 
 /** Path stone GLB for connecting zones. */

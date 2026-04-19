@@ -68,8 +68,10 @@ export class InputManager {
 
   private canvas: HTMLCanvasElement | null = null
   private nativeWheelHandler: ((e: WheelEvent) => void) | null = null
+  private app: pc.AppBase | null = null
+  private postUpdateHandler: (() => void) | null = null
 
-  init(canvas: HTMLCanvasElement): void {
+  init(canvas: HTMLCanvasElement, app?: pc.AppBase): void {
     this.canvas = canvas
     this.keyboard = new pc.Keyboard(window)
 
@@ -97,6 +99,19 @@ export class InputManager {
       this.touch.on(pc.EVENT_TOUCHMOVE, this.onTouchMove, this)
       this.touch.on(pc.EVENT_TOUCHEND, this.onTouchEnd, this)
       this.touch.on(pc.EVENT_TOUCHCANCEL, this.onTouchEnd, this)
+    }
+
+    // wasPressed() needs keyboard.update() called each frame to snapshot
+    // _keymap → _lastmap; otherwise wasPressed stays true every frame a key
+    // is held, causing toggle actions (mount/dismount) to flip multiple times
+    // per physical press.
+    if (app) {
+      this.app = app
+      this.postUpdateHandler = () => {
+        this.keyboard.update()
+        this.mouse.update()
+      }
+      app.on('postupdate', this.postUpdateHandler)
     }
   }
 
@@ -334,6 +349,12 @@ export class InputManager {
       this.touch.off(pc.EVENT_TOUCHMOVE, this.onTouchMove, this)
       this.touch.off(pc.EVENT_TOUCHEND, this.onTouchEnd, this)
       this.touch.off(pc.EVENT_TOUCHCANCEL, this.onTouchEnd, this)
+    }
+
+    if (this.app && this.postUpdateHandler) {
+      this.app.off('postupdate', this.postUpdateHandler)
+      this.app = null
+      this.postUpdateHandler = null
     }
   }
 }

@@ -44,6 +44,11 @@ export class BuildingFactory {
    *  properly-lit cached materials without creating a separate MaterialFactory instance. */
   get materialFactory(): MaterialFactory | null { return this.materials }
 
+  /** Shared GLB loader — exposed so subsystems can implement alternative
+   *  placement strategies (e.g. world-AABB auto-fit for packs whose GLBs bake
+   *  node-level scale transforms). */
+  get assetLoader(): AssetLoader { return this.loader }
+
   /**
    * Create a tiled floor from floorFull GLBs.
    * @param parent Parent entity to add floor tiles to
@@ -388,21 +393,24 @@ export class BuildingFactory {
     pole.render!.meshInstances[0].material = poleMat
     umbrella.addChild(pole)
 
-    // Canopy: inverted cone — dome-like proportions (height ~0.4 for diameter ~1.3)
+    // Canopy: upright cone — apex at top (umbrella finial), base at bottom
+    // (where the ribs splay out). PlayCanvas cones have apex at +Y by
+    // default; with scale(h) the cone extends ±h/2 about its center, so
+    // placing the entity at poleHeight + canopyH/2 seats the base on the
+    // pole-top and leaves the finial at poleHeight + canopyH.
     const canopyH = 0.45
     const canopy = new pc.Entity('Canopy')
     canopy.addComponent('render', { type: 'cone' })
     canopy.setLocalScale(canopyRadius * 2, canopyH, canopyRadius * 2)
-    canopy.setLocalPosition(0, poleHeight + canopyH * 0.3, 0)
-    canopy.setLocalEulerAngles(180, 0, 0)
+    canopy.setLocalPosition(0, poleHeight + canopyH / 2, 0)
     canopy.render!.meshInstances[0].material = canopyMat
     umbrella.addChild(canopy)
 
-    // Finial: small sphere on top of canopy for classic parasol look
+    // Finial: small sphere atop the cone's apex for classic parasol look
     const finial = new pc.Entity('Finial')
     finial.addComponent('render', { type: 'sphere' })
     finial.setLocalScale(0.08, 0.08, 0.08)
-    finial.setLocalPosition(0, poleHeight + canopyH * 0.6, 0)
+    finial.setLocalPosition(0, poleHeight + canopyH + 0.04, 0)
     finial.render!.meshInstances[0].material = poleMat
     umbrella.addChild(finial)
 
