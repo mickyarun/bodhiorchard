@@ -2,44 +2,84 @@
 // Copyright (C) 2026 Arun Rajkumar
 
 /**
- * CoffeeBarBuilder — Coffee bar with enclosed shelter + outdoor seating.
+ * CoffeeBarBuilder — Café with a distinctive exterior and wide outdoor patio.
  *
- * Layout (top-down, Z increases toward front):
+ * Root layout (root origin = zone center, z axis points toward the viewer):
  *
- *   z=0 [========= BACK WALL (solid) =========]
- *       | Cabinet   Bar+Coffee    Stove       |
- *   z=1 |          (stacked)                  |
- *       |                                     |
- *   z=2 [========= FRONT (3 doors) ===========]
- *       x=0                                x=3
+ *             +z
+ *              ▲
+ *     z=+6.5  · · ·  (far row: 2 tables)
+ *     z=+4.0  · · · · (middle row: 4 tables)
+ *     z=+2.0  · · ·  (near row: 2 tables)
+ *     z= 0.0  [=== HUT FRONT / DOOR ===]   ← zone center
+ *     z=-1.5  [   HUT INTERIOR    ]
+ *     z=-3.0  [=== HUT BACK WALL =======]
  *
- *   Outdoor seating (z=3 to z=7):
- *     Left row:  tableCoffee + 2 chairs (×2)
- *     Right row: tableCoffee + 2 chairs (×2)
- *     Central campfire between rows
+ * The hut geometry lives inside a `hutRoot` sub-entity offset by
+ * (−HUT_WIDTH/2, 0, −HUT_DEPTH) so the hut sits centered-in-X and pushed
+ * toward the back of the zone. Outdoor furniture is parented directly to
+ * root (local coords = zone-center-relative) and spreads symmetrically
+ * over the full patio, filling the fenced circle.
  *
- * Placement rules:
- * - All furniture uses placeFurnitureCentered (consistent AABB centering)
- * - Stacking: base placed first, getEntityHeight for top Y, stacked item
- *   placed at that Y — same pattern as HouseBuilder (desk+laptop, cabinet+TV)
+ * Café differentiators vs. a generic house:
+ *   - Single entrance with a red-striped awning over the door
+ *   - "COFFEE" billboard sign above the awning
+ *   - Potted plants flanking the entrance
+ *   - Red umbrellas over every outdoor table
+ *   - Warm terracotta roof instead of the default grey
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { BuildingFactory } from './BuildingFactory'
-import { BUILDING, CAMPFIRE } from '../assets/AssetManifest'
+import { BUILDING } from '../assets/AssetManifest'
+import { LabelRenderer } from '../rendering/LabelRenderer'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 import type { ExclusionZone } from '../utils/MathUtils'
 
 const WALL_HEIGHT = 1.29
-const HUT_WIDTH = 3
-const HUT_DEPTH = 2
+const HUT_WIDTH = 5
+const HUT_DEPTH = 3
+/** Shift the hut so its width is centered on the zone and its footprint is
+ *  pushed toward the back, leaving a clear walking path in front of the door.
+ *  The extra 0.8 past -HUT_DEPTH backs the building off the door zone. */
+const HUT_OFFSET_X = -HUT_WIDTH / 2
+const HUT_SETBACK = 0.8
+const HUT_OFFSET_Z = -HUT_DEPTH - HUT_SETBACK
+/** Door world position relative to zone center (root-local z of the front
+ *  wall). Kept in sync with HUT_OFFSET_Z so GardenEngine can compute the
+ *  door trigger and exit spawn without reaching into the builder. */
+export const COFFEE_DOOR_LOCAL_Z = HUT_OFFSET_Z + HUT_DEPTH
+
+const AWNING_RED: [number, number, number] = [0.82, 0.18, 0.12]
+const ROOF_TERRACOTTA: [number, number, number] = [0.55, 0.28, 0.18]
+
+/**
+ * Table slots in root-local coords. Every slot gets: coffee table, two
+ * facing chairs, and a red umbrella. The list is intentionally data-driven
+ * so tweaking the patio layout doesn't touch any logic.
+ *
+ * Note: no "near row" directly in front of the door — that zone stays as a
+ * clear walking corridor from the door into the seating area.
+ */
+const TABLE_SLOTS: ReadonlyArray<{ x: number; z: number }> = [
+  // Middle row — right cluster pulled inward from x=+4.2 → +2.7 so it sits
+  // comfortably inside the fence instead of hugging the right edge.
+  { x: -4.2, z: 4.0 },
+  { x:  2.7, z: 4.0 },
+  // Far row — right table pulled in from +2.5 → +1.0 to match.
+  { x: -2.5, z: 6.3 },
+  { x:  1.0, z: 6.3 },
+]
 
 export interface CoffeeBarResult {
   entity: pc.Entity
   exclusionZone: ExclusionZone
   seats: InteractionPoint[]
-  /** Hut dimensions for takeover physics wall generation. */
   hutDims: { width: number; depth: number; frontDoorIndices: number[] }
+  /** World position of the hut's back-left corner — used for physics wall
+   *  colliders. Differs from the zone center because the hut is offset
+   *  inside the coffee-bar root. */
+  hutWorldOrigin: { x: number; z: number }
 }
 
 export class CoffeeBarBuilder {
@@ -55,85 +95,150 @@ export class CoffeeBarBuilder {
 
     const seats: InteractionPoint[] = []
 
-    // ─── Shelter hut (3×2 tiles, open front) ───
-    await this.factory.createFloor(root, 3, 2)
-    await this.factory.createWalls(root, 3, 2, [
-      { side: 'front', index: 0, type: 'door' },
-      { side: 'front', index: 1, type: 'door' },
+    // ─── Hut body (offset child so the hut sits centered-in-X, back half) ───
+    const hut = new pc.Entity('HutBody')
+    hut.setLocalPosition(HUT_OFFSET_X, 0, HUT_OFFSET_Z)
+    root.addChild(hut)
+
+    await this.factory.createFloor(hut, HUT_WIDTH, HUT_DEPTH)
+    await this.factory.createWalls(hut, HUT_WIDTH, HUT_DEPTH, [
+      { side: 'front', index: 0, type: 'window' },
+      { side: 'front', index: 1, type: 'window' },
       { side: 'front', index: 2, type: 'door' },
-      { side: 'left', index: 0, type: 'window' },
-      { side: 'right', index: 0, type: 'window' },
+      { side: 'front', index: 3, type: 'window' },
+      { side: 'front', index: 4, type: 'window' },
+      { side: 'left', index: 1, type: 'window' },
+      { side: 'right', index: 1, type: 'window' },
     ])
-    this.factory.createRoof(root, 3, 2, WALL_HEIGHT)
+    const roof = this.factory.createRoof(hut, HUT_WIDTH, HUT_DEPTH, WALL_HEIGHT)
+    this.tintRoof(roof)
 
-    // ─── Interior: back wall equipment ───
-    // All items use placeFurnitureCentered for consistent AABB centering.
-    // Stacking follows HouseBuilder pattern (desk+laptop, cabinet+TV).
+    // Awning + sign above the single door (hut-local coords)
+    this.buildAwning(hut, HUT_WIDTH / 2, HUT_DEPTH, WALL_HEIGHT)
+    const sign = LabelRenderer.create(app, '\u2615 COFFEE', {
+      fontSize: 56,
+      textColor: '#FFFFFF',
+      bgColor: 'rgba(55, 30, 15, 0.92)',
+      borderRadius: 14,
+    })
+    sign.setLocalPosition(HUT_WIDTH / 2, WALL_HEIGHT + 1.05, HUT_DEPTH + 0.05)
+    hut.addChild(sign)
 
-    // Left: kitchen cabinet against back wall
-    await this.factory.placeFurnitureCentered(
-      root, BUILDING.kitchenCabinet, 0.5, 0, 0.5,
-    )
+    // Potted plants flanking the entrance
+    await this.factory.placeFurniture(hut, BUILDING.pottedPlant, HUT_WIDTH / 2 - 1.1, 0, HUT_DEPTH + 0.35)
+    await this.factory.placeFurniture(hut, BUILDING.pottedPlant, HUT_WIDTH / 2 + 0.9, 0, HUT_DEPTH + 0.35)
 
-    // Center: bar counter with coffee machine stacked on top
+    // ─── Interior back-wall equipment (hut-local coords) ───────────────
+    await this.factory.placeFurnitureCentered(hut, BUILDING.kitchenCabinet, 0.5, 0, 0.5)
+    await this.factory.placeFurnitureCentered(hut, BUILDING.kitchenCabinet, 1.5, 0, 0.5)
     const bar = await this.factory.placeFurnitureCentered(
-      root, BUILDING.kitchenBar, 1.5, 0, 0.7,
+      hut, BUILDING.kitchenBar, HUT_WIDTH / 2, 0, 0.7,
     )
     const barHeight = BuildingFactory.getEntityHeight(bar)
     await this.factory.placeFurnitureCentered(
-      root, BUILDING.kitchenCoffeeMachine, 1.5, barHeight, 0.7,
+      hut, BUILDING.kitchenCoffeeMachine, HUT_WIDTH / 2, barHeight, 0.7,
     )
+    await this.factory.placeFurnitureCentered(hut, BUILDING.kitchenStove, 3.5, 0, 0.5)
+    await this.factory.placeFurnitureCentered(hut, BUILDING.kitchenCabinet, 4.5, 0, 0.5)
 
-    // Right: kitchen stove against back wall
-    await this.factory.placeFurnitureCentered(
-      root, BUILDING.kitchenStove, 2.5, 0, 0.5,
-    )
-
-    // ─── Outdoor seating (z=3 to z=7) ───
+    // ─── Outdoor tables (parented to root — zone-centered coords) ──────
     let seatIndex = 0
-
-    // Left row — two coffee tables with chairs facing each other
-    for (let i = 0; i < 2; i++) {
-      const tz = 3.5 + i * 2.0
-      await this.factory.placeFurnitureCentered(root, BUILDING.tableCoffee, -1.0, 0, tz)
-      const left = await this.factory.placeSeat(root, BUILDING.chairCushion, -1.8, tz, 90, 'coffee_bar', seatIndex++, x, z, 'chairCushion', 'interact-right')
-      const right = await this.factory.placeSeat(root, BUILDING.chairCushion, -0.2, tz, -90, 'coffee_bar', seatIndex++, x, z, 'chairCushion', 'interact-right')
+    for (const slot of TABLE_SLOTS) {
+      await this.factory.placeFurnitureCentered(root, BUILDING.tableCoffee, slot.x, 0, slot.z)
+      const left = await this.factory.placeSeat(
+        root, BUILDING.chairCushion,
+        slot.x - 0.8, slot.z, 90,
+        'coffee_bar', seatIndex++, x, z,
+        'chairCushion', 'interact-right',
+      )
+      const right = await this.factory.placeSeat(
+        root, BUILDING.chairCushion,
+        slot.x + 0.8, slot.z, -90,
+        'coffee_bar', seatIndex++, x, z,
+        'chairCushion', 'interact-right',
+      )
       seats.push(left.seat, right.seat)
+      this.factory.createUmbrella(root, slot.x, slot.z, 0, 1.9, 0.75)
     }
 
-    // Right row — two coffee tables with chairs facing each other
-    for (let i = 0; i < 2; i++) {
-      const tz = 3.5 + i * 2.0
-      await this.factory.placeFurnitureCentered(root, BUILDING.tableCoffee, 2.5, 0, tz)
-      const left = await this.factory.placeSeat(root, BUILDING.chairCushion, 1.7, tz, 90, 'coffee_bar', seatIndex++, x, z, 'chairCushion', 'interact-right')
-      const right = await this.factory.placeSeat(root, BUILDING.chairCushion, 3.3, tz, -90, 'coffee_bar', seatIndex++, x, z, 'chairCushion', 'interact-right')
-      seats.push(left.seat, right.seat)
-    }
+    // Decorative plants at the patio perimeter
+    await this.factory.placeFurniture(root, BUILDING.plantSmall1, -5.3, 0, 2.0)
+    await this.factory.placeFurniture(root, BUILDING.plantSmall2,  5.3, 0, 2.0)
+    await this.factory.placeFurniture(root, BUILDING.plantSmall1, -5.3, 0, 5.5)
+    await this.factory.placeFurniture(root, BUILDING.plantSmall2,  5.3, 0, 5.5)
+    await this.factory.placeFurniture(root, BUILDING.plantSmall1, -3.0, 0, 7.2)
+    await this.factory.placeFurniture(root, BUILDING.plantSmall2,  3.0, 0, 7.2)
 
-    // Central campfire between the two seating rows
-    await this.factory.placeFurniture(root, CAMPFIRE.stones, 0.8, 0, 4.5)
-    await this.factory.placeFurniture(root, CAMPFIRE.logs, 0.8, 0.1, 4.5)
-
-    // Add to scene at the END — consistent with other builders.
     app.root.addChild(root)
 
-    // ─── String lights (local coords, part of building entity) ───
-    // Poles at hut front corners, strings frame the outdoor seating area.
+    // String lights framing the full patio (zone-centered coords)
     const stringH = WALL_HEIGHT + 1.2
     this.factory.createStringLights(root, [
-      // Left side of outdoor area
-      { start: { x: -2, y: stringH, z: HUT_DEPTH }, end: { x: -2, y: stringH, z: 6.5 }, bulbCount: 3 },
-      // Right side of outdoor area
-      { start: { x: HUT_WIDTH + 1, y: stringH, z: HUT_DEPTH }, end: { x: HUT_WIDTH + 1, y: stringH, z: 6.5 }, bulbCount: 3 },
-      // Cross-string at hut front
-      { start: { x: -2, y: stringH, z: HUT_DEPTH }, end: { x: HUT_WIDTH + 1, y: stringH, z: HUT_DEPTH }, bulbCount: 4 },
+      // Hut-front cross (just outside the door, spans the hut width + a bit)
+      { start: { x: -5.0, y: stringH, z: 0.2 }, end: { x:  5.0, y: stringH, z: 0.2 }, bulbCount: 5 },
+      // Left perimeter
+      { start: { x: -5.0, y: stringH, z: 0.2 }, end: { x: -5.0, y: stringH, z: 7.0 }, bulbCount: 4 },
+      // Right perimeter
+      { start: { x:  5.0, y: stringH, z: 0.2 }, end: { x:  5.0, y: stringH, z: 7.0 }, bulbCount: 4 },
+      // Front cross
+      { start: { x: -5.0, y: stringH, z: 7.0 }, end: { x:  5.0, y: stringH, z: 7.0 }, bulbCount: 5 },
     ])
 
     return {
       entity: root,
       exclusionZone: { x, z, radius: 8 },
       seats,
-      hutDims: { width: HUT_WIDTH, depth: HUT_DEPTH, frontDoorIndices: [0, 1, 2] },
+      hutDims: { width: HUT_WIDTH, depth: HUT_DEPTH, frontDoorIndices: [2] },
+      hutWorldOrigin: { x: x + HUT_OFFSET_X, z: z + HUT_OFFSET_Z },
     }
+  }
+
+  /** Swap the default roof material for a warm terracotta. */
+  private tintRoof(roof: pc.Entity): void {
+    const materials = this.factory.materialFactory
+    if (!materials) return
+    const mat = materials.getColor('coffee_roof', ...ROOF_TERRACOTTA, {
+      metalness: 0.0,
+      gloss: 0.15,
+    })
+    const mis = roof.render?.meshInstances ?? []
+    for (const mi of mis) mi.material = mat
+  }
+
+  /**
+   * Awning canopy over the door: slightly-tilted red panel + darker trim rail.
+   * Purely decorative — no collider, no interaction.
+   */
+  private buildAwning(parent: pc.Entity, centerX: number, frontZ: number, wallHeight: number): void {
+    const materials = this.factory.materialFactory
+    if (!materials) return
+
+    const red = materials.getColor('awning_red', ...AWNING_RED, { gloss: 0.35 })
+    const trim = materials.getColor('awning_trim', 0.35, 0.08, 0.05, { gloss: 0.4 })
+
+    const awning = new pc.Entity('Awning')
+    awning.setLocalPosition(centerX, wallHeight + 0.02, frontZ)
+
+    const canopy = new pc.Entity('Canopy')
+    canopy.addComponent('render', { type: 'box' })
+    canopy.setLocalScale(2.5, 0.08, 0.95)
+    canopy.setLocalPosition(0, 0, 0.45)
+    canopy.setLocalEulerAngles(-8, 0, 0)
+    if (canopy.render) {
+      for (const mi of canopy.render.meshInstances) mi.material = red
+    }
+    awning.addChild(canopy)
+
+    const rail = new pc.Entity('Rail')
+    rail.addComponent('render', { type: 'box' })
+    rail.setLocalScale(2.6, 0.14, 0.08)
+    rail.setLocalPosition(0, -0.08, 0.9)
+    rail.setLocalEulerAngles(-8, 0, 0)
+    if (rail.render) {
+      for (const mi of rail.render.meshInstances) mi.material = trim
+    }
+    awning.addChild(rail)
+
+    parent.addChild(awning)
   }
 }

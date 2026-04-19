@@ -154,22 +154,24 @@ export class PlayerController {
         const working = findAnimTrack(tools, 'Working_A')
         if (working) layer.assignAnimation('Working', working)
 
-        // Extra animations for the picker
-        const extras: [string, ContainerWithAnims, string, boolean][] = [
-          ['Cheering',    simulation, 'Cheering',        true],
-          ['Waving',      simulation, 'Waving',          true],
-          ['LieIdle',     simulation, 'Lie_Idle',        true],
-          ['SitFloor',    simulation, 'Sit_Floor_Idle',  true],
-          ['PushUps',     simulation, 'Push_Ups',        true],
-          ['Interact',    general,    'Interact',        true],
-          ['UseItem',     general,    'Use_Item',        true],
-          ['Chopping',    tools,      'Chopping',        true],
-          ['Hammering',   tools,      'Hammering',       true],
-          ['Fishing',     tools,      'Fishing_Idle',    true],
+        // Extra animations for the picker. Speed column lets us slow tracks
+        // that otherwise read as twitchy (Use_Item is the drink reaction —
+        // KayKit plays it at "barista snap" tempo by default).
+        const extras: [string, ContainerWithAnims, string, boolean, number][] = [
+          ['Cheering',    simulation, 'Cheering',        true,  1.0],
+          ['Waving',      simulation, 'Waving',          true,  1.0],
+          ['LieIdle',     simulation, 'Lie_Idle',        true,  1.0],
+          ['SitFloor',    simulation, 'Sit_Floor_Idle',  true,  1.0],
+          ['PushUps',     simulation, 'Push_Ups',        true,  1.0],
+          ['Interact',    general,    'Interact',        true,  1.0],
+          ['UseItem',     general,    'Use_Item',        true,  0.4],
+          ['Chopping',    tools,      'Chopping',        true,  1.0],
+          ['Hammering',   tools,      'Hammering',       true,  1.0],
+          ['Fishing',     tools,      'Fishing_Idle',    true,  1.0],
         ]
-        for (const [state, container, trackName, loop] of extras) {
+        for (const [state, container, trackName, loop, speed] of extras) {
           const track = findAnimTrack(container, trackName)
-          if (track) layer.assignAnimation(state, track, 1, loop)
+          if (track) layer.assignAnimation(state, track, speed, loop)
         }
       }
 
