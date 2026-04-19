@@ -33,6 +33,8 @@ export class GroundSystem {
   private overlayEntities: pc.Entity[] = []
   private overlayTextures: pc.Texture[] = []
   private overlayMaterials: pc.StandardMaterial[] = []
+  private pngTexture: pc.Texture | null = null
+  private pngAsset: pc.Asset | null = null
 
   build(app: Application, _materials: MaterialFactory): pc.Entity {
     this.entity = new pc.Entity('Ground')
@@ -40,7 +42,8 @@ export class GroundSystem {
     this.entity.setLocalScale(600, 1, 600)
     this.entity.setPosition(0, 0, 0)
 
-    // Generate procedural grass texture
+    // Procedural grass is the immediate fallback so the scene never flashes
+    // untextured while the PNG asset loads.
     this.texture = this.createGrassTexture(app.app.graphicsDevice)
 
     this.material = new pc.StandardMaterial()
@@ -54,7 +57,38 @@ export class GroundSystem {
     meshInstance.material = this.material
 
     app.root.addChild(this.entity)
+
+    // Upgrade to the seamless grass JPG if available. Tiling chosen so blades
+    // read at a natural size across the 600×600 plane.
+    this.upgradeToGrassImage(app)
+
     return this.entity
+  }
+
+  /** Swap the procedural grass for the seamless tileable grass.jpg. */
+  private upgradeToGrassImage(app: Application): void {
+    const asset = new pc.Asset('grass.jpg', 'texture', { url: 'assets/garden/grass.jpg' })
+    asset.once('load', () => {
+      if (!this.material) return
+      const tex = asset.resource as pc.Texture
+      tex.addressU = pc.ADDRESS_REPEAT
+      tex.addressV = pc.ADDRESS_REPEAT
+      tex.minFilter = pc.FILTER_LINEAR_MIPMAP_LINEAR
+      tex.magFilter = pc.FILTER_LINEAR
+      tex.anisotropy = 8
+      this.pngTexture = tex
+      this.material.diffuseMap = tex
+      // 60 tiles across 600 units → 10 world units per tile. Matches the
+      // low-poly stylized look in the target reference without visible seams.
+      this.material.diffuseMapTiling = new pc.Vec2(60, 60)
+      this.material.update()
+    })
+    asset.once('error', (err: string) => {
+      console.debug('[GroundSystem] grass.jpg failed to load, keeping procedural:', err)
+    })
+    app.app.assets.add(asset)
+    app.app.assets.load(asset)
+    this.pngAsset = asset
   }
 
   /**
@@ -331,6 +365,15 @@ export class GroundSystem {
   }
 
   destroy(_materials?: MaterialFactory): void {
+    if (this.pngAsset) {
+      const app = pc.Application.getApplication()
+      app?.assets.remove(this.pngAsset)
+      this.pngAsset = null
+    }
+    if (this.pngTexture) {
+      this.pngTexture.destroy()
+      this.pngTexture = null
+    }
     for (const entity of this.overlayEntities) entity.destroy()
     for (const tex of this.overlayTextures) tex.destroy()
     for (const mat of this.overlayMaterials) mat.destroy()
