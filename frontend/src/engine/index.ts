@@ -32,6 +32,8 @@ import { MaterialFactory } from './rendering/MaterialFactory'
 import { SceneManager } from './core/SceneManager'
 import { TreePickerSystem } from './interaction/TreePickerSystem'
 import { InteriorManager } from './interior'
+import { CoffeeBarManager } from './coffeebar'
+import { COFFEE_DOOR_LOCAL_Z } from './buildings/CoffeeBarBuilder'
 import {
   TakeoverController,
   TakeoverCamera,
@@ -50,7 +52,7 @@ import { getVehicleDef } from './vehicles/VehicleManifest'
 
 export { type EngineData, type EngineCallbacks } from './types'
 
-type SceneState = 'garden' | 'entering' | 'interior' | 'exiting' | 'takeover'
+type SceneState = 'garden' | 'entering' | 'interior' | 'exiting' | 'takeover' | 'coffeebar'
 
 export class GardenEngine {
   private app: Application | null = null
@@ -65,6 +67,11 @@ export class GardenEngine {
 
   // Interior exploration
   private interior: InteriorManager | null = null
+  // Coffee bar interior (shared across the org)
+  private coffeeBar: CoffeeBarManager | null = null
+  // Blocks the walk-through trigger during exit teleport so the player
+  // doesn't instantly re-enter after being placed just outside the door.
+  private _coffeeBarReentryCooldownMs = 0
   private sceneState: SceneState = 'garden'
   private savedCameraState: CameraState | null = null
   private _interiorMemberId: string | null = null
@@ -158,7 +165,7 @@ export class GardenEngine {
 
     // Input manager
     this.input = new InputManager()
-    this.input.init(this.canvas)
+    this.input.init(this.canvas, this.app.app)
 
     // Camera controller
     this.camera = new CameraController()
@@ -178,6 +185,12 @@ export class GardenEngine {
       this.app, this.input, this.materials, this.canvas, container,
     )
     this.interior.onExit = () => this.exitHouse()
+
+    // Coffee bar manager — shared break-room interior with queue + brewing
+    this.coffeeBar = new CoffeeBarManager(
+      this.app, this.input, this.materials, this.canvas, container,
+    )
+    this.coffeeBar.onExit = () => this.exitCoffeeBar()
 
     // Wire up frame update
     this.app.setConfig({
@@ -516,6 +529,11 @@ export class GardenEngine {
         // are invisible during interior mode and waste CPU cycles.
         break
 
+      case 'coffeebar':
+        this.coffeeBar?.update(dt)
+        // Same reasoning as 'interior' — garden is hidden, no tick needed.
+        break
+
       case 'takeover':
         // Garden stays alive — birds, clouds, agent robots, other characters
         this.sceneManager?.update(dt)
@@ -680,7 +698,34 @@ export class GardenEngine {
               this._currentZone = insideZone
               if (insideZone) this.callbacks.onZoneEnter?.(insideZone)
             }
+
+            // Coffee bar walk-through entry — tight proximity around the
+            // hut's single front door. Cooldown prevents the exit-teleport
+            // from immediately re-triggering entry.
+            if (
+              !this.takeoverCtrl.isSitting
+              && !this.vehicleCtrl?.isActive
+              && Date.now() >= this._coffeeBarReentryCooldownMs
+            ) {
+              const door = this.getCoffeeBarDoorPos()
+              if (door) {
+                const pos = this.takeoverCtrl.getPosition()
+                const dx = pos.x - door.x
+                const dz = pos.z - door.z
+                if (dx * dx + dz * dz < 0.8 * 0.8) {
+                  console.log('[GardenEngine] Coffee bar door hit → entering')
+                  this._coffeeBarReentryCooldownMs = Date.now() + 2000
+                  this.exitTakeover()
+                    .then(() => this.enterCoffeeBar())
+                    .catch(e => console.error('[GardenEngine] coffee bar entry failed:', e))
+                }
+              }
+            }
           }
+
+          // exitTakeover() above synchronously clears takeoverCtrl; bail out
+          // of the rest of the frame so we don't NPE on showWarning / etc.
+          if (!this.takeoverCtrl) break
 
           // Inactivity warning / auto-exit
           if (this.takeoverCtrl.showWarning) {
@@ -872,6 +917,131 @@ export class GardenEngine {
         ? this.sceneManager?.memberHouseMap.get(exitMemberId)?.exitPosition
         : null
       await this.takeoverCharacter(visitorId, exitPos ?? undefined)
+    }
+  }
+
+  // ─── Coffee bar interior ──────────────────────────────
+
+  /**
+   * World position of the coffee bar's single front door. The hut is
+   * centered in X on the zone and pushed back by COFFEE_DOOR_LOCAL_Z,
+   * so the door sits at (zone.x, zone.z + COFFEE_DOOR_LOCAL_Z) in world.
+   */
+  private getCoffeeBarDoorPos(): { x: number; z: number } | null {
+    const zone = this.sceneManager?.worldLayout.getZone('coffee_bar')
+    if (!zone) return null
+    return { x: zone.x, z: zone.z + COFFEE_DOOR_LOCAL_Z }
+  }
+
+  /** Position one step outside the door — used as the exit spawn. */
+  private getCoffeeBarOutsidePos(): { x: number; z: number; yaw: number } | null {
+    const door = this.getCoffeeBarDoorPos()
+    if (!door) return null
+    return { x: door.x, z: door.z + 1.0, yaw: 0 }
+  }
+
+  /**
+   * Enter the shared coffee bar interior. Fade-to-black, hide garden,
+   * hand control to CoffeeBarManager. Falls back to placeholder identity
+   * so dev / unauthenticated sessions still work.
+   */
+  async enterCoffeeBar(): Promise<void> {
+    if (this.sceneState !== 'garden' || this._transitioning) {
+      console.warn('[GardenEngine] enterCoffeeBar blocked: sceneState=', this.sceneState, 'transitioning=', this._transitioning)
+      return
+    }
+    if (!this.camera || !this.coffeeBar || !this.sceneManager) return
+
+    const visitorUserId = this.currentUser?.id ?? this.takeoverUserId ?? 'local_visitor'
+    const visitorName = this.currentUser?.name ?? 'Visitor'
+    const visitorCharacterModel = this.currentUser?.characterModel ?? null
+    const orgId = this.connectedOrgId ?? 'local'
+
+    this._transitioning = true
+    try {
+      this.sceneState = 'entering'
+      this.savedCameraState = this.camera.saveState()
+
+      try {
+        await this.coffeeBar.sceneTransition.perform(async () => {
+          const gardenRoot = this.sceneManager?.gardenRootEntity
+          if (gardenRoot) gardenRoot.enabled = false
+
+          this.camera!.disable()
+          this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+
+          await this.coffeeBar!.enter({
+            userId: visitorUserId,
+            name: visitorName,
+            characterModel: visitorCharacterModel,
+            orgId,
+          })
+          this.sceneState = 'coffeebar'
+        })
+      } catch (err) {
+        console.error('[GardenEngine] Failed to enter coffee bar:', err)
+        this.sceneState = 'garden'
+        this.camera.enable()
+        const gardenRoot = this.sceneManager?.gardenRootEntity
+        if (gardenRoot) gardenRoot.enabled = true
+        if (this.savedCameraState) {
+          this.camera.restoreState(this.savedCameraState)
+          this.savedCameraState = null
+        }
+      }
+    } finally {
+      this._transitioning = false
+    }
+  }
+
+  /** Exit the coffee bar interior back to the garden. */
+  async exitCoffeeBar(): Promise<void> {
+    if (this.sceneState !== 'coffeebar' || this._transitioning) return
+    if (!this.camera || !this.coffeeBar) return
+
+    const visitorId = this.currentUser?.id ?? null
+
+    this._transitioning = true
+    try {
+      this.sceneState = 'exiting'
+
+      await this.coffeeBar.sceneTransition.perform(() => {
+        this.coffeeBar!.exit()
+
+        const gardenRoot = this.sceneManager?.gardenRootEntity
+        if (gardenRoot) gardenRoot.enabled = true
+
+        this.camera!.enable()
+        if (this.savedCameraState) {
+          this.camera!.restoreState(this.savedCameraState)
+          this.savedCameraState = null
+        }
+
+        // Teleport the visitor's world character to just outside the door
+        const outside = this.getCoffeeBarOutsidePos()
+        if (outside && visitorId) {
+          const character = this.sceneManager?.characterSystemRef?.getCharacter(visitorId)
+          if (character) {
+            character.entity.setPosition(outside.x, 0, outside.z)
+            character.entity.setEulerAngles(0, outside.yaw, 0)
+            character.entity.anim?.setBoolean('sitting', false)
+            character.entity.anim?.setInteger('speed', 0)
+          }
+        }
+
+        // Cooldown blocks the walk-through trigger on the exit frame
+        this._coffeeBarReentryCooldownMs = Date.now() + 2000
+        this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+        this.sceneState = 'garden'
+      })
+    } finally {
+      this._transitioning = false
+    }
+
+    // Re-attach WASD takeover just outside the door so control feels continuous
+    if (visitorId) {
+      const outside = this.getCoffeeBarOutsidePos()
+      await this.takeoverCharacter(visitorId, outside ?? undefined)
     }
   }
 
@@ -1214,6 +1384,8 @@ export class GardenEngine {
 
     this.interior?.destroy()
     this.interior = null
+    this.coffeeBar?.destroy()
+    this.coffeeBar = null
     this.picker = null
     this.sceneManager?.destroy()
     this.sceneManager = null

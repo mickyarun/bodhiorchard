@@ -101,7 +101,7 @@ export class HouseTestEngine {
 
     // ── 2. Shared systems ───────────────────────────────────────────────────
     this.input = new InputManager()
-    this.input.init(this.canvas)
+    this.input.init(this.canvas, app)
 
     this.loader  = new AssetLoader(app)
     this.factory = new BuildingFactory(this.loader, new MaterialFactory())

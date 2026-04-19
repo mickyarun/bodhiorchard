@@ -217,8 +217,13 @@ export class SceneManager {
       this.buildingEntities.push(coffeeResult.entity)
       this.layout.addExclusionZones([coffeeResult.exclusionZone])
       this.layout.registerSeats(coffeeResult.seats)
+      // Coffee-bar hut is offset inside its root so it centers on the zone
+      // rather than spilling into one quadrant. Physics colliders must use
+      // the hut's actual world origin (hutWorldOrigin), not the zone center,
+      // or walls misalign from the visual by HUT_OFFSET_{X,Z}.
       this.buildingHuts.push({
-        x: coffeeZone.x, z: coffeeZone.z,
+        x: coffeeResult.hutWorldOrigin.x,
+        z: coffeeResult.hutWorldOrigin.z,
         yawDeg: coffeeResult.entity.getEulerAngles().y,
         ...coffeeResult.hutDims,
       })
@@ -312,6 +317,7 @@ export class SceneManager {
     // Zone signs at each building zone entrance (facing orchard)
     for (const zone of zones) {
       if (zone.name === 'orchard') continue // no sign for center
+      if (zone.name === 'coffee_bar') continue // the COFFEE awning is its label
       // Place sign at edge of zone, facing inward
       const dx = -zone.x
       const dz = -zone.z

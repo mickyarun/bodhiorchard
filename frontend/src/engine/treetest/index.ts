@@ -96,7 +96,7 @@ export class TreeTestEngine {
     ;(app.scene as unknown as { fog: { type: string } }).fog.type = pc.FOG_NONE
 
     this.input = new InputManager()
-    this.input.init(this.canvas)
+    this.input.init(this.canvas, app)
 
     this.materials = new MaterialFactory()
 
