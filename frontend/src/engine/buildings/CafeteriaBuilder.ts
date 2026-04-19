@@ -19,12 +19,22 @@ const WALL_HEIGHT = 1.29
 const HUT_WIDTH = 4
 const HUT_DEPTH = 2
 
+/**
+ * Door trigger position in root-local coords. The front wall lives at
+ * local z = HUT_DEPTH (=2); the two door tiles span local x = [1, 3], so the
+ * centerline sits at x = 2. Exported so GardenEngine can compute the
+ * interior-transition trigger without reaching into the builder internals.
+ */
+export const CAFETERIA_DOOR_OFFSET = { x: 2, z: HUT_DEPTH } as const
+
 export interface CafeteriaResult {
   entity: pc.Entity
   exclusionZone: ExclusionZone
   seats: InteractionPoint[]
   /** Hut dimensions for takeover physics wall generation. */
   hutDims: { width: number; depth: number; frontDoorIndices: number[] }
+  /** World-space door position — zone center + CAFETERIA_DOOR_OFFSET. */
+  doorPos: { x: number; z: number }
 }
 
 export class CafeteriaBuilder {
@@ -101,6 +111,7 @@ export class CafeteriaBuilder {
       exclusionZone: { x, z, radius: 9 },
       seats,
       hutDims: { width: HUT_WIDTH, depth: HUT_DEPTH, frontDoorIndices: [1, 2] },
+      doorPos: { x: x + CAFETERIA_DOOR_OFFSET.x, z: z + CAFETERIA_DOOR_OFFSET.z },
     }
   }
 }

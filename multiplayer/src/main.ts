@@ -11,6 +11,8 @@
  *                 (Owner visibility is handled via OrgRoom state since Phase 8.)
  *   "coffeebar" — One per org. Shared queue + brewing state for the coffee bar
  *                 interior. Every visitor across the org joins the same room.
+ *   "cafeteria" — One per org. Shared queue + cooking state for the cafeteria
+ *                 interior. Mirrors the coffee bar room with meal orders.
  *
  * HTTP endpoints:
  *   GET  /health             — Health check
@@ -25,6 +27,7 @@ import type { Request, Response } from "express"
 import { OrgRoom } from "./rooms/OrgRoom"
 import { HouseRoom } from "./rooms/HouseRoom"
 import { CoffeeBarRoom } from "./rooms/CoffeeBarRoom"
+import { CafeteriaRoom } from "./rooms/CafeteriaRoom"
 import { handleBridgePublish } from "./bridge/BridgeEndpoint"
 
 const port = parseInt(process.env.PORT || "2567", 10)
@@ -34,6 +37,7 @@ const server = defineServer({
     org: defineRoom(OrgRoom),
     house: defineRoom(HouseRoom),
     coffeebar: defineRoom(CoffeeBarRoom),
+    cafeteria: defineRoom(CafeteriaRoom),
   },
 
   transport: new WebSocketTransport({
@@ -48,7 +52,7 @@ const server = defineServer({
     app.use("/internal", expressJson({ limit: "1mb" }))
 
     app.get("/health", (_req: Request, res: Response) => {
-      res.json({ status: "ok", rooms: ["org", "house", "coffeebar"] })
+      res.json({ status: "ok", rooms: ["org", "house", "coffeebar", "cafeteria"] })
     })
 
     // Backend → Colyseus event bridge
