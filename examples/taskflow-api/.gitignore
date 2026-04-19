@@ -1,0 +1,4 @@
+*.db
+__pycache__/
+.venv/
+.bodhiorchard/

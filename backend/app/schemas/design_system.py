@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Arun Rajkumar
+
+"""Pydantic schemas for design system CRUD endpoints."""
+
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel, Field
+
+
+class DesignSystemRead(BaseModel):
+    """Schema for reading a design system entry with repo name."""
+
+    id: uuid.UUID
+    org_id: uuid.UUID
+    repo_id: uuid.UUID
+    repo_name: str | None = None
+    is_default: bool
+    content: str
+    source_hash: str | None = None
+    extracted_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class DesignSystemExtractRequest(BaseModel):
+    """Schema for triggering design system extraction from a tracked repo."""
+
+    repo_id: uuid.UUID
+    is_default: bool = Field(False, description="Mark as org-wide default on creation")
+
+
+class DesignSystemSetDefault(BaseModel):
+    """Schema for marking a design system as the org default."""
+
+    id: uuid.UUID
+
+
+class DesignSystemUpdateContent(BaseModel):
+    """Schema for manually updating design system content."""
+
+    content: str = Field(..., min_length=1)

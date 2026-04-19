@@ -1,0 +1,20 @@
+{
+  "name": "taskflow-qa",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "npx playwright test",
+    "test:cucumber": "npx cucumber-js --require-module ts-node/register --require src/steps/**/*.ts src/features/**/*.feature",
+    "test:smoke": "npx playwright test tests/smoke/",
+    "test:e2e": "npx playwright test tests/e2e/",
+    "report": "npx playwright show-report",
+    "prepare": "git config core.hooksPath .githooks"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@cucumber/cucumber": "^11.0.0",
+    "typescript": "^5.5.0",
+    "ts-node": "^10.9.0",
+    "@types/node": "^22.0.0"
+  }
+}
