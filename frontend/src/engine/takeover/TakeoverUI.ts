@@ -27,15 +27,13 @@ export class TakeoverUI {
   onExitClick: (() => void) | null = null
 
   /**
-   * Invoked when the user clicks "Greet" on the member action panel.
-   * `userId` is the targeted member. Wired by GardenEngine.
-   */
-  onGreetNearby: ((userId: string, name: string) => void) | null = null
-
-  /**
    * Invoked when the user clicks "Invite to race" on the member action
    * panel. `userId` is the targeted member. Wired by GardenEngine to
    * bubble up to the Vue layer (which opens `<RaceSetupDialog>`).
+   *
+   * Greet is hotkey-only (`3`) — no button callback. The once-per-target
+   * SP rule made a second button click look broken, so Greet lives on
+   * the keyboard where the wave animation always plays on every press.
    */
   onInviteNearbyToRace: ((userId: string, name: string) => void) | null = null
 
@@ -52,9 +50,12 @@ export class TakeoverUI {
     parent.style.position = 'relative'
     parent.appendChild(this.container)
 
-    // Controls hint (bottom center)
+    // Controls hint (bottom center). The 3/4 hotkeys are contextual
+    // (only act when near another player); we still show them here so
+    // players learn the binding the first time they stand next to
+    // someone, without needing to read the proximity panel closely.
     this.makeLabel(
-      'WASD \u2014 Move   Shift \u2014 Sprint   Space \u2014 Jump   Drag \u2014 Orbit   ESC \u2014 Exit   1 \u2014 Wave   2 \u2014 Cheer',
+      'WASD \u2014 Move   Shift \u2014 Sprint   Space \u2014 Jump   Drag \u2014 Orbit   ESC \u2014 Exit   1 \u2014 Wave   2 \u2014 Cheer   3 \u2014 Greet   4 \u2014 Invite',
       {
         position: 'absolute', bottom: '20px', left: '50%',
         transform: 'translateX(-50%)',
@@ -105,48 +106,73 @@ export class TakeoverUI {
   }
 
   /**
-   * Show an action panel next to the nearby member. Two buttons: Greet
-   * (fires `onGreetNearby`) and Invite to race (fires `onInviteNearbyToRace`).
-   * Idempotent — calling with the same userId is a no-op, so rapid proximity
-   * flickers don't rebuild the DOM on every frame.
+   * Show an action panel next to the nearby member. One chip: Invite
+   * to race (`onInviteNearbyToRace`, hotkey `4`). Greet is hotkey-only
+   * (`3`) — a small keycap hint next to the target name advertises
+   * the binding. The button was removed because the once-per-target SP
+   * rule made second-click look broken, and a button that silently
+   * no-ops on the second click is worse than no button at all.
    */
   showMemberActionPanel(userId: string, name: string): void {
     if (!this.container) return
     if (this.actionPanelUserId === userId && this.actionPanel) {
-      // Update label for the same target — in case presence-derived text
-      // changed upstream; cheap no-op otherwise.
       const label = this.actionPanel.querySelector<HTMLElement>('[data-label]')
       if (label) label.textContent = name
+      const avatar = this.actionPanel.querySelector<HTMLElement>('[data-avatar]')
+      if (avatar) avatar.textContent = initialsFor(name)
       return
     }
 
     this.hideMemberActionPanel()
+    ensurePanelStyles()
 
     const panel = document.createElement('div')
-    Object.assign(panel.style, {
-      position: 'absolute', bottom: '120px', left: '50%',
-      transform: 'translateX(-50%)',
-      display: 'flex', gap: '8px', alignItems: 'center',
-      background: 'rgba(30,60,120,0.85)',
-      backdropFilter: 'blur(4px)',
-      color: '#fff', padding: '8px 12px', borderRadius: '12px',
-      fontSize: '14px', pointerEvents: 'auto',
-      border: '1px solid rgba(255,255,255,0.2)',
-    })
-    const label = document.createElement('span')
-    label.dataset.label = ''
-    label.textContent = name
-    label.style.marginRight = '4px'
-    panel.appendChild(label)
+    panel.className = 'to-actpanel'
 
-    const greetBtn = makeActionButton('\ud83d\udc4b Greet', () => {
-      this.onGreetNearby?.(userId, name)
+    const target = document.createElement('div')
+    target.className = 'to-actpanel__target'
+
+    const avatar = document.createElement('div')
+    avatar.className = 'to-actpanel__avatar'
+    avatar.dataset.avatar = ''
+    avatar.textContent = initialsFor(name)
+
+    const nameEl = document.createElement('div')
+    nameEl.className = 'to-actpanel__name'
+    nameEl.dataset.label = ''
+    nameEl.textContent = name
+
+    target.appendChild(avatar)
+    target.appendChild(nameEl)
+
+    // Keycap hint for the keyboard-only Greet action. Uses the same
+    // keycap styling as the action chip so players learn "3 waves at
+    // them" without a dedicated (and failure-prone) button.
+    const greetHint = document.createElement('div')
+    greetHint.className = 'to-actpanel__hint'
+    const greetKey = document.createElement('span')
+    greetKey.className = 'to-actpanel__hintkey'
+    greetKey.textContent = '3'
+    const greetLabel = document.createElement('span')
+    greetLabel.textContent = '\ud83d\udc4b Greet'
+    greetHint.appendChild(greetKey)
+    greetHint.appendChild(greetLabel)
+
+    const divider = document.createElement('div')
+    divider.className = 'to-actpanel__divider'
+
+    const raceChip = makeActionChip({
+      keyLabel: '4',
+      icon: '\ud83c\udfc1',
+      text: 'Invite to race',
+      variant: 'primary',
+      onClick: () => this.onInviteNearbyToRace?.(userId, name),
     })
-    const raceBtn = makeActionButton('\ud83c\udfc1 Invite to race', () => {
-      this.onInviteNearbyToRace?.(userId, name)
-    })
-    panel.appendChild(greetBtn)
-    panel.appendChild(raceBtn)
+
+    panel.appendChild(target)
+    panel.appendChild(greetHint)
+    panel.appendChild(divider)
+    panel.appendChild(raceChip)
 
     this.container.appendChild(panel)
     this.actionPanel = panel
@@ -268,7 +294,6 @@ export class TakeoverUI {
     this.seatPrompt = null
     this.exitBtn = null
     this.onExitClick = null
-    this.onGreetNearby = null
     this.onInviteNearbyToRace = null
   }
 
@@ -281,19 +306,264 @@ export class TakeoverUI {
   }
 }
 
-function makeActionButton(text: string, onClick: () => void): HTMLButtonElement {
+interface ActionChipOpts {
+  keyLabel: string
+  icon: string
+  text: string
+  variant: 'neutral' | 'primary'
+  onClick: () => void
+}
+
+/**
+ * A button styled as `[key] icon label`. The keycap is a small bevelled
+ * square mirroring the hardware key so the hotkey binding is legible
+ * at a glance. `variant` picks a palette: `primary` tints the chip
+ * with the race accent to signal the headline action.
+ */
+function makeActionChip(opts: ActionChipOpts): HTMLButtonElement {
   const btn = document.createElement('button')
-  btn.textContent = text
-  Object.assign(btn.style, {
-    background: 'rgba(255,255,255,0.12)',
-    color: '#fff',
-    padding: '6px 12px', borderRadius: '8px',
-    border: '1px solid rgba(255,255,255,0.3)',
-    cursor: 'pointer', pointerEvents: 'auto',
-    fontSize: '13px', fontWeight: '500',
-  })
-  btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(255,255,255,0.22)' })
-  btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(255,255,255,0.12)' })
-  btn.addEventListener('click', onClick)
+  btn.type = 'button'
+  btn.className = `to-actchip to-actchip--${opts.variant}`
+
+  const key = document.createElement('span')
+  key.className = 'to-actchip__key'
+  key.textContent = opts.keyLabel
+
+  const icon = document.createElement('span')
+  icon.className = 'to-actchip__icon'
+  icon.textContent = opts.icon
+
+  const label = document.createElement('span')
+  label.className = 'to-actchip__label'
+  label.textContent = opts.text
+
+  btn.appendChild(key)
+  btn.appendChild(icon)
+  btn.appendChild(label)
+
+  btn.addEventListener('click', opts.onClick)
   return btn
+}
+
+/**
+ * Pull initials out of a display name for the target avatar chip.
+ * Inline rather than importing from `components/race/initials` so the
+ * engine layer stays independent of the Vue-layer helpers.
+ */
+function initialsFor(name: string): string {
+  if (!name) return '?'
+  const cleaned = name.replace(/…$/, '').trim()
+  if (!cleaned) return '?'
+  const parts = cleaned.split(/\s+/)
+  const first = parts[0][0] ?? ''
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? '' : ''
+  return (first + last).toUpperCase() || '?'
+}
+
+let panelStylesInjected = false
+/**
+ * Inject the proximity panel + action chip CSS once per page. Using a
+ * stylesheet (rather than inline style= on every element) lets us
+ * express :hover, :active, and keyframes cleanly — hover glows and
+ * the entrance animation would be awkward to wire via JS listeners.
+ */
+function ensurePanelStyles(): void {
+  if (panelStylesInjected) return
+  panelStylesInjected = true
+  const style = document.createElement('style')
+  style.id = 'takeover-actpanel-css'
+  style.textContent = `
+    .to-actpanel {
+      position: absolute;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px 8px 12px;
+      background: linear-gradient(180deg, rgba(22,28,44,0.82) 0%, rgba(14,18,32,0.88) 100%);
+      color: #fff;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow:
+        0 10px 30px rgba(0,0,0,0.35),
+        inset 0 1px 0 rgba(255,255,255,0.08);
+      backdrop-filter: blur(10px) saturate(140%);
+      -webkit-backdrop-filter: blur(10px) saturate(140%);
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      pointer-events: auto;
+      animation: to-actpanel-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .to-actpanel__target {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 2px 4px 2px 2px;
+    }
+
+    .to-actpanel__avatar {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      color: #fff;
+      background: linear-gradient(135deg, #5865F2 0%, #8B5CF6 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 2px rgba(0,0,0,0.25);
+      flex-shrink: 0;
+    }
+
+    .to-actpanel__name {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      color: rgba(255,255,255,0.95);
+      max-width: 140px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .to-actpanel__divider {
+      width: 1px;
+      align-self: stretch;
+      margin: 4px 2px;
+      background: rgba(255,255,255,0.12);
+    }
+
+    .to-actpanel__hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.7);
+      letter-spacing: 0.2px;
+      padding: 4px 6px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .to-actpanel__hintkey {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 4px;
+      border-radius: 5px;
+      font-size: 10px;
+      font-weight: 800;
+      color: rgba(255,255,255,0.9);
+      background: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.06) 100%);
+      border: 1px solid rgba(255,255,255,0.22);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.25),
+        0 1px 0 rgba(0,0,0,0.2);
+    }
+
+    .to-actchip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px 6px 6px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1;
+      color: #fff;
+      /* Defend against inherited pointer-events:none from the overlay
+         container and lift above any sibling with a lurking higher
+         stacking order created by backdrop-filter. */
+      pointer-events: auto;
+      position: relative;
+      z-index: 1;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: transform 120ms ease, background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+    }
+
+    /* Children are decorative — clicking the keycap, emoji, or label
+       must resolve as a click on the button itself. Without this, the
+       browser can treat the span as the event target and the button's
+       click listener never fires (most reproducible on Safari and
+       inside backdrop-filter stacking contexts). */
+    .to-actchip > * {
+      pointer-events: none;
+    }
+
+    .to-actchip__key {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 6px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: rgba(255,255,255,0.95);
+      background: linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.08) 100%);
+      border: 1px solid rgba(255,255,255,0.28);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.3),
+        inset 0 -1px 0 rgba(0,0,0,0.15),
+        0 1px 0 rgba(0,0,0,0.25);
+      text-shadow: 0 1px 0 rgba(0,0,0,0.25);
+    }
+
+    .to-actchip__icon {
+      font-size: 15px;
+      line-height: 1;
+    }
+
+    .to-actchip__label {
+      letter-spacing: 0.3px;
+    }
+
+    .to-actchip--neutral {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.14);
+    }
+    .to-actchip--neutral:hover {
+      background: rgba(255,255,255,0.14);
+      border-color: rgba(255,255,255,0.24);
+      transform: translateY(-1px);
+    }
+    .to-actchip--neutral:active {
+      transform: translateY(0);
+      background: rgba(255,255,255,0.22);
+    }
+
+    .to-actchip--primary {
+      background: linear-gradient(180deg, rgba(210,34,34,0.95) 0%, rgba(170,22,22,0.95) 100%);
+      border-color: rgba(255,180,180,0.35);
+      box-shadow: 0 4px 14px rgba(210,34,34,0.35);
+    }
+    .to-actchip--primary:hover {
+      background: linear-gradient(180deg, rgba(230,48,48,1) 0%, rgba(195,30,30,1) 100%);
+      border-color: rgba(255,200,200,0.5);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(210,34,34,0.45);
+    }
+    .to-actchip--primary:active {
+      transform: translateY(0);
+    }
+
+    @keyframes to-actpanel-in {
+      from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(0.96); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0)   scale(1);    }
+    }
+  `
+  document.head.appendChild(style)
 }
