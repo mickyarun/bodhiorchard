@@ -528,6 +528,9 @@ export class GardenEngine {
       case 'garden':
         this.camera?.update(dt)
         this.sceneManager?.update(dt)
+        // VehicleSystem per-frame tick — flips stopped remote horses back
+        // to Idle anim when no snapshot arrives for a while.
+        this.vehicleSystem?.update()
         if (this.picker && this.app && this.input) {
           const pickables = this.sceneManager?.getPickableEntities() ?? []
           this.picker.update(this.app.camera, this.input, pickables, this.callbacks)
@@ -552,6 +555,9 @@ export class GardenEngine {
       case 'takeover':
         // Garden stays alive — birds, clouds, agent robots, other characters
         this.sceneManager?.update(dt)
+        // Same stopped-horse idle fix as 'garden' — applies here because the
+        // local player may be observing other mounted users from takeover.
+        this.vehicleSystem?.update()
         if (this.takeoverCtrl && this.takeoverCam) {
           // TakeoverController always runs (handles inactivity even when mounted)
           this.takeoverCtrl.update(dt, this.takeoverCam.yaw)
