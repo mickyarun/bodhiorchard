@@ -37,13 +37,14 @@ import {
 const SIM_TICK_MS = 50
 const MIN_MOVE_INTERVAL_MS = 25
 
+// Matches the anim states CafeteriaManager.broadcastMove actually emits.
+// "cook"/"eat" are handled client-side via the Use_Item integer anim param
+// on the local player only — they are never broadcast.
 const VALID_ANIMS = new Set([
   "idle",
   "walk",
   "sit",
   "sleep",
-  "cook",
-  "eat",
 ])
 
 interface CafeteriaJoinOptions {

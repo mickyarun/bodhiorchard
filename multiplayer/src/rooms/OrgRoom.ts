@@ -40,13 +40,13 @@ import {
 } from "../sim/DevActivitySim"
 import { AgentActivitySim, parseAgentActivityEvent } from "../sim/AgentActivitySim"
 import { InferredPresenceSim, buildPresenceConfig } from "../sim/InferredPresenceSim"
-import { RaceSim } from "../sim/RaceSim"
 import {
   fetchOrgSnapshot,
   verifyUserToken,
   type OrgSnapshotResponse,
 } from "../bridge/BackendClient"
 import { registerOrgRoom, unregisterOrgRoom } from "../bridge/BridgeEndpoint"
+import { installRaceCreateHandler } from "./OrgRaceHandler"
 
 // Server simulation tick rate — 20Hz matches Colyseus default state sync cadence
 const SIM_TICK_MS = 50
@@ -98,8 +98,18 @@ interface TakeoverMessage {
   location?: string
 }
 
-/** locationContext values that represent "inside a shared interior".
- *  Clients use these to hide the avatar while the user is inside. */
+/**
+ * locationContext values that represent "inside a shared interior".
+ * Clients hide the avatar while a member has one of these contexts.
+ *
+ * NOTE: this set is duplicated in the frontend at
+ * `frontend/src/engine/characters/CharacterSystem.ts` (INTERIOR_LOCATIONS).
+ * When adding a new interior (house, arcade, …) update BOTH files or the
+ * hide behaviour will diverge: a new entry added only here will make the
+ * server think it's an interior but every client's CharacterSystem will
+ * render the avatar anyway; added only on the frontend and the server
+ * will still fire walkHome, teleporting the NPC out from under the user.
+ */
 const INTERIOR_LOCATIONS = new Set(["cafeteria", "coffeebar"])
 
 interface VehicleMountMessage {
@@ -127,10 +137,6 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
 
   // Server-side agent/robot simulation (spawn, walk between repo trees, despawn)
   private agentSim = new AgentActivitySim(this.repoPositions)
-
-  // Server-side race simulation (Phase 2). Instantiated in onCreate after
-  // setState so state.gameRound exists.
-  private raceSim: RaceSim | null = null
 
   // Inferred presence simulation — drives pseudo-presence for non-Slack users
   // from their dev-activity history + time of day. Skips Slack-driven members
@@ -172,18 +178,9 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     this.state.orgId = options.orgId ?? ""
     console.log(`[OrgRoom] Created org=${this.state.orgId}`)
 
-    this.raceSim = new RaceSim(this.state.gameRound)
-
     this.onMessage("move", (client, data: MoveMessage) => this.handleMove(client, data))
     this.onMessage("takeover_start", (client, data: TakeoverMessage) => this.handleTakeoverStart(client, data))
     this.onMessage("takeover_end", (client, data: TakeoverMessage) => this.handleTakeoverEnd(client, data))
-
-    // ─── RACE MESSAGE HANDLERS (Phase 2) ──────────────────────────────
-    this.onMessage("race_join", (client) => this.handleRaceJoin(client))
-    this.onMessage("race_move", (client, data: { moving: boolean }) =>
-      this.handleRaceMove(client, data),
-    )
-    this.onMessage("race_sprint_tap", (client) => this.handleRaceSprintTap(client))
 
     // Temporary dev tool: simulate a dev_activity event for the current user.
     // Picks a random repo tree and walks the character there. Remove when
@@ -216,6 +213,12 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       this.handleUpgradeHouse(client, data),
     )
 
+    // Race-v2 invite-to-race flow — isolated in a helper so this file
+    // stays under its size budget. Handles validation, matchMaker room
+    // creation, ActiveRaceSummary population, invite fan-out, and the
+    // client-side `race_created` / `race_create_failed` response.
+    installRaceCreateHandler(this)
+
     // Drive the server-side simulation at 20Hz — walking, phrase cycles, idle timeouts.
     // setSimulationInterval passes dt in milliseconds; sim tick expects seconds.
     //
@@ -227,7 +230,6 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       const dt = dtMs / 1000
       this.devSim.tick(this.state.members, dt)
       this.agentSim.tick(this.state.agents, dt)
-      this.raceSim?.tick(dtMs, this.clock.currentTime)
     }, SIM_TICK_MS)
 
     // Separate slow-tick loop for InferredPresenceSim (once per minute).
@@ -388,11 +390,6 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     const name = (client.userData as { name?: string } | undefined)?.name ?? client.sessionId
     console.log(`[OrgRoom] ${name} left org=${this.state.orgId}`)
 
-    // Release any active race slot so other members aren't waiting on a
-    // ghost player to move.
-    const userIdEarly = (client.userData as { userId?: string } | undefined)?.userId
-    if (userIdEarly) this.raceSim?.leave(userIdEarly)
-
     // If this client was controlling a member via takeover, release the
     // takeover lock AND start a walk-home so the character doesn't strand
     // wherever the player last WASD'd to. Without this, a disconnect leaves
@@ -407,7 +404,18 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (!userId) return
     const member = this.state.members.get(userId)
     if (!member) return
-    if (member.takeoverSessionId !== client.sessionId) return
+
+    // Two cases we need to clean up on abrupt disconnect:
+    //   (a) Active takeover — member.takeoverSessionId === client.sessionId.
+    //       Caller is WASD-ing and just lost connection.
+    //   (b) Inside an interior — handleTakeoverEnd already cleared
+    //       takeoverSessionId and stamped locationContext="cafeteria"/"coffeebar".
+    //       Without this path, the avatar stays hidden on every other
+    //       client forever (their CharacterSystem keeps reading the
+    //       stale interior locationContext and skips the entity).
+    const wasTakeover = member.takeoverSessionId === client.sessionId
+    const wasInInterior = INTERIOR_LOCATIONS.has(member.locationContext)
+    if (!wasTakeover && !wasInInterior) return
 
     member.y = 0
     member.vehicleId = ""
@@ -422,7 +430,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     )
     this.devSim.walkHome(member, home.x, home.y, home.z, home.yaw, home.sitting, home.locationContext)
     console.log(
-      `[OrgRoom] ${name} disconnect-while-takeover → walking home to ${home.locationContext}`,
+      `[OrgRoom] ${name} disconnect (${wasInInterior ? "in-interior" : "takeover"}) → walking home to ${home.locationContext}`,
     )
   }
 
@@ -737,24 +745,6 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   }
 
   // ─── Message handlers ────────────────────────
-
-  private handleRaceJoin(client: Client): void {
-    const userData = client.userData as { userId?: string; name?: string } | undefined
-    if (!userData?.userId) return
-    this.raceSim?.join(userData.userId, userData.name ?? userData.userId)
-  }
-
-  private handleRaceMove(client: Client, data: { moving: boolean }): void {
-    const userData = client.userData as { userId?: string } | undefined
-    if (!userData?.userId) return
-    this.raceSim?.setMoving(userData.userId, !!data.moving)
-  }
-
-  private handleRaceSprintTap(client: Client): void {
-    const userData = client.userData as { userId?: string } | undefined
-    if (!userData?.userId) return
-    this.raceSim?.tapSprint(userData.userId)
-  }
 
   private handleMove(client: Client, data: MoveMessage): void {
     if (!this.validateMove(data)) return
