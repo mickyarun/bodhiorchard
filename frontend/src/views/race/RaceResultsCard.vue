@@ -15,10 +15,6 @@
       <h1 class="results__title">Race complete</h1>
     </header>
 
-    <v-alert v-if="rematchError" type="error" class="mb-4" density="compact">
-      {{ rematchError }}
-    </v-alert>
-
     <!-- Podium — top 3 finishers rendered as 3D characters on a tiered stage.
          Winner in the centre playing the Cheer emote; runners-up flank the
          sides with idle (a "watching the winner" pose rather than explicit
@@ -70,25 +66,12 @@
         <v-icon icon="mdi-arrow-left" size="18" class="mr-1" />
         Back to garden
       </button>
-      <button
-        v-if="isHost"
-        class="results__rematch"
-        :disabled="rematchLoading"
-        @click="onRematch"
-      >
-        <v-progress-circular v-if="rematchLoading" indeterminate size="18" width="2" color="white" class="mr-1" />
-        <v-icon v-else icon="mdi-refresh" size="18" class="mr-1" />
-        Rematch
-      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
-import { OrgRoomClient } from '@/multiplayer/OrgRoomClient'
+import { computed } from 'vue'
 import type { RaceStateSnapshot } from '@/multiplayer/RaceRoomClient'
 import { formatRaceTime } from '@/engine/race/formatTime'
 import { parseCharacterModel, type CharacterConfig } from '@/engine/characters/CharacterConfig'
@@ -105,16 +88,7 @@ defineEmits<{
   (e: 'leave'): void
 }>()
 
-const router = useRouter()
-const authStore = useAuthStore()
-const rematchLoading = ref(false)
-const rematchError = ref<string>('')
-
 const rows = computed(() => props.snapshot.placings)
-
-const isHost = computed(
-  () => !!authStore.user && authStore.user.id === props.snapshot.hostUserId,
-)
 
 const nameByUserId = computed(() => {
   const m = new Map<string, string>()
@@ -200,29 +174,6 @@ function confettiStyle(i: number): Record<string, string> {
   }
 }
 
-async function onRematch(): Promise<void> {
-  if (!isHost.value || rematchLoading.value) return
-  const invitedUserIds = props.snapshot.invitedUserIds
-  if (invitedUserIds.length === 0) {
-    rematchError.value = 'Rematch needs at least one invitee.'
-    return
-  }
-  rematchLoading.value = true
-  rematchError.value = ''
-  try {
-    const client = OrgRoomClient.getInstance()
-    const { roomId } = await client.sendRaceCreate({
-      invitedUserIds: [...invitedUserIds],
-      distanceM: props.snapshot.distanceM,
-    })
-    await router.push(`/raceview/${roomId}`)
-  } catch (err) {
-    console.error('[RaceResultsCard] rematch failed:', err)
-    rematchError.value = err instanceof Error ? err.message : 'Rematch failed.'
-  } finally {
-    rematchLoading.value = false
-  }
-}
 </script>
 
 <style scoped>
@@ -528,8 +479,7 @@ async function onRematch(): Promise<void> {
   margin-top: 4px;
   flex-wrap: wrap;
 }
-.results__back,
-.results__rematch {
+.results__back {
   display: inline-flex;
   align-items: center;
   padding: 12px 24px;
@@ -541,23 +491,11 @@ async function onRematch(): Promise<void> {
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: filter 0.15s, transform 0.15s;
-}
-.results__back {
   background: linear-gradient(135deg, #30d66d, #19a34f);
   color: #06130b;
   box-shadow: 0 8px 20px rgba(47, 216, 107, 0.25);
 }
 .results__back:hover { filter: brightness(1.06); transform: translateY(-1px); }
-.results__rematch {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-}
-.results__rematch:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  transform: translateY(-1px);
-}
-.results__rematch:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* ── Responsive tweaks ──────────────────────
    At narrow viewports (phones, split-screen) the podium cards would

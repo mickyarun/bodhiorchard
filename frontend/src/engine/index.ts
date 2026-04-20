@@ -610,6 +610,22 @@ export class GardenEngine {
             this.tryClaimGreetingBonus()
           }
 
+          // ─── Proximity hotkeys: 3=Greet nearby, 4=Invite to race ────
+          // These mirror the action panel's chip buttons. No-op when
+          // the proximity system hasn't locked onto a nearby member,
+          // so the keys don't misfire in open space. Wave animation is
+          // added on Greet so the key press has kinetic feedback that
+          // matches its 👋 label.
+          const nearbyId = this.takeoverProximity?.nearbyMemberId ?? null
+          const nearbyName = this.takeoverProximity?.nearbyMemberName ?? ''
+          if (this.input?.wasPressed(pc.KEY_3) && nearbyId) {
+            this.takeoverCtrl.playEmote(1)
+            this.tryClaimGreetingBonus()
+          }
+          if (this.input?.wasPressed(pc.KEY_4) && nearbyId && nearbyName) {
+            this.callbacks.onInviteToRace?.(nearbyId, nearbyName)
+          }
+
           // ─── Seat interaction: E-key to sit/stand at nearby chairs ───
           if (this.seatToggleCooldown > 0) this.seatToggleCooldown -= dt
           if (this.input?.wasPressed(pc.KEY_E) && this.sceneManager && !this.vehicleCtrl?.isActive && this.seatToggleCooldown <= 0) {
@@ -1428,10 +1444,9 @@ export class GardenEngine {
     this.takeoverUI = new TakeoverUI()
     this.takeoverUI.init(this.canvas!.parentElement!)
     this.takeoverUI.onExitClick = () => this.exitTakeover()
-    // Wire the action-panel callbacks to the engine's existing greet flow
-    // and to a new race-invite callback that surfaces the target member's
-    // id + name up to the Vue layer (which opens RaceSetupDialog).
-    this.takeoverUI.onGreetNearby = () => this.tryClaimGreetingBonus()
+    // Surface the Invite-to-race target's id + name up to the Vue layer
+    // (which opens RaceSetupDialog). Greet has no button callback — it's
+    // driven purely by the `3` hotkey in onUpdate.
     this.takeoverUI.onInviteNearbyToRace = (userId, name) => {
       this.callbacks.onInviteToRace?.(userId, name)
     }
