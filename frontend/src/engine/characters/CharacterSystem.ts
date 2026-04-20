@@ -21,29 +21,25 @@ import { KayKitCharacterFactory, getClonedMaterials } from './KayKitCharacterFac
 import { parseCharacterModel } from './CharacterConfig'
 import { createLevelBadge } from './LevelBadge'
 import { disposeMaterial } from '../utils/EntityUtils'
+import { lerpPose, POSITION_LERP, type PoseState } from '../multiplayer/RemoteInterp'
 
 /**
- * Per-character target the renderer lerps toward. The target is written by
- * server snapshots (~20Hz); update(dt) reads it every render frame (60Hz)
- * and re-applies both position and rotation.
+ * Per-character pose target. Extends the shared PoseState with a `seated`
+ * flag so the per-frame update loop knows to snap (chair) vs lerp (walk).
+ *
+ * The target is written by server snapshots (~20Hz); update(dt) reads it
+ * every render frame (60Hz) and re-applies position and rotation.
  *
  * Why per-frame apply and not per-snapshot: the anim component, while a
  * walk/sprint state is active, re-evaluates its bindings during PlayCanvas's
  * internal update phase and can overwrite the wrapper's transform between
- * snapshots. Re-applying every frame is the same pattern NetworkedPlayer uses
- * for cafeteria/coffeebar; CharacterSystem previously lacked this loop.
+ * snapshots. Re-applying every frame mirrors the NetworkedPlayer pattern
+ * used by cafeteria / coffeebar remote players.
  */
-interface RenderTarget {
-  x: number
-  y: number
-  z: number
-  yaw: number
+interface RenderTarget extends PoseState {
   /** Seated avatars snap (no position lerp) so they don't drift off the chair. */
   seated: boolean
 }
-
-/** Position interpolation — snappy enough to keep up with a sprinting player. */
-const POSITION_LERP = 0.25
 
 /** Minimum snapshot shape needed to spawn/update a server-driven character. */
 export interface CharacterSnapshot {
@@ -135,13 +131,17 @@ export class CharacterSystem {
     this.app = app
     this.characterRoot = new pc.Entity('CharacterRoot')
     app.root.addChild(this.characterRoot)
-    // Register on POST-update, not update. PlayCanvas fires the 'update' event
-    // BEFORE animationUpdate (the phase where the anim component evaluates its
-    // bindings and writes transforms). If we applied on 'update', anim would
-    // overwrite our setLocalRotation every frame — the symptom being remote
-    // characters sliding without visibly turning. 'postUpdate' fires after
-    // animationUpdate, so our write is the last one before render.
-    app.app.on('postUpdate', this._postUpdateHandler)
+    // Register on POST-update. PlayCanvas's update order per frame is:
+    //   1. app.fire('update')               ← our onUpdate runs here
+    //   2. systems.fire('update')
+    //   3. systems.fire('animationUpdate')  ← anim component evaluates bindings
+    //   4. systems.fire('postUpdate')       ← we run here
+    //   5. render
+    // Applying on step 1 lets anim's step 3 overwrite our setLocalRotation,
+    // causing remote characters to slide without visibly turning. postUpdate
+    // is fired on `systems`, not the app itself — listening on `app.on` would
+    // silently never fire.
+    app.app.systems.on('postUpdate', this._postUpdateHandler)
   }
 
   // ─── Server-Driven Rendering ───────────────────
@@ -244,13 +244,30 @@ export class CharacterSystem {
     // Record the target. The per-frame update(dt) loop applies it every render
     // frame so the anim component can't clobber the transform between snapshots.
     const seated = snapshot.animState === 'sit' || snapshot.animState === 'sleep'
-    this.renderTargets.set(snapshot.userId, {
-      x: snapshot.x,
-      y: snapshot.y,
-      z: snapshot.z,
-      yaw: snapshot.yaw,
-      seated,
-    })
+    const existing = this.renderTargets.get(snapshot.userId)
+    if (existing) {
+      // Mutate in place — avoids allocating a new target on every 20Hz snapshot.
+      existing.targetX = snapshot.x
+      existing.targetY = snapshot.y
+      existing.targetZ = snapshot.z
+      existing.targetYaw = snapshot.yaw
+      existing.seated = seated
+    } else {
+      // First snapshot for this character: seed current* from the entity's
+      // spawn pose so update(dt)'s lerp doesn't fly in from (0,0,0).
+      const pos = character.entity.getPosition()
+      this.renderTargets.set(snapshot.userId, {
+        targetX: snapshot.x,
+        targetY: snapshot.y,
+        targetZ: snapshot.z,
+        targetYaw: snapshot.yaw,
+        currentX: pos.x,
+        currentY: pos.y,
+        currentZ: pos.z,
+        currentYaw: snapshot.yaw,
+        seated,
+      })
+    }
 
     const anim = character.entity.anim
     if (anim) {
@@ -289,22 +306,23 @@ export class CharacterSystem {
 
       const entity = character.entity
       if (target.seated) {
-        entity.setPosition(target.x, target.y, target.z)
+        // Snap to target — prevents visible drift off the chair.
+        target.currentX = target.targetX
+        target.currentY = target.targetY
+        target.currentZ = target.targetZ
+        target.currentYaw = target.targetYaw
       } else {
-        const pos = entity.getPosition()
-        entity.setPosition(
-          pos.x + (target.x - pos.x) * POSITION_LERP,
-          pos.y + (target.y - pos.y) * POSITION_LERP,
-          pos.z + (target.z - pos.z) * POSITION_LERP,
-        )
+        // Shared lerp: position + shortest-path yaw. Lerps from our OWN
+        // tracked current*, never reads back from the entity — the anim
+        // component can clobber entity transforms between postUpdate runs,
+        // and reading clobbered values would destabilise the lerp.
+        lerpPose(target, POSITION_LERP)
       }
-
-      // Rotation: build a pure-Y quaternion from target yaw and set it
-      // directly. No read-back of getEulerAngles() — we own the target value,
-      // and round-tripping through Euler decomposition returns a gimbal-
-      // flipped (180, y', 180) form for some yaw values that breaks naive
-      // delta math. setLocalRotation is the lowest-overhead write path.
-      this._yawQuat.setFromEulerAngles(0, target.yaw, 0)
+      entity.setPosition(target.currentX, target.currentY, target.currentZ)
+      // Rotation via quaternion — bypasses the Euler decomposition round-trip
+      // that setEulerAngles internally does, whose output can surface a
+      // gimbal-flipped (180, y', 180) form for some yaw values.
+      this._yawQuat.setFromEulerAngles(0, target.currentYaw, 0)
       entity.setLocalRotation(this._yawQuat)
     }
   }
@@ -352,7 +370,7 @@ export class CharacterSystem {
 
   destroy(): void {
     // Unregister the postUpdate handler before app teardown.
-    this.app?.app.off('postUpdate', this._postUpdateHandler)
+    this.app?.app.systems.off('postUpdate', this._postUpdateHandler)
     // Destroy the parent first — all children are destroyed recursively.
     // But we still iterate to unregister billboards and dispose GPU resources.
     for (const char of this.characters) {
