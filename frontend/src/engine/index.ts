@@ -1084,12 +1084,22 @@ export class GardenEngine {
         this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
         this.sceneState = 'garden'
       })
+    } catch (err) {
+      // Fade / entity mutations threw. Unwind the pre-fade takeover claim
+      // so the local user's avatar is not silently frozen forever by
+      // updateFromSnapshot's takeoverUserId early-return, and drop the
+      // stuck 'exiting' state back to 'garden'.
+      console.error('[GardenEngine] Failed to exit coffee bar:', err)
+      this.sceneManager?.characterSystemRef?.setTakeoverUser(null)
+      this.sceneState = 'garden'
     } finally {
       this._transitioning = false
     }
 
-    // Re-attach WASD takeover just outside the door so control feels continuous
-    if (visitorId) {
+    // Re-attach WASD takeover just outside the door so control feels continuous.
+    // Skipped if the transition failed — sceneState would not be 'garden'
+    // and takeoverCharacter guards on that already.
+    if (visitorId && this.sceneState === 'garden') {
       const outside = this.getCoffeeBarOutsidePos()
       await this.takeoverCharacter(visitorId, outside ?? undefined)
     }
@@ -1139,12 +1149,10 @@ export class GardenEngine {
         await this.cafeteria.sceneTransition.perform(async () => {
           const gardenRoot = this.sceneManager?.gardenRootEntity
           if (gardenRoot) gardenRoot.enabled = false
-          // CharacterSystem attaches its root directly to app.root (not
-          // gardenRoot), so disabling the garden doesn't hide org members.
-          // Hide the character root explicitly so the takeover avatar
-          // isn't rendered floating inside the cafeteria interior.
-          const charRoot = this.sceneManager?.characterSystemRef?.root
-          if (charRoot) charRoot.enabled = false
+          // Note: CharacterSystem's org-member avatars are hidden by the
+          // server-driven locationContext="cafeteria" rule in
+          // CharacterSystem.updateFromSnapshot — no need to toggle
+          // characterSystem.root here. Matches enterCoffeeBar.
 
           this.camera!.disable()
           this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
@@ -1167,8 +1175,6 @@ export class GardenEngine {
         this.camera.enable()
         const gardenRoot = this.sceneManager?.gardenRootEntity
         if (gardenRoot) gardenRoot.enabled = true
-        const charRoot = this.sceneManager?.characterSystemRef?.root
-        if (charRoot) charRoot.enabled = true
         if (this.savedCameraState) {
           this.camera.restoreState(this.savedCameraState)
           this.savedCameraState = null
@@ -1206,8 +1212,6 @@ export class GardenEngine {
 
         const gardenRoot = this.sceneManager?.gardenRootEntity
         if (gardenRoot) gardenRoot.enabled = true
-        const charRoot = this.sceneManager?.characterSystemRef?.root
-        if (charRoot) charRoot.enabled = true
 
         this.camera!.enable()
         if (this.savedCameraState) {
@@ -1234,11 +1238,19 @@ export class GardenEngine {
         this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
         this.sceneState = 'garden'
       })
+    } catch (err) {
+      // See exitCoffeeBar — fade failure leaves sceneState='exiting' and
+      // the pre-fade takeover claim hiding snapshot updates. Unwind both.
+      console.error('[GardenEngine] Failed to exit cafeteria:', err)
+      this.sceneManager?.characterSystemRef?.setTakeoverUser(null)
+      this.sceneState = 'garden'
     } finally {
       this._transitioning = false
     }
 
-    if (visitorId) {
+    // Skipped if the transition failed — takeoverCharacter guards on
+    // sceneState === 'garden' already.
+    if (visitorId && this.sceneState === 'garden') {
       const outside = this.getCafeteriaOutsidePos()
       await this.takeoverCharacter(visitorId, outside ?? undefined)
     }
@@ -1409,6 +1421,13 @@ export class GardenEngine {
     this.takeoverUI = new TakeoverUI()
     this.takeoverUI.init(this.canvas!.parentElement!)
     this.takeoverUI.onExitClick = () => this.exitTakeover()
+    // Wire the action-panel callbacks to the engine's existing greet flow
+    // and to a new race-invite callback that surfaces the target member's
+    // id + name up to the Vue layer (which opens RaceSetupDialog).
+    this.takeoverUI.onGreetNearby = () => this.tryClaimGreetingBonus()
+    this.takeoverUI.onInviteNearbyToRace = (userId, name) => {
+      this.callbacks.onInviteToRace?.(userId, name)
+    }
     this.takeoverUI.show()
 
     this.takeoverProximity = new ProximitySystem()
