@@ -64,6 +64,14 @@ export class TakeoverController {
   // Scratch vector
   private readonly _dir = new pc.Vec3()
 
+  // Internally-tracked yaw in degrees [-180, 180]. We CANNOT read yaw back
+  // from the entity via `entity.getEulerAngles().y`: for rotations near ±180°
+  // PlayCanvas's quat→euler decomposition returns the gimbal-flipped form
+  // `(180, 0, 180)` for a pure 180° Y rotation, so `.y` reads as 0 even
+  // though the character is visually rotated half around. Broadcasting that 0
+  // made remote observers see position updates without rotation.
+  private _yaw = 0
+
   constructor(input: InputManager) {
     this.input = input
   }
@@ -95,6 +103,7 @@ export class TakeoverController {
     this.jumpProgress = -1
     this.entity.setPosition(x, y, z)
     this.entity.setEulerAngles(0, yaw, 0)
+    this._yaw = yaw
     this.entity.anim?.setBoolean('jumping', false)
     this.entity.anim?.setBoolean('sitting', true)
     this.entity.anim?.setInteger('speed', 0)
@@ -144,9 +153,11 @@ export class TakeoverController {
     return this.entity?.getPosition() ?? pc.Vec3.ZERO
   }
 
-  /** Current yaw in degrees (for multiplayer broadcast). */
+  /** Current yaw in degrees (for multiplayer broadcast). Returns the
+   *  controller's own tracked value, NOT `entity.getEulerAngles().y` —
+   *  that path gimbal-flips at ±180° yaw and silently broadcasts 0. */
   getYaw(): number {
-    return this.entity?.getEulerAngles().y ?? 0
+    return this._yaw
   }
 
   /**
@@ -180,6 +191,11 @@ export class TakeoverController {
 
     const pos = entity.getPosition()
     this.wasSitting = entity.anim?.getBoolean('sitting') ?? false
+    // Seed _yaw from the entity's current world rotation using the
+    // quaternion directly — not getEulerAngles().y, which gimbal-flips.
+    // For a pure Y rotation, yaw = 2 * atan2(q.y, q.w).
+    const q = entity.getRotation()
+    this._yaw = 2 * Math.atan2(q.y, q.w) * pc.math.RAD_TO_DEG
 
     if (this.wasSitting) entity.anim?.setBoolean('sitting', false)
     entity.anim?.setInteger('speed', 0)
@@ -284,8 +300,11 @@ export class TakeoverController {
       const speed = sprinting ? SPRINT_SPEED : WALK_SPEED
       this.physics.movePlayer(wx * speed * dt, wz * speed * dt)
 
-      // Face movement direction
-      this.entity.setEulerAngles(0, Math.atan2(wx, wz) * pc.math.RAD_TO_DEG, 0)
+      // Face movement direction. Track yaw internally — the entity's
+      // euler is only ever WRITTEN by us here; reading it back via
+      // getEulerAngles().y can gimbal-flip at ±180° and broadcast 0.
+      this._yaw = Math.atan2(wx, wz) * pc.math.RAD_TO_DEG
+      this.entity.setEulerAngles(0, this._yaw, 0)
     }
 
     // Step physics + sync entity position
