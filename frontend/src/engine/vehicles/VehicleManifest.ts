@@ -17,6 +17,13 @@ export interface VehicleDef {
   thumbnail: string
   /** Movement speed multiplier relative to walking speed. */
   speedMultiplier: number
+  /**
+   * Optional velocity thresholds (m/s) used by VehicleSystem to derive the
+   * remote gait (Idle / Walk / Gallop) from observed position delta.
+   * Values below `idleMax` → Idle; between → Walk; above `walkMax` → Gallop.
+   * If unset, VehicleSystem derives defaults from `speedMultiplier`.
+   */
+  gaitThresholds?: { idleMax: number; walkMax: number }
   /** Rapier capsule radius when mounted. */
   physicsRadius: number
   /** Rapier capsule half-height when mounted. */
