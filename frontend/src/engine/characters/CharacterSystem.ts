@@ -40,8 +40,14 @@ export interface CharacterSnapshot {
   locationContext?: string
 }
 
-/** locationContext values that should hide the avatar (user is inside a
- *  shared interior). Keep in sync with multiplayer/OrgRoom INTERIOR_LOCATIONS. */
+/**
+ * locationContext values that should hide the avatar (user is inside a
+ * shared interior). MUST stay in sync with the backend set at
+ * `multiplayer/src/rooms/OrgRoom.ts` (INTERIOR_LOCATIONS). When adding
+ * a new interior, update both files — the server's entry drives the
+ * `skip walkHome + stamp locationContext` behaviour on takeover_end, and
+ * the client's entry drives the visibility check in updateFromSnapshot.
+ */
 const INTERIOR_LOCATIONS = new Set(['cafeteria', 'coffeebar'])
 
 function isInteriorLocation(ctx: string | undefined): boolean {
