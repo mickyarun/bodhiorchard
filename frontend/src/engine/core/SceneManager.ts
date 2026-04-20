@@ -318,6 +318,7 @@ export class SceneManager {
     for (const zone of zones) {
       if (zone.name === 'orchard') continue // no sign for center
       if (zone.name === 'coffee_bar') continue // the COFFEE awning is its label
+      if (zone.name === 'cafeteria') continue // the CAFETERIA awning is its label
       // Place sign at edge of zone, facing inward
       const dx = -zone.x
       const dz = -zone.z
