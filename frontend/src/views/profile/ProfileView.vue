@@ -66,7 +66,7 @@
 import { computed, onMounted } from 'vue'
 import { useXPStore } from '@/stores/xp'
 import { useAuthStore } from '@/stores/auth'
-import { parseCharacterModel, isKayKitConfig, type CharacterConfig } from '@/engine/characters/CharacterConfig'
+import { parseCharacterModel, type CharacterConfig } from '@/engine/characters/CharacterConfig'
 import XPProfileCard from '@/components/xp/XPProfileCard.vue'
 import XPHistoryFeed from '@/components/xp/XPHistoryFeed.vue'
 import XPInfoPanel from '@/components/xp/XPInfoPanel.vue'
@@ -78,8 +78,7 @@ const authStore = useAuthStore()
 const characterConfig = computed<CharacterConfig | null>(() => {
   const model = authStore.user?.character_model
   if (!model) return null
-  const config = parseCharacterModel(model)
-  return isKayKitConfig(config) ? config : null
+  return parseCharacterModel(model)
 })
 
 onMounted(() => {

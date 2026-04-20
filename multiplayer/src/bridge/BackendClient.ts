@@ -105,6 +105,92 @@ export async function fetchOrgSnapshot(orgId: string): Promise<OrgSnapshotRespon
   }
 }
 
+/**
+ * Persist + publish a race invitation via the backend.
+ *
+ * Called once per invitee when OrgRoom processes `race_create`. The
+ * backend writes a `notifications` row and broadcasts on the recipient's
+ * WS topic; we get the notification id back. Failures are logged but
+ * don't block the race-room creation — a missed invite is recoverable
+ * (user just doesn't see a toast), a missed room would be fatal.
+ */
+export interface RaceInvitePayload {
+  orgId: string
+  recipientUserId: string
+  hostUserId: string
+  hostName: string
+  roomId: string
+  distanceM: number
+}
+
+export async function postRaceInvite(payload: RaceInvitePayload): Promise<boolean> {
+  try {
+    const url = `${BACKEND_URL}/api/v1/internal/colyseus/race-invite`
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "X-Bridge-Secret": BRIDGE_SECRET,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+    if (!response.ok) {
+      console.warn(`[BackendClient] race-invite HTTP ${response.status}`)
+      return false
+    }
+    return true
+  } catch (err) {
+    console.warn(`[BackendClient] race-invite unreachable:`, err)
+    return false
+  }
+}
+
+/**
+ * POST final race placings to the backend on room disposal. Idempotent
+ * server-side (ON CONFLICT on `(room_id, user_id)`) so a retry after a
+ * transient failure never double-counts.
+ */
+export interface RaceResultsPlacing {
+  userId: string
+  finishTimeMs: number | null
+  place: number
+  finished: boolean
+  distanceMReached: number
+  distanceM: number
+}
+
+export interface RaceResultsPayload {
+  roomId: string
+  orgId: string
+  hostUserId: string
+  distanceM: number
+  placings: RaceResultsPlacing[]
+}
+
+export async function postRaceResults(payload: RaceResultsPayload): Promise<boolean> {
+  try {
+    const url = `${BACKEND_URL}/api/v1/internal/colyseus/race-results`
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "X-Bridge-Secret": BRIDGE_SECRET,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+    if (!response.ok) {
+      console.warn(`[BackendClient] race-results HTTP ${response.status}`)
+      return false
+    }
+    return true
+  } catch (err) {
+    console.warn(`[BackendClient] race-results unreachable:`, err)
+    return false
+  }
+}
+
 /** Verify a user JWT against the backend. */
 export async function verifyUserToken(
   token: string,

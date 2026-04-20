@@ -183,6 +183,11 @@
       :toasts="xpToasts"
       @dismiss="xpDismiss"
     />
+
+    <!-- Race invite toast + watch banner — both mount layout-wide so they
+         survive route changes while the user is signed in. -->
+    <RaceInviteToast v-if="authStore.user?.id" />
+    <RaceWatchBanner v-if="authStore.user?.id" />
   </v-app>
 </template>
 
@@ -193,6 +198,8 @@ import { useAuthStore } from '@/stores/auth'
 import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
 import XPToast from '@/components/common/XPToast.vue'
+import RaceInviteToast from '@/components/race/RaceInviteToast.vue'
+import RaceWatchBanner from '@/components/race/RaceWatchBanner.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useXPSocket } from '@/composables/useXPSocket'
 

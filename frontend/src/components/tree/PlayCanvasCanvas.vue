@@ -42,6 +42,7 @@ const emit = defineEmits<{
   (e: 'house-click', info: { name: string }): void
   (e: 'zone-enter', zone: string): void
   (e: 'zone-exit', zone: string): void
+  (e: 'invite-to-race', info: { userId: string; name: string }): void
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
@@ -192,6 +193,7 @@ async function initEngine(): Promise<void> {
     },
     onZoneEnter: (zone) => emit('zone-enter', zone),
     onZoneExit: (zone) => emit('zone-exit', zone),
+    onInviteToRace: (userId, name) => emit('invite-to-race', { userId, name }),
   })
 
   // Tell engine who the authenticated user is (for identity preservation in

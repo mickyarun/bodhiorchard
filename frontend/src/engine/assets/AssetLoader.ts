@@ -80,8 +80,15 @@ export class AssetLoader {
   }
 
   private loadAsset(path: string): Promise<pc.Asset> {
+    // Anchor relative asset paths at the document root so they resolve the
+    // same way regardless of the current route's depth. Without this, a
+    // relative path like `assets/foo.glb` resolves against the current URL
+    // — fine from `/dashboard` (→ `/assets/foo.glb`) but wrong from
+    // `/raceview/abc-123` (→ `/raceview/assets/foo.glb`, which hits the
+    // SPA fallback and returns HTML).
+    const url = path.startsWith("/") || /^https?:/.test(path) ? path : `/${path}`;
     return new Promise<pc.Asset>((resolve, reject) => {
-      const asset = new pc.Asset(path, "container", { url: path });
+      const asset = new pc.Asset(path, "container", { url });
       this.app.assets.add(asset);
       asset.on("load", () => resolve(asset));
       asset.on("error", (err: string) =>

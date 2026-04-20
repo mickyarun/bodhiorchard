@@ -170,7 +170,7 @@ export class CoffeeBarManager {
     // Remote-player rendering — spawns/updates/despawns visitors other than
     // the local player based on CoffeeBarRoom state.
     this.remotePlayers = new CoffeeBarRemotePlayers(
-      this.root!, this.loader, this.app, this.roomClient, this.localUserId,
+      this.root!, this.loader, this.roomClient, this.localUserId,
     )
     this.moveBroadcastAccum = 0
 

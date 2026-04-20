@@ -17,7 +17,7 @@
 import * as pc from 'playcanvas'
 import type { CharacterConfig } from './CharacterConfig'
 import { KayKitCharacterFactory, getClonedMaterials } from './KayKitCharacterFactory'
-import type { CharacterEntity } from './CharacterFactory'
+import type { CharacterEntity } from './CharacterTypes'
 import { AssetLoader } from '../assets/AssetLoader'
 
 // ─── Scene Constants ───────────────────────────
@@ -220,6 +220,22 @@ export class CharacterPreviewScene {
   /** Update color tinting without reloading the character GLB. */
   async updateColors(config: CharacterConfig): Promise<void> {
     await this.setCharacter(config)
+  }
+
+  /**
+   * Drive the KayKit locomotion state graph's `emote` integer parameter
+   * — see `AnimUtils.LOCOMOTION_STATE_GRAPH`. Values:
+   *   0 = idle (return to rest)
+   *   1 = Wave   (friendly)
+   *   2 = Cheer  (winning celebration)
+   *
+   * No-ops if the current character isn't a KayKit model (legacy blocky
+   * characters don't share the state graph).
+   */
+  setEmote(emote: 0 | 1 | 2 | 3): void {
+    const anim = this.character?.entity.anim
+    if (!anim) return
+    anim.setInteger('emote', emote)
   }
 
   resize(width: number, height: number): void {

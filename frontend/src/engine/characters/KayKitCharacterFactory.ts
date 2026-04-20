@@ -18,7 +18,7 @@
 import * as pc from 'playcanvas'
 import type { AssetLoader } from '../assets/AssetLoader'
 import type { CharacterConfig } from './CharacterConfig'
-import type { CharacterEntity } from './CharacterFactory'
+import type { CharacterEntity } from './CharacterTypes'
 import { getCharacterDef, getCoreAnimationGLBs, getAccessoryDef, SLOT_BONE_NAMES, type AccessorySlot } from './KayKitManifest'
 import { createNameLabel } from './NameLabel'
 import { type ContainerWithAnims, findAnimTrack, LOCOMOTION_STATE_GRAPH } from './AnimUtils'
@@ -67,6 +67,7 @@ const ANIM_TRACK_MAP: Record<string, string> = {
   'UseItem':  'Use_Item',    // general.glb — using a held object animation
   'Wave':     'Waving',      // simulation.glb — social emote
   'Cheer':    'Cheering',    // simulation.glb — social emote
+  'Defeat':   'Death_A',     // general.glb — dejected/fallen pose for loss
 }
 
 // ─── Hex Color Helper ──────────────────────────

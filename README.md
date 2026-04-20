@@ -262,54 +262,38 @@ Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cl
 
 ### Prerequisites
 
-- A Mac, Linux machine, or Mac Mini (recommended for always-on deployment)
-- Docker and Docker Compose
-- Node.js 18+ (for frontend development)
-- Python 3.12+ (for backend development)
+- **Try it**: Docker Desktop (everything else runs in containers)
+- **Develop it**: Docker + Node.js 18+ + Python 3.12+
+- Windows: use WSL2
 - (Optional) Cloudflare account for tunnel — needed for Slack/GitHub webhooks
 
-### Quick Start (Docker)
+### Try it (one command)
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/bodhiorchard.git
+git clone https://github.com/mickyarun/bodhiorchard.git
 cd bodhiorchard
-
-# Copy environment config
-cp backend/.env.example backend/.env
-
-# Start all services (PostgreSQL, Redis, Ollama, Backend)
-cd backend
-docker compose up -d
-
-# Wait for Ollama to pull models (~5 min first time)
-# The API will be available at http://localhost:8000
-# API docs at http://localhost:8000/docs
-
-# Start the frontend
-cd ../frontend
-npm install
-npm run dev
-# Frontend available at http://localhost:3000
+docker compose up
 ```
 
-### Local Development
+Open **http://localhost:3000**. Postgres, Redis, backend, multiplayer, and frontend all start together. Migrations run automatically on backend startup. First build takes ~5 min; subsequent runs are instant.
+
+Configure Claude Code as the AI engine in **Settings → AI Configuration** once the UI is up.
+
+### Develop it (hot reload)
 
 ```bash
-# Backend
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-docker compose up -d redis ollama      # infrastructure only
-alembic upgrade head                    # run migrations
-uvicorn app.main:app --reload           # start dev server
-
-# Frontend (separate terminal)
-cd frontend
-npm install
-npm run dev
+git clone https://github.com/mickyarun/bodhiorchard.git
+cd bodhiorchard
+npm install        # frontend + multiplayer deps via workspaces
+npm run setup      # Python venv, .env files, infra, migrations
+npm run dev        # backend + frontend + multiplayer, one terminal
 ```
+
+- **Frontend**: http://localhost:3000 (Vite)
+- **Backend**: http://localhost:8000/docs (FastAPI)
+- **Multiplayer**: ws://localhost:2567 (Colyseus)
+
+All three processes run in a single terminal with color-coded logs. Ctrl-C stops them; `npm run stop` tears down the infra containers.
 
 ### Environment Variables
 
@@ -343,7 +327,7 @@ bodhiorchard/
 │   │   ├── schemas/         # Pydantic request/response DTOs
 │   │   └── services/        # Business logic (LLM, scanning, synthesis)
 │   ├── alembic/             # Database migrations
-│   ├── docker-compose.yml   # PostgreSQL, Redis, Ollama
+│   ├── entrypoint.sh        # Runs migrations then uvicorn
 │   └── Dockerfile           # Multi-stage production build
 │
 ├── frontend/
@@ -355,6 +339,11 @@ bodhiorchard/
 │   │   └── data/            # Shared data (agent definitions)
 │   └── package.json
 │
+├── multiplayer/             # Colyseus multiplayer server (TypeScript)
+├── scripts/                 # setup.sh, wait-for-postgres.sh
+├── docker-compose.yml       # Full stack: postgres + redis + backend + fe + mp
+├── docker-compose.infra.yml # Contributor infra only: postgres + redis
+├── package.json             # npm workspaces + dev scripts (root)
 ├── BODHIORCHARD-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
 ├── AGENTS.md                # Agent capabilities documentation
 ├── TODO.md                  # Roadmap and progress tracking
