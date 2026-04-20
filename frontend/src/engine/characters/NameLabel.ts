@@ -77,20 +77,19 @@ export function createNameLabel(
   // camera angle, so we accept rendering them over any world geometry.
   material.depthWrite = false
   material.depthTest = false
-  // Cull the back face: the billboard update orients +Y (front) at the
-  // camera every frame, so the back face would only show the texture
-  // through reversed triangle-winding as mirrored text. Default CULLFACE_BACK.
+  material.cull = pc.CULLFACE_NONE
   material.update()
 
   const entity = new pc.Entity('NameLabel')
   entity.addComponent('render', { type: 'plane' })
   entity.render!.meshInstances[0].material = material
   entity.setLocalPosition(0, height, 0)
-  // Plane primitive is 1×1 in local XZ with normal +Y. The billboard update
-  // in Application.updateBillboards orients the plane so +Y faces the camera
-  // and +X aligns with screen-right every frame, so the scale here maps
-  // directly to rendered width (X) and height (Z in local → screen-up).
-  entity.setLocalScale(LABEL_WIDTH, 1, LABEL_WIDTH * (LABEL_CANVAS_H / LABEL_CANVAS_W))
+  // Negative X scale compensates for the lookAt + rotateLocal billboard
+  // orientation (see Application.ts billboard update) — the plane ends up
+  // showing the back face under CULLFACE_NONE, so mirroring the mesh on X
+  // lands canvas U=0 on the viewer's left and text reads left-to-right.
+  entity.setLocalScale(-LABEL_WIDTH, 1, LABEL_WIDTH * (LABEL_CANVAS_H / LABEL_CANVAS_W))
+  entity.setLocalEulerAngles(90, 0, 0)
   entity.tags.add('billboard')
 
   return entity
