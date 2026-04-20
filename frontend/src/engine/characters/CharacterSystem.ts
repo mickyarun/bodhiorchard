@@ -16,9 +16,9 @@
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import type { AssetLoader } from '../assets/AssetLoader'
-import { CharacterFactory, type CharacterEntity } from './CharacterFactory'
+import type { CharacterEntity } from './CharacterTypes'
 import { KayKitCharacterFactory, getClonedMaterials } from './KayKitCharacterFactory'
-import { parseCharacterModel, isKayKitConfig } from './CharacterConfig'
+import { parseCharacterModel } from './CharacterConfig'
 import { createLevelBadge } from './LevelBadge'
 import { disposeMaterial } from '../utils/EntityUtils'
 
@@ -49,7 +49,6 @@ function isInteriorLocation(ctx: string | undefined): boolean {
 }
 
 export class CharacterSystem {
-  private factory: CharacterFactory
   private kayKitFactory: KayKitCharacterFactory
   private characters: CharacterEntity[] = []
   private app: Application | null = null
@@ -75,7 +74,6 @@ export class CharacterSystem {
   isUserMounted: ((userId: string) => boolean) | null = null
 
   constructor(loader: AssetLoader) {
-    this.factory = new CharacterFactory(loader)
     this.kayKitFactory = new KayKitCharacterFactory(loader)
   }
 
@@ -116,32 +114,16 @@ export class CharacterSystem {
     try {
       const sitting = snapshot.animState === 'sit' || snapshot.animState === 'sleep'
       const config = parseCharacterModel(snapshot.characterModel)
-      let character: CharacterEntity
-
-      if (isKayKitConfig(config)) {
-        character = await this.kayKitFactory.create(
-          snapshot.userId,
-          snapshot.name,
-          config,
-          snapshot.x,
-          snapshot.y,
-          snapshot.z,
-          snapshot.yaw,
-          sitting,
-        )
-      } else {
-        const variant = CharacterFactory.getVariant(snapshot.userId, snapshot.characterModel)
-        character = await this.factory.create(
-          snapshot.userId,
-          snapshot.name,
-          variant,
-          snapshot.x,
-          snapshot.y,
-          snapshot.z,
-          snapshot.yaw,
-          sitting,
-        )
-      }
+      const character: CharacterEntity = await this.kayKitFactory.create(
+        snapshot.userId,
+        snapshot.name,
+        config,
+        snapshot.x,
+        snapshot.y,
+        snapshot.z,
+        snapshot.yaw,
+        sitting,
+      )
 
       // Guard: the system may have been destroyed while we were awaiting
       if (!this.app) {
@@ -162,14 +144,14 @@ export class CharacterSystem {
       const label = character.entity.findByTag('billboard')[0] as pc.Entity | undefined
       if (label) this.app.registerBillboard(label)
 
-      // Level badge
+      // Level badge — KayKit characters are short (~0.7 m), so the badge
+      // sits closer to the head than the old Kenney-blocky offset.
       if (snapshot.level > 1) {
-        const badgeHeight = isKayKitConfig(config) ? 1.2 : 1.5
         const badge = createLevelBadge(
           snapshot.level,
           snapshot.levelName || 'seedling',
           this.app.app.graphicsDevice,
-          badgeHeight,
+          1.2,
         )
         character.entity.addChild(badge)
         this.app.registerBillboard(badge)
@@ -292,7 +274,6 @@ export class CharacterSystem {
     this.characterRoot?.destroy()
     this.characterRoot = null
     this.app = null
-    this.factory.clear()
     this.kayKitFactory.clear()
   }
 }

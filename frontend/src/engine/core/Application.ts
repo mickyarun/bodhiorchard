@@ -36,16 +36,6 @@ export class Application {
    */
   private billboards = new Set<pc.Entity>()
 
-  // Scratch vectors reused every frame by updateBillboards to avoid GC pressure.
-  private readonly _bbCamPos = new pc.Vec3()
-  private readonly _bbLabelPos = new pc.Vec3()
-  private readonly _bbBasisX = new pc.Vec3()
-  private readonly _bbBasisY = new pc.Vec3()
-  private readonly _bbBasisZ = new pc.Vec3()
-  private readonly _bbMat = new pc.Mat4()
-  private readonly _bbRot = new pc.Quat()
-  private static readonly BB_WORLD_UP = new pc.Vec3(0, 1, 0)
-
   constructor() {
     this.clock = new Clock()
     this.events = new EventBus<EngineEvents>()
@@ -137,14 +127,17 @@ export class Application {
       this.clock.update(dt)
       this.config.onUpdate?.(dt, this.clock)
 
-      // Billboard labels: orient each plane so its front face (+Y normal)
-      // points at the camera, local +X aligns with screen-right, and
-      // local +Z aligns with screen-up. Texture U increases in local +X,
-      // so canvas text drawn left-to-right renders left-to-right in
-      // screen space — no mirror-scale trick needed. setRotation takes a
-      // world-space quaternion and is parent-aware, so this works
-      // regardless of where in the scene graph the label is parented.
-      this.updateBillboards()
+      // Billboard labels: face camera (O(n) on registered set, not full scene).
+      // The lookAt + rotateLocal pairing orients the Plane primitive so its
+      // -Y normal faces the camera; the texture mirror-X scale on each label
+      // compensates so text reads left-to-right in screen space. See
+      // NameLabel / LevelBadge / LabelRenderer for the scale convention.
+      const camPos = this.camera.getPosition()
+      for (const label of this.billboards) {
+        if (!label.enabled) continue
+        label.lookAt(camPos)
+        label.rotateLocal(90, 0, 0)
+      }
     })
 
     this.app.start()
@@ -158,61 +151,6 @@ export class Application {
 
   unregisterBillboard(entity: pc.Entity): void {
     this.billboards.delete(entity)
-  }
-
-  /**
-   * Orient every registered label plane so its front face points at the
-   * camera. Builds a right-handed basis per label:
-   *   +Y (plane normal) → from label toward camera
-   *   +X               → screen-right (perpendicular to world-up and +Y)
-   *   +Z               → screen-up (cross of +X and +Y)
-   *
-   * Text drawn left-to-right on the label's canvas (U=0 on left) renders
-   * left-to-right in screen space because +X aligns with screen-right —
-   * no geometry mirror-scale, no CULLFACE_NONE back-face fallback.
-   *
-   * Near-singular case (camera directly above a label) uses world +X as
-   * the fallback right vector; the text stays readable from any azimuth.
-   */
-  private updateBillboards(): void {
-    if (this.billboards.size === 0) return
-
-    this._bbCamPos.copy(this.camera.getPosition())
-    const EPSILON = 1e-4
-
-    for (const label of this.billboards) {
-      if (!label.enabled) continue
-
-      this._bbLabelPos.copy(label.getPosition())
-      // basisY = direction from label to camera (plane normal)
-      this._bbBasisY.sub2(this._bbCamPos, this._bbLabelPos)
-      const len = this._bbBasisY.length()
-      if (len < EPSILON) continue
-      this._bbBasisY.mulScalar(1 / len)
-
-      // basisX = cross(worldUp, basisY), normalised. Falls back to world +X
-      // if the camera is exactly above the label (cross product degenerate).
-      this._bbBasisX.cross(Application.BB_WORLD_UP, this._bbBasisY)
-      if (this._bbBasisX.lengthSq() < EPSILON) {
-        this._bbBasisX.set(1, 0, 0)
-      } else {
-        this._bbBasisX.normalize()
-      }
-
-      // basisZ completes the right-handed frame.
-      this._bbBasisZ.cross(this._bbBasisX, this._bbBasisY)
-
-      // Build a rotation matrix directly from the three basis vectors.
-      // pc.Mat4.data is column-major: columns are [X | Y | Z | translation].
-      const d = this._bbMat.data
-      d[0]  = this._bbBasisX.x; d[1]  = this._bbBasisX.y; d[2]  = this._bbBasisX.z; d[3]  = 0
-      d[4]  = this._bbBasisY.x; d[5]  = this._bbBasisY.y; d[6]  = this._bbBasisY.z; d[7]  = 0
-      d[8]  = this._bbBasisZ.x; d[9]  = this._bbBasisZ.y; d[10] = this._bbBasisZ.z; d[11] = 0
-      d[12] = 0;                d[13] = 0;                d[14] = 0;                d[15] = 1
-
-      this._bbRot.setFromMat4(this._bbMat)
-      label.setRotation(this._bbRot)
-    }
   }
 
   // ─── IBL Setup ───────────────────────────────────────
