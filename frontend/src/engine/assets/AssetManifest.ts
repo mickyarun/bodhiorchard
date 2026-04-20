@@ -13,7 +13,6 @@ import type { RepoHealth, ThreatSeverity, BUDStatus } from '../types'
 
 const GARDEN = 'assets/garden'
 const FURNITURE = 'assets/furniture'
-const CHARACTERS = 'characters'
 /** Coffeehouse Lounge Pack by majesticmaje (CC-BY via Poly.Pizza). See
  *  `public/models/coffeebar/ATTRIBUTION.md` for the full notice. */
 const CAFE_PACK = 'models/coffeebar'
@@ -172,6 +171,23 @@ export const SCATTER_PROPS: string[] = [
   `${GARDEN}/plant_bushSmall.glb`,
 ]
 
+/** Named garden props referenced by builders that want a specific model
+ *  (rather than a random pick from SCATTER_* arrays). Adding an entry here
+ *  also ensures the asset is included in getEnvironmentGLBs() preload via
+ *  SCATTER_PROPS / SCATTER_BUSHES / FEATURE_FLOWERS, so no extra wiring. */
+export const DECOR = {
+  logStack:      `${GARDEN}/log_stack.glb`,
+  stumpOld:      `${GARDEN}/stump_old.glb`,
+  stumpRound:    `${GARDEN}/stump_round.glb`,
+  bushGreen:     `${GARDEN}/bush_green.glb`,
+  bushRound:     `${GARDEN}/bush_round.glb`,
+  bushCluster:   `${GARDEN}/bushes_cluster.glb`,
+  flowerYellowA: `${GARDEN}/flower_yellowA.glb`,
+  flowerYellowB: `${GARDEN}/flower_yellowB.glb`,
+  flowerRedA:    `${GARDEN}/flower_redA.glb`,
+  flowerPurpleA: `${GARDEN}/flower_purpleA.glb`,
+} as const
+
 // ─── Building / Furniture GLBs ──────────────────
 
 export const BUILDING = {
@@ -327,6 +343,7 @@ export const CAFE = {
   rug:          `${CAFE_PACK}/Rug.glb`,
   roundRug:     `${CAFE_PACK}/Round_Rug.glb`,
   bins:         `${CAFE_PACK}/Bins.glb`,
+  storageCrate: `${CAFE_PACK}/Storage_Crate.glb`,
 } as const
 
 // ─── Cafeteria GLB (single-scene interior) ──────
@@ -338,26 +355,6 @@ export const CAFE = {
 export const CAFETERIA = {
   room: `${CAFETERIA_PACK}/cafeteria.glb`,
 } as const
-
-// ─── Character GLBs ─────────────────────────────
-
-/** Legacy Kenney Blocky Characters (18 variants, moved to legacy/ subfolder). */
-const LEGACY_CHARACTERS = `${CHARACTERS}/legacy`
-
-const CHARACTER_MODELS = [
-  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
-  'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
-] as const
-
-export function getCharacterGLB(variant: string): string {
-  return `${LEGACY_CHARACTERS}/character-${variant}.glb`
-}
-
-export function getAllCharacterGLBs(): string[] {
-  return CHARACTER_MODELS.map(v => getCharacterGLB(v))
-}
-
-export const CHARACTER_COUNT = CHARACTER_MODELS.length
 
 // ─── Texture Paths ──────────────────────────────
 

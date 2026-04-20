@@ -1108,9 +1108,10 @@ export class GardenEngine {
   // ─── Cafeteria interior ──────────────────────────────
 
   /**
-   * World position of the cafeteria's front door. The hut's footprint lives
-   * inside its root at (x=0..4, z=0..2) in local coords (not centered on the
-   * zone like the coffee bar); CAFETERIA_DOOR_OFFSET carries both offsets.
+   * World position of the cafeteria's front door. The hut sits centered-in-X
+   * and pushed back inside the root entity (like the coffee bar), so
+   * CAFETERIA_DOOR_OFFSET carries the door's position relative to the zone
+   * center rather than being a simple (width/2, depth) offset.
    */
   private getCafeteriaDoorPos(): { x: number; z: number } | null {
     const zone = this.sceneManager?.worldLayout.getZone('cafeteria')
