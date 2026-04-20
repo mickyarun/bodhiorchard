@@ -5,6 +5,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -23,5 +24,9 @@ class NotificationRead(BaseModel):
     is_read: bool = Field(alias="isRead")
     is_dismissed: bool = Field(alias="isDismissed")
     created_at: datetime = Field(alias="createdAt")
+    # Structured payload — race invites put {hostName, hostUserId, roomId,
+    # distanceM} here so the toast / bell dropdown don't have to re-parse
+    # the message string.
+    meta: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}

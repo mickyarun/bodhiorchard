@@ -15,7 +15,8 @@
 
 export class TakeoverUI {
   private container: HTMLElement | null = null
-  private memberCard: HTMLElement | null = null
+  private actionPanel: HTMLElement | null = null
+  private actionPanelUserId: string | null = null
   private warning: HTMLElement | null = null
   private seatPrompt: HTMLElement | null = null
   private exitBtn: HTMLElement | null = null
@@ -24,6 +25,19 @@ export class TakeoverUI {
 
   /** Called when exit button is clicked. Set by GardenEngine. */
   onExitClick: (() => void) | null = null
+
+  /**
+   * Invoked when the user clicks "Greet" on the member action panel.
+   * `userId` is the targeted member. Wired by GardenEngine.
+   */
+  onGreetNearby: ((userId: string, name: string) => void) | null = null
+
+  /**
+   * Invoked when the user clicks "Invite to race" on the member action
+   * panel. `userId` is the targeted member. Wired by GardenEngine to
+   * bubble up to the Vue layer (which opens `<RaceSetupDialog>`).
+   */
+  onInviteNearbyToRace: ((userId: string, name: string) => void) | null = null
 
   init(parent: HTMLElement): void {
     this.container = document.createElement('div')
@@ -49,18 +63,6 @@ export class TakeoverUI {
         fontSize: '12px', letterSpacing: '1px',
       },
     )
-
-    // Proximity member info card (above controls hint)
-    this.memberCard = this.makeLabel('', {
-      position: 'absolute', bottom: '60px', left: '50%',
-      transform: 'translateX(-50%)',
-      background: 'rgba(30,60,120,0.8)',
-      backdropFilter: 'blur(4px)',
-      color: '#fff', padding: '8px 20px', borderRadius: '12px',
-      fontSize: '14px', fontWeight: '500',
-      border: '1px solid rgba(255,255,255,0.2)',
-      display: 'none', transition: 'opacity 0.2s',
-    })
 
     // Inactivity warning (top center)
     this.warning = this.makeLabel('', {
@@ -98,19 +100,65 @@ export class TakeoverUI {
   hide(): void {
     if (!this.container) return
     this.container.style.display = 'none'
-    this.hideMemberInfo()
+    this.hideMemberActionPanel()
     this.hideWarning()
   }
 
-  /** Show proximity member info card. */
-  showMemberInfo(name: string, status: string): void {
-    if (!this.memberCard) return
-    this.memberCard.textContent = `${name} \u2014 ${status}`
-    this.memberCard.style.display = 'block'
+  /**
+   * Show an action panel next to the nearby member. Two buttons: Greet
+   * (fires `onGreetNearby`) and Invite to race (fires `onInviteNearbyToRace`).
+   * Idempotent — calling with the same userId is a no-op, so rapid proximity
+   * flickers don't rebuild the DOM on every frame.
+   */
+  showMemberActionPanel(userId: string, name: string): void {
+    if (!this.container) return
+    if (this.actionPanelUserId === userId && this.actionPanel) {
+      // Update label for the same target — in case presence-derived text
+      // changed upstream; cheap no-op otherwise.
+      const label = this.actionPanel.querySelector<HTMLElement>('[data-label]')
+      if (label) label.textContent = name
+      return
+    }
+
+    this.hideMemberActionPanel()
+
+    const panel = document.createElement('div')
+    Object.assign(panel.style, {
+      position: 'absolute', bottom: '120px', left: '50%',
+      transform: 'translateX(-50%)',
+      display: 'flex', gap: '8px', alignItems: 'center',
+      background: 'rgba(30,60,120,0.85)',
+      backdropFilter: 'blur(4px)',
+      color: '#fff', padding: '8px 12px', borderRadius: '12px',
+      fontSize: '14px', pointerEvents: 'auto',
+      border: '1px solid rgba(255,255,255,0.2)',
+    })
+    const label = document.createElement('span')
+    label.dataset.label = ''
+    label.textContent = name
+    label.style.marginRight = '4px'
+    panel.appendChild(label)
+
+    const greetBtn = makeActionButton('\ud83d\udc4b Greet', () => {
+      this.onGreetNearby?.(userId, name)
+    })
+    const raceBtn = makeActionButton('\ud83c\udfc1 Invite to race', () => {
+      this.onInviteNearbyToRace?.(userId, name)
+    })
+    panel.appendChild(greetBtn)
+    panel.appendChild(raceBtn)
+
+    this.container.appendChild(panel)
+    this.actionPanel = panel
+    this.actionPanelUserId = userId
   }
 
-  hideMemberInfo(): void {
-    if (this.memberCard) this.memberCard.style.display = 'none'
+  hideMemberActionPanel(): void {
+    if (this.actionPanel) {
+      this.actionPanel.remove()
+      this.actionPanel = null
+    }
+    this.actionPanelUserId = null
   }
 
   /** Show inactivity warning with countdown. */
@@ -213,13 +261,15 @@ export class TakeoverUI {
       this.parentEl.style.position = this.originalParentPosition
       this.parentEl = null
     }
+    this.hideMemberActionPanel()
     this.container?.remove()
     this.container = null
-    this.memberCard = null
     this.warning = null
     this.seatPrompt = null
     this.exitBtn = null
     this.onExitClick = null
+    this.onGreetNearby = null
+    this.onInviteNearbyToRace = null
   }
 
   private makeLabel(text: string, styles: Partial<CSSStyleDeclaration>): HTMLElement {
@@ -229,4 +279,21 @@ export class TakeoverUI {
     this.container!.appendChild(el)
     return el
   }
+}
+
+function makeActionButton(text: string, onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.textContent = text
+  Object.assign(btn.style, {
+    background: 'rgba(255,255,255,0.12)',
+    color: '#fff',
+    padding: '6px 12px', borderRadius: '8px',
+    border: '1px solid rgba(255,255,255,0.3)',
+    cursor: 'pointer', pointerEvents: 'auto',
+    fontSize: '13px', fontWeight: '500',
+  })
+  btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(255,255,255,0.22)' })
+  btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(255,255,255,0.12)' })
+  btn.addEventListener('click', onClick)
+  return btn
 }

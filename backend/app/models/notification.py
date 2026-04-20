@@ -5,9 +5,10 @@
 
 import uuid
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import Boolean, Enum, ForeignKey, Index, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -27,6 +28,7 @@ class NotificationType(StrEnum):
     PR_OPENED = "pr_opened"
     PR_MERGED = "pr_merged"
     ALL_PRS_MERGED = "all_prs_merged"
+    RACE_INVITE = "race_invite"
 
 
 class Notification(BaseModel):
@@ -56,6 +58,11 @@ class Notification(BaseModel):
     job_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_dismissed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Generic JSON payload — used by race invites to carry {hostName, distanceM,
+    # roomId, hostUserId} so the bell dropdown can render rich details without
+    # re-fetching from another service. Nullable because legacy job notifications
+    # encode their payload in title / message / deep_link.
+    meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
         return f"<Notification(id={self.id}, user_id={self.user_id}, type={self.type})>"

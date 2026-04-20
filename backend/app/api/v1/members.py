@@ -9,6 +9,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
@@ -164,6 +165,32 @@ async def list_members(
     alias_map = await user_repo.get_alias_map_for_org(org.id)
 
     return [_user_to_member(u, alias_map.get(u.id)) for u in users]
+
+
+class MemberDirectoryEntry(BaseModel):
+    """Minimal member row — just enough to populate an invite dialog."""
+
+    id: uuid.UUID
+    name: str
+
+
+@router.get("/members/directory", response_model=list[MemberDirectoryEntry])
+async def list_member_directory(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[MemberDirectoryEntry]:
+    """Lightweight member directory — {id, name} per active org member.
+
+    Unlike `/members`, this endpoint has no permission gate beyond "must be
+    authenticated + in an org" so non-admin features (race invites, @-mentions)
+    can populate their member pickers without requiring `team:manage`. It
+    returns the strict minimum: no email, no role, no presence.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    user_repo = UserRepository(db, org_id=org.id)
+    users = await user_repo.list_with_membership(org.id)
+    return [MemberDirectoryEntry(id=u.id, name=u.name or "") for u in users if u.is_active]
 
 
 @router.patch(

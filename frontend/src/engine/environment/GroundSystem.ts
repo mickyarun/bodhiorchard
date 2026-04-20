@@ -34,7 +34,7 @@ export class GroundSystem {
   private overlayTextures: pc.Texture[] = []
   private overlayMaterials: pc.StandardMaterial[] = []
   private pngTexture: pc.Texture | null = null
-  private pngAsset: pc.Asset | null = null
+  private pngImage: HTMLImageElement | null = null
 
   build(app: Application, _materials: MaterialFactory): pc.Entity {
     this.entity = new pc.Entity('Ground')
@@ -65,30 +65,51 @@ export class GroundSystem {
     return this.entity
   }
 
-  /** Swap the procedural grass for the seamless tileable grass.jpg. */
+  /**
+   * Swap the procedural grass for the seamless tileable grass.jpg.
+   *
+   * Loads via plain `Image` + `Texture.setSource(img)` rather than
+   * `pc.Asset('texture')`. Two reasons:
+   *   1. Full control over the Texture's initial options — mipmaps, filters,
+   *      wrap modes, anisotropy — before the first upload. The asset handler
+   *      requires string-keyed filter enums via its `data` arg, and mutating
+   *      `minFilter` after the handler's upload is not guaranteed to
+   *      regenerate the mip chain. Missing mipmaps makes the sampler read
+   *      black per WebGL's texture-completeness rule — this is the
+   *      "grass goes black on route re-mount" symptom.
+   *   2. Avoids the asset-registry lifecycle entirely, so there is no
+   *      stale-asset handoff across mounts.
+   */
   private upgradeToGrassImage(app: Application): void {
-    const asset = new pc.Asset('grass.jpg', 'texture', { url: 'assets/garden/grass.jpg' })
-    asset.once('load', () => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    this.pngImage = img
+    img.onload = () => {
       if (!this.material) return
-      const tex = asset.resource as pc.Texture
-      tex.addressU = pc.ADDRESS_REPEAT
-      tex.addressV = pc.ADDRESS_REPEAT
-      tex.minFilter = pc.FILTER_LINEAR_MIPMAP_LINEAR
-      tex.magFilter = pc.FILTER_LINEAR
-      tex.anisotropy = 8
+      const tex = new pc.Texture(app.app.graphicsDevice, {
+        name: 'grass',
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        format: pc.PIXELFORMAT_RGBA8,
+        mipmaps: true,
+        addressU: pc.ADDRESS_REPEAT,
+        addressV: pc.ADDRESS_REPEAT,
+        minFilter: pc.FILTER_LINEAR_MIPMAP_LINEAR,
+        magFilter: pc.FILTER_LINEAR,
+        anisotropy: 8,
+      })
+      tex.setSource(img)
       this.pngTexture = tex
       this.material.diffuseMap = tex
       // 60 tiles across 600 units → 10 world units per tile. Matches the
       // low-poly stylized look in the target reference without visible seams.
       this.material.diffuseMapTiling = new pc.Vec2(60, 60)
       this.material.update()
-    })
-    asset.once('error', (err: string) => {
+    }
+    img.onerror = (err) => {
       console.debug('[GroundSystem] grass.jpg failed to load, keeping procedural:', err)
-    })
-    app.app.assets.add(asset)
-    app.app.assets.load(asset)
-    this.pngAsset = asset
+    }
+    img.src = '/assets/garden/grass.jpg'
   }
 
   /**
@@ -259,11 +280,14 @@ export class GroundSystem {
         }
       }
     }
-    // Write vignette-modified pixels directly to texture (skip canvas round-trip)
+    // Write vignette-modified pixels directly to texture (skip canvas round-trip).
+    // `mipmaps: true` is explicit — with LINEAR_MIPMAP_LINEAR min filter the
+    // sampler requires a complete mip chain, otherwise WebGL returns black.
     const texture = new pc.Texture(device, {
       width: S,
       height: S,
       format: pc.PIXELFORMAT_RGBA8,
+      mipmaps: true,
       addressU: pc.ADDRESS_REPEAT,
       addressV: pc.ADDRESS_REPEAT,
       minFilter: pc.FILTER_LINEAR_MIPMAP_LINEAR,
@@ -365,10 +389,12 @@ export class GroundSystem {
   }
 
   destroy(_materials?: MaterialFactory): void {
-    if (this.pngAsset) {
-      const app = pc.Application.getApplication()
-      app?.assets.remove(this.pngAsset)
-      this.pngAsset = null
+    if (this.pngImage) {
+      this.pngImage.onload = null
+      this.pngImage.onerror = null
+      // Letting the browser reclaim the cached decode is enough; no .src reset
+      // needed since we just drop our reference.
+      this.pngImage = null
     }
     if (this.pngTexture) {
       this.pngTexture.destroy()

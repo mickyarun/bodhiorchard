@@ -156,7 +156,7 @@ export class CafeteriaManager {
     this.ui.show()
 
     this.remotePlayers = new CafeteriaRemotePlayers(
-      this.root!, this.loader, this.app, this.roomClient, this.localUserId,
+      this.root!, this.loader, this.roomClient, this.localUserId,
     )
     this.moveBroadcastAccum = 0
 

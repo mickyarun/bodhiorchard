@@ -8,6 +8,12 @@
       @house-click="(info) => onHouseClick({ name: info.name, activity: 'home' })"
       @zone-enter="(zone) => emit('zone-enter', zone)"
       @zone-exit="(zone) => emit('zone-exit', zone)"
+      @invite-to-race="onInviteToRace"
+    />
+
+    <RaceSetupDialog
+      v-model="raceDialogOpen"
+      :preselected-user-id="raceDialogPreselect"
     />
     <TreeLegend v-if="!selectedRepo && !selectedDeveloper && !selectedHouse" />
 
@@ -53,6 +59,7 @@ import TreeDetailPanel from '@/components/tree/TreeDetailPanel.vue'
 import DeveloperDetailPanel from '@/components/tree/DeveloperDetailPanel.vue'
 import HouseDetailPanel from '@/components/tree/HouseDetailPanel.vue'
 import TreeLegend from '@/components/tree/TreeLegend.vue'
+import RaceSetupDialog from '@/components/race/RaceSetupDialog.vue'
 
 const props = defineProps<{
   displayData: TreeData
@@ -67,6 +74,16 @@ const canvasRef = ref<InstanceType<typeof PlayCanvasCanvas> | null>(null)
 const selectedRepo = ref<RepoLimbData | null>(null)
 const selectedDeveloper = ref<CharacterInfo | null>(null)
 const selectedHouse = ref<HouseInfo | null>(null)
+
+// Race-invite dialog state — opened when the proximity action panel's
+// "Invite to race" button fires via the engine → canvas event bridge.
+const raceDialogOpen = ref(false)
+const raceDialogPreselect = ref<string | null>(null)
+
+function onInviteToRace(info: { userId: string; name: string }): void {
+  raceDialogPreselect.value = info.userId
+  raceDialogOpen.value = true
+}
 
 // ─── Computed ────────────────────────────────────
 
