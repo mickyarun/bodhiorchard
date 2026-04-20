@@ -44,6 +44,7 @@ from app.models.permission import (
 )
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.qa_test_evidence import QATestEvidence
+from app.models.race_result import RaceResult
 from app.models.skill_profile import SkillProfile
 from app.models.standup import StandupReport
 from app.models.tracked_repository import RepoStatus, TrackedRepository
@@ -95,6 +96,7 @@ __all__ = [
     "PRState",
     "PullRequest",
     "QATestEvidence",
+    "RaceResult",
     "RepoStatus",
     "Role",
     "RolePermission",

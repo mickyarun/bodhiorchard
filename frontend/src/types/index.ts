@@ -596,6 +596,23 @@ export type NotificationType =
   | 'approval_rejected'
   | 'developer_assigned'
   | 'reassignment_done'
+  | 'race_invite'
+
+/**
+ * Structured payload attached to a race-invite notification.
+ *
+ * Lives on `AppNotification.meta`. Populated by the backend's
+ * `POST /internal/colyseus/race-invite` endpoint and mirrored onto the
+ * WS push so `<RaceInviteToast>` can render the button without parsing
+ * the message string. Fields are optional so future notification types
+ * can reuse `meta` without carrying race fields they don't need.
+ */
+export interface RaceInviteMeta {
+  roomId?: string
+  hostUserId?: string
+  hostName?: string
+  distanceM?: number
+}
 
 export interface AppNotification {
   id: string
@@ -608,6 +625,8 @@ export interface AppNotification {
   isRead: boolean
   isDismissed: boolean
   createdAt: string
+  /** Generic JSON payload — see `RaceInviteMeta` for race-invite shape. */
+  meta?: Record<string, unknown> | null
 }
 
 // ── Pull Request Types ──────────────────────────────────────────

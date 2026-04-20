@@ -64,42 +64,43 @@ Documentation improvements are always welcome — README, code comments, API doc
 - Redis
 - Docker and Docker Compose (recommended)
 
-### Backend Setup
+### One-command setup (recommended)
+
+From the repo root:
 
 ```bash
-cd backend
-
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate      # macOS/Linux
-# .venv\Scripts\activate       # Windows
-
-# Install dependencies
-pip install -e ".[dev]"
-
-# Start infrastructure (PostgreSQL, Redis, Ollama)
-docker compose up -d
-
-# Run database migrations
-alembic upgrade head
-
-# Start the dev server
-uvicorn app.main:app --reload
-# API available at http://localhost:8000
-# Docs at http://localhost:8000/docs
+npm install        # frontend + multiplayer deps (via npm workspaces)
+npm run setup      # Python venv, .env files, infra containers, migrations
+npm run dev        # backend + frontend + multiplayer with hot reload
 ```
 
-### Frontend Setup
+`npm run dev` runs all three services in a single terminal with color-coded
+logs. Ctrl-C stops them; `npm run stop` tears down postgres/redis.
+
+### Manual setup (if you want to understand the pieces)
 
 ```bash
+# 1. Infra (postgres + redis)
+docker compose -f docker-compose.infra.yml up -d
+
+# 2. Backend
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env          # edit as needed
+alembic upgrade head
+uvicorn app.main:app --reload
+
+# 3. Frontend (new terminal)
 cd frontend
-
-# Install dependencies
 npm install
-
-# Start the dev server
 npm run dev
-# Available at http://localhost:3000
+
+# 4. Multiplayer (new terminal)
+cd multiplayer
+npm install
+npm run start:dev
 ```
 
 ### Running Tests

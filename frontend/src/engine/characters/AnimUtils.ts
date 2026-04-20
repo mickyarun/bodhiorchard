@@ -73,6 +73,7 @@ export const LOCOMOTION_STATE_GRAPH = {
       { name: 'UseItem', speed: 1.0 },
       { name: 'Wave', speed: 1.0 },
       { name: 'Cheer', speed: 1.0 },
+      { name: 'Defeat', speed: 0.6 },   // slowed down so the dejected pose reads as "resigned"
     ],
     transitions: [
       { from: 'START', to: 'Idle', time: 0, priority: 0 },
@@ -125,6 +126,16 @@ export const LOCOMOTION_STATE_GRAPH = {
       },
       {
         from: 'Cheer', to: 'Idle', time: 0.2, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
+      },
+      // Loss emote — the avatar plays a "fallen over" animation as a
+      // dejected pose. Used on the race results podium for non-winners.
+      {
+        from: 'Idle', to: 'Defeat', time: 0.3, priority: 0,
+        conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 3 }],
+      },
+      {
+        from: 'Defeat', to: 'Idle', time: 0.3, priority: 0,
         conditions: [{ parameterName: 'emote', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
       },
     ],

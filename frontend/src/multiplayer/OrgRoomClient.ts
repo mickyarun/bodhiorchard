@@ -80,6 +80,31 @@ interface RawMember {
   houseLevel?: number
 }
 
+/** Summary of one active race — mirrors server ActiveRaceSummary schema. */
+export interface ActiveRaceSummary {
+  roomId: string
+  hostUserId: string
+  hostName: string
+  distanceM: number
+  phase: string
+  racerCount: number
+  /** Host + invitees. Consumers filter their own id out to avoid self-watch. */
+  participantUserIds: readonly string[]
+}
+
+interface RawActiveRace {
+  roomId?: string
+  hostUserId?: string
+  hostName?: string
+  distanceM?: number
+  phase?: string
+  racerCount?: number
+  participantUserIds?: ArrayLike<string>
+}
+
+/** How long to wait for `race_created` / `race_create_failed` before giving up. */
+const RACE_CREATE_TIMEOUT_MS = 5_000
+
 interface RawAgent {
   agentId?: string
   skillSlug?: string
@@ -116,6 +141,10 @@ export class OrgRoomClient {
 
   /** Fan-out listeners for subsystems that need to react to member changes. */
   private memberChangeListeners = new Set<MemberChangeListener>()
+
+  /** Most recent snapshot of OrgRoomState.activeRaces, keyed by roomId. */
+  private activeRaceSnapshots = new Map<string, ActiveRaceSummary>()
+  private activeRaceListeners = new Set<(summaries: ActiveRaceSummary[]) => void>()
 
   /** Callbacks set by the engine. */
   onMemberAdd:    ((userId: string, data: MemberStateSnapshot) => void) | null = null
@@ -225,46 +254,60 @@ export class OrgRoomClient {
     this.room?.send("upgrade_house", { tier })
   }
 
-  /** Temporary dev tool: fire a simulated dev_activity for the current user. */
-  sendSimulateDevActivity(): void {
-    this.room?.send("simulate_dev_activity")
-  }
+  /**
+   * Send a `race_create` request and resolve with the new room id.
+   *
+   * Correlated request/response pattern: the server answers with either
+   * `race_created` (success) or `race_create_failed` (server-side
+   * rejection). Timeout after 5 s so a dropped response doesn't hang
+   * the caller's dialog forever.
+   */
+  async sendRaceCreate(body: {
+    invitedUserIds: string[]
+    distanceM: number
+  }): Promise<{ roomId: string }> {
+    if (!this.room) throw new Error("OrgRoomClient: not connected")
+    const room = this.room
+    return new Promise<{ roomId: string }>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        cleanup()
+        reject(new Error("race_create timed out"))
+      }, RACE_CREATE_TIMEOUT_MS)
 
-  // ─── RACE MESSAGES (Phase 2) ─────────────────────
-
-  /** Claim a racer slot during the lobby phase. */
-  sendRaceJoin(): void {
-    this.room?.send("race_join", {})
-  }
-
-  /** Update the move-key hold state on the server. */
-  sendRaceMove(moving: boolean): void {
-    this.room?.send("race_move", { moving })
-  }
-
-  /** Register a sprint-key tap on the server. */
-  sendRaceSprintTap(): void {
-    this.room?.send("race_sprint_tap", {})
+      const cleanup = (): void => {
+        window.clearTimeout(timeout)
+        okHandle?.()
+        failHandle?.()
+      }
+      const okHandle = room.onMessage("race_created", (msg: { roomId: string }) => {
+        cleanup()
+        resolve({ roomId: msg.roomId })
+      })
+      const failHandle = room.onMessage(
+        "race_create_failed",
+        (msg: { reason: string }) => {
+          cleanup()
+          reject(new Error(`race_create failed: ${msg.reason}`))
+        },
+      )
+      room.send("race_create", body)
+    })
   }
 
   /**
-   * Subscribe to the current race round state. Callback fires on every
-   * schema change; returns the live Colyseus schema object so the caller
-   * can read per-racer fields. Returns an unsubscribe function.
+   * Subscribe to changes in `OrgRoomState.activeRaces`. Called for every
+   * add/change/remove on the MapSchema, giving the watch banner enough
+   * signal to render itself. Returns an unsubscribe function.
    */
-  onRaceRoundChange(listener: (round: unknown) => void): () => void {
-    if (!this.room) return () => { /* no-op */ }
-    const state = this.room.state as { gameRound?: unknown; listen?: (k: string, cb: (v: unknown) => void) => unknown }
-    // The Colyseus SDK exposes `listen` on the root state for top-level
-    // field changes. GameRoundState is nested — we just surface it and
-    // let the caller attach a state-callbacks listener via getStateCallbacks.
-    listener(state.gameRound)
-    return () => { /* unsubscribe handled by getStateCallbacks in caller */ }
+  addActiveRaceListener(listener: (summaries: ActiveRaceSummary[]) => void): () => void {
+    this.activeRaceListeners.add(listener)
+    listener(Array.from(this.activeRaceSnapshots.values()))
+    return () => { this.activeRaceListeners.delete(listener) }
   }
 
-  /** Direct access to the underlying Colyseus room for advanced state listening. */
-  get raceRoom(): Room | null {
-    return this.room
+  /** Temporary dev tool: fire a simulated dev_activity for the current user. */
+  sendSimulateDevActivity(): void {
+    this.room?.send("simulate_dev_activity")
   }
 
   // ─── Member state query API (Phase 8) ────────────
@@ -350,6 +393,48 @@ export class OrgRoomClient {
     stateProxy.agents.onRemove((_agent, agentId) => {
       this.onAgentRemove?.(agentId)
     })
+
+    // Active-race map — drives the garden watch banner. One callback fires
+    // on every MapSchema mutation; we rebuild and publish the full list.
+    const emitActiveRaces = (): void => {
+      const list = Array.from(this.activeRaceSnapshots.values())
+      for (const listener of this.activeRaceListeners) {
+        try { listener(list) } catch (err) {
+          console.warn("[OrgRoomClient] active-race listener threw:", err)
+        }
+      }
+    }
+
+    stateProxy.activeRaces.onAdd((race, roomId) => {
+      this.activeRaceSnapshots.set(roomId, activeRaceToSnapshot(race))
+      emitActiveRaces()
+      $(race).onChange(() => {
+        this.activeRaceSnapshots.set(roomId, activeRaceToSnapshot(race))
+        emitActiveRaces()
+      })
+    }, true)
+
+    stateProxy.activeRaces.onRemove((_race, roomId) => {
+      this.activeRaceSnapshots.delete(roomId)
+      emitActiveRaces()
+    })
+  }
+}
+
+function activeRaceToSnapshot(r: RawActiveRace): ActiveRaceSummary {
+  return {
+    roomId:     r.roomId      ?? '',
+    hostUserId: r.hostUserId  ?? '',
+    hostName:   r.hostName    ?? '',
+    distanceM:  r.distanceM   ?? 0,
+    phase:      r.phase       ?? 'lobby',
+    racerCount: r.racerCount  ?? 0,
+    // ArraySchema on the wire behaves like ArrayLike — convert to a plain
+    // readonly string[] so downstream Vue code can `.includes()` without
+    // pulling the Colyseus proxy semantics into the frontend.
+    participantUserIds: r.participantUserIds
+      ? Array.from(r.participantUserIds as ArrayLike<string>)
+      : [],
   }
 }
 
@@ -359,6 +444,7 @@ export class OrgRoomClient {
 interface OrgRoomStateShape {
   members: Map<string, RawMember>
   agents: Map<string, RawAgent>
+  activeRaces: Map<string, RawActiveRace>
 }
 
 function memberToSnapshot(m: RawMember): MemberStateSnapshot {

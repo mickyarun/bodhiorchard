@@ -129,8 +129,7 @@ onMounted(() => { xpStore.fetchProfile() })
 // Load current selection from user profile, fallback to defaults
 const existing = parseCharacterModel(authStore.user?.character_model ?? null)
 const config = reactive<CharacterConfig>({
-  pack: 'kaykit',
-  characterId: existing.pack === 'kaykit' ? existing.characterId : 'barbarian',
+  characterId: existing.characterId,
   shirtColor: existing.shirtColor || DEFAULT_SHIRT_COLOR,
   pantsColor: existing.pantsColor || DEFAULT_PANTS_COLOR,
   skinColor: existing.skinColor || DEFAULT_SKIN_COLOR,
@@ -140,7 +139,6 @@ const config = reactive<CharacterConfig>({
 
 // Computed shallow copy for the preview (triggers reactivity on any change)
 const previewConfig = computed<CharacterConfig>(() => ({
-  pack: config.pack,
   characterId: config.characterId,
   shirtColor: config.shirtColor,
   pantsColor: config.pantsColor,
