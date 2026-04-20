@@ -368,6 +368,10 @@ export class BuildingFactory {
    * - Pole: thin wooden stick, ground to canopy base
    * - Canopy: inverted cone with enough height to look dome-like (~2:1 diameter:height)
    * - Finial: small sphere on top for classic parasol silhouette
+   *
+   * `canopyColor` + `cacheKey` let callers create multi-colored umbrella
+   * sets (e.g. poolside) without colliding on the shared 'umbrella_canopy'
+   * material cache entry. Omit both for the default red cafeteria parasol.
    */
   createUmbrella(
     parent: pc.Entity,
@@ -376,11 +380,13 @@ export class BuildingFactory {
     baseY = 0,
     poleHeight = 1.8,
     canopyRadius = 0.65,
+    canopyColor: [number, number, number] = [0.82, 0.18, 0.12],
+    cacheKey = 'umbrella_canopy',
   ): void {
     if (!this.materials) return
 
     const poleMat = this.materials.getColor('umbrella_pole', 0.45, 0.3, 0.18)
-    const canopyMat = this.materials.getColor('umbrella_canopy', 0.82, 0.18, 0.12)
+    const canopyMat = this.materials.getColor(cacheKey, ...canopyColor)
 
     const umbrella = new pc.Entity('Umbrella')
     umbrella.setLocalPosition(x, baseY, z)
