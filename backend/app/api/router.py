@@ -22,6 +22,8 @@ from app.api.v1.members import router as members_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.organizations import router as orgs_router
 from app.api.v1.public import router as public_router
+from app.api.v1.races import internal_router as races_internal_router
+from app.api.v1.races import router as races_router
 from app.api.v1.roles import router as roles_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.setup import router as setup_router
@@ -62,3 +64,5 @@ api_router.include_router(public_router, prefix="/api/v1/public")
 api_router.include_router(xp_router, prefix="/api/v1")
 api_router.include_router(mcp_router)
 api_router.include_router(internal_colyseus_router, prefix="/api/v1")
+api_router.include_router(races_router, prefix="/api/v1/races")
+api_router.include_router(races_internal_router, prefix="/api/v1")

@@ -14,7 +14,6 @@
  * renders them.
  */
 import type * as pc from 'playcanvas'
-import type { Application } from '../core/Application'
 import type { AssetLoader } from '../assets/AssetLoader'
 import { NetworkedPlayer } from '../../multiplayer/NetworkedPlayer'
 import type { PlayerData } from '../../multiplayer/ColyseusClient'
@@ -28,7 +27,6 @@ export class CoffeeBarRemotePlayers {
   constructor(
     private readonly root: pc.Entity,
     private readonly loader: AssetLoader,
-    private readonly app: Application,
     private readonly roomClient: CoffeeBarRoomClient,
     private readonly localUserId: string,
   ) {}
@@ -73,7 +71,7 @@ export class CoffeeBarRemotePlayers {
     this.spawning.add(player.userId)
     try {
       const np = new NetworkedPlayer(player.userId, player.name || 'Visitor')
-      await np.spawn(this.root, this.loader, this.app, player)
+      await np.spawn(this.root, this.loader, player)
       // A reconcile may have fired during the await; only keep this entity
       // if no other spawn for the same userId raced ahead of us.
       if (this.byUserId.has(player.userId)) {

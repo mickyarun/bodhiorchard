@@ -203,6 +203,12 @@ export interface EngineCallbacks {
   onHover?: (tooltip: { text: string; screenX: number; screenY: number } | null) => void
   onZoneEnter?: (zone: string) => void
   onZoneExit?: (zone: string) => void
+  /**
+   * Fires when the user clicks "Invite to race" on the proximity action
+   * panel. The Vue layer is expected to open `<RaceSetupDialog>` with
+   * the given member pre-selected.
+   */
+  onInviteToRace?: (userId: string, name: string) => void
 }
 
 // ─── Event Bus Types ────────────────────────────────

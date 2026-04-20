@@ -407,8 +407,11 @@ export class SceneManager {
     this.gardenBirds?.update(dt)
     this.gardenAnimals?.update(dt)
     this.agentSystem?.update(dt)
-    // CharacterSystem is a renderer only — positions come from OrgRoom state sync,
-    // there is no per-frame simulation to advance.
+    // CharacterSystem transform apply happens in POST-update (see
+    // CharacterSystem.build where the postUpdate listener is registered) so it
+    // runs after PlayCanvas's animationUpdate phase — otherwise the anim
+    // component's binding re-evaluates our setLocalRotation away and remote
+    // characters slide without turning.
   }
 
   /**

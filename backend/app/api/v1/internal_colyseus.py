@@ -10,6 +10,7 @@ via shared secret in the `X-Bridge-Secret` header.
 Endpoints:
     GET  /internal/colyseus/org-snapshot/{org_id}  — fetch org members + initial state
     POST /internal/colyseus/verify-token           — verify a user JWT (for room join)
+    POST /internal/colyseus/race-invite            — persist + WS-broadcast a race invitation
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +34,10 @@ from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.settings import PresenceSettings
 from app.services.org_settings import get_presence_settings
 from app.services.presence_cache import get_presence_state
+from app.services.race_invite_service import (
+    RaceInviteValidationError,
+    send_race_invite_notification,
+)
 from app.services.tree_data import get_tree_data
 
 logger = structlog.get_logger(__name__)
@@ -264,3 +270,83 @@ async def verify_user_token(
         "org_id": str(token_org_id) if token_org_id else "",
         "name": jwt_payload.get("name", ""),
     }
+
+
+class RaceInviteRequest(BaseModel):
+    """Body of the race-invite bridge call."""
+
+    org_id: uuid.UUID = Field(alias="orgId")
+    recipient_user_id: uuid.UUID = Field(alias="recipientUserId")
+    host_user_id: uuid.UUID = Field(alias="hostUserId")
+    host_name: str = Field(alias="hostName")
+    room_id: str = Field(alias="roomId")
+    distance_m: int = Field(alias="distanceM")
+
+    model_config = {"populate_by_name": True}
+
+
+class RaceInviteResponse(BaseModel):
+    """Success response for a persisted + published race invite."""
+
+    notification_id: uuid.UUID = Field(alias="notificationId")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.post("/race-invite", response_model=RaceInviteResponse)
+async def post_race_invite(
+    body: RaceInviteRequest,
+    _: None = Depends(_verify_bridge_secret),
+    db: AsyncSession = Depends(get_db),
+) -> RaceInviteResponse:
+    """Persist a race invitation and push it over the recipient's WS topic.
+
+    Called by the multiplayer server (via `BackendClient.postRaceInvite`)
+    once per invitee when a host creates a race room. Validates the
+    recipient is actually a member of the given org before writing so a
+    compromised bridge can't spam notifications across tenants.
+    """
+    # Org-membership check — prevents the bridge from addressing a user
+    # who doesn't belong to the claimed org. The existing
+    # ``OrgToUser`` table is the authoritative membership record.
+    stmt = select(OrgToUser.user_id).where(
+        OrgToUser.org_id == body.org_id,
+        OrgToUser.user_id == body.recipient_user_id,
+    )
+    membership = await db.execute(stmt)
+    if membership.scalar_one_or_none() is None:
+        logger.warning(
+            "race_invite_recipient_not_in_org",
+            org_id=str(body.org_id),
+            recipient_user_id=str(body.recipient_user_id),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recipient is not a member of the specified organization",
+        )
+
+    try:
+        notif_id = await send_race_invite_notification(
+            db,
+            org_id=str(body.org_id),
+            recipient_user_id=str(body.recipient_user_id),
+            host_user_id=str(body.host_user_id),
+            host_name=body.host_name,
+            room_id=body.room_id,
+            distance_m=body.distance_m,
+        )
+    except RaceInviteValidationError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(err),
+        ) from err
+
+    await db.commit()
+    logger.info(
+        "race_invite_persisted",
+        notification_id=str(notif_id),
+        recipient_user_id=str(body.recipient_user_id),
+        room_id=body.room_id,
+        distance_m=body.distance_m,
+    )
+    return RaceInviteResponse(notification_id=notif_id)

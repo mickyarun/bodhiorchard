@@ -13,9 +13,10 @@
 import { Schema, MapSchema, type } from "@colyseus/schema"
 import { MemberState } from "./MemberState"
 import { AgentState } from "./AgentState"
+import { ActiveRaceSummary } from "./ActiveRaceSummary"
 
 export class OrgRoomState extends Schema {
-  @type("string") version = "1.0.0"
+  @type("string") version = "1.2.0"
   @type("string") orgId = ""
 
   /** All members keyed by user_id. */
@@ -23,4 +24,12 @@ export class OrgRoomState extends Schema {
 
   /** All active agent robots keyed by agentId (typically task_id). */
   @type({ map: AgentState }) agents = new MapSchema<AgentState>()
+
+  /**
+   * Active races keyed by roomId. Garden viewers subscribe to this map
+   * to render the "X is racing — Watch →" banner and click through to
+   * `/raceview/{roomId}`. Entries are added by OrgRoom's `race_create`
+   * handler and removed when the RaceRoom disposes.
+   */
+  @type({ map: ActiveRaceSummary }) activeRaces = new MapSchema<ActiveRaceSummary>()
 }

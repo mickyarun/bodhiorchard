@@ -22,6 +22,29 @@ import { parseCharacterModel } from './CharacterConfig'
 import { createLevelBadge } from './LevelBadge'
 import { disposeMaterial } from '../utils/EntityUtils'
 
+/**
+ * Per-character target the renderer lerps toward. The target is written by
+ * server snapshots (~20Hz); update(dt) reads it every render frame (60Hz)
+ * and re-applies both position and rotation.
+ *
+ * Why per-frame apply and not per-snapshot: the anim component, while a
+ * walk/sprint state is active, re-evaluates its bindings during PlayCanvas's
+ * internal update phase and can overwrite the wrapper's transform between
+ * snapshots. Re-applying every frame is the same pattern NetworkedPlayer uses
+ * for cafeteria/coffeebar; CharacterSystem previously lacked this loop.
+ */
+interface RenderTarget {
+  x: number
+  y: number
+  z: number
+  yaw: number
+  /** Seated avatars snap (no position lerp) so they don't drift off the chair. */
+  seated: boolean
+}
+
+/** Position interpolation — snappy enough to keep up with a sprinting player. */
+const POSITION_LERP = 0.25
+
 /** Minimum snapshot shape needed to spawn/update a server-driven character. */
 export interface CharacterSnapshot {
   userId: string
@@ -64,6 +87,9 @@ export class CharacterSystem {
   // hidden when interior mode sets gardenRoot.enabled = false.
   private characterRoot: pc.Entity | null = null
 
+  /** Bound postUpdate handler so we can unregister it in destroy(). */
+  private readonly _postUpdateHandler = (_dt: number): void => this.update(_dt)
+
   /** Exposed so interior modes (cafeteria, coffee bar) can hide org-member
    *  avatars explicitly. Usually redundant — characterRoot is reparented
    *  into gardenRoot — but acts as a safety net. */
@@ -75,6 +101,17 @@ export class CharacterSystem {
 
   // Track pending spawns to prevent duplicate async spawn races
   private spawning = new Set<string>()
+
+  /** Scratch quaternion reused across all characters within a single update() tick. */
+  private readonly _yawQuat = new pc.Quat()
+
+  /**
+   * Latest server snapshot target per user. Written by updateFromSnapshot(),
+   * consumed by update(dt). Characters excluded here have their transforms
+   * driven elsewhere (local takeover, vehicle mounts, interior hidden) — see
+   * `shouldSkipTransformApply` for the full rule set.
+   */
+  private readonly renderTargets = new Map<string, RenderTarget>()
 
   /** Optional callback to check if a user is mounted (set by GardenEngine). */
   isUserMounted: ((userId: string) => boolean) | null = null
@@ -98,6 +135,13 @@ export class CharacterSystem {
     this.app = app
     this.characterRoot = new pc.Entity('CharacterRoot')
     app.root.addChild(this.characterRoot)
+    // Register on POST-update, not update. PlayCanvas fires the 'update' event
+    // BEFORE animationUpdate (the phase where the anim component evaluates its
+    // bindings and writes transforms). If we applied on 'update', anim would
+    // overwrite our setLocalRotation every frame — the symptom being remote
+    // characters sliding without visibly turning. 'postUpdate' fires after
+    // animationUpdate, so our write is the last one before render.
+    app.app.on('postUpdate', this._postUpdateHandler)
   }
 
   // ─── Server-Driven Rendering ───────────────────
@@ -197,8 +241,16 @@ export class CharacterSystem {
     // Their position is driven by VehicleSystem (parented to the horse entity).
     if (this.isUserMounted?.(snapshot.userId)) return
 
-    character.entity.setPosition(snapshot.x, snapshot.y, snapshot.z)
-    character.entity.setEulerAngles(0, snapshot.yaw, 0)
+    // Record the target. The per-frame update(dt) loop applies it every render
+    // frame so the anim component can't clobber the transform between snapshots.
+    const seated = snapshot.animState === 'sit' || snapshot.animState === 'sleep'
+    this.renderTargets.set(snapshot.userId, {
+      x: snapshot.x,
+      y: snapshot.y,
+      z: snapshot.z,
+      yaw: snapshot.yaw,
+      seated,
+    })
 
     const anim = character.entity.anim
     if (anim) {
@@ -219,8 +271,47 @@ export class CharacterSystem {
     }
   }
 
+  /**
+   * Per-frame transform apply. Called from SceneManager.update(dt). Mirrors
+   * NetworkedPlayer.update() in intent: re-apply position and rotation on
+   * every render frame so the anim component's internal binding can't
+   * overwrite them between 20Hz server snapshots.
+   *
+   * Rotation is applied directly (no lerp) — drives straight to target yaw
+   * via quaternion. Position is lerped toward target for smooth motion.
+   */
+  update(_dt: number): void {
+    for (const [userId, target] of this.renderTargets) {
+      if (userId === this.takeoverUserId) continue
+      const character = this.getCharacter(userId)
+      if (!character || !character.entity.enabled) continue
+      if (this.isUserMounted?.(userId)) continue
+
+      const entity = character.entity
+      if (target.seated) {
+        entity.setPosition(target.x, target.y, target.z)
+      } else {
+        const pos = entity.getPosition()
+        entity.setPosition(
+          pos.x + (target.x - pos.x) * POSITION_LERP,
+          pos.y + (target.y - pos.y) * POSITION_LERP,
+          pos.z + (target.z - pos.z) * POSITION_LERP,
+        )
+      }
+
+      // Rotation: build a pure-Y quaternion from target yaw and set it
+      // directly. No read-back of getEulerAngles() — we own the target value,
+      // and round-tripping through Euler decomposition returns a gimbal-
+      // flipped (180, y', 180) form for some yaw values that breaks naive
+      // delta math. setLocalRotation is the lowest-overhead write path.
+      this._yawQuat.setFromEulerAngles(0, target.yaw, 0)
+      entity.setLocalRotation(this._yawQuat)
+    }
+  }
+
   /** Remove a character by userId (when server MemberState is removed). */
   removeByUserId(userId: string): void {
+    this.renderTargets.delete(userId)
     const idx = this.characters.findIndex(c => c.memberId === userId)
     if (idx === -1) return
     const character = this.characters[idx]
@@ -239,6 +330,9 @@ export class CharacterSystem {
    */
   setTakeoverUser(userId: string | null): void {
     this.takeoverUserId = userId
+    // The locally-controlled avatar owns its own transform — drop the server
+    // target so update(dt) doesn't fight the WASD controller.
+    if (userId) this.renderTargets.delete(userId)
   }
 
   /** Get all character entities (used by interaction picking). */
@@ -257,6 +351,8 @@ export class CharacterSystem {
   }
 
   destroy(): void {
+    // Unregister the postUpdate handler before app teardown.
+    this.app?.app.off('postUpdate', this._postUpdateHandler)
     // Destroy the parent first — all children are destroyed recursively.
     // But we still iterate to unregister billboards and dispose GPU resources.
     for (const char of this.characters) {
@@ -277,6 +373,7 @@ export class CharacterSystem {
       char.entity.destroy()
     }
     this.characters = []
+    this.renderTargets.clear()
     this.characterRoot?.destroy()
     this.characterRoot = null
     this.app = null
