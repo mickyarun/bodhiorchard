@@ -15,8 +15,9 @@
  */
 import * as pc from 'playcanvas'
 import { VehicleFactory, type VehicleEntity } from './VehicleFactory'
-import { getVehicleDef } from './VehicleManifest'
+import { getVehicleDef, type VehicleDef } from './VehicleManifest'
 import type { AssetLoader } from '../assets/AssetLoader'
+import { lerpPose, POSITION_LERP, type PoseState } from '../multiplayer/RemoteInterp'
 
 export interface VehicleSnapshot {
   userId: string
@@ -24,6 +25,43 @@ export interface VehicleSnapshot {
   x: number
   z: number
   yaw: number
+}
+
+/**
+ * Per-vehicle interpolation + anim-state record. Extends the shared PoseState
+ * with vehicle-specific bookkeeping (last update time + applied gait).
+ */
+interface MotionSample extends PoseState {
+  /** performance.now() ms when the target was last updated. */
+  t: number
+  /** Last applied anim `speed` (0/1/2) — avoids redundant setInteger calls. */
+  lastSpeed: number
+  /** Cached gait thresholds for this vehicle (computed once at spawn). */
+  thresholds: { idleMax: number; walkMax: number }
+}
+
+/**
+ * Colyseus only broadcasts patches when state changes. When a rider stops
+ * moving, no new position snapshot arrives for the horse — so updateVehicle-
+ * Animation can't re-evaluate. If the last sample is older than this
+ * threshold, the per-frame update() force-transitions the horse to Idle.
+ */
+const STALE_SAMPLE_MS = 150
+
+/**
+ * Assumed base walking speed (m/s) when a vehicle def doesn't declare explicit
+ * gait thresholds. Matches TakeoverController's WALK_SPEED — the horse's
+ * `speedMultiplier` scales this to its walk speed, and gallop is 2× walk.
+ */
+const BASE_WALK_SPEED = 3.0
+
+/** Derive gait velocity thresholds for a vehicle. Uses def overrides if set. */
+function resolveGaitThresholds(def: VehicleDef): { idleMax: number; walkMax: number } {
+  if (def.gaitThresholds) return def.gaitThresholds
+  const walkSpeed = BASE_WALK_SPEED * def.speedMultiplier
+  // idleMax: dead-band just above zero so 20Hz jitter doesn't flicker idle↔walk
+  // walkMax: midpoint between walk and gallop (2× walk)
+  return { idleMax: walkSpeed * 0.1, walkMax: walkSpeed * 1.5 }
 }
 
 export class VehicleSystem {
@@ -38,6 +76,8 @@ export class VehicleSystem {
   private localUserId: string | null = null
   /** Set of userIds currently mounted — used by CharacterSystem to skip position updates. */
   private mountedUsers = new Set<string>()
+  /** Last position sample per user for deriving horse gait from snapshot delta. */
+  private motionSamples = new Map<string, MotionSample>()
 
   constructor(loader: AssetLoader, parentRoot: pc.Entity) {
     this.factory = new VehicleFactory(loader)
@@ -89,9 +129,110 @@ export class VehicleSystem {
       // Dismount: remove vehicle
       this.removeVehicle(snapshot.userId)
     } else if (snapshot.vehicleId && existingVehicle) {
-      // Update: move existing vehicle
-      existingVehicle.entity.setPosition(snapshot.x, 0, snapshot.z)
-      existingVehicle.entity.setEulerAngles(0, snapshot.yaw, 0)
+      // Update: record target + drive anim state. Actual transform application
+      // is lerped in the per-frame update() loop so 20Hz snapshots don't cause
+      // visible flicker between frames.
+      this.updateVehicleAnimation(snapshot, existingVehicle)
+    }
+  }
+
+  /**
+   * Per-frame tick. Two responsibilities:
+   *   1. Lerp each remote horse's transform from its last-applied pose toward
+   *      the server-authoritative target. Without this the horse snaps 20×/s
+   *      to discrete snapshot poses, which reads as flicker during a gallop.
+   *   2. Force stopped horses back to Idle — Colyseus only broadcasts patches
+   *      on state change, so when the rider stops moving no new snapshot
+   *      arrives and the velocity-from-delta code inside updateFromSnapshot
+   *      never runs, leaving the horse stuck in Walk/Gallop forever.
+   */
+  update(): void {
+    const now = performance.now()
+    for (const [userId, sample] of this.motionSamples) {
+      const vehicle = this.vehicles.get(userId)
+      if (!vehicle) continue
+
+      // (1) Position + yaw lerp. Shared interp helper — never reads back from
+      // the entity (the anim component may write the horse's transform
+      // between ticks, which would destabilise the lerp source).
+      lerpPose(sample, POSITION_LERP)
+      vehicle.entity.setPosition(sample.currentX, sample.currentY, sample.currentZ)
+      vehicle.entity.setEulerAngles(0, sample.currentYaw, 0)
+
+      // (2) Force-idle if no snapshot arrived recently.
+      if (sample.lastSpeed !== 0 && now - sample.t >= STALE_SAMPLE_MS) {
+        const anim = vehicle.entity.anim
+        if (anim) {
+          anim.setInteger('speed', 0)
+          sample.lastSpeed = 0
+        }
+      }
+    }
+  }
+
+  /**
+   * Derive the horse's gait (Idle/Walk/Gallop) from position delta between
+   * server snapshots and apply it to the anim component. Server only
+   * broadcasts position/yaw for vehicles; the gait has to be estimated
+   * client-side.
+   */
+  private updateVehicleAnimation(
+    snapshot: VehicleSnapshot,
+    vehicle: VehicleEntity,
+  ): void {
+    const anim = vehicle.entity.anim
+    if (!anim) return
+
+    const now = performance.now()
+    const prev = this.motionSamples.get(snapshot.userId)
+
+    let desiredSpeed: number
+    const thresholds = prev?.thresholds ?? resolveGaitThresholds(vehicle.def)
+    if (!prev) {
+      // First sample — no delta to compute yet; stay in Idle.
+      desiredSpeed = 0
+    } else {
+      const dt = (now - prev.t) / 1000  // seconds
+      if (dt <= 0) return  // duplicate tick; skip
+      const dx = snapshot.x - prev.targetX
+      const dz = snapshot.z - prev.targetZ
+      const velocity = Math.sqrt(dx * dx + dz * dz) / dt
+
+      if (velocity < thresholds.idleMax) desiredSpeed = 0
+      else if (velocity < thresholds.walkMax) desiredSpeed = 1
+      else desiredSpeed = 2
+    }
+
+    if (!prev || prev.lastSpeed !== desiredSpeed) {
+      anim.setInteger('speed', desiredSpeed)
+    }
+
+    // Mutate in place if we have a prior sample — saves a per-patch allocation
+    // at 20Hz × N mounted users. First sample seeds current* from the entity's
+    // spawn pose so the lerp doesn't fly in from (0,0,0).
+    if (prev) {
+      prev.targetX = snapshot.x
+      prev.targetY = 0
+      prev.targetZ = snapshot.z
+      prev.targetYaw = snapshot.yaw
+      prev.t = now
+      prev.lastSpeed = desiredSpeed
+    } else {
+      const pos = vehicle.entity.getPosition()
+      const yaw = vehicle.entity.getEulerAngles().y
+      this.motionSamples.set(snapshot.userId, {
+        targetX: snapshot.x,
+        targetY: 0,
+        targetZ: snapshot.z,
+        targetYaw: snapshot.yaw,
+        currentX: pos.x,
+        currentY: pos.y,
+        currentZ: pos.z,
+        currentYaw: yaw,
+        t: now,
+        lastSpeed: desiredSpeed,
+        thresholds,
+      })
     }
   }
 
@@ -149,6 +290,7 @@ export class VehicleSystem {
     this.factory.destroy(vehicle)
     this.vehicles.delete(userId)
     this.mountedUsers.delete(userId)
+    this.motionSamples.delete(userId)
   }
 
   /**
@@ -160,5 +302,6 @@ export class VehicleSystem {
     }
     this.vehicles.clear()
     this.characterEntities.clear()
+    this.motionSamples.clear()
   }
 }
