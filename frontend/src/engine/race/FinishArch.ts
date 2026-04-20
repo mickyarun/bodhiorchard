@@ -44,16 +44,12 @@ const PENNANT_COLORS: Array<[number, number, number]> = [
 ]
 
 /**
- * Euler angles that stand a horizontal `pc.Plane` up vertically and rotate
- * it so its front face points toward the approaching runners (-X side).
- *
- * FIX HISTORY: the old implementation pre-mirrored the canvas + used a
- * negative X scale hoping the two flips would cancel. They didn't — the
- * plane's visible face (under CULLFACE_NONE) depended on camera angle
- * and viewers consistently saw "HSINIF". New approach: two opposing
- * planes, each with plain text, CULLFACE_BACK. The front-facing plane
- * is readable to approaching racers, the back-facing one to the
- * spectator camera once racers have crossed.
+ * Euler angles that stand a horizontal `pc.Plane` up vertically. The
+ * FRONT Y-rotation points the face toward approaching runners (-X);
+ * the BACK rotation points the other face toward the post-finish
+ * spectator camera (+X). Each plane is CULLFACE_BACK with its own
+ * texture — see `makeFinishTexture`'s `mirrorU` arg for why the
+ * front texture is pre-mirrored.
  */
 const BANNER_FRONT_EULER_X_DEG = -90
 const BANNER_FRONT_EULER_Y_DEG = 90
@@ -69,7 +65,7 @@ export interface FinishArchOptions {
 export class FinishArch {
   private root: pc.Entity | null = null
   private materials: pc.StandardMaterial[] = []
-  private bannerTexture: pc.Texture | null = null
+  private bannerTextures: pc.Texture[] = []
 
   build(parent: pc.Entity, device: pc.GraphicsDevice, opts: FinishArchOptions): void {
     const root = new pc.Entity('FinishArch')
@@ -100,15 +96,21 @@ export class FinishArch {
     beam.setLocalPosition(0, BEAM_HEIGHT_M, 0)
     root.addChild(beam)
 
-    // Two back-to-back banners. Each is one-sided (CULLFACE_BACK), drawing
-    // "FINISH" normally on the canvas, with a rotation that makes the
-    // front-face point at the relevant viewer. No UV mirror trick — the
-    // cancelled-flip approach used to intermittently show "HSINIF".
-    const texture = this.makeFinishTexture(device)
-    this.bannerTexture = texture
-    const mat = this.makeBannerMaterial(texture)
-    root.addChild(this.buildBannerPlane(mat, opts.trackWidthM * BANNER_WIDTH_RATIO, BANNER_FRONT_EULER_Y_DEG, 'FinishBanner_Front'))
-    root.addChild(this.buildBannerPlane(mat, opts.trackWidthM * BANNER_WIDTH_RATIO, BANNER_BACK_EULER_Y_DEG, 'FinishBanner_Back'))
+    // Two back-to-back banners, each one-sided (CULLFACE_BACK) so the
+    // opposite plane's back face doesn't show through. Both planes
+    // share an X-rotation of -90 that maps UV +V (canvas-top) to world
+    // -Y (down) — so every banner texture needs V flipped on the
+    // canvas, otherwise text renders upside-down. They differ on U:
+    // the front plane also flips U (reads right-to-left from its
+    // viewer), while the back plane's U is already correct. Hence
+    // front = rotate 180° (flip both), back = flip V only.
+    const frontTex = this.makeFinishTexture(device, { flipU: true, flipV: true })
+    const backTex = this.makeFinishTexture(device, { flipU: false, flipV: true })
+    this.bannerTextures.push(frontTex, backTex)
+    const frontMat = this.makeBannerMaterial(frontTex)
+    const backMat = this.makeBannerMaterial(backTex)
+    root.addChild(this.buildBannerPlane(frontMat, opts.trackWidthM * BANNER_WIDTH_RATIO, BANNER_FRONT_EULER_Y_DEG, 'FinishBanner_Front'))
+    root.addChild(this.buildBannerPlane(backMat, opts.trackWidthM * BANNER_WIDTH_RATIO, BANNER_BACK_EULER_Y_DEG, 'FinishBanner_Back'))
 
     // Pennants across the top of the beam — simple coloured triangles
     // (approximated with thin rotated planes) spaced evenly. Adds a
@@ -151,8 +153,8 @@ export class FinishArch {
     disposeEntity(this.root)
     this.root = null
 
-    safeDestroyTexture(this.bannerTexture)
-    this.bannerTexture = null
+    for (const tex of this.bannerTextures) safeDestroyTexture(tex)
+    this.bannerTextures = []
 
     for (const mat of this.materials) safeDestroyMaterial(mat)
     this.materials = []
@@ -210,11 +212,24 @@ export class FinishArch {
     return entity
   }
 
-  private makeFinishTexture(device: pc.GraphicsDevice): pc.Texture {
+  private makeFinishTexture(device: pc.GraphicsDevice, flips: { flipU: boolean; flipV: boolean }): pc.Texture {
     const canvas = document.createElement('canvas')
     canvas.width = BANNER_CANVAS_W
     canvas.height = BANNER_CANVAS_H
     const ctx = canvas.getContext('2d')!
+
+    // Apply UV-compensation flips BEFORE any drawing so background,
+    // checkers, and text all transform together. The red fill and
+    // checker stripes are symmetric so only the text orientation
+    // visibly changes.
+    if (flips.flipU) {
+      ctx.translate(BANNER_CANVAS_W, 0)
+      ctx.scale(-1, 1)
+    }
+    if (flips.flipV) {
+      ctx.translate(0, BANNER_CANVAS_H)
+      ctx.scale(1, -1)
+    }
 
     // Red banner background (classic racing finish).
     ctx.fillStyle = '#d22222'
@@ -232,8 +247,6 @@ export class FinishArch {
       }
     }
 
-    // FINISH text drawn normally — orientation is handled by the plane
-    // rotation in buildBannerPlane(), no canvas-side flipping required.
     ctx.fillStyle = '#ffffff'
     ctx.font = 'bold 140px sans-serif'
     ctx.textAlign = 'center'
