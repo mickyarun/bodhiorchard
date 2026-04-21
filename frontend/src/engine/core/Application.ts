@@ -56,10 +56,12 @@ export class Application {
     this.app.resizeCanvas(width, height)
 
     // ─── Scene lighting: THE fix for black models ─────────────
-    this.app.scene.ambientLight = new pc.Color(0.4, 0.4, 0.45)
+    // Slightly warm ambient tint for golden-hour feel (was cool 0.4/0.4/0.45).
+    this.app.scene.ambientLight = new pc.Color(0.48, 0.45, 0.40)
 
     const scene = this.app.scene as unknown as Record<string, unknown>
-    scene.exposure = 1.2
+    // Bumped exposure for more punch — scene read as muddy at 1.2.
+    scene.exposure = 1.35
 
     // Fog (v2.17+: scene.fog is a read-only getter, set properties on it)
     const fog = (this.app.scene as unknown as { fog: Record<string, unknown> }).fog
@@ -96,12 +98,13 @@ export class Application {
     this.camera.lookAt(0, 0, 0)
     this.root.addChild(this.camera)
 
-    // Sun — primary directional light
+    // Sun — primary directional light. Warmer color + higher intensity
+    // for golden-afternoon tone. Pairs with cool fill for temperature split.
     this.sun = new pc.Entity('Sun')
     this.sun.addComponent('light', {
       type: 'directional',
-      color: new pc.Color(1, 0.97, 0.9),
-      intensity: 1.8,
+      color: new pc.Color(1.0, 0.90, 0.74),
+      intensity: 2.1,
       castShadows: true,
       shadowBias: 0.05,
       normalOffsetBias: 0.05,
@@ -111,12 +114,14 @@ export class Application {
     this.sun.setEulerAngles(50, -30, 0)
     this.root.addChild(this.sun)
 
-    // Fill light from opposite side (sky bounce)
+    // Cool fill light from opposite side (sky bounce). Slightly cooler +
+    // brighter than before so shadow sides read as "sky-lit" rather than
+    // "dark" — this is what gives pro scenes depth without flat shadows.
     const fillSky = new pc.Entity('FillSky')
     fillSky.addComponent('light', {
       type: 'directional',
-      color: new pc.Color(0.6, 0.7, 0.9),
-      intensity: 0.6,
+      color: new pc.Color(0.55, 0.68, 0.92),
+      intensity: 0.75,
       castShadows: false,
     })
     fillSky.setEulerAngles(-60, 45, 0)
