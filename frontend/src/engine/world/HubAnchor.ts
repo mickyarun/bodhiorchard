@@ -86,14 +86,22 @@ export class HubAnchor {
   }
 
   /**
-   * Flat cobble disc at ground level. Uses the same pattern as
+   * Flat cobble disc just above ground level. Uses the same pattern as
    * StandupPavilion.createStonePatch — cylinder primitive scaled very thin.
+   *
+   * The plaza is lifted so its bottom face sits at y=0.02 rather than
+   * coplanar with the ground. A PlayCanvas cylinder primitive defaults to
+   * unit height centered at origin, so after scaling height by 0.02 the
+   * bottom face is at (localY - 0.01). Using localY=0.03 puts the bottom
+   * at y=0.02 (clear of the ground) and top at y=0.04. This clearance
+   * also keeps it above path decals (wear y=0.008, strip y=0.015, zone
+   * overlay y=0.02) in case a future layout tweak overlaps their XZ.
    */
   private createPlaza(parent: pc.Entity): void {
     const plaza = new pc.Entity('HubPlaza')
     plaza.addComponent('render', { type: 'cylinder' })
     plaza.setLocalScale(PLAZA_RADIUS * 2, 0.02, PLAZA_RADIUS * 2)
-    plaza.setLocalPosition(0, 0.01, 0)
+    plaza.setLocalPosition(0, 0.03, 0)
 
     const mat = new pc.StandardMaterial()
     this.materials.push(mat)
@@ -116,10 +124,11 @@ export class HubAnchor {
     const mound = new pc.Entity('HubMound')
     mound.addComponent('render', { type: 'cylinder' })
     mound.setLocalScale(MOUND_RADIUS * 2, MOUND_HEIGHT, MOUND_RADIUS * 2)
-    // Cylinder primitive is centered at origin and unit height, so after
-    // scaling by MOUND_HEIGHT we sit its base at y=0.02 (just above the
-    // plaza) by translating up half the scaled height.
-    mound.setLocalPosition(0, 0.02 + MOUND_HEIGHT / 2, 0)
+    // Cylinder primitive is unit-height centered at origin, so after
+    // scaling by MOUND_HEIGHT its bottom face sits at (localY - MH/2).
+    // Plaza top is now at y=0.04 — seat the mound with 0.01 clearance
+    // above it (bottom at y=0.05) so they aren't coplanar either.
+    mound.setLocalPosition(0, 0.05 + MOUND_HEIGHT / 2, 0)
 
     const mat = new pc.StandardMaterial()
     this.materials.push(mat)
@@ -139,8 +148,10 @@ export class HubAnchor {
    * y=MOUND_HEIGHT regardless of the source model's pivot offset).
    */
   private async placeHubTree(parent: pc.Entity): Promise<void> {
+    // Mound top is at y = 0.05 + MOUND_HEIGHT (see createMound). Plant the
+    // tree trunk at that exact y so its base sits on the mound surface.
     const tree = await this.factory.placeFurnitureCentered(
-      parent, DECOR.hubTree, 0, MOUND_HEIGHT, 0,
+      parent, DECOR.hubTree, 0, 0.05 + MOUND_HEIGHT, 0,
     )
     // Uniform scale-up for hero treatment. placeFurnitureCentered stashes
     // the AABB-corrected local position; multiplying scale after placement
@@ -176,7 +187,8 @@ export class HubAnchor {
       // Random yaw breaks the perfect radial symmetry — ring reads as
       // "planted" rather than "procedurally generated asterisk."
       const yaw = (i * 47) % 360
-      const entity = await this.factory.placeFurniture(parent, path, fx, 0.02, fz, yaw)
+      // Plaza top is at y=0.04 (see createPlaza); seat bushes/flowers there.
+      const entity = await this.factory.placeFurniture(parent, path, fx, 0.04, fz, yaw)
       // Scale flower accents up — their default size is invisible at the
       // zoom-out camera that dominates the garden view.
       if (path === DECOR.flowerRedA || path === DECOR.flowerPurpleA) {
