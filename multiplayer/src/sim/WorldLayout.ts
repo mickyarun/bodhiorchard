@@ -2,36 +2,20 @@
 // Copyright (C) 2026 Arun Rajkumar
 
 /**
- * WorldLayout — Shared layout data mirrored from frontend.
+ * WorldLayout — Server-side layout helpers.
  *
- * Must match:
- *   - `frontend/src/engine/world/WorldLayout.ts` — ZONES
- *   - `frontend/src/engine/buildings/VillageLayout.ts` — house placement algorithm
+ * Zone data (ZONES, Zone, getZone) comes from `@shared/world/zones` —
+ * the SAME source the frontend uses. When you move a zone, edit
+ * shared/world/zones.ts ONLY; both sides pick up the change.
  *
- * Used by the server to compute initial member placement without rendering.
+ * This file still owns server-specific layout math that mirrors
+ * frontend/src/engine/buildings/VillageLayout.ts + HouseTierConfig.ts
+ * (house placement, desk/bed seat positions). Those haven't been
+ * shared yet; when they are, this file can shrink further.
  */
 
-export interface Zone {
-  name: string
-  x: number
-  z: number
-  radius: number
-}
-
-/** Mirror of frontend ZONES array. Keep in sync. */
-export const ZONES: Zone[] = [
-  { name: "orchard",    x: 0,    z: 0,    radius: 22 },
-  { name: "coffee_bar", x: -28,  z: -20,  radius: 8 },
-  { name: "cafeteria",  x: 28,   z: -20,  radius: 9 },
-  { name: "housing",    x: -30,  z: 22,   radius: 14 },
-  { name: "pool",       x: 30,   z: 22,   radius: 10 },
-  { name: "pavilion",   x: 0,    z: -32,  radius: 6 },
-]
-
-/** Get a zone by name. */
-export function getZone(name: string): Zone | null {
-  return ZONES.find(z => z.name === name) ?? null
-}
+export { ZONES, getZone, type Zone } from "../../../shared/world/zones"
+import { getZone } from "../../../shared/world/zones"
 
 // ─── VillageLayout constants (mirror frontend/src/engine/buildings/VillageLayout.ts) ───
 
@@ -190,40 +174,8 @@ export function getHouseBedPosition(
 }
 
 // ─── Tree positions (repo trees in orchard) ─────
-
-export function getTreePositions(count: number): Array<{ x: number; z: number }> {
-  const orchard = getZone("orchard")
-  if (!orchard) return []
-  const positions: Array<{ x: number; z: number }> = []
-
-  if (count <= 8) {
-    const arcRadius = orchard.radius * 0.65
-    for (let i = 0; i < count; i++) {
-      const angle = (i / Math.max(count - 1, 1)) * Math.PI * 1.5 - Math.PI * 0.75
-      positions.push({
-        x: orchard.x + Math.cos(angle) * arcRadius,
-        z: orchard.z + Math.sin(angle) * arcRadius,
-      })
-    }
-  } else {
-    const rings = Math.ceil(count / 6)
-    let placed = 0
-    for (let ring = 0; ring < rings && placed < count; ring++) {
-      const ringRadius = orchard.radius * 0.3 + (ring * orchard.radius * 0.65) / rings
-      const perRing = Math.min(6 + ring * 2, count - placed)
-      for (let i = 0; i < perRing && placed < count; i++) {
-        const angle = (i / perRing) * Math.PI * 2 + ring * 0.5
-        positions.push({
-          x: orchard.x + Math.cos(angle) * ringRadius,
-          z: orchard.z + Math.sin(angle) * ringRadius,
-        })
-        placed++
-      }
-    }
-  }
-
-  return positions
-}
+// Re-export from shared so client + server agree byte-for-byte.
+export { getTreePositions } from "../../../shared/world/treePositions"
 
 // Break zone seats are now generated dynamically by BreakSeatGenerator.ts
 // based on team size. See generateBreakSeats(teamSize) for the layout
