@@ -4,34 +4,27 @@
 /**
  * WorldLayout — Master layout: zone positions + exclusion zones + seat registry.
  *
- * Defines world zones as named circles. Every building/tree system
- * uses this to know WHERE to place things. Scatter systems (grass, rocks)
- * use the exclusion zones to avoid placing inside buildings.
+ * Zone coordinates and tiers come from `@shared/world/zones` so the
+ * multiplayer server and the client stay in sync automatically. To
+ * move a zone, edit shared/world/zones.ts — NOT this file.
  */
+import { ZONES as SHARED_ZONES, type Zone, type ZoneTier } from '@shared/world/zones'
+import { getTreePositions as sharedGetTreePositions } from '@shared/world/treePositions'
 import type { ExclusionZone } from '../utils/MathUtils'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 
 /** Backward-compatible alias — use InteractionPoint in new code. */
 export type SeatSlot = InteractionPoint
 
-// ─── Zone Definitions ───────────────────────────
+// ─── Zone Definitions (re-export from shared) ───────────────────────────
 
-export interface WorldZone {
-  name: string
-  x: number
-  z: number
-  radius: number
-}
+export type { ZoneTier }
 
-/** Fixed zone positions — spaced out for TILE_SIZE=1 with larger orchard. */
-const ZONES: WorldZone[] = [
-  { name: 'orchard',    x: 0,    z: 0,    radius: 22 },
-  { name: 'coffee_bar', x: -28,  z: -20,  radius: 8 },
-  { name: 'cafeteria',  x: 28,   z: -20,  radius: 9 },
-  { name: 'housing',    x: -30,  z: 22,   radius: 14 },
-  { name: 'pool',       x: 30,   z: 22,   radius: 10 },
-  { name: 'pavilion',   x: 0,    z: -32,  radius: 6 },
-]
+/** Client-side alias of the shared Zone type. Kept as WorldZone for
+ *  historical reasons — many builders import WorldZone directly. */
+export type WorldZone = Zone
+
+const ZONES: WorldZone[] = SHARED_ZONES
 
 export class WorldLayout {
   private zones: WorldZone[]
@@ -122,43 +115,10 @@ export class WorldLayout {
 
   // ─── Tree Positions ───────────────────────────
 
-  /**
-   * Compute positions for N repo trees in an arc/grid layout
-   * within the orchard zone.
-   */
+  /** Compute positions for N repo trees in the orchard zone. Delegates
+   *  to `@shared/world/treePositions` so client + server agree. */
   getTreePositions(count: number): Array<{ x: number; z: number }> {
-    const orchard = this.getZone('orchard')!
-    const positions: Array<{ x: number; z: number }> = []
-
-    if (count <= 8) {
-      // Single arc for small counts — use most of the orchard radius for spacing
-      const arcRadius = orchard.radius * 0.65
-      for (let i = 0; i < count; i++) {
-        const angle = (i / Math.max(count - 1, 1)) * Math.PI * 1.5 - Math.PI * 0.75
-        positions.push({
-          x: orchard.x + Math.cos(angle) * arcRadius,
-          z: orchard.z + Math.sin(angle) * arcRadius,
-        })
-      }
-    } else {
-      // Multi-ring spiral for larger counts — wider spacing between rings
-      const rings = Math.ceil(count / 6)
-      let placed = 0
-      for (let ring = 0; ring < rings && placed < count; ring++) {
-        const ringRadius = orchard.radius * 0.3 + (ring * orchard.radius * 0.65) / rings
-        const perRing = Math.min(6 + ring * 2, count - placed)
-        for (let i = 0; i < perRing && placed < count; i++) {
-          const angle = (i / perRing) * Math.PI * 2 + ring * 0.5
-          positions.push({
-            x: orchard.x + Math.cos(angle) * ringRadius,
-            z: orchard.z + Math.sin(angle) * ringRadius,
-          })
-          placed++
-        }
-      }
-    }
-
-    return positions
+    return sharedGetTreePositions(count)
   }
 
   /** Reset layout for rebuild. */

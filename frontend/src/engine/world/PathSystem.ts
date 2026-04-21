@@ -2,33 +2,81 @@
 // Copyright (C) 2026 Arun Rajkumar
 
 /**
- * PathSystem — Sandy paths with stone stepping connecting zone centers.
+ * PathSystem — Tiered path network connecting world zones.
  *
- * Each route gets a sand-colored plane strip (soft-edged) underneath,
- * with path_stone GLBs placed on top at regular intervals.
+ * Two visual tiers, driven by {@link PathRoute.kind}:
+ *   - primary   — hub ↔ activity zones. Wider (3.0u), sand-colored, with
+ *                 stepping stones on top, gently curved (quadratic Bezier).
+ *   - secondary — activity ↔ habitation zones. Narrower (2.0u), dirt-tinted,
+ *                 straight, no stones. Reads as "branch from main path"
+ *                 instead of competing with primary for attention.
+ *
+ * Curved paths are rendered as a chain of plane segments sampled along a
+ * quadratic Bezier; stepping stones follow the same sampling. Straight
+ * paths collapse to a single segment.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { randRange } from '../utils/MathUtils'
+import type { WorldZone } from './WorldLayout'
 
 const PATH_ASSET = 'assets/garden/path_stone.glb'
 const STONE_SPACING = 1.8
 const STONE_SCALE = 1.5
-const SAND_WIDTH = 3.0   // width of the sandy strip in world units
 const SAND_TEX_SIZE = 128
 
-interface PathRoute {
+/** Visual width of a primary (hub↔activity) path strip. Exported so
+ *  consumers (e.g. GrassDressing's wear halos) size correctly. */
+export const PRIMARY_WIDTH = 3.0
+/** Visual width of a secondary (hub↔habitation) path strip. */
+export const SECONDARY_WIDTH = 2.0
+/** Fraction of route length trimmed at each end so paths stop shy of zone
+ *  discs rather than poking into them. Shared by any system that samples
+ *  routes (GrassDressing, DecorativePropScatter, LanternSystem). */
+export const END_TRIM = 0.08
+/** Number of segments used to approximate a curved route. 16 is smooth
+ *  enough at this scale without explosive draw-call cost. */
+export const BEZIER_SEGMENTS = 16
+
+export type PathKind = 'primary' | 'secondary'
+
+export interface PathRoute {
   fromX: number
   fromZ: number
   toX: number
   toZ: number
+  /** Optional quadratic Bezier control point. If unset, route is straight. */
+  controlX?: number
+  controlZ?: number
+  /** Visual tier. Defaults to 'primary' for backward compatibility. */
+  kind?: PathKind
+}
+
+/**
+ * Evaluate a route position at parameter t ∈ [0,1].
+ * Exposed so other systems (e.g. LanternSystem) that walk the same routes
+ * can follow curves consistently with rendered paths.
+ */
+export function evalRouteAt(route: PathRoute, t: number): { x: number; z: number } {
+  if (route.controlX === undefined || route.controlZ === undefined) {
+    return {
+      x: route.fromX + (route.toX - route.fromX) * t,
+      z: route.fromZ + (route.toZ - route.fromZ) * t,
+    }
+  }
+  const mt = 1 - t
+  return {
+    x: mt * mt * route.fromX + 2 * mt * t * route.controlX + t * t * route.toX,
+    z: mt * mt * route.fromZ + 2 * mt * t * route.controlZ + t * t * route.toZ,
+  }
 }
 
 export class PathSystem {
   private root: pc.Entity | null = null
   private sandTexture: pc.Texture | null = null
-  private sandMaterial: pc.StandardMaterial | null = null
+  private primaryMat: pc.StandardMaterial | null = null
+  private secondaryMat: pc.StandardMaterial | null = null
 
   async build(
     app: Application,
@@ -37,50 +85,31 @@ export class PathSystem {
   ): Promise<pc.Entity> {
     this.root = new pc.Entity('PathSystem')
 
-    // Create shared sand texture + material for all path strips
     this.sandTexture = this.createSandTexture(app.app.graphicsDevice)
-    this.sandMaterial = new pc.StandardMaterial()
-    this.sandMaterial.diffuseMap = this.sandTexture
-    this.sandMaterial.diffuse = new pc.Color(1, 1, 1)
-    this.sandMaterial.metalness = 0
-    this.sandMaterial.gloss = 0.06
-    this.sandMaterial.opacityMap = this.sandTexture
-    this.sandMaterial.alphaTest = 0.01
-    this.sandMaterial.blendType = pc.BLEND_NORMAL
-    this.sandMaterial.depthWrite = false
-    this.sandMaterial.cull = pc.CULLFACE_NONE
-    this.sandMaterial.update()
+    this.primaryMat = this.createStripMaterial(new pc.Color(1, 1, 1))
+    // Dirt tint: warmer and darker than sand — reads as worn-in secondary path.
+    this.secondaryMat = this.createStripMaterial(new pc.Color(0.65, 0.5, 0.38))
 
-    const asset = await loader.load(PATH_ASSET)
+    const stoneAsset = await loader.load(PATH_ASSET)
 
     for (const route of routes) {
-      const dx = route.toX - route.fromX
-      const dz = route.toZ - route.fromZ
-      const dist = Math.sqrt(dx * dx + dz * dz)
-      if (dist < 2) continue
+      const kind = route.kind ?? 'primary'
+      const width = kind === 'primary' ? PRIMARY_WIDTH : SECONDARY_WIDTH
+      const material = kind === 'primary' ? this.primaryMat : this.secondaryMat
+      if (!material) continue
 
-      // Sand strip plane underneath the stones
-      this.createSandStrip(route, dist, dx, dz)
+      const points = this.sampleRoute(route)
+      if (points.length < 2) continue
 
-      // Stepping stones on top
-      const steps = Math.floor(dist / STONE_SPACING)
-      if (steps < 2) continue
+      // Skip extremely short paths (e.g., overlapping zones) — would just
+      // flicker as a tiny strip.
+      const totalDist = this.pathLength(points)
+      if (totalDist < 2) continue
 
-      const nx = dx / dist
-      const nz = dz / dist
-      const pathAngle = Math.atan2(nx, nz) * (180 / Math.PI)
+      this.drawStrip(points, width, material)
 
-      for (let i = 1; i < steps; i++) {
-        const t = i / steps
-        const sx = route.fromX + dx * t + randRange(-0.15, 0.15)
-        const sz = route.fromZ + dz * t + randRange(-0.15, 0.15)
-
-        const stone = loader.instance(asset)
-        stone.setPosition(sx, 0.02, sz)
-        stone.setLocalEulerAngles(0, pathAngle + randRange(-10, 10), 0)
-        const s = STONE_SCALE + randRange(-0.2, 0.2)
-        stone.setLocalScale(s, s, s)
-        this.root.addChild(stone)
+      if (kind === 'primary') {
+        this.placeSteppingStones(points, totalDist, stoneAsset, loader)
       }
     }
 
@@ -88,25 +117,128 @@ export class PathSystem {
     return this.root
   }
 
-  /** Create a sand-colored plane strip along a route. */
-  private createSandStrip(
-    route: PathRoute,
-    dist: number,
-    dx: number,
-    dz: number,
-  ): void {
-    const midX = (route.fromX + route.toX) / 2
-    const midZ = (route.fromZ + route.toZ) / 2
-    const angle = Math.atan2(dx, dz) * (180 / Math.PI)
+  /**
+   * Sample a route into a polyline. Straight routes yield 2 points;
+   * curved routes yield BEZIER_SEGMENTS+1 points evenly spaced in t.
+   * Both ends are trimmed inward by END_TRIM so the strip stops before
+   * crashing into the zone disc at each terminus.
+   */
+  private sampleRoute(route: PathRoute): Array<{ x: number; z: number }> {
+    const isCurved = route.controlX !== undefined && route.controlZ !== undefined
+    const segments = isCurved ? BEZIER_SEGMENTS : 1
+    const tStart = END_TRIM
+    const tEnd = 1 - END_TRIM
+    const points: Array<{ x: number; z: number }> = []
+    for (let i = 0; i <= segments; i++) {
+      const t = tStart + (tEnd - tStart) * (i / segments)
+      points.push(evalRouteAt(route, t))
+    }
+    return points
+  }
 
-    const strip = new pc.Entity('SandStrip')
-    strip.addComponent('render', { type: 'plane' })
-    // Plane is XZ: scale X = width, Z = length
-    strip.setLocalScale(SAND_WIDTH, 1, dist * 0.85) // 85% length to avoid poking into zone discs
-    strip.setPosition(midX, 0.015, midZ) // just above ground
-    strip.setLocalEulerAngles(0, angle, 0)
-    strip.render!.meshInstances[0].material = this.sandMaterial!
-    this.root!.addChild(strip)
+  private pathLength(points: Array<{ x: number; z: number }>): number {
+    let total = 0
+    for (let i = 0; i < points.length - 1; i++) {
+      const dx = points[i + 1].x - points[i].x
+      const dz = points[i + 1].z - points[i].z
+      total += Math.sqrt(dx * dx + dz * dz)
+    }
+    return total
+  }
+
+  /** Render the polyline as a chain of plane segments. */
+  private drawStrip(
+    points: Array<{ x: number; z: number }>,
+    width: number,
+    material: pc.StandardMaterial,
+  ): void {
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i]
+      const p1 = points[i + 1]
+      const dx = p1.x - p0.x
+      const dz = p1.z - p0.z
+      const length = Math.sqrt(dx * dx + dz * dz)
+      if (length < 0.01) continue
+      const midX = (p0.x + p1.x) / 2
+      const midZ = (p0.z + p1.z) / 2
+      const angle = Math.atan2(dx, dz) * (180 / Math.PI)
+
+      // Overlap segments by 5% so we don't get seams where alpha-faded
+      // texture edges meet; the combined strip reads as continuous.
+      const segLength = length * 1.05
+
+      const strip = new pc.Entity('PathSegment')
+      strip.addComponent('render', { type: 'plane' })
+      strip.setLocalScale(width, 1, segLength)
+      strip.setPosition(midX, 0.015, midZ)
+      strip.setLocalEulerAngles(0, angle, 0)
+      strip.render!.meshInstances[0].material = material
+      this.root!.addChild(strip)
+    }
+  }
+
+  /**
+   * Distribute stepping stones along a sampled polyline at STONE_SPACING
+   * arc-length intervals. Each stone is oriented along the local tangent
+   * of the segment it falls in.
+   */
+  private placeSteppingStones(
+    points: Array<{ x: number; z: number }>,
+    totalDist: number,
+    asset: pc.Asset,
+    loader: AssetLoader,
+  ): void {
+    const count = Math.floor(totalDist / STONE_SPACING)
+    if (count < 2) return
+
+    // Pre-compute per-segment distances for fast arc-length → segment lookup.
+    const segDists: number[] = []
+    for (let i = 0; i < points.length - 1; i++) {
+      const dx = points[i + 1].x - points[i].x
+      const dz = points[i + 1].z - points[i].z
+      segDists.push(Math.sqrt(dx * dx + dz * dz))
+    }
+
+    for (let k = 1; k < count; k++) {
+      const targetD = (k / count) * totalDist
+      let acc = 0
+      for (let i = 0; i < segDists.length; i++) {
+        if (acc + segDists[i] >= targetD) {
+          const tLocal = (targetD - acc) / segDists[i]
+          const p0 = points[i]
+          const p1 = points[i + 1]
+          const sx = p0.x + (p1.x - p0.x) * tLocal + randRange(-0.15, 0.15)
+          const sz = p0.z + (p1.z - p0.z) * tLocal + randRange(-0.15, 0.15)
+          const pathAngle = Math.atan2(p1.x - p0.x, p1.z - p0.z) * (180 / Math.PI)
+
+          const stone = loader.instance(asset)
+          stone.setPosition(sx, 0.02, sz)
+          stone.setLocalEulerAngles(0, pathAngle + randRange(-10, 10), 0)
+          const s = STONE_SCALE + randRange(-0.2, 0.2)
+          stone.setLocalScale(s, s, s)
+          this.root!.addChild(stone)
+          break
+        }
+        acc += segDists[i]
+      }
+    }
+  }
+
+  /** Shared strip material factory — both tiers reuse the sand alpha mask
+   *  so edges fade softly; differ only in diffuse tint. */
+  private createStripMaterial(tint: pc.Color): pc.StandardMaterial {
+    const mat = new pc.StandardMaterial()
+    mat.diffuseMap = this.sandTexture
+    mat.diffuse = tint
+    mat.metalness = 0
+    mat.gloss = 0.06
+    mat.opacityMap = this.sandTexture
+    mat.alphaTest = 0.01
+    mat.blendType = pc.BLEND_NORMAL
+    mat.depthWrite = false
+    mat.cull = pc.CULLFACE_NONE
+    mat.update()
+    return mat
   }
 
   /** Procedural sand texture with soft alpha edges. */
@@ -117,11 +249,9 @@ export class PathSystem {
     canvas.height = S
     const ctx = canvas.getContext('2d')!
 
-    // Base sand color
     ctx.fillStyle = 'rgb(195, 175, 135)'
     ctx.fillRect(0, 0, S, S)
 
-    // Noise patches for variation
     for (let i = 0; i < 40; i++) {
       const x = Math.random() * S
       const y = Math.random() * S
@@ -133,7 +263,6 @@ export class PathSystem {
       ctx.fill()
     }
 
-    // Small grain dots
     for (let i = 0; i < 300; i++) {
       const x = Math.random() * S
       const y = Math.random() * S
@@ -142,15 +271,13 @@ export class PathSystem {
       ctx.fillRect(x, y, 1 + Math.random(), 1 + Math.random())
     }
 
-    // Apply soft alpha fade on the short edges (X direction = path width)
     const imageData = ctx.getImageData(0, 0, S, S)
     const data = imageData.data
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
-        const edgeDist = Math.min(x, S - 1 - x) / (S / 2) // 0 at edges, 1 at center
+        const edgeDist = Math.min(x, S - 1 - x) / (S / 2)
         let alpha: number
         if (edgeDist < 0.3) {
-          // Smooth cubic fade at edges
           const t = edgeDist / 0.3
           alpha = t * t * (3 - 2 * t)
         } else {
@@ -179,19 +306,31 @@ export class PathSystem {
     return texture
   }
 
-  /** Generate default routes from orchard center to each building zone. */
-  static defaultRoutes(zones: Array<{ name: string; x: number; z: number }>): PathRoute[] {
+  /**
+   * Build routes from the tiered zone layout — all paths straight and
+   * radiating from the hub so they align with each zone's fence gate
+   * (gates face the hub per the fence builder's "gate angle points
+   * toward orchard" convention).
+   *
+   *   - primary  : hub → each activity zone (wider, sand + stepping stones)
+   *   - secondary: hub → each habitation zone (narrower, dirt, no stones)
+   *
+   * An earlier design curved primary paths and routed secondary paths
+   * through activity zones for visual "branching," but both caused
+   * path-through-wall misalignment with the radial fence gates. The
+   * primary/secondary hierarchy now comes purely from width + material.
+   */
+  static defaultRoutes(zones: ReadonlyArray<WorldZone>): PathRoute[] {
     const routes: PathRoute[] = []
-    const orchard = zones.find(z => z.name === 'orchard')
-    if (!orchard) return routes
+    const hub = zones.find(z => z.tier === 'hub')
+    if (!hub) return routes
 
     for (const zone of zones) {
-      if (zone.name === 'orchard') continue
+      if (zone.tier === 'hub') continue
       routes.push({
-        fromX: orchard.x,
-        fromZ: orchard.z,
-        toX: zone.x,
-        toZ: zone.z,
+        fromX: hub.x, fromZ: hub.z,
+        toX: zone.x, toZ: zone.z,
+        kind: zone.tier === 'activity' ? 'primary' : 'secondary',
       })
     }
 
@@ -207,9 +346,13 @@ export class PathSystem {
       this.sandTexture.destroy()
       this.sandTexture = null
     }
-    if (this.sandMaterial) {
-      this.sandMaterial.destroy()
-      this.sandMaterial = null
+    if (this.primaryMat) {
+      this.primaryMat.destroy()
+      this.primaryMat = null
+    }
+    if (this.secondaryMat) {
+      this.secondaryMat.destroy()
+      this.secondaryMat = null
     }
   }
 }

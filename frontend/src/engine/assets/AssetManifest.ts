@@ -186,6 +186,11 @@ export const DECOR = {
   flowerYellowB: `${GARDEN}/flower_yellowB.glb`,
   flowerRedA:    `${GARDEN}/flower_redA.glb`,
   flowerPurpleA: `${GARDEN}/flower_purpleA.glb`,
+  /** Hero "Bodhi" tree used as the orchard-center HubAnchor landmark.
+   *  Shares the path with FOREST_TREES so the preload batch covers it.
+   *  `tree_round.glb` reads as a single full canopy from overhead —
+   *  `tree_leafy.glb` split into two lobes from the camera angle. */
+  hubTree:       `${GARDEN}/tree_round.glb`,
 } as const
 
 // ─── Building / Furniture GLBs ──────────────────
