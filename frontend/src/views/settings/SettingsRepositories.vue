@@ -852,7 +852,7 @@
 
       <v-card-actions class="pa-0 mt-4">
         <v-spacer />
-        <v-btn variant="text" @click="showBranchDialog = false">Cancel</v-btn>
+        <v-btn variant="text" @click="cancelBranchDialog">Cancel</v-btn>
         <v-btn
           color="primary"
           variant="flat"
@@ -1170,12 +1170,16 @@ async function handleClone(): Promise<void> {
   // Stage any typed-but-not-queued URL first.
   addUrlToQueue()
 
+  // Snapshot repo IDs so we can tell which rows are new after fetchRepos.
+  // Auto-detection fills main from GitHub's default branch, but develop
+  // often doesn't exist as a branch name — we walk the user through the
+  // mapping dialog for each new-but-unmapped repo before scanning.
+  const existingIds = new Set(settingsStore.repos.map((r) => r.id))
+
   cloning.value = true
   cloneError.value = ''
   let anySucceeded = false
   try {
-    // Sequential clone — one at a time keeps network load predictable and
-    // makes per-item error reporting obvious. Skip items already done.
     for (const item of cloneQueue.value) {
       if (item.status === 'done') continue
       item.status = 'cloning'
@@ -1198,14 +1202,54 @@ async function handleClone(): Promise<void> {
   }
 
   const allDone = cloneQueue.value.every((q) => q.status === 'done')
-  if (allDone) {
-    closeAddRepoDialog()
-    if (anySucceeded && scanAfterAdd.value) {
+  if (!allDone) {
+    // Partial failures leave the dialog open so the user can retry just
+    // the errored rows (by clicking Clone again — successes are skipped).
+    return
+  }
+
+  closeAddRepoDialog()
+
+  if (anySucceeded) {
+    const newlyUnmapped = settingsStore.repos.filter(
+      (r) => !existingIds.has(r.id) && (!r.mainBranch || !r.developBranch),
+    )
+    if (newlyUnmapped.length > 0) {
+      pendingMapping.value = [...newlyUnmapped]
+      scanAfterMapping.value = scanAfterAdd.value
+      await openBranchDialog(pendingMapping.value[0])
+      return   // triggerScan runs from the mapping-walkthrough completion
+    }
+    if (scanAfterAdd.value) triggerScan(false)
+  }
+}
+
+// Branch-mapping walkthrough state — when multiple freshly-cloned repos
+// need mapping, we queue them and re-open the dialog from saveBranchMapping
+// / cancel until the queue drains. Scan fires at the end so users don't hit
+// "Map branches before scanning" after a batch clone.
+const pendingMapping = ref<RepoInfo[]>([])
+const scanAfterMapping = ref(false)
+
+async function advanceMappingWalkthrough(): Promise<void> {
+  if (pendingMapping.value.length === 0) {
+    if (scanAfterMapping.value) {
+      scanAfterMapping.value = false
       triggerScan(false)
     }
+    return
   }
-  // Partial failures leave the dialog open so the user can retry just the
-  // errored rows (by clicking Clone again — successes are skipped).
+  const next = pendingMapping.value.shift()
+  if (next) await openBranchDialog(next)
+}
+
+function cancelBranchDialog(): void {
+  showBranchDialog.value = false
+  // Cancelling mid-walkthrough aborts the batch — don't keep nagging the
+  // user. Leaves remaining repos unmapped; they'll surface via the normal
+  // "Not mapped" chip + scan-guard flow.
+  pendingMapping.value = []
+  scanAfterMapping.value = false
 }
 
 async function copyDeployKey(): Promise<void> {
@@ -1266,6 +1310,10 @@ async function saveBranchMapping(): Promise<void> {
   )
   branchSaving.value = false
   showBranchDialog.value = false
+  // If we're walking a post-clone queue, open the next unmapped repo; the
+  // walkthrough triggers the deferred scan once the queue drains. Safe to
+  // call for one-off edits — the queue is empty and this no-ops.
+  await advanceMappingWalkthrough()
 }
 
 function confirmAndScan(fullRescan: boolean): void {
