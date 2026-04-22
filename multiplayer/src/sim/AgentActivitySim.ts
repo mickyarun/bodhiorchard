@@ -311,9 +311,16 @@ export class AgentActivitySim {
         return
       }
     }
-    // Single-repo or repo-free: wander within a small patrol radius.
-    // Anchor to the tree slot when resolvable; otherwise anchor to the
-    // fallback slot. Anchoring to `agent.x/z` here caused unbounded drift.
+    // Repo-free: no tree to patrol around. Stay put at the fallback slot —
+    // wandering from there with radius 3.5 can reach the bodhi mound
+    // (FALLBACK_HUB_OFFSET 4.8 − 3.5 = 1.3 < MOUND_RADIUS 4.0), which
+    // would visibly clip the robot into the platform.
+    if (entry.repoNames.length === 0) {
+      this.enterWorking(agent, entry)
+      return
+    }
+    // Single-repo: wander within a small patrol radius of the tree slot.
+    // Anchoring to `agent.x/z` here caused unbounded drift pre-fix.
     const basePos = this.getRepoPosition(entry) ?? getAgentFallbackSlot()
     const angle = Math.random() * Math.PI * 2
     const radius = 1.5 + Math.random() * 2.0

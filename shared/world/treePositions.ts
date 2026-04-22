@@ -39,11 +39,13 @@ const SLOTS_PER_RING = 5
 /** Angular step between adjacent slots on an arc. ~40° keeps ≥1 unit gap. */
 const SLOT_ANGLE_STEP_RAD = (40 * Math.PI) / 180
 /**
- * Offset from orchard (bodhi tree) center for the repo-free fallback slot.
- * Small enough to read as "standing at the bodhi tree," large enough to
- * not clip its trunk/canopy.
+ * Offset from orchard center for the repo-free fallback slot. Must stay
+ * strictly greater than the hub's MOUND_RADIUS (4.0 in frontend/src/
+ * engine/world/HubAnchor.ts) + character half-width (~0.4), otherwise
+ * the robot spawns inside the mound collider. 4.8 parks it just beyond
+ * the platform rim with a small visual breath.
  */
-const FALLBACK_HUB_OFFSET = 2.2
+const FALLBACK_HUB_OFFSET = 4.8
 
 /** Resolve the orchard zone or fail loudly — missing zone is a config bug. */
 function requireOrchard(): Zone {

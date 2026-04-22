@@ -110,7 +110,7 @@ export class SceneManager {
   private _takeoverPhysicsBuilder: TakeoverPhysicsBuilder | null = null
   private buildingHuts: HutInfo[] = []
   private pondObstacle: PondObstacle | null = null
-  private bodhiTrunk: { x: number; z: number; radius: number } | null = null
+  private bodhiTrunk: { x: number; z: number; radius: number; topY: number } | null = null
   private poolWater: WaterSurface | null = null
 
   // Shared data for Phase 3+
