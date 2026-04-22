@@ -260,14 +260,23 @@ Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cl
 
 ## Getting Started
 
+Bodhiorchard ships in **two deployment modes**. Pick the one that matches how you want to run it — the product is identical, only the process boundary between your host and the containers changes.
+
+| Mode | What runs in Docker | What runs on your host | Claude auth |
+|---|---|---|---|
+| **Full Docker** | postgres, redis, **backend**, multiplayer, frontend | nothing | Anthropic API key (entered in Settings → AI Configuration) |
+| **Hybrid** | postgres, redis only (infra) | backend, multiplayer, frontend via `npm run dev` | The host's existing `claude login` session (Claude Pro/Max subscription) |
+
+**Pick Full Docker** for a one-command "evaluator" setup, a dedicated Mac-mini deployment, or any case where you'd rather pay-per-token via Anthropic's API than wire up a Claude subscription. **Pick Hybrid** if you already run `claude` interactively on your laptop and want agents to use that same flat-rate subscription, or you want hot-reload for development.
+
 ### Prerequisites
 
-- **Try it**: Docker Desktop (everything else runs in containers)
-- **Develop it**: Docker + Node.js 18+ + Python 3.12+
-- Windows: use WSL2
+- **Full Docker**: Docker Desktop ≥ 4.20 (everything else is in containers)
+- **Hybrid**: Docker + Node.js 18+ + Python 3.12+ + a host-installed, already-logged-in [Claude Code CLI](https://code.claude.com/docs/en/setup)
+- Windows: use WSL2 for either mode
 - (Optional) Cloudflare account for tunnel — needed for Slack/GitHub webhooks
 
-### Try it (one command)
+### Full Docker mode (one command)
 
 ```bash
 git clone https://github.com/mickyarun/bodhiorchard.git
@@ -275,11 +284,18 @@ cd bodhiorchard
 docker compose up
 ```
 
-Open **http://localhost:3000**. Postgres, Redis, backend, multiplayer, and frontend all start together. Migrations run automatically on backend startup. First build takes ~5 min; subsequent runs are instant.
+Open **http://localhost:3000**. Postgres, Redis, backend, multiplayer, and frontend all start together. Migrations run automatically on backend startup. First build takes ~5 min (the backend image installs git, Node.js 20, and the `@anthropic-ai/claude-code` npm package); subsequent runs are instant.
 
-Configure Claude Code as the AI engine in **Settings → AI Configuration** once the UI is up.
+Once the UI is up:
 
-### Develop it (hot reload)
+1. Complete first-time setup (org name, admin user, source repo path).
+2. Go to **Settings → AI Configuration → Claude Code**.
+3. Choose **API key (Full Docker)**, paste an `sk-ant-…` key from [console.anthropic.com](https://console.anthropic.com/settings/keys), and **Save**.
+4. Click **Test connection** — it should report the CLI version and a successful round-trip.
+
+The key is encrypted (Fernet AES-128) in Postgres and pushed into the backend's process env on save, so every subsequent agent run inherits it. No compose-level env var required.
+
+### Hybrid mode (hot reload)
 
 ```bash
 git clone https://github.com/mickyarun/bodhiorchard.git
@@ -289,11 +305,17 @@ npm run setup      # Python venv, .env files, infra, migrations
 npm run dev        # backend + frontend + multiplayer, one terminal
 ```
 
-- **Frontend**: http://localhost:3000 (Vite)
-- **Backend**: http://localhost:8000/docs (FastAPI)
+- **Frontend**: http://localhost:3000 (Vite, hot reload)
+- **Backend**: http://localhost:8000/docs (FastAPI, `--reload`)
 - **Multiplayer**: ws://localhost:2567 (Colyseus)
 
-All three processes run in a single terminal with color-coded logs. Ctrl-C stops them; `npm run stop` tears down the infra containers.
+Only `postgres` and `redis` run in Docker (via `docker-compose.infra.yml`). The backend process inherits your shell environment — including whatever `claude login` has authenticated on your host — so agent runs use your Claude subscription automatically. In **Settings → AI Configuration → Claude Code**, leave the auth mode on **Hybrid / host login** (the default).
+
+All three host processes run in a single terminal with color-coded logs. Ctrl-C stops them; `npm run stop` tears down the infra containers.
+
+### Switching between modes
+
+The database is the same shape either way, so you can swap modes against the same data. Stop the current mode first (`Ctrl-C` + `npm run stop` for Hybrid, `docker compose down` for Full Docker), then start the other. The stored `claude_auth_mode` on your organization determines which path agent runs take — update it in Settings when you switch.
 
 ### Environment Variables
 
@@ -301,8 +323,9 @@ All three processes run in a single terminal with color-coded logs. Ctrl-C stops
 |---|---|---|
 | `DATABASE_URL` | PostgreSQL connection | `postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard` |
 | `SECRET_KEY` | JWT signing key | `change-me-in-production` |
-| `ENCRYPTION_KEY` | AES key for secrets at rest | (generated) |
-| `LLM_PROVIDER` | LLM provider | `ollama` |
+| `ENCRYPTION_KEY` | AES key for secrets at rest (used to encrypt the Claude API key, Slack tokens, GitHub private keys) | (generated) |
+| `ANTHROPIC_API_KEY` | Optional process-level fallback for Claude auth. Ignored when an org-level key is configured in Settings. | (unset) |
+| `LLM_PROVIDER` | LLM provider (for non-codebase agents) | `ollama` |
 | `LLM_MODEL` | LLM model name | `llama3:8b` |
 | `EMBEDDING_PROVIDER` | Embedding provider | `ollama` |
 | `EMBEDDING_MODEL` | Embedding model | `nomic-embed-text` |

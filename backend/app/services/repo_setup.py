@@ -1288,6 +1288,49 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
     orig_branch, _, _ = await run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path)
     orig_branch = orig_branch.strip()
 
+    # Earlier scan phases write Bodhiorchard's own files (MCP config, git
+    # hooks, a ``prepare`` script in package.json) directly into the
+    # working tree. Those uncommitted changes will collide with the
+    # upcoming branch switch — git refuses to checkout when it would
+    # overwrite dirty files. Stash everything (including untracked) so the
+    # switch is clean; we pop the stash back in the ``finally`` below so
+    # the staging step below still has the files to commit.
+    _, _, dirty_rc = await run_git(
+        ["diff-index", "--quiet", "HEAD", "--"], cwd=repo_path
+    )
+    _, untracked_out, _ = await run_git(
+        ["ls-files", "--others", "--exclude-standard"], cwd=repo_path
+    )
+    has_dirty = dirty_rc != 0 or bool(untracked_out.strip())
+    stashed = False
+    if has_dirty:
+        _, _, stash_rc = await run_git(
+            ["stash", "push", "--include-untracked", "-m", "bodhiorchard-setup-pre-checkout"],
+            cwd=repo_path,
+        )
+        stashed = stash_rc == 0
+        if not stashed:
+            logger.warning(
+                "bodhiorchard_setup_stash_failed",
+                error="git stash push failed — checkout may still collide with local changes",
+            )
+
+    async def _restore_dirty_state() -> None:
+        if not stashed:
+            return
+        _, stderr, rc = await run_git(["stash", "pop"], cwd=repo_path)
+        if rc != 0:
+            # Conflict applying the stash back — usually because the target
+            # branch has a tracked file where we had an untracked one, or
+            # already modified the same lines. Keep the stash entry so the
+            # user can recover manually (``git stash list``) rather than
+            # silently committing a half-applied tree.
+            logger.warning(
+                "bodhiorchard_setup_stash_pop_conflict",
+                error=stderr[:200],
+                hint="stash entry kept; resolve via `git stash list` + `git stash apply`",
+            )
+
     if branch_exists_remote:
         # Fetch and check out existing branch to add any new files (e.g. GitNexus config)
         await run_git(["fetch", "origin", _SETUP_BRANCH], cwd=repo_path)
@@ -1299,6 +1342,7 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
             )
         if rc != 0:
             logger.warning("bodhiorchard_setup_checkout_failed", error=stderr[:200])
+            await _restore_dirty_state()
             return None
     else:
         # Try checking out existing local branch first
@@ -1310,7 +1354,13 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
             )
         if rc != 0:
             logger.warning("bodhiorchard_setup_branch_failed", error=stderr[:200])
+            await _restore_dirty_state()
             return None
+
+    # Now on the setup branch — pop the stash so the files we need to
+    # commit (MCP config, hooks, package.json prepare script) are in the
+    # working tree again.
+    await _restore_dirty_state()
 
     try:
         # Stage only files that have changes

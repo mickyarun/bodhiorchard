@@ -149,13 +149,20 @@ onMounted(async () => {
     const { data } = await api.get('/v1/settings/claude')
     authMode.value = data.auth_mode
     hasStoredKey.value = data.has_api_key
-  } catch {
-    // First-time load: endpoint may 401 for unauthenticated setup flow — ignore.
+  } catch (err: unknown) {
+    // 401 is expected here during first-time setup (no JWT yet). Anything
+    // else — 500, network error — is worth leaving a breadcrumb for when
+    // the Settings card quietly stays on defaults.
+    const axiosErr = err as { response?: { status?: number } }
+    if (axiosErr?.response?.status !== 401) {
+      console.warn('[SettingsClaudeCode] failed to load state', err)
+    }
   }
 })
 
 async function save(): Promise<void> {
   saving.value = true
+  claudeError.value = ''
   try {
     const payload: { auth_mode: AuthMode; api_key?: string } = {
       auth_mode: authMode.value,
@@ -167,6 +174,12 @@ async function save(): Promise<void> {
     hasStoredKey.value = data.has_api_key
     apiKey.value = ''
     await checkClaudeCode()
+  } catch (err: unknown) {
+    claudeStatus.value = 'failed'
+    const axiosErr = err as { response?: { data?: { detail?: string } } }
+    claudeError.value = axiosErr?.response?.data?.detail
+      || 'Failed to save Claude settings. Try again, and check the console for details.'
+    console.warn('[SettingsClaudeCode] save failed', err)
   } finally {
     saving.value = false
   }
@@ -184,16 +197,17 @@ async function checkClaudeCode(): Promise<void> {
     const { data } = await api.post('/v1/settings/claude/test', null, { timeout: 120_000 })
     applyTestResult(data)
     return
-  } catch {
-    // fall through to unauth setup check
+  } catch (err) {
+    console.debug('[SettingsClaudeCode] authed test endpoint failed, trying setup fallback', err)
   }
 
   try {
     const { data } = await api.get('/setup/check-claude', { timeout: 120_000 })
     applyTestResult(data)
-  } catch {
+  } catch (err) {
     claudeStatus.value = 'failed'
     claudeError.value = 'Could not reach the server to test Claude Code.'
+    console.warn('[SettingsClaudeCode] test failed', err)
   }
 }
 

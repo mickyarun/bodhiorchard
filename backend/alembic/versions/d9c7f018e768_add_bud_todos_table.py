@@ -90,7 +90,11 @@ def upgrade() -> None:
     op.create_index("ix_bud_todo_org_status", "bud_todos", ["org_id", "status"])
 
     # ── Incidental drift fixes ────────────────────────────────
-    op.create_index("ix_bugs_bud_id_status", "bugs", ["bud_id", "status"])
+    # Use IF NOT EXISTS: zd_bug_type_column already creates this index,
+    # so fresh schemas already have it by the time this migration runs.
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_bugs_bud_id_status ON bugs (bud_id, status)"
+    )
 
     for table in ("jira_import_sessions", "jira_issue_bud_map"):
         for col in ("created_at", "updated_at"):
@@ -114,7 +118,8 @@ def downgrade() -> None:
                 nullable=True,
                 existing_server_default=sa.text("now()"),
             )
-    op.drop_index("ix_bugs_bud_id_status", table_name="bugs")
+    # Mirror the guarded upgrade: zd_bug_type_column's downgrade drops it.
+    op.execute("DROP INDEX IF EXISTS ix_bugs_bud_id_status")
 
     # Drop bud_todos
     op.drop_index("ix_bud_todo_org_status", table_name="bud_todos")
