@@ -44,6 +44,9 @@ services:
       # When unset this is empty; orgs using api_key auth mode override it
       # from the encrypted value stored in the DB.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Shared HMAC with the multiplayer service — both sides must match or
+      # internal bridge calls (verify-token, org-snapshot, race-*) get 403.
+      COLYSEUS_BRIDGE_SECRET: ${COLYSEUS_BRIDGE_SECRET:-dev-colyseus-bridge-secret}
     ports:
       - "8000:8000"
     volumes:
@@ -58,6 +61,21 @@ services:
     build:
       context: .
       dockerfile: multiplayer/Dockerfile
+    depends_on:
+      # Multiplayer's onAuth calls backend /api/v1/internal/colyseus/verify-token
+      # on every join. Starting before the backend is up would reject early
+      # joins with "auth backend unreachable".
+      - backend
+    environment:
+      # Inside Docker the backend is reachable at its service name, not
+      # localhost — BackendClient.ts defaults to http://localhost:8000 which
+      # resolves to this container itself.
+      BACKEND_URL: http://backend:8000
+      # Shared HMAC for internal bridge calls. Pinned to the same default on
+      # both sides so they can't drift silently; override in production via
+      # a host env var and the backend's COLYSEUS_BRIDGE_SECRET will see it
+      # too (they share the key).
+      COLYSEUS_BRIDGE_SECRET: ${COLYSEUS_BRIDGE_SECRET:-dev-colyseus-bridge-secret}
     ports:
       - "2567:2567"
 
