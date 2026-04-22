@@ -5,7 +5,6 @@
 
 import asyncio
 import contextlib
-import os
 import secrets
 import uuid
 from pathlib import Path
@@ -169,25 +168,47 @@ async def get_repo_branches(
     }
 
 
+async def _require_setup_incomplete(db: AsyncSession) -> None:
+    """Reject the call when an organization already exists.
+
+    All endpoints in this router are unauthenticated because the setup
+    wizard runs *before* any user or JWT exists. Once setup completes,
+    leaving them open would let anyone on the network exercise the
+    clone-volume, mint a deploy key, or stress-test Anthropic with
+    arbitrary API keys. We guard by checking for any organization row —
+    the same signal the frontend uses to hide the wizard.
+    """
+    org_repo = OrganizationRepository(db)
+    if await org_repo.check_setup_exists() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Setup is already complete; this endpoint is disabled.",
+        )
+
+
 @router.get("/deployment-info")
 async def get_deployment_info() -> dict:
     """Report whether the backend is running in Docker or on the host.
 
     Used by the setup wizard to decide which Claude auth options to surface:
     Docker deployments cannot reach a host ``claude login`` session, so the
-    UI constrains the choice to an API key.
+    UI constrains the choice to an API key. Harmless to expose post-setup,
+    so no guard.
     """
     return deployment_info()
 
 
 @router.get("/deploy-key")
-async def get_deploy_key() -> dict:
+async def get_deploy_key(db: AsyncSession = Depends(get_db)) -> dict:
     """Return the backend's SSH public key, generating it on first call.
 
     The setup wizard shows this to the user so they can paste it into a
     private repo's **Settings → Deploy keys** on GitHub, granting the
-    Bodhiorchard backend read access to that repo.
+    Bodhiorchard backend read access to that repo. Gated post-setup — the
+    authenticated ``/v1/settings/repos/clone`` flow exposes its own
+    deploy-key helper for ongoing use.
     """
+    await _require_setup_incomplete(db)
     return {
         "public_key": get_public_key(),
         "fingerprint_algo": "ssh-ed25519",
@@ -198,7 +219,15 @@ class CloneRepoRequest(BaseModel):
     """Body for ``POST /api/setup/clone-repo``."""
 
     url: str = Field(..., description="GitHub HTTPS or SSH URL.")
-    org_slug: str = Field(..., alias="orgSlug", min_length=2, max_length=100)
+    org_slug: str = Field(
+        ...,
+        alias="orgSlug",
+        min_length=2,
+        max_length=100,
+        # Mirror SetupOrganization.slug so the path segment under
+        # /data/repos can't contain surprises even before the org exists.
+        pattern=r"^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+    )
     pat: str | None = Field(
         default=None,
         description="Optional GitHub personal-access token for HTTPS private repos.",
@@ -208,14 +237,19 @@ class CloneRepoRequest(BaseModel):
 
 
 @router.post("/clone-repo")
-async def clone_repo(body: CloneRepoRequest) -> dict:
+async def clone_repo(
+    body: CloneRepoRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """Clone a GitHub repo into the backend's ``/data/repos`` volume.
 
     Unauthenticated because this is part of the setup wizard, which runs
     before any org/user exists. The returned ``path`` is container-local
     and is the value the wizard passes back in ``/setup/initialize`` so the
-    scan pipeline finds the clone.
+    scan pipeline finds the clone. Refuses once setup is complete — the
+    authenticated ``/v1/settings/repos/clone`` covers post-setup cloning.
     """
+    await _require_setup_incomplete(db)
     result = await clone_or_update(body.url, org_slug=body.org_slug, pat=body.pat)
     if not result.success:
         return {
@@ -241,30 +275,35 @@ async def clone_repo(body: CloneRepoRequest) -> dict:
 
 
 @router.get("/check-claude")
-async def check_claude() -> dict:
+async def check_claude(db: AsyncSession = Depends(get_db)) -> dict:
     """Test Claude Code against the backend's current process env (no auth).
 
     Returns:
         Test results including cli_available, test_passed, output, error.
     """
+    await _require_setup_incomplete(db)
     return await test_claude_connection()
 
 
 @router.post("/check-claude")
 async def check_claude_with_credentials(
     body: ClaudeCheckRequest | None = None,
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Test Claude Code against provisional credentials during setup.
 
-    When ``auth_mode == 'api_key'`` and ``api_key`` is supplied, swap it into
-    the backend process env for the duration of the subprocess call, then
-    restore whatever was there before. This lets the setup wizard validate
-    a pasted key *before* the org is created.
+    When ``auth_mode == 'api_key'`` and ``api_key`` is supplied, the key
+    is passed to the subprocess via ``env_extra`` — isolated to this one
+    subprocess, with no mutation of the backend's process env (mutating
+    ``os.environ`` would race with any concurrent agent run and could
+    cross-wire billing between orgs).
 
     When ``auth_mode == 'host'`` (or no body), the test runs against the
     unmodified process env — mirrors the GET endpoint.
     """
-    if body is None:
+    await _require_setup_incomplete(db)
+
+    if body is None or body.auth_mode == AUTH_MODE_HOST:
         return await test_claude_connection()
 
     if body.auth_mode not in VALID_AUTH_MODES:
@@ -273,10 +312,6 @@ async def check_claude_with_credentials(
             detail=f"auth_mode must be one of {sorted(VALID_AUTH_MODES)}",
         )
 
-    if body.auth_mode == AUTH_MODE_HOST:
-        return await test_claude_connection()
-
-    # api_key mode — temporarily override env for the test.
     api_key = (body.api_key or "").strip()
     if not api_key:
         raise HTTPException(
@@ -284,15 +319,8 @@ async def check_claude_with_credentials(
             detail="api_key is required when auth_mode is 'api_key'",
         )
 
-    original = os.environ.get("ANTHROPIC_API_KEY")
-    os.environ["ANTHROPIC_API_KEY"] = api_key
-    try:
-        return await test_claude_connection()
-    finally:
-        if original is None:
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-        else:
-            os.environ["ANTHROPIC_API_KEY"] = original
+    # Subprocess-scoped override — never touches os.environ.
+    return await test_claude_connection(env_extra={"ANTHROPIC_API_KEY": api_key})
 
 
 @router.post("/initialize", response_model=SetupResponse, status_code=status.HTTP_201_CREATED)
