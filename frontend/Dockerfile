@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Build context is the repo root so that Vite's `@shared` alias (resolved to
 # `../shared`) and tsconfig's `../shared/**/*.ts` include can locate the
 # sibling `shared/` directory during the frontend build.
@@ -18,7 +16,7 @@ RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 COPY shared/ /app/shared/
 
-RUN npm run build && \
+RUN npx vite build && \
     # Ensure every static asset is world-readable. macOS sometimes hands us
     # 0600 files (e.g. items saved by image tools or copied with cp -p) and
     # Vite preserves those perms — nginx then 403s when serving them.
