@@ -21,7 +21,7 @@
 
 ## What is Bodhiorchard?
 
-Bodhiorchard is an **open-source, AI-first alternative to Agile project management tools** like Jira, Linear, and Shortcut. It runs locally on your laptop or Mac Mini with **11 specialized AI agents** that orchestrate the entire software development lifecycle — from feature intake to production deployment, learning, and continuous improvement. Choose your AI engine: [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware intelligence, [**Ollama**](https://ollama.com) for fully local/free inference, or cloud APIs from **Anthropic** and **OpenAI** — mix and match per agent.
+Bodhiorchard is an **open-source, AI-first alternative to Agile project management tools** like Jira, Linear, and Shortcut. It runs locally on your laptop or Mac Mini with **11 specialized AI agents** that orchestrate the entire software development lifecycle — from feature intake to production deployment, learning, and continuous improvement. Today it's powered by [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware intelligence; [**Ollama**](https://ollama.com) (fully local/free), the **Anthropic** and **OpenAI** direct APIs, and **OpenAI Codex** are on the near-term roadmap.
 
 ### The Problem
 
@@ -179,29 +179,31 @@ Need Slack integration or internet access? A **Cloudflare Tunnel** exposes just 
 - **Dramatically lower cost** — no cloud compute bills, no per-user pricing
 - **Lower energy footprint** — a Mac Mini uses ~10W idle vs hundreds of watts for cloud VMs
 - **Your data stays local** — code, BUDs, and knowledge never leave your machine
-- **Offline-capable** — with Ollama, everything works without internet
+- **Your data stays on your hardware** — code, BUDs, and knowledge never leave the machine
 
-### AI Configuration — 4 Presets, Your Choice
+### AI Configuration
 
-Bodhiorchard uses [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) as its core AI engine for codebase-aware agents (Tech Plan, Test Plan, BUD generation). For other agents, you choose the provider. The Settings page offers four presets:
+Bodhiorchard's agents run on [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code). How the backend authenticates with Claude depends on where the backend is running:
 
-| Preset | Codebase Agents | Other Agents | Best For |
-|---|---|---|---|
-| **Hybrid** (recommended) | Claude Code | Anthropic or OpenAI API | Best quality — local code intelligence + cloud reasoning |
-| **Claude + Ollama** | Claude Code | Ollama (local) | Privacy-first — cloud only for code, everything else local |
-| **Cloud API** | Anthropic or OpenAI | Anthropic or OpenAI | Teams already paying for API access |
-| **Local (Ollama)** | Ollama | Ollama | Fully offline — zero API keys, zero cost, full privacy |
-
-**Supported LLM providers:**
-
-| Provider | Models | Cost |
+| Deployment | Claude auth | What you do |
 |---|---|---|
-| **Ollama** | llama3, nomic-embed-text, and any GGUF model | Free (your hardware) |
-| **Anthropic** | Claude Opus, Sonnet, Haiku via Claude Code + API | Pay-per-use |
-| **OpenAI** | GPT-4o, GPT-4, GPT-3.5 via fastembed | Pay-per-use |
-| **OpenAI Codex** | Code-specialized models | Under development |
+| **Full Docker** (backend in a container) | Anthropic API key | Paste an `sk-ant-…` key in **Settings → AI Configuration → Claude Code**. Stored encrypted (Fernet AES-128), pay-per-token via Anthropic. |
+| **Local / Hybrid** (backend on the host) | Host's `claude login` session | Run `claude login` on your machine once. Agent runs inherit whatever Claude Pro/Max subscription or API key the host is signed into. Nothing saved to the database. |
 
-Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cloud APIs when you need them.
+The backend auto-detects which mode it's in (via `/.dockerenv`) and the setup wizard + Settings page only surface the options that actually work for that deployment.
+
+#### Coming soon
+
+More AI engines are in development and will appear as additional presets in the AI Configuration page — API rewiring only, no deployment changes:
+
+| Engine | Status |
+|---|---|
+| **Ollama** (fully local, free, air-gapped) | Planned |
+| **Anthropic** direct API (non-codebase agents) | Planned |
+| **OpenAI** API (GPT-4o/4/3.5) | Planned |
+| **OpenAI Codex** | In development |
+
+Until those land, Claude Code is the single supported engine for both codebase-aware and non-codebase agents.
 
 ### System Diagram
 
@@ -216,10 +218,10 @@ Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cl
   │                       │   │   │                │           │
   │          ┌────────────┘   │   └──────────┐     │ MCP       │
   │          │                │              │     │ (10 tools)│
-  │  ┌───────▼───┐  ┌────────▼──┐  ┌────────▼──┐  │           │
-  │  │PostgreSQL  │  │  Redis    │  │  Ollama   │  │           │
-  │  │+ pgvector  │  │  Cache    │  │(local LLM)│  │           │
-  │  └───────────┘  └───────────┘  └───────────┘  │           │
+  │  ┌───────▼────┐  ┌────────▼──┐  ┌────────▼──────┐ │         │
+  │  │ PostgreSQL │  │  Redis    │  │ Ollama / OpenAI│ │         │
+  │  │ + pgvector │  │  Cache    │  │ (coming soon)  │ │         │
+  │  └────────────┘  └───────────┘  └────────────────┘ │         │
   │                                                            │
   └──────────────────────┬─────────────────────────────────────┘
                          │ Cloudflare Tunnel (optional)
@@ -238,7 +240,7 @@ Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cl
 - Python 3.12+ / FastAPI / SQLAlchemy 2.0 (async)
 - PostgreSQL 16 with pgvector for vector search
 - Redis for caching and job queues
-- fastembed for multi-provider LLM access (Ollama, OpenAI, Anthropic)
+- fastembed for local embeddings (BAAI/bge-small-en-v1.5 by default)
 - Alembic for database migrations
 - structlog for structured JSON logging
 
@@ -250,11 +252,10 @@ Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cl
 - Axios with auth interceptor
 
 **AI & Infrastructure**
-- Claude Code as the core AI engine for codebase-aware agents (via MCP)
-- Ollama for local LLM inference (no API keys needed to start)
-- fastembed for multi-provider LLM access (Anthropic, OpenAI, Ollama)
+- Claude Code as the sole AI engine today (authenticated via API key in Full Docker, or host `claude login` in Hybrid)
 - Docker + Docker Compose on a local machine or Mac Mini
 - Cloudflare Tunnel for exposing webhooks to Slack / GitHub / internet
+- Ollama / direct Anthropic / OpenAI / Codex integrations planned (see *AI Configuration → Coming soon*)
 
 ---
 
@@ -402,13 +403,13 @@ When the backend is running, interactive API documentation is available at:
 
 | Integration | Status | Description |
 |---|---|---|
-| **Claude Code** | Core | AI backbone — runs codebase-aware agents locally via MCP (10 tools) |
-| **Ollama** | Supported | Local LLM inference — free, private, no API keys needed |
-| **Anthropic API** | Supported | Cloud LLM for non-codebase agents via fastembed |
-| **OpenAI API** | Supported | Alternative cloud LLM provider via fastembed |
+| **Claude Code** | Core | AI backbone — runs codebase-aware agents via MCP (10 tools). API key in Full Docker, host `claude login` in Hybrid. |
 | **Slack** | Supported | Feature intake, triage conversations, notifications (via Cloudflare Tunnel) |
-| **GitHub** | Supported | PR merge detection, branch status, code scanning |
-| **OpenAI Codex** | In Development | Code-specialized agent tasks |
+| **GitHub** | Supported | PR merge detection, branch status, deploy-key cloning of private repos |
+| **Ollama** | Coming soon | Local LLM inference — free, private, no API keys needed |
+| **Anthropic API** | Coming soon | Direct Claude API for non-codebase agents (bypasses Claude Code MCP) |
+| **OpenAI API** | Coming soon | Alternative cloud LLM provider |
+| **OpenAI Codex** | In development | Code-specialized agent tasks |
 | **Figma** | Planned | Design review capture via MCP |
 | **Linear** | Planned | Bidirectional sync |
 

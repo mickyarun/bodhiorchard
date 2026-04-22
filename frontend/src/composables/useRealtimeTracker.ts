@@ -17,7 +17,7 @@
  *   })
  */
 import { ref, onUnmounted } from 'vue'
-import { subscribe, unsubscribe, isConnected } from '@/services/socket'
+import { subscribe, unsubscribe } from '@/services/socket'
 import api from '@/services/api'
 
 export interface TrackerCallbacks<T> {
@@ -166,19 +166,21 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
     // Fallback: start polling if WS doesn't connect in time
     fallbackTimer = setTimeout(startPollingIfNeeded, fallbackDelayMs)
 
-    // Periodic health check: handles WS dropping mid-tracking
+    // Periodic health check: kicks polling back on if it died. Note we
+    // deliberately do NOT stop polling just because the WS is connected —
+    // polling is our safety-net against the subscribe-before-publish
+    // race (progress events published server-side during the tiny window
+    // before the client's WS subscribe lands get dropped; UI then gets
+    // stuck on the last-received state until polling picks up the
+    // canonical state on the next tick).
     connectionCheckTimer = setInterval(() => {
       if (stopped) {
         if (connectionCheckTimer) clearInterval(connectionCheckTimer)
         return
       }
-      if (!isConnected() && !pollTimer) {
-        // WS dropped — start polling
+      if (!pollTimer) {
         pollStart = Date.now()
         poll()
-      } else if (isConnected() && pollTimer) {
-        // WS reconnected — stop polling, WS takes over
-        stopPolling()
       }
     }, connectionCheckMs)
   }
