@@ -31,6 +31,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
     logger.info("bodhiorchard_startup", version="0.1.0")
 
+    # 0. Static contract check: every MCP tool's schema ↔ handler must agree.
+    # Catches the class of bug that once let `write_bud` silently clobber
+    # BUDs because the schema said `content` and the handler read `content`
+    # but Claude sent `requirements_md`. Hard-fails the boot with the exact
+    # mismatch rather than shipping a silent data-loss regression.
+    from app.mcp.contract_check import check_mcp_contracts
+
+    check_mcp_contracts()
+
+    # 0b. Register external event-bus transports. Every publish to a topic
+    # like "agent_activity:<org_id>" fans out to the in-process queue
+    # subscribers (dashboard WebSocket) AND to each registered transport.
+    # Colyseus forwarding lives here so the multiplayer server sees every
+    # agent event regardless of which handler raised it.
+    from app.services.colyseus_forwarder import forward_agent_activity_to_colyseus
+    from app.services.event_bus import register_transport
+
+    register_transport(forward_agent_activity_to_colyseus)
+
     from app.services.job_handlers import setup_job_handlers
     from app.services.job_queue import cleanup_completed_jobs, start_workers, stop_workers
 

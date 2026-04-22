@@ -45,6 +45,12 @@ export function useScanSocket() {
     getError: (d) => d.error || null,
     pollIntervalMs: 2000,
     pollTimeoutMs: 1_800_000, // 30 min — scans can be long
+    // Scan progress lives in Redis for 30 min; the subscribe →
+    // first-publish race can still drop `scan_complete` (backend logs
+    // `event_bus_no_subscribers` right before the terminal event),
+    // leaving the UI stuck at the last received percent. Polling
+    // alongside the WS is cheap insurance.
+    pollAlongsideWs: true,
   })
 
   return {

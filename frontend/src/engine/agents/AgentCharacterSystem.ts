@@ -15,10 +15,8 @@ import type { Application } from '../core/Application'
 import type { AssetLoader } from '../assets/AssetLoader'
 import type { EngineAgentActivity } from '../types'
 import { AgentCharacter } from './AgentCharacter'
-
-const TREE_OFFSET_X = 1.5
-const TREE_OFFSET_Z = 1.5
-const STACK_OFFSET = 1.2
+import { getAgentSlotAtTree, getAgentFallbackSlot } from '@shared/world/treePositions'
+import { countAgentsAtRepo } from '@shared/world/agentStacking'
 
 /** Tracked state for one active agent robot. */
 interface AgentEntry {
@@ -27,6 +25,8 @@ interface AgentEntry {
   action: string
   repoNames: string[]
   currentRepoIndex: number
+  /** Frozen at spawn — matches server semantics in `AgentActivitySim`. */
+  stackIndex: number
   shuffleTimer: number
 }
 
@@ -265,21 +265,31 @@ export class AgentCharacterSystem {
       ? [...a.impacted_repo_names]
       : a.repo_name ? [a.repo_name] : []
 
+    // Freeze stackIndex at spawn — count siblings at this repo BEFORE this
+    // entry is added to `this.entries`. Mirrors server-side semantics.
+    const firstRepo = repoNames[0] ?? ""
+    const stackIndex = firstRepo
+      ? countAgentsAtRepo(
+          this.entries.values(),
+          firstRepo,
+          e => this.characters.has(e.key),
+        )
+      : 0
+
     const entry: AgentEntry = {
       key,
       skillSlug: a.skill_slug || 'agent',
       action: this.formatAction(a),
       repoNames,
       currentRepoIndex: 0,
+      stackIndex,
       shuffleTimer: 0,
     }
     this.entries.set(key, entry)
 
-    const pos = this.getPosition(entry)
-    // Repo-free agents: spawn near the orchard but offset to a clear area
-    // (center 0,0 has trees/rocks — offset to the path between zones)
-    const x = pos?.x ?? 5
-    const z = pos?.z ?? 5
+    const pos = this.getPosition(entry) ?? getAgentFallbackSlot()
+    const x = pos.x
+    const z = pos.z
 
     const character = new AgentCharacter(key, entry.skillSlug)
     await character.spawn(this.parent, this.loader, this.app, x, z, entry.action)
@@ -298,26 +308,12 @@ export class AgentCharacterSystem {
   }
 
   private getPosition(entry: AgentEntry): { x: number; z: number } | null {
-    if (entry.repoNames.length === 0) return null  // repo-free → caller uses (0,0)
+    if (entry.repoNames.length === 0) return null  // repo-free → caller uses fallback
 
     const repoName = entry.repoNames[entry.currentRepoIndex]
     const treePos = this.getTreePos(repoName)
     if (!treePos) return null
 
-    const stackIndex = this.getStackIndex(repoName, entry.key)
-    return {
-      x: treePos.x + TREE_OFFSET_X + stackIndex * STACK_OFFSET,
-      z: treePos.z + TREE_OFFSET_Z,
-    }
-  }
-
-  private getStackIndex(repoName: string, key: string): number {
-    let index = 0
-    for (const [entryKey, entry] of this.entries) {
-      if (entryKey === key) return index
-      const currentRepo = entry.repoNames[entry.currentRepoIndex]
-      if (currentRepo === repoName && this.characters.has(entryKey)) index++
-    }
-    return index
+    return getAgentSlotAtTree({ x: treePos.x, z: treePos.z }, entry.stackIndex)
   }
 }

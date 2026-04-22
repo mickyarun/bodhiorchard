@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.auth import MCPAuthResult
+from app.mcp.handler_utils import require_non_empty
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.models.dev_activity import DevActivityLog
 from app.models.pull_request import PullRequest
@@ -137,10 +138,11 @@ async def handle_takeover_todo(
             "error": "takeover_todo requires a per-user MCP token",
         }
 
-    bud_number = params.get("bud_number")
-    sequence = params.get("sequence")
-    if bud_number is None or sequence is None:
-        return {"success": False, "error": "bud_number and sequence are required"}
+    error = require_non_empty(params, "bud_number", "sequence")
+    if error:
+        return error
+    bud_number = params["bud_number"]
+    sequence = params["sequence"]
 
     bud_repo = BUDRepository(db, org_id=auth.org.id)
     bud = await bud_repo.get_by_number(int(bud_number))
@@ -223,16 +225,12 @@ async def handle_complete_todo(
             "error": "complete_todo requires a per-user MCP token",
         }
 
-    bud_number = params.get("bud_number")
-    sequence = params.get("sequence")
-    summary = (params.get("summary") or "").strip()
-    if bud_number is None or sequence is None:
-        return {"success": False, "error": "bud_number and sequence are required"}
-    if not summary:
-        return {
-            "success": False,
-            "error": "summary is required — describe briefly what you implemented.",
-        }
+    error = require_non_empty(params, "bud_number", "sequence", "summary")
+    if error:
+        return error
+    bud_number = params["bud_number"]
+    sequence = params["sequence"]
+    summary = params["summary"].strip()
 
     bud_repo = BUDRepository(db, org_id=auth.org.id)
     bud = await bud_repo.get_by_number(int(bud_number))

@@ -17,8 +17,9 @@
  *   })
  */
 import { ref, onUnmounted } from 'vue'
-import { subscribe, unsubscribe } from '@/services/socket'
+import { subscribe, unsubscribe, isConnected } from '@/services/socket'
 import api from '@/services/api'
+import type { AxiosError } from 'axios'
 
 export interface TrackerCallbacks<T> {
   onProgress?: (data: T) => void
@@ -45,6 +46,31 @@ export interface TrackerConfig<T> {
   fallbackDelayMs?: number
   /** Interval for WS health checks in ms (default: 5000) */
   connectionCheckMs?: number
+  /**
+   * When true, keep polling running alongside the WebSocket as a safety
+   * net against subscribe-before-publish races (relevant for scans
+   * whose progress lives in Redis for ~30 min and whose terminal event
+   * can be published before the client subscribe propagates).
+   *
+   * When false (default), polling is only a fallback — it kicks in if
+   * the WS isn't connected and stops again once it reconnects. This
+   * matters for trackers whose backend state is short-lived (jobs are
+   * cleaned up 5 min after terminal): a poll running after cleanup
+   * would 404 and surface as a spurious "Failed to check status".
+   */
+  pollAlongsideWs?: boolean
+  /**
+   * When true (default), ``startTracking`` fires a one-shot REST fetch
+   * to seed the initial state so the UI doesn't have to wait for the
+   * first WS event. Useful for page-refresh-mid-scan where the user
+   * lands on a tracked resource that's already in progress.
+   *
+   * Set false for pure WS-driven trackers whose backend state is
+   * short-lived — the REST endpoint returns 404 when the entry was
+   * already cleaned up, which then fires a spurious ``onError``.
+   * Jobs (see ``useJobSocket``) are the canonical case.
+   */
+  fetchInitialStateViaRest?: boolean
 }
 
 export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
@@ -55,6 +81,8 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
   const pollTimeoutMs = config.pollTimeoutMs ?? 1_800_000
   const fallbackDelayMs = config.fallbackDelayMs ?? 3000
   const connectionCheckMs = config.connectionCheckMs ?? 5000
+  const pollAlongsideWs = config.pollAlongsideWs ?? false
+  const fetchInitialStateViaRest = config.fetchInitialStateViaRest ?? true
 
   let currentId: string | null = null
   let callbacks: TrackerCallbacks<T> | undefined
@@ -103,7 +131,24 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
         return
       }
       pollTimer = setTimeout(poll, pollIntervalMs)
-    } catch {
+    } catch (err) {
+      // 404 means the backend's in-memory entry was already cleaned up
+      // (e.g. jobs reaped 5 min after terminal). That's terminal
+      // information, not a failure — the UI's source of truth for the
+      // owning resource (BUD task row, scan row) lives elsewhere and
+      // will drive the final state. Stop tracking silently so we don't
+      // surface a confusing "Failed to check status" toast. We only
+      // swallow the 404 once we've seen at least one successful update
+      // (data.value !== null) — a 404 on the very first poll means the
+      // id was never valid, and we want the onError path to fire so
+      // the UI isn't left in a perpetual "tracking" limbo.
+      if (
+        (err as AxiosError).response?.status === 404
+        && data.value !== null
+      ) {
+        stopTracking()
+        return
+      }
       callbacks?.onError?.('Failed to check status')
       stopTracking()
     }
@@ -112,13 +157,16 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
   function startPollingIfNeeded(): void {
     if (stopped || !currentId) return
     if (pollTimer) return // already polling
-    // We used to skip polling when the WS was "connected", but the topic
-    // subscribe → first-publish race can still drop a terminal event (the
-    // backend publishes `scan_complete` before the client's subscribe has
-    // propagated, and the UI stays stuck in "scanning"). Polling is cheap
-    // (a single GET every `pollIntervalMs`), idempotent with `handleData`,
-    // and stops the moment a terminal state arrives — so run it as a
-    // belt-and-suspenders alongside the WS rather than only on fallback.
+    // `pollAlongsideWs` flips this between two modes:
+    //   * true  — always-on belt-and-suspenders. Necessary for trackers
+    //             like the scan whose terminal event can be published
+    //             before the WS subscribe propagates (the UI would
+    //             otherwise get stuck at the last received progress).
+    //   * false — fallback only. Trackers whose backend state is
+    //             short-lived (e.g. jobs cleaned up after 5 min) would
+    //             otherwise emit spurious 404-backed "Failed to check
+    //             status" errors once the entry is reaped.
+    if (!pollAlongsideWs && isConnected()) return
     pollStart = Date.now()
     poll()
   }
@@ -160,27 +208,37 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
     wsCallback = handleWsMessage
     subscribe(topic, wsCallback)
 
-    // Immediately fetch current state so the UI doesn't wait for the next stage transition
-    fetchInitialState()
+    // Immediately fetch current state so the UI doesn't wait for the next stage transition.
+    // Skipped for pure WS-driven trackers (jobs) whose backend state vanishes after terminal.
+    if (fetchInitialStateViaRest) {
+      fetchInitialState()
+    }
 
     // Fallback: start polling if WS doesn't connect in time
     fallbackTimer = setTimeout(startPollingIfNeeded, fallbackDelayMs)
 
-    // Periodic health check: kicks polling back on if it died. Note we
-    // deliberately do NOT stop polling just because the WS is connected —
-    // polling is our safety-net against the subscribe-before-publish
-    // race (progress events published server-side during the tiny window
-    // before the client's WS subscribe lands get dropped; UI then gets
-    // stuck on the last-received state until polling picks up the
-    // canonical state on the next tick).
+    // Periodic health check:
+    //   pollAlongsideWs=true  — ensure polling is always running;
+    //                           restart if it died.
+    //   pollAlongsideWs=false — kick polling on when the WS drops,
+    //                           stop it again when the WS recovers.
     connectionCheckTimer = setInterval(() => {
       if (stopped) {
         if (connectionCheckTimer) clearInterval(connectionCheckTimer)
         return
       }
-      if (!pollTimer) {
+      if (pollAlongsideWs) {
+        if (!pollTimer) {
+          pollStart = Date.now()
+          poll()
+        }
+        return
+      }
+      if (!isConnected() && !pollTimer) {
         pollStart = Date.now()
         poll()
+      } else if (isConnected() && pollTimer) {
+        stopPolling()
       }
     }, connectionCheckMs)
   }

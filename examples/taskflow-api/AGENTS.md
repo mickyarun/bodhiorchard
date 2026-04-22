@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **bodhiorchard** (21068 symbols, 40702 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **taskflow-api** (336 symbols, 564 relationships, 14 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -24,10 +24,10 @@ This project is indexed by GitNexus as **bodhiorchard** (21068 symbols, 40702 re
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/bodhiorchard/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/bodhiorchard/clusters` | All functional areas |
-| `gitnexus://repo/bodhiorchard/processes` | All execution flows |
-| `gitnexus://repo/bodhiorchard/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/taskflow-api/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/taskflow-api/clusters` | All functional areas |
+| `gitnexus://repo/taskflow-api/processes` | All execution flows |
+| `gitnexus://repo/taskflow-api/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
