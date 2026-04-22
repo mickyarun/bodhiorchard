@@ -47,21 +47,27 @@ _HASH_FIELDS = (
     "unmatched_authors",
     "synthesis_warning",
     "setup_pr_message",
+    "repo_warnings",
     "error",
     "updated_at",  # epoch timestamp for stale detection
 )
 
 
+def _decode_json_list(raw: object) -> list:
+    """Parse a field stored as a JSON string back into a list."""
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw) if raw else []
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    if isinstance(raw, list):
+        return raw
+    return []
+
+
 def _dict_to_scan_status(data: dict) -> ScanStatus:
     """Convert a stored dict to a ``ScanStatus`` model."""
-    # unmatched_authors is stored as JSON string in Redis
-    authors = data.get("unmatched_authors", "[]")
-    if isinstance(authors, str):
-        try:
-            authors = json.loads(authors)
-        except (json.JSONDecodeError, TypeError):
-            authors = []
-
     return ScanStatus(
         scan_id=data.get("scan_id", ""),
         status=data.get("status", "started"),
@@ -71,9 +77,10 @@ def _dict_to_scan_status(data: dict) -> ScanStatus:
         features_skipped=int(data.get("features_skipped", 0)),
         profiles_found=int(data.get("profiles_found", 0)),
         stale_cleaned=int(data.get("stale_cleaned", 0)),
-        unmatched_authors=authors,
+        unmatched_authors=_decode_json_list(data.get("unmatched_authors", "[]")),
         synthesis_warning=data.get("synthesis_warning"),
         setup_pr_message=data.get("setup_pr_message"),
+        repo_warnings=_decode_json_list(data.get("repo_warnings", "[]")),
         error=data.get("error"),
     )
 
@@ -111,6 +118,7 @@ async def create_scan_progress(scan_id: str, org_id: str) -> ScanStatus:
         "unmatched_authors": "[]",
         "synthesis_warning": "",
         "setup_pr_message": "",
+        "repo_warnings": "[]",
         "error": "",
         "updated_at": str(time.time()),
     }
@@ -249,6 +257,29 @@ def _update_fallback(
             _org_scan_map.pop(org_id, None)
 
     return result
+
+
+async def append_repo_warning(
+    scan_id: str,
+    *,
+    repo: str,
+    phase: str,
+    summary: str,
+    hint: str | None = None,
+) -> ScanStatus | None:
+    """Append a non-fatal per-repo warning to the scan's warning list.
+
+    The list is stored JSON-encoded so it survives Redis's flat hash
+    layout. We read-modify-write which is fine here since scan progress
+    is single-writer per scan_id.
+    """
+    current = await get_scan_progress(scan_id)
+    if current is None:
+        logger.warning("append_repo_warning_missing_scan", scan_id=scan_id)
+        return None
+    entry = {"repo": repo, "phase": phase, "summary": summary, "hint": hint}
+    warnings = [w.model_dump() for w in current.repo_warnings] + [entry]
+    return await update_scan_progress(scan_id, repo_warnings=warnings)
 
 
 async def get_scan_progress(scan_id: str) -> ScanStatus | None:

@@ -145,6 +145,35 @@
 
     <v-expand-transition>
       <v-alert
+        v-if="scanResult.repoWarnings.length > 0"
+        type="warning"
+        variant="tonal"
+        density="compact"
+        class="mb-4"
+        icon="mdi-alert-outline"
+      >
+        <div class="text-body-2 font-weight-medium mb-2">
+          {{ scanResult.repoWarnings.length }} repo{{ scanResult.repoWarnings.length > 1 ? 's' : '' }} had issues during scan
+        </div>
+        <div
+          v-for="(w, i) in scanResult.repoWarnings"
+          :key="`${w.repo}-${w.phase}-${i}`"
+          class="text-body-2 mb-2"
+        >
+          <div>
+            <strong>{{ w.repo }}</strong>
+            <span class="text-medium-emphasis"> · {{ w.phase }}</span>
+          </div>
+          <div>{{ w.summary }}</div>
+          <div v-if="w.hint" class="text-caption text-primary mt-1">
+            Fix: <code>{{ w.hint }}</code>
+          </div>
+        </div>
+      </v-alert>
+    </v-expand-transition>
+
+    <v-expand-transition>
+      <v-alert
         v-if="scanStatus === 'failed'"
         type="error"
         variant="tonal"
@@ -457,88 +486,314 @@
   </v-dialog>
 
   <!-- Add Repo Dialog -->
-  <v-dialog v-model="showAddRepoDialog" max-width="520">
+  <v-dialog v-model="showAddRepoDialog" max-width="580">
     <v-card color="surface" class="pa-6">
-      <div class="text-h6 font-weight-bold mb-4">Add Repositories</div>
-
-      <!-- Selected paths list -->
-      <div v-if="newRepoPaths.length" class="mb-3">
+      <div class="d-flex align-center justify-space-between mb-4">
+        <div class="text-h6 font-weight-bold">Add Repository</div>
         <v-chip
-          v-for="(p, idx) in newRepoPaths"
-          :key="p"
-          closable
+          v-if="deploymentMode"
+          :color="deploymentMode === 'docker' ? 'info' : 'success'"
           variant="tonal"
-          size="small"
-          class="ma-1"
-          @click:close="newRepoPaths.splice(idx, 1)"
+          size="x-small"
+          :prepend-icon="deploymentMode === 'docker' ? 'mdi-docker' : 'mdi-laptop'"
         >
-          <v-icon icon="mdi-source-repository" size="14" start />
-          {{ p.split('/').pop() }}
-          <v-tooltip activator="parent" location="top" :text="p" />
+          {{ deploymentMode === 'docker' ? 'Full Docker' : 'Hybrid' }}
         </v-chip>
       </div>
 
-      <!-- Path input + browse -->
-      <v-text-field
-        v-model="newRepoPath"
-        label="Absolute path to git repository"
-        placeholder="/path/to/repo"
-        variant="outlined"
+      <v-tabs
+        v-model="addTab"
         density="compact"
-        hint="Add multiple repos — type or browse, then press Enter or click +"
-        persistent-hint
-        @keyup.enter="addPathToList"
+        color="primary"
+        class="mb-3"
       >
-        <template #prepend-inner>
-          <v-icon icon="mdi-folder-outline" size="20" class="text-medium-emphasis me-1" />
-        </template>
-        <template #append-inner>
-          <v-btn
-            icon="mdi-plus"
-            size="small"
-            variant="text"
-            density="compact"
-            :disabled="!newRepoPath.trim()"
-            @click="addPathToList"
-          />
-          <v-btn
-            icon="mdi-folder-search-outline"
-            size="small"
-            variant="text"
-            density="compact"
-            @click="directoryPicker?.open()"
-          />
-        </template>
-      </v-text-field>
-      <v-alert
-        type="warning"
-        variant="tonal"
-        density="compact"
-        icon="mdi-source-branch-sync"
-        class="mt-3"
-      >
-        Scanning will temporarily stash uncommitted changes and checkout the main branch.
-        <strong>Commit or back up your work</strong> before scanning.
-      </v-alert>
-      <v-checkbox
-        v-model="scanAfterAdd"
-        label="Scan after adding"
-        density="compact"
-        hide-details
-        class="mt-2"
-      />
-      <v-card-actions class="pa-0 mt-3">
-        <v-spacer />
-        <v-btn variant="text" @click="showAddRepoDialog = false">Cancel</v-btn>
-        <v-btn
-          color="primary"
-          variant="flat"
-          :disabled="newRepoPaths.length === 0 && !newRepoPath.trim()"
-          @click="addReposAndScan"
+        <v-tab value="github" prepend-icon="mdi-github">GitHub clone</v-tab>
+        <v-tab
+          v-if="deploymentMode !== 'docker'"
+          value="local"
+          prepend-icon="mdi-folder-outline"
         >
-          Add {{ newRepoPaths.length > 1 ? `(${newRepoPaths.length})` : '' }}
-        </v-btn>
-      </v-card-actions>
+          Local path
+        </v-tab>
+      </v-tabs>
+
+      <!-- GitHub clone tab -->
+      <div v-if="addTab === 'github'">
+        <!-- Queued URLs with per-row status -->
+        <div v-if="cloneQueue.length" class="mb-3">
+          <v-chip
+            v-for="(q, idx) in cloneQueue"
+            :key="q.url"
+            closable
+            variant="tonal"
+            size="small"
+            class="ma-1"
+            :color="cloneChipColor(q.status)"
+            :disabled="q.status === 'cloning'"
+            :prepend-icon="cloneChipIcon(q.status)"
+            @click:close="removeCloneQueueItem(idx)"
+          >
+            {{ cloneRepoLabel(q.url) }}
+            <v-tooltip activator="parent" location="top">
+              <div>{{ q.url }}</div>
+              <div v-if="q.error" class="text-caption text-error">{{ q.error }}</div>
+            </v-tooltip>
+          </v-chip>
+        </div>
+
+        <v-text-field
+          v-model="cloneUrl"
+          label="GitHub URL"
+          placeholder="https://github.com/owner/repo"
+          variant="outlined"
+          density="comfortable"
+          prepend-inner-icon="mdi-link-variant"
+          :hint="cloneUrlHint"
+          persistent-hint
+          class="mb-3"
+          @keyup.enter="addUrlToQueue"
+        >
+          <template #append-inner>
+            <v-btn
+              icon="mdi-plus"
+              size="small"
+              variant="text"
+              density="compact"
+              :disabled="!cloneUrl.trim() || cloning"
+              @click="addUrlToQueue"
+            />
+          </template>
+        </v-text-field>
+
+        <v-switch
+          v-model="cloneIsPrivate"
+          label="Private repository"
+          color="primary"
+          density="compact"
+          hide-details
+          class="mb-2"
+        />
+
+        <v-expand-transition>
+          <div v-if="cloneIsPrivate">
+            <v-alert
+              v-if="urlIsSsh"
+              type="success"
+              variant="tonal"
+              density="compact"
+              icon="mdi-lock-check-outline"
+              class="mb-3"
+            >
+              <div class="text-body-2">
+                SSH URL — we'll authenticate with the deploy key below. No token needed.
+              </div>
+            </v-alert>
+            <v-alert
+              v-else-if="urlIsHttps"
+              type="info"
+              variant="tonal"
+              density="compact"
+              icon="mdi-key-variant"
+              class="mb-3"
+            >
+              <div class="text-body-2">
+                HTTPS — paste a fine-grained PAT with
+                <strong>Contents: Read-only</strong>. Prefer SSH? Use
+                <code>git@github.com:owner/repo.git</code>.
+              </div>
+            </v-alert>
+
+            <v-expand-transition>
+              <div v-if="urlIsHttps || (!urlIsSsh && !urlIsHttps)">
+                <v-text-field
+                  v-model="clonePat"
+                  label="GitHub personal-access token"
+                  placeholder="github_pat_… or ghp_…"
+                  type="password"
+                  variant="outlined"
+                  density="compact"
+                  autocomplete="off"
+                  hide-details
+                  prepend-inner-icon="mdi-key-variant"
+                  class="mb-2"
+                />
+                <div class="text-caption text-medium-emphasis mb-3 ml-1">
+                  Used once for this clone and never stored.
+                  <a
+                    href="https://github.com/settings/personal-access-tokens/new"
+                    target="_blank"
+                    rel="noopener"
+                    class="text-primary"
+                  >Create one →</a>
+                </div>
+              </div>
+            </v-expand-transition>
+
+            <v-expand-transition>
+              <div v-if="urlIsSsh">
+                <v-alert
+                  type="info"
+                  variant="tonal"
+                  density="compact"
+                  icon="mdi-key-chain"
+                  class="mb-3"
+                >
+                  <div class="text-body-2 font-weight-medium mb-1">
+                    Deploy key
+                  </div>
+                  <div class="text-caption mb-2">
+                    Add this to
+                    <strong>your repo → Settings → Deploy keys → Add deploy key</strong>.
+                    Leave <em>Allow write</em> off.
+                  </div>
+                </v-alert>
+
+                <v-textarea
+                  :model-value="deployKey"
+                  label="Public deploy key"
+                  rows="2"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  readonly
+                  auto-grow
+                  class="mb-2 font-monospace"
+                  style="font-size: 11px;"
+                />
+                <v-btn
+                  size="small"
+                  variant="tonal"
+                  prepend-icon="mdi-content-copy"
+                  :disabled="!deployKey"
+                  class="mb-3"
+                  @click="copyDeployKey"
+                >
+                  {{ deployKeyCopied ? 'Copied' : 'Copy key' }}
+                </v-btn>
+              </div>
+            </v-expand-transition>
+          </div>
+        </v-expand-transition>
+
+        <v-checkbox
+          v-model="scanAfterAdd"
+          label="Scan after cloning"
+          density="compact"
+          hide-details
+          class="mb-3"
+        />
+
+        <v-expand-transition>
+          <v-alert
+            v-if="cloneError"
+            type="error"
+            variant="tonal"
+            density="compact"
+            class="mb-3"
+            icon="mdi-alert-circle-outline"
+          >
+            {{ cloneError }}
+          </v-alert>
+        </v-expand-transition>
+
+        <v-card-actions class="pa-0">
+          <v-spacer />
+          <v-btn variant="text" :disabled="cloning" @click="closeAddRepoDialog">Cancel</v-btn>
+          <v-btn
+            color="primary"
+            variant="flat"
+            prepend-icon="mdi-download"
+            :disabled="!canClone"
+            :loading="cloning"
+            @click="handleClone"
+          >
+            {{ cloneButtonLabel }}
+          </v-btn>
+        </v-card-actions>
+      </div>
+
+      <!-- Local path tab (Hybrid only) -->
+      <div v-if="addTab === 'local'">
+        <div v-if="newRepoPaths.length" class="mb-3">
+          <v-chip
+            v-for="(p, idx) in newRepoPaths"
+            :key="p"
+            closable
+            variant="tonal"
+            size="small"
+            class="ma-1"
+            @click:close="newRepoPaths.splice(idx, 1)"
+          >
+            <v-icon icon="mdi-source-repository" size="14" start />
+            {{ p.split('/').pop() }}
+            <v-tooltip activator="parent" location="top" :text="p" />
+          </v-chip>
+        </div>
+
+        <v-text-field
+          v-model="newRepoPath"
+          label="Absolute path to git repository"
+          placeholder="/path/to/repo"
+          variant="outlined"
+          density="compact"
+          hint="Add multiple repos — type or browse, then press Enter or click +"
+          persistent-hint
+          @keyup.enter="addPathToList"
+        >
+          <template #prepend-inner>
+            <v-icon icon="mdi-folder-outline" size="20" class="text-medium-emphasis me-1" />
+          </template>
+          <template #append-inner>
+            <v-btn
+              icon="mdi-plus"
+              size="small"
+              variant="text"
+              density="compact"
+              :disabled="!newRepoPath.trim()"
+              @click="addPathToList"
+            />
+            <v-btn
+              icon="mdi-folder-search-outline"
+              size="small"
+              variant="text"
+              density="compact"
+              @click="directoryPicker?.open()"
+            />
+          </template>
+        </v-text-field>
+
+        <v-alert
+          type="warning"
+          variant="tonal"
+          density="compact"
+          icon="mdi-source-branch-sync"
+          class="mt-3"
+        >
+          Scanning will temporarily stash uncommitted changes and checkout the main branch.
+          <strong>Commit or back up your work</strong> before scanning.
+        </v-alert>
+
+        <v-checkbox
+          v-model="scanAfterAdd"
+          label="Scan after adding"
+          density="compact"
+          hide-details
+          class="mt-2"
+        />
+
+        <v-card-actions class="pa-0 mt-3">
+          <v-spacer />
+          <v-btn variant="text" @click="closeAddRepoDialog">Cancel</v-btn>
+          <v-btn
+            color="primary"
+            variant="flat"
+            :disabled="newRepoPaths.length === 0 && !newRepoPath.trim()"
+            @click="addReposAndScan"
+          >
+            Add {{ newRepoPaths.length > 1 ? `(${newRepoPaths.length})` : '' }}
+          </v-btn>
+        </v-card-actions>
+      </div>
     </v-card>
   </v-dialog>
 
@@ -616,12 +871,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import DirectoryPicker from '@/components/setup/DirectoryPicker.vue'
 import api from '@/services/api'
 import { useScanSocket } from '@/composables/useScanSocket'
-import type { ScanStatusData } from '@/composables/useScanSocket'
+import type { ScanStatusData, RepoScanWarning } from '@/composables/useScanSocket'
 import type { RepoInfo } from '@/types'
 
 const settingsStore = useSettingsStore()
@@ -643,6 +898,7 @@ const scanResult = ref({
   staleCleaned: 0,
   unmatchedAuthors: [] as string[],
   synthesisWarning: '' as string,
+  repoWarnings: [] as RepoScanWarning[],
 })
 let currentScanId = ''
 
@@ -660,6 +916,128 @@ const newRepoPath = ref('')
 const newRepoPaths = ref<string[]>([])
 const scanAfterAdd = ref(true)
 const directoryPicker = ref<InstanceType<typeof DirectoryPicker> | null>(null)
+
+// Deployment mode — same detection used by the setup wizard.
+const deploymentMode = ref<'docker' | 'host' | null>(null)
+// Add-repo dialog active tab — GitHub clone is the default for both modes.
+const addTab = ref<'github' | 'local'>('github')
+
+// GitHub clone form state — supports a queue of URLs so the user can batch
+// several repos in one dialog open. PAT/SSH auth is shared across the batch
+// (matches the common case of cloning several repos from the same GitHub
+// account with one token or one deploy key).
+type CloneQueueStatus = 'pending' | 'cloning' | 'done' | 'error'
+interface CloneQueueItem {
+  url: string
+  status: CloneQueueStatus
+  error?: string
+}
+
+const cloneUrl = ref('')                     // current input (not yet queued)
+const cloneQueue = ref<CloneQueueItem[]>([]) // staged + in-flight URLs
+const cloneIsPrivate = ref(false)
+const clonePat = ref('')
+const cloning = ref(false)
+const cloneError = ref('')
+const deployKey = ref('')
+const deployKeyCopied = ref(false)
+
+function isSshUrl(url: string): boolean {
+  const v = url.trim()
+  return v.startsWith('git@') || v.startsWith('ssh://')
+}
+function isHttpsUrl(url: string): boolean {
+  return url.trim().startsWith('https://')
+}
+
+const urlIsSsh = computed<boolean>(() => isSshUrl(cloneUrl.value))
+const urlIsHttps = computed<boolean>(() => isHttpsUrl(cloneUrl.value))
+
+// Shape hints derived from the queue (not just the current input) so the
+// PAT field appears/disappears based on what's actually queued.
+const queueHasSsh = computed<boolean>(() =>
+  cloneQueue.value.some((q) => isSshUrl(q.url)) || urlIsSsh.value,
+)
+const queueHasHttps = computed<boolean>(() =>
+  cloneQueue.value.some((q) => isHttpsUrl(q.url)) || urlIsHttps.value
+  || (!queueHasSsh.value && cloneQueue.value.length + (cloneUrl.value.trim() ? 1 : 0) > 0),
+)
+
+const cloneUrlHint = computed<string>(() => {
+  const v = cloneUrl.value.trim()
+  if (!v && cloneQueue.value.length === 0) {
+    return 'Paste a GitHub URL — HTTPS or SSH. Press + or Enter to queue more.'
+  }
+  if (!v) return 'Press + or Enter to queue another repo.'
+  if (urlIsSsh.value) return 'SSH URL — will use the deploy key below.'
+  return 'HTTPS URL — public repos clone anonymously.'
+})
+
+const pendingCount = computed<number>(
+  () => cloneQueue.value.filter((q) => q.status === 'pending' || q.status === 'error').length
+    + (cloneUrl.value.trim() ? 1 : 0),
+)
+
+const canClone = computed<boolean>(() => {
+  if (cloning.value) return false
+  if (pendingCount.value === 0) return false
+  // If any pending URL is HTTPS + private, the shared PAT must be filled.
+  if (cloneIsPrivate.value) {
+    const anyNeedsPat = (cloneUrl.value.trim() && isHttpsUrl(cloneUrl.value))
+      || cloneQueue.value.some((q) =>
+        (q.status === 'pending' || q.status === 'error') && isHttpsUrl(q.url),
+      )
+    if (anyNeedsPat && !clonePat.value.trim()) return false
+  }
+  return true
+})
+
+const cloneButtonLabel = computed<string>(() => {
+  if (cloning.value) return 'Cloning…'
+  const n = pendingCount.value
+  if (n === 0) return 'Clone repositories'
+  return n === 1 ? 'Clone repository' : `Clone ${n} repositories`
+})
+
+function cloneRepoLabel(url: string): string {
+  // Pull owner/repo or just repo from either URL shape for display.
+  const cleaned = url.replace(/\.git\/?$/, '').replace(/\/$/, '')
+  return cleaned.split(/[/:]/).pop() || cleaned
+}
+function cloneChipColor(status: CloneQueueStatus): string {
+  return status === 'done'
+    ? 'success'
+    : status === 'error'
+      ? 'error'
+      : status === 'cloning'
+        ? 'primary'
+        : 'grey'
+}
+function cloneChipIcon(status: CloneQueueStatus): string {
+  return status === 'done'
+    ? 'mdi-check-circle-outline'
+    : status === 'error'
+      ? 'mdi-alert-circle-outline'
+      : status === 'cloning'
+        ? 'mdi-progress-download'
+        : 'mdi-source-repository'
+}
+
+function addUrlToQueue(): void {
+  const u = cloneUrl.value.trim()
+  if (!u) return
+  if (cloneQueue.value.some((q) => q.url === u)) {
+    cloneUrl.value = ''
+    return
+  }
+  cloneQueue.value.push({ url: u, status: 'pending' })
+  cloneUrl.value = ''
+}
+function removeCloneQueueItem(idx: number): void {
+  const item = cloneQueue.value[idx]
+  if (item && item.status === 'cloning') return   // can't cancel an in-flight one
+  cloneQueue.value.splice(idx, 1)
+}
 
 // Branch mapping dialog
 const uatStageEnabled = computed(
@@ -686,6 +1064,35 @@ const maxTurnsOptions = [
   { title: '100 steps', value: 100 },
   { title: 'Unlimited', value: 0 },
 ]
+
+// Warn before the "passed test" state lingers across URL edits — same as setup.
+watch([cloneUrl, cloneIsPrivate, clonePat], () => {
+  cloneError.value = ''
+})
+
+// Load the deployment chip + deploy key the moment the dialog opens so they're
+// ready by the time the user flips on "Private repository" (and so Local tab is
+// hidden in Docker before the user can blink at a broken option).
+watch(showAddRepoDialog, async (open) => {
+  if (!open) return
+  if (deploymentMode.value === null) {
+    try {
+      const { data } = await api.get('/setup/deployment-info')
+      deploymentMode.value = data.mode === 'docker' ? 'docker' : 'host'
+      addTab.value = 'github'
+    } catch {
+      deploymentMode.value = 'host'
+    }
+  }
+  if (!deployKey.value) {
+    try {
+      const { data } = await api.get('/setup/deploy-key')
+      deployKey.value = data.public_key || ''
+    } catch {
+      deployKey.value = ''
+    }
+  }
+})
 
 onMounted(async () => {
   fetchIndexStats()
@@ -755,13 +1162,76 @@ async function addReposAndScan(): Promise<void> {
     if (ok) anyOk = true
   }
   if (anyOk) {
-    showAddRepoDialog.value = false
-    newRepoPaths.value = []
-    newRepoPath.value = ''
+    closeAddRepoDialog()
     if (scanAfterAdd.value) {
       triggerScan(false)
     }
   }
+}
+
+async function handleClone(): Promise<void> {
+  if (!canClone.value) return
+  // Stage any typed-but-not-queued URL first.
+  addUrlToQueue()
+
+  cloning.value = true
+  cloneError.value = ''
+  let anySucceeded = false
+  try {
+    // Sequential clone — one at a time keeps network load predictable and
+    // makes per-item error reporting obvious. Skip items already done.
+    for (const item of cloneQueue.value) {
+      if (item.status === 'done') continue
+      item.status = 'cloning'
+      item.error = undefined
+
+      const pat = cloneIsPrivate.value && !isSshUrl(item.url)
+        ? clonePat.value.trim() || null
+        : null
+      const ok = await settingsStore.cloneRepo(item.url, pat)
+      if (ok) {
+        item.status = 'done'
+        anySucceeded = true
+      } else {
+        item.status = 'error'
+        item.error = settingsStore.error || 'Clone failed.'
+      }
+    }
+  } finally {
+    cloning.value = false
+  }
+
+  const allDone = cloneQueue.value.every((q) => q.status === 'done')
+  if (allDone) {
+    closeAddRepoDialog()
+    if (anySucceeded && scanAfterAdd.value) {
+      triggerScan(false)
+    }
+  }
+  // Partial failures leave the dialog open so the user can retry just the
+  // errored rows (by clicking Clone again — successes are skipped).
+}
+
+async function copyDeployKey(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(deployKey.value)
+    deployKeyCopied.value = true
+    setTimeout(() => { deployKeyCopied.value = false }, 2000)
+  } catch {
+    // Fall through — user can select and copy manually.
+  }
+}
+
+function closeAddRepoDialog(): void {
+  showAddRepoDialog.value = false
+  // Reset form state so the next open starts clean.
+  newRepoPaths.value = []
+  newRepoPath.value = ''
+  cloneUrl.value = ''
+  cloneQueue.value = []
+  cloneIsPrivate.value = false
+  clonePat.value = ''
+  cloneError.value = ''
 }
 
 async function openBranchDialog(repo: RepoInfo): Promise<void> {
@@ -878,6 +1348,7 @@ function startPolling(): void {
   function handleProgress(data: ScanStatusData): void {
     scanProgress.value = data.progressPct || 0
     scanStatusLabel.value = data.statusLabel || formatStatusLabel(data.status)
+    scanResult.value.repoWarnings = data.repoWarnings || []
   }
 
   function handleComplete(data: ScanStatusData): void {
@@ -890,6 +1361,7 @@ function startPolling(): void {
       staleCleaned: data.staleCleaned || 0,
       unmatchedAuthors: data.unmatchedAuthors || [],
       synthesisWarning: data.synthesisWarning || '',
+      repoWarnings: data.repoWarnings || [],
     }
     localStorage.removeItem('bodhiorchard_scan_id')
     fetchIndexStats()

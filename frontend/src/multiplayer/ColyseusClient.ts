@@ -8,8 +8,7 @@
  * join/leave helpers for house rooms.
  */
 import { Client, Room } from "@colyseus/sdk"
-
-const DEFAULT_SERVER = "ws://localhost:2567"
+import { resolveColyseusUrl } from "./colyseusUrl"
 
 export interface PlayerData {
   userId: string
@@ -37,9 +36,9 @@ export class ColyseusClient {
     this.client = new Client(serverUrl)
   }
 
-  static getInstance(serverUrl = DEFAULT_SERVER): ColyseusClient {
+  static getInstance(serverUrl?: string): ColyseusClient {
     if (!ColyseusClient.instance) {
-      ColyseusClient.instance = new ColyseusClient(serverUrl)
+      ColyseusClient.instance = new ColyseusClient(serverUrl ?? resolveColyseusUrl())
     }
     return ColyseusClient.instance
   }

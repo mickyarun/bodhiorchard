@@ -248,8 +248,20 @@ function handleLogout(): void {
 }
 
 .app-main {
+  /* 100vh on iOS Safari counts the URL/tab bar area, so content
+     extends below the visible viewport. 100dvh resolves to the
+     currently-visible height. Keep 100vh as a fallback — browsers
+     that parse `dvh` (Safari 15.4+, Chrome 108+, Firefox 101+)
+     win via the @supports block below. */
   height: 100vh;
   max-height: 100vh;
+}
+
+@supports (height: 100dvh) {
+  .app-main {
+    height: 100dvh;
+    max-height: 100dvh;
+  }
 }
 
 .app-scroll {
