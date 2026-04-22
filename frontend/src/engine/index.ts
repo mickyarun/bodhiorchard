@@ -52,9 +52,9 @@ import { VehicleController } from './vehicles/VehicleController'
 import { VehicleSystem } from './vehicles/VehicleSystem'
 import { getVehicleDef } from './vehicles/VehicleManifest'
 
-export { type EngineData, type EngineCallbacks } from './types'
+export { type EngineData, type EngineCallbacks, type SceneState } from './types'
 
-type SceneState = 'garden' | 'entering' | 'interior' | 'exiting' | 'takeover' | 'coffeebar' | 'cafeteria'
+import type { SceneState } from './types'
 
 export class GardenEngine {
   private app: Application | null = null
@@ -77,7 +77,18 @@ export class GardenEngine {
   // Cafeteria interior (shared across the org)
   private cafeteria: CafeteriaManager | null = null
   private _cafeteriaReentryCooldownMs = 0
-  private sceneState: SceneState = 'garden'
+  // Backing store for sceneState. All existing code writes `this.sceneState =
+  // ...`, so we expose it via a getter/setter pair — the setter fires the
+  // onSceneStateChange callback whenever the state actually changes, giving
+  // UI layers (e.g. the touch-control overlay) a single subscription point
+  // without touching any of the ~24 assignment sites.
+  private _sceneState: SceneState = 'garden'
+  private get sceneState(): SceneState { return this._sceneState }
+  private set sceneState(next: SceneState) {
+    if (this._sceneState === next) return
+    this._sceneState = next
+    this.callbacks.onSceneStateChange?.(next)
+  }
   private savedCameraState: CameraState | null = null
   private _interiorMemberId: string | null = null
   // Re-entrancy guard for enterHouse/exitHouse. Set `true` for the duration
@@ -85,6 +96,11 @@ export class GardenEngine {
   // to prevent double-entry (e.g. a door hit firing mid-fade) and
   // double-exit (e.g. ESC pressed while the exit fade is still running).
   private _transitioning = false
+
+  // Last reason takeoverCharacter bailed — surfaced to the UI so iPad
+  // users can see why "Take control" did nothing (no console access).
+  private _takeoverBailReason: string | null = null
+  get takeoverBailReason(): string | null { return this._takeoverBailReason }
 
   // Garden takeover (player controls their character)
   private takeoverCtrl: TakeoverController | null = null
@@ -1330,20 +1346,50 @@ export class GardenEngine {
     userId: string,
     spawnOverride?: { x: number; z: number; yaw: number },
   ): Promise<void> {
-    if (this.sceneState !== 'garden' || !this.camera || !this.input || !this.sceneManager || !this.app) return
+    // The UI surfaces the bail reason via `takeoverBailReason`; debug
+    // logs only fire in dev to avoid console noise in production (and
+    // because `_takeoverBailReason` is the primary diagnostic).
+    const debug = import.meta.env.DEV
+    if (this.sceneState !== 'garden') {
+      if (debug) console.warn('[GardenEngine] takeover bail: sceneState =', this.sceneState)
+      this._takeoverBailReason = `Scene not ready (${this.sceneState}).`
+      return
+    }
+    if (!this.camera || !this.input || !this.sceneManager || !this.app) {
+      const missing = [
+        !this.camera && 'camera',
+        !this.input && 'input',
+        !this.sceneManager && 'sceneManager',
+        !this.app && 'app',
+      ].filter(Boolean).join(', ')
+      if (debug) console.warn('[GardenEngine] takeover bail: missing', missing)
+      this._takeoverBailReason = `Engine not initialised (${missing}).`
+      return
+    }
 
     const charSystem = this.sceneManager.characterSystemRef
-    if (!charSystem) return
+    if (!charSystem) {
+      if (debug) console.warn('[GardenEngine] takeover bail: characterSystem not ready')
+      this._takeoverBailReason = 'Characters not loaded yet.'
+      return
+    }
 
     const character = charSystem.getCharacter(userId)
     if (!character) {
-      console.warn(
-        '[GardenEngine] takeoverCharacter: character not found for', userId,
-        '— check that the Colyseus OrgRoom is connected and that the user is',
-        'in the org snapshot (see _collect_org_members in internal_colyseus.py).',
-      )
+      const available = charSystem.getCharacters().map(c => c.memberId)
+      if (debug) {
+        console.warn(
+          '[GardenEngine] takeoverCharacter: character not found for', userId,
+          'available:', available,
+        )
+      }
+      this._takeoverBailReason = available.length
+        ? `No character assigned to you yet (${available.length} others in scene).`
+        : 'Still connecting — wait for characters to appear.'
       return
     }
+
+    this._takeoverBailReason = null
 
     // Take Control always enters garden WASD mode. Interior mode (walking
     // around inside the house) is a separate entry point triggered by
@@ -1558,6 +1604,19 @@ export class GardenEngine {
 
   /** Whether the engine is currently in takeover mode. */
   get isTakeover(): boolean { return this.sceneState === 'takeover' }
+
+  /** Current top-level scene state (garden, takeover, interior, etc.). */
+  getSceneState(): SceneState { return this._sceneState }
+
+  /**
+   * ID of the nearby member the proximity system has locked onto, or
+   * null. Used by the on-screen touch overlay to gate the Greet (3) and
+   * Invite-to-race (4) buttons so they only light up when there's
+   * actually a target.
+   */
+  getNearbyMemberId(): string | null {
+    return this.takeoverProximity?.nearbyMemberId ?? null
+  }
 
   /**
    * Set the currently authenticated user's full identity.

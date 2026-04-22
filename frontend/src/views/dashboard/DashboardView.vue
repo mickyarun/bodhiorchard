@@ -1,7 +1,9 @@
 <template>
   <div class="dashboard-view fill-height d-flex flex-column">
-    <!-- Shared header -->
-    <div class="d-flex align-center ga-3 px-4 py-3" style="flex-shrink: 0; flex-wrap: wrap;">
+    <!-- Shared header — single-line, horizontally scrollable on narrow
+         screens (iPad portrait / small laptops) so controls don't
+         wrap to a second row and chew up canvas vertical space. -->
+    <div class="dashboard-view__header d-flex align-center ga-3 px-4 py-3">
       <div class="text-h6 font-weight-bold mr-2">Dashboard</div>
 
       <!-- View mode toggle -->
@@ -342,6 +344,21 @@ onUnmounted(() => {
   background: rgb(var(--v-theme-surface));
 }
 
+/* Keep the header on a single line — chips/selects scroll horizontally
+   instead of wrapping, so the canvas below keeps its full height. */
+.dashboard-view__header {
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dashboard-view__header > * {
+  flex-shrink: 0;
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.15s ease;
@@ -374,6 +391,15 @@ onUnmounted(() => {
   font-size: 12px;
   pointer-events: none;
   user-select: none;
+}
+
+/* On touch devices the "Press T" hint is misleading — there's no
+   keyboard and PlayCanvasCanvas already renders an on-screen
+   "Take control" button in its place. */
+@media (hover: none) and (pointer: coarse) {
+  .takeover-hint {
+    display: none;
+  }
 }
 
 .takeover-hint kbd {

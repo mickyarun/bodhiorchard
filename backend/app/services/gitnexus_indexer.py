@@ -61,10 +61,50 @@ class GitNexusResult:
     stats: dict[str, int] = field(default_factory=dict)
     success: bool = False
     error: str | None = None
+    error_hint: str | None = None
 
 
 class GitNexusNotInstalledError(Exception):
     """Raised when npx/Node.js is not available to run GitNexus."""
+
+
+def _summarize_npx_failure(stderr: str, returncode: int) -> tuple[str, str | None]:
+    """Pull a short, actionable summary out of noisy npm/npx stderr.
+
+    Returns ``(summary, hint)`` where ``summary`` is one line suitable for
+    the UI and ``hint`` is an optional recovery suggestion. Strips the
+    `npm warn` lines that drown the real error.
+    """
+    lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+    err_lines = [ln for ln in lines if not ln.lower().startswith("npm warn")]
+
+    code_match = next(
+        (ln for ln in err_lines if ln.lower().startswith("npm error code")),
+        None,
+    )
+    if code_match:
+        code = code_match.removeprefix("npm error code ").removeprefix("npm ERR! code ")
+        hint: str | None = None
+        if code == "ENOTEMPTY":
+            hint = (
+                "Clear the npx cache and retry: rm -rf ~/.npm/_npx "
+                "(or `npm cache clean --force`)."
+            )
+        elif code in {"EACCES", "EPERM"}:
+            hint = "Check file permissions on ~/.npm and the repo directory."
+        elif code == "ENOSPC":
+            hint = "Free disk space and retry."
+        return (f"npm failed: {code}", hint)
+
+    last_err = next(
+        (ln for ln in reversed(err_lines) if "error" in ln.lower()),
+        None,
+    )
+    if last_err:
+        return (last_err[:200], None)
+    if err_lines:
+        return (err_lines[-1][:200], None)
+    return (f"GitNexus analyze exited with code {returncode}", None)
 
 
 ## _find_npx, _run_npx_sync, _run_npx, _run_cypher are imported from gitnexus_utils
@@ -135,15 +175,16 @@ async def index_repo_with_gitnexus(
                     stderr_preview=stderr[:200],
                 )
             else:
+                summary, hint = _summarize_npx_failure(stderr, returncode)
                 logger.warning(
                     "gitnexus_nonzero_exit",
                     returncode=returncode,
+                    summary=summary,
+                    hint=hint,
                     stderr=stderr[:500],
                 )
-                result.error = (
-                    f"GitNexus analyze failed (code {returncode}): "
-                    f"{stderr[:200]}"
-                )
+                result.error = summary
+                result.error_hint = hint
                 return result
 
         logger.info("gitnexus_analyze_complete", repo=repo_path)

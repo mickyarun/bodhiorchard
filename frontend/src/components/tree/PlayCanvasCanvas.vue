@@ -16,17 +16,54 @@
     >
       {{ tooltipText }}
     </div>
+    <TouchControls
+      v-if="isTouch && touchContext"
+      :context="touchContext"
+      :proximity-target-id="nearbyMemberId"
+    />
+    <!-- Garden-mode entry for touch devices — keyboard users press T
+         (DashboardView), iPad users have no keys so they need a button.
+         Uses pointerup which fires reliably for both mouse and touch
+         on iOS Safari; @click alone can be swallowed when PlayCanvas's
+         canvas-level touch listeners consume the gesture. -->
+    <div
+      v-if="isTouch && sceneState === 'garden'"
+      class="playcanvas-canvas__take-control-wrap"
+    >
+      <button
+        type="button"
+        class="playcanvas-canvas__take-control"
+        :class="{ 'playcanvas-canvas__take-control--flash': tapFlash }"
+        aria-label="Take control of your character"
+        @pointerup.stop="onTakeControlTap"
+      >
+        <span class="playcanvas-canvas__take-control-icon" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor">
+            <path d="M4 2.5v11l10-5.5-10-5.5z" />
+          </svg>
+        </span>
+        <span class="playcanvas-canvas__take-control-label">Take control</span>
+      </button>
+      <div
+        v-if="takeoverFailureReason"
+        class="playcanvas-canvas__take-control-reason"
+      >
+        {{ takeoverFailureReason }}
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { TreeData } from '@/types/dashboard'
 import { GardenEngine } from '@/engine/index'
-import type { EngineData, RepoHealth, ThreatSeverity, BUDStatus, RelType } from '@/engine/types'
+import type { EngineData, RepoHealth, ThreatSeverity, BUDStatus, RelType, SceneState } from '@/engine/types'
 import { useAuthStore } from '@/stores/auth'
 import { useXPStore } from '@/stores/xp'
 import api from '@/services/api'
+import TouchControls, { type TouchContext } from '@/components/touch/TouchControls.vue'
+import { useTouchDevice } from '@/composables/useTouchDevice'
 
 const authStore = useAuthStore()
 
@@ -48,6 +85,23 @@ const emit = defineEmits<{
 const containerRef = ref<HTMLElement | null>(null)
 const tooltipText = ref<string | null>(null)
 const tooltipPos = ref({ x: 0, y: 0 })
+
+// Touch overlay state — gated on device capability + current scene mode.
+// sceneState is mirrored into a ref via the onSceneStateChange callback so
+// the template reacts to engine transitions. nearbyMemberId is polled from
+// the engine because proximity updates every frame and we don't want the
+// churn of firing a callback at 60 Hz.
+const { isTouch } = useTouchDevice()
+const sceneState = ref<SceneState>('garden')
+const nearbyMemberId = ref<string | null>(null)
+
+const touchContext = computed<TouchContext | null>(() => {
+  if (sceneState.value === 'takeover') return 'garden-takeover'
+  if (sceneState.value === 'interior' || sceneState.value === 'coffeebar' || sceneState.value === 'cafeteria') return 'interior'
+  return null
+})
+
+let proximityTimer: ReturnType<typeof setInterval> | null = null
 
 let engine: GardenEngine | null = null
 // Set to true only after `initEngine` completes — guards the auth watcher
@@ -194,7 +248,12 @@ async function initEngine(): Promise<void> {
     onZoneEnter: (zone) => emit('zone-enter', zone),
     onZoneExit: (zone) => emit('zone-exit', zone),
     onInviteToRace: (userId, name) => emit('invite-to-race', { userId, name }),
+    onSceneStateChange: (state) => { sceneState.value = state },
   })
+
+  // Seed the initial scene state so the touch overlay reacts correctly on
+  // first render (before any transition has fired).
+  sceneState.value = engine.getSceneState()
 
   // Tell engine who the authenticated user is (for identity preservation in
   // house visits and for JWT verification on Colyseus join). The auth store
@@ -295,6 +354,13 @@ onMounted(async () => {
     resizeObserver = new ResizeObserver(onResize)
     resizeObserver.observe(containerRef.value)
   }
+
+  // Poll proximity target at 10 Hz — only used to dim/brighten the touch
+  // Greet (3) and Invite (4) buttons. Polling instead of a per-frame
+  // callback keeps the engine loop free of UI churn.
+  proximityTimer = setInterval(() => {
+    nearbyMemberId.value = engine?.getNearbyMemberId() ?? null
+  }, 100)
 })
 
 watch(
@@ -356,6 +422,51 @@ function takeoverCharacter(): void {
   if (userId) engine?.takeoverCharacter(userId)
 }
 
+/** Touch-overlay button handler. Briefly flashes the button so the
+ *  user gets visible feedback that the tap was received, then calls
+ *  into the engine and — if the engine silently bails — surfaces
+ *  the reason inline via `takeoverFailureReason`. iPad has no easy
+ *  console access, so this is how users see what went wrong. */
+const tapFlash = ref(false)
+const takeoverFailureReason = ref<string | null>(null)
+
+function onTakeControlTap(): void {
+  tapFlash.value = true
+  setTimeout(() => { tapFlash.value = false }, 180)
+  takeoverFailureReason.value = null
+
+  const userId = authStore.user?.id
+  if (import.meta.env.DEV) {
+    console.log('[TakeControl] tap', {
+      userId,
+      hasEngine: !!engine,
+      sceneState: sceneState.value,
+    })
+  }
+  if (!userId) {
+    takeoverFailureReason.value = 'Not signed in.'
+    return
+  }
+  if (!engine) {
+    takeoverFailureReason.value = 'Engine still loading — try again in a moment.'
+    return
+  }
+  Promise.resolve(engine.takeoverCharacter(userId))
+    .then(() => {
+      // If sceneState didn't flip, the engine set a bail reason we
+      // can surface. Success clears the message automatically since
+      // the whole button hides (v-if on sceneState === 'garden').
+      if (engine && sceneState.value === 'garden') {
+        takeoverFailureReason.value = engine.takeoverBailReason
+          ?? 'Take control did nothing — engine state may be stuck.'
+      }
+    })
+    .catch(err => {
+      console.error('[TakeControl] takeoverCharacter threw', err)
+      takeoverFailureReason.value = `Error: ${(err as Error)?.message ?? err}`
+    })
+}
+
 /** Exit takeover mode back to overview (callable from parent). */
 function exitTakeover(): void {
   engine?.exitTakeover()
@@ -381,6 +492,10 @@ onUnmounted(() => {
   }
   if (resizeTimer) {
     clearTimeout(resizeTimer)
+  }
+  if (proximityTimer) {
+    clearInterval(proximityTimer)
+    proximityTimer = null
   }
   if (engine) {
     engine.destroy()
@@ -423,6 +538,117 @@ onUnmounted(() => {
   white-space: pre-line;
   z-index: 10;
   max-width: 250px;
+}
+
+/* Position wrapper so the button + inline error stack vertically
+   and stay centred. The wrapper is just for layout — all the
+   game-button styling lives on the button itself. */
+.playcanvas-canvas__take-control-wrap {
+  position: absolute;
+  left: 50%;
+  bottom: max(88px, calc(env(safe-area-inset-bottom) + 72px));
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none; /* children flip this on */
+}
+
+.playcanvas-canvas__take-control-reason {
+  pointer-events: auto;
+  max-width: 280px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(15, 20, 30, 0.85);
+  color: #ffd764;
+  font-size: 12px;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4),
+              0 0 0 1px rgba(212, 168, 67, 0.5);
+}
+
+/* Compact warm-amber action button. The theme's secondary
+   (#D4A843) reads as gold against the green garden — far more
+   contrast than primary-on-primary. Sized to feel like a pill
+   UI button, not a dominating call-to-action. */
+.playcanvas-canvas__take-control {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px 10px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    #f2c971 0%,
+    #d4a843 55%,
+    #a67d26 100%
+  );
+  color: #2a1a00;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.18),
+    0 3px 0 #6b4e12,
+    0 6px 14px rgba(0, 0, 0, 0.5),
+    0 0 0 1.5px rgba(40, 24, 0, 0.7);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.08s ease,
+    filter 0.15s ease, background 0.15s ease;
+}
+
+.playcanvas-canvas__take-control:hover {
+  filter: brightness(1.06);
+}
+
+.playcanvas-canvas__take-control:active,
+.playcanvas-canvas__take-control--flash {
+  transform: translateY(2px);
+  background: linear-gradient(
+    180deg,
+    #ffe79f 0%,
+    #f5d27a 55%,
+    #c09536 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22),
+    0 1px 0 #6b4e12,
+    0 2px 6px rgba(0, 0, 0, 0.4),
+    0 0 0 1.5px rgba(40, 24, 0, 0.7),
+    0 0 16px rgba(255, 208, 110, 0.55);
+}
+
+.playcanvas-canvas__take-control-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #2a1a00;
+  color: #ffd764;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.15),
+    0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.playcanvas-canvas__take-control-icon svg {
+  margin-left: 1px; /* optical center the play triangle */
+}
+
+.playcanvas-canvas__take-control-label {
+  line-height: 1;
 }
 
 </style>
