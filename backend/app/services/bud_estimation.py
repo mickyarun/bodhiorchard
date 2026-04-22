@@ -73,7 +73,10 @@ async def estimate_bud_dates(
     skill_ctx = await get_skill_context(db, org_id, bud)
     historical_ctx = await get_historical_context(db, org_id)
 
-    # AI-PERT estimation + LLM-rated complexity (with fallback)
+    # AI-PERT estimation + LLM-rated complexity (with fallback). The org's
+    # config is threaded through so the prompt can name the configured AI
+    # coding agent (Claude Code / Ollama / Cloud / Codex) instead of
+    # hardcoding one — see ``get_ai_agent_profile``.
     llm_result = await llm_pert_estimate(
         bud,
         heuristic_complexity,
@@ -81,6 +84,7 @@ async def estimate_bud_dates(
         skill_ctx,
         historical_ctx,
         remaining,
+        org_config=org.config if org else None,
     )
     if llm_result is not None:
         pert_estimates = llm_result.phases
