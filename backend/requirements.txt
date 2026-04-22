@@ -18,3 +18,9 @@ pgvector>=0.2.4
 redis>=5.0.0
 structlog>=24.1.0
 cachetools>=5.3.0
+# Direct runtime deps (were satisfied transitively — pin explicitly so an
+# upstream dropping them silently doesn't break the app):
+#   python-dotenv: backend/alembic/env.py loads .env for the Alembic CLI
+#   PyYAML:        backend/app/services/skill_loader.py parses frontmatter
+python-dotenv>=1.0.0
+PyYAML>=6.0
