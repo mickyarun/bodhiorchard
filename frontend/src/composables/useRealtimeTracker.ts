@@ -19,6 +19,7 @@
 import { ref, onUnmounted } from 'vue'
 import { subscribe, unsubscribe, isConnected } from '@/services/socket'
 import api from '@/services/api'
+import type { AxiosError } from 'axios'
 
 export interface TrackerCallbacks<T> {
   onProgress?: (data: T) => void
@@ -58,6 +59,18 @@ export interface TrackerConfig<T> {
    * would 404 and surface as a spurious "Failed to check status".
    */
   pollAlongsideWs?: boolean
+  /**
+   * When true (default), ``startTracking`` fires a one-shot REST fetch
+   * to seed the initial state so the UI doesn't have to wait for the
+   * first WS event. Useful for page-refresh-mid-scan where the user
+   * lands on a tracked resource that's already in progress.
+   *
+   * Set false for pure WS-driven trackers whose backend state is
+   * short-lived — the REST endpoint returns 404 when the entry was
+   * already cleaned up, which then fires a spurious ``onError``.
+   * Jobs (see ``useJobSocket``) are the canonical case.
+   */
+  fetchInitialStateViaRest?: boolean
 }
 
 export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
@@ -69,6 +82,7 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
   const fallbackDelayMs = config.fallbackDelayMs ?? 3000
   const connectionCheckMs = config.connectionCheckMs ?? 5000
   const pollAlongsideWs = config.pollAlongsideWs ?? false
+  const fetchInitialStateViaRest = config.fetchInitialStateViaRest ?? true
 
   let currentId: string | null = null
   let callbacks: TrackerCallbacks<T> | undefined
@@ -117,7 +131,24 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
         return
       }
       pollTimer = setTimeout(poll, pollIntervalMs)
-    } catch {
+    } catch (err) {
+      // 404 means the backend's in-memory entry was already cleaned up
+      // (e.g. jobs reaped 5 min after terminal). That's terminal
+      // information, not a failure — the UI's source of truth for the
+      // owning resource (BUD task row, scan row) lives elsewhere and
+      // will drive the final state. Stop tracking silently so we don't
+      // surface a confusing "Failed to check status" toast. We only
+      // swallow the 404 once we've seen at least one successful update
+      // (data.value !== null) — a 404 on the very first poll means the
+      // id was never valid, and we want the onError path to fire so
+      // the UI isn't left in a perpetual "tracking" limbo.
+      if (
+        (err as AxiosError).response?.status === 404
+        && data.value !== null
+      ) {
+        stopTracking()
+        return
+      }
       callbacks?.onError?.('Failed to check status')
       stopTracking()
     }
@@ -177,8 +208,11 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
     wsCallback = handleWsMessage
     subscribe(topic, wsCallback)
 
-    // Immediately fetch current state so the UI doesn't wait for the next stage transition
-    fetchInitialState()
+    // Immediately fetch current state so the UI doesn't wait for the next stage transition.
+    // Skipped for pure WS-driven trackers (jobs) whose backend state vanishes after terminal.
+    if (fetchInitialStateViaRest) {
+      fetchInitialState()
+    }
 
     // Fallback: start polling if WS doesn't connect in time
     fallbackTimer = setTimeout(startPollingIfNeeded, fallbackDelayMs)
