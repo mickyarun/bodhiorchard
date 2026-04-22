@@ -53,11 +53,6 @@ services:
       # Persistent store for the backend's ed25519 deploy keypair used to
       # clone private GitHub repos. Only the public key is ever exposed.
       - ssh_data:/data/ssh
-      # npm / npx cache. Needs to live on a real filesystem, NOT the
-      # container overlay: npm's atomic-install rename hits ENOTEMPTY on
-      # overlayfs for tree-sitter-<lang> native packages (rc=217 from
-      # `npx gitnexus analyze`). A named volume is ext4 and renames cleanly.
-      - npm_cache:/home/appuser/.npm
 
   multiplayer:
     build:
@@ -82,4 +77,3 @@ volumes:
   postgres_data:
   repos_data:
   ssh_data:
-  npm_cache:
