@@ -101,6 +101,15 @@ PERMISSION_CATEGORIES: list[CategoryDef] = [
         ],
     ),
     CategoryDef(
+        key="SETTINGS",
+        name="Project Settings",
+        description="Permissions for project-level settings (design systems, agent skills, repos)",
+        permissions=[
+            PermissionDef("settings:view", "View Project Settings"),
+            PermissionDef("settings:edit", "Edit Project Settings"),
+        ],
+    ),
+    CategoryDef(
         key="INTEGRATIONS",
         name="Integrations",
         description="Permissions related to third-party integrations",
@@ -195,6 +204,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
             "buds:*",
             "team:*",
             "org:*",
+            "settings:*",
             "integrations:*",
             "knowledge:*",
             "reports:*",
@@ -208,6 +218,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
             "buds:*",
             "agents:view/trigger",
             "team:view",
+            "settings:view",
             "knowledge:*",
             "reports:*",
         ],
@@ -221,6 +232,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
             "nodes:*",
             "buds:view/approve",
             "team:view",
+            "settings:*",
             "knowledge:*",
             "reports:*",
         ],
@@ -232,6 +244,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
             "backlog:view/edit/approve",
             "buds:view/edit/approve",
             "team:view",
+            "settings:view",
             "knowledge:view",
             "reports:*",
         ],
@@ -242,6 +255,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:view",
             "buds:view",
+            "settings:view",
             "knowledge:view/contribute",
             "reports:view",
         ],
@@ -252,6 +266,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:view",
             "buds:view",
+            "settings:view",
             "knowledge:view/contribute",
         ],
     ),
@@ -261,6 +276,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:view/edit",
             "buds:view",
+            "settings:view",
             "knowledge:view/contribute",
             "reports:view",
         ],
