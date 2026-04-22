@@ -17,7 +17,7 @@
  *   })
  */
 import { ref, onUnmounted } from 'vue'
-import { subscribe, unsubscribe } from '@/services/socket'
+import { subscribe, unsubscribe, isConnected } from '@/services/socket'
 import api from '@/services/api'
 
 export interface TrackerCallbacks<T> {
@@ -45,6 +45,19 @@ export interface TrackerConfig<T> {
   fallbackDelayMs?: number
   /** Interval for WS health checks in ms (default: 5000) */
   connectionCheckMs?: number
+  /**
+   * When true, keep polling running alongside the WebSocket as a safety
+   * net against subscribe-before-publish races (relevant for scans
+   * whose progress lives in Redis for ~30 min and whose terminal event
+   * can be published before the client subscribe propagates).
+   *
+   * When false (default), polling is only a fallback — it kicks in if
+   * the WS isn't connected and stops again once it reconnects. This
+   * matters for trackers whose backend state is short-lived (jobs are
+   * cleaned up 5 min after terminal): a poll running after cleanup
+   * would 404 and surface as a spurious "Failed to check status".
+   */
+  pollAlongsideWs?: boolean
 }
 
 export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
@@ -55,6 +68,7 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
   const pollTimeoutMs = config.pollTimeoutMs ?? 1_800_000
   const fallbackDelayMs = config.fallbackDelayMs ?? 3000
   const connectionCheckMs = config.connectionCheckMs ?? 5000
+  const pollAlongsideWs = config.pollAlongsideWs ?? false
 
   let currentId: string | null = null
   let callbacks: TrackerCallbacks<T> | undefined
@@ -112,13 +126,16 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
   function startPollingIfNeeded(): void {
     if (stopped || !currentId) return
     if (pollTimer) return // already polling
-    // We used to skip polling when the WS was "connected", but the topic
-    // subscribe → first-publish race can still drop a terminal event (the
-    // backend publishes `scan_complete` before the client's subscribe has
-    // propagated, and the UI stays stuck in "scanning"). Polling is cheap
-    // (a single GET every `pollIntervalMs`), idempotent with `handleData`,
-    // and stops the moment a terminal state arrives — so run it as a
-    // belt-and-suspenders alongside the WS rather than only on fallback.
+    // `pollAlongsideWs` flips this between two modes:
+    //   * true  — always-on belt-and-suspenders. Necessary for trackers
+    //             like the scan whose terminal event can be published
+    //             before the WS subscribe propagates (the UI would
+    //             otherwise get stuck at the last received progress).
+    //   * false — fallback only. Trackers whose backend state is
+    //             short-lived (e.g. jobs cleaned up after 5 min) would
+    //             otherwise emit spurious 404-backed "Failed to check
+    //             status" errors once the entry is reaped.
+    if (!pollAlongsideWs && isConnected()) return
     pollStart = Date.now()
     poll()
   }
@@ -166,21 +183,28 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
     // Fallback: start polling if WS doesn't connect in time
     fallbackTimer = setTimeout(startPollingIfNeeded, fallbackDelayMs)
 
-    // Periodic health check: kicks polling back on if it died. Note we
-    // deliberately do NOT stop polling just because the WS is connected —
-    // polling is our safety-net against the subscribe-before-publish
-    // race (progress events published server-side during the tiny window
-    // before the client's WS subscribe lands get dropped; UI then gets
-    // stuck on the last-received state until polling picks up the
-    // canonical state on the next tick).
+    // Periodic health check:
+    //   pollAlongsideWs=true  — ensure polling is always running;
+    //                           restart if it died.
+    //   pollAlongsideWs=false — kick polling on when the WS drops,
+    //                           stop it again when the WS recovers.
     connectionCheckTimer = setInterval(() => {
       if (stopped) {
         if (connectionCheckTimer) clearInterval(connectionCheckTimer)
         return
       }
-      if (!pollTimer) {
+      if (pollAlongsideWs) {
+        if (!pollTimer) {
+          pollStart = Date.now()
+          poll()
+        }
+        return
+      }
+      if (!isConnected() && !pollTimer) {
         pollStart = Date.now()
         poll()
+      } else if (isConnected() && pollTimer) {
+        stopPolling()
       }
     }, connectionCheckMs)
   }
