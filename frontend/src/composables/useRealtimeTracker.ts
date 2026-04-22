@@ -111,8 +111,14 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
 
   function startPollingIfNeeded(): void {
     if (stopped || !currentId) return
-    if (isConnected()) return
     if (pollTimer) return // already polling
+    // We used to skip polling when the WS was "connected", but the topic
+    // subscribe → first-publish race can still drop a terminal event (the
+    // backend publishes `scan_complete` before the client's subscribe has
+    // propagated, and the UI stays stuck in "scanning"). Polling is cheap
+    // (a single GET every `pollIntervalMs`), idempotent with `handleData`,
+    // and stops the moment a terminal state arrives — so run it as a
+    // belt-and-suspenders alongside the WS rather than only on fallback.
     pollStart = Date.now()
     poll()
   }

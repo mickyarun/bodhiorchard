@@ -29,6 +29,11 @@ RUN apt-get update && \
         libpq5 git openssh-client curl ca-certificates gnupg && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
+    # GitNexus has tree-sitter native bindings that need build tools to
+    # compile, which we don't want to bake into the runtime image. Instead
+    # we rely on npx caching it under the appuser's ~/.npm/_npx — and
+    # serialise npx invocations in _run_npx to keep concurrent calls from
+    # racing on that cache (see app/services/gitnexus_utils.py).
     npm install -g @anthropic-ai/claude-code@latest && \
     apt-get purge -y --auto-remove curl gnupg && \
     rm -rf /var/lib/apt/lists/* && \
