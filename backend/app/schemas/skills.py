@@ -50,6 +50,15 @@ STATUS_LABELS: dict[str, str] = {
 }
 
 
+class RepoScanWarning(BaseModel):
+    """A non-fatal failure surfaced to the UI for a (repo, phase) pair."""
+
+    repo: str
+    phase: str
+    summary: str
+    hint: str | None = None
+
+
 class ScanStatus(BaseModel):
     """Status of a running or completed scan."""
 
@@ -64,6 +73,9 @@ class ScanStatus(BaseModel):
     unmatched_authors: list[str] = Field(default_factory=list, alias="unmatchedAuthors")
     synthesis_warning: str | None = Field(default=None, alias="synthesisWarning")
     setup_pr_message: str | None = Field(default=None, alias="setupPrMessage")
+    repo_warnings: list[RepoScanWarning] = Field(
+        default_factory=list, alias="repoWarnings"
+    )
     error: str | None = None
 
     @computed_field(alias="statusLabel")  # type: ignore[misc]

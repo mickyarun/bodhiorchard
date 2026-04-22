@@ -50,22 +50,35 @@ export class TakeoverUI {
     parent.style.position = 'relative'
     parent.appendChild(this.container)
 
-    // Controls hint (bottom center). The 3/4 hotkeys are contextual
-    // (only act when near another player); we still show them here so
-    // players learn the binding the first time they stand next to
-    // someone, without needing to read the proximity panel closely.
-    this.makeLabel(
-      'WASD \u2014 Move   Shift \u2014 Sprint   Space \u2014 Jump   Drag \u2014 Orbit   ESC \u2014 Exit   1 \u2014 Wave   2 \u2014 Cheer   3 \u2014 Greet   4 \u2014 Invite',
-      {
-        position: 'absolute', bottom: '20px', left: '50%',
-        transform: 'translateX(-50%)',
-        background: 'rgba(0,0,0,0.5)', color: 'rgba(255,255,255,0.8)',
-        padding: '8px 20px', borderRadius: '20px',
-        fontSize: '12px', letterSpacing: '1px',
-      },
-    )
+    // Touch devices get the on-screen <TouchControls> overlay (joystick
+    // + action buttons + Esc), which replaces both the keyboard hint
+    // strip and the DOM Exit button. Rendering both creates UI clutter
+    // and overlap.
+    const isTouchDevice =
+      typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(hover: none) and (pointer: coarse)').matches
 
-    // Inactivity warning (top center)
+    if (!isTouchDevice) {
+      // Controls hint (bottom center). The 3/4 hotkeys are contextual
+      // (only act when near another player); we still show them here so
+      // players learn the binding the first time they stand next to
+      // someone, without needing to read the proximity panel closely.
+      this.makeLabel(
+        'WASD \u2014 Move   Shift \u2014 Sprint   Space \u2014 Jump   Drag \u2014 Orbit   ESC \u2014 Exit   1 \u2014 Wave   2 \u2014 Cheer   3 \u2014 Greet   4 \u2014 Invite',
+        {
+          position: 'absolute', bottom: '20px', left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.5)', color: 'rgba(255,255,255,0.8)',
+          padding: '8px 20px', borderRadius: '20px',
+          fontSize: '12px', letterSpacing: '1px',
+        },
+      )
+    }
+
+    // Inactivity warning (top center) — keep on both touch and keyboard;
+    // the warning is informational and doesn't duplicate a TouchControls
+    // button.
     this.warning = this.makeLabel('', {
       position: 'absolute', top: '60px', left: '50%',
       transform: 'translateX(-50%)',
@@ -75,23 +88,26 @@ export class TakeoverUI {
       display: 'none',
     })
 
-    // Exit button (top right)
-    this.exitBtn = this.makeLabel('Exit', {
-      position: 'absolute', top: '16px', right: '16px',
-      background: 'rgba(220,60,60,0.8)', color: '#fff',
-      padding: '6px 16px', borderRadius: '8px',
-      fontSize: '13px', fontWeight: '600', cursor: 'pointer',
-      pointerEvents: 'auto',
-      border: '1px solid rgba(255,255,255,0.3)',
-      transition: 'background 0.2s',
-    })
-    this.exitBtn.addEventListener('mouseenter', () => {
-      if (this.exitBtn) this.exitBtn.style.background = 'rgba(220,60,60,1)'
-    })
-    this.exitBtn.addEventListener('mouseleave', () => {
-      if (this.exitBtn) this.exitBtn.style.background = 'rgba(220,60,60,0.8)'
-    })
-    this.exitBtn.addEventListener('click', () => this.onExitClick?.())
+    if (!isTouchDevice) {
+      // Exit button (top right) — TouchControls has its own Esc button
+      // in the same corner, so skip this on touch devices.
+      this.exitBtn = this.makeLabel('Exit', {
+        position: 'absolute', top: '16px', right: '16px',
+        background: 'rgba(220,60,60,0.8)', color: '#fff',
+        padding: '6px 16px', borderRadius: '8px',
+        fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+        pointerEvents: 'auto',
+        border: '1px solid rgba(255,255,255,0.3)',
+        transition: 'background 0.2s',
+      })
+      this.exitBtn.addEventListener('mouseenter', () => {
+        if (this.exitBtn) this.exitBtn.style.background = 'rgba(220,60,60,1)'
+      })
+      this.exitBtn.addEventListener('mouseleave', () => {
+        if (this.exitBtn) this.exitBtn.style.background = 'rgba(220,60,60,0.8)'
+      })
+      this.exitBtn.addEventListener('click', () => this.onExitClick?.())
+    }
   }
 
   show(): void {
