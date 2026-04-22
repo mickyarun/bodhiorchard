@@ -44,6 +44,11 @@ export class BuildingFactory {
    *  properly-lit cached materials without creating a separate MaterialFactory instance. */
   get materialFactory(): MaterialFactory | null { return this.materials }
 
+  /** Shared GLB loader — exposed so subsystems can implement alternative
+   *  placement strategies (e.g. world-AABB auto-fit for packs whose GLBs bake
+   *  node-level scale transforms). */
+  get assetLoader(): AssetLoader { return this.loader }
+
   /**
    * Create a tiled floor from floorFull GLBs.
    * @param parent Parent entity to add floor tiles to
@@ -363,6 +368,10 @@ export class BuildingFactory {
    * - Pole: thin wooden stick, ground to canopy base
    * - Canopy: inverted cone with enough height to look dome-like (~2:1 diameter:height)
    * - Finial: small sphere on top for classic parasol silhouette
+   *
+   * `canopyColor` + `cacheKey` let callers create multi-colored umbrella
+   * sets (e.g. poolside) without colliding on the shared 'umbrella_canopy'
+   * material cache entry. Omit both for the default red cafeteria parasol.
    */
   createUmbrella(
     parent: pc.Entity,
@@ -371,11 +380,13 @@ export class BuildingFactory {
     baseY = 0,
     poleHeight = 1.8,
     canopyRadius = 0.65,
+    canopyColor: [number, number, number] = [0.82, 0.18, 0.12],
+    cacheKey = 'umbrella_canopy',
   ): void {
     if (!this.materials) return
 
     const poleMat = this.materials.getColor('umbrella_pole', 0.45, 0.3, 0.18)
-    const canopyMat = this.materials.getColor('umbrella_canopy', 0.82, 0.18, 0.12)
+    const canopyMat = this.materials.getColor(cacheKey, ...canopyColor)
 
     const umbrella = new pc.Entity('Umbrella')
     umbrella.setLocalPosition(x, baseY, z)
@@ -388,21 +399,24 @@ export class BuildingFactory {
     pole.render!.meshInstances[0].material = poleMat
     umbrella.addChild(pole)
 
-    // Canopy: inverted cone — dome-like proportions (height ~0.4 for diameter ~1.3)
+    // Canopy: upright cone — apex at top (umbrella finial), base at bottom
+    // (where the ribs splay out). PlayCanvas cones have apex at +Y by
+    // default; with scale(h) the cone extends ±h/2 about its center, so
+    // placing the entity at poleHeight + canopyH/2 seats the base on the
+    // pole-top and leaves the finial at poleHeight + canopyH.
     const canopyH = 0.45
     const canopy = new pc.Entity('Canopy')
     canopy.addComponent('render', { type: 'cone' })
     canopy.setLocalScale(canopyRadius * 2, canopyH, canopyRadius * 2)
-    canopy.setLocalPosition(0, poleHeight + canopyH * 0.3, 0)
-    canopy.setLocalEulerAngles(180, 0, 0)
+    canopy.setLocalPosition(0, poleHeight + canopyH / 2, 0)
     canopy.render!.meshInstances[0].material = canopyMat
     umbrella.addChild(canopy)
 
-    // Finial: small sphere on top of canopy for classic parasol look
+    // Finial: small sphere atop the cone's apex for classic parasol look
     const finial = new pc.Entity('Finial')
     finial.addComponent('render', { type: 'sphere' })
     finial.setLocalScale(0.08, 0.08, 0.08)
-    finial.setLocalPosition(0, poleHeight + canopyH * 0.6, 0)
+    finial.setLocalPosition(0, poleHeight + canopyH + 0.04, 0)
     finial.render!.meshInstances[0].material = poleMat
     umbrella.addChild(finial)
 

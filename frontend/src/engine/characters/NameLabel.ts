@@ -84,6 +84,10 @@ export function createNameLabel(
   entity.addComponent('render', { type: 'plane' })
   entity.render!.meshInstances[0].material = material
   entity.setLocalPosition(0, height, 0)
+  // Negative X scale compensates for the lookAt + rotateLocal billboard
+  // orientation (see Application.ts billboard update) — the plane ends up
+  // showing the back face under CULLFACE_NONE, so mirroring the mesh on X
+  // lands canvas U=0 on the viewer's left and text reads left-to-right.
   entity.setLocalScale(-LABEL_WIDTH, 1, LABEL_WIDTH * (LABEL_CANVAS_H / LABEL_CANVAS_W))
   entity.setLocalEulerAngles(90, 0, 0)
   entity.tags.add('billboard')

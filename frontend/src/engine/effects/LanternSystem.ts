@@ -10,6 +10,7 @@
  * Performance: ~20 posts + 20 spheres, shared materials, no shadows.
  */
 import * as pc from 'playcanvas'
+import { evalRouteAt, type PathRoute } from '../world/PathSystem'
 
 const LANTERN_SPACING = 6      // world units between lanterns along each path
 const POLE_WIDTH = 0.06
@@ -44,30 +45,35 @@ export class LanternSystem {
 
   /**
    * Place lanterns along path routes, skipping any positions inside exclusion zones.
-   * @param routes — array of {fromX, fromZ, toX, toZ} path segments
+   * @param routes — array of PathRoute (supports curved routes via Bezier control points)
    * @param exclusionZones — circular zones where lanterns should NOT be placed (e.g., housing village)
    */
   buildAlongRoutes(
-    routes: Array<{ fromX: number; fromZ: number; toX: number; toZ: number }>,
+    routes: PathRoute[],
     exclusionZones: ReadonlyArray<{ x: number; z: number; radius: number }> = [],
   ): void {
     for (const route of routes) {
-      const dx = route.toX - route.fromX
-      const dz = route.toZ - route.fromZ
-      const dist = Math.sqrt(dx * dx + dz * dz)
-      if (dist < LANTERN_SPACING * 2) continue // skip very short paths
+      // Chord length — the Bezier arc length is within a few % of this for
+      // our gentle 12% curves. Close enough for lantern count estimation.
+      const chordDx = route.toX - route.fromX
+      const chordDz = route.toZ - route.fromZ
+      const chordDist = Math.sqrt(chordDx * chordDx + chordDz * chordDz)
+      if (chordDist < LANTERN_SPACING * 2) continue
 
-      const nx = dx / dist
-      const nz = dz / dist
-      // Perpendicular direction (left side of path)
-      const px = -nz
-      const pz = nx
-
-      const count = Math.floor(dist / LANTERN_SPACING)
+      const count = Math.floor(chordDist / LANTERN_SPACING)
       for (let i = 1; i < count; i++) {
         const t = i / count
-        const x = route.fromX + dx * t + px * PATH_OFFSET
-        const z = route.fromZ + dz * t + pz * PATH_OFFSET
+        const p = evalRouteAt(route, t)
+        // Approximate perpendicular via finite difference on the curve —
+        // correct for both straight and curved routes.
+        const pNext = evalRouteAt(route, Math.min(1, t + 0.01))
+        const tdx = pNext.x - p.x
+        const tdz = pNext.z - p.z
+        const tlen = Math.sqrt(tdx * tdx + tdz * tdz) || 1
+        const px = -tdz / tlen
+        const pz = tdx / tlen
+        const x = p.x + px * PATH_OFFSET
+        const z = p.z + pz * PATH_OFFSET
 
         // Skip if inside an exclusion zone (housing compound, etc.)
         const excluded = exclusionZones.some(zone => {

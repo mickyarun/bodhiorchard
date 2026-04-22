@@ -12,6 +12,13 @@
 import { useRealtimeTracker } from '@/composables/useRealtimeTracker'
 import type { TrackerCallbacks } from '@/composables/useRealtimeTracker'
 
+export interface RepoScanWarning {
+  repo: string
+  phase: string
+  summary: string
+  hint: string | null
+}
+
 export interface ScanStatusData {
   scanId: string
   status: string
@@ -25,6 +32,7 @@ export interface ScanStatusData {
   unmatchedAuthors: string[]
   synthesisWarning: string | null
   setupPrMessage: string | null
+  repoWarnings: RepoScanWarning[]
   error: string | null
 }
 

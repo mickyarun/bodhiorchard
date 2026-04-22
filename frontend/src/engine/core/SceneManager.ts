@@ -41,6 +41,9 @@ import { PineTreeSystem } from '../environment/PineTreeSystem'
 import { BushSystem } from '../environment/BushSystem'
 import { ForestLake } from '../environment/ForestLake'
 import { MountainBackdrop } from '../environment/MountainBackdrop'
+import { HubAnchor } from '../world/HubAnchor'
+import { GrassDressing } from '../world/GrassDressing'
+import { DecorativePropScatter } from '../world/DecorativePropScatter'
 import { CoffeeBarBuilder } from '../buildings/CoffeeBarBuilder'
 import { CafeteriaBuilder } from '../buildings/CafeteriaBuilder'
 import { HousingVillage } from '../buildings/HousingVillage'
@@ -83,6 +86,8 @@ export class SceneManager {
   private forestLake: ForestLake | null = null
   private mountains: MountainBackdrop | null = null
   private paths: PathSystem | null = null
+  private grassDressing: GrassDressing | null = null
+  private decorProps: DecorativePropScatter | null = null
   private characterSystem: CharacterSystem | null = null
   private gardenBirds: GardenBirdSystem | null = null
   private gardenAnimals: GardenAnimalSystem | null = null
@@ -184,6 +189,16 @@ export class SceneManager {
     this.clouds = new CloudSystem()
     this.clouds.build(this.app, this.materials)
 
+    // 2b. HubAnchor — orchard-center landmark (Bodhi tree + mound + plaza).
+    // Built BEFORE repo trees so its exclusion zone is registered in time
+    // and so it anchors the scene before anything else populates the hub.
+    const buildingFactory = new BuildingFactory(this.loader, this.materials)
+    const hubAnchor = new HubAnchor(buildingFactory)
+    const hubResult = await hubAnchor.build(this.app, 0, 0)
+    if (checkCancelled()) return
+    this.buildingEntities.push(hubResult.entity)
+    this.layout.addExclusionZones([hubResult.exclusionZone])
+
     // 3. Repo visualization (default: trees with decoration)
     this.repoVis = this.createRepoVisualization()
     const treeZones = await this.repoVis.build(this.app, data, this.layout)
@@ -202,9 +217,7 @@ export class SceneManager {
     await this.gardenAnimals.init(this.loader)
     if (checkCancelled()) return
 
-    // 4. Buildings
-    const buildingFactory = new BuildingFactory(this.loader, this.materials)
-
+    // 4. Buildings (buildingFactory created above in phase 2b for HubAnchor)
     const coffeeZone = this.layout.getZone('coffee_bar')
     const cafeteriaZone = this.layout.getZone('cafeteria')
     const poolZone = this.layout.getZone('pool')
@@ -217,8 +230,13 @@ export class SceneManager {
       this.buildingEntities.push(coffeeResult.entity)
       this.layout.addExclusionZones([coffeeResult.exclusionZone])
       this.layout.registerSeats(coffeeResult.seats)
+      // Coffee-bar hut is offset inside its root so it centers on the zone
+      // rather than spilling into one quadrant. Physics colliders must use
+      // the hut's actual world origin (hutWorldOrigin), not the zone center,
+      // or walls misalign from the visual by HUT_OFFSET_{X,Z}.
       this.buildingHuts.push({
-        x: coffeeZone.x, z: coffeeZone.z,
+        x: coffeeResult.hutWorldOrigin.x,
+        z: coffeeResult.hutWorldOrigin.z,
         yawDeg: coffeeResult.entity.getEulerAngles().y,
         ...coffeeResult.hutDims,
       })
@@ -309,9 +327,17 @@ export class SceneManager {
     await this.paths.build(this.app, this.loader, pathRoutes)
     if (checkCancelled()) return
 
+    // 5b. Grass dressing — macro tint overlay + path-wear halos. Uses the
+    // routes we just computed. Rendered at y=0.005..0.012 so it sits
+    // beneath path strips (y=0.015) and zone overlays (y=0.02).
+    this.grassDressing = new GrassDressing()
+    this.grassDressing.build(this.app, pathRoutes)
+
     // Zone signs at each building zone entrance (facing orchard)
     for (const zone of zones) {
       if (zone.name === 'orchard') continue // no sign for center
+      if (zone.name === 'coffee_bar') continue // the COFFEE awning is its label
+      if (zone.name === 'cafeteria') continue // the CAFETERIA awning is its label
       // Place sign at edge of zone, facing inward
       const dx = -zone.x
       const dz = -zone.z
@@ -332,6 +358,14 @@ export class SceneManager {
 
     this.bushes = new BushSystem()
     await this.bushes.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes)
+    if (checkCancelled()) return
+
+    // 6a. Decorative prop scatter — flower patches + rock piles in mid-distance
+    // wedges, complementing BushSystem's single bushes/stumps.
+    this.decorProps = new DecorativePropScatter()
+    await this.decorProps.build(
+      this.app, this.loader, this.layout.getExclusionZones(), pathRoutes,
+    )
     if (checkCancelled()) return
 
     // 6b. Forest lake — pond inside a dense forest cluster, opposite the mountains (SE)
@@ -367,7 +401,11 @@ export class SceneManager {
     const lanternExclusions = housingZone
       ? [{ x: housingZone.x, z: housingZone.z, radius: housingZone.radius + 4 }]
       : []
-    this.lanterns.buildAlongRoutes(PathSystem.defaultRoutes([...zones]), lanternExclusions)
+    // Reuse the exact `pathRoutes` computed for PathSystem.build() — those
+    // account for the housing gate-position swap and any future curve data.
+    // Recomputing from raw `zones` would put lanterns on a different route
+    // than the actual path (misaligned near the housing gate).
+    this.lanterns.buildAlongRoutes(pathRoutes, lanternExclusions)
 
     // 8c. Zone fences — circular wooden fences around each building zone.
     // Gate angle points toward orchard (0,0) so it aligns with the path entrance.
@@ -400,8 +438,11 @@ export class SceneManager {
     this.gardenBirds?.update(dt)
     this.gardenAnimals?.update(dt)
     this.agentSystem?.update(dt)
-    // CharacterSystem is a renderer only — positions come from OrgRoom state sync,
-    // there is no per-frame simulation to advance.
+    // CharacterSystem transform apply happens in POST-update (see
+    // CharacterSystem.build where the postUpdate listener is registered) so it
+    // runs after PlayCanvas's animationUpdate phase — otherwise the anim
+    // component's binding re-evaluates our setLocalRotation away and remote
+    // characters slide without turning.
   }
 
   /**
@@ -623,6 +664,9 @@ export class SceneManager {
     this.bushes?.destroy()
     this.bushes = null
 
+    this.decorProps?.destroy()
+    this.decorProps = null
+
     this.pines?.destroy()
     this.pines = null
 
@@ -633,6 +677,9 @@ export class SceneManager {
 
     this.paths?.destroy()
     this.paths = null
+
+    this.grassDressing?.destroy()
+    this.grassDressing = null
 
     this.characterSystem?.destroy()
     this.characterSystem = null

@@ -1,104 +1,177 @@
 <template>
-  <div class="setup-gradient d-flex flex-column" style="min-height: 100vh;">
-    <v-container class="flex-grow-1 py-6" fluid>
-      <v-btn
-        variant="text"
-        size="small"
-        class="mb-2"
-        @click="router.back()"
-      >
-        <v-icon start>mdi-arrow-left</v-icon>
-        Back
-      </v-btn>
+  <div class="char-select">
+    <!-- Ambient gradient backdrop -->
+    <div class="char-select__backdrop" />
 
-      <div class="text-h4 font-weight-bold text-center mb-2">
-        Choose Your Character
-      </div>
-      <div class="text-body-2 text-medium-emphasis text-center mb-6">
-        Pick your avatar for the Bodhiorchard garden
-      </div>
+    <!-- Top-left back button -->
+    <v-btn
+      variant="text"
+      size="small"
+      class="char-select__back"
+      @click="router.back()"
+    >
+      <v-icon start>mdi-arrow-left</v-icon>
+      Back
+    </v-btn>
 
-      <!-- XP Progress — reusable component -->
-      <XPProfileCard
-        v-if="xpStore.profile"
-        :total-xp="xpStore.profile.total_xp"
-        :level="xpStore.profile.level"
-        :level-name="xpStore.profile.level_name"
-        :xp-to-next-level="xpStore.profile.xp_to_next_level"
-        :next-level-threshold="xpStore.profile.next_level_threshold"
-        :streak-count="xpStore.profile.streak_count"
-        :skill-points="xpStore.profile.skill_points"
-        class="mb-5 mx-auto"
-        style="max-width: 650px;"
-      />
+    <!-- Main two-pane stage -->
+    <div class="char-select__stage">
+      <!-- LEFT: 3D preview with floating HUD -->
+      <section class="char-select__preview-pane">
+        <CharacterPreview
+          :config="previewConfig"
+          class="char-select__preview"
+        />
 
-      <v-row>
-        <!-- 3D Preview — shown first on mobile (order-1), right on desktop (order-md-2) -->
-        <v-col cols="12" md="7" order="1" order-md="2">
-          <v-card
-            color="surface"
-            class="character-select__preview-card mb-4"
-          >
-            <CharacterPreview
-              :config="previewConfig"
-              class="character-select__preview"
-            />
-          </v-card>
-        </v-col>
+        <!-- Floating progress HUD (race-style) -->
+        <div v-if="xpStore.profile" class="char-select__hud">
+          <div class="char-select__hud-eyebrow">Your Progress</div>
+          <div class="char-select__hud-top">
+            <span class="char-select__hud-glyph">{{ levelIcon }}</span>
+            <div class="char-select__hud-ident">
+              <div class="char-select__hud-level">Lv.{{ xpStore.profile.level }}</div>
+              <div class="char-select__hud-name">{{ levelNameDisplay }}</div>
+            </div>
+            <v-spacer />
+            <div class="char-select__hud-xp">
+              <span class="char-select__hud-xp-val">{{ xpStore.profile.total_xp.toLocaleString() }}</span>
+              <span class="char-select__hud-xp-unit">XP</span>
+            </div>
+          </div>
+          <div class="char-select__hud-bar">
+            <div class="char-select__hud-bar-fill" :style="{ width: progress + '%' }" />
+          </div>
+          <div class="char-select__hud-meta">
+            <span v-if="xpStore.profile.xp_to_next_level > 0">
+              {{ xpStore.profile.xp_to_next_level.toLocaleString() }} XP to
+              <strong>{{ nextLevelDisplay }}</strong>
+            </span>
+            <span v-else class="char-select__hud-max">Max level</span>
+            <v-spacer />
+            <span v-if="xpStore.profile.skill_points > 0" class="char-select__hud-sp">
+              <v-icon size="12">mdi-star-four-points</v-icon>
+              {{ formatSP(xpStore.profile.skill_points) }} SP
+            </span>
+            <span
+              v-if="xpStore.profile.streak_count > 0"
+              class="char-select__hud-streak"
+              :class="{ 'char-select__hud-streak--hot': xpStore.profile.streak_count >= 7 }"
+            >
+              <v-icon size="12">{{ xpStore.profile.streak_count >= 7 ? 'mdi-fire-alert' : 'mdi-fire' }}</v-icon>
+              {{ xpStore.profile.streak_count }}d
+            </span>
+          </div>
+        </div>
+      </section>
 
-        <!-- Controls — shown second on mobile (order-2), left on desktop (order-md-1) -->
-        <v-col cols="12" md="5" order="2" order-md="1">
-          <v-card color="surface" class="pa-5 mb-4">
+      <!-- RIGHT: Tabbed customization panel -->
+      <section class="char-select__panel">
+        <header class="char-select__panel-head">
+          <div class="char-select__eyebrow">Character Setup</div>
+          <h1 class="char-select__title">Customize Your Hero</h1>
+          <p class="char-select__sub">Pick your avatar, colors, and loadout for the Bodhiorchard garden.</p>
+        </header>
+
+        <v-tabs
+          v-model="tab"
+          color="primary"
+          density="compact"
+          class="char-select__tabs"
+          slider-color="primary"
+          grow
+        >
+          <v-tab value="character">
+            <v-icon start size="18">mdi-account</v-icon>Character
+          </v-tab>
+          <v-tab value="colors">
+            <v-icon start size="18">mdi-palette</v-icon>Colors
+          </v-tab>
+          <v-tab value="loadout">
+            <v-icon start size="18">mdi-sword-cross</v-icon>Loadout
+          </v-tab>
+          <v-tab value="upgrades">
+            <v-icon start size="18">mdi-treasure-chest</v-icon>Upgrades
+          </v-tab>
+        </v-tabs>
+
+        <v-tabs-window v-model="tab" class="char-select__panel-body">
+          <v-tabs-window-item value="character">
             <CharacterGrid
               :selected-id="config.characterId"
               @select="onCharacterSelect"
             />
-          </v-card>
-
-          <v-card color="surface" class="pa-5 mb-4">
+          </v-tabs-window-item>
+          <v-tabs-window-item value="colors">
             <ColorCustomizer
               :shirt-color="config.shirtColor"
               :pants-color="config.pantsColor"
               :skin-color="config.skinColor"
               @update="onColorUpdate"
             />
-          </v-card>
-
-          <v-card color="surface" class="pa-5 mb-4">
+          </v-tabs-window-item>
+          <v-tabs-window-item value="loadout">
             <AccessoryPicker
               :right-hand="config.rightHand"
               :left-hand="config.leftHand"
               @update="onAccessoryUpdate"
             />
-          </v-card>
-
-          <v-card color="surface" class="pa-5">
+          </v-tabs-window-item>
+          <v-tabs-window-item value="upgrades">
             <UpgradeShopPanel />
-          </v-card>
-        </v-col>
-      </v-row>
+          </v-tabs-window-item>
+        </v-tabs-window>
+      </section>
+    </div>
 
-      <!-- Save button -->
-      <div class="d-flex justify-center mt-6">
-        <v-btn
-          color="primary"
-          size="large"
-          :loading="saving"
-          :disabled="!config.characterId"
-          @click="handleSave"
+    <!-- Sticky bottom action bar -->
+    <footer class="char-select__footer">
+      <div class="char-select__footer-summary">
+        <v-chip
+          v-if="currentCharacterName"
+          size="small"
+          variant="flat"
+          class="char-select__chip"
         >
-          <v-icon start icon="mdi-check" />
-          Save & Continue
-        </v-btn>
+          <v-icon start size="14">mdi-account</v-icon>
+          {{ currentCharacterName }}
+        </v-chip>
+        <v-chip
+          v-if="rightHandName"
+          size="small"
+          variant="flat"
+          class="char-select__chip"
+        >
+          <v-icon start size="14">mdi-hand-back-right</v-icon>
+          {{ rightHandName }}
+        </v-chip>
+        <v-chip
+          v-if="leftHandName"
+          size="small"
+          variant="flat"
+          class="char-select__chip"
+        >
+          <v-icon start size="14">mdi-hand-back-left</v-icon>
+          {{ leftHandName }}
+        </v-chip>
       </div>
-    </v-container>
+      <v-btn
+        color="primary"
+        size="large"
+        class="char-select__save"
+        :loading="saving"
+        :disabled="!config.characterId"
+        @click="handleSave"
+      >
+        <v-icon start icon="mdi-check" />
+        Save &amp; Continue
+      </v-btn>
+    </footer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, computed, ref } from 'vue'
+import { reactive, computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import XPProfileCard from '@/components/xp/XPProfileCard.vue'
 import CharacterGrid from '@/components/character/CharacterGrid.vue'
 import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import ColorCustomizer from '@/components/character/ColorCustomizer.vue'
@@ -112,25 +185,24 @@ import {
   DEFAULT_PANTS_COLOR,
   DEFAULT_SKIN_COLOR,
 } from '@/engine/characters/CharacterConfig'
+import { getCharacterDef, getAccessoryDef } from '@/engine/characters/KayKitManifest'
 import { useMembersStore } from '@/stores/members'
 import { useAuthStore } from '@/stores/auth'
 import { useXPStore } from '@/stores/xp'
-import { onMounted } from 'vue'
+import { formatSP } from '@/utils/format'
 
 const router = useRouter()
 const membersStore = useMembersStore()
 const authStore = useAuthStore()
 const xpStore = useXPStore()
 const saving = ref(false)
+const tab = ref<'character' | 'colors' | 'loadout' | 'upgrades'>('character')
 
-// Fetch XP profile on mount (needed for unlock data + progress bar)
 onMounted(() => { xpStore.fetchProfile() })
 
-// Load current selection from user profile, fallback to defaults
 const existing = parseCharacterModel(authStore.user?.character_model ?? null)
 const config = reactive<CharacterConfig>({
-  pack: 'kaykit',
-  characterId: existing.pack === 'kaykit' ? existing.characterId : 'barbarian',
+  characterId: existing.characterId,
   shirtColor: existing.shirtColor || DEFAULT_SHIRT_COLOR,
   pantsColor: existing.pantsColor || DEFAULT_PANTS_COLOR,
   skinColor: existing.skinColor || DEFAULT_SKIN_COLOR,
@@ -138,9 +210,7 @@ const config = reactive<CharacterConfig>({
   leftHand: existing.leftHand || '',
 })
 
-// Computed shallow copy for the preview (triggers reactivity on any change)
 const previewConfig = computed<CharacterConfig>(() => ({
-  pack: config.pack,
   characterId: config.characterId,
   shirtColor: config.shirtColor,
   pantsColor: config.pantsColor,
@@ -148,6 +218,32 @@ const previewConfig = computed<CharacterConfig>(() => ({
   rightHand: config.rightHand,
   leftHand: config.leftHand,
 }))
+
+const currentCharacterName = computed(() => getCharacterDef(config.characterId)?.name ?? '')
+const rightHandName = computed(() => (config.rightHand ? getAccessoryDef(config.rightHand)?.name : '') ?? '')
+const leftHandName = computed(() => (config.leftHand ? getAccessoryDef(config.leftHand)?.name : '') ?? '')
+
+const LEVEL_ICONS: Record<string, string> = {
+  seedling: '🌱', sprout: '🌿', sapling: '🌲', tree: '🌳', ancient_oak: '🏔️',
+}
+const LEVEL_NAMES = ['seedling', 'sprout', 'sapling', 'tree', 'ancient_oak']
+
+const levelIcon = computed(() => LEVEL_ICONS[xpStore.profile?.level_name ?? ''] || '⭐')
+const levelNameDisplay = computed(() => (xpStore.profile?.level_name ?? '').replace('_', ' '))
+const nextLevelDisplay = computed(() => {
+  const current = xpStore.profile?.level_name ?? ''
+  const idx = LEVEL_NAMES.indexOf(current)
+  if (idx >= 0 && idx < LEVEL_NAMES.length - 1) {
+    return LEVEL_NAMES[idx + 1].replace('_', ' ')
+  }
+  return ''
+})
+const progress = computed(() => {
+  const p = xpStore.profile
+  if (!p || p.next_level_threshold === 0) return 100
+  const into = p.next_level_threshold - p.xp_to_next_level
+  return Math.min(100, (into / p.next_level_threshold) * 100)
+})
 
 function onCharacterSelect(id: string): void {
   config.characterId = id
@@ -186,20 +282,334 @@ async function handleSave(): Promise<void> {
 </script>
 
 <style scoped>
-.character-select__preview-card {
-  height: 500px;
-  overflow: hidden;
+.char-select {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  isolation: isolate;
+}
+
+.char-select__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 60% at 70% 20%, rgba(46, 125, 50, 0.18), transparent 60%),
+    radial-gradient(ellipse 60% 80% at 10% 90%, rgba(22, 48, 30, 0.35), transparent 60%),
+    linear-gradient(180deg, #0a130f 0%, #060c08 100%);
+}
+
+/* ── Back button ────────────────────────────── */
+.char-select__back {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 5;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 11px !important;
+}
+
+/* ── Stage ──────────────────────────────────── */
+.char-select__stage {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  padding: 56px 28px 108px;
+  max-width: 1600px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 @media (max-width: 960px) {
-  .character-select__preview-card {
-    height: 320px;
+  .char-select__stage {
+    grid-template-columns: 1fr;
+    padding: 52px 16px 120px;
+    gap: 16px;
   }
 }
 
-.character-select__preview {
-  height: 100%;
+/* ── Preview pane ───────────────────────────── */
+.char-select__preview-pane {
+  position: sticky;
+  top: 20px;
+  height: calc(100vh - 180px);
+  min-height: 520px;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.2));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
 }
 
-/* XP card styles moved to reusable XPProfileCard.vue */
+@media (max-width: 960px) {
+  .char-select__preview-pane {
+    position: relative;
+    top: auto;
+    height: 380px;
+    min-height: 380px;
+  }
+}
+
+.char-select__preview {
+  height: 100%;
+  border-radius: 0 !important;
+}
+
+/* ── Floating HUD ───────────────────────────── */
+.char-select__hud {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  max-width: 420px;
+  padding: 14px 18px 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(10, 22, 14, 0.82), rgba(10, 22, 14, 0.7));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+.char-select__hud-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 8px;
+}
+
+.char-select__hud-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.char-select__hud-glyph {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.char-select__hud-ident {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.char-select__hud-level {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.char-select__hud-name {
+  font-size: 11px;
+  text-transform: capitalize;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.char-select__hud-xp {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.char-select__hud-xp-val {
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--v-theme-secondary));
+  letter-spacing: -0.02em;
+}
+
+.char-select__hud-xp-unit {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.08em;
+}
+
+.char-select__hud-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.char-select__hud-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgb(var(--v-theme-primary)), rgb(var(--v-theme-secondary)));
+  transition: width 0.6s ease;
+}
+
+.char-select__hud-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.char-select__hud-meta strong {
+  color: rgb(var(--v-theme-secondary));
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.char-select__hud-max {
+  color: rgb(var(--v-theme-secondary));
+  font-weight: 700;
+}
+
+.char-select__hud-sp,
+.char-select__hud-streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+}
+
+.char-select__hud-streak--hot {
+  background: rgba(255, 87, 34, 0.18);
+  color: #ffb199;
+  animation: pulse-flame 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-flame {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+/* ── Panel ──────────────────────────────────── */
+.char-select__panel {
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(15, 28, 20, 0.85) 0%, rgba(8, 16, 12, 0.9) 100%);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.char-select__panel-head {
+  padding: 22px 24px 8px;
+}
+
+.char-select__eyebrow {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 10px;
+}
+
+.char-select__title {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  font-style: italic;
+  margin: 0 0 4px;
+}
+
+.char-select__sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
+}
+
+.char-select__tabs {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  min-height: 48px;
+}
+
+.char-select__tabs :deep(.v-tab) {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  min-height: 48px;
+}
+
+.char-select__panel-body {
+  padding: 20px 24px 24px;
+}
+
+/* Let v-window collapse to the active tab's height — prevents a tall empty
+   area when switching from a long tab (Character/Upgrades) to a short one
+   (Colors). */
+.char-select__panel-body :deep(.v-window__container) {
+  height: auto !important;
+}
+
+.char-select__panel-body :deep(.v-window-item--active) {
+  height: auto;
+}
+
+/* ── Sticky footer ──────────────────────────── */
+.char-select__footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 28px;
+  background: linear-gradient(180deg, rgba(6, 12, 8, 0.75), rgba(6, 12, 8, 0.95));
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.char-select__footer-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.char-select__chip {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  font-weight: 600;
+}
+
+.char-select__save {
+  font-weight: 800 !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  min-width: 200px;
+}
+
+@media (max-width: 600px) {
+  .char-select__footer {
+    padding: 12px 14px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .char-select__save {
+    width: 100%;
+  }
+}
 </style>

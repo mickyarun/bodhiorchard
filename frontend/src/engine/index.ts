@@ -32,6 +32,10 @@ import { MaterialFactory } from './rendering/MaterialFactory'
 import { SceneManager } from './core/SceneManager'
 import { TreePickerSystem } from './interaction/TreePickerSystem'
 import { InteriorManager } from './interior'
+import { CoffeeBarManager } from './coffeebar'
+import { COFFEE_DOOR_LOCAL_Z } from './buildings/CoffeeBarBuilder'
+import { CafeteriaManager } from './cafeteria'
+import { CAFETERIA_DOOR_OFFSET } from './buildings/CafeteriaBuilder'
 import {
   TakeoverController,
   TakeoverCamera,
@@ -48,9 +52,9 @@ import { VehicleController } from './vehicles/VehicleController'
 import { VehicleSystem } from './vehicles/VehicleSystem'
 import { getVehicleDef } from './vehicles/VehicleManifest'
 
-export { type EngineData, type EngineCallbacks } from './types'
+export { type EngineData, type EngineCallbacks, type SceneState } from './types'
 
-type SceneState = 'garden' | 'entering' | 'interior' | 'exiting' | 'takeover'
+import type { SceneState } from './types'
 
 export class GardenEngine {
   private app: Application | null = null
@@ -65,7 +69,26 @@ export class GardenEngine {
 
   // Interior exploration
   private interior: InteriorManager | null = null
-  private sceneState: SceneState = 'garden'
+  // Coffee bar interior (shared across the org)
+  private coffeeBar: CoffeeBarManager | null = null
+  // Blocks the walk-through trigger during exit teleport so the player
+  // doesn't instantly re-enter after being placed just outside the door.
+  private _coffeeBarReentryCooldownMs = 0
+  // Cafeteria interior (shared across the org)
+  private cafeteria: CafeteriaManager | null = null
+  private _cafeteriaReentryCooldownMs = 0
+  // Backing store for sceneState. All existing code writes `this.sceneState =
+  // ...`, so we expose it via a getter/setter pair — the setter fires the
+  // onSceneStateChange callback whenever the state actually changes, giving
+  // UI layers (e.g. the touch-control overlay) a single subscription point
+  // without touching any of the ~24 assignment sites.
+  private _sceneState: SceneState = 'garden'
+  private get sceneState(): SceneState { return this._sceneState }
+  private set sceneState(next: SceneState) {
+    if (this._sceneState === next) return
+    this._sceneState = next
+    this.callbacks.onSceneStateChange?.(next)
+  }
   private savedCameraState: CameraState | null = null
   private _interiorMemberId: string | null = null
   // Re-entrancy guard for enterHouse/exitHouse. Set `true` for the duration
@@ -73,6 +96,11 @@ export class GardenEngine {
   // to prevent double-entry (e.g. a door hit firing mid-fade) and
   // double-exit (e.g. ESC pressed while the exit fade is still running).
   private _transitioning = false
+
+  // Last reason takeoverCharacter bailed — surfaced to the UI so iPad
+  // users can see why "Take control" did nothing (no console access).
+  private _takeoverBailReason: string | null = null
+  get takeoverBailReason(): string | null { return this._takeoverBailReason }
 
   // Garden takeover (player controls their character)
   private takeoverCtrl: TakeoverController | null = null
@@ -158,7 +186,7 @@ export class GardenEngine {
 
     // Input manager
     this.input = new InputManager()
-    this.input.init(this.canvas)
+    this.input.init(this.canvas, this.app.app)
 
     // Camera controller
     this.camera = new CameraController()
@@ -178,6 +206,18 @@ export class GardenEngine {
       this.app, this.input, this.materials, this.canvas, container,
     )
     this.interior.onExit = () => this.exitHouse()
+
+    // Coffee bar manager — shared break-room interior with queue + brewing
+    this.coffeeBar = new CoffeeBarManager(
+      this.app, this.input, this.materials, this.canvas, container,
+    )
+    this.coffeeBar.onExit = () => this.exitCoffeeBar()
+
+    // Cafeteria manager — shared dining interior with queue + cooking
+    this.cafeteria = new CafeteriaManager(
+      this.app, this.input, this.canvas, container,
+    )
+    this.cafeteria.onExit = () => this.exitCafeteria()
 
     // Wire up frame update
     this.app.setConfig({
@@ -504,6 +544,9 @@ export class GardenEngine {
       case 'garden':
         this.camera?.update(dt)
         this.sceneManager?.update(dt)
+        // VehicleSystem per-frame tick — flips stopped remote horses back
+        // to Idle anim when no snapshot arrives for a while.
+        this.vehicleSystem?.update()
         if (this.picker && this.app && this.input) {
           const pickables = this.sceneManager?.getPickableEntities() ?? []
           this.picker.update(this.app.camera, this.input, pickables, this.callbacks)
@@ -516,9 +559,21 @@ export class GardenEngine {
         // are invisible during interior mode and waste CPU cycles.
         break
 
+      case 'coffeebar':
+        this.coffeeBar?.update(dt)
+        // Same reasoning as 'interior' — garden is hidden, no tick needed.
+        break
+
+      case 'cafeteria':
+        this.cafeteria?.update(dt)
+        break
+
       case 'takeover':
         // Garden stays alive — birds, clouds, agent robots, other characters
         this.sceneManager?.update(dt)
+        // Same stopped-horse idle fix as 'garden' — applies here because the
+        // local player may be observing other mounted users from takeover.
+        this.vehicleSystem?.update()
         if (this.takeoverCtrl && this.takeoverCam) {
           // TakeoverController always runs (handles inactivity even when mounted)
           this.takeoverCtrl.update(dt, this.takeoverCam.yaw)
@@ -569,6 +624,22 @@ export class GardenEngine {
           if (this.input?.wasPressed(pc.KEY_2)) {
             this.takeoverCtrl.playEmote(2)
             this.tryClaimGreetingBonus()
+          }
+
+          // ─── Proximity hotkeys: 3=Greet nearby, 4=Invite to race ────
+          // These mirror the action panel's chip buttons. No-op when
+          // the proximity system hasn't locked onto a nearby member,
+          // so the keys don't misfire in open space. Wave animation is
+          // added on Greet so the key press has kinetic feedback that
+          // matches its 👋 label.
+          const nearbyId = this.takeoverProximity?.nearbyMemberId ?? null
+          const nearbyName = this.takeoverProximity?.nearbyMemberName ?? ''
+          if (this.input?.wasPressed(pc.KEY_3) && nearbyId) {
+            this.takeoverCtrl.playEmote(1)
+            this.tryClaimGreetingBonus()
+          }
+          if (this.input?.wasPressed(pc.KEY_4) && nearbyId && nearbyName) {
+            this.callbacks.onInviteToRace?.(nearbyId, nearbyName)
           }
 
           // ─── Seat interaction: E-key to sit/stand at nearby chairs ───
@@ -680,7 +751,60 @@ export class GardenEngine {
               this._currentZone = insideZone
               if (insideZone) this.callbacks.onZoneEnter?.(insideZone)
             }
+
+            // Coffee bar walk-through entry — tight proximity around the
+            // hut's single front door. Cooldown prevents the exit-teleport
+            // from immediately re-triggering entry.
+            if (
+              !this.takeoverCtrl.isSitting
+              && !this.vehicleCtrl?.isActive
+              && Date.now() >= this._coffeeBarReentryCooldownMs
+            ) {
+              const door = this.getCoffeeBarDoorPos()
+              if (door) {
+                const pos = this.takeoverCtrl.getPosition()
+                const dx = pos.x - door.x
+                const dz = pos.z - door.z
+                if (dx * dx + dz * dz < 0.8 * 0.8) {
+                  console.log('[GardenEngine] Coffee bar door hit → entering')
+                  this._coffeeBarReentryCooldownMs = Date.now() + 2000
+                  // location: 'coffeebar' tells OrgRoom to park the avatar
+                  // at locationContext='coffeebar' (no walkHome). Other
+                  // clients hide it while the user is inside.
+                  this.exitTakeover({ location: 'coffeebar' })
+                    .then(() => this.enterCoffeeBar())
+                    .catch(e => console.error('[GardenEngine] coffee bar entry failed:', e))
+                }
+              }
+            }
+
+            // Cafeteria walk-through entry — same pattern as coffee bar.
+            if (
+              this.takeoverCtrl
+              && !this.takeoverCtrl.isSitting
+              && !this.vehicleCtrl?.isActive
+              && Date.now() >= this._cafeteriaReentryCooldownMs
+            ) {
+              const door = this.getCafeteriaDoorPos()
+              if (door) {
+                const pos = this.takeoverCtrl.getPosition()
+                const dx = pos.x - door.x
+                const dz = pos.z - door.z
+                if (dx * dx + dz * dz < 0.8 * 0.8) {
+                  console.log('[GardenEngine] Cafeteria door hit → entering')
+                  this._cafeteriaReentryCooldownMs = Date.now() + 2000
+                  // location: 'cafeteria' — see coffee-bar equivalent above.
+                  this.exitTakeover({ location: 'cafeteria' })
+                    .then(() => this.enterCafeteria())
+                    .catch(e => console.error('[GardenEngine] cafeteria entry failed:', e))
+                }
+              }
+            }
           }
+
+          // exitTakeover() above synchronously clears takeoverCtrl; bail out
+          // of the rest of the frame so we don't NPE on showWarning / etc.
+          if (!this.takeoverCtrl) break
 
           // Inactivity warning / auto-exit
           if (this.takeoverCtrl.showWarning) {
@@ -875,6 +999,302 @@ export class GardenEngine {
     }
   }
 
+  // ─── Coffee bar interior ──────────────────────────────
+
+  /**
+   * World position of the coffee bar's single front door. The hut is
+   * centered in X on the zone and pushed back by COFFEE_DOOR_LOCAL_Z,
+   * so the door sits at (zone.x, zone.z + COFFEE_DOOR_LOCAL_Z) in world.
+   */
+  private getCoffeeBarDoorPos(): { x: number; z: number } | null {
+    const zone = this.sceneManager?.worldLayout.getZone('coffee_bar')
+    if (!zone) return null
+    return { x: zone.x, z: zone.z + COFFEE_DOOR_LOCAL_Z }
+  }
+
+  /** Position one step outside the door — used as the exit spawn. */
+  private getCoffeeBarOutsidePos(): { x: number; z: number; yaw: number } | null {
+    const door = this.getCoffeeBarDoorPos()
+    if (!door) return null
+    return { x: door.x, z: door.z + 1.0, yaw: 0 }
+  }
+
+  /**
+   * Enter the shared coffee bar interior. Fade-to-black, hide garden,
+   * hand control to CoffeeBarManager. Falls back to placeholder identity
+   * so dev / unauthenticated sessions still work.
+   */
+  async enterCoffeeBar(): Promise<void> {
+    if (this.sceneState !== 'garden' || this._transitioning) {
+      console.warn('[GardenEngine] enterCoffeeBar blocked: sceneState=', this.sceneState, 'transitioning=', this._transitioning)
+      return
+    }
+    if (!this.camera || !this.coffeeBar || !this.sceneManager) return
+
+    const visitorUserId = this.currentUser?.id ?? this.takeoverUserId ?? 'local_visitor'
+    const visitorName = this.currentUser?.name ?? 'Visitor'
+    const visitorCharacterModel = this.currentUser?.characterModel ?? null
+    const orgId = this.connectedOrgId ?? 'local'
+
+    this._transitioning = true
+    try {
+      this.sceneState = 'entering'
+      this.savedCameraState = this.camera.saveState()
+
+      try {
+        await this.coffeeBar.sceneTransition.perform(async () => {
+          const gardenRoot = this.sceneManager?.gardenRootEntity
+          if (gardenRoot) gardenRoot.enabled = false
+
+          this.camera!.disable()
+          this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+
+          await this.coffeeBar!.enter({
+            userId: visitorUserId,
+            name: visitorName,
+            characterModel: visitorCharacterModel,
+            orgId,
+          })
+          this.sceneState = 'coffeebar'
+        })
+      } catch (err) {
+        console.error('[GardenEngine] Failed to enter coffee bar:', err)
+        this.sceneState = 'garden'
+        this.camera.enable()
+        const gardenRoot = this.sceneManager?.gardenRootEntity
+        if (gardenRoot) gardenRoot.enabled = true
+        if (this.savedCameraState) {
+          this.camera.restoreState(this.savedCameraState)
+          this.savedCameraState = null
+        }
+      }
+    } finally {
+      this._transitioning = false
+    }
+  }
+
+  /** Exit the coffee bar interior back to the garden. */
+  async exitCoffeeBar(): Promise<void> {
+    if (this.sceneState !== 'coffeebar' || this._transitioning) return
+    if (!this.camera || !this.coffeeBar) return
+
+    const visitorId = this.currentUser?.id ?? null
+
+    // Lock the visitor under takeover before the fade so stale
+    // locationContext="coffeebar" snapshots can't re-hide the avatar
+    // during the transition. See exitCafeteria for the full rationale.
+    if (visitorId) {
+      this.sceneManager?.characterSystemRef?.setTakeoverUser(visitorId)
+    }
+
+    this._transitioning = true
+    try {
+      this.sceneState = 'exiting'
+
+      await this.coffeeBar.sceneTransition.perform(() => {
+        this.coffeeBar!.exit()
+
+        const gardenRoot = this.sceneManager?.gardenRootEntity
+        if (gardenRoot) gardenRoot.enabled = true
+
+        this.camera!.enable()
+        if (this.savedCameraState) {
+          this.camera!.restoreState(this.savedCameraState)
+          this.savedCameraState = null
+        }
+
+        // Teleport the visitor's world character to just outside the door
+        const outside = this.getCoffeeBarOutsidePos()
+        if (outside && visitorId) {
+          const character = this.sceneManager?.characterSystemRef?.getCharacter(visitorId)
+          if (character) {
+            // Force visible — hidden by snapshot updates during the visit.
+            character.entity.enabled = true
+            character.entity.setPosition(outside.x, 0, outside.z)
+            character.entity.setEulerAngles(0, outside.yaw, 0)
+            character.entity.anim?.setBoolean('sitting', false)
+            character.entity.anim?.setInteger('speed', 0)
+          }
+        }
+
+        // Cooldown blocks the walk-through trigger on the exit frame
+        this._coffeeBarReentryCooldownMs = Date.now() + 2000
+        this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+        this.sceneState = 'garden'
+      })
+    } catch (err) {
+      // Fade / entity mutations threw. Unwind the pre-fade takeover claim
+      // so the local user's avatar is not silently frozen forever by
+      // updateFromSnapshot's takeoverUserId early-return, and drop the
+      // stuck 'exiting' state back to 'garden'.
+      console.error('[GardenEngine] Failed to exit coffee bar:', err)
+      this.sceneManager?.characterSystemRef?.setTakeoverUser(null)
+      this.sceneState = 'garden'
+    } finally {
+      this._transitioning = false
+    }
+
+    // Re-attach WASD takeover just outside the door so control feels continuous.
+    // Skipped if the transition failed — sceneState would not be 'garden'
+    // and takeoverCharacter guards on that already.
+    if (visitorId && this.sceneState === 'garden') {
+      const outside = this.getCoffeeBarOutsidePos()
+      await this.takeoverCharacter(visitorId, outside ?? undefined)
+    }
+  }
+
+  // ─── Cafeteria interior ──────────────────────────────
+
+  /**
+   * World position of the cafeteria's front door. The hut sits centered-in-X
+   * and pushed back inside the root entity (like the coffee bar), so
+   * CAFETERIA_DOOR_OFFSET carries the door's position relative to the zone
+   * center rather than being a simple (width/2, depth) offset.
+   */
+  private getCafeteriaDoorPos(): { x: number; z: number } | null {
+    const zone = this.sceneManager?.worldLayout.getZone('cafeteria')
+    if (!zone) return null
+    return {
+      x: zone.x + CAFETERIA_DOOR_OFFSET.x,
+      z: zone.z + CAFETERIA_DOOR_OFFSET.z,
+    }
+  }
+
+  private getCafeteriaOutsidePos(): { x: number; z: number; yaw: number } | null {
+    const door = this.getCafeteriaDoorPos()
+    if (!door) return null
+    return { x: door.x, z: door.z + 1.0, yaw: 0 }
+  }
+
+  /** Enter the shared cafeteria interior. Mirrors enterCoffeeBar. */
+  async enterCafeteria(): Promise<void> {
+    if (this.sceneState !== 'garden' || this._transitioning) {
+      console.warn('[GardenEngine] enterCafeteria blocked: sceneState=', this.sceneState, 'transitioning=', this._transitioning)
+      return
+    }
+    if (!this.camera || !this.cafeteria || !this.sceneManager) return
+
+    const visitorUserId = this.currentUser?.id ?? this.takeoverUserId ?? 'local_visitor'
+    const visitorName = this.currentUser?.name ?? 'Visitor'
+    const visitorCharacterModel = this.currentUser?.characterModel ?? null
+    const orgId = this.connectedOrgId ?? 'local'
+
+    this._transitioning = true
+    try {
+      this.sceneState = 'entering'
+      this.savedCameraState = this.camera.saveState()
+
+      try {
+        await this.cafeteria.sceneTransition.perform(async () => {
+          const gardenRoot = this.sceneManager?.gardenRootEntity
+          if (gardenRoot) gardenRoot.enabled = false
+          // Note: CharacterSystem's org-member avatars are hidden by the
+          // server-driven locationContext="cafeteria" rule in
+          // CharacterSystem.updateFromSnapshot — no need to toggle
+          // characterSystem.root here. Matches enterCoffeeBar.
+
+          this.camera!.disable()
+          this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+
+          await this.cafeteria!.enter({
+            userId: visitorUserId,
+            name: visitorName,
+            characterModel: visitorCharacterModel,
+            orgId,
+          })
+          this.sceneState = 'cafeteria'
+        })
+      } catch (err) {
+        console.error('[GardenEngine] Failed to enter cafeteria:', err)
+        // Fully unwind any partial state — if CafeteriaManager.enter()
+        // enabled the root before throwing, calling exit() here hides it
+        // again and disconnects any in-flight Colyseus join.
+        this.cafeteria?.exit()
+        this.sceneState = 'garden'
+        this.camera.enable()
+        const gardenRoot = this.sceneManager?.gardenRootEntity
+        if (gardenRoot) gardenRoot.enabled = true
+        if (this.savedCameraState) {
+          this.camera.restoreState(this.savedCameraState)
+          this.savedCameraState = null
+        }
+      }
+    } finally {
+      this._transitioning = false
+    }
+  }
+
+  /** Exit the cafeteria interior back to the garden. */
+  async exitCafeteria(): Promise<void> {
+    if (this.sceneState !== 'cafeteria' || this._transitioning) return
+    if (!this.camera || !this.cafeteria) return
+
+    const visitorId = this.currentUser?.id ?? null
+
+    // Reserve the local user as "under takeover" before any fade work
+    // starts. During the visit, OrgRoom has been broadcasting
+    // locationContext="cafeteria" snapshots which CharacterSystem uses to
+    // hide the avatar. The moment we begin exit, lock the visitor's userId
+    // as takeover so updateFromSnapshot ignores any stale "cafeteria"
+    // snapshots that arrive during the fade — otherwise the entity stays
+    // hidden until a fresh server broadcast resets locationContext.
+    if (visitorId) {
+      this.sceneManager?.characterSystemRef?.setTakeoverUser(visitorId)
+    }
+
+    this._transitioning = true
+    try {
+      this.sceneState = 'exiting'
+
+      await this.cafeteria.sceneTransition.perform(() => {
+        this.cafeteria!.exit()
+
+        const gardenRoot = this.sceneManager?.gardenRootEntity
+        if (gardenRoot) gardenRoot.enabled = true
+
+        this.camera!.enable()
+        if (this.savedCameraState) {
+          this.camera!.restoreState(this.savedCameraState)
+          this.savedCameraState = null
+        }
+
+        const outside = this.getCafeteriaOutsidePos()
+        if (outside && visitorId) {
+          const character = this.sceneManager?.characterSystemRef?.getCharacter(visitorId)
+          if (character) {
+            // Force visible — the entity was disabled by snapshot updates
+            // during the visit; enable it here before the fade reveals the
+            // garden again.
+            character.entity.enabled = true
+            character.entity.setPosition(outside.x, 0, outside.z)
+            character.entity.setEulerAngles(0, outside.yaw, 0)
+            character.entity.anim?.setBoolean('sitting', false)
+            character.entity.anim?.setInteger('speed', 0)
+          }
+        }
+
+        this._cafeteriaReentryCooldownMs = Date.now() + 2000
+        this.sceneManager?.physicsWorld?.disableDoorsUntil(Date.now() + 500)
+        this.sceneState = 'garden'
+      })
+    } catch (err) {
+      // See exitCoffeeBar — fade failure leaves sceneState='exiting' and
+      // the pre-fade takeover claim hiding snapshot updates. Unwind both.
+      console.error('[GardenEngine] Failed to exit cafeteria:', err)
+      this.sceneManager?.characterSystemRef?.setTakeoverUser(null)
+      this.sceneState = 'garden'
+    } finally {
+      this._transitioning = false
+    }
+
+    // Skipped if the transition failed — takeoverCharacter guards on
+    // sceneState === 'garden' already.
+    if (visitorId && this.sceneState === 'garden') {
+      const outside = this.getCafeteriaOutsidePos()
+      await this.takeoverCharacter(visitorId, outside ?? undefined)
+    }
+  }
+
   /** Helper — wait for a duration (used to let camera fly-to complete). */
   private waitForTransition(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
@@ -926,20 +1346,50 @@ export class GardenEngine {
     userId: string,
     spawnOverride?: { x: number; z: number; yaw: number },
   ): Promise<void> {
-    if (this.sceneState !== 'garden' || !this.camera || !this.input || !this.sceneManager || !this.app) return
+    // The UI surfaces the bail reason via `takeoverBailReason`; debug
+    // logs only fire in dev to avoid console noise in production (and
+    // because `_takeoverBailReason` is the primary diagnostic).
+    const debug = import.meta.env.DEV
+    if (this.sceneState !== 'garden') {
+      if (debug) console.warn('[GardenEngine] takeover bail: sceneState =', this.sceneState)
+      this._takeoverBailReason = `Scene not ready (${this.sceneState}).`
+      return
+    }
+    if (!this.camera || !this.input || !this.sceneManager || !this.app) {
+      const missing = [
+        !this.camera && 'camera',
+        !this.input && 'input',
+        !this.sceneManager && 'sceneManager',
+        !this.app && 'app',
+      ].filter(Boolean).join(', ')
+      if (debug) console.warn('[GardenEngine] takeover bail: missing', missing)
+      this._takeoverBailReason = `Engine not initialised (${missing}).`
+      return
+    }
 
     const charSystem = this.sceneManager.characterSystemRef
-    if (!charSystem) return
+    if (!charSystem) {
+      if (debug) console.warn('[GardenEngine] takeover bail: characterSystem not ready')
+      this._takeoverBailReason = 'Characters not loaded yet.'
+      return
+    }
 
     const character = charSystem.getCharacter(userId)
     if (!character) {
-      console.warn(
-        '[GardenEngine] takeoverCharacter: character not found for', userId,
-        '— check that the Colyseus OrgRoom is connected and that the user is',
-        'in the org snapshot (see _collect_org_members in internal_colyseus.py).',
-      )
+      const available = charSystem.getCharacters().map(c => c.memberId)
+      if (debug) {
+        console.warn(
+          '[GardenEngine] takeoverCharacter: character not found for', userId,
+          'available:', available,
+        )
+      }
+      this._takeoverBailReason = available.length
+        ? `No character assigned to you yet (${available.length} others in scene).`
+        : 'Still connecting — wait for characters to appear.'
       return
     }
+
+    this._takeoverBailReason = null
 
     // Take Control always enters garden WASD mode. Interior mode (walking
     // around inside the house) is a separate entry point triggered by
@@ -1040,6 +1490,12 @@ export class GardenEngine {
     this.takeoverUI = new TakeoverUI()
     this.takeoverUI.init(this.canvas!.parentElement!)
     this.takeoverUI.onExitClick = () => this.exitTakeover()
+    // Surface the Invite-to-race target's id + name up to the Vue layer
+    // (which opens RaceSetupDialog). Greet has no button callback — it's
+    // driven purely by the `3` hotkey in onUpdate.
+    this.takeoverUI.onInviteNearbyToRace = (userId, name) => {
+      this.callbacks.onInviteToRace?.(userId, name)
+    }
     this.takeoverUI.show()
 
     this.takeoverProximity = new ProximitySystem()
@@ -1048,8 +1504,18 @@ export class GardenEngine {
     console.debug('[GardenEngine] Entered takeover mode for', userId)
   }
 
-  /** Exit takeover mode — restore camera and resume NPC behavior. */
-  async exitTakeover(): Promise<void> {
+  /**
+   * Exit takeover mode — restore camera and resume NPC behavior.
+   *
+   * @param opts.location  Optional interior destination the user is
+   *   stepping into (e.g. "cafeteria", "coffeebar"). When set, the
+   *   server skips walkHome and stamps `member.locationContext = location`,
+   *   which every other client's CharacterSystem reads to hide the
+   *   avatar while the visit is in progress. Re-acquiring takeover on
+   *   exit sends takeover_start, which resets locationContext to
+   *   "garden" — the avatar reappears automatically.
+   */
+  async exitTakeover(opts: { location?: string } = {}): Promise<void> {
     // Re-entry guard: takeoverCtrl is cleared first thing to prevent any concurrent calls
     if (!this.takeoverCtrl) return
 
@@ -1070,11 +1536,12 @@ export class GardenEngine {
     const ctrl = this.takeoverCtrl
     this.takeoverCtrl = null
 
-    // Release server-side takeover so OrgRoom's walkHome simulation resumes
-    // for this member. The server will start advancing position toward the
-    // home seat on its next tick.
+    // Release server-side takeover. The optional `location` tells the
+    // server this is an interior hand-off (cafeteria / coffee bar)
+    // rather than a release-to-NPC; the server then parks the avatar
+    // at locationContext=location and every viewer hides it.
     if (this.takeoverUserId) {
-      this.orgRoomClient?.sendTakeoverEnd(this.takeoverUserId)
+      this.orgRoomClient?.sendTakeoverEnd(this.takeoverUserId, opts.location)
     }
 
     // Clear the client-side prediction block BEFORE any async work. Snapshot
@@ -1137,6 +1604,19 @@ export class GardenEngine {
 
   /** Whether the engine is currently in takeover mode. */
   get isTakeover(): boolean { return this.sceneState === 'takeover' }
+
+  /** Current top-level scene state (garden, takeover, interior, etc.). */
+  getSceneState(): SceneState { return this._sceneState }
+
+  /**
+   * ID of the nearby member the proximity system has locked onto, or
+   * null. Used by the on-screen touch overlay to gate the Greet (3) and
+   * Invite-to-race (4) buttons so they only light up when there's
+   * actually a target.
+   */
+  getNearbyMemberId(): string | null {
+    return this.takeoverProximity?.nearbyMemberId ?? null
+  }
 
   /**
    * Set the currently authenticated user's full identity.
@@ -1214,6 +1694,10 @@ export class GardenEngine {
 
     this.interior?.destroy()
     this.interior = null
+    this.coffeeBar?.destroy()
+    this.coffeeBar = null
+    this.cafeteria?.destroy()
+    this.cafeteria = null
     this.picker = null
     this.sceneManager?.destroy()
     this.sceneManager = null

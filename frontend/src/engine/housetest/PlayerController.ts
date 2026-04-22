@@ -2,15 +2,11 @@
 // Copyright (C) 2026 Arun Rajkumar
 
 /**
- * PlayerController — keyboard-driven Kenney character with AABB collision.
+ * PlayerController — keyboard-driven KayKit character with AABB collision.
  *
- * Loads a Kenney Blocky Character GLB, drives idle↔walk animations via
- * PlayCanvas AnimComponent, and moves using WASD with AABB slide collision.
- *
- * Entity hierarchy (same wrapper pattern as CharacterFactory):
- *   playerWrapper (positioned in world)
- *     └── renderEntity (skinned GLB, scaled + offset so feet sit at Y=0)
- *         AnimComponent lives on the wrapper (auto-discovers skinned children)
+ * Loads a KayKit character via the shared factory, drives its locomotion
+ * state graph (idle / walk / sit / sleep) via the AnimComponent, and
+ * moves with WASD under AABB slide collision.
  *
  * Note: Using setPosition() directly (no rigidbody). When integrating into
  * the main dashboard, swap to Dynamic RigidBody + applyForce() with Ammo.js
@@ -19,20 +15,11 @@
 import * as pc from 'playcanvas'
 import type { AssetLoader } from '../assets/AssetLoader'
 import type { InputManager } from '../input/InputManager'
-import { getCharacterGLB } from '../assets/AssetManifest'
-import { parseCharacterModel, isKayKitConfig } from '../characters/CharacterConfig'
+import { parseCharacterModel } from '../characters/CharacterConfig'
 import { KayKitCharacterFactory } from '../characters/KayKitCharacterFactory'
-import { CharacterFactory } from '../characters/CharacterFactory'
 import { type ContainerWithAnims, findAnimTrack } from '../characters/AnimUtils'
 import { tryMove, type CollisionBox } from './CollisionSystem'
 import type { PhysicsWorld } from '../physics'
-
-// ─── Character model constants (matches CharacterFactory) ────
-const CHAR_NATIVE_HEIGHT = 9.0
-const CHAR_TARGET_HEIGHT = 1.0
-const CHAR_SCALE = CHAR_TARGET_HEIGHT / CHAR_NATIVE_HEIGHT
-/** Lifts model feet (Y≈-1 native) to Y=0 in wrapper space. */
-const CHAR_Y_OFFSET = 1.0 * CHAR_SCALE
 
 // ─── Movement constants ──────────────────────────────────────
 const MOVE_SPEED   = 3.0  // world units per second
@@ -40,53 +27,10 @@ const SPRINT_SPEED = 6.0  // 2× walk
 const JUMP_HEIGHT  = 0.5  // peak Y
 const JUMP_DURATION = 0.45 // seconds
 
-// ─── Animation state graph ──────────────────────────────────
-// Extended from LOCOMOTION_STATE_GRAPH (AnimUtils.ts) for house interiors.
-// NOTE: uses INTEGER parameters (sitting=0/1) vs BOOLEAN in LOCOMOTION_STATE_GRAPH.
-// KayKit characters use Sit for both chair sitting and bed sleeping (no lie-down clip).
-const STATE_GRAPH = {
-  layers: [{
-    name: 'locomotion',
-    states: [
-      { name: 'START' },
-      { name: 'Idle',  speed: 1.0 },
-      { name: 'Walk',  speed: 1.0 },
-      { name: 'Sit',   speed: 1.0 },
-      { name: 'Sleep', speed: 1.0 },
-    ],
-    transitions: [
-      { from: 'START', to: 'Idle', time: 0, priority: 0 },
-      {
-        from: 'Idle', to: 'Walk', time: 0.2, priority: 0,
-        conditions: [{ parameterName: 'speed', predicate: pc.ANIM_GREATER_THAN, value: 0 }],
-      },
-      {
-        from: 'Walk', to: 'Idle', time: 0, priority: 0,
-        conditions: [{ parameterName: 'speed', predicate: pc.ANIM_LESS_THAN_EQUAL_TO, value: 0 }],
-      },
-      {
-        from: 'Idle', to: 'Sit', time: 0.2, priority: 1,
-        conditions: [{ parameterName: 'sitting', predicate: pc.ANIM_EQUAL_TO, value: 1 }],
-      },
-      {
-        from: 'Sit', to: 'Idle', time: 0.2, priority: 0,
-        conditions: [{ parameterName: 'sitting', predicate: pc.ANIM_EQUAL_TO, value: 0 }],
-      },
-    ],
-  }],
-  parameters: {
-    speed:    { name: 'speed',    type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
-    sitting:  { name: 'sitting',  type: pc.ANIM_PARAMETER_INTEGER, value: 0 },
-  },
-}
-
-// ContainerWithAnims and findAnimTrack imported from shared AnimUtils
-
 export class PlayerController {
   private loader: AssetLoader
   private input: InputManager
   private entity: pc.Entity | null = null
-  private _isKayKit = false
   private collisionBoxes: CollisionBox[] = []
   private physics: PhysicsWorld | null = null
   private _sitting  = false
@@ -112,108 +56,71 @@ export class PlayerController {
   async init(root: pc.Entity, startX: number, startZ: number, characterModel?: string | null): Promise<pc.Entity> {
     const config = parseCharacterModel(characterModel ?? null)
 
-    if (isKayKitConfig(config)) {
-      // KayKit character — use factory to create entity with animations + colors
-      const factory = new KayKitCharacterFactory(this.loader)
-      const result = await factory.create(
-        'player', '', config,
-        startX, 0, startZ,
-        PlayerController.SPAWN_YAW, false,
-      )
-      // Remove the name label (not needed for local player in house)
-      const label = result.entity.findByTag('billboard')[0] as pc.Entity | undefined
-      if (label) label.destroy()
+    // KayKit character — shared factory builds entity with animations + colors
+    const factory = new KayKitCharacterFactory(this.loader)
+    const result = await factory.create(
+      'player', '', config,
+      startX, 0, startZ,
+      PlayerController.SPAWN_YAW, false,
+    )
+    // Remove the name label (not needed for local player in house)
+    const label = result.entity.findByTag('billboard')[0] as pc.Entity | undefined
+    if (label) label.destroy()
 
-      // Scale down for interior — garden scale (0.95) is too large for the small room
-      const interiorScale = 0.75
-      const renderChild = result.entity.children[0]
-      if (renderChild) {
-        const s = renderChild.getLocalScale()
-        renderChild.setLocalScale(s.x * interiorScale, s.y * interiorScale, s.z * interiorScale)
-      }
-
-      // Load extra animation GLBs and assign them as additional states
-      const anim = result.entity.anim
-      if (anim?.baseLayer) {
-        const layer = anim.baseLayer
-        const loadTracks = async (glb: string) => {
-          const a = await this.loader.load(glb)
-          return a.resource as ContainerWithAnims
-        }
-        const [general, simulation, tools] = await Promise.all([
-          loadTracks('characters/kaykit/animations/general.glb'),
-          loadTracks('characters/kaykit/animations/simulation.glb'),
-          loadTracks('characters/kaykit/animations/tools.glb'),
-        ])
-
-        // Sleep — Death_A plays once and holds collapsed pose
-        const death = findAnimTrack(general, 'Death_A')
-        if (death) layer.assignAnimation('Sleep', death, 1, false)
-
-        // Working — for laptop/desk interaction
-        const working = findAnimTrack(tools, 'Working_A')
-        if (working) layer.assignAnimation('Working', working)
-
-        // Extra animations for the picker
-        const extras: [string, ContainerWithAnims, string, boolean][] = [
-          ['Cheering',    simulation, 'Cheering',        true],
-          ['Waving',      simulation, 'Waving',          true],
-          ['LieIdle',     simulation, 'Lie_Idle',        true],
-          ['SitFloor',    simulation, 'Sit_Floor_Idle',  true],
-          ['PushUps',     simulation, 'Push_Ups',        true],
-          ['Interact',    general,    'Interact',        true],
-          ['UseItem',     general,    'Use_Item',        true],
-          ['Chopping',    tools,      'Chopping',        true],
-          ['Hammering',   tools,      'Hammering',       true],
-          ['Fishing',     tools,      'Fishing_Idle',    true],
-        ]
-        for (const [state, container, trackName, loop] of extras) {
-          const track = findAnimTrack(container, trackName)
-          if (track) layer.assignAnimation(state, track, 1, loop)
-        }
-      }
-
-      root.addChild(result.entity)
-      this.entity = result.entity
-      this._isKayKit = true
-      return result.entity
+    // Scale down for interior — garden scale (0.95) is too large for the small room
+    const interiorScale = 0.75
+    const renderChild = result.entity.children[0]
+    if (renderChild) {
+      const s = renderChild.getLocalScale()
+      renderChild.setLocalScale(s.x * interiorScale, s.y * interiorScale, s.z * interiorScale)
     }
 
-    // Legacy Kenney Blocky character path
-    const variant = config.characterId || CharacterFactory.getVariant('player', null)
-    const glbPath = getCharacterGLB(variant)
-    const asset = await this.loader.load(glbPath)
-    const container = asset.resource as ContainerWithAnims
+    // Load extra animation GLBs and assign them as additional states
+    const anim = result.entity.anim
+    if (anim?.baseLayer) {
+      const layer = anim.baseLayer
+      const loadTracks = async (glb: string) => {
+        const a = await this.loader.load(glb)
+        return a.resource as ContainerWithAnims
+      }
+      const [general, simulation, tools] = await Promise.all([
+        loadTracks('characters/kaykit/animations/general.glb'),
+        loadTracks('characters/kaykit/animations/simulation.glb'),
+        loadTracks('characters/kaykit/animations/tools.glb'),
+      ])
 
-    const wrapper = new pc.Entity('Player')
-    wrapper.setPosition(startX, 0, startZ)
-    wrapper.setEulerAngles(0, PlayerController.SPAWN_YAW, 0)
+      // Sleep — Death_A plays once and holds collapsed pose
+      const death = findAnimTrack(general, 'Death_A')
+      if (death) layer.assignAnimation('Sleep', death, 1, false)
 
-    // Render entity — skinned GLB, offset so feet sit at Y=0
-    const renderEntity = container.instantiateRenderEntity()
-    renderEntity.setLocalScale(CHAR_SCALE, CHAR_SCALE, CHAR_SCALE)
-    renderEntity.setLocalPosition(0, CHAR_Y_OFFSET, 0)
-    wrapper.addChild(renderEntity)
+      // Working — for laptop/desk interaction
+      const working = findAnimTrack(tools, 'Working_A')
+      if (working) layer.assignAnimation('Working', working)
 
-    // Anim component — discovers skinned mesh in child automatically
-    wrapper.addComponent('anim', { activate: true })
-    wrapper.anim!.loadStateGraph(STATE_GRAPH)
-    const layer = wrapper.anim!.baseLayer
-    if (layer) {
-      const idle = findAnimTrack(container, 'idle')
-      const walk = findAnimTrack(container, 'walk')
-      // Fallback chain: try common keyword variants, then fall back to idle.
-      const sit   = findAnimTrack(container, 'sit')   ?? idle
-      const sleep = findAnimTrack(container, 'death') ?? findAnimTrack(container, 'lie') ?? idle
-      if (idle)  layer.assignAnimation('Idle',  idle)
-      if (walk)  layer.assignAnimation('Walk',  walk)
-      if (sit)   layer.assignAnimation('Sit',   sit)
-      if (sleep) layer.assignAnimation('Sleep', sleep, 1, false)
+      // Extra animations for the picker. Speed column lets us slow tracks
+      // that otherwise read as twitchy (Use_Item is the drink reaction —
+      // KayKit plays it at "barista snap" tempo by default).
+      const extras: [string, ContainerWithAnims, string, boolean, number][] = [
+        ['Cheering',    simulation, 'Cheering',        true,  1.0],
+        ['Waving',      simulation, 'Waving',          true,  1.0],
+        ['LieIdle',     simulation, 'Lie_Idle',        true,  1.0],
+        ['SitFloor',    simulation, 'Sit_Floor_Idle',  true,  1.0],
+        ['PushUps',     simulation, 'Push_Ups',        true,  1.0],
+        ['Interact',    general,    'Interact',        true,  1.0],
+        ['UseItem',     general,    'Use_Item',        true,  0.4],
+        ['Chopping',    tools,      'Chopping',        true,  1.0],
+        ['Hammering',   tools,      'Hammering',       true,  1.0],
+        ['Fishing',     tools,      'Fishing_Idle',    true,  1.0],
+      ]
+      for (const [state, container, trackName, loop, speed] of extras) {
+        const track = findAnimTrack(container, trackName)
+        if (track) layer.assignAnimation(state, track, speed, loop)
+      }
     }
 
-    root.addChild(wrapper)
-    this.entity = wrapper
-    return wrapper
+    root.addChild(result.entity)
+    this.entity = result.entity
+    return result.entity
   }
 
   /** Swap collision boxes when transitioning between scenes (manual AABB mode). */
@@ -234,13 +141,8 @@ export class PlayerController {
     this.entity.setPosition(x, y, z)
     this.entity.setEulerAngles(0, yaw, 0)
     const anim = this.entity.anim
-    if (this._isKayKit) {
-      anim?.setBoolean('sitting', true)
-      anim?.setInteger('speed', 0)
-    } else {
-      anim?.setInteger('speed', 0)
-      anim?.setInteger('sitting', 1)
-    }
+    anim?.setBoolean('sitting', true)
+    anim?.setInteger('speed', 0)
   }
 
   /** End sit — nudge away from furniture to avoid collision trapping. */
@@ -260,11 +162,7 @@ export class PlayerController {
     const anim = this.entity.anim
     if (!anim) return
     try { anim.setInteger('working', 0) } catch (e) { if (import.meta.env.DEV) console.debug('[PlayerCtrl] anim param missing:', e) }
-    if (this._isKayKit) {
-      anim.setBoolean('sitting', false)
-    } else {
-      anim.setInteger('sitting', 0)
-    }
+    anim.setBoolean('sitting', false)
     try { anim.baseLayer?.transition('Idle', 0.2) } catch (e) { if (import.meta.env.DEV) console.debug('[PlayerCtrl] anim transition:', e) }
   }
 
@@ -277,11 +175,7 @@ export class PlayerController {
     const anim = this.entity.anim
     if (!anim) return
     anim.setInteger('speed', 0)
-    if (this._isKayKit) {
-      anim.setBoolean('sitting', false)
-    } else {
-      anim.setInteger('sitting', 0)
-    }
+    anim.setBoolean('sitting', false)
     try { anim.baseLayer?.transition('Sleep', 0.3) } catch { /* state missing */ }
   }
 
@@ -328,11 +222,7 @@ export class PlayerController {
         if (this._sleeping) this.wakeUp()
         return  // skip movement on the stand-up frame
       } else {
-        if (this._isKayKit) {
-          this.entity.anim?.setInteger('speed', 0)
-        } else {
-          this.entity.anim!.setInteger('speed', 0)
-        }
+        this.entity.anim?.setInteger('speed', 0)
         return
       }
     }

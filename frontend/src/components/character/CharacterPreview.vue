@@ -33,6 +33,10 @@ import { CharacterPreviewScene } from '@/engine/characters/CharacterPreviewScene
 
 const props = defineProps<{
   config: CharacterConfig
+  /** Which KayKit emote to drive the character with while displayed.
+   *  0 = idle, 1 = wave, 2 = cheer, 3 = defeat.
+   *  Defaults to idle when unspecified. */
+  emote?: 0 | 1 | 2 | 3
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
@@ -49,6 +53,7 @@ onMounted(async () => {
   sceneReady.value = true  // scene boots with lighting + pedestal visible
 
   await scene.setCharacter(props.config)
+  scene.setEmote(props.emote ?? 0)
   loading.value = false
 
   resizeObserver = new ResizeObserver(() => {
@@ -64,9 +69,18 @@ watch(
     if (!scene) return
     loading.value = true
     await scene.setCharacter(newConfig)
+    scene.setEmote(props.emote ?? 0)
     loading.value = false
   },
   { deep: true },
+)
+
+// Hot-swap the emote without reloading the GLB — cheap, no flicker.
+watch(
+  () => props.emote,
+  (next) => {
+    scene?.setEmote(next ?? 0)
+  },
 )
 
 onUnmounted(() => {

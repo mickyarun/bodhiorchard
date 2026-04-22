@@ -18,6 +18,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@shared': fileURLToPath(new URL('../shared', import.meta.url)),
     },
   },
   server: {
@@ -29,6 +30,17 @@ export default defineConfig({
         changeOrigin: true,
         timeout: 300000, // 5 min — AI chat endpoints can be slow
         ws: true,
+      },
+      // Forward Colyseus through the same origin so HTTPS pages (ngrok,
+      // Tailscale Serve) don't hit a mixed-content block when the client
+      // tries to reach ws://localhost:2567 directly from an https:// page.
+      // `rewrite` strips the /colyseus prefix since the Colyseus server
+      // expects /matchmake/... at its root.
+      '/colyseus': {
+        target: 'http://localhost:2567',
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/colyseus/, ''),
       },
     },
   },
