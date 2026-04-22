@@ -31,6 +31,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
     logger.info("bodhiorchard_startup", version="0.1.0")
 
+    # 0. Static contract check: every MCP tool's schema ↔ handler must agree.
+    # Catches the class of bug that once let `write_bud` silently clobber
+    # BUDs because the schema said `content` and the handler read `content`
+    # but Claude sent `requirements_md`. Hard-fails the boot with the exact
+    # mismatch rather than shipping a silent data-loss regression.
+    from app.mcp.contract_check import check_mcp_contracts
+
+    check_mcp_contracts()
+
     from app.services.job_handlers import setup_job_handlers
     from app.services.job_queue import cleanup_completed_jobs, start_workers, stop_workers
 
@@ -130,10 +139,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     presence_task = asyncio.create_task(_presence_poll_loop())
 
+    # 8. Runaway-agent-task sweeper. Heartbeats written from the agent
+    # runner are checked every 60 s; any `running` task with a stale
+    # heartbeat or past its 30-min wall-clock deadline gets marked
+    # failed. Catches the "Docker Desktop VM suspended with the laptop,
+    # backend never restarted, task stuck in running forever" case that
+    # the startup-only `recover_stuck_agent_tasks` can't.
+    from app.services.agent_task_sweeper import run_sweeper_loop
+
+    sweeper_task = asyncio.create_task(run_sweeper_loop(), name="agent-task-sweeper")
+
     yield
 
     cleanup_task.cancel()
     presence_task.cancel()
+    sweeper_task.cancel()
     await stop_workers()
 
     from app.services.redis_client import close_redis
