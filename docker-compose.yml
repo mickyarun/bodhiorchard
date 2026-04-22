@@ -1,0 +1,79 @@
+# Full-stack compose for the evaluator path: `docker compose up`.
+# Starts postgres, redis, backend (with migrations), multiplayer, and frontend.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: bodhiorchard
+      POSTGRES_PASSWORD: bodhiorchard
+      POSTGRES_DB: bodhiorchard
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bodhiorchard -d bodhiorchard"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://bodhiorchard:bodhiorchard@postgres:5432/bodhiorchard
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: change-me-in-production
+      ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+      EMBEDDING_PROVIDER: fastembed
+      EMBEDDING_MODEL: BAAI/bge-small-en-v1.5
+      EMBEDDING_DIMENSIONS: "384"
+      # Optional: pass a host-level Anthropic key through to the container.
+      # When unset this is empty; orgs using api_key auth mode override it
+      # from the encrypted value stored in the DB.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persistent home for git clones of target repositories (Full Docker
+      # mode). Survives rebuilds so scans don't re-clone every time.
+      - repos_data:/data/repos
+      # Persistent store for the backend's ed25519 deploy keypair used to
+      # clone private GitHub repos. Only the public key is ever exposed.
+      - ssh_data:/data/ssh
+
+  multiplayer:
+    build:
+      context: .
+      dockerfile: multiplayer/Dockerfile
+    ports:
+      - "2567:2567"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    depends_on:
+      - backend
+      - multiplayer
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:
+  repos_data:
+  ssh_data:

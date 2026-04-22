@@ -189,6 +189,12 @@ const router = createRouter({
           meta: { permission: 'integrations:configure' },
           component: () => import('@/views/settings/SettingsJiraImport.vue'),
         },
+        {
+          path: 'raceview/:roomId',
+          name: 'race-view',
+          component: () => import('@/views/race/RaceRoomView.vue'),
+          props: true,
+        },
       ],
     },
   ],

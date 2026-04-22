@@ -260,56 +260,62 @@ Start free with Ollama. Add Claude Code for codebase intelligence. Upgrade to cl
 
 ## Getting Started
 
+Bodhiorchard ships in **two deployment modes**. Pick the one that matches how you want to run it — the product is identical, only the process boundary between your host and the containers changes.
+
+| Mode | What runs in Docker | What runs on your host | Claude auth |
+|---|---|---|---|
+| **Full Docker** | postgres, redis, **backend**, multiplayer, frontend | nothing | Anthropic API key (entered in Settings → AI Configuration) |
+| **Hybrid** | postgres, redis only (infra) | backend, multiplayer, frontend via `npm run dev` | The host's existing `claude login` session (Claude Pro/Max subscription) |
+
+**Pick Full Docker** for a one-command "evaluator" setup, a dedicated Mac-mini deployment, or any case where you'd rather pay-per-token via Anthropic's API than wire up a Claude subscription. **Pick Hybrid** if you already run `claude` interactively on your laptop and want agents to use that same flat-rate subscription, or you want hot-reload for development.
+
 ### Prerequisites
 
-- A Mac, Linux machine, or Mac Mini (recommended for always-on deployment)
-- Docker and Docker Compose
-- Node.js 18+ (for frontend development)
-- Python 3.12+ (for backend development)
+- **Full Docker**: Docker Desktop ≥ 4.20 (everything else is in containers)
+- **Hybrid**: Docker + Node.js 18+ + Python 3.12+ + a host-installed, already-logged-in [Claude Code CLI](https://code.claude.com/docs/en/setup)
+- Windows: use WSL2 for either mode
 - (Optional) Cloudflare account for tunnel — needed for Slack/GitHub webhooks
 
-### Quick Start (Docker)
+### Full Docker mode (one command)
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/bodhiorchard.git
+git clone https://github.com/mickyarun/bodhiorchard.git
 cd bodhiorchard
-
-# Copy environment config
-cp backend/.env.example backend/.env
-
-# Start all services (PostgreSQL, Redis, Ollama, Backend)
-cd backend
-docker compose up -d
-
-# Wait for Ollama to pull models (~5 min first time)
-# The API will be available at http://localhost:8000
-# API docs at http://localhost:8000/docs
-
-# Start the frontend
-cd ../frontend
-npm install
-npm run dev
-# Frontend available at http://localhost:3000
+docker compose up
 ```
 
-### Local Development
+Open **http://localhost:3000**. Postgres, Redis, backend, multiplayer, and frontend all start together. Migrations run automatically on backend startup. First build takes ~5 min (the backend image installs git, Node.js 20, and the `@anthropic-ai/claude-code` npm package); subsequent runs are instant.
+
+Once the UI is up:
+
+1. Complete first-time setup (org name, admin user, source repo path).
+2. Go to **Settings → AI Configuration → Claude Code**.
+3. Choose **API key (Full Docker)**, paste an `sk-ant-…` key from [console.anthropic.com](https://console.anthropic.com/settings/keys), and **Save**.
+4. Click **Test connection** — it should report the CLI version and a successful round-trip.
+
+The key is encrypted (Fernet AES-128) in Postgres and pushed into the backend's process env on save, so every subsequent agent run inherits it. No compose-level env var required.
+
+### Hybrid mode (hot reload)
 
 ```bash
-# Backend
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-docker compose up -d redis ollama      # infrastructure only
-alembic upgrade head                    # run migrations
-uvicorn app.main:app --reload           # start dev server
-
-# Frontend (separate terminal)
-cd frontend
-npm install
-npm run dev
+git clone https://github.com/mickyarun/bodhiorchard.git
+cd bodhiorchard
+npm install        # frontend + multiplayer deps via workspaces
+npm run setup      # Python venv, .env files, infra, migrations
+npm run dev        # backend + frontend + multiplayer, one terminal
 ```
+
+- **Frontend**: http://localhost:3000 (Vite, hot reload)
+- **Backend**: http://localhost:8000/docs (FastAPI, `--reload`)
+- **Multiplayer**: ws://localhost:2567 (Colyseus)
+
+Only `postgres` and `redis` run in Docker (via `docker-compose.infra.yml`). The backend process inherits your shell environment — including whatever `claude login` has authenticated on your host — so agent runs use your Claude subscription automatically. In **Settings → AI Configuration → Claude Code**, leave the auth mode on **Hybrid / host login** (the default).
+
+All three host processes run in a single terminal with color-coded logs. Ctrl-C stops them; `npm run stop` tears down the infra containers.
+
+### Switching between modes
+
+The database is the same shape either way, so you can swap modes against the same data. Stop the current mode first (`Ctrl-C` + `npm run stop` for Hybrid, `docker compose down` for Full Docker), then start the other. The stored `claude_auth_mode` on your organization determines which path agent runs take — update it in Settings when you switch.
 
 ### Environment Variables
 
@@ -317,8 +323,9 @@ npm run dev
 |---|---|---|
 | `DATABASE_URL` | PostgreSQL connection | `postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard` |
 | `SECRET_KEY` | JWT signing key | `change-me-in-production` |
-| `ENCRYPTION_KEY` | AES key for secrets at rest | (generated) |
-| `LLM_PROVIDER` | LLM provider | `ollama` |
+| `ENCRYPTION_KEY` | AES key for secrets at rest (used to encrypt the Claude API key, Slack tokens, GitHub private keys) | (generated) |
+| `ANTHROPIC_API_KEY` | Optional process-level fallback for Claude auth. Ignored when an org-level key is configured in Settings. | (unset) |
+| `LLM_PROVIDER` | LLM provider (for non-codebase agents) | `ollama` |
 | `LLM_MODEL` | LLM model name | `llama3:8b` |
 | `EMBEDDING_PROVIDER` | Embedding provider | `ollama` |
 | `EMBEDDING_MODEL` | Embedding model | `nomic-embed-text` |
@@ -343,7 +350,7 @@ bodhiorchard/
 │   │   ├── schemas/         # Pydantic request/response DTOs
 │   │   └── services/        # Business logic (LLM, scanning, synthesis)
 │   ├── alembic/             # Database migrations
-│   ├── docker-compose.yml   # PostgreSQL, Redis, Ollama
+│   ├── entrypoint.sh        # Runs migrations then uvicorn
 │   └── Dockerfile           # Multi-stage production build
 │
 ├── frontend/
@@ -355,6 +362,11 @@ bodhiorchard/
 │   │   └── data/            # Shared data (agent definitions)
 │   └── package.json
 │
+├── multiplayer/             # Colyseus multiplayer server (TypeScript)
+├── scripts/                 # setup.sh, wait-for-postgres.sh
+├── docker-compose.yml       # Full stack: postgres + redis + backend + fe + mp
+├── docker-compose.infra.yml # Contributor infra only: postgres + redis
+├── package.json             # npm workspaces + dev scripts (root)
 ├── BODHIORCHARD-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
 ├── AGENTS.md                # Agent capabilities documentation
 ├── TODO.md                  # Roadmap and progress tracking

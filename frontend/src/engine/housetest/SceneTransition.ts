@@ -33,22 +33,27 @@ export class SceneTransition {
   async perform(onSwap: () => void | Promise<void>): Promise<void> {
     if (this.active || !this.overlay) return
     this.active = true
+    try {
+      // Fade in. Re-check overlay after each await — destroy() can null it
+      // mid-flight if a teardown races with an in-progress transition.
+      this.overlay.style.display = 'block'
+      await this.nextFrame()
+      if (!this.overlay) return
+      this.overlay.style.opacity = '1'
+      await this.wait(FADE_MS)
 
-    // Fade in
-    this.overlay.style.display = 'block'
-    await this.nextFrame()
-    this.overlay.style.opacity = '1'
-    await this.wait(FADE_MS)
+      // Swap (happens while black — await supports async callbacks like interior build)
+      await onSwap()
 
-    // Swap (happens while black — await supports async callbacks like interior build)
-    await onSwap()
-
-    // Fade out
-    this.overlay.style.opacity = '0'
-    await this.wait(FADE_MS)
-    this.overlay.style.display = 'none'
-
-    this.active = false
+      // Fade out
+      if (!this.overlay) return
+      this.overlay.style.opacity = '0'
+      await this.wait(FADE_MS)
+      if (!this.overlay) return
+      this.overlay.style.display = 'none'
+    } finally {
+      this.active = false
+    }
   }
 
   destroy(): void {

@@ -183,6 +183,11 @@
       :toasts="xpToasts"
       @dismiss="xpDismiss"
     />
+
+    <!-- Race invite toast + watch banner — both mount layout-wide so they
+         survive route changes while the user is signed in. -->
+    <RaceInviteToast v-if="authStore.user?.id" />
+    <RaceWatchBanner v-if="authStore.user?.id" />
   </v-app>
 </template>
 
@@ -193,6 +198,8 @@ import { useAuthStore } from '@/stores/auth'
 import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
 import XPToast from '@/components/common/XPToast.vue'
+import RaceInviteToast from '@/components/race/RaceInviteToast.vue'
+import RaceWatchBanner from '@/components/race/RaceWatchBanner.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useXPSocket } from '@/composables/useXPSocket'
 
@@ -241,8 +248,20 @@ function handleLogout(): void {
 }
 
 .app-main {
+  /* 100vh on iOS Safari counts the URL/tab bar area, so content
+     extends below the visible viewport. 100dvh resolves to the
+     currently-visible height. Keep 100vh as a fallback — browsers
+     that parse `dvh` (Safari 15.4+, Chrome 108+, Firefox 101+)
+     win via the @supports block below. */
   height: 100vh;
   max-height: 100vh;
+}
+
+@supports (height: 100dvh) {
+  .app-main {
+    height: 100dvh;
+    max-height: 100dvh;
+  }
 }
 
 .app-scroll {

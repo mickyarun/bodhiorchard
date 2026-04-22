@@ -88,6 +88,8 @@ export function createLevelBadge(
   entity.addComponent('render', { type: 'plane' })
   entity.render!.meshInstances[0].material = material
   entity.setLocalPosition(0, height, 0)
+  // Negative X scale: see NameLabel.ts — compensates for the billboard
+  // lookAt + rotateLocal orientation so text reads left-to-right.
   entity.setLocalScale(-BADGE_WIDTH, 1, BADGE_WIDTH * (BADGE_CANVAS_H / BADGE_CANVAS_W))
   entity.setLocalEulerAngles(90, 0, 0)
   entity.tags.add('billboard')

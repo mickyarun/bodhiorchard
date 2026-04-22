@@ -33,6 +33,16 @@ class Organization(BaseModel):
     slack_signing_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_team_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     mcp_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Claude Code authentication:
+    #   "host"    — inherit ANTHROPIC_API_KEY from the backend process env
+    #               (Hybrid mode with host-installed claude, or Full Docker with
+    #               a compose-level env var)
+    #   "api_key" — inject the decrypted claude_api_key_encrypted at subprocess
+    #               launch (Full Docker with a per-org key entered in Settings)
+    claude_auth_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="host"
+    )
+    claude_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def __repr__(self) -> str:
         return f"<Organization(id={self.id}, slug={self.slug!r})>"

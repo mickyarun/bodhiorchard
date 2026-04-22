@@ -1,13 +1,33 @@
 <template>
   <v-container class="py-6" fluid>
-    <div class="d-flex align-center mb-6">
+    <div class="d-flex align-center mb-4">
       <v-icon icon="mdi-trophy" color="secondary" size="28" class="mr-2" />
       <div class="text-h5 font-weight-bold">Leaderboard</div>
       <v-spacer />
-      <v-chip variant="tonal" size="small" color="primary">
+      <v-chip
+        v-if="activeTab === 'xp'"
+        variant="tonal"
+        size="small"
+        color="primary"
+      >
         {{ entries.length }} members
       </v-chip>
     </div>
+
+    <v-tabs v-model="activeTab" color="primary" density="comfortable" class="mb-4">
+      <v-tab value="xp">XP</v-tab>
+      <v-tab value="race-100">Race 100 m</v-tab>
+      <v-tab value="race-200">Race 200 m</v-tab>
+    </v-tabs>
+
+    <v-window v-model="activeTab">
+      <v-window-item value="race-100">
+        <RaceLeaderboardTab :distance="100" />
+      </v-window-item>
+      <v-window-item value="race-200">
+        <RaceLeaderboardTab :distance="200" />
+      </v-window-item>
+      <v-window-item value="xp">
 
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
 
@@ -80,6 +100,8 @@
         </v-list-item>
       </v-list>
     </v-card>
+      </v-window-item>
+    </v-window>
   </v-container>
 </template>
 
@@ -88,6 +110,9 @@ import { computed, defineComponent, h, onMounted, ref } from 'vue'
 import type { LeaderboardEntry } from '@/types'
 import { useXPStore } from '@/stores/xp'
 import { useAuthStore } from '@/stores/auth'
+import RaceLeaderboardTab from './RaceLeaderboardTab.vue'
+
+const activeTab = ref<'xp' | 'race-100' | 'race-200'>('xp')
 
 const xpStore = useXPStore()
 const authStore = useAuthStore()

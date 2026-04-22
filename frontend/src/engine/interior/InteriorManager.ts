@@ -351,7 +351,7 @@ export class InteriorManager {
   private async spawnRemotePlayer(sessionId: string, player: PlayerData): Promise<void> {
     if (!this.interiorRoot || this.remotePlayers.has(sessionId)) return
     const remote = new NetworkedPlayer(sessionId, player.name)
-    await remote.spawn(this.interiorRoot, this.loader, this.app, player)
+    await remote.spawn(this.interiorRoot, this.loader, player)
     this.remotePlayers.set(sessionId, remote)
   }
 
@@ -417,7 +417,7 @@ export class InteriorManager {
     // (exit, owner leaving, rapid state flip) can invalidate this call.
     const myGen = ++this.ownerNpcGen
     const candidate = new NetworkedPlayer(`owner_${ownerId}`, snapshot.name)
-    await candidate.spawn(this.interiorRoot, this.loader, this.app, {
+    await candidate.spawn(this.interiorRoot, this.loader, {
       userId: ownerId,
       name: snapshot.name,
       characterModel: snapshot.characterModel,

@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -26,6 +27,7 @@ from app.schemas.settings import (
     RepoInfo,
     RepoStatusRequest,
 )
+from app.services.repo_cloner import clone_or_update
 from app.services.repo_scanner import (
     _detect_develop_branch,
     _detect_main_branch,
@@ -166,6 +168,88 @@ async def add_repo(
             repo.github_repo_full_name = github_name
 
     await db.flush()
+
+    return RepoInfo(
+        id=str(repo.id),
+        path=repo.path,
+        name=repo.name,
+        status=repo.status.value,
+        lastScanned=None,
+        sha=repo.head_sha,
+        knowledgeCount=repo.knowledge_count,
+        featureCount=repo.feature_count,
+        mainBranch=repo.main_branch,
+        developBranch=repo.develop_branch,
+        uatBranch=repo.uat_branch,
+        hasUncommittedChanges=has_dirty,
+        repoType=detect_repo_type(str(repo_path)),
+        githubRepo=repo.github_repo_full_name,
+    )
+
+
+class CloneRepoBody(BaseModel):
+    """Body for ``POST /v1/settings/repos/clone`` — authenticated GitHub clone."""
+
+    url: str = Field(..., description="GitHub HTTPS or SSH URL.")
+    pat: str | None = Field(
+        default=None,
+        description="Optional GitHub personal-access token for HTTPS private repos.",
+    )
+
+
+@router.post("/repos/clone", response_model=RepoInfo)
+async def clone_and_add_repo(
+    body: CloneRepoBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RepoInfo:
+    """Clone a GitHub repo into the backend volume and register it on this org.
+
+    Combines ``repo_cloner.clone_or_update`` (which writes to ``/data/repos``)
+    with the same "add by local path" flow as ``POST /repos`` above — so from
+    the rest of the pipeline's perspective a cloned repo is indistinguishable
+    from a pre-existing local one.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+
+    result = await clone_or_update(body.url, org_slug=org.slug, pat=body.pat)
+    if not result.success or not result.path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.error or "Clone failed.",
+        )
+
+    repo_path = Path(result.path).resolve()
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    repo = await repo_repo.upsert(str(repo_path), repo_path.name)
+
+    detected_main = result.default_branch or await _detect_main_branch(str(repo_path))
+    detected_dev = await _detect_develop_branch(str(repo_path))
+    has_dirty = await detect_uncommitted_changes(str(repo_path))
+
+    if detected_main:
+        repo.main_branch = detected_main
+    if detected_dev:
+        repo.develop_branch = detected_dev
+
+    if not repo.github_repo_full_name:
+        from app.services.git_operations import get_github_repo_full_name
+
+        github_name = await get_github_repo_full_name(str(repo_path))
+        if github_name:
+            repo.github_repo_full_name = github_name
+
+    await db.flush()
+
+    logger.info(
+        "repo_cloned_and_registered",
+        org_id=str(org.id),
+        repo_id=str(repo.id),
+        path=str(repo_path),
+        url_kind="ssh" if body.url.startswith(("git@", "ssh://")) else "https",
+        pat_used=body.pat is not None,
+    )
 
     return RepoInfo(
         id=str(repo.id),

@@ -41,7 +41,7 @@ export class HouseRoom extends Room<{ state: HouseRoomState }> {
       if (typeof data.x !== "number" || !isFinite(data.x)) return
       if (typeof data.z !== "number" || !isFinite(data.z)) return
       if (typeof data.yaw !== "number" || !isFinite(data.yaw)) return
-      const validAnims = ["idle", "walk", "sit", "sleep"]
+      const validAnims = ["idle", "walk", "sit", "sleep", "brew", "drink"]
       if (!validAnims.includes(data.animState)) return
       player.x = data.x
       player.z = data.z

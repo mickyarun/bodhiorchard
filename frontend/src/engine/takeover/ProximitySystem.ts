@@ -8,20 +8,19 @@
  * the proximity threshold. Shows their name/presence via TakeoverUI.
  */
 import * as pc from 'playcanvas'
-import type { CharacterEntity } from '../characters/CharacterFactory'
+import type { CharacterEntity } from '../characters/CharacterTypes'
 import type { TakeoverUI } from './TakeoverUI'
 
 const PROXIMITY_THRESHOLD_SQ = 3.0 * 3.0  // 3 world units, squared
 
 export class ProximitySystem {
   private lastShownId: string | null = null
+  private lastShownName: string = ''
 
   /**
-   * Check proximity to all characters and show/hide member info.
-   * @param playerPos - Current player position
-   * @param playerId - Player's own member ID (skip self)
-   * @param characters - All character entities in the scene
-   * @param ui - TakeoverUI for showing/hiding member info
+   * Check proximity to all characters and show/hide the action panel.
+   * The panel always carries the targeted member's userId + name so the
+   * Greet / Invite-to-race buttons know who they're acting on.
    */
   update(
     playerPos: pc.Vec3,
@@ -49,11 +48,13 @@ export class ProximitySystem {
     }
 
     if (closestId && closestId !== this.lastShownId) {
-      ui.showMemberInfo(closestName, 'Nearby')
+      ui.showMemberActionPanel(closestId, closestName)
       this.lastShownId = closestId
+      this.lastShownName = closestName
     } else if (!closestId && this.lastShownId) {
-      ui.hideMemberInfo()
+      ui.hideMemberActionPanel()
       this.lastShownId = null
+      this.lastShownName = ''
     }
   }
 
@@ -63,7 +64,11 @@ export class ProximitySystem {
   /** The memberId of the nearest character, or null if none nearby. */
   get nearbyMemberId(): string | null { return this.lastShownId }
 
+  /** The display name of the nearest character, or an empty string. */
+  get nearbyMemberName(): string { return this.lastShownName }
+
   reset(): void {
     this.lastShownId = null
+    this.lastShownName = ''
   }
 }

@@ -186,17 +186,17 @@ function generateCoffeeBarSeats(
 /**
  * Pool seats — procedural beach loungers around the pool.
  *
- * Seat height matches ProceduralBeachChair.SEAT_HEIGHT (0.25).
- * Positions are raw placement coords — no GLB offset math needed
- * because the procedural chairs have center-origin geometry.
+ * Seat height = DECK_TOP_Y (0.18) + ProceduralBeachChair.SEAT_HEIGHT (0.25).
+ * The loungers are placed on top of the sandstone deck slabs built by
+ * PoolResortBuilder, so characters sit at deck + chair height, not floor + chair.
  */
 function generatePoolSeats(
   zoneX: number, zoneZ: number, count: number,
 ): BreakSeat[] {
-  // Seat surface height — must match frontend ProceduralBeachChair.SEAT_HEIGHT.
-  // The server Y coordinate IS the character's final world Y (the frontend
-  // does `setPosition(x, y, z)` directly), same as cafeteria (0.23).
-  const SEAT_Y = 0.25
+  // Must match PoolResortBuilder: DECK_TOP_Y (0.18) + SEAT_HEIGHT (0.25).
+  // The server Y IS the character's final world Y (the frontend does
+  // setPosition(x, y, z) directly — no deck correction happens after spawn).
+  const SEAT_Y = 0.43
 
   const ALL_POOL_SEATS: BreakSeat[] = [
     { zone: "pool_resort", x: zoneX - 5,   y: SEAT_Y, z: zoneZ - 1.5, yaw: 90 },

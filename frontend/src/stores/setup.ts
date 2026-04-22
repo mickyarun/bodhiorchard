@@ -31,6 +31,10 @@ export const useSetupStore = defineStore('setup', () => {
       timeoutSeconds: 300,
       maxTurns: 40,
     },
+    claude: {
+      authMode: 'host',
+      apiKey: '',
+    },
   })
 
   const totalSteps = 6
@@ -116,6 +120,13 @@ export const useSetupStore = defineStore('setup', () => {
         admin: state.value.admin,
         sourceCode: state.value.sourceCode,
         scan: state.value.scan,
+        claude: {
+          authMode: state.value.claude.authMode,
+          // Only send the key when we actually have one to store.
+          apiKey: state.value.claude.authMode === 'api_key' && state.value.claude.apiKey
+            ? state.value.claude.apiKey
+            : null,
+        },
       }
 
       const { data } = await api.post('/setup/initialize', payload)

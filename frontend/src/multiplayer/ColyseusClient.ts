@@ -8,8 +8,7 @@
  * join/leave helpers for house rooms.
  */
 import { Client, Room } from "@colyseus/sdk"
-
-const DEFAULT_SERVER = "ws://localhost:2567"
+import { resolveColyseusUrl } from "./colyseusUrl"
 
 export interface PlayerData {
   userId: string
@@ -37,9 +36,9 @@ export class ColyseusClient {
     this.client = new Client(serverUrl)
   }
 
-  static getInstance(serverUrl = DEFAULT_SERVER): ColyseusClient {
+  static getInstance(serverUrl?: string): ColyseusClient {
     if (!ColyseusClient.instance) {
-      ColyseusClient.instance = new ColyseusClient(serverUrl)
+      ColyseusClient.instance = new ColyseusClient(serverUrl ?? resolveColyseusUrl())
     }
     return ColyseusClient.instance
   }
@@ -73,6 +72,100 @@ export class ColyseusClient {
       console.warn("[ColyseusClient] Failed to join house room:", err)
       throw err
     }
+  }
+
+  /**
+   * Join the coffee bar room. One room per org — every visitor across the org
+   * joins the same `coffeebar-{orgId}` so the queue and brewing state are
+   * globally consistent.
+   *
+   * Wires the same player join/leave/move listeners as joinHouseRoom.
+   * Coffee-specific messages (enqueue, ack, leave queue) are sent via
+   * sendCoffeeEnqueue / sendCoffeeAckDispense / sendCoffeeLeaveQueue.
+   */
+  async joinCoffeeBarRoom(
+    orgId: string,
+    userData: { userId: string; name: string; characterModel?: string },
+  ): Promise<Room> {
+    if (this.currentRoom) {
+      await this.leaveRoom()
+    }
+
+    try {
+      this.currentRoom = await this.client.joinOrCreate("coffeebar", {
+        roomId: `coffeebar-${orgId}`,
+        orgId,
+        userId: userData.userId,
+        name: userData.name,
+        characterModel: userData.characterModel ?? '',
+      })
+
+      this.setupStateListeners()
+      return this.currentRoom
+    } catch (err) {
+      console.warn("[ColyseusClient] Failed to join coffee bar room:", err)
+      throw err
+    }
+  }
+
+  /** Send a coffee order enqueue request. Server validates the drink. */
+  sendCoffeeEnqueue(drink: string): void {
+    this.currentRoom?.send("coffee_enqueue", { drink })
+  }
+
+  /** Drop out of the coffee queue. Ignored server-side if already active. */
+  sendCoffeeLeaveQueue(): void {
+    this.currentRoom?.send("coffee_leave_queue", {})
+  }
+
+  /** Ack that the drink was collected; advances dispensed -> idle immediately. */
+  sendCoffeeAckDispense(): void {
+    this.currentRoom?.send("coffee_ack_dispense", {})
+  }
+
+  /**
+   * Join the cafeteria room. One room per org — every visitor across the org
+   * joins the same `cafeteria-{orgId}` so the queue and cooking state are
+   * globally consistent. Mirrors joinCoffeeBarRoom.
+   */
+  async joinCafeteriaRoom(
+    orgId: string,
+    userData: { userId: string; name: string; characterModel?: string },
+  ): Promise<Room> {
+    if (this.currentRoom) {
+      await this.leaveRoom()
+    }
+
+    try {
+      this.currentRoom = await this.client.joinOrCreate("cafeteria", {
+        roomId: `cafeteria-${orgId}`,
+        orgId,
+        userId: userData.userId,
+        name: userData.name,
+        characterModel: userData.characterModel ?? '',
+      })
+
+      this.setupStateListeners()
+      return this.currentRoom
+    } catch (err) {
+      console.warn("[ColyseusClient] Failed to join cafeteria room:", err)
+      throw err
+    }
+  }
+
+  /** Send a cafeteria meal enqueue request. Server validates the meal. */
+  sendCafeteriaEnqueue(meal: string): void {
+    this.currentRoom?.send("cafe_enqueue", { meal })
+  }
+
+  /** Drop out of the cafeteria queue. Ignored server-side if already active. */
+  sendCafeteriaLeaveQueue(): void {
+    this.currentRoom?.send("cafe_leave_queue", {})
+  }
+
+  /** Ack that the meal was collected; advances dispensed -> idle immediately. */
+  sendCafeteriaAckDispense(): void {
+    this.currentRoom?.send("cafe_ack_dispense", {})
   }
 
   /**

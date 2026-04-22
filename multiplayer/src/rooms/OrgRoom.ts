@@ -46,6 +46,7 @@ import {
   type OrgSnapshotResponse,
 } from "../bridge/BackendClient"
 import { registerOrgRoom, unregisterOrgRoom } from "../bridge/BridgeEndpoint"
+import { installRaceCreateHandler } from "./OrgRaceHandler"
 
 // Server simulation tick rate — 20Hz matches Colyseus default state sync cadence
 const SIM_TICK_MS = 50
@@ -87,7 +88,29 @@ interface MoveMessage {
 
 interface TakeoverMessage {
   userId: string
+  /**
+   * Optional destination context when ending takeover. When set (e.g.
+   * "cafeteria", "coffeebar"), the server skips walkHome and parks the
+   * character at `locationContext = location`. Other clients hide the
+   * avatar while in an interior instead of seeing it frozen at the door.
+   * Omit (or set to empty) for normal takeover-end → walk-home behaviour.
+   */
+  location?: string
 }
+
+/**
+ * locationContext values that represent "inside a shared interior".
+ * Clients hide the avatar while a member has one of these contexts.
+ *
+ * NOTE: this set is duplicated in the frontend at
+ * `frontend/src/engine/characters/CharacterSystem.ts` (INTERIOR_LOCATIONS).
+ * When adding a new interior (house, arcade, …) update BOTH files or the
+ * hide behaviour will diverge: a new entry added only here will make the
+ * server think it's an interior but every client's CharacterSystem will
+ * render the avatar anyway; added only on the frontend and the server
+ * will still fire walkHome, teleporting the NPC out from under the user.
+ */
+const INTERIOR_LOCATIONS = new Set(["cafeteria", "coffeebar"])
 
 interface VehicleMountMessage {
   vehicleId: string
@@ -189,6 +212,12 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     this.onMessage("upgrade_house", (client, data: { tier: number }) =>
       this.handleUpgradeHouse(client, data),
     )
+
+    // Race-v2 invite-to-race flow — isolated in a helper so this file
+    // stays under its size budget. Handles validation, matchMaker room
+    // creation, ActiveRaceSummary population, invite fan-out, and the
+    // client-side `race_created` / `race_create_failed` response.
+    installRaceCreateHandler(this)
 
     // Drive the server-side simulation at 20Hz — walking, phrase cycles, idle timeouts.
     // setSimulationInterval passes dt in milliseconds; sim tick expects seconds.
@@ -375,7 +404,18 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (!userId) return
     const member = this.state.members.get(userId)
     if (!member) return
-    if (member.takeoverSessionId !== client.sessionId) return
+
+    // Two cases we need to clean up on abrupt disconnect:
+    //   (a) Active takeover — member.takeoverSessionId === client.sessionId.
+    //       Caller is WASD-ing and just lost connection.
+    //   (b) Inside an interior — handleTakeoverEnd already cleared
+    //       takeoverSessionId and stamped locationContext="cafeteria"/"coffeebar".
+    //       Without this path, the avatar stays hidden on every other
+    //       client forever (their CharacterSystem keeps reading the
+    //       stale interior locationContext and skips the entity).
+    const wasTakeover = member.takeoverSessionId === client.sessionId
+    const wasInInterior = INTERIOR_LOCATIONS.has(member.locationContext)
+    if (!wasTakeover && !wasInInterior) return
 
     member.y = 0
     member.vehicleId = ""
@@ -390,7 +430,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     )
     this.devSim.walkHome(member, home.x, home.y, home.z, home.yaw, home.sitting, home.locationContext)
     console.log(
-      `[OrgRoom] ${name} disconnect-while-takeover → walking home to ${home.locationContext}`,
+      `[OrgRoom] ${name} disconnect (${wasInInterior ? "in-interior" : "takeover"}) → walking home to ${home.locationContext}`,
     )
   }
 
@@ -806,6 +846,19 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       member.animState = "idle"
     }
     member.takeoverSessionId = ""
+
+    // Interior hand-off: user walked through a cafeteria/coffee-bar door.
+    // Don't run walkHome — they'll reacquire takeover via takeover_start on
+    // exit. Set locationContext so every viewer's CharacterSystem hides the
+    // avatar while the user is inside.
+    if (data.location && INTERIOR_LOCATIONS.has(data.location)) {
+      member.animState = "idle"
+      member.locationContext = data.location
+      console.log(
+        `[OrgRoom] ${member.name} takeover END → entering ${data.location} (avatar hidden)`,
+      )
+      return
+    }
 
     // Walk the character back to its presence-based seat. Without this, the
     // character would freeze wherever the player left them until the next

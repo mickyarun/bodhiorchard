@@ -207,10 +207,12 @@ export class StandupPavilion {
   private createStonePatch(parent: pc.Entity, radius: number): void {
     const patch = new pc.Entity('StonePatch')
     patch.addComponent('render', { type: 'cylinder' })
-    // PlayCanvas cylinder primitive is unit height centered at origin;
-    // scale Y down so it's a thin pad sitting just above ground.
+    // PlayCanvas cylinder primitive is unit height centered at origin, so
+    // with Y-scale 0.02 the bottom face sits at (localY - 0.01). Using
+    // localY=0.03 keeps the bottom at y=0.02 — above the ground plane and
+    // path decals — so it never z-fights regardless of camera angle.
     patch.setLocalScale(radius * 2, 0.02, radius * 2)
-    patch.setLocalPosition(0, 0.01, 0)
+    patch.setLocalPosition(0, 0.03, 0)
 
     const mat = new pc.StandardMaterial()
     this.materials.push(mat)

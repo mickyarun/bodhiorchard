@@ -7,6 +7,13 @@ export interface SetupRepoConfig {
   developBranch: string | null
 }
 
+export type ClaudeAuthMode = 'host' | 'api_key'
+
+export interface SetupClaudeConfig {
+  authMode: ClaudeAuthMode
+  apiKey: string
+}
+
 export interface SetupState {
   currentStep: number
   organization: {
@@ -25,6 +32,7 @@ export interface SetupState {
     timeoutSeconds: number
     maxTurns: number
   }
+  claude: SetupClaudeConfig
 }
 
 export interface StepDefinition {

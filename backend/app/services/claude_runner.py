@@ -286,6 +286,11 @@ async def run_claude_code(
         "--output-format",
         output_format,
         "--dangerously-skip-permissions",
+        # Force a neutral output style so skill output isn't polluted by the
+        # developer's interactive outputStyle (e.g. "learning" prepends
+        # ★ Insight blocks that break HTML/JSON extraction downstream).
+        "--settings",
+        json.dumps({"outputStyle": "default"}),
     ]
 
     # stream-json requires --verbose (Claude CLI constraint)
@@ -555,7 +560,9 @@ async def _get_claude_version() -> str | None:
     return None
 
 
-async def test_claude_connection() -> dict:
+async def test_claude_connection(
+    env_extra: dict[str, str] | None = None,
+) -> dict:
     """Run a simple test to verify Claude Code CLI works.
 
     Performs two checks:
@@ -563,6 +570,12 @@ async def test_claude_connection() -> dict:
     2. A trivial prompt — confirms the API key is valid and the CLI can
        reach the Anthropic API.  Uses a 90-second timeout to accommodate
        first-invocation cold starts.
+
+    Args:
+        env_extra: Optional env overlay passed through to the subprocess
+            (e.g. a provisional ``ANTHROPIC_API_KEY`` the user is
+            validating in the setup wizard). Preferred over mutating
+            ``os.environ`` because concurrent agent runs share that.
 
     Returns:
         A dict with test results: cli_available, cli_version, test_passed,
@@ -588,7 +601,9 @@ async def test_claude_connection() -> dict:
 
     test_result = await run_claude_code(
         prompt="Reply with exactly: BODHIORCHARD_CONNECTION_OK",
-        config=ClaudeRunnerConfig(max_turns=1, timeout_seconds=90),
+        config=ClaudeRunnerConfig(
+            max_turns=1, timeout_seconds=90, env_extra=env_extra,
+        ),
     )
 
     result["test_passed"] = test_result.success
