@@ -150,6 +150,24 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function cloneRepo(url: string, pat: string | null = null): Promise<boolean> {
+    // Authenticated counterpart of the setup wizard's clone step. The
+    // backend clones into /data/repos/<org-slug>/<repo> and registers the
+    // tracked_repositories row in one shot, so the UI gets the same
+    // "repo now appears in the list" outcome as a local-path add.
+    try {
+      await api.post('/v1/settings/repos/clone', {
+        url,
+        pat: pat || undefined,
+      }, { timeout: 120_000 })
+      await fetchRepos()
+      return true
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to clone repository.')
+      return false
+    }
+  }
+
   async function removeRepo(path: string): Promise<boolean> {
     try {
       await api.delete('/v1/settings/repos', { data: { path } })
@@ -224,6 +242,7 @@ export const useSettingsStore = defineStore('settings', () => {
     reposLoading,
     fetchRepos,
     addRepo,
+    cloneRepo,
     removeRepo,
     setRepoStatus,
     fetchRepoBranches,
