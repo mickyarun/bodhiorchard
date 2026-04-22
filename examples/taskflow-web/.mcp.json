@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "bodhiorchard": {
+      "command": "python3",
+      "args": [
+        ".bodhiorchard/mcp_bridge.py"
+      ],
+      "env": {
+        "BODHIORCHARD_BACKEND_URL": "https://backendchat.ngrok.app"
+      }
+    }
+  }
+}
