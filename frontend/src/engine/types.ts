@@ -193,6 +193,20 @@ export interface EngineAgentInfo {
 
 // ─── Engine Callbacks ───────────────────────────────
 
+/**
+ * Top-level modes the 3D scene can be in. Kept in types.ts (not
+ * engine/index.ts) so UI layers can subscribe to scene-state changes
+ * without importing the engine class itself.
+ */
+export type SceneState =
+  | 'garden'
+  | 'entering'
+  | 'interior'
+  | 'exiting'
+  | 'takeover'
+  | 'coffeebar'
+  | 'cafeteria'
+
 export interface EngineCallbacks {
   onSceneReady?: () => void
   onTreeClick?: (info: EngineTreeInfo) => void
@@ -209,6 +223,13 @@ export interface EngineCallbacks {
    * the given member pre-selected.
    */
   onInviteToRace?: (userId: string, name: string) => void
+  /**
+   * Fires whenever the top-level scene state transitions (garden ↔
+   * takeover ↔ interior etc.). UI overlays such as the touch-control
+   * layer subscribe to this to appear only in modes that accept
+   * avatar input.
+   */
+  onSceneStateChange?: (state: SceneState) => void
 }
 
 // ─── Event Bus Types ────────────────────────────────

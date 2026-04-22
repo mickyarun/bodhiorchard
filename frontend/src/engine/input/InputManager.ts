@@ -57,10 +57,11 @@ export class InputManager {
   private static readonly DOUBLE_CLICK_MS = 400
   private static readonly DOUBLE_CLICK_DIST = 10
 
-  // Touch joystick state
-  private touchMoveId: number | null = null
-  private touchMoveStart = { x: 0, y: 0 }
-  private touchMoveCurrent = { x: 0, y: 0 }
+  // Touch camera-orbit state. Movement is handled by the on-screen
+  // <TouchControls> overlay (see components/touch/) which synthesises
+  // WASD KeyboardEvents — InputManager never sees touch-based movement.
+  // Only open-canvas drag (the area not covered by overlay widgets)
+  // contributes to camera orbit here.
   private touchOrbitId: number | null = null
   private touchOrbitPrev = { x: 0, y: 0 }
   private touchOrbitDx = 0
@@ -123,14 +124,8 @@ export class InputManager {
     if (this.keyboard.isPressed(pc.KEY_A) || this.keyboard.isPressed(pc.KEY_LEFT)) x -= 1
     if (this.keyboard.isPressed(pc.KEY_D) || this.keyboard.isPressed(pc.KEY_RIGHT)) x += 1
 
-    // Touch joystick
-    if (this.touchMoveId !== null) {
-      const dx = this.touchMoveCurrent.x - this.touchMoveStart.x
-      const dy = this.touchMoveCurrent.y - this.touchMoveStart.y
-      const maxRadius = 60
-      x += Math.max(-1, Math.min(1, dx / maxRadius))
-      z += Math.max(-1, Math.min(1, dy / maxRadius))
-    }
+    // Touch movement flows through synthetic WASD keydowns dispatched by
+    // <TouchJoystick>, so the four isPressed checks above already cover it.
 
     const len = Math.sqrt(x * x + z * z)
     if (len > 1) {
@@ -293,25 +288,27 @@ export class InputManager {
   // ─── Touch Handlers ─────────────────────────────────
 
   private onTouchStart(event: pc.TouchEvent): void {
-    const canvasWidth = event.element?.clientWidth ?? window.innerWidth
+    // Ignore touches that originate on the <TouchControls> overlay — the
+    // overlay's widgets set pointer-events: auto and handle their own
+    // gestures, so a tap on the joystick or a button must not also
+    // register as a camera-orbit start. PlayCanvas wraps the native
+    // TouchEvent; the original DOM event is reachable via `event.event`.
+    const native = (event as unknown as { event?: Event }).event
+    const target = native?.target
+    if (target instanceof Element && target.closest('.touch-controls')) return
 
     for (const touch of event.changedTouches) {
-      if (touch.x < canvasWidth / 2 && this.touchMoveId === null) {
-        this.touchMoveId = touch.id
-        this.touchMoveStart = { x: touch.x, y: touch.y }
-        this.touchMoveCurrent = { x: touch.x, y: touch.y }
-      } else if (touch.x >= canvasWidth / 2 && this.touchOrbitId === null) {
+      if (this.touchOrbitId === null) {
         this.touchOrbitId = touch.id
         this.touchOrbitPrev = { x: touch.x, y: touch.y }
+        break
       }
     }
   }
 
   private onTouchMove(event: pc.TouchEvent): void {
     for (const touch of event.changedTouches) {
-      if (touch.id === this.touchMoveId) {
-        this.touchMoveCurrent = { x: touch.x, y: touch.y }
-      } else if (touch.id === this.touchOrbitId) {
+      if (touch.id === this.touchOrbitId) {
         this.touchOrbitDx += touch.x - this.touchOrbitPrev.x
         this.touchOrbitDy += touch.y - this.touchOrbitPrev.y
         this.touchOrbitPrev = { x: touch.x, y: touch.y }
@@ -321,9 +318,7 @@ export class InputManager {
 
   private onTouchEnd(event: pc.TouchEvent): void {
     for (const touch of event.changedTouches) {
-      if (touch.id === this.touchMoveId) {
-        this.touchMoveId = null
-      } else if (touch.id === this.touchOrbitId) {
+      if (touch.id === this.touchOrbitId) {
         this.touchOrbitId = null
       }
     }
