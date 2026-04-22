@@ -65,6 +65,16 @@ async def _bud_response(
             if not completed or completed.created_at < failed.created_at:
                 active_task = failed
 
+    # `updated_at` has an ``onupdate=func.now()`` server default that
+    # SQLAlchemy doesn't include in INSERT…RETURNING, so on a freshly
+    # inserted BUD the attribute is "not loaded". Pydantic's sync
+    # validator would then trigger a lazy SELECT — which can't spawn a
+    # greenlet from sync context and raises MissingGreenlet. An explicit
+    # refresh inside the async context eager-loads every column before
+    # validation, and also picks up anything later phases (auto-assign,
+    # agent-task creation) mutated on the same row.
+    await db.refresh(bud)
+
     bud_data = BUDRead.model_validate(bud)
     if active_task:
         bud_data.active_agent_task = BUDAgentTaskRead.model_validate(active_task)
