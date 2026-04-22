@@ -1361,6 +1361,19 @@ async function triggerScan(fullRescan: boolean = false): Promise<void> {
   scanProgress.value = 0
   scanStatusLabel.value = 'Saving path...'
   scanError.value = ''
+  // Reset the full result — otherwise a Full Rescan after a warn/error
+  // run leaves the old "1 repo had issues" alert visible alongside the
+  // new progress bar.
+  scanResult.value = {
+    scanMode: 'full',
+    featuresIndexed: 0,
+    featuresSkipped: 0,
+    profilesFound: 0,
+    staleCleaned: 0,
+    unmatchedAuthors: [],
+    synthesisWarning: '',
+    repoWarnings: [],
+  }
 
   try {
     await api.patch('/v1/settings/connections', {
