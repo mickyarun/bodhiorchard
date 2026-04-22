@@ -286,6 +286,11 @@ async def run_claude_code(
         "--output-format",
         output_format,
         "--dangerously-skip-permissions",
+        # Force a neutral output style so skill output isn't polluted by the
+        # developer's interactive outputStyle (e.g. "learning" prepends
+        # ★ Insight blocks that break HTML/JSON extraction downstream).
+        "--settings",
+        json.dumps({"outputStyle": "default"}),
     ]
 
     # stream-json requires --verbose (Claude CLI constraint)
