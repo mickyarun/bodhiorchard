@@ -816,7 +816,7 @@
       </div>
 
       <template v-else>
-        <v-select
+        <v-combobox
           v-model="branchDialogMain"
           :items="branchDialogBranches"
           label="Production (main) Branch *"
@@ -824,9 +824,11 @@
           density="compact"
           prepend-inner-icon="mdi-source-branch"
           class="mb-3"
+          hint="Pick from the list or type a custom name (e.g. trunk, prod)."
+          persistent-hint
           :rules="[v => !!v || 'Required']"
         />
-        <v-select
+        <v-combobox
           v-model="branchDialogDev"
           :items="branchDialogBranches"
           label="Develop Branch *"
@@ -834,6 +836,8 @@
           density="compact"
           prepend-inner-icon="mdi-source-branch"
           :class="uatStageEnabled ? 'mb-3' : ''"
+          hint="Pick from the list or type a name. If there's no dedicated develop branch, reuse the main branch name."
+          persistent-hint
           :rules="[v => !!v || 'Required']"
         />
         <v-combobox
