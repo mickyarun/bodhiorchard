@@ -44,12 +44,14 @@ COPY --from=builder /install /usr/local
 
 COPY . .
 
-# Create persistent storage roots for cloned repos and the SSH deploy key.
-# These get mounted as named volumes in docker-compose; creating them here
-# seeds the initial ownership on first volume creation.
-RUN mkdir -p /data/repos /data/ssh && \
+# Create persistent storage roots for cloned repos, the SSH deploy key,
+# and the npm/npx cache. These get mounted as named volumes in
+# docker-compose; creating them here seeds the initial ownership on
+# first volume creation (Docker picks up ownership from the image's
+# existing directory only when the path exists at build time).
+RUN mkdir -p /data/repos /data/ssh /home/appuser/.npm && \
     chmod +x /app/entrypoint.sh && \
-    chown -R appuser:appuser /app /data
+    chown -R appuser:appuser /app /data /home/appuser/.npm
 USER appuser
 
 EXPOSE 8000
