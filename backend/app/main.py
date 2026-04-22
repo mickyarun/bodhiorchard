@@ -40,6 +40,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     check_mcp_contracts()
 
+    # 0b. Register external event-bus transports. Every publish to a topic
+    # like "agent_activity:<org_id>" fans out to the in-process queue
+    # subscribers (dashboard WebSocket) AND to each registered transport.
+    # Colyseus forwarding lives here so the multiplayer server sees every
+    # agent event regardless of which handler raised it.
+    from app.services.colyseus_forwarder import forward_agent_activity_to_colyseus
+    from app.services.event_bus import register_transport
+
+    register_transport(forward_agent_activity_to_colyseus)
+
     from app.services.job_handlers import setup_job_handlers
     from app.services.job_queue import cleanup_completed_jobs, start_workers, stop_workers
 

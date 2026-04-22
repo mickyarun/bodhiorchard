@@ -1,13 +1,29 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""In-process topic-based event bus for real-time push.
+"""In-process topic-based event bus with pluggable external transports.
 
 Services publish events to string topics (e.g. "job:{id}", "scan:{id}").
-WebSocket connections subscribe to topics and receive events via asyncio.Queue.
+
+Two consumer kinds are supported side-by-side:
+
+1. **Queue subscribers** — `subscribe(topic)` returns an `asyncio.Queue` that
+   the caller reads from. Used by the WebSocket endpoint (`/ws`) to push
+   events to dashboard clients.
+
+2. **External transports** — async callbacks registered once at app startup
+   via `register_transport(fn)`. Each `publish()` spawns a detached task per
+   transport. Transports self-filter by topic prefix. This is how
+   `agent_activity:*` events reach the multiplayer server (see
+   `colyseus_forwarder.py`).
+
+Queue subscribers and transports are independent: a topic with zero queue
+subscribers still fans out to every transport, and vice versa.
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import structlog
 
@@ -17,6 +33,17 @@ logger = structlog.get_logger(__name__)
 
 # topic → set of subscriber queues
 _subscribers: dict[str, set[asyncio.Queue[dict]]] = {}
+
+#: Signature for a fan-out transport. Transports MUST be non-blocking and
+#: never raise — raised exceptions are logged and swallowed so one bad
+#: transport can't take down the event bus.
+Transport = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+# Registered transports, in registration order.
+_transports: list[Transport] = []
+# GC anchor for in-flight transport tasks — required because
+# `asyncio.create_task` only holds a weak reference (see backend/CLAUDE.md).
+_transport_tasks: set[asyncio.Task[None]] = set()
 
 
 def subscribe(topic: str) -> asyncio.Queue[dict]:
@@ -41,31 +68,79 @@ def unsubscribe(topic: str, queue: asyncio.Queue[dict]) -> None:
     logger.debug("event_bus_unsubscribe", topic=topic, remaining=len(subs) if subs else 0)
 
 
-def publish(topic: str, data: dict) -> None:
-    """Fan out *data* to every subscriber queue for *topic*.
+def register_transport(transport: Transport) -> None:
+    """Register *transport* to be invoked on every `publish()`.
 
-    Wraps data in an envelope: ``{"topic": topic, "data": data}``.
-    Drops the message for any queue that is full (slow consumer
-    catches the next update).
+    Idempotent by identity — registering the same callable twice is a no-op,
+    which keeps uvicorn --reload from double-firing transports.
+    """
+    if transport in _transports:
+        return
+    _transports.append(transport)
+    logger.info(
+        "event_bus_transport_registered",
+        name=getattr(transport, "__name__", repr(transport)),
+        total=len(_transports),
+    )
+
+
+def clear_transports() -> None:
+    """Remove every registered transport. Intended for tests / shutdown."""
+    _transports.clear()
+
+
+def publish(topic: str, data: dict) -> None:
+    """Fan out *data* to queue subscribers AND external transports.
+
+    Queue subscribers receive an envelope `{"topic": topic, "data": data}`.
+    External transports receive `(topic, data)` directly and run as detached
+    tasks — failures are logged but never propagate.
+
+    Drops the message for any queue that is full (slow consumer catches the
+    next update).
     """
     subs = _subscribers.get(topic)
-    if not subs:
+    subscriber_count = len(subs) if subs else 0
+
+    if not subs and not _transports:
         logger.info("event_bus_no_subscribers", topic=topic)
-        return
-    envelope = {"topic": topic, "data": data}
-    event_type = data.get("event_type", "")
-    if "agent_activity" in topic:
-        logger.info(
-            "event_bus_publish_agent",
+
+    # In-process queue fanout (unchanged semantics).
+    if subs:
+        envelope = {"topic": topic, "data": data}
+        if "agent_activity" in topic:
+            logger.info(
+                "event_bus_publish_agent",
+                topic=topic,
+                event_type=data.get("event_type", ""),
+                subscriber_count=subscriber_count,
+            )
+        for queue in subs:
+            try:
+                queue.put_nowait(envelope)
+            except asyncio.QueueFull:
+                logger.warning("event_bus_queue_full", topic=topic)
+
+    # External transport fanout (Colyseus, future Slack/SSE/metrics/etc.).
+    for transport in _transports:
+        task = asyncio.create_task(_invoke_transport(transport, topic, data))
+        _transport_tasks.add(task)
+        task.add_done_callback(_transport_tasks.discard)
+
+
+async def _invoke_transport(transport: Transport, topic: str, data: dict) -> None:
+    """Run *transport* and contain any exception it raises."""
+    try:
+        await transport(topic, data)
+    except asyncio.CancelledError:
+        raise
+    except Exception as err:  # noqa: BLE001
+        logger.warning(
+            "event_bus_transport_failed",
+            transport=getattr(transport, "__name__", repr(transport)),
             topic=topic,
-            event_type=event_type,
-            subscriber_count=len(subs),
+            error=str(err),
         )
-    for queue in subs:
-        try:
-            queue.put_nowait(envelope)
-        except asyncio.QueueFull:
-            logger.warning("event_bus_queue_full", topic=topic)
 
 
 def cleanup_topic(topic: str) -> None:
