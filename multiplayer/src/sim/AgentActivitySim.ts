@@ -19,6 +19,13 @@
  */
 import { MapSchema } from "@colyseus/schema"
 import { AgentState } from "../schema/AgentState"
+import { getAgentSlotAtTree, getAgentFallbackSlot } from "./WorldLayout"
+import { countAgentsAtRepo } from "../../../shared/world/agentStacking"
+import {
+  PHRASES,
+  DEFAULT_PHRASES,
+  getSkillDisplayName,
+} from "../../../shared/agents/AgentPhrases"
 
 // ─── Constants (mirror frontend AgentCharacter) ─────────
 
@@ -29,75 +36,10 @@ const WORK_DURATION_MAX = 12
 const PHRASE_INTERVAL = 4           // seconds between label phrase updates
 const SPAWN_ANIM_SEC = 2.5          // spawn → working transition delay
 const COMPLETE_PAUSE_SEC = 2.0      // completing → done delay
-const TREE_OFFSET_X = 1.5           // opposite side from devs (-1.5)
-const TREE_OFFSET_Z = 1.5
-const STACK_OFFSET = 1.2            // multiple agents at same tree stack along x
 const ACTION_CYCLE_SEC = 4          // cycle action (grab/spin/miniguns) every N sec
 const ACTION_CYCLE: Array<"grab" | "spin" | "miniguns"> = [
   "grab", "spin", "miniguns", "grab", "miniguns", "spin",
 ]
-
-// ─── Working phrases (mirror frontend AgentWorkingPhrases) ─────
-
-const PHRASES: Record<string, string[]> = {
-  "product-manager": [
-    "Analyzing requirements...", "Drafting acceptance criteria...",
-    "Reviewing edge cases...", "Writing problem statement...",
-    "Checking team capacity...", "Scoping dependencies...",
-    "Researching context...", "Building PRD...",
-  ],
-  "tech-planner": [
-    "Scanning codebase...", "Mapping repo structure...",
-    "Planning architecture...", "Identifying impacted files...",
-    "Estimating complexity...", "Drafting tech spec...",
-    "Analyzing dependencies...", "Reviewing patterns...",
-  ],
-  "code-reviewer": [
-    "Reading diff...", "Checking code patterns...",
-    "Reviewing test coverage...", "Analyzing edge cases...",
-    "Validating types...", "Scanning for bugs...",
-    "Checking style guide...", "Reviewing imports...",
-  ],
-  "qa-engineer": [
-    "Building test plan...", "Analyzing test scenarios...",
-    "Checking boundary cases...", "Mapping test coverage...",
-    "Writing assertions...", "Reviewing risk areas...",
-    "Planning regression tests...", "Validating flows...",
-  ],
-  "designer": [
-    "Scanning design system...", "Building wireframe...",
-    "Applying layout rules...", "Setting up components...",
-    "Reviewing spacing...", "Generating HTML...",
-    "Checking responsiveness...", "Picking tokens...",
-  ],
-  "triage": [
-    "Reading request...", "Classifying priority...",
-    "Checking existing BUDs...", "Routing to team...",
-    "Analyzing impact...", "Drafting response...",
-  ],
-}
-
-const DEFAULT_PHRASES = [
-  "Processing...", "Analyzing...", "Working...",
-  "Thinking...", "Evaluating...", "Computing...",
-]
-
-const SKILL_NAMES: Record<string, string> = {
-  "product-manager": "Product Manager",
-  "tech-planner": "Tech Planner",
-  "code-reviewer": "Code Reviewer",
-  "qa-engineer": "QA Engineer",
-  "designer": "Designer",
-  "triage": "Triage Agent",
-  "backend-developer": "Backend Dev",
-  "frontend-developer": "Frontend Dev",
-}
-
-function getSkillDisplayName(slug: string): string {
-  return SKILL_NAMES[slug] ?? slug
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, c => c.toUpperCase())
-}
 
 // ─── Types ─────────────────────────────────
 
@@ -300,7 +242,9 @@ export class AgentActivitySim {
     // Freeze the stack index at spawn time so sibling completions don't make
     // this agent's target jump sideways when its own next target is recomputed.
     const firstRepo = repoNames[0] ?? ""
-    const stackIndex = firstRepo ? this.computeStackIndex(firstRepo) : 0
+    const stackIndex = firstRepo
+      ? countAgentsAtRepo(this.entries.values(), firstRepo)
+      : 0
 
     const entry: AgentEntry = {
       key,
@@ -321,8 +265,8 @@ export class AgentActivitySim {
       pendingComplete: false,
     }
 
-    // Compute spawn position — first tree with offset, or (5,5) fallback
-    const pos = this.getRepoPosition(entry) ?? { x: 5, z: 5 }
+    // Compute spawn position — first tree with offset, or orchard-anchored fallback
+    const pos = this.getRepoPosition(entry) ?? getAgentFallbackSlot()
     entry.targetX = pos.x
     entry.targetZ = pos.z
 
@@ -367,8 +311,10 @@ export class AgentActivitySim {
         return
       }
     }
-    // Single-repo or repo-free: wander within a small patrol radius around current position
-    const basePos = this.getRepoPosition(entry) ?? { x: agent.x, z: agent.z }
+    // Single-repo or repo-free: wander within a small patrol radius.
+    // Anchor to the tree slot when resolvable; otherwise anchor to the
+    // fallback slot. Anchoring to `agent.x/z` here caused unbounded drift.
+    const basePos = this.getRepoPosition(entry) ?? getAgentFallbackSlot()
     const angle = Math.random() * Math.PI * 2
     const radius = 1.5 + Math.random() * 2.0
     entry.targetX = basePos.x + Math.cos(angle) * radius
@@ -422,23 +368,7 @@ export class AgentActivitySim {
     const repo = entry.repoNames[entry.currentRepoIndex]
     const tree = this.repoPositions.get(repo)
     if (!tree) return null
-    return {
-      x: tree.x + TREE_OFFSET_X + entry.stackIndex * STACK_OFFSET,
-      z: tree.z + TREE_OFFSET_Z,
-    }
-  }
-
-  /**
-   * Count agents currently occupying a given repo tree — used only at spawn
-   * time to pick an initial stack offset. The result is then frozen in
-   * `AgentEntry.stackIndex` so it doesn't drift as siblings complete.
-   */
-  private computeStackIndex(repoName: string): number {
-    let index = 0
-    for (const entry of this.entries.values()) {
-      if (entry.repoNames[entry.currentRepoIndex] === repoName) index++
-    }
-    return index
+    return getAgentSlotAtTree(tree, entry.stackIndex)
   }
 
   private randomWorkDuration(): number {

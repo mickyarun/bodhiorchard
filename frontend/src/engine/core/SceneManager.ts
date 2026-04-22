@@ -110,6 +110,7 @@ export class SceneManager {
   private _takeoverPhysicsBuilder: TakeoverPhysicsBuilder | null = null
   private buildingHuts: HutInfo[] = []
   private pondObstacle: PondObstacle | null = null
+  private bodhiTrunk: { x: number; z: number; radius: number } | null = null
   private poolWater: WaterSurface | null = null
 
   // Shared data for Phase 3+
@@ -198,6 +199,7 @@ export class SceneManager {
     if (checkCancelled()) return
     this.buildingEntities.push(hubResult.entity)
     this.layout.addExclusionZones([hubResult.exclusionZone])
+    this.bodhiTrunk = hubResult.trunkCollider
 
     // 3. Repo visualization (default: trees with decoration)
     this.repoVis = this.createRepoVisualization()
@@ -543,6 +545,9 @@ export class SceneManager {
       if (this.pondObstacle) {
         builder.registerPond(this.pondObstacle)
       }
+      if (this.bodhiTrunk) {
+        builder.registerHubAnchor(this.bodhiTrunk)
+      }
       builder.registerPerimeter(this.layout.getWorldRadius() + 8)
       if (this._housingFenceBounds && this._housingGatePosition) {
         builder.registerRectFence(this._housingFenceBounds, this._housingGatePosition)
@@ -738,6 +743,7 @@ export class SceneManager {
     this._takeoverPhysicsBuilder = null
     this.buildingHuts = []
     this.pondObstacle = null
+    this.bodhiTrunk = null
 
     this.layout.reset()
   }
