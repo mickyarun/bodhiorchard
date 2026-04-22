@@ -25,7 +25,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_activity import AgentActivityLog
-from app.models.agent_log import AgentLog
 from app.models.bud import BUDDocument
 from app.models.bud_agent_task import BUDAgentTask
 from app.models.bug import Bug, BugStatus
@@ -390,24 +389,6 @@ async def collect_agents(
                 bud_title=row[3],
             )
         )
-
-    # Legacy AgentLog fallback (backward compat)
-    if not tree.agent_activity:
-        legacy = await db.execute(
-            select(AgentLog)
-            .where(AgentLog.org_id == org_id)
-            .order_by(AgentLog.created_at.desc())
-            .limit(10)
-        )
-        for log in legacy.scalars().all():
-            tree.agent_activity.append(
-                AgentActivityItem(
-                    agent_name=log.agent_name or "unknown",
-                    action=log.output_summary or log.input_summary or "",
-                    timestamp=log.created_at.isoformat() if log.created_at else "",
-                    status=log.status or "completed",
-                )
-            )
 
 
 # ─── Members ─────────────────────────────────────────────────────────────

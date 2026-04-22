@@ -8,6 +8,7 @@ Dispatches to per-type prompt builders and result handlers via an extensible
 registry. Adding a new agent type = add a builder + handler entry.
 """
 
+import asyncio
 import uuid as uuid_mod
 from typing import Any, Protocol
 
@@ -140,10 +141,22 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
 
     update_job(job_id, status_message="Loading task...", progress_pct=5)
 
+    # Pre-set so the ``except`` branches below can always log / write
+    # activity rows even if we fail before resolving the real skill/task
+    # type (e.g. task row not yet visible, DB down).
+    _skill_slug: str = "bud_agent"
+    _task_type: str = "unknown"
+
     async with AsyncSessionLocal() as db:
         try:
             task = await db.get(BUDAgentTask, task_id)
             if not task:
+                logger.error(
+                    "bud_agent_task_not_found",
+                    task_id=str(task_id),
+                    job_id=job_id,
+                    org_id=str(org_id),
+                )
                 update_job(job_id, state=JobState.FAILED, error="Agent task not found")
                 return
 
@@ -176,6 +189,15 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             _bud_number = bud.bud_number if bud else None
             _bud_title = bud.title if bud else None
 
+            logger.info(
+                "bud_agent_phase",
+                phase="task_loaded",
+                task_id=str(task_id),
+                task_type=_task_type,
+                bud_id=str(bud_id),
+                skill_slug=_skill_slug,
+            )
+
             skill = Skill(
                 name=skill_row.name,
                 slug=skill_row.skill_slug,
@@ -202,6 +224,14 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
 
             update_job(job_id, status_message="Building prompt...", progress_pct=10)
             prompt, working_dir = await builder(bud, skill, org_id, db)
+
+            logger.info(
+                "bud_agent_phase",
+                phase="prompt_built",
+                task_id=str(task_id),
+                prompt_length=len(prompt),
+                working_dir=working_dir,
+            )
 
             # Run Claude
             update_job(job_id, status_message="Running agent...", progress_pct=20)
@@ -258,11 +288,30 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             task.status = AgentTaskStatus.RUNNING
             await db.commit()
 
+            logger.info(
+                "bud_agent_phase",
+                phase="claude_invoked",
+                task_id=str(task_id),
+                task_type=_task_type,
+                bud_id=str(bud_id),
+                skill_slug=_skill_slug,
+            )
+
             result = await run_claude_code(
                 prompt=prompt,
                 working_dir=working_dir,
                 config=config,
                 progress_callback=make_progress_callback(job_id),
+            )
+
+            logger.info(
+                "bud_agent_phase",
+                phase="claude_completed",
+                task_id=str(task_id),
+                success=result.success,
+                output_length=len(result.output or ""),
+                cost_usd=result.cost_usd,
+                turns_used=result.turns_used,
             )
 
             if not result.success:
@@ -289,6 +338,21 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             # Dispatch to result handler
             update_job(job_id, status_message="Saving results...", progress_pct=90)
 
+            # Refresh the ``bud`` ORM instance before dispatching. The agent
+            # may have written to the BUD via MCP tools (``write_bud``) and
+            # those writes committed in *separate* HTTP-request sessions.
+            # ``AsyncSessionLocal`` uses ``expire_on_commit=False``, so our
+            # cached instance is stale — and because SQLAlchemy's identity
+            # map keys on primary key, any ``get_by_id`` a result handler
+            # does on this same session returns the same stale instance
+            # rather than re-reading from the DB. One refresh here inoculates
+            # every current and future result handler + downstream service
+            # (estimator prompt, todo sync, notifications).
+            # Note: ``refresh`` reloads scalar columns only. If a future agent
+            # writes to a relationship via MCP and a downstream step reads
+            # it, pass ``attribute_names=["designs", ...]`` for that field.
+            await db.refresh(bud)
+
             handler = RESULT_HANDLERS.get(task.task_type)
             result_summary = None
             if handler:
@@ -314,6 +378,49 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             task.result_summary = result_summary
             task.error_message = None
             await db.commit()
+
+            logger.info(
+                "bud_agent_phase",
+                phase="result_saved",
+                task_id=str(task_id),
+                task_type=_task_type,
+            )
+
+        except asyncio.CancelledError:
+            # The API/worker signalled cancel via ``cancel_job``. Claude's
+            # subprocess (if still running) was killed when the await was
+            # interrupted — see the CancelledError branch in
+            # ``claude_runner.run_claude_code``. We own the task row's
+            # terminal state: flip it to FAILED with the user-supplied
+            # reason and leave WS publication + JobState.CANCELLED to the
+            # worker's own CancelledError handler.
+            await db.rollback()
+            # ``cancel_job`` stashes the cancel reason on the job's
+            # ``status_message`` before it cancels the asyncio.Task, so
+            # we can recover it via the public accessor without reaching
+            # into job_queue internals.
+            from app.services.job_queue import get_job  # noqa: PLC0415
+            job = get_job(job_id)
+            reason = (job.status_message if job else None) or "Cancelled by user"
+            async with AsyncSessionLocal() as err_db:
+                err_task = await err_db.get(BUDAgentTask, task_id)
+                if err_task and err_task.status in (
+                    AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING,
+                ):
+                    err_task.status = AgentTaskStatus.FAILED
+                    err_task.error_message = reason[:500]
+                await err_db.commit()
+            await log_agent_activity(
+                None,
+                org_id=org_id,
+                event_type="skill_failed",
+                skill_slug=_skill_slug,
+                message=reason,
+                bud_id=bud_id,
+                task_id=task_id,
+            )
+            logger.info("bud_agent_job_cancelled", task_id=str(task_id), reason=reason)
+            raise   # Let the worker's CancelledError branch emit the WS terminal event
 
         except Exception as exc:
             await db.rollback()

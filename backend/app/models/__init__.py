@@ -8,7 +8,6 @@ auto-generation of migration scripts.
 """
 
 from app.models.agent_activity import AgentActivityLog
-from app.models.agent_log import AgentLog
 from app.models.agent_skill import AgentSkill
 from app.models.agent_skill_bud_stage import AgentSkillBudStage
 from app.models.base import Base, BaseModel
@@ -54,7 +53,6 @@ from app.models.user_mcp_token import UserMCPToken
 
 __all__ = [
     "AgentActivityLog",
-    "AgentLog",
     "AgentSkill",
     "AgentSkillBudStage",
     "AgentTaskStatus",
