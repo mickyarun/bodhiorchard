@@ -10,6 +10,9 @@ services:
       POSTGRES_DB: bodhiorchard
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Host-side port for DBeaver / psql etc.
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bodhiorchard -d bodhiorchard"]
       interval: 3s
@@ -47,6 +50,11 @@ services:
       # Shared HMAC with the multiplayer service — both sides must match or
       # internal bridge calls (verify-token, org-snapshot, race-*) get 403.
       COLYSEUS_BRIDGE_SECRET: ${COLYSEUS_BRIDGE_SECRET:-dev-colyseus-bridge-secret}
+      # Inside Docker the multiplayer server is reachable at its service
+      # name. Without this, settings.colyseus.url defaults to
+      # http://localhost:2567 which resolves to the backend container
+      # itself, silently dropping every agent_activity fan-out POST.
+      COLYSEUS_URL: http://multiplayer:2567
     ports:
       - "8000:8000"
     volumes:
