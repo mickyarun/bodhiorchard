@@ -309,6 +309,17 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function cancelAgentTask(budId: string, taskId: string): Promise<void> {
+    // Task-level cancel handles both the live-worker case (signal, worker
+    // cleans up) and the orphan case (no worker left, API flips the row).
+    try {
+      await api.post(`/v1/buds/${budId}/agent-tasks/${taskId}/cancel`)
+      await fetchBUD(budId)
+    } catch {
+      error.value = 'Failed to cancel agent task'
+    }
+  }
+
   async function fetchEstimates(budId: string): Promise<BUDEstimates | null> {
     try {
       const { data } = await api.get(`/v1/buds/${budId}/estimates`)
@@ -372,6 +383,7 @@ export const useBUDStore = defineStore('bud', () => {
     overrideCodeReview,
     requestReassignment,
     retryAgentTask,
+    cancelAgentTask,
     fetchEstimates,
     recalculateEstimates,
     overrideEstimate,

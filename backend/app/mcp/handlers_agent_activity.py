@@ -10,7 +10,6 @@ Processes activity events from two sources:
 All events are stored in agent_activity_logs, linked to agent_skills.
 """
 
-import asyncio
 import contextlib
 import uuid
 
@@ -28,7 +27,6 @@ from app.schemas.agent_activity import (
     AgentActivityHookRequest,
     AgentActivityHookResponse,
 )
-from app.services.colyseus_bridge import publish_to_colyseus
 from app.services.event_bus import publish
 
 logger = structlog.get_logger(__name__)
@@ -69,7 +67,10 @@ async def handle_agent_activity(
 
     # 3. Resolve BUD — from request, then from branch name
     bud_id, bud_number = await _resolve_bud(
-        db, org.id, body.bud_number, body.branch,
+        db,
+        org.id,
+        body.bud_number,
+        body.branch,
     )
 
     # 4. Resolve skill_id from skill_slug
@@ -83,11 +84,15 @@ async def handle_agent_activity(
 
     # 6. Dedup: skip if this commit SHA was already recorded
     if body.event_type == "commit" and body.commit_sha:
-        dup_stmt = select(AgentActivityLog.id).where(
-            AgentActivityLog.org_id == org.id,
-            AgentActivityLog.event_type == "commit",
-            AgentActivityLog.commit_sha == body.commit_sha,
-        ).limit(1)
+        dup_stmt = (
+            select(AgentActivityLog.id)
+            .where(
+                AgentActivityLog.org_id == org.id,
+                AgentActivityLog.event_type == "commit",
+                AgentActivityLog.commit_sha == body.commit_sha,
+            )
+            .limit(1)
+        )
         dup = await db.execute(dup_stmt)
         if dup.scalar_one_or_none() is not None:
             logger.debug("agent_activity_commit_duplicate", sha=body.commit_sha[:8])
@@ -173,13 +178,11 @@ async def handle_agent_activity(
         "bud_title": None,  # not available at hook time without extra query
         "impacted_repo_names": impacted_repo_names,
     }
+    # event_bus.publish fans out to (a) in-process queue subscribers and
+    # (b) external transports registered at app startup. One of those
+    # transports is `colyseus_forwarder` — so this single call reaches
+    # the dashboard WebSocket and the multiplayer server.
     publish(f"agent_activity:{org.id}", agent_activity_payload)
-
-    # Forward to Colyseus for server-authoritative robot simulation. Detached
-    # so a slow bridge cannot stall the hook request path.
-    asyncio.create_task(
-        publish_to_colyseus(org.id, "agent_activity", agent_activity_payload)
-    )
 
     logger.info(
         "agent_activity_recorded",
@@ -207,10 +210,14 @@ async def _resolve_skill_id(
     """Resolve a skill_slug to agent_skills.id for this org."""
     if not skill_slug:
         return None
-    stmt = select(AgentSkill.id).where(
-        AgentSkill.org_id == org_id,
-        AgentSkill.skill_slug == skill_slug,
-    ).limit(1)
+    stmt = (
+        select(AgentSkill.id)
+        .where(
+            AgentSkill.org_id == org_id,
+            AgentSkill.skill_slug == skill_slug,
+        )
+        .limit(1)
+    )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 

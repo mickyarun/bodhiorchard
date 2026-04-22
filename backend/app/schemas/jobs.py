@@ -16,6 +16,7 @@ class JobState(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class JobStatusRead(BaseModel):

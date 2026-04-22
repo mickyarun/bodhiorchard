@@ -206,6 +206,40 @@ export class TakeoverPhysicsBuilder {
   }
 
   /**
+   * Seal the raised bodhi mound with a wall ring + a top cap. Together
+   * they make the cylinder volume fully impassable — the ring blocks
+   * lateral walk-through, the cap blocks drop-in from above.
+   *
+   * The ring's segment count auto-scales with circumference so a larger
+   * mound gets more segments and reads as a smooth circle rather than
+   * a visible polygon. The cap is a thin axis-aligned box covering the
+   * full circular footprint (the square overhang is harmless — any
+   * point outside the circle is outside the visual mound too).
+   */
+  registerHubAnchor(
+    mound: { x: number; z: number; radius: number; topY: number },
+  ): void {
+    const segments = Math.max(12, Math.round((2 * Math.PI * mound.radius) / 0.65))
+    this.addPhysicsRing(mound.x, mound.z, mound.radius, {
+      halfH: HOUSE_WALL_HEIGHT / 2,
+      thickness: 0.15,
+      segments,
+      overlap: 1.25,
+    })
+    // Top cap: thin slab sitting flush with the mound's top surface so
+    // a falling or jumping body cannot land inside the ring.
+    const capHalfH = 0.1
+    this.physics.addStaticBox(
+      mound.x,
+      mound.topY + capHalfH,
+      mound.z,
+      mound.radius,
+      capHalfH,
+      mound.radius,
+    )
+  }
+
+  /**
    * Register the world perimeter as a ring of box segments.
    * Prevents the player from walking beyond the world edge.
    */

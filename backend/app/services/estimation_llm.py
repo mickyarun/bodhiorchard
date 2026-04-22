@@ -14,6 +14,7 @@ import structlog
 
 from app.models.bud import BUDDocument
 from app.services.estimation_engine import PERTEstimate
+from app.services.org_settings import get_ai_agent_profile
 
 logger = structlog.get_logger(__name__)
 
@@ -25,8 +26,23 @@ def build_estimation_prompt(
     skill_ctx: dict | None,
     historical_ctx: str,
     remaining_phases: list[str],
+    org_config: dict | None = None,
 ) -> str:
-    """Build the LLM prompt for PERT three-point estimation."""
+    """Build the LLM prompt for PERT three-point estimation.
+
+    The prompt is structured to fight three calibration failure modes we
+    have observed in production: (1) numeric exemplars in the prompt act
+    as anchors and pull every estimate toward them, so we use a structural
+    schema example with placeholders instead of concrete day counts;
+    (2) the AI-agent productivity note must come BEFORE the verbose PRD
+    or it gets washed out by 20K characters of acceptance-criteria; and
+    (3) without a calibration table the model has no scale reference, so
+    every feature regresses to "average" — small features get over-estimated
+    and large features get under-estimated. The agent name + productivity
+    hint are sourced from ``org.config["llm"]["preset"]`` via
+    ``get_ai_agent_profile``, so no specific tool name is hardcoded here.
+    """
+    agent = get_ai_agent_profile(org_config)
     repos = bud.impacted_repos or []
     repo_names = ", ".join(r.get("repo_name", "?") for r in repos) or "unknown"
 
@@ -48,10 +64,24 @@ def build_estimation_prompt(
     phase_context = _build_phase_context(bud)
 
     return (
-        "You are estimating software delivery phases in BUSINESS DAYS.\n"
+        "You are estimating remaining work for a software delivery feature, "
+        "in BUSINESS DAYS.\n"
+        f"This team uses {agent['name']} for development. {agent['hint']}\n\n"
         "For each phase, provide Optimistic (O), Most Likely (M), and "
         "Pessimistic (P) estimates.\n"
         "Also rate overall feature complexity from 1 (trivial) to 5 (very complex).\n\n"
+        f"Heuristic complexity from BUD signals: {complexity}/5 — your final "
+        "estimates should be consistent with this scale.\n"
+        "Calibration anchor (Most-Likely days for the development phase only):\n"
+        "  complexity 1 (CSS / copy / config tweak): 0.25\n"
+        "  complexity 2 (small UI or single endpoint): 1\n"
+        "  complexity 3 (multi-component feature): 3\n"
+        "  complexity 4 (cross-system change): 8\n"
+        "  complexity 5 (architectural / multi-repo): 15+\n"
+        "Other phases scale proportionally and are usually smaller than development.\n"
+        "For phases that are essentially N/A for this feature (e.g. no tech_arch "
+        "for a CSS-only tweak), return values around O=0.1 M=0.1 P=0.25 — do "
+        "not pad to 0.5+ out of habit.\n\n"
         f"Impacted repos: {len(repos)} ({repo_names})\n"
         f"Backlog ahead: {backlog_ctx['queue_depth']} features\n"
         f"Assignee workload: {backlog_ctx['assignee_workload']} other active\n"
@@ -60,11 +90,10 @@ def build_estimation_prompt(
         f"{historical_ctx}\n\n"
         f"Estimate these remaining phases: {phases_str}\n"
         "The first phase listed may already be in progress — estimate REMAINING time.\n"
-        "If a phase is already complete, use O=0, M=0, P=0.\n"
-        "This team uses AI-assisted development (Claude Code) — factor that in.\n\n"
-        "Reply with ONLY a JSON object. Example:\n"
-        '{"complexity": 2, "phases": {"development": {"O": 1, "M": 2, "P": 4}, '
-        '"testing": {"O": 0.5, "M": 1, "P": 2}}}\n'
+        "If a phase is already complete, use O=0, M=0, P=0.\n\n"
+        "Reply with ONLY a JSON object of the form:\n"
+        '{"complexity": <1-5>, "phases": {"<phase_name>": '
+        '{"O": <num>, "M": <num>, "P": <num>}, ...}}\n'
     )
 
 
@@ -151,6 +180,7 @@ async def llm_pert_estimate(
     skill_ctx: dict | None,
     historical_ctx: str,
     remaining_phases: list[str],
+    org_config: dict | None = None,
 ) -> LLMEstimateResult | None:
     """Call LLM for PERT estimates + complexity. Returns None on failure."""
     prompt = build_estimation_prompt(
@@ -160,6 +190,7 @@ async def llm_pert_estimate(
         skill_ctx,
         historical_ctx,
         remaining_phases,
+        org_config=org_config,
     )
 
     for attempt in range(2):

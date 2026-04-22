@@ -16,7 +16,7 @@ import { AGENT_ROBOT } from '../assets/AssetManifest'
 import { AgentLabel } from './AgentLabel'
 import { SpaceshipTransport } from './SpaceshipTransport'
 import { getNextPhrase } from './AgentWorkingPhrases'
-import { getSkillDisplayName } from './AgentSkillNames'
+import { getSkillDisplayName } from '@shared/agents/AgentPhrases'
 import { setTreeData } from '../world/TreeNodeData'
 
 const ROBOT_SCALE = 0.15

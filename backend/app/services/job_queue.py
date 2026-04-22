@@ -47,6 +47,12 @@ class _JobEntry(NamedTuple):
 # ── Internal state ─────────────────────────────────────────────────
 _job_store: dict[str, _JobEntry] = {}  # job_id → entry
 
+# Live ``asyncio.Task`` for each in-flight handler. Populated by the
+# worker when it starts running a job, removed when the handler
+# returns. ``cancel_job`` uses this to actually interrupt the worker
+# (via ``asyncio.Task.cancel``) rather than just flipping state bits.
+_running_tasks: dict[str, asyncio.Task[None]] = {}
+
 # Handler = async function(job_id: str, payload: dict) -> None
 JobHandler = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -184,16 +190,17 @@ def update_job(
 
 
 def cleanup_completed_jobs() -> int:
-    """Remove completed/failed jobs older than _COMPLETED_TTL.
+    """Remove completed/failed/cancelled jobs older than _COMPLETED_TTL.
 
     Returns:
         Number of jobs removed.
     """
     now = time.monotonic()
+    terminal_states = (JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED)
     stale = [
         jid
         for jid, entry in _job_store.items()
-        if entry.status.state in (JobState.COMPLETED, JobState.FAILED)
+        if entry.status.state in terminal_states
         and entry.created_mono + _COMPLETED_TTL < now
     ]
     from app.services.event_bus import cleanup_topic
@@ -202,6 +209,41 @@ def cleanup_completed_jobs() -> int:
         del _job_store[jid]
         cleanup_topic(f"job:{jid}")
     return len(stale)
+
+
+def cancel_job(job_id: str, *, reason: str = "Cancelled by user") -> bool:
+    """Signal an in-flight job to stop.
+
+    Only the worker owns terminal state transitions on the job and the
+    paired ``bud_agent_tasks`` row. This function's job is to poke the
+    running ``asyncio.Task`` so the handler's ``CancelledError`` branch
+    fires — the handler then cleans up (kills the Claude subprocess,
+    marks the DB row FAILED with the supplied reason) and the worker
+    emits the terminal WS event.
+
+    If the job isn't tracked any more, or already terminal, no-op.
+    Returns True when a live task was actually cancelled.
+    """
+    entry = _job_store.get(job_id)
+    if entry is None:
+        return False
+    if entry.status.state in (JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED):
+        return False
+
+    # Stash the cancel reason so the worker's CancelledError branch can
+    # use it as the error message on the terminal update.
+    entry.status.status_message = reason
+
+    task = _running_tasks.get(job_id)
+    if task is None or task.done():
+        # Either never started running, or finished right before we
+        # reached here. Flip the state directly — no worker will touch
+        # the row after this point.
+        update_job(job_id, state=JobState.CANCELLED, error=reason)
+        return True
+
+    task.cancel()
+    return True
 
 
 def is_job_active(job_type: str, match_payload: dict[str, str]) -> bool:
@@ -233,7 +275,33 @@ async def _worker(
         job_id, payload = await queue.get()
         try:
             update_job(job_id, state=JobState.RUNNING, status_message="Starting...")
-            await handler(job_id, payload)
+            # Wrap the handler in an explicit Task so cancel_job can
+            # interrupt it cleanly. Without this wrapping, cancelling
+            # the worker's outer coroutine would kill the worker for
+            # all subsequent jobs too.
+            handler_task = asyncio.create_task(
+                handler(job_id, payload), name=f"job-handler-{job_id}",
+            )
+            _running_tasks[job_id] = handler_task
+            try:
+                await handler_task
+            finally:
+                _running_tasks.pop(job_id, None)
+        except asyncio.CancelledError:
+            # User-initiated cancel via cancel_job(job_id). The handler
+            # is responsible for its own DB/subprocess cleanup on
+            # CancelledError; we just emit the terminal WS event.
+            entry = _job_store.get(job_id)
+            reason = (
+                entry.status.status_message if entry else None
+            ) or "Cancelled by user"
+            update_job(
+                job_id,
+                state=JobState.CANCELLED,
+                error=reason,
+                status_message="Cancelled",
+            )
+            logger.info("job_worker_cancelled", job_id=job_id, job_type=job_type)
         except Exception as exc:
             update_job(
                 job_id,

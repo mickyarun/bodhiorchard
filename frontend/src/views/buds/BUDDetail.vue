@@ -218,6 +218,17 @@
                 rounded
                 class="agent-banner__progress"
               />
+              <v-btn
+                v-if="bud.active_agent_task?.job_id"
+                size="x-small"
+                variant="tonal"
+                color="warning"
+                prepend-icon="mdi-close-circle-outline"
+                :loading="cancellingAgent"
+                @click="cancelRunningAgent"
+              >
+                Cancel
+              </v-btn>
             </div>
           </div>
 
@@ -1175,6 +1186,18 @@ async function saveTitle(): Promise<void> {
 
 const statusChanging = ref(false)
 const statusChangeTarget = ref('')
+const cancellingAgent = ref(false)
+
+async function cancelRunningAgent(): Promise<void> {
+  const taskId = bud.value?.active_agent_task?.id
+  if (!taskId || !bud.value) return
+  cancellingAgent.value = true
+  try {
+    await budStore.cancelAgentTask(bud.value.id, taskId)
+  } finally {
+    cancellingAgent.value = false
+  }
+}
 
 const PHASE_ROLE_LABELS: Record<string, string> = {
   bud: 'product manager',

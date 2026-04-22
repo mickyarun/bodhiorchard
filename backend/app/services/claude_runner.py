@@ -105,6 +105,10 @@ async def _run_with_streaming(
     cost: float | None = None
     turns: int | None = None
     error_subtype: str | None = None
+    # Pre-bind so the ``CancelledError`` / ``TimeoutError`` branches can
+    # reference ``proc`` even if cancellation fires before the subprocess
+    # is actually spawned.
+    proc: asyncio.subprocess.Process | None = None
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -153,17 +157,29 @@ async def _run_with_streaming(
 
         await asyncio.wait_for(_read_and_wait(), timeout=timeout)
     except TimeoutError:
-        try:
-            proc.kill()
-            await proc.wait()
-            logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
-        except ProcessLookupError:
-            pass
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+                logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
+            except ProcessLookupError:
+                pass
         return ClaudeRunResult(
             success=False,
             output="",
             error=f"Timed out after {timeout}s",
         )
+    except asyncio.CancelledError:
+        # Caller cancelled the job — kill the CLI so it stops making
+        # MCP tool calls (and spending tokens) before we re-raise.
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+                logger.info("claude_subprocess_killed_on_cancel", pid=proc.pid)
+            except ProcessLookupError:
+                pass
+        raise
     except FileNotFoundError:
         return ClaudeRunResult(
             success=False,
@@ -475,6 +491,15 @@ async def run_claude_code(
             output="",
             error=f"Timed out after {config.timeout_seconds}s",
         )
+    except asyncio.CancelledError:
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+                logger.info("claude_subprocess_killed_on_cancel", pid=proc.pid)
+            except ProcessLookupError:
+                pass
+        raise
     except FileNotFoundError:
         return ClaudeRunResult(
             success=False,

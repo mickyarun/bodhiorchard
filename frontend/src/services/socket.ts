@@ -14,14 +14,28 @@
  */
 
 const TOKEN_KEY = 'bodhiorchard_token'
-const MAX_RETRIES = 5
+/**
+ * Max consecutive failed reconnects before backing off to the watchdog
+ * cadence. Raised from 5 → 15 so a routine backend-restart window
+ * (2s+4s+8s+15s*11 ≈ 3 min) is handled without user interaction.
+ */
+const MAX_RETRIES = 15
 const BASE_DELAY_MS = 2000
+/** Cap the exponential backoff delay so we don't wait 30s between tries. */
+const MAX_DELAY_MS = 15000
+/**
+ * Watchdog cadence — after retries are exhausted we still probe every
+ * WATCHDOG_INTERVAL_MS so the socket recovers from long restarts
+ * without relying on the user flipping tabs.
+ */
+const WATCHDOG_INTERVAL_MS = 30000
 
 // ── Module state ─────────────────────────────────────────────────
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let watchdogTimer: ReturnType<typeof setInterval> | null = null
 let retryCount = 0
-let _dead = false // true after all retries exhausted (until network/visibility resets it)
+let _dead = false // true after all retries exhausted (until watchdog/visibility resets it)
 
 /** topic → set of callbacks */
 const listeners: Map<string, Set<(data: unknown) => void>> = new Map()
@@ -44,12 +58,35 @@ function clearReconnectTimer(): void {
 
 function scheduleReconnect(): void {
   if (retryCount >= MAX_RETRIES) {
+    // Mark dead but keep the watchdog running — if the backend eventually
+    // comes back, the watchdog will reset state and try again.
     _dead = true
+    ensureWatchdog()
     return
   }
-  const delay = BASE_DELAY_MS * Math.pow(2, retryCount)
+  const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retryCount), MAX_DELAY_MS)
   retryCount++
   reconnectTimer = setTimeout(() => connect(), delay)
+}
+
+/**
+ * Periodically retry while dead. Survives the scenario where the user
+ * stays on the tab during a backend restart longer than MAX_RETRIES —
+ * no visibility/online event fires, so without this the socket never
+ * recovers. Cheap: one fetch-free probe every 30s.
+ */
+function ensureWatchdog(): void {
+  if (watchdogTimer !== null) return
+  watchdogTimer = setInterval(() => {
+    if (listeners.size === 0) return // nothing cares — skip
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      return // already alive — skip
+    }
+    // Fresh attempt: reset state and retry from the top of the backoff ramp.
+    retryCount = 0
+    _dead = false
+    connect()
+  }, WATCHDOG_INTERVAL_MS)
 }
 
 /** Re-send subscribe messages for all active topics after reconnect. */
@@ -99,9 +136,14 @@ export function connect(): void {
 
   ws.onclose = (ev: CloseEvent) => {
     ws = null
-    // 4001 = auth failure — don't retry
+    // 4001 = auth failure (expired / invalid JWT). Retrying with the
+    // same token is pointless; kick the axios refresh interceptor by
+    // pinging an authenticated endpoint. On success, axios dispatches
+    // `bodhiorchard:token-refreshed` and the window listener below
+    // reconnects us with the fresh token.
     if (ev.code === 4001) {
       _dead = true
+      triggerTokenRefresh()
       return
     }
     scheduleReconnect()
@@ -114,6 +156,10 @@ export function connect(): void {
 
 export function disconnect(): void {
   clearReconnectTimer()
+  if (watchdogTimer !== null) {
+    clearInterval(watchdogTimer)
+    watchdogTimer = null
+  }
   _dead = true
   if (ws) {
     ws.onclose = null // prevent reconnect
@@ -178,11 +224,38 @@ function attemptReconnect(): void {
   connect()
 }
 
+/**
+ * Fire a single authenticated REST call to let the axios refresh
+ * interceptor observe 401 and rotate the JWT. The subsequent
+ * `bodhiorchard:token-refreshed` event (dispatched by api.ts) drives
+ * the window listener below to reconnect. Safe to call even when the
+ * token is still valid — the response is ignored.
+ */
+function triggerTokenRefresh(): void {
+  // Dynamic import avoids a circular `socket ↔ api` import at module load.
+  import('@/services/api')
+    .then(({ default: api }) => api.get('/v1/auth/me').catch(() => { /* swallow */ }))
+    .catch(() => { /* axios not available — user has to re-login manually */ })
+}
+
 if (typeof window !== 'undefined') {
   window.addEventListener('online', attemptReconnect)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       attemptReconnect()
     }
+  })
+  // When the axios interceptor rotates the JWT, drop the stale socket
+  // and reconnect using the fresh token on the next connect().
+  window.addEventListener('bodhiorchard:token-refreshed', () => {
+    if (ws) {
+      ws.onclose = null // prevent the pending-close from looping us
+      ws.close()
+      ws = null
+    }
+    clearReconnectTimer()
+    retryCount = 0
+    _dead = false
+    if (listeners.size > 0) connect()
   })
 }

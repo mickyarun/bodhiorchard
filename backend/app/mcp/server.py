@@ -84,7 +84,6 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         input_schema={
             "type": "object",
             "properties": {
-                "project_id": {"type": "string", "description": "Project ID to fetch BUDs for"},
                 "limit": {"type": "integer", "description": "Max BUDs to return", "default": 5},
             },
         },
@@ -99,14 +98,20 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
-                "content": {"type": "string"},
+                "requirements_md": {
+                    "type": "string",
+                    "description": (
+                        "Full Markdown body of the BUD — problem statement, "
+                        "proposed solution, acceptance criteria, edge cases, "
+                        "dependencies. Matches the DB column name."
+                    ),
+                },
                 "bud_number": {
                     "type": "integer",
                     "description": "Existing BUD number to update (omit to create new)",
                 },
-                "backlog_item_id": {"type": "string"},
             },
-            "required": ["title", "content"],
+            "required": ["title", "requirements_md"],
         },
     ),
     MCPToolDefinition(
@@ -293,9 +298,12 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         input_schema={
             "type": "object",
             "properties": {
-                "team_id": {
+                "repo_id": {
                     "type": "string",
-                    "description": "Team ID (optional, defaults to all)",
+                    "description": (
+                        "Optional repo UUID to scope team context to. "
+                        "Omit for org-wide view."
+                    ),
                 },
             },
         },
