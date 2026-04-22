@@ -175,7 +175,11 @@ export function getHouseBedPosition(
 
 // ─── Tree positions (repo trees in orchard) ─────
 // Re-export from shared so client + server agree byte-for-byte.
-export { getTreePositions } from "../../../shared/world/treePositions"
+export {
+  getTreePositions,
+  getAgentSlotAtTree,
+  getAgentFallbackSlot,
+} from "../../../shared/world/treePositions"
 
 // Break zone seats are now generated dynamically by BreakSeatGenerator.ts
 // based on team size. See generateBreakSeats(teamSize) for the layout

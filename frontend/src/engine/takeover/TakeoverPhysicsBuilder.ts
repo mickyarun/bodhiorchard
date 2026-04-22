@@ -206,6 +206,23 @@ export class TakeoverPhysicsBuilder {
   }
 
   /**
+   * Register a ring collider around the bodhi tree trunk at the orchard
+   * hub. Same pond-style ring — narrow radius, few segments. Prevents
+   * the player from walking through the hero tree.
+   */
+  registerHubAnchor(
+    trunk: { x: number; z: number; radius: number },
+    segments = 8,
+  ): void {
+    this.addPhysicsRing(trunk.x, trunk.z, trunk.radius, {
+      halfH: HOUSE_WALL_HEIGHT / 2,
+      thickness: 0.12,
+      segments,
+      overlap: 1.2,
+    })
+  }
+
+  /**
    * Register the world perimeter as a ring of box segments.
    * Prevents the player from walking beyond the world edge.
    */
