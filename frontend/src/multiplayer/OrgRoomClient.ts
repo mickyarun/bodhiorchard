@@ -18,8 +18,7 @@
  *   client.onMemberRemove = (id) => characterSystem.removeCharacter(id)
  */
 import { Client, getStateCallbacks, Room } from "@colyseus/sdk"
-
-const DEFAULT_SERVER = "ws://localhost:2567"
+import { resolveColyseusUrl } from "./colyseusUrl"
 
 /** Read-only snapshot of a member's state (mirrors server MemberState schema). */
 export interface MemberStateSnapshot {
@@ -159,9 +158,9 @@ export class OrgRoomClient {
     this.client = new Client(serverUrl)
   }
 
-  static getInstance(serverUrl = DEFAULT_SERVER): OrgRoomClient {
+  static getInstance(serverUrl?: string): OrgRoomClient {
     if (!OrgRoomClient.instance) {
-      OrgRoomClient.instance = new OrgRoomClient(serverUrl)
+      OrgRoomClient.instance = new OrgRoomClient(serverUrl ?? resolveColyseusUrl())
     }
     return OrgRoomClient.instance
   }

@@ -22,8 +22,7 @@
  */
 import { Client, getStateCallbacks, Room } from "@colyseus/sdk"
 import type { RacePhase, Placing } from "@shared/race/types"
-
-const DEFAULT_SERVER = "ws://localhost:2567"
+import { resolveColyseusUrl } from "./colyseusUrl"
 
 export interface RacerSnapshot {
   id: string
@@ -136,8 +135,8 @@ export class RaceRoomClient {
   private authName = ""
   private authCharacterModel = ""
 
-  constructor(serverUrl: string = DEFAULT_SERVER) {
-    this.client = new Client(serverUrl)
+  constructor(serverUrl?: string) {
+    this.client = new Client(serverUrl ?? resolveColyseusUrl())
   }
 
   get isHost(): boolean {

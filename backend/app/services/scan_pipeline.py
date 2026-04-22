@@ -39,7 +39,7 @@ from app.services.scan_phases import (
     phase_e_skills,
     phase_g_persist,
 )
-from app.services.scan_progress import update_scan_progress
+from app.services.scan_progress import append_repo_warning, update_scan_progress
 
 logger = structlog.get_logger(__name__)
 
@@ -493,6 +493,14 @@ async def run_scan_pipeline(
                             progress_pct=base_pct + 15,
                         )
                         await ensure_gitnexus_mcp()
+                    elif gitnexus_result.error:
+                        await append_repo_warning(
+                            scan_id,
+                            repo=repo_name,
+                            phase="indexing_code",
+                            summary=gitnexus_result.error,
+                            hint=gitnexus_result.error_hint,
+                        )
 
                     await db.flush()
                     timer.mark(f"B_gitnexus/{repo_name}")

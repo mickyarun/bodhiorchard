@@ -48,6 +48,35 @@ class SetupScan(BaseModel):
     max_turns: int = Field(default=40, alias="maxTurns", ge=0, le=100)
 
 
+class SetupClaude(BaseModel):
+    """Claude Code auth choice collected in the setup wizard.
+
+    ``host`` = trust the backend process env (Hybrid mode, or Full Docker
+    with a compose-level ``ANTHROPIC_API_KEY``). ``api_key`` = Full Docker
+    with a user-supplied key that will be stored encrypted on the org.
+    """
+
+    model_config = {"populate_by_name": True}
+
+    auth_mode: str = Field(default="host", alias="authMode")
+    api_key: str | None = Field(default=None, alias="apiKey")
+
+
+class ClaudeCheckRequest(BaseModel):
+    """Body for ``POST /api/setup/check-claude`` — optional provisional creds.
+
+    Used by the setup wizard to validate a pasted API key *before* creating
+    the org. When ``api_key`` is present the endpoint swaps it into the
+    backend process env for the duration of the subprocess call, then
+    restores whatever was there before.
+    """
+
+    model_config = {"populate_by_name": True}
+
+    auth_mode: str = Field(default="host", alias="authMode")
+    api_key: str | None = Field(default=None, alias="apiKey")
+
+
 class SetupRequest(BaseModel):
     """Setup payload: org, admin, repos with branches, and scan settings."""
 
@@ -57,6 +86,7 @@ class SetupRequest(BaseModel):
     admin: SetupAdmin
     source_code: SetupSourceCode = Field(alias="sourceCode")
     scan: SetupScan = Field(default_factory=SetupScan)
+    claude: SetupClaude = Field(default_factory=SetupClaude)
 
 
 class SetupResponse(BaseModel):
@@ -80,6 +110,7 @@ class DirectoryEntry(BaseModel):
     name: str
     path: str
     is_git_repo: bool = False
+    has_sub_repos: bool = False
 
 
 class BrowseDirectoriesResponse(BaseModel):

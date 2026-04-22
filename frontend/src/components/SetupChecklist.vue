@@ -69,6 +69,30 @@
         {{ displayStatusLabel }}
       </div>
     </div>
+
+    <!-- Per-repo scan warnings (non-fatal, but surfaced so users know) -->
+    <div v-if="wsWarnings.length" class="px-4 pb-3">
+      <v-alert
+        type="warning"
+        variant="tonal"
+        density="compact"
+        icon="mdi-alert-outline"
+      >
+        <div class="text-body-2 font-weight-medium mb-1">
+          {{ wsWarnings.length }} repo{{ wsWarnings.length > 1 ? 's' : '' }} had issues
+        </div>
+        <div
+          v-for="(w, i) in wsWarnings"
+          :key="`${w.repo}-${w.phase}-${i}`"
+          class="text-caption mb-1"
+        >
+          <strong>{{ w.repo }}</strong>
+          <span class="text-medium-emphasis"> · {{ w.phase }}</span>
+          <div>{{ w.summary }}</div>
+          <div v-if="w.hint" class="text-primary">{{ w.hint }}</div>
+        </div>
+      </v-alert>
+    </div>
   </v-card>
 </template>
 
@@ -76,7 +100,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '@/services/api'
 import { useScanSocket } from '@/composables/useScanSocket'
-import type { ScanStatusData } from '@/composables/useScanSocket'
+import type { ScanStatusData, RepoScanWarning } from '@/composables/useScanSocket'
 import type { SetupChecklistStatus } from '@/types/setup'
 
 const checklist = ref<SetupChecklistStatus | null>(null)
@@ -88,6 +112,7 @@ const { startTracking, stopTracking } = useScanSocket()
 const wsScanActive = ref(false)
 const wsProgress = ref(0)
 const wsStatusLabel = ref('')
+const wsWarnings = ref<RepoScanWarning[]>([])
 let currentWsScanId: string | null = null
 
 // Use WS progress when available, fall back to poll data
@@ -160,6 +185,7 @@ function maybeStartWsTracking(scanId: string): void {
     onProgress: (data: ScanStatusData) => {
       wsProgress.value = data.progressPct || 0
       wsStatusLabel.value = data.statusLabel || ''
+      wsWarnings.value = data.repoWarnings || []
     },
     onComplete: () => {
       wsScanActive.value = false
