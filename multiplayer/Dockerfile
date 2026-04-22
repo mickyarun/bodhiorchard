@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Build context is the repo root so that the sibling `shared/` directory
 # referenced by tsconfig (`rootDir: ".."`, `include: ["../shared/race/**/*.ts"]`)
 # and by `../../../shared/...` imports is available during `npm run build`.

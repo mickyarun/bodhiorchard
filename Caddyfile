@@ -1,0 +1,6 @@
+# Caddy automatically provisions a Let's Encrypt TLS certificate for {$DOMAIN}.
+# All traffic (HTTP + WebSocket) is forwarded to nginx inside the frontend
+# container, which in turn proxies /api/ → backend and /colyseus/ → multiplayer.
+{$DOMAIN} {
+    reverse_proxy frontend:80
+}
