@@ -166,8 +166,16 @@ async def index_repo_with_gitnexus(
         )
 
         if returncode != 0:
-            # npm peer dependency warnings cause exit code 1 but analysis succeeds
-            is_npm_warn_only = "npm warn" in stderr and "error" not in stderr.lower()
+            # npm peer-dep warnings and npx cleanup warnings can cause exit
+            # code 1 while the analysis itself succeeded. Real failures show
+            # up as `npm error` (npm 9+) or `npm ERR!` (older) lines — NOT
+            # the word "error" in general, because npm serialises JS
+            # `Error` objects inside its `npm warn cleanup` ENOTEMPTY output
+            # (e.g. `[Error: ENOTEMPTY: directory not empty, rmdir '…']`),
+            # which used to make us treat every harmless warning as fatal.
+            lowered = stderr.lower()
+            has_real_npm_error = "npm error" in lowered or "npm err!" in lowered
+            is_npm_warn_only = "npm warn" in lowered and not has_real_npm_error
             if is_npm_warn_only:
                 logger.info(
                     "gitnexus_npm_warnings_ignored",

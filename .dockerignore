@@ -1,0 +1,20 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.local
+**/*.log
+**/.DS_Store
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+**/.vite
+.git
+backend/.venv
+# Example repos are scanned at runtime — they don't belong in any image.
+examples/
+# Playwright/test artifacts the QA example emits locally.
+**/playwright-report
+**/test-results

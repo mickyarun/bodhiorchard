@@ -78,6 +78,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("agent_skills_seed_failed_at_startup", exc_info=True)
 
+    # 5b. Apply the configured org's Claude API key to os.environ so every
+    # subsequent `claude` subprocess inherits it. No-op when auth_mode=host.
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.services.claude_env import load_claude_env_at_startup
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await load_claude_env_at_startup(session)
+    except (SQLAlchemyError, OSError):
+        # Specific failure modes: the DB isn't reachable yet, or the
+        # Fernet decrypt blew up. Broader exceptions should propagate.
+        logger.warning("claude_env_load_failed_at_startup", exc_info=True)
+
     # 6. Recover stuck agent tasks from prior crash/restart
     from app.repositories.bud_agent_task import recover_stuck_agent_tasks
 
