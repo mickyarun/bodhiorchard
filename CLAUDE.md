@@ -1,7 +1,11 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **bodhiorchard** (8393 symbols, 23526 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **bodhiorchard** (20791 symbols, 40199 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -13,44 +17,12 @@ This project is indexed by GitNexus as **bodhiorchard** (8393 symbols, 23526 rel
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
 
-## When Debugging
-
-1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
-2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/bodhiorchard/process/{processName}` — trace the full execution flow step by step
-4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
-
-## When Refactoring
-
-- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
-- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
-- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
-
 ## Never Do
 
 - NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
 - NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
 - NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Tools Quick Reference
-
-| Tool | When to use | Command |
-|------|-------------|---------|
-| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
-| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
-| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
-| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
-| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
-| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
-
-## Impact Risk Levels
-
-| Depth | Meaning | Action |
-|-------|---------|--------|
-| d=1 | WILL BREAK — direct callers/importers | MUST update these |
-| d=2 | LIKELY AFFECTED — indirect deps | Should test |
-| d=3 | MAY NEED TESTING — transitive | Test if critical path |
 
 ## Resources
 
@@ -60,32 +32,6 @@ This project is indexed by GitNexus as **bodhiorchard** (8393 symbols, 23526 rel
 | `gitnexus://repo/bodhiorchard/clusters` | All functional areas |
 | `gitnexus://repo/bodhiorchard/processes` | All execution flows |
 | `gitnexus://repo/bodhiorchard/process/{name}` | Step-by-step execution trace |
-
-## Self-Check Before Finishing
-
-Before completing any code modification task, verify:
-1. `gitnexus_impact` was run for all modified symbols
-2. No HIGH/CRITICAL risk warnings were ignored
-3. `gitnexus_detect_changes()` confirms changes match expected scope
-4. All d=1 (WILL BREAK) dependents were updated
-
-## Keeping the Index Fresh
-
-After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
-
-```bash
-npx gitnexus analyze
-```
-
-If the index previously included embeddings, preserve them by adding `--embeddings`:
-
-```bash
-npx gitnexus analyze --embeddings
-```
-
-To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
-
-> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
 
 ## CLI
 
@@ -99,6 +45,87 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+---
+
+## Common Commands
+
+All development is orchestrated from the repo root via npm workspaces. Backend Python lives in `backend/.venv` (created by `npm run setup`); activate `conda activate python3129` for ad-hoc Python tooling.
+
+### Root (dev loop)
+| Command | What it does |
+|---------|-------------|
+| `npm run setup` | One-time: creates `backend/.venv`, installs Python deps, copies `.env` files, starts infra, runs Alembic migrations |
+| `npm run dev` | Starts postgres+redis, waits for Postgres, then runs backend/frontend/multiplayer concurrently with colour-coded logs |
+| `npm run dev:infra` / `npm run stop` | Start/stop the infra-only containers (postgres, redis) |
+| `npm run dev:backend` / `dev:frontend` / `dev:multiplayer` | Run a single process if `npm run dev` is too noisy |
+| `docker compose up` | **Full Docker** mode — whole stack incl. backend in containers (see README for Hybrid vs Full Docker trade-off) |
+| `npx gitnexus analyze` | Refresh the GitNexus index after commits (a PostToolUse hook handles this automatically after `git commit`/`git merge`) |
+
+### Backend (`backend/`)
+- **Lint**: `.venv/bin/ruff check . --fix && .venv/bin/ruff format .` (line-length 99, rules `E,F,I,N,W,UP,B,A,SIM`)
+- **Type check**: `.venv/bin/mypy app/` (strict mode, pydantic plugin enabled)
+- **Tests**: `.venv/bin/pytest` — `asyncio_mode = "auto"`, testpaths = `tests/`
+- **Single test**: `.venv/bin/pytest tests/path/to/test_x.py::test_name -xvs`
+- **New migration**: `.venv/bin/alembic revision --autogenerate -m "message"` then `alembic upgrade head` (also auto-runs on backend startup via `entrypoint.sh`)
+
+### Frontend (`frontend/`)
+- **Type check (the real gate)**: `npx vue-tsc --noEmit` — `npm run lint` fails because no ESLint config exists; ignore the pre-existing unused-import error in `SceneManager.ts`
+- **Build**: `npm run build` (runs `vue-tsc --noEmit` then Vite)
+- **Tests**: `npm test` (Vitest, one-shot) / `npm run test:watch`
+
+### Multiplayer (`multiplayer/`)
+- **Dev**: `npm --workspace bodhiorchard-multiplayer run start:dev` (Colyseus 0.17, port 2567)
+
+---
+
+## Architecture Overview
+
+Bodhiorchard is a **local-first, multi-tenant AI dev-ops platform** with three cooperating processes plus managed infra. Keep these boundaries in mind — they determine where new code belongs.
+
+### Three-process topology
+- **`backend/` (FastAPI, Python 3.12, async SQLAlchemy 2.0)** — REST API, agent orchestration, MCP server, repository scanning. Every request is JWT-auth'd and **org-scoped**; repositories enforce tenant isolation at the data layer.
+- **`frontend/` (Vue 3 + Vuetify 3 + Pinia + TypeScript)** — SPA at `:3000`. Uses PlayCanvas for the 3D "Living Tree" / Garden Engine visualization. Axios interceptor attaches JWT.
+- **`multiplayer/` (Colyseus 0.17, TypeScript)** — authoritative room server at `:2567` for shared 3D-world state (OrgRoom, RaceRoom). Simulation logic is *server-side*; clients interpolate.
+- **Infra** — PostgreSQL 16 + pgvector (vector search for BUDs/bugs/features), Redis (cache + job queue).
+
+### Backend layering (strict, top-down)
+```
+api/v1/          HTTP handlers — thin; validate via schemas, delegate to services
+agents/          Agent definitions & orchestrators (11 agents: Triage, BUD, TechPlan, ...)
+mcp/             MCP server exposing 10 tools to Claude Code
+services/        Business logic — LLM calls, scanning, synthesis, bud_closure, bug_linker
+repositories/    Data access — all queries filter by organization_id
+models/          SQLAlchemy ORM
+schemas/         Pydantic DTOs
+core/            Auth, permissions, encryption (Fernet AES-128 for secrets at rest)
+```
+Cross-cutting patterns: **async jobs** (register handler → return `202` → track via `useJobSocket`); **dual Claude auth modes** per org (`api_key` vs `hybrid_host`, stored in `claude_auth_mode`).
+
+### BUD lifecycle (the core domain object)
+```
+bud → design → development → testing → uat → prod → closed   (discarded at any stage)
+```
+- Markdown doc with spec / tech spec / test plan sections, numbered per org (`BUD-001`, …).
+- Embeddings generated at creation time; bug-linker uses pgvector cosine distance, threshold 0.40.
+- `on_bud_closed()` in `services/bud_closure.py` is the single entry point for contributor-XP + repo-scan side effects — called from both manual PATCH and auto-close.
+- Release detection has two paths: fast (`bud_id` on PR) and SHA-walk (release PRs without `bud_id`).
+
+### Shared code
+`shared/world/zones.ts` holds world-zone positions imported by **both** the frontend engine and the multiplayer server — keep them in sync or the simulations desync.
+
+### Deployment modes (critical context)
+| Mode | Backend runs in | Claude auth | Use when |
+|------|----------------|-------------|---------|
+| Full Docker | Container | Org-level API key in Settings → AI Config | Evaluators, Mac-mini deploys |
+| Hybrid | Host venv (hot reload) | Inherits host's `claude login` session | Dev loop, Claude Pro subscription |
+
+The stored `claude_auth_mode` on the org decides which path agent runs take.
+
+### Key references in-repo
+- `BODHIORCHARD-ARCHITECTURE.md` — full 8400-line architecture spec
+- `AGENTS.md` — per-agent capabilities and triggers
+- `frontend/src/engine/ARCHITECTURE.md` — **must-read before touching the Garden Engine** (rules encoded in the Garden Engine section below)
 
 ---
 

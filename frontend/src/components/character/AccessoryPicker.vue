@@ -5,15 +5,17 @@
     </div>
     <div class="accessory-picker__row">
       <div class="accessory-picker__slot">
-        <div class="text-caption text-medium-emphasis mb-1">Right Hand</div>
+        <div class="text-caption text-medium-emphasis mb-2">Right Hand</div>
         <div class="accessory-picker__items">
           <div
-            class="accessory-picker__item"
-            :class="{ 'accessory-picker__item--active': !rightHand }"
+            class="accessory-picker__card accessory-picker__card--none"
+            :class="{ 'accessory-picker__card--selected': !rightHand }"
             @click="emit('update', 'rightHand', '')"
           >
-            <v-icon icon="mdi-close" size="20" />
-            <span class="text-caption">None</span>
+            <div class="accessory-picker__preview">
+              <v-icon icon="mdi-close" size="36" />
+            </div>
+            <div class="accessory-picker__name">None</div>
           </div>
           <v-tooltip
             v-for="acc in rightHandItems"
@@ -24,30 +26,48 @@
             <template #activator="{ props: tp }">
               <div
                 v-bind="tp"
-                class="accessory-picker__item"
+                class="accessory-picker__card"
                 :class="{
-                  'accessory-picker__item--active': rightHand === acc.id,
-                  'accessory-picker__item--locked': acc.locked,
+                  'accessory-picker__card--selected': rightHand === acc.id,
+                  'accessory-picker__card--locked': acc.locked,
                 }"
                 @click="!acc.locked && emit('update', 'rightHand', acc.id)"
               >
-                <v-icon :icon="acc.locked ? 'mdi-lock' : acc.icon" size="20" />
-                <span class="text-caption">{{ acc.name }}</span>
+                <div class="accessory-picker__preview">
+                  <v-icon :icon="acc.icon" size="36" />
+                </div>
+                <div class="accessory-picker__name">{{ acc.name }}</div>
+                <div
+                  v-if="acc.locked"
+                  class="accessory-picker__lock-overlay"
+                >
+                  <v-icon icon="mdi-lock" size="24" />
+                  <v-chip
+                    size="x-small"
+                    color="warning"
+                    variant="flat"
+                    class="accessory-picker__level-badge"
+                  >
+                    Lv.{{ acc.unlockLevel }}
+                  </v-chip>
+                </div>
               </div>
             </template>
           </v-tooltip>
         </div>
       </div>
       <div class="accessory-picker__slot">
-        <div class="text-caption text-medium-emphasis mb-1">Left Hand</div>
+        <div class="text-caption text-medium-emphasis mb-2">Left Hand</div>
         <div class="accessory-picker__items">
           <div
-            class="accessory-picker__item"
-            :class="{ 'accessory-picker__item--active': !leftHand }"
+            class="accessory-picker__card accessory-picker__card--none"
+            :class="{ 'accessory-picker__card--selected': !leftHand }"
             @click="emit('update', 'leftHand', '')"
           >
-            <v-icon icon="mdi-close" size="20" />
-            <span class="text-caption">None</span>
+            <div class="accessory-picker__preview">
+              <v-icon icon="mdi-close" size="36" />
+            </div>
+            <div class="accessory-picker__name">None</div>
           </div>
           <v-tooltip
             v-for="acc in leftHandItems"
@@ -58,15 +78,31 @@
             <template #activator="{ props: tp }">
               <div
                 v-bind="tp"
-                class="accessory-picker__item"
+                class="accessory-picker__card"
                 :class="{
-                  'accessory-picker__item--active': leftHand === acc.id,
-                  'accessory-picker__item--locked': acc.locked,
+                  'accessory-picker__card--selected': leftHand === acc.id,
+                  'accessory-picker__card--locked': acc.locked,
                 }"
                 @click="!acc.locked && emit('update', 'leftHand', acc.id)"
               >
-                <v-icon :icon="acc.locked ? 'mdi-lock' : acc.icon" size="20" />
-                <span class="text-caption">{{ acc.name }}</span>
+                <div class="accessory-picker__preview">
+                  <v-icon :icon="acc.icon" size="36" />
+                </div>
+                <div class="accessory-picker__name">{{ acc.name }}</div>
+                <div
+                  v-if="acc.locked"
+                  class="accessory-picker__lock-overlay"
+                >
+                  <v-icon icon="mdi-lock" size="24" />
+                  <v-chip
+                    size="x-small"
+                    color="warning"
+                    variant="flat"
+                    class="accessory-picker__level-badge"
+                  >
+                    Lv.{{ acc.unlockLevel }}
+                  </v-chip>
+                </div>
               </div>
             </template>
           </v-tooltip>
@@ -118,39 +154,81 @@ const leftHandItems = computed(() => {
 }
 
 .accessory-picker__items {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 8px;
 }
 
-.accessory-picker__item {
+.accessory-picker__card {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  padding: 8px 12px;
   border: 2px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
+  padding: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  min-width: 72px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: center;
 }
 
-.accessory-picker__item:hover:not(.accessory-picker__item--locked) {
+.accessory-picker__card:hover:not(.accessory-picker__card--locked) {
   border-color: rgba(255, 255, 255, 0.3);
   transform: translateY(-2px);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
 }
 
-.accessory-picker__item--active {
+.accessory-picker__card--selected {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.12);
   box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.25);
 }
 
-.accessory-picker__item--locked {
-  opacity: 0.35;
+.accessory-picker__card--locked {
   cursor: not-allowed;
+}
+
+.accessory-picker__card--locked .accessory-picker__preview,
+.accessory-picker__card--locked .accessory-picker__name {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+
+.accessory-picker__preview {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  transition: filter 0.2s ease, opacity 0.2s ease;
+}
+
+.accessory-picker__name {
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 4px;
+  line-height: 1.2;
+  transition: opacity 0.2s;
+}
+
+.accessory-picker__lock-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+}
+
+.accessory-picker__level-badge {
+  font-size: 9px !important;
+  font-weight: 700;
+  height: 16px !important;
+  padding: 0 6px !important;
 }
 </style>
