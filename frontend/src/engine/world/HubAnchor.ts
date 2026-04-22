@@ -36,8 +36,12 @@ import type { ExclusionZone } from '../utils/MathUtils'
 export interface HubAnchorResult {
   entity: pc.Entity
   exclusionZone: ExclusionZone
-  /** World-space circle the physics builder uses to block the trunk. */
-  trunkCollider: { x: number; z: number; radius: number }
+  /**
+   * Geometry the physics builder uses to seal the raised mound. The ring
+   * collider wraps the rim at `radius`; the cap closes the top so the
+   * volume is fully impassable (no jumping/clipping onto the platform).
+   */
+  trunkCollider: { x: number; z: number; radius: number; topY: number }
 }
 
 // ─── Layout tuning (local units, centered on anchor origin) ───────────────
@@ -53,13 +57,6 @@ const MOUND_HEIGHT = 0.7        // visible elevation of the mound
 const RING_RADIUS = 5.8         // bush/flower ring, sits between mound and plaza edge
 const RING_COUNT = 12           // more bushes for larger circumference
 const HUB_TREE_SCALE = 3.2      // hero tree — clearly largest silhouette in scene
-/**
- * Trunk-base radius for the physics collider. Approximates the visual
- * trunk after HUB_TREE_SCALE is applied — wide enough to block walk-
- * through, narrow enough that agents standing at FALLBACK_HUB_OFFSET
- * (2.2) still clear it comfortably.
- */
-const BODHI_TRUNK_RADIUS = 0.7
 
 export class HubAnchor {
   private factory: BuildingFactory
@@ -91,7 +88,16 @@ export class HubAnchor {
       // Slightly larger than plaza so paths stop at the plaza rim with a
       // tiny breathing margin (prevents stepping stones landing on cobble).
       exclusionZone: { x, z, radius: PLAZA_RADIUS + 0.5 },
-      trunkCollider: { x, z, radius: BODHI_TRUNK_RADIUS },
+      // Collider wraps the whole raised mound — player can't step onto
+      // the platform. Geometry is tied to the visual mound constants so
+      // visual and collision stay in lockstep (0.05 is the plaza-to-
+      // mound clearance applied in createMound; see there for details).
+      trunkCollider: {
+        x,
+        z,
+        radius: MOUND_RADIUS,
+        topY: 0.05 + MOUND_HEIGHT,
+      },
     }
   }
 

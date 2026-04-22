@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **bodhiorchard** (20791 symbols, 40199 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **bodhiorchard** (21045 symbols, 40685 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -101,6 +101,8 @@ schemas/         Pydantic DTOs
 core/            Auth, permissions, encryption (Fernet AES-128 for secrets at rest)
 ```
 Cross-cutting patterns: **async jobs** (register handler → return `202` → track via `useJobSocket`); **dual Claude auth modes** per org (`api_key` vs `hybrid_host`, stored in `claude_auth_mode`).
+
+**Event-bus fanout**: `event_bus.publish(topic, payload)` reaches (a) in-process asyncio Queue subscribers (dashboard `/ws`) and (b) every external transport registered via `register_transport()` in `main.py` lifespan. The multiplayer server subscribes via `services/colyseus_forwarder.py`. Add new external sinks (Slack, metrics, SSE) by writing an `async (topic, payload) -> None` callback and registering it in lifespan — no publisher-side changes.
 
 ### BUD lifecycle (the core domain object)
 ```
