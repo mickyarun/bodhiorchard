@@ -374,7 +374,11 @@ async def run_claude_code(
     if progress_callback is not None:
         try:
             return await _run_with_streaming(
-                cmd, cwd, config.timeout_seconds, progress_callback, env=sub_env,
+                cmd,
+                cwd,
+                config.timeout_seconds,
+                progress_callback,
+                env=sub_env,
             )
         finally:
             if mcp_config_file is not None:
@@ -408,15 +412,21 @@ async def run_claude_code(
         )
 
         if proc.returncode != 0:
+            # The CLI writes structured errors (auth, credit, rate-limit, model
+            # deprecation) to stdout JSON with empty stderr. Surface that human
+            # message instead of the opaque "Exit code N:".
+            api_error = _parse_cli_error_payload(stdout_str)
+            error_msg = api_error or f"Exit code {proc.returncode}: {stderr_str[:500]}"
             logger.error(
                 "claude_run_failed",
                 returncode=proc.returncode,
                 stderr=stderr_str[:500],
+                api_error=api_error,
             )
             return ClaudeRunResult(
                 success=False,
                 output=stdout_str,
-                error=f"Exit code {proc.returncode}: {stderr_str[:500]}",
+                error=error_msg,
             )
 
         # Parse JSON output from Claude Code CLI
@@ -561,6 +571,25 @@ async def ensure_gitnexus_mcp() -> None:
         logger.warning("gitnexus_mcp_register_failed", error=str(exc))
 
 
+def _parse_cli_error_payload(stdout_str: str) -> str | None:
+    """Extract a human error message from a non-zero CLI run's stdout JSON.
+
+    Returns ``None`` when stdout isn't a recognisable Claude CLI error envelope,
+    so the caller can fall back to the generic exit-code message.
+    """
+    try:
+        parsed = json.loads(stdout_str)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict) or not parsed.get("is_error"):
+        return None
+    msg = (parsed.get("result") or "").strip()
+    status_code = parsed.get("api_error_status")
+    if msg and status_code:
+        return f"{msg} (HTTP {status_code})"
+    return msg or None
+
+
 async def _get_claude_version() -> str | None:
     """Run ``claude --version`` and return the version string, or None on failure.
 
@@ -627,7 +656,9 @@ async def test_claude_connection(
     test_result = await run_claude_code(
         prompt="Reply with exactly: BODHIORCHARD_CONNECTION_OK",
         config=ClaudeRunnerConfig(
-            max_turns=1, timeout_seconds=90, env_extra=env_extra,
+            max_turns=1,
+            timeout_seconds=90,
+            env_extra=env_extra,
         ),
     )
 
