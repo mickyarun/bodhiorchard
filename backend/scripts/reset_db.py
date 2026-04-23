@@ -9,9 +9,9 @@ Usage (from backend/):
     DATABASE_URL=postgres://... python -m scripts.reset_db
 
 What it does:
-    1. TRUNCATE … CASCADE on every application table (respects FKs automatically)
-    2. Resets auto-increment sequences via RESTART IDENTITY
-    3. Drops orphaned PostgreSQL enum types that block fresh migrations
+    1. Discovers every public-schema table from information_schema
+    2. TRUNCATE … RESTART IDENTITY CASCADE on all of them in one statement
+    3. Optionally drops orphaned PostgreSQL enum types (`--drop-enums`)
 
 What happens next:
     - Restart the backend (`uvicorn app.main:app --reload`)
@@ -23,50 +23,9 @@ import asyncio
 import os
 import sys
 
-# ---------------------------------------------------------------------------
-# Tables to truncate — order doesn't matter because of CASCADE.
-# Alembic's `alembic_version` is intentionally excluded so migrations
-# aren't re-applied on next startup.
-# ---------------------------------------------------------------------------
-TABLES_TO_TRUNCATE = [
-    # Auth & identity
-    "jwt_tokens",
-    "user_email_aliases",
-    "org_to_user",
-    "users",
-    "organizations",
-    # BUD documents
-    "bud_chat_messages",
-    "bud_designs",
-    "bud_timeline_events",
-    "bud_documents",
-    # Knowledge & learning
-    "knowledge_to_repo",
-    "knowledge_items",
-    "feature_learnings",
-    "skill_profiles",
-    # Repos & scanning
-    "tracked_repositories",
-    "design_system_refs",
-    # Bugs
-    "bugs",
-    # RBAC (re-seeded on startup)
-    "role_permissions",
-    "permissions",
-    "permission_categories",
-    "roles",
-    # Notifications & logs
-    "notifications",
-    "agent_logs",
-    # AI & automation
-    "agent_skills",
-    "agent_skill_bud_stages",
-    "bud_agent_tasks",
-    "enterprise_rules",
-    # Triage & standup
-    "triage_sessions",
-    "standup_reports",
-]
+# Tables we never touch — Alembic's bookkeeping must persist so migrations
+# don't re-apply on next startup.
+TABLES_TO_PRESERVE = {"alembic_version"}
 
 # PostgreSQL enum types created by SQLAlchemy that may block re-migration.
 ENUM_TYPES_TO_DROP = [
@@ -100,9 +59,17 @@ async def main() -> None:
 
     conn = await asyncpg.connect(dsn)
     try:
-        table_list = ", ".join(TABLES_TO_TRUNCATE)
+        rows = await conn.fetch("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+        tables = sorted({r["tablename"] for r in rows} - TABLES_TO_PRESERVE)
+        if not tables:
+            print("No application tables found — nothing to truncate.")
+            return
+
+        # Quote each identifier defensively — pg_tables names are trusted, but
+        # quoting protects against any future name with mixed case or keywords.
+        table_list = ", ".join(f'"{t}"' for t in tables)
         sql = f"TRUNCATE {table_list} RESTART IDENTITY CASCADE"
-        print(f"Truncating {len(TABLES_TO_TRUNCATE)} tables …")
+        print(f"Truncating {len(tables)} tables …")
         await conn.execute(sql)
         print("All tables truncated.")
 
