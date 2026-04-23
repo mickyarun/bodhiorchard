@@ -6,7 +6,6 @@
 Pure-function tests — no database, no HTTP.
 """
 
-import pytest
 
 from app.services.jira_consolidator import (
     ConsolidatedGroup,
@@ -17,11 +16,9 @@ from app.services.jira_field_mapper import (
     JiraFieldMapper,
     build_user_cache_from_issues,
     get_parent_key,
-    get_subtask_keys,
     is_epic,
     is_subtask,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────
 
@@ -141,7 +138,8 @@ class TestBugMapping:
 
     def test_severity_from_priority(self) -> None:
         mapper = JiraFieldMapper()
-        assert mapper.map_to_bug_fields(_issue("X-1", priority="Highest"))["severity"] == "critical"
+        highest = mapper.map_to_bug_fields(_issue("X-1", priority="Highest"))
+        assert highest["severity"] == "critical"
         assert mapper.map_to_bug_fields(_issue("X-1", priority="High"))["severity"] == "high"
         assert mapper.map_to_bug_fields(_issue("X-1", priority="Medium"))["severity"] == "medium"
         assert mapper.map_to_bug_fields(_issue("X-1", priority="Low"))["severity"] == "low"

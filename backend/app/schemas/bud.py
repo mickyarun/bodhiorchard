@@ -200,54 +200,6 @@ class ChatMessageRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class PhaseEstimate(BaseModel):
-    """Estimated completion for a single BUD lifecycle phase."""
-
-    phase: str
-    estimated_completion: datetime
-    p50_date: datetime | None = None
-    p70_date: datetime | None = None
-    p85_date: datetime | None = None
-    expected_days: float | None = None
-    std_dev_days: float | None = None
-    source: str
-    confidence: float
-    override_reason: str | None = None
-
-
-class BUDEstimatesRead(BaseModel):
-    """Full estimation response for a BUD with Monte Carlo percentiles."""
-
-    bud_id: uuid.UUID
-    complexity: int | None = None
-    phases: list[PhaseEstimate] = []
-    prod_p50: datetime | None = None
-    prod_p70: datetime | None = None
-    prod_p85: datetime | None = None
-    generated_at: datetime | None = None
-    trigger: str | None = None
-
-
-class EstimateOverrideRequest(BaseModel):
-    """Request to manually override a phase's estimated date."""
-
-    estimated_completion: datetime
-    reason: str = Field(..., min_length=1, max_length=2000)
-
-
-class EstimateSnapshotRead(BaseModel):
-    """Read schema for a historical estimate snapshot."""
-
-    id: uuid.UUID
-    trigger: str
-    phase_estimates: dict
-    complexity: int | None = None
-    context: dict | None = None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class RejectTechArchRequest(BaseModel):
     """Schema for rejecting a tech architecture plan."""
 

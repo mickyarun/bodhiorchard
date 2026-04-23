@@ -178,3 +178,87 @@ def test_prompt_permits_near_zero_estimates_for_na_phases() -> None:
     )
     assert "essentially N/A" in prompt
     assert "0.1" in prompt
+
+
+# ── Phase B: capacity context + effort/wall-clock + bugs ─────────
+
+
+def test_prompt_unit_is_focused_effort_not_wall_clock() -> None:
+    """The LLM must estimate effort, not wall-clock — the engine
+    converts via the capacity divisor. This line is the contract that
+    prevents double-counting capacity (once in the LLM's pessimism,
+    once in the post-MC divisor)."""
+    prompt = build_estimation_prompt(
+        bud=_stub_bud(),
+        complexity=2,
+        backlog_ctx=_BACKLOG,
+        skill_ctx=None,
+        historical_ctx="",
+        remaining_phases=_PHASES,
+    )
+    assert "focused effort" in prompt
+    assert "do not pre-discount" in prompt
+
+
+def test_prompt_renders_capacity_summary_when_supplied() -> None:
+    """Capacity tuples must surface in the prompt so the LLM can see
+    why dates might shift. Missing/empty summary → no block (callers
+    that haven't migrated keep working)."""
+    summary = [
+        ("designer", 0.40, "60% loaded"),
+        ("developer", 0.70, "30% loaded"),
+    ]
+    prompt = build_estimation_prompt(
+        bud=_stub_bud(),
+        complexity=2,
+        backlog_ctx=_BACKLOG,
+        skill_ctx=None,
+        historical_ctx="",
+        remaining_phases=_PHASES,
+        capacity_summary=summary,
+    )
+    assert "Team capacity right now" in prompt
+    assert "designer: 0.40 (60% loaded)" in prompt
+    assert "developer: 0.70 (30% loaded)" in prompt
+
+
+def test_prompt_omits_capacity_block_when_summary_empty() -> None:
+    prompt = build_estimation_prompt(
+        bud=_stub_bud(),
+        complexity=2,
+        backlog_ctx=_BACKLOG,
+        skill_ctx=None,
+        historical_ctx="",
+        remaining_phases=_PHASES,
+        capacity_summary=None,
+    )
+    assert "Team capacity right now" not in prompt
+
+
+def test_prompt_renders_open_bug_count_when_present() -> None:
+    prompt = build_estimation_prompt(
+        bud=_stub_bud(),
+        complexity=2,
+        backlog_ctx=_BACKLOG,
+        skill_ctx=None,
+        historical_ctx="",
+        remaining_phases=_PHASES,
+        bug_context={"open_bug_count": 3},
+    )
+    assert "Open bugs against this BUD: 3" in prompt
+
+
+def test_prompt_omits_bug_line_when_zero_or_missing() -> None:
+    """Zero bugs and missing bug context must both produce no line —
+    avoids a noisy 'Open bugs against this BUD: 0' for the common case."""
+    for ctx in (None, {}, {"open_bug_count": 0}):
+        prompt = build_estimation_prompt(
+            bud=_stub_bud(),
+            complexity=2,
+            backlog_ctx=_BACKLOG,
+            skill_ctx=None,
+            historical_ctx="",
+            remaining_phases=_PHASES,
+            bug_context=ctx,
+        )
+        assert "Open bugs against this BUD" not in prompt

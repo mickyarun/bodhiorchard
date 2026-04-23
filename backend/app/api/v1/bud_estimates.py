@@ -21,7 +21,7 @@ from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_estimate import BUDEstimateSnapshotRepository
 from app.repositories.organization import OrganizationRepository
-from app.schemas.bud import (
+from app.schemas.bud_estimate import (
     BUDEstimatesRead,
     EstimateOverrideRequest,
     EstimateSnapshotRead,
@@ -205,6 +205,8 @@ def _build_estimates_response(bud: BUDDocument) -> BUDEstimatesRead:
         prod_p50=summary.get("prod_p50"),
         prod_p70=summary.get("prod_p70"),
         prod_p85=summary.get("prod_p85"),
+        project_buffer_days=summary.get("project_buffer_days"),
+        commit_date=summary.get("commit_date"),
         generated_at=summary.get("generated_at"),
         trigger=summary.get("trigger"),
     )
