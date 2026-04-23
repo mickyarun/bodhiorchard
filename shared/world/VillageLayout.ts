@@ -4,12 +4,15 @@
 /**
  * VillageLayout — Pure layout algorithm for village housing.
  *
- * One central road per street. Houses on both sides facing inward.
- * Multiple parallel streets for larger orgs (9+ members).
+ * Shared between frontend (rendering) and multiplayer (spawn math). Emits
+ * placements in the village's ZONE-LOCAL frame (yaw-free, centred on 0,0).
+ * Callers that need world coordinates rotate-and-translate by the housing
+ * zone (`zone.x, zone.z, zone.yawDeg`) via `rotatePointAroundPivot` from
+ * `./geom.ts`.
  *
  * Zero PlayCanvas imports — independently testable.
  *
- * Layout (top-down, +Z = south):
+ * Layout (top-down, +Z = south, before zone yaw):
  *
  *   ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐     north side (yaw=0, doors face +Z)
  *   │ H0  │  │ H2  │  │ H4  │  │ H6  │
@@ -22,7 +25,13 @@
  * Assignment: even index → north, odd → south (interleaved).
  * For ≤4 members (single side fits): all go north.
  * For 9+: wraps to a second parallel street.
+ *
+ * Placements are **count-pure**: they depend only on `members.length` and
+ * the zone, never on member identity or ordering. The multiplayer memoisation
+ * in `multiplayer/src/sim/WorldLayout.ts` relies on this invariant.
  */
+import { rotatePointAroundPivot } from './geom'
+import type { Zone } from './zones'
 
 // ─── Layout Constants ────────────────────────────
 
@@ -53,9 +62,11 @@ export interface VillagePlacement {
   memberId: string
   memberName: string
   tier: number
+  /** House origin X in ZONE-LOCAL space (yaw-free). */
   x: number
+  /** House origin Z in ZONE-LOCAL space. */
   z: number
-  /** 0 = doors face +Z (north side), 180 = doors face -Z (south side). */
+  /** 0 = doors face +Z (north side), 180 = doors face -Z (south side). Local. */
   yawDeg: number
   streetIndex: number
   side: 'north' | 'south'
@@ -64,7 +75,7 @@ export interface VillagePlacement {
 
 export interface StreetDef {
   index: number
-  /** Z coordinate of the road centerline. */
+  /** Z coordinate of the road centerline in ZONE-LOCAL space. */
   centerZ: number
   startX: number
   endX: number
@@ -78,34 +89,46 @@ export interface FenceBounds {
 }
 
 export interface VillageLayoutResult {
+  /** Placements in zone-LOCAL space (yaw-free, centred on 0,0). */
   placements: VillagePlacement[]
+  /** Streets in zone-LOCAL space. */
   streets: StreetDef[]
+  /** Maximum circular extent in LOCAL space. */
   fenceRadius: number
+  /** Rectangle in zone-LOCAL space (axis-aligned, yaw-free). */
   fenceBounds: FenceBounds
   /**
-   * Distance from world origin (0, 0) to the furthest corner of `fenceBounds`.
-   * Used by the outer campus perimeter so it grows to enclose the village
-   * when the static `housing` zone radius in `shared/world/zones.ts` is
-   * smaller than the member-count-driven village footprint.
+   * Distance from world origin (0, 0) to the furthest rotated corner of
+   * `fenceBounds` after the village yaw is applied. Drives the outer
+   * campus perimeter so the rail encloses the true village footprint
+   * even when yaw + member-count push the rectangle past the static
+   * `housing.radius` in `shared/world/zones.ts`.
    */
   outerReach: number
+  /** World-space centre of the village (= zone.x, zone.z). */
   center: { x: number; z: number }
+  /** Zone yaw in radians — callers use this to convert placements to world. */
+  yawRad: number
 }
 
 // ─── Main Algorithm ──────────────────────────────
 
 export function computeVillageLayout(
   members: VillageMember[],
-  centerX: number,
-  centerZ: number,
+  zone: Zone,
 ): VillageLayoutResult {
   const n = members.length
+  const yawRad = ((zone.yawDeg ?? 0) * Math.PI) / 180
+  // Internal algorithm runs in LOCAL coordinates around (0, 0); callers
+  // (frontend root entity / multiplayer wrapper) handle the world transform.
+
   if (n === 0) {
     return {
       placements: [], streets: [], fenceRadius: 5,
-      fenceBounds: { minX: centerX - 5, maxX: centerX + 5, minZ: centerZ - 5, maxZ: centerZ + 5 },
+      fenceBounds: { minX: -5, maxX: 5, minZ: -5, maxZ: 5 },
       outerReach: 0,
-      center: { x: centerX, z: centerZ },
+      center: { x: zone.x, z: zone.z },
+      yawRad,
     }
   }
 
@@ -151,9 +174,9 @@ export function computeVillageLayout(
     })
   }
 
-  // ─── Step 2: Compute world positions ───────────────────
+  // ─── Step 2: Compute LOCAL positions (centred on 0,0) ───
   const totalDepth = (streetCount - 1) * STREET_GAP
-  const baseZ = centerZ - totalDepth / 2
+  const baseZ = -totalDepth / 2
   const streetDefs: StreetDef[] = []
 
   for (let s = 0; s < streetCount; s++) {
@@ -162,9 +185,8 @@ export function computeVillageLayout(
     const sc = southCounts[s]
     const maxPerSide = Math.max(nc, sc)
     const rowWidth = (maxPerSide - 1) * HOUSE_SPACING_ALONG
-    const startX = centerX - rowWidth / 2
+    const startX = -rowWidth / 2
 
-    // Place north-side houses (above road)
     let northSlot = 0
     let southSlot = 0
     for (const p of placements) {
@@ -190,7 +212,7 @@ export function computeVillageLayout(
     })
   }
 
-  // ─── Step 3: Compute fence bounds (square, centered on layout) ──
+  // ─── Step 3: Compute fence bounds (LOCAL, yaw-free) ──
   const HOUSE_EXTENT = 4 // max visual extent from house origin
   const PAD = 3          // breathing room around outermost houses
   let bMinX = Infinity, bMaxX = -Infinity
@@ -209,22 +231,24 @@ export function computeVillageLayout(
     minX: cx - halfExtent, maxX: cx + halfExtent,
     minZ: cz - halfExtent, maxZ: cz + halfExtent,
   }
-  // Circular radius for backward compat (multiplayer WorldLayout.ts)
   const fenceRadius = halfExtent * Math.SQRT2
 
-  // Max distance from world origin to any fence corner. Literal max over the
-  // 4 corners rather than hypot(max|x|, max|z|) — the two agree when the
-  // rectangle sits entirely in one quadrant (true for the current housing
-  // zone at -30,40) but diverge if a future layout straddles the origin.
-  const corners = [
-    [fenceBounds.minX, fenceBounds.minZ],
-    [fenceBounds.minX, fenceBounds.maxZ],
-    [fenceBounds.maxX, fenceBounds.minZ],
-    [fenceBounds.maxX, fenceBounds.maxZ],
-  ] as const
+  // World-space outer reach: rotate each LOCAL corner by the zone yaw around
+  // the zone centre, then measure to world origin. Applying rotation here
+  // (rather than leaving it to the consumer) means a future caller can't
+  // silently compute an axis-aligned reach by forgetting to rotate.
+  const localCorners = [
+    { x: fenceBounds.minX, z: fenceBounds.minZ },
+    { x: fenceBounds.minX, z: fenceBounds.maxZ },
+    { x: fenceBounds.maxX, z: fenceBounds.minZ },
+    { x: fenceBounds.maxX, z: fenceBounds.maxZ },
+  ]
   let outerReach = 0
-  for (const [x, z] of corners) {
-    const d = Math.hypot(x, z)
+  for (const c of localCorners) {
+    // rotate LOCAL corner into world by first translating to world centre,
+    // then rotating around that centre.
+    const w = rotatePointAroundPivot(c.x + zone.x, c.z + zone.z, yawRad, zone.x, zone.z)
+    const d = Math.hypot(w.x, w.z)
     if (d > outerReach) outerReach = d
   }
 
@@ -234,6 +258,7 @@ export function computeVillageLayout(
     fenceRadius: Math.max(fenceRadius, 8),
     fenceBounds,
     outerReach,
-    center: { x: centerX, z: centerZ },
+    center: { x: zone.x, z: zone.z },
+    yawRad,
   }
 }

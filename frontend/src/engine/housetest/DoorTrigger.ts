@@ -13,10 +13,19 @@
  * event-driven detection.
  */
 import * as pc from 'playcanvas'
+import { getHouseTierGeometry } from '@shared/world/HouseTiers'
 
-/** Default door positions for 4×4 room. */
-const DEFAULT_ENTRY = new pc.Vec3(1.5, 0, 4.7)
-const DEFAULT_EXIT  = new pc.Vec3(1.5, 0, 3.8)
+/**
+ * Default door trigger centres derived from tier 1's authoritative geometry.
+ * `setDoorPosition` is the live path; these defaults are used only before
+ * the first `setDoorPosition` call (scene boot), so deriving them avoids a
+ * hardcoded 4×4 assumption rotting if tier 1 changes.
+ */
+const TIER1 = getHouseTierGeometry(1)
+const DEFAULT_DOOR_X = TIER1.doorIndex + 0.5
+const DEFAULT_FRONT_Z = TIER1.depth
+const DEFAULT_ENTRY = new pc.Vec3(DEFAULT_DOOR_X, 0, DEFAULT_FRONT_Z + 0.7)
+const DEFAULT_EXIT  = new pc.Vec3(DEFAULT_DOOR_X, 0, DEFAULT_FRONT_Z - 0.2)
 const TRIGGER_RADIUS = 0.7
 const COOLDOWN_MS = 1500
 

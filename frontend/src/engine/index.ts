@@ -24,6 +24,8 @@ import type {
   EngineCallbacks,
   EngineEvents,
 } from './types'
+import { toWorld } from '@shared/world/geom'
+import type { HouseResult } from './buildings/HouseBuilder'
 import { Application } from './core/Application'
 import { EventBus } from './core/EventBus'
 import { InputManager } from './input/InputManager'
@@ -55,6 +57,21 @@ import { getVehicleDef } from './vehicles/VehicleManifest'
 export { type EngineData, type EngineCallbacks, type SceneState } from './types'
 
 import type { SceneState } from './types'
+
+/**
+ * Resolve a house's exit spawn in world space. `exitPosition` is stored
+ * LOCAL to the house tile (corner-origin); composition with `house.pivot`
+ * yields the world-space teleport target. Falls back to pivot centre when
+ * pivot is missing (un-wrapped HouseResult — shouldn't happen post-build).
+ */
+function exitPositionWorld(house: HouseResult): { x: number; z: number; yaw: number } {
+  if (!house.pivot) {
+    const p = house.entity.getPosition()
+    return { x: p.x, z: p.z, yaw: house.exitPosition.yaw }
+  }
+  const w = toWorld(house.exitPosition, house.pivot)
+  return { x: w.x, z: w.z, yaw: house.exitPosition.yaw + house.pivot.yawDeg }
+}
 
 export class GardenEngine {
   private app: Application | null = null
@@ -962,7 +979,7 @@ export class GardenEngine {
         if (house && visitorId) {
           const character = this.sceneManager?.characterSystemRef?.getCharacter(visitorId)
           if (character) {
-            const exit = house.exitPosition
+            const exit = exitPositionWorld(house)
             character.entity.setPosition(exit.x, 0, exit.z)
             character.entity.setEulerAngles(0, exit.yaw, 0)
             character.entity.anim?.setBoolean('sitting', false)
@@ -992,9 +1009,10 @@ export class GardenEngine {
     // can snap the character to their sim position (bed/desk) before the
     // capsule is created.
     if (visitorId) {
-      const exitPos = exitMemberId
-        ? this.sceneManager?.memberHouseMap.get(exitMemberId)?.exitPosition
+      const exitHouse = exitMemberId
+        ? this.sceneManager?.memberHouseMap.get(exitMemberId)
         : null
+      const exitPos = exitHouse ? exitPositionWorld(exitHouse) : null
       await this.takeoverCharacter(visitorId, exitPos ?? undefined)
     }
   }
@@ -1412,19 +1430,21 @@ export class GardenEngine {
       console.debug('[GardenEngine] spawn override at', { x: spawnOverride.x.toFixed(2), z: spawnOverride.z.toFixed(2), yaw: spawnOverride.yaw })
     } else {
       const ownHouse = this.sceneManager.memberHouseMap.get(userId)
-      if (ownHouse) {
+      if (ownHouse && ownHouse.pivot) {
         const cp = character.entity.getPosition()
-        const bed = ownHouse.bedPosition
-        const dx = cp.x - bed.x
-        const dz = cp.z - bed.z
+        const bedW = toWorld(ownHouse.bedPosition, ownHouse.pivot)
+        const dx = cp.x - bedW.x
+        const dz = cp.z - bedW.z
         const nearBed = (dx * dx + dz * dz) < 9
+        const pivot = ownHouse.pivot
         const nearSeat = ownHouse.seats.some(s => {
-          const sx = cp.x - s.x
-          const sz = cp.z - s.z
+          const w = toWorld(s, pivot)
+          const sx = cp.x - w.x
+          const sz = cp.z - w.z
           return (sx * sx + sz * sz) < 4
         })
         if (nearBed || nearSeat) {
-          const exit = ownHouse.exitPosition
+          const exit = exitPositionWorld(ownHouse)
           character.entity.setPosition(exit.x, 0, exit.z)
           character.entity.setEulerAngles(0, exit.yaw, 0)
           character.entity.anim?.setBoolean('sitting', false)

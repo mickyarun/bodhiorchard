@@ -41,22 +41,26 @@ import {
   type PlayerData,
 } from '../../multiplayer'
 import { getInteractablesForTier } from '../housetest/SceneConfig'
+import { getHouseTierGeometry } from '@shared/world/HouseTiers'
 
-// Player spawn inside the room — clear of all furniture collision boxes
-const PLAYER_ENTER_X = 2.0
+/** Z offset from the back wall for the player's spawn — leaves walking room. */
 const PLAYER_ENTER_Z = 1.5
 
 /**
- * Get owner NPC seat position from the tier's interactable config.
- * Reads the actual laptop/bed seat coordinates so positions match the visual furniture.
+ * Get owner NPC seat position from the tier's interactable config. Reads the
+ * actual laptop/bed seat coordinates so positions match the visual furniture;
+ * falls back to the tier's canonical desk/bed geometry (shared with physics)
+ * when the housetest config is missing the entry.
  */
 function getOwnerSeat(tier: number, type: 'desk' | 'bed'): { x: number; z: number; yaw: number } {
   const interactables = getInteractablesForTier(tier)
   const id = type === 'desk' ? 'laptop' : 'bed'
   const item = interactables.find(i => i.id === id)
   if (item?.seat) return { x: item.seat.x, z: item.seat.z, yaw: item.seat.yaw }
-  // Fallback: center of room
-  return type === 'desk' ? { x: 2.0, z: 1.0, yaw: 180 } : { x: 1.0, z: 0.5, yaw: 0 }
+  const geom = getHouseTierGeometry(tier)
+  return type === 'desk'
+    ? { x: geom.desk.x, z: geom.desk.z, yaw: geom.desk.yaw }
+    : { x: geom.bed.x,  z: geom.bed.z,  yaw: 0 }
 }
 
 export class InteriorManager {
@@ -199,7 +203,10 @@ export class InteriorManager {
 
     // Spawn player with the visitor's character model (keeps identity when visiting others' houses)
     this.player = new PlayerController(this.loader, this.input)
-    await this.player.init(this.interiorRoot!, PLAYER_ENTER_X, PLAYER_ENTER_Z, this.visitorCharacterModel)
+    // Spawn X is the room centre so the player lands clear of the back wall
+    // regardless of tier width. Z is a fixed small offset from the back wall.
+    const playerEnterX = getHouseTierGeometry(this.currentHouseTier).width / 2
+    await this.player.init(this.interiorRoot!, playerEnterX, PLAYER_ENTER_Z, this.visitorCharacterModel)
     this.player.setCollisionBoxes(this.collisionBoxes)
 
     // Switch to interior camera
