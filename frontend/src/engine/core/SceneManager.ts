@@ -118,6 +118,8 @@ export class SceneManager {
   private _housingVillage: HousingVillage | null = null
   private _housingGatePosition: { x: number; z: number } | null = null
   private _housingFenceBounds: import('../buildings/VillageLayout').FenceBounds | null = null
+  /** Furthest village-fence corner from origin; see getOuterPerimeterRadius(). */
+  private _housingOuterReach: number = 0
 
   /** Member lookup by user_id — includes character_model for identity preservation when visiting houses. */
   private _memberDataMap = new Map<string, { user_id: string; name: string; character_model: string | null }>()
@@ -270,6 +272,7 @@ export class SceneManager {
       this._memberHouseMap = housingResult.memberHouseMap
       this._housingGatePosition = housingResult.gatePosition
       this._housingFenceBounds = housingResult.fenceBounds
+      this._housingOuterReach = housingResult.outerReach
     }
 
     if (poolZone) {
@@ -548,7 +551,7 @@ export class SceneManager {
       if (this.bodhiTrunk) {
         builder.registerHubAnchor(this.bodhiTrunk)
       }
-      builder.registerPerimeter(this.layout.getWorldRadius() + 8)
+      builder.registerPerimeter(this.getOuterPerimeterRadius())
       if (this._housingFenceBounds && this._housingGatePosition) {
         builder.registerRectFence(this._housingFenceBounds, this._housingGatePosition)
       }
@@ -609,6 +612,17 @@ export class SceneManager {
     }
   }
 
+  /**
+   * Outer perimeter radius used by BOTH the visual rail fence and the
+   * Rapier physics collider. Taking the max of the static zone-derived
+   * world radius and the dynamic village reach means the rail grows to
+   * enclose the housing village when house count pushes its footprint
+   * beyond the fixed `housing` zone radius in `shared/world/zones.ts`.
+   */
+  private getOuterPerimeterRadius(): number {
+    return Math.max(this.layout.getWorldRadius(), this._housingOuterReach) + 8
+  }
+
   private buildZoneFences(factory: BuildingFactory): void {
     if (!factory.materialFactory) return
     const fence = new CircularFence(factory.materialFactory)
@@ -630,9 +644,7 @@ export class SceneManager {
     }
 
     // ── Outer campus perimeter (light rail) ────────────────────────────────────
-    // worldRadius is the furthest zone edge from origin (~51 units).
-    // +8 gives a comfortable visual margin before the green ground fades out.
-    const outerRadius = this.layout.getWorldRadius() + 8
+    const outerRadius = this.getOuterPerimeterRadius()
     this.buildingEntities.push(fence.build(this.app.root, {
       radius:    outerRadius,
       cx:        0,
@@ -696,6 +708,7 @@ export class SceneManager {
     this._housingVillage = null
     this._housingGatePosition = null
     this._housingFenceBounds = null
+    this._housingOuterReach = 0
     this._memberHouseMap.clear()
     this._memberDataMap.clear()
 

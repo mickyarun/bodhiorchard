@@ -39,6 +39,8 @@ export interface HousingVillageResult {
   memberHouseMap: Map<string, HouseResult>
   fenceRadius: number
   fenceBounds: FenceBounds
+  /** Distance from world origin to the furthest village fence corner. */
+  outerReach: number
   /** World-space gate entrance point — PathSystem routes to here. */
   gatePosition: { x: number; z: number }
 }
@@ -82,6 +84,7 @@ export class HousingVillage {
         exclusionZone: { x: 0, z: 0, radius: 0 },
         seats: allSeats, memberHouseMap,
         fenceRadius: 10, fenceBounds: emptyBounds,
+        outerReach: 0,
         gatePosition: { x: 0, z: 0 },
       }
     }
@@ -128,6 +131,7 @@ export class HousingVillage {
       seats: allSeats, memberHouseMap,
       fenceRadius: layout.fenceRadius,
       fenceBounds: layout.fenceBounds,
+      outerReach: layout.outerReach,
       gatePosition,
     }
   }
