@@ -82,6 +82,13 @@ export interface VillageLayoutResult {
   streets: StreetDef[]
   fenceRadius: number
   fenceBounds: FenceBounds
+  /**
+   * Distance from world origin (0, 0) to the furthest corner of `fenceBounds`.
+   * Used by the outer campus perimeter so it grows to enclose the village
+   * when the static `housing` zone radius in `shared/world/zones.ts` is
+   * smaller than the member-count-driven village footprint.
+   */
+  outerReach: number
   center: { x: number; z: number }
 }
 
@@ -97,6 +104,7 @@ export function computeVillageLayout(
     return {
       placements: [], streets: [], fenceRadius: 5,
       fenceBounds: { minX: centerX - 5, maxX: centerX + 5, minZ: centerZ - 5, maxZ: centerZ + 5 },
+      outerReach: 0,
       center: { x: centerX, z: centerZ },
     }
   }
@@ -204,11 +212,28 @@ export function computeVillageLayout(
   // Circular radius for backward compat (multiplayer WorldLayout.ts)
   const fenceRadius = halfExtent * Math.SQRT2
 
+  // Max distance from world origin to any fence corner. Literal max over the
+  // 4 corners rather than hypot(max|x|, max|z|) — the two agree when the
+  // rectangle sits entirely in one quadrant (true for the current housing
+  // zone at -30,40) but diverge if a future layout straddles the origin.
+  const corners = [
+    [fenceBounds.minX, fenceBounds.minZ],
+    [fenceBounds.minX, fenceBounds.maxZ],
+    [fenceBounds.maxX, fenceBounds.minZ],
+    [fenceBounds.maxX, fenceBounds.maxZ],
+  ] as const
+  let outerReach = 0
+  for (const [x, z] of corners) {
+    const d = Math.hypot(x, z)
+    if (d > outerReach) outerReach = d
+  }
+
   return {
     placements,
     streets: streetDefs,
     fenceRadius: Math.max(fenceRadius, 8),
     fenceBounds,
+    outerReach,
     center: { x: centerX, z: centerZ },
   }
 }
