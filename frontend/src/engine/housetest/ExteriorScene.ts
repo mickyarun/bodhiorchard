@@ -31,7 +31,8 @@ import {
   computeVillageLayout,
   type VillagePlacement,
   type VillageLayoutResult,
-} from '../buildings/VillageLayout'
+} from '@shared/world/VillageLayout'
+import type { Zone } from '@shared/world/zones'
 
 const GROUND_COLOR = { r: 0.45, g: 0.65, b: 0.35 }
 
@@ -72,7 +73,10 @@ export class ExteriorScene {
 
   async build(root: pc.Entity, physics: PhysicsWorld, memberCount = 5): Promise<void> {
     const members = generateMockMembers(memberCount)
-    const layout = computeVillageLayout(members, 0, 0)
+    // Housetest renders in isolation at origin with no village yaw; synthesise
+    // a minimal zone so computeVillageLayout has the shape it expects.
+    const testZone: Zone = { name: 'housetest', tier: 'habitation', x: 0, z: 0, radius: 14 }
+    const layout = computeVillageLayout(members, testZone)
     this.layout = layout
 
     // Ground — sized to fit the square fence

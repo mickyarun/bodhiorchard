@@ -12,7 +12,7 @@
  */
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
-import type { FenceBounds } from '../buildings/VillageLayout'
+import type { FenceBounds } from '@shared/world/VillageLayout'
 import {
   POST_HEIGHT, POST_WIDTH, PANEL_HEIGHT, PANEL_THICKNESS,
   GATE_POST_W, GATE_POST_H, GATE_WIDTH,

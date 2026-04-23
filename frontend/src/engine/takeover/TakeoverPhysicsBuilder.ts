@@ -23,7 +23,7 @@ import type RAPIER_NS from '@dimforge/rapier3d'
 import type { PhysicsWorld } from '../physics'
 import { WALL_HEIGHT, type HouseResult } from '../buildings/HouseBuilder'
 import { getHouseTier } from '../buildings/HouseTierConfig'
-import type { FenceBounds } from '../buildings/VillageLayout'
+import type { FenceBounds } from '@shared/world/VillageLayout'
 import { SOLID_SEGMENT_WIDTH, GATE_WIDTH } from '../world/FenceConstants'
 
 // ─── Constants ─────────────────────────────────
@@ -93,10 +93,12 @@ export class TakeoverPhysicsBuilder {
    * can tear them down on tier change.
    */
   registerHouse(memberId: string, house: HouseResult): void {
-    // Use explicit pivot data (plain numbers, no entity transform dependencies)
-    const px = house.pivotX ?? house.entity.getPosition().x
-    const pz = house.pivotZ ?? house.entity.getPosition().z
-    const yawDeg = house.pivotYaw ?? house.entity.getEulerAngles().y
+    // house.pivot carries the WORLD position + composed yaw (house + village)
+    // written by HousingVillage.wrapWithPivot. Fallback to entity transform is
+    // only for un-wrapped HouseResult (shouldn't happen in normal build flow).
+    const px = house.pivot?.x ?? house.entity.getPosition().x
+    const pz = house.pivot?.z ?? house.entity.getPosition().z
+    const yawDeg = house.pivot?.yawDeg ?? house.entity.getEulerAngles().y
     const yawRad = yawDeg * Math.PI / 180
 
     const tierDef = getHouseTier(house.tier ?? 1)
@@ -281,88 +283,85 @@ export class TakeoverPhysicsBuilder {
 
   /**
    * Register a rectangular fence as 4 wall colliders matching a visual
-   * RectangularFence. A gate gap is created on the wall closest to
-   * `gatePosition` (same logic as RectangularFence.computeGateSide).
+   * RectangularFence, optionally rotated by a village yaw.
+   *
+   * All `bounds` / `gatePositionLocal` coordinates are in the village's
+   * ZONE-LOCAL frame (axis-aligned, centred on 0,0). The caller passes
+   * `villageCenter` (world) + `villageYawRad` (radians); walls are
+   * constructed in local space and rotated into world before they're
+   * written to the Rapier world. Pass `villageYawRad=0` + `villageCenter`
+   * equal to the bounds' world centre for the legacy axis-aligned
+   * behaviour.
    */
   registerRectFence(
     bounds: FenceBounds,
-    gatePosition: { x: number; z: number },
+    gatePositionLocal: { x: number; z: number },
+    villageCenter: { x: number; z: number },
+    villageYawRad: number,
     gateWidth = GATE_WIDTH,
   ): void {
     const { minX, maxX, minZ, maxZ } = bounds
     const halfH = HOUSE_WALL_HEIGHT / 2
     const thick = HOUSE_WALL_THICK
 
-    // 4 walls: each is a thin box along one edge of the rectangle.
-    // The gate gap is cut into whichever wall the gate sits on.
+    // 4 walls in LOCAL frame; rotation + translation applied at emit time.
     const walls: Array<{
       cx: number; cz: number; halfW: number; halfD: number; yawRad: number
       isGateSide: boolean; wallLen: number
     }> = [
-      // north (minZ edge, runs along X)
       { cx: (minX + maxX) / 2, cz: minZ, halfW: (maxX - minX) / 2, halfD: thick, yawRad: 0,
         isGateSide: false, wallLen: maxX - minX },
-      // south (maxZ edge, runs along X)
       { cx: (minX + maxX) / 2, cz: maxZ, halfW: (maxX - minX) / 2, halfD: thick, yawRad: 0,
         isGateSide: false, wallLen: maxX - minX },
-      // west (minX edge, runs along Z)
       { cx: minX, cz: (minZ + maxZ) / 2, halfW: (maxZ - minZ) / 2, halfD: thick, yawRad: Math.PI / 2,
         isGateSide: false, wallLen: maxZ - minZ },
-      // east (maxX edge, runs along Z)
       { cx: maxX, cz: (minZ + maxZ) / 2, halfW: (maxZ - minZ) / 2, halfD: thick, yawRad: Math.PI / 2,
         isGateSide: false, wallLen: maxZ - minZ },
     ]
 
-    // Find which wall the gate is closest to
+    // Gate-wall detection runs in LOCAL (unrotated) so it stays a simple
+    // axis-aligned distance compare — matches how RectangularFence picks
+    // the side visually and avoids trig for this check.
     const dists = [
-      Math.abs(gatePosition.z - minZ),  // north
-      Math.abs(gatePosition.z - maxZ),  // south
-      Math.abs(gatePosition.x - minX),  // west
-      Math.abs(gatePosition.x - maxX),  // east
+      Math.abs(gatePositionLocal.z - minZ),  // north
+      Math.abs(gatePositionLocal.z - maxZ),  // south
+      Math.abs(gatePositionLocal.x - minX),  // west
+      Math.abs(gatePositionLocal.x - maxX),  // east
     ]
     const gateIdx = dists.indexOf(Math.min(...dists))
     walls[gateIdx].isGateSide = true
 
+    // Apply village rotation + translation when emitting each box.
+    const cos = Math.cos(villageYawRad)
+    const sin = Math.sin(villageYawRad)
+    const emit = (lx: number, lz: number, localHalfW: number, localHalfD: number, localYaw: number) => {
+      const wx = villageCenter.x + lx * cos + lz * sin
+      const wz = villageCenter.z - lx * sin + lz * cos
+      this.physics.addStaticBoxRotated(
+        wx, halfH, wz,
+        localHalfW, halfH, localHalfD,
+        localYaw + villageYawRad,
+      )
+    }
+
     for (const wall of walls) {
       if (!wall.isGateSide) {
-        // Full wall — single box
-        this.physics.addStaticBoxRotated(
-          wall.cx, halfH, wall.cz,
-          wall.halfW, halfH, wall.halfD,
-          wall.yawRad,
-        )
+        emit(wall.cx, wall.cz, wall.halfW, wall.halfD, wall.yawRad)
+        continue
+      }
+      // Gate wall: split into two panels around the gap. Gate is always
+      // centred on the wall (same as the visual RectangularFence).
+      const gapHalf = gateWidth / 2
+      const panelLen = (wall.wallLen - gateWidth) / 2
+      if (panelLen <= 0) continue  // gate wider than wall — skip
+      const panelHalfW = panelLen / 2
+      const offset = gapHalf + panelHalfW
+      if (wall.yawRad === 0) {
+        emit(wall.cx - offset, wall.cz, panelHalfW, wall.halfD, 0)
+        emit(wall.cx + offset, wall.cz, panelHalfW, wall.halfD, 0)
       } else {
-        // Split wall into two panels around the gate gap.
-        // Gate is centered on the wall; each panel covers from wall edge to gap edge.
-        const gapHalf = gateWidth / 2
-        const panelLen = (wall.wallLen - gateWidth) / 2
-        if (panelLen <= 0) continue  // gate wider than wall — skip
-
-        const panelHalfW = panelLen / 2
-        // Offset from wall center to panel center along the wall's long axis
-        const offset = gapHalf + panelHalfW
-
-        if (wall.yawRad === 0) {
-          // X-aligned wall: panels offset along X
-          this.physics.addStaticBoxRotated(
-            wall.cx - offset, halfH, wall.cz,
-            panelHalfW, halfH, wall.halfD, 0,
-          )
-          this.physics.addStaticBoxRotated(
-            wall.cx + offset, halfH, wall.cz,
-            panelHalfW, halfH, wall.halfD, 0,
-          )
-        } else {
-          // Z-aligned wall: panels offset along Z
-          this.physics.addStaticBoxRotated(
-            wall.cx, halfH, wall.cz - offset,
-            panelHalfW, halfH, wall.halfD, Math.PI / 2,
-          )
-          this.physics.addStaticBoxRotated(
-            wall.cx, halfH, wall.cz + offset,
-            panelHalfW, halfH, wall.halfD, Math.PI / 2,
-          )
-        }
+        emit(wall.cx, wall.cz - offset, panelHalfW, wall.halfD, Math.PI / 2)
+        emit(wall.cx, wall.cz + offset, panelHalfW, wall.halfD, Math.PI / 2)
       }
     }
   }

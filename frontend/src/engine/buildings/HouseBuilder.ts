@@ -133,19 +133,38 @@ function createHouseNameboard(
 /** Max seats per house across all tiers — used as seat index stride to prevent collisions in mixed-tier villages. */
 const SEATS_PER_HOUSE = 4
 
+/**
+ * World-space pivot of a placed house. Carries the composed rotation
+ * (house yaw + village yaw) so consumers can always map HouseResult's
+ * LOCAL coordinates to world via `toWorld(localPoint, pivot)`.
+ */
+export interface HousePivot {
+  x: number
+  z: number
+  yawDeg: number
+}
+
 export interface HouseResult {
   entity: pc.Entity
   memberId: string
   memberName: string
   characterModel: string | null
   tier: number
+  /** Bed mattress surface position — LOCAL to the house tile (corner-origin). */
   bedPosition: { x: number; y: number; z: number }
+  /** Interaction seats — LOCAL to the house tile. Consumers use `toWorld(seat, pivot)`. */
   seats: InteractionPoint[]
+  /** Door exit spawn — LOCAL to the house tile. */
   exitPosition: { x: number; z: number; yaw: number }
-  /** Pivot center + yaw, set by HousingVillage. Used by TakeoverPhysicsBuilder. */
-  pivotX?: number
-  pivotZ?: number
-  pivotYaw?: number
+  /**
+   * World-space pivot + composed yaw. Written by `HousingVillage.wrapWithPivot`
+   * after placement. The sole authoritative transform from house-local
+   * coordinates to world space — consumers read `pivot` and apply
+   * `toWorld` rather than reading `seats`/`bedPosition` as world directly.
+   *
+   * Undefined for a freshly-built (un-placed) HouseResult; set once wrapped.
+   */
+  pivot?: HousePivot
   /**
    * Measured world-space half-extents of the KayKit exterior GLB after scaling.
    * Set only for tier 2/3 where the visual comes from a loaded model whose
