@@ -123,7 +123,9 @@ class RewardEventRepository:
         return event
 
     async def list_for_user(
-        self, user_id: uuid.UUID, limit: int = 50,
+        self,
+        user_id: uuid.UUID,
+        limit: int = 50,
     ) -> list[RewardEvent]:
         """Recent reward events for a user, newest first."""
         stmt = (

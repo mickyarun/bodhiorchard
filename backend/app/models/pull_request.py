@@ -61,10 +61,13 @@ class PullRequest(BaseModel):
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False,
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id"),
+        nullable=False,
     )
     bud_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("bud_documents.id", ondelete="CASCADE"),
+        UUID(as_uuid=True),
+        ForeignKey("bud_documents.id", ondelete="CASCADE"),
         nullable=True,
     )
     repo_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -75,7 +78,8 @@ class PullRequest(BaseModel):
     github_pr_number: Mapped[int] = mapped_column(Integer, nullable=False)
     github_pr_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     github_repo_full_name: Mapped[str] = mapped_column(
-        String(255), nullable=False,
+        String(255),
+        nullable=False,
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -88,21 +92,25 @@ class PullRequest(BaseModel):
         default=PRState.OPEN,
     )
     author_github_login: Mapped[str] = mapped_column(
-        String(100), nullable=False,
+        String(100),
+        nullable=False,
     )
     author_user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
     merged_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
     # SHA written to the base branch on merge (works for merge / squash /
     # rebase strategies). Captured from GitHub's pull_request.closed payload
     # via GitHubPullRequest.merge_commit_sha. Used by release-stage detection
     # to match which BUDs a downstream release PR carries.
     merge_commit_sha: Mapped[str | None] = mapped_column(
-        String(40), nullable=True,
+        String(40),
+        nullable=True,
     )
     review_status: Mapped[PRReviewStatus] = mapped_column(
         Enum(

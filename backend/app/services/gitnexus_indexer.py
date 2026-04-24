@@ -106,8 +106,7 @@ def _summarize_npx_failure(stderr: str, returncode: int) -> tuple[str, str | Non
         hint: str | None = None
         if code == "ENOTEMPTY":
             hint = (
-                "Clear the npx cache and retry: rm -rf ~/.npm/_npx "
-                "(or `npm cache clean --force`)."
+                "Clear the npx cache and retry: rm -rf ~/.npm/_npx (or `npm cache clean --force`)."
             )
         elif code in {"EACCES", "EPERM"}:
             hint = "Check file permissions on ~/.npm and the repo directory."
