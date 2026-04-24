@@ -435,7 +435,7 @@
           variant="outlined"
           hide-details
           :min="60"
-          :max="1800"
+          :max="3600"
           class="flex-grow-1"
         />
         <v-text-field
