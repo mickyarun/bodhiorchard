@@ -1,10 +1,10 @@
 <template>
   <v-card
     class="pa-5 settings-card"
-    :class="{ 'settings-card--active': settingsStore.connections.slack.enabled }"
+    :class="{ 'settings-card--active': settingsStore.connections.slack.connected }"
     color="surface"
   >
-    <div class="d-flex align-center justify-space-between mb-1">
+    <div class="d-flex align-center justify-space-between" :class="showDetails ? 'mb-4' : ''">
       <div class="d-flex align-center ga-3">
         <v-avatar size="36" color="primary" variant="tonal" rounded="lg">
           <v-icon icon="mdi-slack" size="22" />
@@ -14,16 +14,27 @@
           <div class="text-caption text-medium-emphasis">Feature intake &amp; agent triggers</div>
         </div>
       </div>
-      <v-switch
-        v-model="settingsStore.connections.slack.enabled"
-        hide-details
-        density="compact"
-        color="primary"
-      />
+      <div class="d-flex align-center ga-2">
+        <v-chip
+          :color="settingsStore.connections.slack.connected ? 'success' : 'grey'"
+          size="x-small"
+          variant="tonal"
+        >
+          {{ settingsStore.connections.slack.connected ? 'Connected' : 'Not set up' }}
+        </v-chip>
+        <v-btn
+          v-if="settingsStore.connections.slack.connected"
+          :icon="showDetails ? 'mdi-chevron-up' : 'mdi-pencil-outline'"
+          size="x-small"
+          variant="text"
+          :title="showDetails ? 'Collapse' : 'Edit settings'"
+          @click="showDetails = !showDetails"
+        />
+      </div>
     </div>
 
     <v-expand-transition>
-      <div v-if="settingsStore.connections.slack.enabled" class="mt-4">
+      <div v-if="showDetails">
         <v-text-field
           v-model="settingsStore.connections.slack.botToken"
           label="Bot Token"
@@ -372,13 +383,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useMembersStore } from '@/stores/members'
 import api from '@/services/api'
 
 const settingsStore = useSettingsStore()
 const membersStore = useMembersStore()
+
+// Collapse the setup form when Slack credentials are already stored so the
+// card renders compactly. Expand via the edit button when the user wants to
+// rotate tokens or view the manifest / event subscription docs.
+const showDetails = ref(!settingsStore.connections.slack.connected)
+watch(
+  () => settingsStore.connections.slack.connected,
+  (connected) => { showDetails.value = !connected },
+)
 
 const slackManifestOpen = ref(false)
 const slackEventsOpen = ref(false)

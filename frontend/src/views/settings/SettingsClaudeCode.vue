@@ -1,5 +1,5 @@
 <template>
-  <v-card class="pa-6 settings-card" color="surface">
+  <v-card class="pa-5 settings-card claude-card" color="surface">
     <div class="d-flex align-center ga-3 mb-1">
       <v-avatar size="36" color="surface-variant" rounded="lg">
         <v-icon icon="mdi-console" size="22" />
@@ -28,32 +28,46 @@
 
     <v-divider class="my-4" />
 
-    <div class="text-body-2 font-weight-medium mb-2">Authentication mode</div>
-    <v-radio-group v-model="authMode" density="compact" hide-details class="mb-3">
-      <v-radio value="host">
-        <template #label>
-          <div>
-            <div class="text-body-2">Hybrid / host login</div>
-            <div class="text-caption text-medium-emphasis">
-              Trust the host's <code>claude login</code> (Hybrid mode) or a
-              compose-level <code>ANTHROPIC_API_KEY</code> passed through to
-              the backend. Nothing stored in the database.
-            </div>
+    <div class="text-body-2 font-weight-medium mb-3">Authentication mode</div>
+    <div role="radiogroup" aria-label="Authentication mode" class="auth-mode-tiles mb-4">
+      <button
+        v-for="opt in authOptions"
+        :key="opt.value"
+        type="button"
+        role="radio"
+        :aria-checked="authMode === opt.value"
+        class="auth-tile"
+        :class="{ 'auth-tile--active': authMode === opt.value }"
+        @click="authMode = opt.value"
+        @keydown.space.prevent="authMode = opt.value"
+      >
+        <div class="auth-tile__indicator">
+          <v-icon
+            :icon="authMode === opt.value ? 'mdi-radiobox-marked' : 'mdi-radiobox-blank'"
+            :color="authMode === opt.value ? 'primary' : undefined"
+            size="20"
+          />
+        </div>
+        <div class="auth-tile__body">
+          <div class="auth-tile__header">
+            <v-icon :icon="opt.icon" size="18" class="auth-tile__icon" />
+            <span class="text-body-2 font-weight-medium">{{ opt.title }}</span>
+            <v-chip
+              v-if="opt.badge"
+              size="x-small"
+              variant="tonal"
+              color="primary"
+              class="auth-tile__badge"
+            >
+              {{ opt.badge }}
+            </v-chip>
           </div>
-        </template>
-      </v-radio>
-      <v-radio value="api_key">
-        <template #label>
-          <div>
-            <div class="text-body-2">API key (Full Docker)</div>
-            <div class="text-caption text-medium-emphasis">
-              Paste an Anthropic API key. Stored encrypted (Fernet AES-128).
-              Applied to every agent run launched from this backend.
-            </div>
+          <div class="text-caption text-medium-emphasis auth-tile__desc">
+            {{ opt.description }}
           </div>
-        </template>
-      </v-radio>
-    </v-radio-group>
+        </div>
+      </button>
+    </div>
 
     <v-expand-transition>
       <div v-if="authMode === 'api_key'" class="mb-3">
@@ -132,6 +146,30 @@ const authMode = ref<AuthMode>('host')
 const apiKey = ref('')
 const hasStoredKey = ref(false)
 const saving = ref(false)
+
+const authOptions: ReadonlyArray<{
+  value: AuthMode
+  title: string
+  icon: string
+  description: string
+  badge?: string
+}> = [
+  {
+    value: 'host',
+    title: 'Hybrid / host login',
+    icon: 'mdi-laptop',
+    badge: 'Recommended',
+    description:
+      "Uses the host machine's claude login session or an ANTHROPIC_API_KEY env var. Nothing is stored in the database.",
+  },
+  {
+    value: 'api_key',
+    title: 'API key (Full Docker)',
+    icon: 'mdi-key-variant',
+    description:
+      'Paste an Anthropic API key. Stored encrypted with Fernet AES-128 and applied to every agent run.',
+  },
+]
 
 const claudeStatus = ref<Status>('idle')
 const claudeError = ref('')
@@ -233,3 +271,77 @@ function applyTestResult(data: {
   }
 }
 </script>
+
+<style scoped>
+.auth-mode-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  border-radius: 10px;
+  background: rgba(var(--v-theme-surface-variant), 0.25);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.auth-tile:hover {
+  border-color: rgba(var(--v-theme-primary), 0.5);
+  background: rgba(var(--v-theme-surface-variant), 0.4);
+}
+
+.auth-tile:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
+}
+
+.auth-tile--active {
+  border-color: rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.08);
+}
+
+.auth-tile__indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 1px;
+  flex: 0 0 auto;
+}
+
+.auth-tile__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.auth-tile__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.auth-tile__icon {
+  opacity: 0.85;
+}
+
+.auth-tile__badge {
+  height: 18px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.auth-tile__desc {
+  line-height: 1.5;
+}
+</style>

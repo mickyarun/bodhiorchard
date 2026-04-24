@@ -22,6 +22,7 @@ class GitHubSettings(BaseModel):
     """GitHub App integration settings (read response)."""
 
     enabled: bool = False
+    connected: bool = False
     app_id: int | None = Field(None, alias="appId")
     has_private_key: bool = Field(False, alias="hasPrivateKey")
     installation_id: int | None = Field(None, alias="installationId")
@@ -45,6 +46,11 @@ class SlackSettings(BaseModel):
     """Slack integration settings."""
 
     enabled: bool = False
+    # `connected` is the source of truth for "does this org have Slack
+    # credentials stored", independent of the user-controlled toggle.
+    # The settings UI uses this to render the connected state so the
+    # badge doesn't drift from the actual credential state in the DB.
+    connected: bool = False
     bot_token: str = Field(default="", alias="botToken")
     signing_secret: str = Field(default="", alias="signingSecret")
     team_id: str = Field(default="", alias="teamId")
