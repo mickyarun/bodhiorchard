@@ -31,7 +31,6 @@ from app.services.repo_cloner import clone_or_update
 from app.services.repo_scanner import (
     _detect_develop_branch,
     _detect_main_branch,
-    detect_repo_type,
     detect_uncommitted_changes,
     list_remote_branches,
 )
@@ -93,18 +92,6 @@ async def list_repos(
     all_ds = await ds_repo.list_all()
     ds_repo_ids = {str(ds.repo_id) for ds in all_ds}
 
-    # ``detect_repo_type`` walks 23 platform detectors × filesystem reads
-    # per repo — ~600-1400ms on a cold cache. Inline for 21 repos this
-    # blocks the event loop for ~14s and starves every other concurrent
-    # request. Parallelising across repos just thrashes the disk (worse
-    # total wall time), so we run the probes sequentially inside a single
-    # worker thread: loop stays responsive, subsequent calls hit the
-    # lru_cache on ``detect_repo_type``.
-    def _probe_all() -> list[tuple[str | None, str]]:
-        return [(detect_repo_type(r.path), _detect_setup_status(r.path)) for r in repos]
-
-    fs_results = await asyncio.to_thread(_probe_all)
-
     return [
         RepoInfo(
             id=str(r.id),
@@ -119,12 +106,11 @@ async def list_repos(
             developBranch=r.develop_branch,
             uatBranch=r.uat_branch,
             hasUncommittedChanges=False,
-            repoType=repo_type,
             githubRepo=r.github_repo_full_name,
-            setupStatus=setup_status,
+            setupStatus=_detect_setup_status(r.path),
             designSystemStatus=_detect_design_system_status(str(r.id), ds_repo_ids),
         )
-        for r, (repo_type, setup_status) in zip(repos, fs_results, strict=True)
+        for r in repos
     ]
 
 
@@ -194,7 +180,6 @@ async def add_repo(
         developBranch=repo.develop_branch,
         uatBranch=repo.uat_branch,
         hasUncommittedChanges=has_dirty,
-        repoType=await asyncio.to_thread(detect_repo_type, str(repo_path)),
         githubRepo=repo.github_repo_full_name,
     )
 
@@ -276,7 +261,6 @@ async def clone_and_add_repo(
         developBranch=repo.develop_branch,
         uatBranch=repo.uat_branch,
         hasUncommittedChanges=has_dirty,
-        repoType=await asyncio.to_thread(detect_repo_type, str(repo_path)),
         githubRepo=repo.github_repo_full_name,
     )
 
@@ -367,7 +351,6 @@ async def update_repo_status(
         developBranch=repo.develop_branch,
         uatBranch=repo.uat_branch,
         hasUncommittedChanges=False,
-        repoType=await asyncio.to_thread(detect_repo_type, repo.path),
         githubRepo=repo.github_repo_full_name,
     )
 
@@ -460,7 +443,6 @@ async def update_repo_branches(
         developBranch=repo.develop_branch,
         uatBranch=repo.uat_branch,
         hasUncommittedChanges=False,
-        repoType=await asyncio.to_thread(detect_repo_type, repo.path),
         githubRepo=repo.github_repo_full_name,
     )
 
