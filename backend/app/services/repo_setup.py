@@ -9,6 +9,7 @@ updating ``.gitignore``, adding a ``prepare`` script to ``package.json``,
 and committing + pushing the result as a PR-ready branch.
 """
 
+import functools
 import json
 import shutil
 import textwrap
@@ -27,22 +28,6 @@ logger = structlog.get_logger(__name__)
 
 
 # ── Constants ──────────────────────────────────────────────────────
-
-_FRONTEND_DEPS = frozenset(
-    {
-        "vue",
-        "react",
-        "react-dom",
-        "next",
-        "nuxt",
-        "@angular/core",
-        "svelte",
-        "@sveltejs/kit",
-        "vuetify",
-        "@mui/material",
-        "tailwindcss",
-    }
-)
 
 _HOOK_MARKER = "# installed-by-bodhiorchard"
 
@@ -212,24 +197,40 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
 # ── Repo type detection ───────────────────────────────────────────
 
 
+@functools.lru_cache(maxsize=256)
 def detect_repo_type(repo_path: str) -> str | None:
-    """Detect if repo is 'frontend' or 'backend' by checking package.json deps.
+    """Classify a repo as 'frontend' or 'backend' for the settings UI badge.
+
+    Delegates to :func:`app.services.platforms.detect_platform` and maps any
+    UI-bearing platform (web, mobile, desktop, static site, tokens-only) to
+    the coarse ``"frontend"`` label the settings UI expects. All other repos
+    — including those with no recognizable markers — fall to ``"backend"``.
+
+    This function exists only for the settings-UI surface. New code should
+    call ``detect_platform`` directly to access the full platform metadata.
+
+    Result is cached per path: each call walks 23 platform detectors with
+    filesystem reads, which costs ~600-1400ms on a warm disk. A repo's
+    platform almost never changes mid-process, and the cache resets on
+    every worker restart (so ``--reload`` picks up schema changes). For a
+    manual cache bust (e.g. after moving files) call
+    ``detect_repo_type.cache_clear()``.
 
     Args:
         repo_path: Absolute path to the git repository.
 
     Returns:
-        'frontend', 'backend', or None if detection fails.
+        'frontend' if a UI-bearing platform is detected, else 'backend'.
+        In practice ``None`` is unreachable because ``backend_fallback``
+        always matches; the ``| None`` return type is retained only because
+        the settings schema's ``repoType`` field is nullable.
     """
-    pkg_path = Path(repo_path) / "package.json"
-    if not pkg_path.exists():
+    from app.services.platforms import UI_KINDS, detect_platform
+
+    platform = detect_platform(Path(repo_path))
+    if platform is None:
         return "backend"
-    try:
-        pkg = json.loads(pkg_path.read_text())
-        all_deps = set(pkg.get("dependencies", {})) | set(pkg.get("devDependencies", {}))
-        return "frontend" if all_deps & _FRONTEND_DEPS else "backend"
-    except (json.JSONDecodeError, OSError):
-        return None
+    return "frontend" if platform.kind in UI_KINDS else "backend"
 
 
 # ── Worktree management ───────────────────────────────────────────
@@ -1295,9 +1296,7 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
     # overwrite dirty files. Stash everything (including untracked) so the
     # switch is clean; we pop the stash back in the ``finally`` below so
     # the staging step below still has the files to commit.
-    _, _, dirty_rc = await run_git(
-        ["diff-index", "--quiet", "HEAD", "--"], cwd=repo_path
-    )
+    _, _, dirty_rc = await run_git(["diff-index", "--quiet", "HEAD", "--"], cwd=repo_path)
     _, untracked_out, _ = await run_git(
         ["ls-files", "--others", "--exclude-standard"], cwd=repo_path
     )

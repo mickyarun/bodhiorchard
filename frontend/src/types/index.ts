@@ -393,18 +393,10 @@ export interface KnowledgeItem {
   repoIds: string[]
 }
 
-export interface KnowledgeSearchResult extends KnowledgeItem {
-  score: number
+export interface KnowledgeItemPage {
+  items: KnowledgeItem[]
+  total: number
 }
-
-export const KNOWLEDGE_CATEGORIES = [
-  { value: '', label: 'All' },
-  { value: 'feature_registry', label: 'Features' },
-  { value: 'code_doc', label: 'Code Docs' },
-  { value: 'api_pattern', label: 'API Patterns' },
-  { value: 'architecture', label: 'Architecture' },
-  { value: 'convention', label: 'Conventions' },
-] as const
 
 export const FEATURE_STATUS_COLORS: Record<string, string> = {
   planned: 'info',
