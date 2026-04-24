@@ -7,7 +7,9 @@ No database access, no LLM calls — just math. This keeps the estimation
 logic testable and deterministic (seed-able for reproducible tests).
 """
 
+import math
 import random
+import statistics
 from datetime import date, timedelta
 from typing import NamedTuple
 
@@ -54,45 +56,59 @@ def pert_std_dev(est: PERTEstimate) -> float:
     return (est.pessimistic - est.optimistic) / 6
 
 
-def default_pert_spread(
-    complexity: int,
-    backlog_depth: int,
-    assignee_workload: int,
-    phase_order: list[str] | None = None,
-) -> dict[str, PERTEstimate]:
-    """Generate conservative PERT spreads from defaults when LLM is unavailable.
+# Vose's Beta-PERT shape parameter. The canonical value λ=4 makes the
+# Beta-PERT distribution's mean equal the PERT expected value
+# (O + 4M + P) / 6, which keeps `beta_pert_sample` and `pert_expected`
+# mathematically consistent. See https://www.riskamp.com/beta-pert/ for
+# the derivation.
+_BETA_PERT_LAMBDA = 4.0
 
-    Scales base durations by complexity (1-5), backlog depth, and workload.
+# Wall-clock divisor floor for capacity-aware Monte Carlo. A capacity
+# below this would imply a >10× stretch — past the point where
+# deterministic forecasting is meaningful. Lives here (the lower-level
+# engine module) so ``capacity_provider`` can import it without creating
+# a cycle.
+MIN_CAPACITY = 0.1
 
-    Args:
-        complexity: 1-5 scale for feature complexity.
-        backlog_depth: Number of buds in the assignee's queue.
-        assignee_workload: Current workload factor for the assignee.
-        phase_order: Optional subset/ordering of phases to include. When
-            None, uses all phases from ``DEFAULT_PHASE_DAYS``. Pass a
-            filtered list (e.g. excluding "uat") when the caller knows
-            the org has certain phases disabled. Backward compatible:
-            omitting this argument preserves the original behaviour.
+
+def beta_pert_sample(
+    rng: random.Random,
+    optimistic: float,
+    most_likely: float,
+    pessimistic: float,
+) -> float:
+    """Draw a single sample from the Vose Beta-PERT distribution.
+
+    Shape parameters follow the standard Vose form with λ=4:
+        α = 1 + λ·(M − O)/(P − O)
+        β = 1 + λ·(P − M)/(P − O)
+    The sample is then `O + (P − O) · Beta(α, β)`.
+
+    Beta-PERT is preferred over a triangular distribution for project
+    three-point estimates because it places more weight on the mode and
+    smoother weight in the tails, producing ~8–15 % better P80 accuracy
+    in published schedule-risk studies (RiskAMP, Safran).
+
+    Zero-spread input (O = M = P) short-circuits to the single value —
+    otherwise the α/β formulae divide by zero.
     """
-    complexity_factor = complexity / 3.0
-    queue_factor = 1 + (backlog_depth * 0.3)
-    workload_factor = 1 + (assignee_workload * 0.2)
-    combined = queue_factor * workload_factor
+    spread = pessimistic - optimistic
+    if spread <= 0:
+        return optimistic
+    alpha = 1.0 + _BETA_PERT_LAMBDA * (most_likely - optimistic) / spread
+    beta = 1.0 + _BETA_PERT_LAMBDA * (pessimistic - most_likely) / spread
+    return optimistic + spread * rng.betavariate(alpha, beta)
 
-    phases_to_iterate = phase_order if phase_order is not None else list(DEFAULT_PHASE_DAYS.keys())
 
-    result: dict[str, PERTEstimate] = {}
-    for phase in phases_to_iterate:
-        base = DEFAULT_PHASE_DAYS.get(phase)
-        if base is None:
-            continue
-        scaled = base * complexity_factor * combined
-        result[phase] = PERTEstimate(
-            optimistic=round(scaled * 0.6, 1),
-            most_likely=round(scaled, 1),
-            pessimistic=round(scaled * 2.0, 1),
-        )
-    return result
+def historical_sample(rng: random.Random, samples: list[float]) -> float:
+    """Bootstrap draw — pick one wall-clock duration from past data.
+
+    The returned value is **already wall-clock**, so callers must not
+    apply the capacity divisor to it (capacity was already baked into the
+    historical observation when the team actually delivered that BUD).
+    Empty list raises IndexError; callers are expected to gate on length.
+    """
+    return rng.choice(samples)
 
 
 def monte_carlo_simulate(
@@ -100,25 +116,65 @@ def monte_carlo_simulate(
     remaining_phases: list[str],
     n: int = 10_000,
     seed: int | None = None,
+    *,
+    capacity_by_phase: dict[str, float] | None = None,
+    historical_by_phase: dict[str, list[float]] | None = None,
+    historical_weight: float = 0.0,
 ) -> dict[str, dict[str, float]]:
     """Run Monte Carlo simulation over PERT estimates.
 
     Returns per-phase and cumulative percentile results (p50, p70, p85)
     in business days from today.
+
+    Capacity (Phase B): when ``capacity_by_phase`` is provided, each
+    phase's effort sample is divided by that phase's capacity in
+    [MIN_CAPACITY, 1.0] before being summed — turning effort days into
+    wall-clock days. Per-iteration division (not post-hoc multiplication
+    on percentiles) so the variance also stretches when capacity is low;
+    distinguishes proper resource-aware Monte Carlo from a naive
+    after-the-fact multiplier (Salute Enterprises, Intaver).
+
+    Historical reference-class (Phase C, Magennis): when
+    ``historical_by_phase`` lists past wall-clock durations for a phase,
+    each iteration draws from history with probability
+    ``historical_weight`` (0–1), otherwise from the LLM Beta-PERT.
+    Historical draws skip the capacity divisor — they are already
+    wall-clock. ``historical_weight = 0.0`` (default) preserves the
+    Phase-A/B behaviour exactly.
     """
     rng = random.Random(seed)
     phase_samples: dict[str, list[float]] = {p: [] for p in remaining_phases}
+    # Per-phase deltas (each iteration's contribution alone, not the
+    # cumulative-through-phase). Needed by Phase D's project-buffer
+    # math, which assumes phase variances are independent and aggregates
+    # them via √Σ.
+    phase_delta_samples: dict[str, list[float]] = {p: [] for p in remaining_phases}
     cumulative_samples: list[float] = []
+    cap = capacity_by_phase or {}
+    hist = historical_by_phase or {}
 
     for _ in range(n):
         total = 0.0
         for phase in remaining_phases:
             est = pert_estimates[phase]
-            if est.optimistic == est.pessimistic == 0:
+            phase_hist = hist.get(phase) or []
+            use_historical = (
+                phase_hist and historical_weight > 0.0 and rng.random() < historical_weight
+            )
+            if use_historical:
+                # Already wall-clock — skip the capacity divisor.
+                sampled = historical_sample(rng, phase_hist)
+            elif est.optimistic == est.pessimistic == 0:
                 sampled = 0.0
             else:
-                sampled = rng.triangular(est.optimistic, est.pessimistic, est.most_likely)
+                effort = beta_pert_sample(rng, est.optimistic, est.most_likely, est.pessimistic)
+                # Capacity divisor: effort days → wall-clock days. Floor
+                # at MIN_CAPACITY so we never divide by ~0; also matches
+                # the floor enforced by ``capacity_provider``.
+                divisor = max(cap.get(phase, 1.0), MIN_CAPACITY)
+                sampled = effort / divisor
             phase_samples[phase].append(total + sampled)
+            phase_delta_samples[phase].append(sampled)
             total += sampled
         cumulative_samples.append(total)
 
@@ -134,7 +190,42 @@ def monte_carlo_simulate(
     for phase in remaining_phases:
         result[phase] = percentiles(phase_samples[phase])
     result["_total"] = percentiles(cumulative_samples)
+    # Per-phase variance is exposed under a private key so the caller
+    # can compute Goldratt's project buffer without re-running MC.
+    # ``statistics.variance`` requires n ≥ 2; n is always 10k here.
+    result["_phase_variances"] = {
+        phase: statistics.variance(phase_delta_samples[phase]) for phase in remaining_phases
+    }
     return result
+
+
+# Goldratt's recommended project-buffer multiplier on the aggregated
+# √Σ standard deviation. 1.5 is the canonical Critical Chain Method
+# value — large enough to absorb realistic variance without bloating the
+# committed date. Lives here so the project-buffer math is in one place.
+PROJECT_BUFFER_FACTOR = 1.5
+
+
+def project_buffer_days(
+    phase_variances: dict[str, float] | list[float],
+    factor: float = PROJECT_BUFFER_FACTOR,
+) -> float:
+    """Critical Chain project buffer: factor · √Σ(phase_variance).
+
+    The √Σ form assumes phase variances are independent, which is the
+    standard first approximation. Empty input returns 0 (no buffer
+    needed when there is nothing to absorb), so partially-completed
+    BUDs whose phase list is empty render cleanly as buffer = 0 rather
+    than crashing the panel.
+
+    Accepts either a list of variances or a phase→variance dict (the
+    shape ``monte_carlo_simulate`` returns under ``_phase_variances``)
+    so callers can pass either without re-shaping.
+    """
+    if not phase_variances:
+        return 0.0
+    values = phase_variances.values() if isinstance(phase_variances, dict) else phase_variances
+    return factor * math.sqrt(sum(values))
 
 
 def add_business_days(start: date, days: float) -> date:
@@ -147,43 +238,3 @@ def add_business_days(start: date, days: float) -> date:
         if current.weekday() < 5:  # Mon-Fri
             added += 1
     return current
-
-
-def compute_complexity(
-    requirements_len: int,
-    tech_spec_len: int,
-    impacted_repo_count: int,
-    qa_case_count: int,
-) -> int:
-    """Derive a 1-5 complexity score from BUD signals.
-
-    Weights repo count and QA cases heavily (actual scope indicators).
-    Content length is a weak signal — AI agents write verbose specs
-    even for simple features, so thresholds are high.
-    """
-    score = 1.0
-
-    # Content volume — weak signal, high thresholds
-    content_len = requirements_len + tech_spec_len
-    if content_len > 30000:
-        score += 1.0
-    elif content_len > 15000:
-        score += 0.5
-
-    # Multi-repo is a strong complexity signal
-    if impacted_repo_count >= 4:
-        score += 2.0
-    elif impacted_repo_count >= 3:
-        score += 1.5
-    elif impacted_repo_count >= 2:
-        score += 0.5
-
-    # QA case volume — strong signal for testing complexity
-    if qa_case_count > 20:
-        score += 1.5
-    elif qa_case_count > 10:
-        score += 1.0
-    elif qa_case_count > 5:
-        score += 0.5
-
-    return max(1, min(5, round(score)))

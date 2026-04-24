@@ -31,6 +31,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
     logger.info("bodhiorchard_startup", version="0.1.0")
 
+    # 0. Static contract check: every MCP tool's schema ↔ handler must agree.
+    # Catches the class of bug that once let `write_bud` silently clobber
+    # BUDs because the schema said `content` and the handler read `content`
+    # but Claude sent `requirements_md`. Hard-fails the boot with the exact
+    # mismatch rather than shipping a silent data-loss regression.
+    from app.mcp.contract_check import check_mcp_contracts
+
+    check_mcp_contracts()
+
+    # 0b. Register external event-bus transports. Every publish to a topic
+    # like "agent_activity:<org_id>" fans out to the in-process queue
+    # subscribers (dashboard WebSocket) AND to each registered transport.
+    # Colyseus forwarding lives here so the multiplayer server sees every
+    # agent event regardless of which handler raised it.
+    from app.services.colyseus_forwarder import forward_agent_activity_to_colyseus
+    from app.services.event_bus import register_transport
+
+    register_transport(forward_agent_activity_to_colyseus)
+
     from app.services.job_handlers import setup_job_handlers
     from app.services.job_queue import cleanup_completed_jobs, start_workers, stop_workers
 
@@ -130,10 +149,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     presence_task = asyncio.create_task(_presence_poll_loop())
 
+    # 8. Warm the fastembed ONNX model in the background. The first real
+    # embed call otherwise pays a ~10s import + model-load cost which, on
+    # uvicorn --reload dev loops, stalls every concurrent API request at
+    # the start of each worker lifetime. Fire-and-forget: the task finishes
+    # within ~10s and subsequent embed_batch calls find the model ready.
+    from app.services.embedding_service import embedding_service
+
+    async def _warm_embedding_model() -> None:
+        try:
+            await embedding_service.warm()
+            logger.info("embedding_model_warmed")
+        except Exception:
+            logger.warning("embedding_model_warmup_failed", exc_info=True)
+
+    embedding_warmup_task = asyncio.create_task(_warm_embedding_model())
+
     yield
 
     cleanup_task.cancel()
     presence_task.cancel()
+    embedding_warmup_task.cancel()
     await stop_workers()
 
     from app.services.redis_client import close_redis

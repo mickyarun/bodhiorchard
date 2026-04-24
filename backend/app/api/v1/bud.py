@@ -65,6 +65,16 @@ async def _bud_response(
             if not completed or completed.created_at < failed.created_at:
                 active_task = failed
 
+    # `updated_at` has an ``onupdate=func.now()`` server default that
+    # SQLAlchemy doesn't include in INSERT…RETURNING, so on a freshly
+    # inserted BUD the attribute is "not loaded". Pydantic's sync
+    # validator would then trigger a lazy SELECT — which can't spawn a
+    # greenlet from sync context and raises MissingGreenlet. An explicit
+    # refresh inside the async context eager-loads every column before
+    # validation, and also picks up anything later phases (auto-assign,
+    # agent-task creation) mutated on the same row.
+    await db.refresh(bud)
+
     bud_data = BUDRead.model_validate(bud)
     if active_task:
         bud_data.active_agent_task = BUDAgentTaskRead.model_validate(active_task)
@@ -123,11 +133,13 @@ async def list_buds(
             .where(
                 Bug.org_id == current_user.org_id,
                 Bug.bud_id.in_(bud_ids),
-                Bug.status.in_([
-                    BugStatusEnum.OPEN,
-                    BugStatusEnum.IN_PROGRESS,
-                    BugStatusEnum.BLOCKED,
-                ]),
+                Bug.status.in_(
+                    [
+                        BugStatusEnum.OPEN,
+                        BugStatusEnum.IN_PROGRESS,
+                        BugStatusEnum.BLOCKED,
+                    ]
+                ),
             )
             .group_by(Bug.bud_id)
         )
@@ -301,8 +313,7 @@ async def update_bud(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Cannot change status of a {bud.status.value} BUD. "
-                "Create a new BUD instead."
+                f"Cannot change status of a {bud.status.value} BUD. Create a new BUD instead."
             ),
         )
 
@@ -493,7 +504,9 @@ async def update_bud(
                 from app.services.bud_closure import on_bud_closed
 
                 await on_bud_closed(
-                    db, current_user.org_id, bud,
+                    db,
+                    current_user.org_id,
+                    bud,
                     actor_id=current_user.id,
                     actor_name=current_user.name,
                 )
@@ -611,10 +624,7 @@ async def _trigger_status_jobs(
     # Re-estimate delivery dates in the background on UAT/Prod transitions.
     # Uses its own DB session so the request can return immediately — the
     # frontend polls estimates via the existing useEstimates composable.
-    if (
-        "status" in update_data
-        and update_data["status"] in (BUDStatus.UAT, BUDStatus.PROD)
-    ):
+    if "status" in update_data and update_data["status"] in (BUDStatus.UAT, BUDStatus.PROD):
         import asyncio
 
         task = asyncio.create_task(
@@ -652,7 +662,9 @@ async def _bg_estimate(
             if bud is None:
                 return
             await estimate_bud_dates(
-                db, org_id, bud,
+                db,
+                org_id,
+                bud,
                 trigger=f"status_to_{trigger}",
                 actor_id=actor_id,
                 actor_name=actor_name,
@@ -807,6 +819,78 @@ async def override_code_review(
     if refreshed is None:
         raise HTTPException(status_code=500, detail="BUD vanished after override")
     return await _bud_response(refreshed, current_user.org_id, db)
+
+
+@router.post(
+    "/{bud_id}/agent-tasks/{task_id}/cancel",
+    response_model=BUDAgentTaskRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def cancel_agent_task(
+    bud_id: uuid.UUID,
+    task_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BUDAgentTaskRead:
+    """Cancel a running or pending agent task.
+
+    Two cases, one endpoint:
+
+    1. **Live job** — the paired ``asyncio.Task`` is still tracked by
+       the job queue. We signal it; the worker's ``CancelledError``
+       branch kills the Claude subprocess and marks the DB row
+       ``failed`` from its own fresh session. The API does NOT write
+       terminal state in this path — the execution plane owns it.
+
+    2. **Orphan row** — the in-memory job is gone (e.g. backend
+       restarted mid-run, or the 5-min cleanup TTL has elapsed), but
+       the ``bud_agent_tasks`` row is still stuck at ``pending`` /
+       ``running``. No worker exists to clean up, so the API flips the
+       row itself. This is the only case where the API writes terminal
+       state — because there is literally no-one else who can.
+    """
+    from sqlalchemy import update as sql_update
+
+    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
+    from app.services.job_queue import cancel_job as cancel_in_memory_job
+
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    task = await task_repo.get_by_id(task_id)
+    if not task or task.bud_id != bud_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if task.status not in (AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING):
+        return BUDAgentTaskRead.model_validate(task)
+
+    reason = f"Cancelled by {current_user.email}"
+    signalled = bool(task.job_id) and cancel_in_memory_job(task.job_id, reason=reason)
+
+    if not signalled:
+        # Orphan — no worker will ever clean this up, so we do it here.
+        # Tenant-scoped + status-guarded so we don't clobber a row that
+        # raced us to a terminal state.
+        await db.execute(
+            sql_update(BUDAgentTask)
+            .where(BUDAgentTask.id == task_id)
+            .where(BUDAgentTask.org_id == current_user.org_id)
+            .where(BUDAgentTask.status.in_(["pending", "running"]))
+            .values(status="failed", error_message=reason)
+        )
+        await db.commit()
+        fresh = await task_repo.get_by_id(task_id)
+        if fresh is not None:
+            task = fresh
+
+    logger.info(
+        "agent_task_cancel",
+        task_id=str(task_id),
+        bud_id=str(bud_id),
+        job_id=task.job_id,
+        signalled=signalled,
+        by=current_user.email,
+    )
+
+    return BUDAgentTaskRead.model_validate(task)
 
 
 @router.post(

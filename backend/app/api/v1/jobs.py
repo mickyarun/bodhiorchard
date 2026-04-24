@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Job status polling endpoint."""
+"""Job status polling + cancellation endpoints."""
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.schemas.jobs import JobStatusRead
-from app.services.job_queue import get_job
+from app.schemas.jobs import JobState, JobStatusRead
+from app.services.job_queue import cancel_job, get_job
 
 logger = structlog.get_logger(__name__)
 
@@ -40,3 +40,34 @@ async def get_job_status(
             detail="Job not found",
         )
     return job
+
+
+@router.post("/{job_id}/cancel", response_model=JobStatusRead)
+async def cancel_job_endpoint(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+) -> JobStatusRead:
+    """Signal a running job to cancel.
+
+    Pure signal — pokes the paired ``asyncio.Task`` so the worker's
+    ``CancelledError`` branch fires. The worker owns terminal state
+    transitions (DB rows, subprocess cleanup, WS event emission).
+
+    For BUD agent tasks prefer the task-level endpoint at
+    ``POST /v1/buds/{bud_id}/agent-tasks/{task_id}/cancel`` — it also
+    handles orphan DB rows left over after a backend restart, which
+    this endpoint cannot, since the in-memory job is gone.
+    """
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
+        )
+    if job.state in (JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED):
+        return job
+
+    cancel_job(job_id, reason=f"Cancelled by {current_user.email}")
+    updated = get_job(job_id) or job
+    logger.info("job_cancel_signalled", job_id=job_id, by=current_user.email)
+    return updated

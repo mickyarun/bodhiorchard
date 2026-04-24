@@ -37,6 +37,15 @@
         <span class="text-caption text-medium-emphasis">optimistic</span>
         <span class="text-caption text-medium-emphasis">safe to promise</span>
       </div>
+      <!-- Commit date = prod-P50 + project buffer (Critical Chain). One
+           date stakeholders can rely on, distinct from the per-phase
+           medians which are deliberately tight. -->
+      <div v-if="estimates.commit_date" class="commit-date mt-2">
+        <strong>Commit:</strong> {{ formatDate(estimates.commit_date) }}
+        <span v-if="estimates.project_buffer_days" class="text-caption text-medium-emphasis ml-1">
+          (P50 + {{ formatBufferDays(estimates.project_buffer_days) }} buffer)
+        </span>
+      </div>
     </div>
 
     <!-- Complexity + meta row -->
@@ -54,7 +63,9 @@
       </span>
     </div>
 
-    <!-- Phase stepper -->
+    <!-- Phase stepper. Per-phase dates render the median (P50) per
+         Critical Chain — the safety margin is aggregated into the
+         buffer pill at the end, not padded into every phase. -->
     <div class="phase-stepper">
       <div
         v-for="(phase, index) in sortedPhases"
@@ -68,14 +79,29 @@
         @click="$emit('override-phase', phase.phase)"
       >
         <div class="phase-dot" />
-        <div v-if="index < sortedPhases.length - 1" class="phase-connector" />
+        <div
+          v-if="index < sortedPhases.length - 1 || hasBuffer"
+          class="phase-connector"
+        />
         <div class="phase-info">
           <div class="text-caption font-weight-medium">{{ phaseLabel(phase.phase) }}</div>
-          <div class="text-caption" :class="deadlineClass(phase.p70_date)">
-            {{ formatDate(phase.p70_date || phase.estimated_completion) }}
+          <div class="text-caption" :class="deadlineClass(phase.p50_date)">
+            {{ formatDate(phase.p50_date || phase.estimated_completion) }}
           </div>
           <div v-if="phase.source === 'override'" class="text-caption text-warning">
             overridden
+          </div>
+        </div>
+      </div>
+      <!-- Project buffer pill — only when the backend supplied a
+           non-zero buffer (older snapshots or empty phase lists hide
+           it cleanly, no broken layout). -->
+      <div v-if="hasBuffer" class="phase-step phase-step--buffer">
+        <div class="phase-dot phase-dot--buffer" />
+        <div class="phase-info">
+          <div class="text-caption font-weight-medium">Buffer</div>
+          <div class="text-caption text-medium-emphasis">
+            {{ formatBufferDays(estimates.project_buffer_days) }}
           </div>
         </div>
       </div>
@@ -160,6 +186,21 @@ function deadlineClass(dateStr: string | null | undefined): string {
   if (days < 0) return 'text-error'
   if (days < 2) return 'text-warning'
   return 'text-medium-emphasis'
+}
+
+// Hide the Buffer pill cleanly when the backend either didn't supply
+// the field (pre-Phase-D snapshot) or computed it as zero (no
+// remaining variance to absorb).
+const hasBuffer = computed(
+  () =>
+    !!props.estimates?.project_buffer_days &&
+    props.estimates.project_buffer_days > 0,
+)
+
+function formatBufferDays(days: number | null | undefined): string {
+  if (!days) return '0d'
+  // Sub-day buffers round to one decimal; whole-day buffers stay clean.
+  return days < 1 ? `${days.toFixed(1)}d` : `${Math.round(days)}d`
 }
 </script>
 
@@ -281,5 +322,30 @@ function deadlineClass(dateStr: string | null | undefined): string {
 .phase-step--done .phase-connector {
   background: rgb(var(--v-theme-success));
   opacity: 0.4;
+}
+
+/* Project-buffer pill (Critical Chain) — visually distinct from
+   regular phases so stakeholders read it as "shared safety margin"
+   rather than another step in the lifecycle. */
+.phase-step--buffer {
+  cursor: default;
+  flex: 0 0 auto;
+  min-width: 70px;
+}
+
+.phase-step--buffer:hover {
+  background: transparent;
+}
+
+.phase-dot--buffer {
+  background: rgb(var(--v-theme-warning));
+  opacity: 0.6;
+  border: 1px dashed rgba(255, 255, 255, 0.4);
+}
+
+.commit-date {
+  font-size: 0.875rem;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.85);
 }
 </style>

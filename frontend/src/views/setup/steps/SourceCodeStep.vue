@@ -64,30 +64,35 @@
           </v-chip>
         </div>
 
-        <v-text-field
-          v-model="cloneUrl"
-          label="GitHub URL"
-          placeholder="https://github.com/owner/repo"
-          variant="outlined"
-          density="comfortable"
-          hide-details="auto"
-          prepend-inner-icon="mdi-link-variant"
-          :hint="cloneUrlHint"
-          persistent-hint
-          class="mb-3"
-          @keyup.enter="addUrlToQueue"
-        >
-          <template #append-inner>
-            <v-btn
-              icon="mdi-plus"
-              size="small"
-              variant="text"
-              density="compact"
-              :disabled="!cloneUrl.trim() || cloning"
-              @click="addUrlToQueue"
-            />
-          </template>
-        </v-text-field>
+        <div class="d-flex align-start ga-2 mb-1">
+          <v-text-field
+            v-model="cloneUrl"
+            label="GitHub URL"
+            placeholder="https://github.com/owner/repo"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            prepend-inner-icon="mdi-link-variant"
+            class="flex-grow-1"
+            @keyup.enter="addUrlToQueue"
+          />
+          <v-btn
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-plus"
+            :disabled="!cloneUrl.trim() || cloning"
+            style="min-height: 48px;"
+            @click="addUrlToQueue"
+          >
+            Add
+          </v-btn>
+        </div>
+        <div class="text-caption text-medium-emphasis mb-3 ml-1">
+          {{ cloneUrlHint }}
+          <span v-if="cloneQueue.length === 0" class="text-primary">
+            Add as many as you want, then Clone.
+          </span>
+        </div>
 
         <v-switch
           v-model="isPrivate"
@@ -430,7 +435,7 @@
           variant="outlined"
           hide-details
           :min="60"
-          :max="1800"
+          :max="3600"
           class="flex-grow-1"
         />
         <v-text-field

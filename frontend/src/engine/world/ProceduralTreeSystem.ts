@@ -26,6 +26,14 @@ import { WORLD_SCALE } from '../treetest/TreeRules'
 import { LabelRenderer } from '../rendering/LabelRenderer'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import { setTreeData, type TreeFeatureNodeData } from './TreeNodeData'
+import {
+  loadTreeCache,
+  saveTreeCache,
+  pruneLRU,
+  computeCacheKey,
+  type BakedLeafGroup,
+  type BakedTree,
+} from '../treetest/treeCache'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -72,9 +80,11 @@ interface ProceduralEntry {
   repo:            EngineRepoData
   worldX:          number
   worldZ:          number
-  label:           pc.Entity | null    // null until growth completes
+  label:           pc.Entity | null    // null until growth completes / cache loads
   done:            boolean
   featuresByTitle: Map<string, EngineFeature>  // title → full feature data (for picking)
+  cacheKey:        string              // stable key for treeCache; "__unimplemented__*" disables caching
+  rootColor:       Color3              // palette-cycled trunk color — needed for cache save
 }
 
 // ─── System ──────────────────────────────────────────────────────────────────
@@ -114,6 +124,23 @@ export class ProceduralTreeSystem implements RepoVisualization {
       if (arr) arr.push(f); else featuresByRepo.set(f.repo_name, [f])
     }
 
+    // Precompute cache keys per repo, then fire the IndexedDB lookups in
+    // parallel. Sequential awaits would multiply by 21 (~1 RTT each even from
+    // IDB) and stall the boot path.
+    const perRepoFeatures: EngineFeature[][] = []
+    const cacheKeys: string[] = []
+    for (let i = 0; i < data.repos.length; i++) {
+      const repo = data.repos[i]
+      const repoFeatures = (featuresByRepo.get(repo.repo_name) ?? []).slice(0, MAX_FEATURES)
+      perRepoFeatures.push(repoFeatures)
+      cacheKeys.push(computeCacheKey({
+        repoName:        repo.repo_name,
+        trunkColorIndex: i % TRUNK_PALETTE.length,
+        features:        repoFeatures.map(f => ({ title: f.title, status: f.status })),
+      }))
+    }
+    const cacheHits = await Promise.all(cacheKeys.map(k => loadTreeCache(k)))
+
     for (let i = 0; i < data.repos.length; i++) {
       const repo = data.repos[i]
       const pos  = positions[i]
@@ -135,7 +162,7 @@ export class ProceduralTreeSystem implements RepoVisualization {
       this.treeMap.set(repo.repo_name, container)
 
       // Map EngineFeature → Tree3DSystem feature format
-      const repoFeatures = (featuresByRepo.get(repo.repo_name) ?? []).slice(0, MAX_FEATURES)
+      const repoFeatures = perRepoFeatures[i]
       const color = trunkColor(i)
       const treeFeatures = repoFeatures.map(f => ({
         color:  color,
@@ -151,13 +178,14 @@ export class ProceduralTreeSystem implements RepoVisualization {
       const tree   = new Tree3DSystem(app.app, { useEmissive: false })
       const leaves = new LeafSystem(app.app, this.materials)
       tree.setFeatures(treeFeatures)
-      tree.startTree(trunkColor(i), pos.x, 0, pos.z)
 
-      this.entries.push({
+      const entry: ProceduralEntry = {
         tree, leaves, container, repoName: repo.repo_name, repo,
         worldX: pos.x, worldZ: pos.z,
         label: null, done: false, featuresByTitle,
-      })
+        cacheKey: cacheKeys[i], rootColor: color,
+      }
+      this.entries.push(entry)
 
       // Container is immediately pickable (repo click/hover)
       this.allPickableEntities.push(container)
@@ -166,10 +194,60 @@ export class ProceduralTreeSystem implements RepoVisualization {
         x: pos.x, z: pos.z,
         radius: estimatedRadius(repoFeatures.length),
       })
+
+      const cached = cacheHits[i]
+      if (cached) {
+        // Cache hit: skip growth, restore instanced state directly.
+        tree.loadFromCache(
+          { branchGroups: cached.branchGroups, primaries: cached.primaries },
+          color, pos.x, pos.z,
+        )
+        if (cached.leafGroup) leaves.loadFromCache(cached.leafGroup)
+        this.handleTreeReady(entry, cached.labelY)
+        entry.done = true
+      } else {
+        tree.startTree(color, pos.x, 0, pos.z)
+      }
     }
 
     app.root.addChild(this.root)
+    // Opportunistic background eviction — never awaited, never blocks boot.
+    pruneLRU().catch(() => {})
     return exclusionZones
+  }
+
+  /**
+   * Shared side effects that fire once a tree reaches its fully-grown baked
+   * state, whether from a live growth run or a restored cache load:
+   *   - tag primary-feature pick proxies with TreeNodeData
+   *   - add them to allPickableEntities
+   *   - create + place the billboard label
+   *
+   * The tree's featureEntityMap must already be populated before this call.
+   */
+  private handleTreeReady(entry: ProceduralEntry, labelY: number): void {
+    if (!this.appRef) return
+    for (const [entity, { title, status }] of entry.tree.getFeatureEntityMap()) {
+      const feat = entry.featuresByTitle.get(title)
+      const nodeData: TreeFeatureNodeData = {
+        type:          'tree_feature',
+        title,
+        status,
+        repoName:      entry.repoName,
+        linkedRepos:   feat?.linked_repos   ?? [],
+        codeLocations: feat?.code_locations ?? null,
+        branchName:    feat?.branch_name    ?? null,
+        fromBud:       feat?.from_bud       ?? null,
+        sourceRef:     feat?.source_ref     ?? null,
+      }
+      entity.tags.add('pickable')
+      setTreeData(entity, nodeData)
+      this.allPickableEntities.push(entity)
+    }
+    const label = LabelRenderer.create(this.appRef, entry.repoName)
+    label.setLocalPosition(0, labelY, 0)
+    entry.container.addChild(label)
+    entry.label = label
   }
 
   /** Advance all growing trees. Spawn leaves + labels on completion. Animate leaves each frame. */
@@ -181,49 +259,48 @@ export class ProceduralTreeSystem implements RepoVisualization {
         const stillGrowing = entry.tree.update(dt)
         if (!stillGrowing) {
           entry.done = true
+
+          // Collapse 60k+ per-branch entities into a handful of hardware-instanced
+          // draw calls (one per color). Descendants destroyed; primary feature
+          // branches stay as invisible pick proxies. Must run BEFORE
+          // buildFeatureEntityMap so the map only walks surviving primaries.
+          const treeExport = entry.tree.bakeInstanced()
           entry.tree.buildFeatureEntityMap()
 
-          // Tag all feature branch entities as pickable with full TreeNodeData
-          for (const [entity, { title, status }] of entry.tree.getFeatureEntityMap()) {
-            const feat = entry.featuresByTitle.get(title)
-            const nodeData: TreeFeatureNodeData = {
-              type:          'tree_feature',
-              title,
-              status,
-              repoName:      entry.repoName,
-              linkedRepos:   feat?.linked_repos   ?? [],
-              codeLocations: feat?.code_locations ?? null,
-              branchName:    feat?.branch_name    ?? null,
-              fromBud:       feat?.from_bud       ?? null,
-              sourceRef:     feat?.source_ref     ?? null,
-            }
-            entity.tags.add('pickable')
-            setTreeData(entity, nodeData)
-            this.allPickableEntities.push(entity)
-          }
-
-          // Spawn leaves only if repo has at least one implemented feature.
-          // in_progress / planned repos show bare trees — leaves signal completion.
-          const hasImplemented = [...entry.featuresByTitle.values()].some(f => f.status === 'implemented')
+          // Compute canopy-top label Y from terminal tips BEFORE leaf spawn
+          // destroys nothing relevant, but we keep the order stable.
           const tips = entry.tree.getTerminalTips()
-          if (hasImplemented) {
-            entry.leaves.spawnLeaves(tips, entry.tree.getRootColor())
-          }
-
-          // Place billboard label just above the canopy
           const labelY = tips.length > 0
             ? Math.max(...tips.map(t => t.position.y)) + LABEL_GAP
             : DEFAULT_LABEL_Y
 
-          const label = LabelRenderer.create(this.appRef, entry.repoName)
-          // Local position relative to container (which is at worldX, 0, worldZ)
-          label.setLocalPosition(0, labelY, 0)
-          entry.container.addChild(label)
-          entry.label = label
+          // Leaves spawn only if the repo has at least one implemented feature.
+          // in_progress / planned repos show bare trees — leaves signal completion.
+          const hasImplemented = [...entry.featuresByTitle.values()].some(f => f.status === 'implemented')
+          let leafExport: BakedLeafGroup | null = null
+          if (hasImplemented) {
+            entry.leaves.spawnLeaves(tips, entry.tree.getRootColor())
+            leafExport = entry.leaves.bakeInstanced()
+          }
+
+          this.handleTreeReady(entry, labelY)
+
+          // Persist the baked tree so the next session can skip growth.
+          // Structured-clone preserves the Float32Arrays; fire-and-forget.
+          const payload: BakedTree = {
+            schemaVersion: 1,
+            cacheKey:      entry.cacheKey,
+            savedAt:       Date.now(),
+            branchGroups:  treeExport.branchGroups,
+            leafGroup:     leafExport,
+            primaries:     treeExport.primaries,
+            labelY,
+          }
+          saveTreeCache(payload).catch(() => {})
         }
       }
 
-      // Animate leaf wind sway every frame (no-op until leaves are spawned)
+      // Animate leaf wind sway every frame (no-op once leaves are baked)
       entry.leaves.update(dt)
     }
   }

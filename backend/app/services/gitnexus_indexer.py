@@ -9,6 +9,8 @@ knowledge graph for communities (feature clusters) and execution flows.
 
 import asyncio
 import json
+import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,6 +24,23 @@ from app.services.gitnexus_utils import run_cypher as _run_cypher
 from app.services.gitnexus_utils import run_npx as _run_npx
 
 logger = structlog.get_logger(__name__)
+
+
+async def _clear_npx_cache() -> None:
+    """Blow away ``~/.npm/_npx`` so the next npx call starts fresh.
+
+    npx's _npx cache can get into a state where half-installed
+    tree-sitter native packages make every subsequent install fail with
+    ``ENOTEMPTY: directory not empty, rename``. The CLI's own error
+    hint is "rm -rf ~/.npm/_npx" — doing that automatically is cheaper
+    than failing the whole scan for a recoverable cache bug.
+
+    Runs in a thread because it can touch hundreds of small files.
+    """
+    cache = Path(os.path.expanduser("~/.npm/_npx"))
+    if not cache.exists():
+        return
+    await asyncio.to_thread(shutil.rmtree, cache, ignore_errors=True)
 
 
 @dataclass
@@ -87,8 +106,7 @@ def _summarize_npx_failure(stderr: str, returncode: int) -> tuple[str, str | Non
         hint: str | None = None
         if code == "ENOTEMPTY":
             hint = (
-                "Clear the npx cache and retry: rm -rf ~/.npm/_npx "
-                "(or `npm cache clean --force`)."
+                "Clear the npx cache and retry: rm -rf ~/.npm/_npx (or `npm cache clean --force`)."
             )
         elif code in {"EACCES", "EPERM"}:
             hint = "Check file permissions on ~/.npm and the repo directory."
@@ -164,6 +182,26 @@ async def index_repo_with_gitnexus(
             cwd=str(repo),
             timeout=300,
         )
+
+        # npx's package cache (~/.npm/_npx) gets into an inconsistent state
+        # when a prior install left native tree-sitter-<lang> dirs half-
+        # extracted: the NEXT install fails with `npm error ENOTEMPTY` on
+        # the atomic rename. The CLI even tells you the fix ("Clear the
+        # npx cache and retry"). Doing that automatically once is cheaper
+        # than failing the whole scan for a recoverable cache bug.
+        if (
+            returncode != 0
+            and "ENOTEMPTY" in stderr
+            and ("npm error" in stderr.lower() or "npm err!" in stderr.lower())
+        ):
+            await _clear_npx_cache()
+            logger.info("gitnexus_retrying_after_cache_clear", repo=repo_path)
+            stdout, stderr, returncode = await _run_npx(
+                npx,
+                analyze_args,
+                cwd=str(repo),
+                timeout=300,
+            )
 
         if returncode != 0:
             # npm peer-dep warnings and npx cleanup warnings can cause exit

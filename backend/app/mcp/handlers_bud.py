@@ -11,6 +11,7 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mcp.handler_utils import require_non_empty
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.organization import Organization
 from app.repositories.bud import BUDRepository
@@ -48,13 +49,30 @@ async def handle_write_bud(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Save or update a BUD document."""
-    title = params.get("title", "")
-    content = params.get("content", "")
-    bud_number = params.get("bud_number")
+    """Save or update a BUD document.
 
-    if not title:
-        return {"success": False, "error": "title is required"}
+    Accepts the Markdown body under either ``requirements_md`` (matches
+    the DB column and the prompt context the agent sees) or ``content``
+    (the older name still declared in the MCP tool schema). Claude's
+    tool-call serialization has historically flipped between the two;
+    accepting either keeps the handler robust to that drift.
+
+    Refuses empty bodies — silently clobbering an existing BUD's
+    ``requirements_md`` with ``""`` is how we shipped data loss in the
+    first place.
+    """
+    # Canonical contract: the schema declares `requirements_md`
+    # (matching the DB column) as the required body field. If Claude
+    # sends anything else, we surface a loud error rather than clobber
+    # the existing BUD with an empty string — which is how the silent-
+    # data-loss bug shipped in the first place.
+    error = require_non_empty(params, "title", "requirements_md")
+    if error:
+        return error
+
+    title = params.get("title", "")
+    body = params.get("requirements_md", "")
+    bud_number = params.get("bud_number")
 
     bud_repo = BUDRepository(db, org_id=org.id)
 
@@ -65,12 +83,13 @@ async def handle_write_bud(
             return {"success": False, "error": f"BUD-{bud_number:03d} not found"}
 
         existing.title = title
-        existing.requirements_md = content
+        existing.requirements_md = body
         logger.info(
             "mcp_update_bud",
             org_id=str(org.id),
             bud_number=bud_number,
             title=title,
+            body_len=len(body),
         )
         return {
             "success": True,
@@ -88,14 +107,14 @@ async def handle_write_bud(
         bud_number=next_number,
         title=title,
         status=BUDStatus.BUD,
-        requirements_md=content,
+        requirements_md=body,
     )
     await bud_repo.create(bud)
 
     # Create a PLANNED feature_registry entry for immediate discoverability
     from app.services.feature_lifecycle import create_planned_feature
 
-    feature_item = await create_planned_feature(db, org.id, next_number, title, content)
+    feature_item = await create_planned_feature(db, org.id, next_number, title, body)
 
     logger.info("mcp_write_bud", org_id=str(org.id), bud_number=next_number, title=title)
     return {
@@ -109,7 +128,9 @@ async def handle_write_bud(
 
 
 async def _resolve_bud(
-    db: AsyncSession, org_id: Any, task_id: str,
+    db: AsyncSession,
+    org_id: Any,
+    task_id: str,
 ) -> BUDDocument | None:
     """Resolve a BUD from a task_id (BUD number string or UUID)."""
     import uuid

@@ -4,22 +4,29 @@
 /**
  * BreakSeatGenerator — programmatic break-zone seat computation.
  *
- * Generates seat positions for cafeteria, coffee bar, and pool zones
- * using the **same layout constants** as the frontend builders
- * (CafeteriaBuilder, CoffeeBarBuilder, PoolResortBuilder). This ensures
- * server-placed characters sit at exactly the same world-space positions
- * as the visible furniture.
+ * Generates seat positions for cafeteria, coffee bar, and pool zones.
+ * Cafeteria + coffee bar layouts come from `shared/world/breakSeats.ts`,
+ * the same module the frontend builders import — so server-placed
+ * characters sit on exactly the chairs the client renders.
  *
  * Scaling: targets ~60% of team size across all break zones so multiple
  * members can take breaks simultaneously without overlapping. The pool
  * is capped at 6 (physical umbrella sets); cafeteria and coffee bar
- * grow by adding rows of tables.
+ * expose only as many seats as the frontend draws (count clamped to
+ * breakSeatCount(layout)).
  *
  * Zone positions are imported from the shared ZONES array — the same
  * source of truth as the frontend's WorldLayout.
  */
 
 import { getZone } from "./WorldLayout"
+import {
+  CAFETERIA_LAYOUT,
+  COFFEE_BAR_LAYOUT,
+  breakSeatCount,
+  forEachBreakSeat,
+  type BreakZoneLayout,
+} from "../../../shared/world/breakSeats"
 
 // ─── Seat type ──────────────────────────────────────────────────────────────
 
@@ -41,12 +48,12 @@ const POOL_MAX = 6
 
 /**
  * Minimum seats per zone — matches the physical furniture count built by
- * each frontend builder. You can't have fewer seats than visible chairs,
- * or characters sit on air. For large teams the budget-based scaling
- * adds MORE rows; these minimums only kick in for small teams.
+ * each frontend builder. Cafeteria + coffee bar derive from the shared
+ * layout so the two sides can never drift again. Pool stays hardcoded;
+ * its umbrella set count is owned by PoolResortBuilder.
  */
-const CAFE_MIN = 8     // CafeteriaBuilder: 2 rows × 2 tables × 2 benches
-const COFFEE_MIN = 8   // CoffeeBarBuilder: 2 columns × 2 tables × 2 chairs
+const CAFE_MIN = breakSeatCount(CAFETERIA_LAYOUT)  // 4 tables × 2 benches = 8
+const COFFEE_MIN = breakSeatCount(COFFEE_BAR_LAYOUT) // 4 tables × 2 chairs = 8
 const POOL_MIN = 6     // PoolResortBuilder: 6 umbrella+chair sets
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -75,111 +82,41 @@ export function generateBreakSeats(teamSize: number): BreakSeat[] {
   const pool = getZone("pool")!
 
   return [
-    ...generateCafeteriaSeats(caf.x, caf.z, cafCount),
-    ...generateCoffeeBarSeats(cof.x, cof.z, cofCount),
+    ...seatsFromLayout(CAFETERIA_LAYOUT, caf.x, caf.z, cafCount),
+    ...seatsFromLayout(COFFEE_BAR_LAYOUT, cof.x, cof.z, cofCount),
     ...generatePoolSeats(pool.x, pool.z, poolCount),
   ]
 }
 
-// ─── Zone layout engines ────────────────────────────────────────────────────
+// ─── Zone layout engine ─────────────────────────────────────────────────────
 
 /**
- * Cafeteria seats — mirrors CafeteriaBuilder.ts layout.
+ * Convert a shared BreakZoneLayout into world-space seats for up to `count`
+ * members. Count is clamped to the layout's physical seat count — the
+ * frontend only draws `breakSeatCount(layout)` chairs, so emitting more
+ * would put characters on thin air. To give more members a seat, add slots
+ * to the shared layout (and both builders will render the extra furniture).
  *
- * Layout: rows of 2 long tables, each with a bench on both sides.
- * 4 seats per row (2 tables × 2 sides). Rows spaced 2.8 units apart.
- * First row starts at local z=3.5 (in front of the kitchen hut).
- *
- * Iteration order: outer=side, inner=tableX — must match
- * CafeteriaBuilder.ts so seat indices align for occupancy tracking.
+ * Iteration order matches `forEachBreakSeat`, which the frontend builders
+ * also follow — so seat index N on the server refers to the same physical
+ * chair as seat index N on the client.
  */
-function generateCafeteriaSeats(
-  zoneX: number, zoneZ: number, count: number,
+function seatsFromLayout(
+  layout: BreakZoneLayout, zoneX: number, zoneZ: number, count: number,
 ): BreakSeat[] {
-  const BENCH_OFFSET = 0.55
-  const ROW_START_Z = 3.5
-  const ROW_SPACING = 2.8
-  const TABLE_XS = [1.0, 3.0]
-  const SEAT_Y = 0.23
-  // Must match SEAT_OFFSETS.benchCushion.forwardOffset in
-  // frontend/src/engine/characters/InteractionPoint.ts
-  const FORWARD_OFFSET = 0.10
-
   const seats: BreakSeat[] = []
-  const rows = Math.ceil(count / 4)
-
-  for (let row = 0; row < rows; row++) {
-    const tz = ROW_START_Z + row * ROW_SPACING
-    for (const side of [-1, 1]) {
-      const yaw = side > 0 ? 180 : 0
-      const yawRad = yaw * Math.PI / 180
-      for (const tableX of TABLE_XS) {
-        if (seats.length >= count) return seats
-        seats.push({
-          zone: "cafeteria",
-          x: zoneX + tableX + Math.sin(yawRad) * FORWARD_OFFSET,
-          y: SEAT_Y,
-          z: zoneZ + tz + side * BENCH_OFFSET + Math.cos(yawRad) * FORWARD_OFFSET,
-          yaw,
-        })
-      }
-    }
-  }
-  return seats
-}
-
-/**
- * Coffee bar seats — mirrors CoffeeBarBuilder.ts layout.
- *
- * Layout: 2 columns of small round tables, each with 2 facing chairs.
- * Left column at localX=-1.0 (chairs at -1.8 and -0.2).
- * Right column at localX=2.5 (chairs at 1.7 and 3.3).
- * Tables spaced 2.0 units apart, starting at local z=3.5.
- *
- * Iteration order: outer=column, inner=table — must match
- * CoffeeBarBuilder.ts so seat indices align for occupancy tracking.
- */
-function generateCoffeeBarSeats(
-  zoneX: number, zoneZ: number, count: number,
-): BreakSeat[] {
-  const COLUMNS = [
-    { baseX: -1.0, leftOffset: -0.8, rightOffset: 0.8 },
-    { baseX:  2.5, leftOffset: -0.8, rightOffset: 0.8 },
-  ]
-  const TABLE_START_Z = 3.5
-  const TABLE_SPACING = 2.0
-  const SEAT_Y = 0.23
-  // Must match SEAT_OFFSETS.chairCushion.forwardOffset in
-  // frontend/src/engine/characters/InteractionPoint.ts
-  const FORWARD_OFFSET = 0.15
-
-  const seats: BreakSeat[] = []
-  const tablesPerCol = Math.ceil(count / 4) // 4 seats per 2 columns
-  const maxTables = Math.max(tablesPerCol, 1)
-
-  for (const col of COLUMNS) {
-    for (let t = 0; t < maxTables; t++) {
-      const tz = TABLE_START_Z + t * TABLE_SPACING
-      if (seats.length >= count) return seats
-      // Left chair (facing right, yaw=90)
-      seats.push({
-        zone: "coffee_bar",
-        x: zoneX + col.baseX + col.leftOffset + Math.sin(90 * Math.PI / 180) * FORWARD_OFFSET,
-        y: SEAT_Y,
-        z: zoneZ + tz + Math.cos(90 * Math.PI / 180) * FORWARD_OFFSET,
-        yaw: 90,
-      })
-      if (seats.length >= count) return seats
-      // Right chair (facing left, yaw=-90)
-      seats.push({
-        zone: "coffee_bar",
-        x: zoneX + col.baseX + col.rightOffset + Math.sin(-90 * Math.PI / 180) * FORWARD_OFFSET,
-        y: SEAT_Y,
-        z: zoneZ + tz + Math.cos(-90 * Math.PI / 180) * FORWARD_OFFSET,
-        yaw: -90,
-      })
-    }
-  }
+  const cap = Math.min(count, breakSeatCount(layout))
+  forEachBreakSeat(layout, (idx, slot, chair) => {
+    if (idx >= cap) return
+    const yawRad = chair.yaw * Math.PI / 180
+    seats.push({
+      zone: layout.zone,
+      x: zoneX + slot.x + chair.dx + Math.sin(yawRad) * layout.forwardOffset,
+      y: layout.seatY,
+      z: zoneZ + slot.z + chair.dz + Math.cos(yawRad) * layout.forwardOffset,
+      yaw: chair.yaw,
+    })
+  })
   return seats
 }
 

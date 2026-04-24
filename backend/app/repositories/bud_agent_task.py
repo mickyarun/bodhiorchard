@@ -28,10 +28,12 @@ async def recover_stuck_agent_tasks(db: AsyncSession) -> int:
     stmt = (
         update(BUDAgentTask)
         .where(
-            BUDAgentTask.status.in_([
-                AgentTaskStatus.PENDING,
-                AgentTaskStatus.RUNNING,
-            ])
+            BUDAgentTask.status.in_(
+                [
+                    AgentTaskStatus.PENDING,
+                    AgentTaskStatus.RUNNING,
+                ]
+            )
         )
         .values(
             status=AgentTaskStatus.FAILED,
@@ -68,10 +70,12 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
             select(BUDAgentTask)
             .where(BUDAgentTask.bud_id == bud_id)
             .where(
-                BUDAgentTask.status.in_([
-                    AgentTaskStatus.PENDING,
-                    AgentTaskStatus.RUNNING,
-                ])
+                BUDAgentTask.status.in_(
+                    [
+                        AgentTaskStatus.PENDING,
+                        AgentTaskStatus.RUNNING,
+                    ]
+                )
             )
             .order_by(BUDAgentTask.created_at.desc())
             .limit(1)
@@ -139,9 +143,7 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
         await self._db.execute(stmt)
         await self._db.flush()
 
-    async def mark_completed(
-        self, task_id: uuid.UUID, result_summary: dict | None = None
-    ) -> None:
+    async def mark_completed(self, task_id: uuid.UUID, result_summary: dict | None = None) -> None:
         """Mark a task as completed.
 
         Args:

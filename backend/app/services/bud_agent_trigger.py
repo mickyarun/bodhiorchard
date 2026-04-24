@@ -84,7 +84,13 @@ async def create_agent_task_for_stage(
         triggered_by=triggered_by,
     )
     db.add(task)
-    await db.flush()  # get task.id without committing
+    # Commit BEFORE enqueueing. The worker opens its own session and, at
+    # PostgreSQL READ COMMITTED, cannot see data held inside our ongoing
+    # transaction. Enqueueing before committing lets the worker race us
+    # to ``SELECT`` a row that doesn't exist yet, and it fails with
+    # "Agent task not found" within microseconds of job_created.
+    await db.commit()
+    await db.refresh(task)
 
     job = create_job(
         JOB_BUD_AGENT,
@@ -95,11 +101,9 @@ async def create_agent_task_for_stage(
         ).model_dump(),
         user_id=str(triggered_by) if triggered_by else None,
     )
+    # Second commit links the job_id onto the (already-visible) task row
+    # so ``/agent-tasks/{id}/cancel`` can find the paired job.
     task.job_id = job.job_id
-    task.status = AgentTaskStatus.RUNNING
-
-    # Single atomic commit — task + job_id visible to worker together.
-    # Must commit before returning because the worker opens its own session.
     await db.commit()
 
     logger.info(

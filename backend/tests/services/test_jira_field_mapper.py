@@ -6,8 +6,6 @@
 Pure-function tests — no database, no HTTP.
 """
 
-import pytest
-
 from app.services.jira_consolidator import (
     ConsolidatedGroup,
     build_consolidated_requirements,
@@ -17,11 +15,9 @@ from app.services.jira_field_mapper import (
     JiraFieldMapper,
     build_user_cache_from_issues,
     get_parent_key,
-    get_subtask_keys,
     is_epic,
     is_subtask,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────
 
@@ -141,7 +137,8 @@ class TestBugMapping:
 
     def test_severity_from_priority(self) -> None:
         mapper = JiraFieldMapper()
-        assert mapper.map_to_bug_fields(_issue("X-1", priority="Highest"))["severity"] == "critical"
+        highest = mapper.map_to_bug_fields(_issue("X-1", priority="Highest"))
+        assert highest["severity"] == "critical"
         assert mapper.map_to_bug_fields(_issue("X-1", priority="High"))["severity"] == "high"
         assert mapper.map_to_bug_fields(_issue("X-1", priority="Medium"))["severity"] == "medium"
         assert mapper.map_to_bug_fields(_issue("X-1", priority="Low"))["severity"] == "low"
@@ -153,9 +150,7 @@ class TestBugMapping:
 
     def test_bug_status_from_category(self) -> None:
         mapper = JiraFieldMapper()
-        bug = mapper.map_to_bug_fields(
-            _issue("X-1", status_name="Done", status_category="done")
-        )
+        bug = mapper.map_to_bug_fields(_issue("X-1", status_name="Done", status_category="done"))
         assert bug["status"] == "closed"
 
 
@@ -164,16 +159,12 @@ class TestUserResolution:
 
     def test_known_user_resolved(self) -> None:
         mapper = JiraFieldMapper(user_cache={"alice@x.com": "uuid-123"})
-        fields = mapper.map_to_bud_fields(
-            _issue("X-1", assignee_email="alice@x.com")
-        )
+        fields = mapper.map_to_bud_fields(_issue("X-1", assignee_email="alice@x.com"))
         assert fields["assignee_id"] == "uuid-123"
 
     def test_unknown_user_left_none(self) -> None:
         mapper = JiraFieldMapper(user_cache={})
-        fields = mapper.map_to_bud_fields(
-            _issue("X-1", assignee_email="unknown@x.com")
-        )
+        fields = mapper.map_to_bud_fields(_issue("X-1", assignee_email="unknown@x.com"))
         assert "assignee_id" not in fields
 
     def test_no_assignee(self) -> None:

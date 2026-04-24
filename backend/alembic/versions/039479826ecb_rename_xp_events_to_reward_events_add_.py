@@ -11,16 +11,18 @@ are classified as type='sp' with amount set from that metadata; all other
 rows are type='xp'. The existing sp_amount metadata is kept untouched so a
 downgrade can round-trip without further work.
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
 
+from alembic import op
+
 # revision identifiers, used by Alembic.
-revision: str = '039479826ecb'
-down_revision: Union[str, None] = 'd9c7f018e768'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "039479826ecb"
+down_revision: str | None = "d9c7f018e768"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -34,7 +36,8 @@ def upgrade() -> None:
 
     # 3. Rename xp_amount -> amount and promote to Numeric(10,2)
     op.alter_column(
-        "reward_events", "xp_amount",
+        "reward_events",
+        "xp_amount",
         new_column_name="amount",
         type_=sa.Numeric(10, 2, asdecimal=False),
         existing_type=sa.Integer(),
@@ -98,7 +101,8 @@ def downgrade() -> None:
     # metadata written by sp_service is still intact on those rows, so the
     # fractional values can be recovered from there if needed.
     op.alter_column(
-        "reward_events", "amount",
+        "reward_events",
+        "amount",
         new_column_name="xp_amount",
         type_=sa.Integer(),
         existing_type=sa.Numeric(10, 2, asdecimal=False),

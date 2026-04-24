@@ -45,10 +45,14 @@ class DeveloperXP(BaseModel):
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
     )
     org_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False,
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
     )
     total_xp: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -59,13 +63,21 @@ class DeveloperXP(BaseModel):
 
     # Skill points — scarce currency earned through role-based quality outcomes
     skill_points: Mapped[float] = mapped_column(
-        Numeric(10, 2, asdecimal=False), nullable=False, default=0, server_default="0",
+        Numeric(10, 2, asdecimal=False),
+        nullable=False,
+        default=0,
+        server_default="0",
     )
     house_level: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, server_default="1",
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
     )
     vehicle_unlocks: Mapped[list[str]] = mapped_column(
-        ARRAY(String(30)), nullable=False, server_default="{}",
+        ARRAY(String(30)),
+        nullable=False,
+        server_default="{}",
     )
 
     def __repr__(self) -> str:
@@ -83,29 +95,37 @@ class RewardEvent(BaseModel):
         # Partial unique index: prevents duplicate awards for the same source_ref
         Index(
             "uq_reward_events_source_ref",
-            "source_ref", "org_id",
+            "source_ref",
+            "org_id",
             unique=True,
             postgresql_where="source_ref IS NOT NULL",
         ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
     )
     org_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False,
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
     )
     type: Mapped[RewardType] = mapped_column(
         Enum(RewardType, name="reward_type", values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
     amount: Mapped[float] = mapped_column(
-        Numeric(10, 2, asdecimal=False), nullable=False,
+        Numeric(10, 2, asdecimal=False),
+        nullable=False,
     )
     source: Mapped[str] = mapped_column(String(30), nullable=False)
     source_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     multiplier: Mapped[float] = mapped_column(
-        Numeric(precision=3, scale=2), nullable=False, default=1.0,
+        Numeric(precision=3, scale=2),
+        nullable=False,
+        default=1.0,
     )
     metadata_: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 

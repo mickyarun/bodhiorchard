@@ -61,14 +61,18 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         *,
         category: str | None = None,
         repo_id: uuid.UUID | None = None,
+        title_query: str | None = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[KnowledgeItem]:
-        """List active knowledge items, optionally filtered by category and repo.
+        """List active knowledge items, optionally filtered by category, repo, and title.
 
         Args:
             category: Optional category filter.
             repo_id: Optional tracked repository filter (via junction table).
+            title_query: Optional case-insensitive substring match against title.
             limit: Maximum number of results.
+            offset: Number of rows to skip for pagination.
 
         Returns:
             List of active KnowledgeItem instances ordered by updated_at desc.
@@ -77,6 +81,7 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
             select(KnowledgeItem)
             .where(KnowledgeItem.is_active.is_(True))
             .order_by(KnowledgeItem.updated_at.desc())
+            .offset(offset)
             .limit(limit)
         )
         if category:
@@ -89,6 +94,8 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
                     )
                 )
             )
+        if title_query:
+            stmt = stmt.where(KnowledgeItem.title.ilike(f"%{title_query}%"))
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
@@ -128,12 +135,16 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         *,
         category: str | None = None,
         source: str | None = None,
+        repo_id: uuid.UUID | None = None,
+        title_query: str | None = None,
     ) -> int:
-        """Count active items with optional category and source filters.
+        """Count active items with optional category, source, repo, and title filters.
 
         Args:
             category: Optional category filter.
             source: Optional source filter.
+            repo_id: Optional tracked repository filter (via junction table).
+            title_query: Optional case-insensitive substring match against title.
 
         Returns:
             Count of matching active items.
@@ -146,6 +157,16 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
             stmt = stmt.where(KnowledgeItem.category == category)
         if source:
             stmt = stmt.where(KnowledgeItem.source == source)
+        if repo_id:
+            stmt = stmt.where(
+                KnowledgeItem.id.in_(
+                    select(KnowledgeRepoLink.knowledge_id).where(
+                        KnowledgeRepoLink.repo_id == repo_id
+                    )
+                )
+            )
+        if title_query:
+            stmt = stmt.where(KnowledgeItem.title.ilike(f"%{title_query}%"))
         result = await self._db.execute(stmt)
         return result.scalar() or 0
 
@@ -256,20 +277,28 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         title: str,
         category: str,
     ) -> KnowledgeItem | None:
-        """Fetch an item by exact title and category within the org.
+        """Fetch an ACTIVE item by exact title and category within the org.
+
+        Inactive (soft-deleted) items are excluded so that post-merge
+        tombstones never shadow the live row. The ``feature_registry``
+        category also carries a partial unique index on
+        ``(org_id, title) WHERE category='feature_registry' AND is_active=true``
+        (migration ``zm_feature_registry_unique``), so this method is
+        provably single-result for that category.
 
         Args:
             title: The item title.
             category: The item category.
 
         Returns:
-            The matching KnowledgeItem or None.
+            The matching active KnowledgeItem or None.
         """
         result = await self._db.execute(
             select(KnowledgeItem).where(
                 KnowledgeItem.org_id == self._org_id,
                 KnowledgeItem.title == title,
                 KnowledgeItem.category == category,
+                KnowledgeItem.is_active.is_(True),
             )
         )
         return result.scalar_one_or_none()
@@ -564,7 +593,8 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
 
     async def _inherit_code_locations(
-        self, knowledge_id: uuid.UUID,
+        self,
+        knowledge_id: uuid.UUID,
     ) -> dict | None:
         """Find code_locations from an existing junction for the same feature."""
         result = await self._db.execute(
@@ -647,9 +677,7 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
             return 0
         # Load full junction rows (not just repo_ids) to carry code_locations
         result = await self._db.execute(
-            select(KnowledgeRepoLink).where(
-                KnowledgeRepoLink.knowledge_id.in_(source_ids)
-            )
+            select(KnowledgeRepoLink).where(KnowledgeRepoLink.knowledge_id.in_(source_ids))
         )
         source_links = list(result.scalars().all())
         if not source_links:
@@ -739,7 +767,6 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         )
         return [row[0] for row in result.all()]
 
-
     async def get_by_ids(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, KnowledgeItem]:
         """Fetch multiple items by their IDs.
 
@@ -805,9 +832,7 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         if not ids:
             return []
         await self._db.execute(
-            sql_update(KnowledgeItem)
-            .where(KnowledgeItem.id.in_(ids))
-            .values(is_active=False)
+            sql_update(KnowledgeItem).where(KnowledgeItem.id.in_(ids)).values(is_active=False)
         )
         return ids
 

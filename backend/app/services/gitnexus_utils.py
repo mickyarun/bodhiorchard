@@ -50,6 +50,16 @@ def _run_npx_sync(
     return (result.stdout, result.stderr, result.returncode)
 
 
+# Serialise every npx invocation across the backend. Concurrent calls share
+# the ~/.npm/_npx cache and race on npm's atomic-install rename step —
+# producing `ENOTEMPTY: directory not empty, rename .../tree-sitter-*`
+# during scans. Scan phases that spawn several npx calls still run fast
+# because the first one warms the cache and subsequent ones hit it dry.
+# If this ever becomes a throughput bottleneck, split the cache with
+# per-invocation `--cache` dirs instead of a global lock.
+_NPX_LOCK = asyncio.Lock()
+
+
 async def run_npx(
     npx: str,
     args: list[str],
@@ -59,9 +69,11 @@ async def run_npx(
     """Run a gitnexus command via npx and return (stdout, stderr, returncode).
 
     Uses subprocess.run in a thread to avoid asyncio pipe buffer truncation
-    with large outputs (>8KB).
+    with large outputs (>8KB). Serialised by ``_NPX_LOCK`` so concurrent
+    callers don't corrupt the shared npx package cache.
     """
-    return await asyncio.to_thread(_run_npx_sync, npx, args, cwd, timeout)
+    async with _NPX_LOCK:
+        return await asyncio.to_thread(_run_npx_sync, npx, args, cwd, timeout)
 
 
 async def run_cypher(

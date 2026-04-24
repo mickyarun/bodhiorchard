@@ -4,11 +4,15 @@
 /**
  * HousingVillage — Double-row street village for the production dashboard.
  *
- * Uses VillageLayout.computeVillageLayout() for house placement,
- * then builds houses with the pivot wrapper pattern (same as housetest)
- * so rotation happens around the house center, not the corner.
+ * Uses `computeVillageLayout` from `@shared/world/VillageLayout` for house
+ * placement. The layout is emitted in zone-LOCAL coordinates (yaw-free,
+ * centred on 0,0); this class sets the village root entity's world
+ * position + yaw from the housing zone, so every child (houses, roads,
+ * fence, driveways) inherits the visual rotation automatically.
  *
- * Also builds sand-strip roads, driveways, and a square fence.
+ * HouseResult coordinates stay LOCAL forever: seats / bedPosition /
+ * exitPosition are never mutated into world space. Consumers read them
+ * via `toWorld(localPoint, house.pivot)` from `@shared/world/geom`.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
@@ -17,8 +21,7 @@ import { HouseBuilder, type HouseResult } from './HouseBuilder'
 import { BuildingFactory } from './BuildingFactory'
 import type { AssetLoader } from '../assets/AssetLoader'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
-import { getHouseTier } from './HouseTierConfig'
-import { MAX_TIER_FOOTPRINT } from './HouseTierConfig'
+import { getHouseTier, MAX_TIER_FOOTPRINT } from './HouseTierConfig'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 import type { WorldLayout } from '../world/WorldLayout'
 import type { ExclusionZone } from '../utils/MathUtils'
@@ -28,7 +31,9 @@ import {
   computeVillageLayout,
   type FenceBounds,
   type VillageLayoutResult,
-} from './VillageLayout'
+} from '@shared/world/VillageLayout'
+import type { Zone } from '@shared/world/zones'
+import { rotatePointAroundPivot, toWorld } from '@shared/world/geom'
 
 // ─── Types ───────────────────────────────────────
 
@@ -38,9 +43,18 @@ export interface HousingVillageResult {
   seats: InteractionPoint[]
   memberHouseMap: Map<string, HouseResult>
   fenceRadius: number
-  fenceBounds: FenceBounds
-  /** World-space gate entrance point — PathSystem routes to here. */
+  /** Axis-aligned rectangle in zone-LOCAL space (yaw-free). */
+  fenceBoundsLocal: FenceBounds
+  /** World-space centre of the village (= housing zone x/z). */
+  center: { x: number; z: number }
+  /** Village yaw in radians — physics + derived world computations read this. */
+  yawRad: number
+  /** Distance from world origin to the furthest rotated village fence corner. */
+  outerReach: number
+  /** Gate entrance in world space — PathSystem routes here. */
   gatePosition: { x: number; z: number }
+  /** Gate side relative to the zone-local rectangle. Passed to RectangularFence. */
+  gateSide: 'north' | 'south' | 'east' | 'west'
 }
 
 // ─── Village Builder ─────────────────────────────
@@ -52,6 +66,7 @@ export class HousingVillage {
   /** Stored context for live tier rebuilds. */
   private buildContext: {
     villageRoot: pc.Entity
+    zone: Zone
     members: EngineMember[]
     layout: VillageLayoutResult
     memberHouseMap: Map<string, HouseResult>
@@ -81,27 +96,36 @@ export class HousingVillage {
         entity: root,
         exclusionZone: { x: 0, z: 0, radius: 0 },
         seats: allSeats, memberHouseMap,
-        fenceRadius: 10, fenceBounds: emptyBounds,
+        fenceRadius: 10, fenceBoundsLocal: emptyBounds,
+        center: { x: zone?.x ?? 0, z: zone?.z ?? 0 },
+        yawRad: 0,
+        outerReach: 0,
         gatePosition: { x: 0, z: 0 },
+        gateSide: 'south',
       }
     }
 
     const villageMems = members.map(m => ({
       user_id: m.user_id, name: m.name, house_level: m.house_level,
     }))
-    const layout = computeVillageLayout(villageMems, zone.x, zone.z)
+    const layout = computeVillageLayout(villageMems, zone)
 
-    // Roads + driveways (centeredOrigin — pivot pattern centers houses)
+    // Root carries the village's world position AND yaw; all children are
+    // placed in LOCAL coordinates and inherit the transform visually.
+    root.setPosition(zone.x, 0, zone.z)
+    root.setLocalEulerAngles(0, zone.yawDeg ?? 0, 0)
+
+    // Roads + driveways — placements are local, root's yaw rotates them visually.
     await this.roads.init()
     this.roads.buildRoads(root, layout.streets, layout.placements, { driveways: true })
 
-    // Fence
+    // Fence — bounds are zone-local, gateSide picked in the same frame.
+    const gateSide = this.computeGateSide(zone)
     if (materials) {
-      const gateSide = this.computeGateSide(zone.x, zone.z)
       new RectangularFence(materials).build(root, { bounds: layout.fenceBounds, gateSide })
     }
 
-    // ─── Houses (pivot wrapper pattern) ─────────────────────────
+    // ─── Houses: build LOCAL, wrap with pivot, compose yaw ─────────────
     for (const placement of layout.placements) {
       const member = members[placement.layoutIndex]
       const tier = member.house_level ?? 1
@@ -111,128 +135,132 @@ export class HousingVillage {
         placement.x, placement.z, placement.layoutIndex, tier,
       )
 
-      this.wrapWithPivot(root, result, placement.x, placement.z, placement.yawDeg, tier)
+      this.wrapWithPivot(root, result, placement, zone, tier)
 
-      allSeats.push(...result.seats)
+      // WorldLayout.getSeats() returns seats in world coords across every
+      // zone (coffee bar, cafeteria, pool, pavilion emit world directly).
+      // HouseResult seats stay LOCAL — push world-space clones here so the
+      // two readers don't race on a single mutated object.
+      const pivot = result.pivot
+      if (pivot) {
+        for (const s of result.seats) {
+          const w = toWorld(s, pivot)
+          allSeats.push({
+            ...s,
+            x: w.x, z: w.z,
+            approachX: toWorld({ x: s.approachX, z: s.approachZ }, pivot).x,
+            approachZ: toWorld({ x: s.approachX, z: s.approachZ }, pivot).z,
+            yaw: s.yaw + pivot.yawDeg,
+          })
+        }
+      }
       memberHouseMap.set(member.user_id, result)
     }
 
     app.root.addChild(root)
 
-    const gatePosition = this.computeGatePosition(layout.fenceBounds, zone.x, zone.z)
-    this.buildContext = { villageRoot: root, members, layout, memberHouseMap }
+    const gateLocal = this.computeGateLocal(layout.fenceBounds, gateSide)
+    const gatePosition = this.localToWorld(gateLocal.x, gateLocal.z, zone, layout.yawRad)
+
+    this.buildContext = { villageRoot: root, zone, members, layout, memberHouseMap }
 
     return {
       entity: root,
       exclusionZone: { x: zone.x, z: zone.z, radius: layout.fenceRadius + MAX_TIER_FOOTPRINT },
       seats: allSeats, memberHouseMap,
       fenceRadius: layout.fenceRadius,
-      fenceBounds: layout.fenceBounds,
+      fenceBoundsLocal: layout.fenceBounds,
+      center: { x: zone.x, z: zone.z },
+      yawRad: layout.yawRad,
+      outerReach: layout.outerReach,
       gatePosition,
+      gateSide,
     }
   }
 
   // ─── Pivot Wrapper ─────────────────────────────
 
   /**
-   * Wrap a HouseBuilder result with a pivot entity so the house center
-   * is at the placement position and rotation happens around center.
-   *
-   * HouseBuilder builds from corner (0,0 → w,d). The pivot offsets the
-   * entity by (-w/2, -d/2) so the center aligns with the placement.
+   * Wrap a HouseBuilder result with a pivot entity at the placement's
+   * LOCAL coordinates under the village root. The village root already
+   * carries position + yaw, so the pivot itself only composes the house's
+   * own yaw (0 for north side, 180 for south). HouseResult's
+   * seats/bedPosition/exitPosition stay LOCAL (corner-origin); `pivot`
+   * is written with WORLD position and composed yaw for downstream
+   * consumers that need world coordinates.
    */
   private wrapWithPivot(
     parent: pc.Entity,
     result: HouseResult,
-    px: number, pz: number,
-    yawDeg: number, tier: number,
+    placement: { x: number; z: number; yawDeg: number },
+    zone: Zone,
+    tier: number,
   ): void {
     const tierDef = getHouseTier(tier)
 
-    // Centering offset: from corner-origin to center-origin. The HouseBuilder
-    // lays out the house (procedural walls or scaled KayKit GLB) within a
-    // tierDef.width × tierDef.depth tile footprint, so halving those gives the
-    // pivot-to-corner delta consistently across all tiers — no special case
-    // for KayKit. This is the single source of truth for house centering.
+    // Corner → centre offset. HouseBuilder lays the house out in a
+    // (tierDef.width × tierDef.depth) tile footprint from (0,0); halving
+    // those gives the pivot-to-corner delta consistently across tiers.
     const ox = -tierDef.width / 2
     const oz = -tierDef.depth / 2
 
-    // Create pivot at placement center with rotation
+    // Pivot lives at the placement's LOCAL coordinates under the rotated
+    // village root. House-yaw (0 or 180) is purely local; the village
+    // yaw is already on the root.
     const pivot = new pc.Entity(`HousePivot_${result.memberId}`)
-    pivot.setPosition(px, 0, pz)
-    pivot.setLocalEulerAngles(0, yawDeg, 0)
+    pivot.setLocalPosition(placement.x, 0, placement.z)
+    pivot.setLocalEulerAngles(0, placement.yawDeg, 0)
     parent.addChild(pivot)
 
-    // Add house entity as child, offset to center
     pivot.addChild(result.entity)
     result.entity.setLocalPosition(ox, 0, oz)
-    result.entity.setLocalEulerAngles(0, 0, 0)  // yaw is on pivot
+    result.entity.setLocalEulerAngles(0, 0, 0)
 
-    // Shift data positions by centering offset, then rotate around center
-    this.shiftPositions(result, ox, oz)
-    this.applyRotation(result, px, pz, yawDeg)
-
-    // Replace entity reference with the pivot (for destroy/rebuild)
+    // Replace entity reference so destroy() tears down the pivot subtree.
     result.entity = pivot
 
-    // Store explicit pivot data for physics (avoids entity transform reference issues)
-    result.pivotX = px
-    result.pivotZ = pz
-    result.pivotYaw = yawDeg
-  }
-
-  // ─── Position Transforms ───────────────────────
-
-  /** Shift all data positions by (ox, oz) to account for centering offset. */
-  private shiftPositions(result: HouseResult, ox: number, oz: number): void {
-    for (const seat of result.seats) {
-      seat.x += ox; seat.z += oz
-      seat.approachX += ox; seat.approachZ += oz
+    // Composed WORLD transform: rotate placement around zone centre, then
+    // translate to world; compose house yaw with village yaw. Seats /
+    // bedPosition / exitPosition remain LOCAL (never mutated).
+    const villageYawRad = ((zone.yawDeg ?? 0) * Math.PI) / 180
+    const worldXZ = rotatePointAroundPivot(
+      placement.x + zone.x, placement.z + zone.z, villageYawRad, zone.x, zone.z,
+    )
+    result.pivot = {
+      x: worldXZ.x,
+      z: worldXZ.z,
+      yawDeg: placement.yawDeg + (zone.yawDeg ?? 0),
     }
-    result.bedPosition.x += ox
-    result.bedPosition.z += oz
-    result.exitPosition.x += ox
-    result.exitPosition.z += oz
-  }
-
-  /** Rotate all data positions around (cx, cz) by yawDeg. */
-  private applyRotation(result: HouseResult, cx: number, cz: number, yawDeg: number): void {
-    const rad = yawDeg * Math.PI / 180
-    const cos = Math.cos(rad)
-    const sin = Math.sin(rad)
-
-    for (const seat of result.seats) {
-      const dx = seat.x - cx, dz = seat.z - cz
-      seat.x = cx + dx * cos + dz * sin
-      seat.z = cz - dx * sin + dz * cos
-      const ax = seat.approachX - cx, az = seat.approachZ - cz
-      seat.approachX = cx + ax * cos + az * sin
-      seat.approachZ = cz - ax * sin + az * cos
-      seat.yaw += yawDeg
-    }
-
-    const bdx = result.bedPosition.x - cx, bdz = result.bedPosition.z - cz
-    result.bedPosition.x = cx + bdx * cos + bdz * sin
-    result.bedPosition.z = cz - bdx * sin + bdz * cos
-
-    const edx = result.exitPosition.x - cx, edz = result.exitPosition.z - cz
-    result.exitPosition.x = cx + edx * cos + edz * sin
-    result.exitPosition.z = cz - edx * sin + edz * cos
-    result.exitPosition.yaw += yawDeg
   }
 
   // ─── Gate Helpers ──────────────────────────────
 
-  private computeGateSide(zoneX: number, zoneZ: number): 'north' | 'south' | 'east' | 'west' {
-    const ax = Math.abs(zoneX), az = Math.abs(zoneZ)
-    if (ax > az) return zoneX > 0 ? 'west' : 'east'
-    return zoneZ > 0 ? 'north' : 'south'
+  /**
+   * Pick which wall of the zone-local rectangle houses the gate. Works
+   * at any rotation: we transform "direction from zone to origin" into
+   * the zone-local frame, then pick the wall whose outward normal
+   * best matches it.
+   */
+  private computeGateSide(zone: Zone): 'north' | 'south' | 'east' | 'west' {
+    const yawRad = ((zone.yawDeg ?? 0) * Math.PI) / 180
+    const dx = -zone.x, dz = -zone.z               // world → origin
+    const cos = Math.cos(yawRad), sin = Math.sin(yawRad)
+    // Inverse of rotatePointAroundPivot's forward direction — rotate the
+    // world-space direction vector into zone-local.
+    const lx =  dx * cos - dz * sin
+    const lz =  dx * sin + dz * cos
+    return Math.abs(lx) > Math.abs(lz)
+      ? (lx > 0 ? 'east'  : 'west')
+      : (lz > 0 ? 'south' : 'north')
   }
 
-  private computeGatePosition(bounds: FenceBounds, zoneX: number, zoneZ: number): { x: number; z: number } {
+  private computeGateLocal(
+    bounds: FenceBounds,
+    side: 'north' | 'south' | 'east' | 'west',
+  ): { x: number; z: number } {
     const cx = (bounds.minX + bounds.maxX) / 2
     const cz = (bounds.minZ + bounds.maxZ) / 2
-    switch (this.computeGateSide(zoneX, zoneZ)) {
+    switch (side) {
       case 'north': return { x: cx, z: bounds.minZ }
       case 'south': return { x: cx, z: bounds.maxZ }
       case 'east':  return { x: bounds.maxX, z: cz }
@@ -240,11 +268,18 @@ export class HousingVillage {
     }
   }
 
+  private localToWorld(
+    lx: number, lz: number,
+    zone: Zone, yawRad: number,
+  ): { x: number; z: number } {
+    return rotatePointAroundPivot(lx + zone.x, lz + zone.z, yawRad, zone.x, zone.z)
+  }
+
   // ─── Live Rebuild ──────────────────────────────
 
   async rebuildByMemberId(memberId: string, newTier: number): Promise<void> {
     if (!this.buildContext) return
-    const { villageRoot, members, layout, memberHouseMap } = this.buildContext
+    const { villageRoot, zone, members, layout, memberHouseMap } = this.buildContext
 
     const oldResult = memberHouseMap.get(memberId)
     if (!oldResult) return
@@ -263,7 +298,7 @@ export class HousingVillage {
       placement.x, placement.z, placement.layoutIndex, newTier,
     )
 
-    this.wrapWithPivot(villageRoot, result, placement.x, placement.z, placement.yawDeg, newTier)
+    this.wrapWithPivot(villageRoot, result, placement, zone, newTier)
     memberHouseMap.set(memberId, result)
   }
 }

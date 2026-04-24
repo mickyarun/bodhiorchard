@@ -171,6 +171,13 @@ export interface BUDEstimates {
   prod_p50: string | null
   prod_p70: string | null
   prod_p85: string | null
+  // Critical Chain Method fields. ``project_buffer_days`` aggregates
+  // per-phase variance via Goldratt's √Σ formula; ``commit_date`` is
+  // the date stakeholders should commit to (prod-P50 + buffer).
+  // Both nullable for backward compat with snapshots persisted before
+  // Phase D landed — render falls back to "no buffer" gracefully.
+  project_buffer_days: number | null
+  commit_date: string | null
   generated_at: string | null
   trigger: string | null
 }
@@ -386,18 +393,10 @@ export interface KnowledgeItem {
   repoIds: string[]
 }
 
-export interface KnowledgeSearchResult extends KnowledgeItem {
-  score: number
+export interface KnowledgeItemPage {
+  items: KnowledgeItem[]
+  total: number
 }
-
-export const KNOWLEDGE_CATEGORIES = [
-  { value: '', label: 'All' },
-  { value: 'feature_registry', label: 'Features' },
-  { value: 'code_doc', label: 'Code Docs' },
-  { value: 'api_pattern', label: 'API Patterns' },
-  { value: 'architecture', label: 'Architecture' },
-  { value: 'convention', label: 'Conventions' },
-] as const
 
 export const FEATURE_STATUS_COLORS: Record<string, string> = {
   planned: 'info',
@@ -434,7 +433,6 @@ export interface RepoInfo {
   developBranch: string | null
   uatBranch: string | null
   hasUncommittedChanges: boolean
-  repoType: string | null
   setupStatus: 'merged' | 'not_setup'
   designSystemStatus: 'none' | 'extracting' | 'ready'
 }

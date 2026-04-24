@@ -26,8 +26,25 @@ from app.services.event_bus import publish
 
 logger = structlog.get_logger(__name__)
 
-_SCAN_TTL = 7200  # 2 hours
-_STALE_TIMEOUT = 600  # 10 minutes — scan is considered stuck after this
+_SCAN_TTL = 7200  # 2 hours — Redis key lifetime (refreshed on every write)
+# A scan is auto-failed if nothing touches it for this long. Must be
+# comfortably larger than the largest permitted ``scan.timeout_seconds``
+# (schemas/settings.py caps it at 3600s) so a long-running Claude phase
+# between scan_progress updates doesn't get the whole scan marked failed.
+# Matching _SCAN_TTL means "stale" and "aged out of Redis" happen on the
+# same timescale — simpler mental model.
+_STALE_TIMEOUT = _SCAN_TTL  # 2 hours
+
+
+def _clamp_pct(current: int, requested: int) -> int:
+    """Monotonic, upper-bounded progress update.
+
+    Progress never goes backwards (``max(current, requested)``) and never
+    exceeds 100. Used by both the Redis and in-memory fallback update
+    paths so the two cannot drift.
+    """
+    return min(100, max(current, requested))
+
 
 # ── In-memory fallback ──────────────────────────────────────────────
 _fallback: dict[str, dict] = {}
@@ -190,7 +207,7 @@ async def _update_redis(
     if new_pct is not None:
         current_raw = await redis.hget(key, "progress_pct")
         current_pct = int(current_raw or 0)
-        updates["progress_pct"] = str(max(current_pct, new_pct))
+        updates["progress_pct"] = str(_clamp_pct(current_pct, new_pct))
 
     for field, value in extras.items():
         if field in _HASH_FIELDS:
@@ -207,7 +224,19 @@ async def _update_redis(
     if updates:
         await redis.hset(key, mapping=updates)
 
+    # Refresh TTL on every write so long scans can't age out of Redis
+    # mid-run. Without this the key is guaranteed to survive only the
+    # original 2 hours from creation; a scan that runs longer (say a
+    # multi-repo synthesis at 3600s per Claude call) would silently
+    # disappear and the /status endpoint would 404 despite the pipeline
+    # still working. We also refresh the org→scan pointer so the
+    # "transient miss" fall-through in resolve_scan_progress keeps
+    # working for the full lifetime of the scan.
+    await redis.expire(key, _SCAN_TTL)
     raw = await redis.hgetall(key)
+    org_id = raw.get("org_id")
+    if org_id:
+        await redis.expire(f"scan_active:{org_id}", _SCAN_TTL)
     result = _dict_to_scan_status(raw)
     _publish(scan_id, result)
     return result
@@ -231,7 +260,7 @@ def _update_fallback(
 
     if new_pct is not None:
         current_pct = int(data.get("progress_pct", 0))
-        data["progress_pct"] = str(max(current_pct, new_pct))
+        data["progress_pct"] = str(_clamp_pct(current_pct, new_pct))
 
     for field, value in extras.items():
         if field in _HASH_FIELDS:
@@ -247,16 +276,55 @@ def _update_fallback(
 
     result = _dict_to_scan_status(data)
     _publish(scan_id, result)
+    # Terminal entries are kept so polls that arrive just after completion
+    # still get the final status. Cleanup is age-based via
+    # _prune_stale_fallback() on each read.
+    return result
 
-    # Clean up terminal scans from fallback to prevent unbounded growth
-    if new_status in ("completed", "failed"):
-        _fallback.pop(scan_id, None)
-        # Clean org→scan mapping for this scan
+
+def _prune_stale_fallback() -> None:
+    """Drop fallback entries older than ``_SCAN_TTL`` so the dict doesn't
+    grow unbounded. Mirrors the Redis TTL behaviour for the in-memory
+    path, without eagerly deleting entries that a lingering poll might
+    still want to read."""
+    if not _fallback:
+        return
+    now = time.time()
+    stale = [
+        sid
+        for sid, data in _fallback.items()
+        if now - float(data.get("updated_at", now)) > _SCAN_TTL
+    ]
+    for sid in stale:
+        data = _fallback.pop(sid, None)
+        if data is None:
+            continue
         org_id = data.get("org_id")
-        if org_id and _org_scan_map.get(org_id) == scan_id:
+        if org_id and _org_scan_map.get(org_id) == sid:
             _org_scan_map.pop(org_id, None)
 
-    return result
+
+async def append_repo_warning(
+    scan_id: str,
+    *,
+    repo: str,
+    phase: str,
+    summary: str,
+    hint: str | None = None,
+) -> ScanStatus | None:
+    """Append a non-fatal per-repo warning to the scan's warning list.
+
+    The list is stored JSON-encoded so it survives Redis's flat hash
+    layout. We read-modify-write which is fine here since scan progress
+    is single-writer per scan_id.
+    """
+    current = await get_scan_progress(scan_id)
+    if current is None:
+        logger.warning("append_repo_warning_missing_scan", scan_id=scan_id)
+        return None
+    entry = {"repo": repo, "phase": phase, "summary": summary, "hint": hint}
+    warnings = [w.model_dump() for w in current.repo_warnings] + [entry]
+    return await update_scan_progress(scan_id, repo_warnings=warnings)
 
 
 async def append_repo_warning(
@@ -300,9 +368,35 @@ async def get_scan_progress(scan_id: str) -> ScanStatus | None:
             return _dict_to_scan_status(raw)
         return None
 
+    _prune_stale_fallback()
     data = _fallback.get(scan_id)
     if data is not None:
         return _dict_to_scan_status(data)
+    return None
+
+
+async def resolve_scan_progress(
+    scan_id: str,
+    org_id: str,
+) -> ScanStatus | None:
+    """Read a scan by id, falling back to the org's currently-active scan.
+
+    Covers the "user switched tabs during a scan" case: the browser
+    re-mounts and polls ``/scan/{scan_id}/status`` before the websocket
+    has re-subscribed; if the request racelost the scan entry in a
+    transient backend hiccup, we still return a live status as long as
+    the org has an active scan matching the requested id. This way the
+    UI never sees a phantom 404 mid-scan.
+
+    Returns the direct lookup when available, the org's active scan if
+    it matches ``scan_id``, or ``None`` otherwise.
+    """
+    direct = await get_scan_progress(scan_id)
+    if direct is not None:
+        return direct
+    active = await get_active_scan_for_org(org_id)
+    if active is not None and active.scan_id == scan_id:
+        return active
     return None
 
 
@@ -390,9 +484,14 @@ async def get_active_scan_for_org(org_id: str) -> ScanStatus | None:
                 scan_id=scan_id,
                 last_update=data.get("updated_at"),
             )
-            _update_fallback(scan_id, "failed", None, {
-                "error": "Scan cancelled (timed out — no progress for 10 minutes).",
-            })
+            _update_fallback(
+                scan_id,
+                "failed",
+                None,
+                {
+                    "error": "Scan cancelled (timed out — no progress for 10 minutes).",
+                },
+            )
             _org_scan_map.pop(org_id, None)
             return None
 

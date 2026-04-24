@@ -71,7 +71,9 @@ class TrackedRepository(BaseModel):
     # BUD whose commits are included.
     uat_branch: Mapped[str | None] = mapped_column(String(100), nullable=True)
     github_repo_full_name: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, index=True,
+        String(255),
+        nullable=True,
+        index=True,
     )
 
     def __repr__(self) -> str:

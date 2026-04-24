@@ -41,7 +41,9 @@ async def get_my_xp(
 
     xp_remaining, next_threshold = xp_for_next_level(total_xp)
     unlocks = await get_unlocked_items(
-        db, user_id=current_user.id, org_id=current_user.org_id,
+        db,
+        user_id=current_user.id,
+        org_id=current_user.org_id,
     )
 
     return XPProfileRead(

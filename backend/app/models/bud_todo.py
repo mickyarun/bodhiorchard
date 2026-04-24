@@ -71,9 +71,7 @@ class BUDTodo(BaseModel):
     )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    phase: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="development"
-    )
+    phase: Mapped[str] = mapped_column(String(30), nullable=False, default="development")
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -90,15 +88,11 @@ class BUDTodo(BaseModel):
     )
     context_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    taken_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    taken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Relationships
-    bud: Mapped["BUDDocument"] = relationship(
-        back_populates="todos", lazy="selectin"
-    )
+    bud: Mapped["BUDDocument"] = relationship(back_populates="todos", lazy="selectin")
     assignee: Mapped["User | None"] = relationship(lazy="joined")
 
     def __repr__(self) -> str:
