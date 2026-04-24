@@ -97,11 +97,15 @@ async def handle_dev_activity(
 
     # 4. Dedup: skip if this commit SHA was already recorded
     if body.event_type == "commit" and body.commit_sha:
-        dup_stmt = select(DevActivityLog.id).where(
-            DevActivityLog.org_id == org.id,
-            DevActivityLog.event_type == "commit",
-            DevActivityLog.commit_sha == body.commit_sha,
-        ).limit(1)
+        dup_stmt = (
+            select(DevActivityLog.id)
+            .where(
+                DevActivityLog.org_id == org.id,
+                DevActivityLog.event_type == "commit",
+                DevActivityLog.commit_sha == body.commit_sha,
+            )
+            .limit(1)
+        )
         dup = await db.execute(dup_stmt)
         if dup.scalar_one_or_none() is not None:
             logger.debug("hook_commit_duplicate", sha=body.commit_sha[:8])
@@ -198,9 +202,7 @@ async def handle_dev_activity(
         "file_path": body.file_path,
         "created_at": log.created_at.isoformat(),
     }
-    asyncio.create_task(
-        publish_to_colyseus(org.id, "dev_activity", dev_activity_payload)
-    )
+    asyncio.create_task(publish_to_colyseus(org.id, "dev_activity", dev_activity_payload))
 
     # Award XP for developer activity (non-blocking — XP errors must not break hooks)
     if user_id:
@@ -210,8 +212,12 @@ async def handle_dev_activity(
             await check_and_award_streak(db, user_id=user_id, org_id=org.id)
             if body.event_type == "commit" and body.commit_sha:
                 await award_xp(
-                    db, user_id=user_id, org_id=org.id,
-                    amount=5, source="commit", source_ref=body.commit_sha,
+                    db,
+                    user_id=user_id,
+                    org_id=org.id,
+                    amount=5,
+                    source="commit",
+                    source_ref=body.commit_sha,
                 )
         except Exception:
             logger.warning("xp_award_failed", user_id=str(user_id), exc_info=True)

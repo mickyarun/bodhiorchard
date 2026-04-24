@@ -415,11 +415,7 @@ def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
                 if not isinstance(tc, dict):
                     continue
                 disc = (
-                    tc.get("layer")
-                    or tc.get("type")
-                    or tc.get("suite")
-                    or tc.get("kind")
-                    or ""
+                    tc.get("layer") or tc.get("type") or tc.get("suite") or tc.get("kind") or ""
                 ).lower()
                 if disc in ("automation", "automated", "auto", "unit", "integration", "component"):
                     auto.append(tc)
@@ -431,8 +427,15 @@ def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
     # based on category heuristics. Unit/functional/boundary/negative tests
     # are typically automation; a11y/visual/ux tests are typically manual.
     auto_categories = {
-        "functional", "boundary", "negative", "stress", "regression",
-        "integration", "unit", "component", "impact",
+        "functional",
+        "boundary",
+        "negative",
+        "stress",
+        "regression",
+        "integration",
+        "unit",
+        "component",
+        "impact",
     }
     if not auto and manual:
         reclassified_auto: list = []

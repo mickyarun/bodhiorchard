@@ -44,12 +44,14 @@ export function useScanSocket() {
       d.status === 'completed' ? 'completed' : d.status === 'failed' ? 'failed' : null,
     getError: (d) => d.error || null,
     pollIntervalMs: 2000,
-    pollTimeoutMs: 1_800_000, // 30 min — scans can be long
-    // Scan progress lives in Redis for 30 min; the subscribe →
-    // first-publish race can still drop `scan_complete` (backend logs
-    // `event_bus_no_subscribers` right before the terminal event),
-    // leaving the UI stuck at the last received percent. Polling
-    // alongside the WS is cheap insurance.
+    // No wall-clock cap: scans can legitimately run for hours (multi-repo
+    // × Claude synthesis). The tracker stops when the backend reports
+    // completed / failed (including the stale-sweep auto-fail), so a
+    // hardcoded ceiling here only ever produces false "failed" banners.
+    // Polling alongside the WS closes the subscribe → publish race:
+    // the event bus has no buffer, so a terminal event published while
+    // the tab was mid-unsubscribe would be lost; the next REST poll
+    // catches up from Redis. Cheap insurance.
     pollAlongsideWs: true,
   })
 

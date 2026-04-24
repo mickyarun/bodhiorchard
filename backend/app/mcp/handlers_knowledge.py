@@ -175,7 +175,11 @@ async def handle_write_feature_registry(
     from app.mcp.synthesis_queue import get_queue_remaining, remove_from_queue
 
     error = require_non_empty(
-        params, "feature_name", "description", "capabilities", "tags",
+        params,
+        "feature_name",
+        "description",
+        "capabilities",
+        "tags",
     )
     if error:
         return error
@@ -268,9 +272,7 @@ async def handle_write_feature_registry(
 
     # Link to repo via junction table (with per-repo code_locations)
     if repo_id and item:
-        await ki_repo.link_to_repo(
-            item.id, repo_id, code_locations=params.get("code_locations")
-        )
+        await ki_repo.link_to_repo(item.id, repo_id, code_locations=params.get("code_locations"))
         await ki_repo.flush()
 
     # Deactivate originals when merging cross-repo features.

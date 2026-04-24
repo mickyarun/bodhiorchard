@@ -8,7 +8,11 @@ package.json), sends them to the configured LLM (via Claude Code CLI),
 and gets back structured markdown with design tokens, CDN boilerplate,
 and a pattern library.
 
-Falls back to basic regex extraction if the CLI is unavailable.
+Falls back to basic regex extraction if the CLI is unavailable. File
+discovery globs and the LLM prompt idiom are supplied by the detected
+:class:`app.services.platforms.Platform`, so mobile (Flutter / Android /
+iOS), desktop, static-site and token-only repos work in the same pipeline
+as web apps.
 """
 
 import hashlib
@@ -18,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
+
+from app.services.platforms import DEFAULT_SKIP_DIRS, Platform, PlatformKind
 
 logger = structlog.get_logger(__name__)
 
@@ -32,49 +38,6 @@ class ExtractionResult:
     error: str | None = None  # Non-fatal error (e.g. LLM timeout)
 
 
-# Glob patterns to discover design-related files (broad search)
-_DESIGN_FILE_PATTERNS = [
-    # Vuetify / Vue config
-    "**/vuetify.ts",
-    "**/vuetify.js",
-    "**/vuetify.config.*",
-    # Theme / style files
-    "**/theme.ts",
-    "**/theme.js",
-    "**/theme.config.*",
-    "**/themes/**/*.ts",
-    "**/themes/**/*.js",
-    # CSS / SCSS / SASS
-    "**/main.scss",
-    "**/main.css",
-    "**/variables.scss",
-    "**/variables.css",
-    "**/tokens.scss",
-    "**/tokens.css",
-    "**/global.scss",
-    "**/global.css",
-    # Tailwind
-    "tailwind.config.*",
-    "**/tailwind.config.*",
-    # MUI / Material UI
-    "**/createTheme.*",
-    "**/palette.*",
-    # package.json (for framework detection & CDN versions)
-    "package.json",
-]
-
-# Directories to skip during file discovery
-_SKIP_DIRS = {
-    "node_modules",
-    ".git",
-    "dist",
-    "build",
-    ".next",
-    ".nuxt",
-    "coverage",
-    "__pycache__",
-}
-
 # Max file size to include in the prompt (50KB)
 _MAX_FILE_SIZE = 50_000
 
@@ -82,25 +45,32 @@ _MAX_FILE_SIZE = 50_000
 _MAX_TOTAL_CONTENT = 200_000
 
 
-async def extract_design_system(repo_path: Path) -> ExtractionResult:
+async def extract_design_system(repo_path: Path, platform: Platform) -> ExtractionResult:
     """Extract design system from a repository using the LLM.
 
-    Discovers design-related files, sends them to Claude Code CLI for
-    intelligent extraction, and returns structured markdown.
+    Discovers design-related files (via the platform's ``design_globs``),
+    sends them to Claude Code CLI for intelligent extraction, and returns
+    structured markdown.
 
     Falls back to regex-based extraction if the CLI is unavailable or times out.
 
     Args:
         repo_path: Path to the repository root.
+        platform: The detected platform supplying globs, skip dirs, and
+            prompt idiom.
 
     Returns:
         ExtractionResult with content, hash, method used, and any non-fatal error.
     """
     # 1. Discover design-related files
-    discovered = _discover_design_files(repo_path)
+    discovered = discover_design_files(repo_path, platform)
     if not discovered:
-        logger.warning("no_design_files_found", repo_path=str(repo_path))
-        content, source_hash = _fallback_minimal(repo_path)
+        logger.warning(
+            "no_design_files_found",
+            repo_path=str(repo_path),
+            platform=platform.slug,
+        )
+        content, source_hash = _fallback_minimal(repo_path, platform)
         return ExtractionResult(
             content=content,
             source_hash=source_hash,
@@ -108,8 +78,8 @@ async def extract_design_system(repo_path: Path) -> ExtractionResult:
         )
 
     # 2. Read file contents
-    file_contents = _read_discovered_files(discovered)
-    source_hash = _compute_hash(file_contents)
+    file_contents = read_discovered_files(discovered)
+    source_hash = compute_hash(file_contents)
 
     # 3. Try LLM-powered extraction
     from app.services.claude_runner import is_claude_cli_available
@@ -117,11 +87,12 @@ async def extract_design_system(repo_path: Path) -> ExtractionResult:
     llm_error: str | None = None
     if is_claude_cli_available():
         try:
-            markdown, llm_err = await _llm_extract(repo_path, file_contents)
+            markdown, llm_err = await _llm_extract(repo_path, file_contents, platform)
             if markdown:
                 logger.info(
                     "design_system_extracted_via_llm",
                     repo_path=str(repo_path),
+                    platform=platform.slug,
                     file_count=len(file_contents),
                     hash=source_hash[:12],
                 )
@@ -133,49 +104,66 @@ async def extract_design_system(repo_path: Path) -> ExtractionResult:
             llm_error = llm_err
         except Exception as exc:
             llm_error = str(exc)[:200]
-            logger.exception("llm_extraction_failed", repo_path=str(repo_path))
+            logger.exception(
+                "llm_extraction_failed",
+                repo_path=str(repo_path),
+                platform=platform.slug,
+            )
     else:
         llm_error = "Claude Code CLI not available"
 
-    # 4. Fallback to regex extraction
-    logger.info("design_system_fallback_regex", repo_path=str(repo_path))
-    markdown = _regex_extract(repo_path, file_contents)
+    # 4. Fallback.
+    # The regex extractor only understands web/Vuetify idioms, so for
+    # non-web platforms (Flutter, Android, iOS, ...) running it would
+    # produce Vuetify CDN HTML that is actively misleading. Emit a
+    # platform-aware placeholder instead.
+    logger.info(
+        "design_system_fallback",
+        repo_path=str(repo_path),
+        platform=platform.slug,
+        reason=llm_error,
+    )
+    if platform.kind == PlatformKind.WEB:
+        markdown = _regex_extract(repo_path, file_contents)
+        method = "regex_fallback"
+    else:
+        markdown = _platform_aware_fallback(platform, file_contents, llm_error)
+        method = "minimal"
     return ExtractionResult(
         content=markdown,
         source_hash=source_hash,
-        method="regex_fallback",
-        error=llm_error or "LLM extraction returned empty result — used regex fallback",
+        method=method,
+        error=llm_error or "LLM extraction returned empty result — used fallback",
     )
 
 
-def discover_design_files(repo_path: Path) -> list[Path]:
-    """Find design-related files in the repository using glob patterns.
+def discover_design_files(repo_path: Path, platform: Platform) -> list[Path]:
+    """Find design-related files in the repository using platform-aware globs.
 
     Args:
         repo_path: Repository root path.
+        platform: Detected platform whose ``design_globs`` and ``skip_dirs``
+            drive the search.
 
     Returns:
         Sorted list of discovered file paths.
     """
+    skip = DEFAULT_SKIP_DIRS | frozenset(platform.skip_dirs)
     found: set[Path] = set()
-    for pattern in _DESIGN_FILE_PATTERNS:
+    for pattern in platform.design_globs:
         for path in repo_path.glob(pattern):
-            if path.is_file() and not _in_skip_dir(path, repo_path):
+            if path.is_file() and not _in_skip_dir(path, repo_path, skip):
                 found.add(path)
 
     # Sort by path for deterministic ordering
     return sorted(found)
 
 
-# Backwards-compat alias
-_discover_design_files = discover_design_files
-
-
-def _in_skip_dir(path: Path, root: Path) -> bool:
-    """Check if a path is inside a directory we should skip."""
+def _in_skip_dir(path: Path, root: Path, skip: frozenset[str]) -> bool:
+    """Check if a path is inside a directory in the skip set."""
     try:
         relative = path.relative_to(root)
-        return any(part in _SKIP_DIRS for part in relative.parts)
+        return any(part in skip for part in relative.parts)
     except ValueError:
         return False
 
@@ -215,18 +203,10 @@ def read_discovered_files(
     return result
 
 
-# Backwards-compat alias
-_read_discovered_files = read_discovered_files
-
-
 def compute_hash(file_contents: dict[str, str]) -> str:
     """Compute SHA256 hash of all discovered file contents."""
     combined = "".join(f"{k}:{v}" for k, v in sorted(file_contents.items()))
     return hashlib.sha256(combined.encode()).hexdigest()
-
-
-# Backwards-compat alias
-_compute_hash = compute_hash
 
 
 async def _get_gitnexus_context(repo_path: Path) -> str:
@@ -262,9 +242,71 @@ async def _get_gitnexus_context(repo_path: Path) -> str:
     return ""
 
 
+def _extraction_instructions(platform: Platform) -> str:
+    """Build the LLM instructions block — platform-aware.
+
+    Web platforms get the full 6-section layout (Color Palette, Typography,
+    Component Defaults, CSS Variables, CDN Boilerplate, Pattern Library) —
+    downstream wireframe generators depend on the CDN boilerplate.
+
+    Non-web platforms get a focused 3-section layout (Color Palette,
+    Typography, Platform Tokens). Asking a Flutter / Android / iOS repo
+    to produce CDN HTML or Vuetify component defaults is what pushed the
+    LLM past the 10-minute timeout.
+    """
+    if platform.kind == PlatformKind.WEB:
+        return (
+            "## Instructions\n\n"
+            "Produce a design system reference document in markdown with "
+            "these sections:\n\n"
+            "1. **Color Palette**: ALL theme colors as a markdown table "
+            "(`| Token | Value |`). Include dark/light themes.\n"
+            "2. **Typography**: Font families, sizes, weights.\n"
+            "3. **Component Defaults**: Configured component defaults "
+            "(Vuetify defaults, MUI overrides, etc.).\n"
+            "4. **CSS Variables / Tokens**: Custom properties, SCSS "
+            "variables, design tokens.\n"
+            "5. **CDN Boilerplate**: Complete HTML boilerplate using the "
+            "project's UI framework via CDN with the EXACT version from "
+            "package.json. Include: CDN links, framework init with theme "
+            "colors, icon library, font imports, runnable template.\n"
+            "6. **Pattern Library**: Common component patterns as concise "
+            "examples.\n\n"
+            "Output ONLY the markdown starting with "
+            "`# Design System Reference`. No preamble."
+        )
+    return (
+        "## Instructions\n\n"
+        "Produce a focused design system reference in markdown with "
+        "these three sections **only** (do NOT emit CDN HTML, Vuetify "
+        "boilerplate, or CSS variable tables — this is a "
+        f"{platform.kind.value} repository):\n\n"
+        "1. **Color Palette**: All semantic colors as a markdown table "
+        "(`| Token | Value | Notes |`). Include dark / light variants "
+        "when the codebase defines them. Express colours in hex.\n"
+        "2. **Typography**: Font families, sizes, weights, line heights "
+        "— in the platform's idiom (Flutter `TextStyle`, Android "
+        "`TextAppearance`, iOS `Font`, XAML `TextBlock` styles).\n"
+        "3. **Platform Tokens**: Any other design-relevant constants "
+        "(spacing scale, radii, elevations, motion durations). Use the "
+        "platform's native value types.\n\n"
+        "**Budget discipline (important):**\n"
+        "- Cap tool calls at 4 file reads + 1 GitNexus query total. Do "
+        "NOT walk every widget.\n"
+        "- If the repo lacks a dedicated theme module, extract what you "
+        "can from inline `Color(0x…)` / `TextStyle(…)` literals found "
+        "in the inlined files and STOP. Imperfect-but-shipped beats "
+        "exhaustive-and-timed-out.\n"
+        "- Keep the output tight: 150-300 lines total.\n\n"
+        "Output ONLY the markdown starting with "
+        "`# Design System Reference`. No preamble."
+    )
+
+
 async def _llm_extract(
     repo_path: Path,
     file_contents: dict[str, str],
+    platform: Platform,
 ) -> tuple[str | None, str | None]:
     """Use Claude Code CLI to intelligently extract the design system.
 
@@ -275,6 +317,8 @@ async def _llm_extract(
     Args:
         repo_path: Repository root (used as working_dir for CLI).
         file_contents: Dict of filename → content for design-related files.
+        platform: Detected platform whose ``prompt_hint`` is prepended so
+            the LLM parses tokens in the idioms of that platform.
 
     Returns:
         Tuple of (markdown_content_or_none, error_message_or_none).
@@ -284,12 +328,15 @@ async def _llm_extract(
     # Get GitNexus context for faster file discovery
     gitnexus_ctx = await _get_gitnexus_context(repo_path)
 
-    # Inline all design files (theme configs are rarely >20KB).
-    # Only list paths for truly large files like full package.json with 100+ deps.
+    # Inline design files up to 10KB each. The previous 20KB cap meant a
+    # real Flutter app could easily ship 80KB of prompt, which combined
+    # with the 15-turn exploration budget timed out at 10 minutes on
+    # large repos. Keep inlining lean and let the LLM navigate via
+    # GitNexus MCP (or Read tool) for anything bigger.
     inline_parts = []
     path_only_files = []
     for filename, content in file_contents.items():
-        if len(content) < 20_000:
+        if len(content) < 10_000:
             inline_parts.append(f"### {filename}\n```\n{content}\n```")
         else:
             path_only_files.append(f"- `{filename}` ({len(content)} bytes)")
@@ -302,52 +349,68 @@ async def _llm_extract(
         "from this repository into structured markdown.\n",
     ]
 
+    if platform.prompt_hint:
+        prompt_parts.append(f"## Platform Context\n\n{platform.prompt_hint}\n")
+
     if gitnexus_ctx:
         prompt_parts.append(gitnexus_ctx)
+
+    # Navigation hint: when the repo is GitNexus-indexed, telling Claude
+    # to query the graph *first* is 5-10× faster than scanning files.
+    # A missing tool is harmless — the CLI just ignores the suggestion.
+    prompt_parts.append(
+        "## Navigation\n\n"
+        "If the `gitnexus` MCP server is connected, **prefer it over "
+        "filesystem scans**:\n"
+        "- `gitnexus_query` with query=\"theme color typography\" to "
+        "locate design-related symbols by name.\n"
+        "- `gitnexus_context` with a symbol name to get its definition "
+        "+ callers without reading the whole file.\n"
+        "Fall back to `Read` only for files that GitNexus doesn't surface.\n"
+    )
 
     prompt_parts.append(f"## Key Files (inlined)\n\n{file_context}\n")
 
     if paths_section:
         prompt_parts.append(f"## Additional Files (read from disk if needed)\n\n{paths_section}\n")
 
-    prompt_parts.append(
-        "## Instructions\n\n"
-        "Analyze the source files and produce a design system reference "
-        "document in markdown with these sections:\n\n"
-        "1. **Color Palette**: ALL theme colors as a markdown table "
-        "(`| Token | Value |`). Include dark/light themes.\n"
-        "2. **Typography**: Font families, sizes, weights.\n"
-        "3. **Component Defaults**: Configured component defaults "
-        "(Vuetify defaults, MUI overrides, etc.).\n"
-        "4. **CSS Variables / Tokens**: Custom properties, SCSS "
-        "variables, design tokens.\n"
-        "5. **CDN Boilerplate**: Complete HTML boilerplate using the "
-        "project's UI framework via CDN with the EXACT version from "
-        "package.json. Include: CDN links, framework init with theme "
-        "colors, icon library, font imports, runnable template.\n"
-        "6. **Pattern Library**: Common component patterns as concise "
-        "examples.\n\n"
-        "Output ONLY the markdown starting with "
-        "`# Design System Reference`. No preamble."
-    )
+    prompt_parts.append(_extraction_instructions(platform))
 
     prompt = "\n".join(prompt_parts)
 
+    # 15 turns let Claude explore the whole repo; 8 was too tight for
+    # Flutter repos without dedicated theme files (inline colours force
+    # several Read calls). 12 is the sweet spot: room for 1-2 GitNexus
+    # queries + 4-6 Read calls + 1-2 refinement passes, still bounded.
     result = await run_claude_code(
         prompt=prompt,
         working_dir=repo_path,
-        config=ClaudeRunnerConfig(max_turns=15, timeout_seconds=300),
+        config=ClaudeRunnerConfig(max_turns=12, timeout_seconds=600),
     )
 
-    if not result.success:
+    # Even on non-success (e.g. ``error_max_turns``) Claude often has
+    # written a usable partial design-system doc to ``result.output``
+    # before the cap hit. ``output_tokens=1824`` on a real atoa_pax run
+    # was ~80% of a complete doc — throwing it away forced the fallback.
+    # Only hard-fail if the output is truly empty / doesn't look like the
+    # expected markdown shape.
+    output = (result.output or "").strip()
+    partial_ok = bool(output) and "Design System" in output
+
+    if not result.success and not partial_ok:
         logger.warning(
             "llm_extract_failed",
             error=result.error,
-            output_preview=result.output[:200],
+            output_preview=output[:200],
         )
         return None, result.error or "LLM extraction failed"
 
-    output = result.output.strip()
+    if not result.success and partial_ok:
+        logger.info(
+            "llm_extract_partial_salvaged",
+            error=result.error,
+            output_length=len(output),
+        )
 
     # Claude may wrap in markdown fences — strip them
     if output.startswith("```markdown"):
@@ -430,16 +493,31 @@ def _regex_extract(
     return "\n".join(sections)
 
 
-def _fallback_minimal(repo_path: Path) -> tuple[str, str]:
-    """Produce a minimal design system when no files are found.
+def _fallback_minimal(repo_path: Path, platform: Platform) -> tuple[str, str]:
+    """Produce a minimal design system when no design files were discovered.
+
+    For web platforms the output is the Vuetify CDN boilerplate (preserves
+    existing behaviour). For non-web platforms we emit a platform-aware
+    placeholder — emitting Vuetify HTML for a Flutter / Android / iOS repo
+    would be actively misleading.
 
     Args:
         repo_path: Repository root path.
+        platform: The detected platform. Controls which idiom the
+            placeholder is written in.
 
     Returns:
         Tuple of (markdown_content, source_hash).
     """
-    # Try reading at least package.json
+    if platform.kind == PlatformKind.WEB:
+        return _fallback_minimal_web(repo_path)
+
+    source_hash = hashlib.sha256(platform.slug.encode()).hexdigest()
+    return _platform_aware_fallback(platform, file_contents={}, reason=None), source_hash
+
+
+def _fallback_minimal_web(repo_path: Path) -> tuple[str, str]:
+    """Web-specific minimal fallback — emits the Vuetify CDN boilerplate."""
     pkg_path = repo_path / "package.json"
     vuetify_version = "3.5.0"
     vue_version = "3.4.0"
@@ -464,6 +542,92 @@ def _fallback_minimal(repo_path: Path) -> tuple[str, str]:
 
     source_hash = hashlib.sha256(source.encode()).hexdigest()
     return md, source_hash
+
+
+def _platform_aware_fallback(
+    platform: Platform,
+    file_contents: dict[str, str],
+    reason: str | None,
+) -> str:
+    """Emit a platform-aware placeholder markdown when the LLM path can't run.
+
+    The key goal is: **do not emit Vuetify CDN HTML for a non-web repo.**
+    This document makes the degraded state obvious to the user and lists
+    the discovered design files so they can re-run extraction later (once
+    the Claude CLI is configured) with full context.
+    """
+    idiom = _PLATFORM_IDIOM_HINTS.get(platform.kind, "design tokens")
+    lines: list[str] = [
+        "# Design System Reference",
+        "",
+        f"> **Platform detected:** `{platform.slug}` ({platform.kind.value}).",
+        "",
+        "## Status",
+        "",
+        (
+            "The automated extractor could not produce a structured design "
+            f"system for this {platform.kind.value} repository. The full LLM "
+            "extraction path is required to parse this platform's native "
+            "theme sources."
+        ),
+        "",
+    ]
+    if reason:
+        lines.extend(["**Reason:**", "", f"> {reason}", ""])
+    lines.extend(
+        [
+            "## What the extractor was looking for",
+            "",
+            platform.prompt_hint or f"{idiom} for this platform.",
+            "",
+        ],
+    )
+    if file_contents:
+        lines.extend(["## Discovered design files", ""])
+        for filename in sorted(file_contents):
+            size = len(file_contents[filename])
+            lines.append(f"- `{filename}` ({size} bytes)")
+        lines.append("")
+    else:
+        lines.extend(
+            [
+                "## Discovered design files",
+                "",
+                "_None._ The platform's globs did not match any files at this path.",
+                "",
+            ],
+        )
+    lines.extend(
+        [
+            "## Next steps",
+            "",
+            "1. Ensure the Claude Code CLI is available and authenticated "
+            "for this organization (Settings → AI Config).",
+            f"2. Re-run design extraction on this repository from the "
+            f"Settings → Design Systems page. The LLM will use the "
+            f"`{platform.slug}` idiom hint to extract the correct tokens.",
+            "",
+        ],
+    )
+    return "\n".join(lines)
+
+
+# Kind → short idiom description used in fallback copy.
+_PLATFORM_IDIOM_HINTS: dict[PlatformKind, str] = {
+    PlatformKind.WEB: "CSS custom properties, Tailwind config, or MUI/Vuetify theme objects",
+    PlatformKind.MOBILE_NATIVE: (
+        "Flutter ThemeData, Android XML resources, or iOS Asset Catalog colors"
+    ),
+    PlatformKind.MOBILE_CROSS: (
+        "React Native StyleSheet tokens, Ionic CSS variables, or Capacitor theme config"
+    ),
+    PlatformKind.DESKTOP: (
+        "XAML ResourceDictionary, QML Theme singletons, or Swift/Kotlin theme modules"
+    ),
+    PlatformKind.STATIC_SITE: "SCSS variables or site-generator theme config",
+    PlatformKind.TOKENS_ONLY: "W3C Design Tokens Format JSON",
+    PlatformKind.BACKEND: "no design tokens expected",
+}
 
 
 # ── Regex helpers ─────────────────────────────────────────────────

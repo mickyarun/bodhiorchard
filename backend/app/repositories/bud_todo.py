@@ -31,9 +31,7 @@ class BUDTodoRepository(BaseRepository[BUDTodo]):
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_by_sequence(
-        self, bud_id: uuid.UUID, sequence: int
-    ) -> BUDTodo | None:
+    async def get_by_sequence(self, bud_id: uuid.UUID, sequence: int) -> BUDTodo | None:
         """Fetch a single TODO by (bud_id, sequence)."""
         stmt = self._scoped(
             select(BUDTodo)

@@ -84,9 +84,7 @@ def build_capacity_summary(
     ``(role_value, capacity, narration)`` — narration is a short human
     string the prompt formatter quotes verbatim.
     """
-    needed_roles = {
-        PHASE_ROLE_MAP[p] for p in remaining_phases if p in PHASE_ROLE_MAP
-    }
+    needed_roles = {PHASE_ROLE_MAP[p] for p in remaining_phases if p in PHASE_ROLE_MAP}
     rows: list[tuple[str, float, str]] = []
     for role in sorted(needed_roles, key=lambda r: r.value):
         capacity = role_capacity.get(role, 1.0)
@@ -172,19 +170,13 @@ def build_estimated_dates(
     total_mc = mc_results.get("_total", {})
     phase_variances = mc_results.get("_phase_variances") or {}
     buffer_days = project_buffer_days(phase_variances)
-    prod_p50_date = add_business_days(
-        today, total_mc.get("p50", _FALLBACK_PROD_P50)
-    )
+    prod_p50_date = add_business_days(today, total_mc.get("p50", _FALLBACK_PROD_P50))
     commit_date = add_business_days(prod_p50_date, buffer_days)
 
     result["_summary"] = {
         "prod_p50": prod_p50_date.isoformat(),
-        "prod_p70": add_business_days(
-            today, total_mc.get("p70", _FALLBACK_PROD_P70)
-        ).isoformat(),
-        "prod_p85": add_business_days(
-            today, total_mc.get("p85", _FALLBACK_PROD_P85)
-        ).isoformat(),
+        "prod_p70": add_business_days(today, total_mc.get("p70", _FALLBACK_PROD_P70)).isoformat(),
+        "prod_p85": add_business_days(today, total_mc.get("p85", _FALLBACK_PROD_P85)).isoformat(),
         "project_buffer_days": round(buffer_days, 1),
         "commit_date": commit_date.isoformat(),
         "complexity": bud.complexity,

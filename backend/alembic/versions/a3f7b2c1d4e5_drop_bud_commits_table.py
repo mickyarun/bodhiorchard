@@ -30,7 +30,8 @@ def upgrade() -> None:
 
     # 2. Deduplicate existing commit rows before adding unique index.
     #    Keep the earliest row per (org_id, commit_sha), delete the rest.
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         DELETE FROM dev_activity_logs
         WHERE id IN (
             SELECT id FROM (
@@ -44,7 +45,8 @@ def upgrade() -> None:
             ) dupes
             WHERE rn > 1
         )
-    """))
+    """)
+    )
 
     # 3. Partial unique index for commit dedup
     op.create_index(

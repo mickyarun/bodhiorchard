@@ -92,9 +92,7 @@ async def get_org_snapshot(
     # auto-mode toggle). Defaults preserve the legacy hardcoded behaviour
     # (Mon-Fri, 08:00-18:00, server-local) so un-migrated orgs get the
     # same presence sim output as before this field existed.
-    config_row = await db.execute(
-        select(Organization.config).where(Organization.id == org_id)
-    )
+    config_row = await db.execute(select(Organization.config).where(Organization.id == org_id))
     org_config = config_row.scalar_one_or_none() or {}
     presence_settings = get_presence_settings(org_config)
 

@@ -93,9 +93,7 @@ def default_pert_spread(
     workload_factor = 1 + (assignee_workload * _WORKLOAD_FACTOR_PER_BUD)
     combined = queue_factor * workload_factor
 
-    phases_to_iterate = (
-        phase_order if phase_order is not None else list(DEFAULT_PHASE_DAYS.keys())
-    )
+    phases_to_iterate = phase_order if phase_order is not None else list(DEFAULT_PHASE_DAYS.keys())
 
     result: dict[str, PERTEstimate] = {}
     for phase in phases_to_iterate:

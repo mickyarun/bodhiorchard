@@ -56,9 +56,7 @@ class TestInlineMarks:
             "content": [
                 {
                     "type": "paragraph",
-                    "content": [
-                        {"type": "text", "text": "bold", "marks": [{"type": "strong"}]}
-                    ],
+                    "content": [{"type": "text", "text": "bold", "marks": [{"type": "strong"}]}],
                 }
             ],
         }
@@ -70,9 +68,7 @@ class TestInlineMarks:
             "content": [
                 {
                     "type": "paragraph",
-                    "content": [
-                        {"type": "text", "text": "italic", "marks": [{"type": "em"}]}
-                    ],
+                    "content": [{"type": "text", "text": "italic", "marks": [{"type": "em"}]}],
                 }
             ],
         }
@@ -84,9 +80,7 @@ class TestInlineMarks:
             "content": [
                 {
                     "type": "paragraph",
-                    "content": [
-                        {"type": "text", "text": "code", "marks": [{"type": "code"}]}
-                    ],
+                    "content": [{"type": "text", "text": "code", "marks": [{"type": "code"}]}],
                 }
             ],
         }
@@ -98,9 +92,7 @@ class TestInlineMarks:
             "content": [
                 {
                     "type": "paragraph",
-                    "content": [
-                        {"type": "text", "text": "old", "marks": [{"type": "strike"}]}
-                    ],
+                    "content": [{"type": "text", "text": "old", "marks": [{"type": "strike"}]}],
                 }
             ],
         }

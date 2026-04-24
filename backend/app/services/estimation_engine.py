@@ -159,9 +159,7 @@ def monte_carlo_simulate(
             est = pert_estimates[phase]
             phase_hist = hist.get(phase) or []
             use_historical = (
-                phase_hist
-                and historical_weight > 0.0
-                and rng.random() < historical_weight
+                phase_hist and historical_weight > 0.0 and rng.random() < historical_weight
             )
             if use_historical:
                 # Already wall-clock — skip the capacity divisor.
@@ -169,9 +167,7 @@ def monte_carlo_simulate(
             elif est.optimistic == est.pessimistic == 0:
                 sampled = 0.0
             else:
-                effort = beta_pert_sample(
-                    rng, est.optimistic, est.most_likely, est.pessimistic
-                )
+                effort = beta_pert_sample(rng, est.optimistic, est.most_likely, est.pessimistic)
                 # Capacity divisor: effort days → wall-clock days. Floor
                 # at MIN_CAPACITY so we never divide by ~0; also matches
                 # the floor enforced by ``capacity_provider``.
@@ -198,8 +194,7 @@ def monte_carlo_simulate(
     # can compute Goldratt's project buffer without re-running MC.
     # ``statistics.variance`` requires n ≥ 2; n is always 10k here.
     result["_phase_variances"] = {
-        phase: statistics.variance(phase_delta_samples[phase])
-        for phase in remaining_phases
+        phase: statistics.variance(phase_delta_samples[phase]) for phase in remaining_phases
     }
     return result
 
@@ -229,11 +224,7 @@ def project_buffer_days(
     """
     if not phase_variances:
         return 0.0
-    values = (
-        phase_variances.values()
-        if isinstance(phase_variances, dict)
-        else phase_variances
-    )
+    values = phase_variances.values() if isinstance(phase_variances, dict) else phase_variances
     return factor * math.sqrt(sum(values))
 
 
@@ -247,5 +238,3 @@ def add_business_days(start: date, days: float) -> date:
         if current.weekday() < 5:  # Mon-Fri
             added += 1
     return current
-
-
