@@ -12,8 +12,8 @@ export interface ConnectionsState {
     localPath: string
     type: 'workspace' | 'single-repo'
   }
-  github: { enabled: boolean; appId: number | null; hasPrivateKey: boolean; installationId: number | null; webhookConfigured: boolean; org?: string | null }
-  slack: { enabled: boolean; botToken: string; signingSecret: string; teamId: string }
+  github: { enabled: boolean; connected: boolean; appId: number | null; hasPrivateKey: boolean; installationId: number | null; webhookConfigured: boolean; org?: string | null }
+  slack: { enabled: boolean; connected: boolean; botToken: string; signingSecret: string; teamId: string }
   aiConfig: {
     preset: string
   }
@@ -52,8 +52,8 @@ export interface ConnectionsState {
 function emptyState(): ConnectionsState {
   return {
     sourceCode: { localPath: '', type: 'single-repo' },
-    github: { enabled: false, appId: null, hasPrivateKey: false, installationId: null, webhookConfigured: false },
-    slack: { enabled: false, botToken: '', signingSecret: '', teamId: '' },
+    github: { enabled: false, connected: false, appId: null, hasPrivateKey: false, installationId: null, webhookConfigured: false },
+    slack: { enabled: false, connected: false, botToken: '', signingSecret: '', teamId: '' },
     aiConfig: {
       preset: 'claude-code',
     },

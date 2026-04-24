@@ -95,6 +95,7 @@ async def get_connections(
         ),
         github=GitHubSettings(
             enabled=bool(org.github_app_id),
+            connected=bool(org.github_app_id and org.github_app_private_key),
             appId=org.github_app_id,
             hasPrivateKey=bool(org.github_app_private_key),
             installationId=org.github_app_installation_id,
@@ -102,6 +103,7 @@ async def get_connections(
         ),
         slack=SlackSettings(
             enabled=slack_cfg.get("enabled", False),
+            connected=bool(org.slack_bot_token),
             botToken=_mask_secret(decrypt_secret(org.slack_bot_token or "")),
             signingSecret=_mask_secret(decrypt_secret(org.slack_signing_secret or "")),
             teamId=org.slack_team_id or "",
