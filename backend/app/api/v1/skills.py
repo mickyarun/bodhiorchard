@@ -18,18 +18,16 @@ from app.repositories.organization import OrganizationRepository
 from app.repositories.skill_profile import SkillProfileRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.skills import (
+    KnowledgeItemPage,
     KnowledgeItemRead,
-    KnowledgeSearchRequest,
-    KnowledgeSearchResult,
     ModuleSkill,
     ScanRequest,
     ScanResponse,
     ScanStatus,
     SkillProfileRead,
 )
-from app.services.embedding_service import embedding_service
 from app.services.scan_pipeline import run_scan_pipeline
-from app.services.scan_progress import create_scan_progress, get_scan_progress
+from app.services.scan_progress import create_scan_progress, resolve_scan_progress
 
 logger = structlog.get_logger(__name__)
 
@@ -130,17 +128,24 @@ async def trigger_scan(
 async def get_scan_status(
     scan_id: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> ScanStatus:
     """Poll the status of a running or completed scan.
+
+    Falls back to the org's currently-active scan if the direct lookup
+    misses — so a browser tab switch that briefly drops the WS doesn't
+    surface a phantom 404 mid-scan.
 
     Args:
         scan_id: The scan ID returned by POST /scan.
         current_user: The authenticated user.
+        db: The async database session.
 
     Returns:
         ScanStatus with progress percentage and results.
     """
-    scan_progress = await get_scan_progress(scan_id)
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    scan_progress = await resolve_scan_progress(scan_id, str(org.id))
     if scan_progress is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -275,80 +280,52 @@ def _item_to_read(item: KnowledgeItem) -> KnowledgeItemRead:
     )
 
 
-@router.get("/knowledge", response_model=list[KnowledgeItemRead])
+@router.get("/knowledge", response_model=KnowledgeItemPage)
 async def list_knowledge(
     category: str | None = Query(None, description="Filter by category"),
     repo_id: uuid.UUID | None = Query(
         None, description="Filter by tracked repository", alias="repoId"
     ),
-    limit: int = Query(50, ge=1, le=200),
+    q: str | None = Query(
+        None, description="Case-insensitive title substring filter", max_length=200
+    ),
+    limit: int = Query(24, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[KnowledgeItemRead]:
-    """List knowledge items for the organization.
+) -> KnowledgeItemPage:
+    """List knowledge items for the organization with pagination and title search.
 
     Args:
         category: Optional category filter.
         repo_id: Optional tracked repository filter (via junction table).
+        q: Optional case-insensitive substring match against title.
         limit: Maximum number of items to return.
+        offset: Number of rows to skip (pagination).
         current_user: The authenticated user.
         db: The async database session.
 
     Returns:
-        List of KnowledgeItemRead objects.
+        KnowledgeItemPage with items for the current page plus the total count.
     """
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-    items = await ki_repo.list_active(category=category, repo_id=repo_id, limit=limit)
+    title_query = q.strip() if q and q.strip() else None
+    items = await ki_repo.list_active(
+        category=category,
+        repo_id=repo_id,
+        title_query=title_query,
+        limit=limit,
+        offset=offset,
+    )
+    total = await ki_repo.count_active(
+        category=category,
+        repo_id=repo_id,
+        title_query=title_query,
+    )
 
-    return [_item_to_read(item) for item in items]
-
-
-@router.post("/knowledge/search", response_model=list[KnowledgeSearchResult])
-async def search_knowledge(
-    body: KnowledgeSearchRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> list[KnowledgeSearchResult]:
-    """Semantic search over knowledge items using pgvector.
-
-    Embeds the query, then finds nearest neighbors in the knowledge_items table.
-
-    Args:
-        body: Search request with query text and optional filters.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        List of KnowledgeSearchResult objects ranked by similarity.
-    """
-    org_repo = OrganizationRepository(db)
-    org = await org_repo.get_for_user(current_user)
-
-    try:
-        query_vector = await embedding_service.embed(body.query)
-    except Exception as exc:
-        logger.exception("knowledge_search_embed_failed", query=body.query[:100])
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Embedding service unavailable. Check your AI configuration.",
-        ) from exc
-
-    ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-    rows = await ki_repo.semantic_search(query_vector, category=body.category, limit=body.limit)
-
-    return [
-        KnowledgeSearchResult(
-            title=item.title,
-            content=item.content or "",
-            category=item.category,
-            score=round(1.0 - distance, 4),
-            sourceRef=item.source_ref,
-            featureStatus=item.feature_status,
-        )
-        for item, distance in rows
-    ]
+    return KnowledgeItemPage(items=[_item_to_read(item) for item in items], total=total)
 
 
 @router.get("/index-stats")

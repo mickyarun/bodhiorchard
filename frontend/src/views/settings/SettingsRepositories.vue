@@ -60,22 +60,42 @@
           </v-chip>
         </div>
         <div class="d-flex flex-wrap ga-3">
-          <div class="index-stat">
-            <div class="text-h6 font-weight-bold">{{ indexStats.knowledgeItems.byCategory.feature_registry || 0 }}</div>
-            <div class="text-caption text-medium-emphasis">Features</div>
-          </div>
-          <div class="index-stat">
-            <div class="text-h6 font-weight-bold">{{ indexStats.knowledgeItems.embedded }}</div>
-            <div class="text-caption text-medium-emphasis">Embedded</div>
-          </div>
-          <div class="index-stat">
-            <div class="text-h6 font-weight-bold">{{ indexStats.skillProfiles }}</div>
-            <div class="text-caption text-medium-emphasis">Profiles</div>
-          </div>
-          <div class="index-stat">
-            <div class="text-h6 font-weight-bold">{{ settingsStore.repos.length }}</div>
-            <div class="text-caption text-medium-emphasis">Repos</div>
-          </div>
+          <v-tooltip content-class="scan-tooltip" location="top" max-width="280">
+            <template #activator="{ props }">
+              <div v-bind="props" class="index-stat">
+                <div class="text-h6 font-weight-bold">{{ indexStats.knowledgeItems.byCategory.feature_registry || 0 }}</div>
+                <div class="text-caption text-medium-emphasis">Features</div>
+              </div>
+            </template>
+            Distinct code areas detected across your repos (e.g. "Payment Link Lifecycle"). Synthesised from code clusters during each scan and used to group BUDs, bugs, and knowledge items.
+          </v-tooltip>
+          <v-tooltip content-class="scan-tooltip" location="top" max-width="280">
+            <template #activator="{ props }">
+              <div v-bind="props" class="index-stat">
+                <div class="text-h6 font-weight-bold">{{ indexStats.knowledgeItems.embedded }}</div>
+                <div class="text-caption text-medium-emphasis">Embedded</div>
+              </div>
+            </template>
+            Features that have vector embeddings computed. Embeddings power "find similar" lookups — e.g. matching a new bug to the most likely related feature.
+          </v-tooltip>
+          <v-tooltip content-class="scan-tooltip" location="top" max-width="280">
+            <template #activator="{ props }">
+              <div v-bind="props" class="index-stat">
+                <div class="text-h6 font-weight-bold">{{ indexStats.skillProfiles }}</div>
+                <div class="text-caption text-medium-emphasis">Profiles</div>
+              </div>
+            </template>
+            One row per (developer × code module), derived from git history. Feeds BUD assignment suggestions, XP, and "who knows this code?" lookups.
+          </v-tooltip>
+          <v-tooltip content-class="scan-tooltip" location="top" max-width="280">
+            <template #activator="{ props }">
+              <div v-bind="props" class="index-stat">
+                <div class="text-h6 font-weight-bold">{{ settingsStore.repos.length }}</div>
+                <div class="text-caption text-medium-emphasis">Repos</div>
+              </div>
+            </template>
+            Git repositories currently tracked by Bodhiorchard. Scans walk each one to synthesise features and compute skill profiles.
+          </v-tooltip>
         </div>
       </div>
     </v-expand-transition>
@@ -391,7 +411,7 @@
             label="Timeout (seconds)"
             type="number"
             :min="60"
-            :max="1800"
+            :max="3600"
             density="compact"
             variant="outlined"
           >
@@ -401,7 +421,7 @@
                   <v-icon v-bind="props" icon="mdi-help-circle-outline" size="18" color="grey" />
                 </template>
                 How long the scan can run before it stops. Large repos with many features
-                may need more time. Default: 300s (5 min). Try 600s if scans time out.
+                may need more time. Default: 300s (5 min). Max 3600s (1 hr).
               </v-tooltip>
             </template>
           </v-text-field>

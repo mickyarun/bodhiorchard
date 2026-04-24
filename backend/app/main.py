@@ -149,10 +149,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     presence_task = asyncio.create_task(_presence_poll_loop())
 
+    # 8. Warm the fastembed ONNX model in the background. The first real
+    # embed call otherwise pays a ~10s import + model-load cost which, on
+    # uvicorn --reload dev loops, stalls every concurrent API request at
+    # the start of each worker lifetime. Fire-and-forget: the task finishes
+    # within ~10s and subsequent embed_batch calls find the model ready.
+    from app.services.embedding_service import embedding_service
+
+    async def _warm_embedding_model() -> None:
+        try:
+            await embedding_service.warm()
+            logger.info("embedding_model_warmed")
+        except Exception:
+            logger.warning("embedding_model_warmup_failed", exc_info=True)
+
+    embedding_warmup_task = asyncio.create_task(_warm_embedding_model())
+
     yield
 
     cleanup_task.cancel()
     presence_task.cancel()
+    embedding_warmup_task.cancel()
     await stop_workers()
 
     from app.services.redis_client import close_redis
