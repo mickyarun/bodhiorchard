@@ -31,7 +31,6 @@ from app.services.repo_cloner import clone_or_update
 from app.services.repo_scanner import (
     _detect_develop_branch,
     _detect_main_branch,
-    detect_repo_type,
     detect_uncommitted_changes,
     list_remote_branches,
 )
@@ -107,7 +106,6 @@ async def list_repos(
             developBranch=r.develop_branch,
             uatBranch=r.uat_branch,
             hasUncommittedChanges=False,
-            repoType=detect_repo_type(r.path),
             githubRepo=r.github_repo_full_name,
             setupStatus=_detect_setup_status(r.path),
             designSystemStatus=_detect_design_system_status(str(r.id), ds_repo_ids),
@@ -182,7 +180,6 @@ async def add_repo(
         developBranch=repo.develop_branch,
         uatBranch=repo.uat_branch,
         hasUncommittedChanges=has_dirty,
-        repoType=detect_repo_type(str(repo_path)),
         githubRepo=repo.github_repo_full_name,
     )
 
@@ -264,7 +261,6 @@ async def clone_and_add_repo(
         developBranch=repo.develop_branch,
         uatBranch=repo.uat_branch,
         hasUncommittedChanges=has_dirty,
-        repoType=detect_repo_type(str(repo_path)),
         githubRepo=repo.github_repo_full_name,
     )
 
@@ -355,7 +351,6 @@ async def update_repo_status(
         developBranch=repo.develop_branch,
         uatBranch=repo.uat_branch,
         hasUncommittedChanges=False,
-        repoType=detect_repo_type(repo.path),
         githubRepo=repo.github_repo_full_name,
     )
 
@@ -448,7 +443,6 @@ async def update_repo_branches(
         developBranch=repo.develop_branch,
         uatBranch=repo.uat_branch,
         hasUncommittedChanges=False,
-        repoType=detect_repo_type(repo.path),
         githubRepo=repo.github_repo_full_name,
     )
 

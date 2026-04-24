@@ -68,7 +68,7 @@ class AIConfigSettings(BaseModel):
 class ScanSettings(BaseModel):
     """Scan pipeline tuning settings."""
 
-    timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=60, le=1800)
+    timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=60, le=3600)
     max_turns: int = Field(default=40, alias="maxTurns", ge=0, le=100)
     auto_create_members: bool = Field(
         default=True,
@@ -223,7 +223,6 @@ class RepoInfo(BaseModel):
     develop_branch: str | None = Field(None, alias="developBranch")
     uat_branch: str | None = Field(None, alias="uatBranch")
     has_uncommitted_changes: bool = Field(False, alias="hasUncommittedChanges")
-    repo_type: str | None = Field(None, alias="repoType")
     github_repo: str | None = Field(None, alias="githubRepo")
     setup_status: str = Field("not_setup", alias="setupStatus")
     design_system_status: str = Field("none", alias="designSystemStatus")

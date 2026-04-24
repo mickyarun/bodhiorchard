@@ -4,49 +4,42 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/services/api'
-import type { KnowledgeItem, KnowledgeSearchResult } from '@/types'
+import type { KnowledgeItem, KnowledgeItemPage } from '@/types'
+
+export const PAGE_SIZE = 24
+
+interface FetchArgs {
+  page?: number
+  repoId?: string
+  q?: string
+}
 
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const items = ref<KnowledgeItem[]>([])
-  const searchResults = ref<KnowledgeSearchResult[]>([])
+  const total = ref(0)
   const selectedItem = ref<KnowledgeItem | null>(null)
   const loading = ref(false)
-  const searching = ref(false)
   const error = ref<string | null>(null)
 
-  async function fetchItems(category?: string, repoId?: string): Promise<void> {
+  async function fetchItems({ page = 1, repoId, q }: FetchArgs = {}): Promise<void> {
     loading.value = true
     error.value = null
     try {
-      const params: Record<string, string | number> = { limit: 200 }
-      if (category) params.category = category
+      const params: Record<string, string | number> = {
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
+      }
       if (repoId) params.repoId = repoId
-      const { data } = await api.get('/v1/skills/knowledge', { params })
-      items.value = data
-      searchResults.value = []
+      if (q) params.q = q
+      const { data } = await api.get<KnowledgeItemPage>('/v1/skills/knowledge', { params })
+      items.value = data.items
+      total.value = data.total
     } catch {
       error.value = 'Failed to load knowledge items.'
+      items.value = []
+      total.value = 0
     } finally {
       loading.value = false
-    }
-  }
-
-  async function searchItems(query: string, category?: string): Promise<void> {
-    if (!query.trim()) {
-      searchResults.value = []
-      return
-    }
-    searching.value = true
-    error.value = null
-    try {
-      const body: Record<string, string | number> = { query, limit: 50 }
-      if (category) body.category = category
-      const { data } = await api.post('/v1/skills/knowledge/search', body)
-      searchResults.value = data
-    } catch {
-      error.value = 'Search failed. Check AI configuration.'
-    } finally {
-      searching.value = false
     }
   }
 
@@ -62,13 +55,11 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
 
   return {
     items,
-    searchResults,
+    total,
     selectedItem,
     loading,
-    searching,
     error,
     fetchItems,
-    searchItems,
     fetchItem,
   }
 })

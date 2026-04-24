@@ -27,6 +27,14 @@ import { Vec3 } from './Vec3'
 import { TreeBranch } from './TreeBranch'
 import { defaultTrunk, defaultBranch, type TreeRules, type Color3, WORLD_SCALE } from './TreeRules'
 import type { WindSystem } from './WindSystem'
+import type { BakedBranchGroup, BakedFeaturePrimary } from './treeCache'
+import { createInstancedEntity } from './instancing'
+
+/** Data returned by bakeInstanced — everything needed to persist + reconstruct. */
+export interface BakedTreeExport {
+  branchGroups: BakedBranchGroup[]
+  primaries:    BakedFeaturePrimary[]
+}
 
 const GROW_SPEED             = 200 * WORLD_SCALE
 const DEFAULT_ROOT_COLOR: Color3 = [180, 180, 180]
@@ -36,6 +44,7 @@ const COLLECT_MAX_DEPTH   = 30
 const DEFAULT_LEVELS      = 16
 
 export class Tree3DSystem {
+  private app: pc.AppBase
   private treeRoot: pc.Entity
 
   private tree: TreeBranch | null = null
@@ -92,7 +101,36 @@ export class Tree3DSystem {
   private static readonly _windQuat = new pc.Quat()
   private static readonly _windAxis = new pc.Vec3()
 
+  // Static scratch for the one-shot bake pass — one Mat4/Vec3/Quat reused
+  // across every branch avoids ~64K × 4 throwaway allocations on large trees
+  // (one bake call is ~5 ms GC when allocating per branch, ~0 ms when reused).
+  private static readonly _bakeMat4  = new pc.Mat4()
+  private static readonly _bakePos   = new pc.Vec3()
+  private static readonly _bakeScale = new pc.Vec3()
+  private static readonly _bakeQuat  = new pc.Quat()
+  private static readonly _bakeDir   = new Vec3(0, 0, 0)
+
+  // Epsilons shared between orient/bake paths. Co-locate named constants so a
+  // change to numerical tolerance affects both entity-path rendering and the
+  // instancing bake in lockstep.
+  private static readonly DEGENERATE_LENGTH_EPSILON = 1e-6
+  private static readonly DEGENERATE_DOT_THRESHOLD  = 0.9999
+  private static readonly THICKNESS_SCALE           = 2
+
+  // ─── Instancing bake state ─────────────────────────────────────────────────
+  // Populated by bakeInstanced(). The per-color vertex buffers own GPU memory
+  // that outlives this.entityMap entries and must be destroyed explicitly.
+  private bakedEntities: pc.Entity[] = []
+  private bakedVertexBuffers: pc.VertexBuffer[] = []
+
+  // Shared unit cylinder mesh reused across every baked tree, keyed by device
+  // so that hot-reload / multi-app scenarios don't hand out a mesh bound to a
+  // stale graphics device (which would crash at first draw because the device's
+  // program library wouldn't be registered for it).
+  private static _cylinderMeshByDevice = new WeakMap<pc.GraphicsDevice, pc.Mesh>()
+
   constructor(app: pc.AppBase, options?: { useEmissive?: boolean }) {
+    this.app = app
     this.useEmissive = options?.useEmissive ?? true
     this.trunkRules  = defaultTrunk()
     this.branchRules = defaultBranch()
@@ -111,20 +149,7 @@ export class Tree3DSystem {
    * @param worldX/Y/Z - world-space position of the root (default 0,0,0 for standalone demo)
    */
   startTree(rootColor: Color3 = DEFAULT_ROOT_COLOR, worldX = 0, worldY = 0, worldZ = 0): void {
-    this.rootColor = rootColor
-    this.treeWorldX = worldX
-    this.treeWorldZ = worldZ
-    this.windReady = false
-    this.treeRoot.setRotation(new pc.Quat())  // reset rotation before regrow
-    this.clearEntities()
-    // Destroy old branch materials AFTER entities are gone — safe, explicit, no ref-count issues
-    this.destroyMaterials()
-    this.activeBranches = []
-
-    // Always reset rules before scaling — prevents stale state on regrow
-    this.trunkRules    = defaultTrunk()
-    this.branchRules   = defaultBranch()
-    this.offTrunkRules = defaultTrunk()
+    this.resetGrowthState(rootColor, worldX, worldZ)
 
     const rootSize = this.scaleRulesForFeatureCount(this.featureData.length)
 
@@ -449,9 +474,266 @@ export class Tree3DSystem {
     return mat
   }
 
+  // ─── Hardware-instancing bake ────────────────────────────────────────────
+  //
+  // After growth completes the branch transforms are static. Keeping one
+  // `pc.Entity` + cylinder render component per branch gives us 60k–64k draw
+  // calls per fully-grown tree (see scaleRulesForFeatureCount doc). This
+  // method collapses every finished branch into a single instanced draw call
+  // per unique color by writing each branch's world matrix into a single
+  // per-instance VertexBuffer and attaching it via `MeshInstance.setInstancing`.
+  //
+  // Primary feature branches (`featurePrimaryBranches`) survive as invisible
+  // pick proxies — their render component is stripped but the entity stays in
+  // the scene graph with its `pickable` tag, moved to the primary's midpoint
+  // so TreePickerSystem's screen-space distance test hits the visible stem.
+  //
+  // Call once from the growth-complete handler, BEFORE buildFeatureEntityMap.
+  //
+  // Returns the packed matrices + primary midpoints so callers can persist them
+  // to IndexedDB (treeCache). A fresh tree discards the return value; a tree
+  // being saved to cache hands it to saveTreeCache().
+  bakeInstanced(): BakedTreeExport {
+    const branchGroups: BakedBranchGroup[] = []
+    const primaries: BakedFeaturePrimary[] = []
+    if (!this.tree) return { branchGroups, primaries }
+
+    // Pass 1: count per color + stash the Color3 for each key. Lets us allocate
+    // right-sized Float32Arrays per group without intermediate Mat4[] buffers,
+    // which on N=250 trees previously meant ~64K Mat4 allocations per bake.
+    const groupInfo = new Map<string, { color: Color3; count: number }>()
+    this.countBranchesByColor(this.tree, groupInfo, 0)
+
+    // Pass 2: allocate each group's final Float32Array up-front and a running
+    // write-offset, then walk again writing world matrices directly via a
+    // single static scratch Mat4 (see _bakeMat4). Zero per-branch allocation.
+    const groupBuffers = new Map<string, { color: Color3; matrices: Float32Array; offset: number }>()
+    for (const [key, info] of groupInfo) {
+      groupBuffers.set(key, { color: info.color, matrices: new Float32Array(info.count * 16), offset: 0 })
+    }
+    this.writeBranchMatrices(this.tree, groupBuffers, 0)
+
+    for (const [colorKey, buf] of groupBuffers) {
+      const count = buf.matrices.length / 16
+      if (count === 0) continue
+      this.attachInstancedBranchEntity(colorKey, buf.matrices, count)
+      branchGroups.push({ colorKey, color: buf.color, matrices: buf.matrices, count })
+    }
+
+    this.convertPrimariesToPickProxies(primaries)
+    return { branchGroups, primaries }
+  }
+
+  /**
+   * Reconstruct a fully-grown tree from a cached bake, skipping the growth
+   * animation entirely. Called by ProceduralTreeSystem when loadTreeCache()
+   * returns a hit. Must mirror the end state of startTree() + update()-to-done
+   * + bakeInstanced(): per-color instanced MeshInstances, primary pick-proxy
+   * entities at midpoints, no live growth, ready for wind + picking.
+   */
+  loadFromCache(
+    exported: BakedTreeExport,
+    rootColor: Color3,
+    worldX: number,
+    worldZ: number,
+  ): void {
+    this.resetGrowthState(rootColor, worldX, worldZ)
+    // Cache hit means the tree is already fully grown — enable wind immediately
+    // instead of waiting for buildWindEntries() after a growth-complete event.
+    this.windReady = true
+
+    // Recreate per-color instanced mesh instances + their materials.
+    for (const group of exported.branchGroups) {
+      // Re-seed the material cache so later getMaterial() lookups hit (e.g. if
+      // a later re-grow ever goes through the per-entity path again).
+      if (!this.matCache.has(group.colorKey)) {
+        this.getMaterial(group.color)
+      }
+      this.attachInstancedBranchEntity(group.colorKey, group.matrices, group.count)
+    }
+
+    // Recreate primary-feature pick proxies. Render-less entities — picked by
+    // position + tag, not rendered.
+    for (const p of exported.primaries) {
+      const entity = new pc.Entity('PrimaryProxy')
+      entity.setPosition(p.midpoint[0], p.midpoint[1], p.midpoint[2])
+      this.treeRoot.addChild(entity)
+      this.featureEntityMap.set(entity, { title: p.title, status: p.status })
+    }
+  }
+
+  // Shared full reset used by startTree() (before growth) and loadFromCache()
+  // (before restoring a baked tree). Both paths must start from a clean slate
+  // for idempotence when the same Tree3DSystem is reused across runs.
+  private resetGrowthState(rootColor: Color3, worldX: number, worldZ: number): void {
+    this.clearEntities()
+    this.destroyMaterials()
+    this.activeBranches = []
+    this.tree = null
+    this.trunkChain.clear()
+    this.featurePrimaryBranches = []
+    this.featureEntityMap.clear()
+    this.featureBranchCount = 0
+    this.growing = false
+    this.windReady = false
+
+    this.rootColor  = rootColor
+    this.treeWorldX = worldX
+    this.treeWorldZ = worldZ
+    this.treeRoot.setRotation(new pc.Quat())
+
+    // Rules must be re-defaulted so a subsequent startTree() doesn't inherit
+    // scaled-for-large-N trunk minSize from a prior run.
+    this.trunkRules    = defaultTrunk()
+    this.branchRules   = defaultBranch()
+    this.offTrunkRules = defaultTrunk()
+    this.growSpeed     = GROW_SPEED
+  }
+
+  private attachInstancedBranchEntity(colorKey: string, matrices: Float32Array, count: number): void {
+    const material = this.matCache.get(colorKey)
+    if (!material || count === 0) return
+    const { entity, vb } = createInstancedEntity(
+      this.app.graphicsDevice,
+      this.getCylinderMesh(),
+      material,
+      matrices,
+      count,
+      `BakedBranches_${colorKey}`,
+    )
+    this.treeRoot.addChild(entity)
+    this.bakedEntities.push(entity)
+    this.bakedVertexBuffers.push(vb)
+  }
+
+  // Converts each surviving primary-feature branch entity into a render-less
+  // pick proxy at the branch midpoint, then destroys all other branch entities.
+  // Appends the same primaries (with midpoints) to `out` for cache export.
+  private convertPrimariesToPickProxies(out: BakedFeaturePrimary[]): void {
+    const primaryMeta = new Map(this.featurePrimaryBranches.map(fp => [fp.branch, { title: fp.title, status: fp.status }]))
+    // Collect keys first — we mutate the Map during iteration.
+    for (const branch of Array.from(this.entityMap.keys())) {
+      const entity = this.entityMap.get(branch)
+      if (!entity) continue
+      const meta = primaryMeta.get(branch)
+      if (meta) {
+        entity.removeComponent('render')
+        // Move to midpoint so the screen-space picker (FEATURE_HOVER_PX=18)
+        // hits somewhere on the visible branch stem, not at its hidden base.
+        const root = branch.root
+        const tip = branch.getTip()
+        const mx = (root.x + tip.x) * 0.5
+        const my = (root.y + tip.y) * 0.5
+        const mz = (root.z + tip.z) * 0.5
+        entity.setPosition(mx, my, mz)
+        out.push({ title: meta.title, status: meta.status, midpoint: [mx, my, mz] })
+      } else {
+        entity.destroy()
+        this.entityMap.delete(branch)
+      }
+    }
+  }
+
+  private countBranchesByColor(
+    branch: TreeBranch,
+    out: Map<string, { color: Color3; count: number }>,
+    depth: number,
+  ): void {
+    if (depth > COLLECT_MAX_DEPTH) return
+    if (branch.growthSize > 0) {
+      const key = `${branch.color[0]}_${branch.color[1]}_${branch.color[2]}`
+      const entry = out.get(key)
+      if (entry) {
+        entry.count++
+      } else {
+        out.set(key, { color: [...branch.color] as Color3, count: 1 })
+      }
+    }
+    for (const baby of branch.babies) this.countBranchesByColor(baby, out, depth + 1)
+  }
+
+  private writeBranchMatrices(
+    branch: TreeBranch,
+    buffers: Map<string, { color: Color3; matrices: Float32Array; offset: number }>,
+    depth: number,
+  ): void {
+    if (depth > COLLECT_MAX_DEPTH) return
+    if (branch.growthSize > 0) {
+      const key = `${branch.color[0]}_${branch.color[1]}_${branch.color[2]}`
+      const buf = buffers.get(key)
+      if (buf) {
+        this.writeBranchMatrixAt(branch, buf.matrices, buf.offset)
+        buf.offset += 16
+      }
+    }
+    for (const baby of branch.babies) this.writeBranchMatrices(baby, buffers, depth + 1)
+  }
+
+  // Write a single branch's world matrix into the flat buffer at byte offset.
+  // Uses static scratch Mat4/Vec3/Quat — zero allocation across the entire bake.
+  private writeBranchMatrixAt(branch: TreeBranch, out: Float32Array, offset: number): void {
+    const dir = Tree3DSystem._bakeDir
+    branch.getGrowTipInto(dir)
+    const dirLen = dir.length()
+    const thickness = Math.max(branch.size / THICKNESS_DIVISOR, MIN_THICKNESS)
+
+    Tree3DSystem._bakePos.set(
+      branch.root.x + dir.x * 0.5,
+      branch.root.y + dir.y * 0.5,
+      branch.root.z + dir.z * 0.5,
+    )
+    Tree3DSystem._bakeScale.set(thickness * Tree3DSystem.THICKNESS_SCALE, dirLen, thickness * Tree3DSystem.THICKNESS_SCALE)
+    this.writeRotationAlignToY(dir, dirLen, Tree3DSystem._bakeQuat)
+    Tree3DSystem._bakeMat4.setTRS(Tree3DSystem._bakePos, Tree3DSystem._bakeQuat, Tree3DSystem._bakeScale)
+
+    out.set(Tree3DSystem._bakeMat4.data, offset)
+  }
+
+  // Populates `outQuat` with a rotation that aligns +Y to `dir`. Mirrors the
+  // logic in orientAlongDirection() but writes into a caller-owned Quat so the
+  // bake pass stays allocation-free.
+  private writeRotationAlignToY(dir: Vec3, len: number, outQuat: pc.Quat): void {
+    outQuat.set(0, 0, 0, 1)
+    if (len < Tree3DSystem.DEGENERATE_LENGTH_EPSILON) return
+    const ny = dir.y / len
+    if (ny > Tree3DSystem.DEGENERATE_DOT_THRESHOLD) return
+    if (ny < -Tree3DSystem.DEGENERATE_DOT_THRESHOLD) {
+      outQuat.setFromEulerAngles(180, 0, 0)
+      return
+    }
+    // Axis = up × target; w = 1 + dot. Normalize in-place.
+    const cx = dir.z / len
+    const cz = -dir.x / len
+    outQuat.set(cx, 0, cz, 1 + ny)
+    const mag = Math.sqrt(outQuat.x * outQuat.x + outQuat.y * outQuat.y + outQuat.z * outQuat.z + outQuat.w * outQuat.w)
+    outQuat.x /= mag; outQuat.y /= mag; outQuat.z /= mag; outQuat.w /= mag
+  }
+
+  private getCylinderMesh(): pc.Mesh {
+    const device = this.app.graphicsDevice
+    const cached = Tree3DSystem._cylinderMeshByDevice.get(device)
+    if (cached) return cached
+    // Build the unit cylinder directly against this app's graphics device.
+    // pc.CylinderGeometry defaults: radius 0.5, height 1, 5 height segments,
+    // 20 cap segments, centered at origin with Y axis vertical — matches the
+    // primitive 'cylinder' in dimensions and is what TreeBranch transforms
+    // expect (scale.y = branch length, thickness → scale.xz).
+    const mesh = pc.Mesh.fromGeometry(device, new pc.CylinderGeometry())
+    Tree3DSystem._cylinderMeshByDevice.set(device, mesh)
+    return mesh
+  }
+
   private clearEntities(): void {
     for (const entity of this.entityMap.values()) entity.destroy()
     this.entityMap.clear()
+    this.clearBaked()
+  }
+
+  private clearBaked(): void {
+    for (const e of this.bakedEntities) e.destroy()
+    for (const vb of this.bakedVertexBuffers) vb.destroy()
+    this.bakedEntities = []
+    this.bakedVertexBuffers = []
   }
 
   private destroyMaterials(): void {

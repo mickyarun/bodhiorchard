@@ -21,6 +21,8 @@ import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { Color3 } from './TreeRules'
 import type { WindSystem } from './WindSystem'
+import type { BakedLeafGroup } from './treeCache'
+import { createInstancedEntity } from './instancing'
 
 const MAX_TIPS        = 160    // cap terminal tips — max entities = 160 * 10 = 1600
 const LEAVES_PER_TIP  = 10
@@ -46,10 +48,26 @@ export class LeafSystem {
   private materials: MaterialFactory
   private leafRoot: pc.Entity
   private leaves: LeafEntry[] = []
-  private leafMesh: pc.Mesh | null = null
   private patchedMaterials = new Set<string>()
   private time = 0
   private windSystem: WindSystem | null = null
+
+  // Tree-color used for the leaf material. Tracked on spawn / restore so
+  // bakeInstanced doesn't need it passed in (would diverge from what the
+  // per-leaf entities were already spawned with).
+  private treeColor: Color3 | null = null
+
+  // Instancing bake: populated by bakeInstanced(). update() short-circuits
+  // once the per-leaf entity list is cleared post-bake. Baked GPU resources
+  // live until destroy() / clear().
+  private bakedEntities: pc.Entity[] = []
+  private bakedVertexBuffers: pc.VertexBuffer[] = []
+
+  // Shared lance-leaf mesh, keyed by graphics device so hot-reload / multi-app
+  // contexts never hand out a mesh bound to a stale device. All LeafSystem
+  // instances on the same device share the same 9-vert geometry — 21 repos
+  // used to mean 21 identical GPU uploads.
+  private static _leafMeshByDevice = new WeakMap<pc.GraphicsDevice, pc.Mesh>()
 
   constructor(app: pc.AppBase, materials: MaterialFactory, parent?: pc.Entity) {
     this.app = app
@@ -71,16 +89,17 @@ export class LeafSystem {
     treeColor: Color3,
   ): void {
     this.clear()
-    if (!this.leafMesh) this.leafMesh = this.buildLeafMesh()
+    this.treeColor = [...treeColor] as Color3
 
     const sampled = tips.length <= MAX_TIPS ? tips : reservoirSample(tips, MAX_TIPS)
 
     // Fetch material ONCE — avoids inflating MaterialFactory refCount once per leaf
     const mat = this.getLeafMaterial(treeColor)
+    const mesh = this.getLeafMesh()
 
     for (const tip of sampled) {
       for (let i = 0; i < LEAVES_PER_TIP; i++) {
-        this.spawnLeaf(tip.position, tip.size, mat)
+        this.spawnLeaf(tip.position, tip.size, mat, mesh)
       }
     }
   }
@@ -115,27 +134,91 @@ export class LeafSystem {
     }
   }
 
-  clear(): void {
+  /**
+   * Collapse every spawned leaf into one hardware-instanced MeshInstance per
+   * material (typically just one — each tree uses a single leaf color). Read
+   * each leaf's world matrix, pack into an instance VertexBuffer, attach to a
+   * single MeshInstance, then destroy the per-leaf entities.
+   *
+   * After bake this.leaves is empty so update() becomes a no-op. Whole-tree
+   * sway still plays via Tree3DSystem.applyWind() rotating treeRoot — leaves
+   * parented under that root sway with it; the per-leaf sine jiggle is gone
+   * by design (not worth ~33k setEulerAngles calls per frame per garden).
+   */
+  bakeInstanced(): BakedLeafGroup | null {
+    if (this.leaves.length === 0 || !this.treeColor) return null
+
+    // All leaves in a tree share a single material today, so one group is
+    // sufficient. Pack every leaf's world transform into a single Float32Array.
+    const flat = new Float32Array(this.leaves.length * 16)
+    for (let i = 0; i < this.leaves.length; i++) {
+      const wt = this.leaves[i].entity.getWorldTransform()
+      flat.set(wt.data, i * 16)
+    }
+
+    this.createInstancedLeafEntity(flat, this.leaves.length, this.treeColor)
+
     for (const leaf of this.leaves) leaf.entity.destroy()
     this.leaves = []
-    // Destroy mesh GPU buffers on each clear — prevents stale vertexBuffer refs
-    // on the next spawnLeaves() when the shadow renderer tries to draw them.
-    this.leafMesh?.destroy()
-    this.leafMesh = null
+
+    return { color: [...this.treeColor] as Color3, matrices: flat, count: flat.length / 16 }
+  }
+
+  /**
+   * Reconstruct the tree's leaf instanced MeshInstance from a cached bake.
+   * Skips spawnLeaves + bakeInstanced in favor of directly rebuilding the
+   * VertexBuffer and MeshInstance. Called on cache hit.
+   */
+  loadFromCache(data: BakedLeafGroup): void {
+    this.clear()
+    if (data.count === 0) return
+    this.treeColor = [...data.color] as Color3
+    this.createInstancedLeafEntity(data.matrices, data.count, data.color)
+  }
+
+  private createInstancedLeafEntity(
+    matrices: Float32Array,
+    count: number,
+    treeColor: Color3,
+  ): void {
+    const mat = this.getLeafMaterial(treeColor)
+    const { entity, vb } = createInstancedEntity(
+      this.app.graphicsDevice,
+      this.getLeafMesh(),
+      mat,
+      matrices,
+      count,
+      'BakedLeaves',
+    )
+    this.leafRoot.addChild(entity)
+    this.bakedEntities.push(entity)
+    this.bakedVertexBuffers.push(vb)
+  }
+
+  clear(): void {
+    // Destroy baked entities + their VBs first. The leaf mesh is shared across
+    // all LeafSystem instances on this device (see _leafMeshByDevice) and is
+    // owned by the device's lifetime, not this instance — we never destroy it.
+    for (const e of this.bakedEntities) e.destroy()
+    for (const vb of this.bakedVertexBuffers) vb.destroy()
+    this.bakedEntities = []
+    this.bakedVertexBuffers = []
+
+    for (const leaf of this.leaves) leaf.entity.destroy()
+    this.leaves = []
+    this.treeColor = null
   }
 
   destroy(): void {
     this.clear()
-    this.leafMesh?.destroy()
-    this.leafMesh = null
     this.leafRoot.destroy()
   }
 
   // ─── Private ──────────────────────────────────────────────────────────────
 
-  private spawnLeaf(pos: pc.Vec3, branchSize: number, mat: pc.StandardMaterial): void {
+  private spawnLeaf(pos: pc.Vec3, branchSize: number, mat: pc.StandardMaterial, mesh: pc.Mesh): void {
     const scale = LEAF_HEIGHT * (0.75 + Math.random() * LEAF_SCALE_VARY)
-    const mi    = new pc.MeshInstance(this.leafMesh!, mat)
+    const mi    = new pc.MeshInstance(mesh, mat)
 
     const entity = new pc.Entity('Leaf')
     entity.addComponent('render', { meshInstances: [mi] })
@@ -170,12 +253,21 @@ export class LeafSystem {
 
   /**
    * Lance/teardrop leaf mesh — 9 vertices (8 outer + center fan pivot), 8 triangles.
-   * Slight z-curve so the leaf isn't perfectly flat.
-   *
-   * Uses pc.createMesh() — the v2 recommended utility — which guarantees
-   * SEMANTIC_POSITION at attribute location 0, required by the shadow renderer.
+   * Slight z-curve so the leaf isn't perfectly flat. Cached per graphics device
+   * so every LeafSystem on the same device shares one GPU upload — at 21 repos
+   * this drops from 21 × 36 bytes = 756B + 21 buffer lifecycles to a single
+   * shared mesh bound to the device's own lifetime.
    */
-  private buildLeafMesh(): pc.Mesh {
+  private getLeafMesh(): pc.Mesh {
+    const device = this.app.graphicsDevice
+    const cached = LeafSystem._leafMeshByDevice.get(device)
+    if (cached) return cached
+    const mesh = this.buildLeafMesh(device)
+    LeafSystem._leafMeshByDevice.set(device, mesh)
+    return mesh
+  }
+
+  private buildLeafMesh(device: pc.GraphicsDevice): pc.Mesh {
     const h = 1.0
     const w = LEAF_WIDTH
     const zc = (y: number) => Math.sin(y * Math.PI) * 0.12
@@ -217,7 +309,7 @@ export class LeafSystem {
     geometry.normals   = normals
     geometry.uvs       = uvs
     geometry.indices   = indices
-    return pc.Mesh.fromGeometry(this.app.graphicsDevice, geometry)
+    return pc.Mesh.fromGeometry(device, geometry)
   }
 
   /**

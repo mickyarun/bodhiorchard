@@ -36,7 +36,6 @@ from app.services.repo_setup import (  # noqa: F401
     add_prepare_script,
     commit_and_push_bodhiorchard_setup,
     create_setup_pr,
-    detect_repo_type,
     ensure_repo_worktrees,
     init_bodhiorchard_mcp_in_repo,
     install_hooks,
