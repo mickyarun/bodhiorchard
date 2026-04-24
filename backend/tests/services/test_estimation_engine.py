@@ -30,10 +30,10 @@ from app.services.estimation_engine import (
 @pytest.mark.parametrize(
     ("optimistic", "most_likely", "pessimistic"),
     [
-        (1.0, 2.0, 5.0),     # asymmetric-right (tail toward pessimistic)
-        (1.0, 4.0, 5.0),     # asymmetric-left  (tail toward optimistic)
-        (2.0, 3.0, 4.0),     # symmetric
-        (0.1, 0.5, 10.0),    # wide spread
+        (1.0, 2.0, 5.0),  # asymmetric-right (tail toward pessimistic)
+        (1.0, 4.0, 5.0),  # asymmetric-left  (tail toward optimistic)
+        (2.0, 3.0, 4.0),  # symmetric
+        (0.1, 0.5, 10.0),  # wide spread
     ],
 )
 def test_beta_pert_sample_stays_within_bounds(
@@ -63,14 +63,9 @@ def test_beta_pert_sample_mean_matches_pert_expected(
     `pert_expected` and the sampler no longer agree, and percentiles would
     no longer be interpretable against the analytic mean."""
     rng = random.Random(1337)
-    samples = [
-        beta_pert_sample(rng, optimistic, most_likely, pessimistic)
-        for _ in range(10_000)
-    ]
+    samples = [beta_pert_sample(rng, optimistic, most_likely, pessimistic) for _ in range(10_000)]
     empirical_mean = sum(samples) / len(samples)
-    analytic_mean = pert_expected(
-        PERTEstimate(optimistic, most_likely, pessimistic)
-    )
+    analytic_mean = pert_expected(PERTEstimate(optimistic, most_likely, pessimistic))
     # 5 % tolerance accommodates the Monte Carlo sampling noise at n=10k.
     assert math.isclose(empirical_mean, analytic_mean, rel_tol=0.05)
 
@@ -137,9 +132,7 @@ def test_monte_carlo_capacity_none_is_backward_compatible() -> None:
     changing the math for callers that haven't migrated."""
     est = PERTEstimate(1.0, 2.0, 5.0)
     baseline = monte_carlo_simulate({"dev": est}, ["dev"], n=5_000, seed=42)
-    same = monte_carlo_simulate(
-        {"dev": est}, ["dev"], n=5_000, seed=42, capacity_by_phase=None
-    )
+    same = monte_carlo_simulate({"dev": est}, ["dev"], n=5_000, seed=42, capacity_by_phase=None)
     assert baseline == same
 
 

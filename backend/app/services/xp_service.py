@@ -42,6 +42,7 @@ __all__ = [
 
 # ─── XP Award Result ───────────────────────────
 
+
 @dataclass
 class XPAwardResult:
     """Returned by award_xp() to inform the caller of state changes."""
@@ -55,6 +56,7 @@ class XPAwardResult:
 
 
 # ─── Core Functions ─────────────────────────────
+
 
 async def award_xp(
     db: AsyncSession,
@@ -203,20 +205,31 @@ async def check_and_award_streak(
         try:
             async with db.begin_nested():
                 await event_repo.create(
-                    user_id=user_id, reward_type=RewardType.XP, amount=effective_xp,
-                    source="streak", source_ref=source_ref, multiplier=mult,
+                    user_id=user_id,
+                    reward_type=RewardType.XP,
+                    amount=effective_xp,
+                    source="streak",
+                    source_ref=source_ref,
+                    multiplier=mult,
                 )
         except IntegrityError:
             logger.debug("xp_streak_dedup", source_ref=source_ref)
 
         if new_level != old_level:
-            publish(f"xp:{user_id}", {
-                "event_type": "level_up", "type": RewardType.XP.value,
-                "amount": effective_xp,
-                "source": "streak", "new_total": row.total_xp,
-                "level": new_level, "level_name": new_name,
-                "level_changed": True, "streak_count": row.streak_count,
-            })
+            publish(
+                f"xp:{user_id}",
+                {
+                    "event_type": "level_up",
+                    "type": RewardType.XP.value,
+                    "amount": effective_xp,
+                    "source": "streak",
+                    "new_total": row.total_xp,
+                    "level": new_level,
+                    "level_name": new_name,
+                    "level_changed": True,
+                    "streak_count": row.streak_count,
+                },
+            )
 
     # SP milestones for streak achievements
     if row.streak_count in (14, 30):
@@ -266,10 +279,7 @@ async def award_quality_bonus(
     activities_result = await db.execute(activities_stmt)
     activities = list(activities_result.scalars().all())
 
-    tasks_stmt = (
-        select(BUDAgentTask)
-        .where(BUDAgentTask.bud_id == bud_id)
-    )
+    tasks_stmt = select(BUDAgentTask).where(BUDAgentTask.bud_id == bud_id)
     tasks_result = await db.execute(tasks_stmt)
     tasks = list(tasks_result.scalars().all())
 

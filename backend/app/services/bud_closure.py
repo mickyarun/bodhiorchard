@@ -146,11 +146,7 @@ def _trigger_impacted_repo_scan(
     if not isinstance(impacted, list) or not impacted:
         return
 
-    repo_ids = [
-        r.get("repo_id")
-        for r in impacted
-        if isinstance(r, dict) and r.get("repo_id")
-    ]
+    repo_ids = [r.get("repo_id") for r in impacted if isinstance(r, dict) and r.get("repo_id")]
     if not repo_ids:
         return
 
@@ -179,10 +175,7 @@ async def _bg_scan(
             repo_repo = TrackedRepoRepository(db, org_id=org_id)
             all_repos = await repo_repo.get_active_id_path_name()
             repo_id_set = set(repo_ids)
-            paths = [
-                path for rid, path, _name in all_repos
-                if str(rid) in repo_id_set
-            ]
+            paths = [path for rid, path, _name in all_repos if str(rid) in repo_id_set]
 
         if not paths:
             return

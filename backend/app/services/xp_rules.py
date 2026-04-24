@@ -11,9 +11,9 @@ from dataclasses import dataclass
 # ─── Level Thresholds ───────────────────────────
 
 LEVELS: list[tuple[int, int, str]] = [
-    (1, 0,    "seedling"),
-    (2, 100,  "sprout"),
-    (3, 500,  "sapling"),
+    (1, 0, "seedling"),
+    (2, 100, "sprout"),
+    (3, 500, "sapling"),
     (4, 1500, "tree"),
     (5, 5000, "ancient_oak"),
 ]
@@ -37,6 +37,7 @@ def xp_for_next_level(total_xp: int) -> tuple[int, int]:
 
 
 # ─── Streak Multiplier ─────────────────────────
+
 
 def streak_multiplier(streak_days: int) -> float:
     """Multiplier for daily streak XP based on consecutive active days."""

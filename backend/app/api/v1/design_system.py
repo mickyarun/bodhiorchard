@@ -125,11 +125,25 @@ async def extract_design_system(
             detail=f"Repository path does not exist: {tracked_repo.path}",
         )
 
+    from app.services.platforms import UI_KINDS, detect_platform
+
+    platform = detect_platform(repo_path)
+    if platform is None or platform.kind not in UI_KINDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"No UI-bearing platform detected at {repo_path}. Design-system "
+                "extraction is only supported for frontend / mobile / desktop / "
+                "static-site / design-tokens repositories."
+            ),
+        )
+
     payload = DesignExtractJobPayload(
         org_id=str(current_user.org_id),
         repo_id=str(body.repo_id),
         repo_path=str(repo_path),
         is_default=body.is_default,
+        platform=platform.slug,
     )
 
     job = create_job(

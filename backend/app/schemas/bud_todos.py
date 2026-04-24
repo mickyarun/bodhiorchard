@@ -54,8 +54,6 @@ class BUDTodoClaimResponse(BaseModel):
     """Response from claiming a TODO."""
 
     todo: BUDTodoRead
-    previous_assignee_id: uuid.UUID | None = Field(
-        default=None, alias="previousAssigneeId"
-    )
+    previous_assignee_id: uuid.UUID | None = Field(default=None, alias="previousAssigneeId")
 
     model_config = ConfigDict(populate_by_name=True)

@@ -94,9 +94,7 @@ class UserRepository(BaseRepository[User]):
         """
         if not user_ids:
             return {}
-        result = await self._db.execute(
-            select(User.id, User.name).where(User.id.in_(user_ids))
-        )
+        result = await self._db.execute(select(User.id, User.name).where(User.id.in_(user_ids)))
         return {row.id: row.name for row in result.all()}
 
     async def list_by_org(self, org_id: uuid.UUID) -> list[User]:

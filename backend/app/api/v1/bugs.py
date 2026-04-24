@@ -83,7 +83,9 @@ async def create_bug(
             import structlog
 
             structlog.get_logger(__name__).warning(
-                "bug_embed_link_failed_inline", bug_id=str(bug.id), exc_info=True,
+                "bug_embed_link_failed_inline",
+                bug_id=str(bug.id),
+                exc_info=True,
             )
     else:
         # BUD already linked manually — just generate embedding in background
@@ -107,7 +109,9 @@ async def create_bug(
             import structlog
 
             structlog.get_logger(__name__).warning(
-                "bug_threshold_check_failed", bug_id=str(bug.id), exc_info=True,
+                "bug_threshold_check_failed",
+                bug_id=str(bug.id),
+                exc_info=True,
             )
 
     # SP triggers: penalize BUD developer, reward QA reporter
@@ -349,15 +353,11 @@ async def _resolve_bud_info(
 
     from app.models.bud import BUDDocument
 
-    stmt = (
-        select(BUDDocument.id, BUDDocument.bud_number, BUDDocument.title)
-        .where(BUDDocument.org_id == org_id, BUDDocument.id.in_(bud_ids))
+    stmt = select(BUDDocument.id, BUDDocument.bud_number, BUDDocument.title).where(
+        BUDDocument.org_id == org_id, BUDDocument.id.in_(bud_ids)
     )
     result = await db.execute(stmt)
-    return {
-        row.id: {"number": row.bud_number, "title": row.title}
-        for row in result.all()
-    }
+    return {row.id: {"number": row.bud_number, "title": row.title} for row in result.all()}
 
 
 async def _award_bug_sp(

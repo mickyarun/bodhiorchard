@@ -133,11 +133,13 @@ async def list_buds(
             .where(
                 Bug.org_id == current_user.org_id,
                 Bug.bud_id.in_(bud_ids),
-                Bug.status.in_([
-                    BugStatusEnum.OPEN,
-                    BugStatusEnum.IN_PROGRESS,
-                    BugStatusEnum.BLOCKED,
-                ]),
+                Bug.status.in_(
+                    [
+                        BugStatusEnum.OPEN,
+                        BugStatusEnum.IN_PROGRESS,
+                        BugStatusEnum.BLOCKED,
+                    ]
+                ),
             )
             .group_by(Bug.bud_id)
         )
@@ -311,8 +313,7 @@ async def update_bud(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Cannot change status of a {bud.status.value} BUD. "
-                "Create a new BUD instead."
+                f"Cannot change status of a {bud.status.value} BUD. Create a new BUD instead."
             ),
         )
 
@@ -503,7 +504,9 @@ async def update_bud(
                 from app.services.bud_closure import on_bud_closed
 
                 await on_bud_closed(
-                    db, current_user.org_id, bud,
+                    db,
+                    current_user.org_id,
+                    bud,
                     actor_id=current_user.id,
                     actor_name=current_user.name,
                 )
@@ -621,10 +624,7 @@ async def _trigger_status_jobs(
     # Re-estimate delivery dates in the background on UAT/Prod transitions.
     # Uses its own DB session so the request can return immediately — the
     # frontend polls estimates via the existing useEstimates composable.
-    if (
-        "status" in update_data
-        and update_data["status"] in (BUDStatus.UAT, BUDStatus.PROD)
-    ):
+    if "status" in update_data and update_data["status"] in (BUDStatus.UAT, BUDStatus.PROD):
         import asyncio
 
         task = asyncio.create_task(
@@ -662,7 +662,9 @@ async def _bg_estimate(
             if bud is None:
                 return
             await estimate_bud_dates(
-                db, org_id, bud,
+                db,
+                org_id,
+                bud,
                 trigger=f"status_to_{trigger}",
                 actor_id=actor_id,
                 actor_name=actor_name,
@@ -856,9 +858,7 @@ async def cancel_agent_task(
     task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
     task = await task_repo.get_by_id(task_id)
     if not task or task.bud_id != bud_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     if task.status not in (AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING):
         return BUDAgentTaskRead.model_validate(task)
 

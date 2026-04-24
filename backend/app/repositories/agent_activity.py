@@ -20,7 +20,10 @@ class AgentActivityLogRepository(BaseRepository[AgentActivityLog]):
         super().__init__(AgentActivityLog, db, org_id=org_id)
 
     async def list_for_bud(
-        self, bud_id: uuid.UUID, *, limit: int = 100,
+        self,
+        bud_id: uuid.UUID,
+        *,
+        limit: int = 100,
     ) -> list[AgentActivityLog]:
         """List agent activity logs for a BUD, most recent first."""
         stmt = self._scoped(
@@ -33,7 +36,10 @@ class AgentActivityLogRepository(BaseRepository[AgentActivityLog]):
         return list(result.scalars().all())
 
     async def list_for_skill(
-        self, skill_id: uuid.UUID, *, limit: int = 100,
+        self,
+        skill_id: uuid.UUID,
+        *,
+        limit: int = 100,
     ) -> list[AgentActivityLog]:
         """List agent activity logs for a skill, most recent first."""
         stmt = self._scoped(
@@ -46,7 +52,8 @@ class AgentActivityLogRepository(BaseRepository[AgentActivityLog]):
         return list(result.scalars().all())
 
     async def list_for_session(
-        self, session_id: str,
+        self,
+        session_id: str,
     ) -> list[AgentActivityLog]:
         """List all agent activity events in a session."""
         stmt = self._scoped(

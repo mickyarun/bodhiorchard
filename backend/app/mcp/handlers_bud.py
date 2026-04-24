@@ -128,7 +128,9 @@ async def handle_write_bud(
 
 
 async def _resolve_bud(
-    db: AsyncSession, org_id: Any, task_id: str,
+    db: AsyncSession,
+    org_id: Any,
+    task_id: str,
 ) -> BUDDocument | None:
     """Resolve a BUD from a task_id (BUD number string or UUID)."""
     import uuid

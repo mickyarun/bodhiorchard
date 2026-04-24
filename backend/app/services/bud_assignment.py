@@ -210,9 +210,7 @@ async def auto_assign_for_phase(
         role=role_name,
     )
 
-    await _assign_todos_to_lead_if_development(
-        db, org_id, bud.id, new_status, chosen.id
-    )
+    await _assign_todos_to_lead_if_development(db, org_id, bud.id, new_status, chosen.id)
     return chosen.id
 
 

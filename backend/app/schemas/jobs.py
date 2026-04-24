@@ -125,6 +125,12 @@ class DesignExtractJobPayload(BaseModel):
     repo_id: str
     repo_path: str
     is_default: bool = False
+    # Platform slug (see app.services.platforms). The handler resolves this
+    # back to a Platform instance to select the correct design-file globs,
+    # skip directories, and LLM prompt idiom. Required — there is no sensible
+    # cross-platform default and silently classifying a Flutter repo as
+    # web_js is exactly the bug this field exists to prevent.
+    platform: str
 
 
 class BUDAgentTaskPayload(BaseModel):

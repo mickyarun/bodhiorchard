@@ -17,6 +17,11 @@
 - `app/api/v1/` - Versioned route handlers
 - `app/core/` - Security (JWT, bcrypt) and FastAPI dependencies
 - `app/services/` - Business logic (LLM, embeddings)
+- `app/services/platforms/` - Frontend/UI toolchain registry (Flutter, Android,
+  iOS, Electron, Tauri, Blazor, Qt, …). Each platform is a ~50-line file with
+  `detect()`, `design_globs`, `skip_dirs`, `prompt_hint`. See
+  `app/services/platforms/README.md` for the "add a new platform in 5 steps"
+  recipe. Used by `design_system_extractor.py` and the settings repo-badge.
 - `app/agents/` - AI agent orchestration layer
 - `app/mcp/` - Model Context Protocol servers
 - `tests/` - pytest-asyncio test suite

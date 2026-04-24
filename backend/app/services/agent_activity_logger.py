@@ -56,20 +56,38 @@ async def log_agent_activity(
 
     if db is not None:
         await _write_and_publish(
-            db, org_id=org_id, event_type=event_type, status=status,
-            skill_slug=skill_slug, message=message, bud_id=bud_id,
-            skill_id=skill_id, task_id=task_id, repo_id=repo_id,
-            metadata_=metadata_, bud_number=bud_number, bud_title=bud_title,
+            db,
+            org_id=org_id,
+            event_type=event_type,
+            status=status,
+            skill_slug=skill_slug,
+            message=message,
+            bud_id=bud_id,
+            skill_id=skill_id,
+            task_id=task_id,
+            repo_id=repo_id,
+            metadata_=metadata_,
+            bud_number=bud_number,
+            bud_title=bud_title,
         )
     else:
         from app.database import AsyncSessionLocal
 
         async with AsyncSessionLocal() as fresh_db:
             await _write_and_publish(
-                fresh_db, org_id=org_id, event_type=event_type, status=status,
-                skill_slug=skill_slug, message=message, bud_id=bud_id,
-                skill_id=skill_id, task_id=task_id, repo_id=repo_id,
-                metadata_=metadata_, bud_number=bud_number, bud_title=bud_title,
+                fresh_db,
+                org_id=org_id,
+                event_type=event_type,
+                status=status,
+                skill_slug=skill_slug,
+                message=message,
+                bud_id=bud_id,
+                skill_id=skill_id,
+                task_id=task_id,
+                repo_id=repo_id,
+                metadata_=metadata_,
+                bud_number=bud_number,
+                bud_title=bud_title,
             )
             await fresh_db.commit()
 

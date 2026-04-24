@@ -56,7 +56,9 @@ async def handle_triage_job(job_id: str, raw_payload: dict[str, Any]) -> None:
                     return
 
                 await log_agent_activity(
-                    db, org_id=org.id, event_type="skill_invoked",
+                    db,
+                    org_id=org.id,
+                    event_type="skill_invoked",
                     skill_slug="triage",
                     message=f"Triage '{payload.action}' started",
                 )
@@ -127,7 +129,9 @@ async def handle_triage_job(job_id: str, raw_payload: dict[str, Any]) -> None:
                     )
 
                 await log_agent_activity(
-                    db, org_id=org.id, event_type="skill_completed",
+                    db,
+                    org_id=org.id,
+                    event_type="skill_completed",
                     skill_slug="triage",
                     message=f"Triage '{payload.action}' completed",
                 )
@@ -136,7 +140,9 @@ async def handle_triage_job(job_id: str, raw_payload: dict[str, Any]) -> None:
                 await db.rollback()
                 if org is not None:
                     await log_agent_activity(
-                        None, org_id=org.id, event_type="skill_failed",
+                        None,
+                        org_id=org.id,
+                        event_type="skill_failed",
                         skill_slug="triage",
                         message=f"Triage '{payload.action}' failed",
                     )

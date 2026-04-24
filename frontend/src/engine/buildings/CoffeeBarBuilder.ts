@@ -35,6 +35,7 @@ import { BUILDING } from '../assets/AssetManifest'
 import { LabelRenderer } from '../rendering/LabelRenderer'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 import type { ExclusionZone } from '../utils/MathUtils'
+import { COFFEE_BAR_LAYOUT } from '../../../../shared/world/breakSeats'
 
 const WALL_HEIGHT = 1.29
 const HUT_WIDTH = 5
@@ -53,23 +54,9 @@ export const COFFEE_DOOR_LOCAL_Z = HUT_OFFSET_Z + HUT_DEPTH
 const AWNING_RED: [number, number, number] = [0.82, 0.18, 0.12]
 const ROOF_TERRACOTTA: [number, number, number] = [0.55, 0.28, 0.18]
 
-/**
- * Table slots in root-local coords. Every slot gets: coffee table, two
- * facing chairs, and a red umbrella. The list is intentionally data-driven
- * so tweaking the patio layout doesn't touch any logic.
- *
- * Note: no "near row" directly in front of the door — that zone stays as a
- * clear walking corridor from the door into the seating area.
- */
-const TABLE_SLOTS: ReadonlyArray<{ x: number; z: number }> = [
-  // Middle row — right cluster pulled inward from x=+4.2 → +2.7 so it sits
-  // comfortably inside the fence instead of hugging the right edge.
-  { x: -4.2, z: 4.0 },
-  { x:  2.7, z: 4.0 },
-  // Far row — right table pulled in from +2.5 → +1.0 to match.
-  { x: -2.5, z: 6.3 },
-  { x:  1.0, z: 6.3 },
-]
+// Table slots, chair offsets, and seat Y live in shared/world/breakSeats.ts —
+// imported above as COFFEE_BAR_LAYOUT so the multiplayer seat generator
+// renders remote members onto the exact same chairs we build here.
 
 export interface CoffeeBarResult {
   entity: pc.Entity
@@ -142,22 +129,20 @@ export class CoffeeBarBuilder {
     await this.factory.placeFurnitureCentered(hut, BUILDING.kitchenCabinet, 4.5, 0, 0.5)
 
     // ─── Outdoor tables (parented to root — zone-centered coords) ──────
+    // Nested loop matches forEachBreakSeat(COFFEE_BAR_LAYOUT) order, so the
+    // seatIndex counter here lines up 1:1 with the server's BreakSeatGenerator.
     let seatIndex = 0
-    for (const slot of TABLE_SLOTS) {
+    for (const slot of COFFEE_BAR_LAYOUT.tables) {
       await this.factory.placeFurnitureCentered(root, BUILDING.tableCoffee, slot.x, 0, slot.z)
-      const left = await this.factory.placeSeat(
-        root, BUILDING.chairCushion,
-        slot.x - 0.8, slot.z, 90,
-        'coffee_bar', seatIndex++, x, z,
-        'chairCushion', 'interact-right',
-      )
-      const right = await this.factory.placeSeat(
-        root, BUILDING.chairCushion,
-        slot.x + 0.8, slot.z, -90,
-        'coffee_bar', seatIndex++, x, z,
-        'chairCushion', 'interact-right',
-      )
-      seats.push(left.seat, right.seat)
+      for (const chair of COFFEE_BAR_LAYOUT.chairs) {
+        const { seat } = await this.factory.placeSeat(
+          root, BUILDING.chairCushion,
+          slot.x + chair.dx, slot.z + chair.dz, chair.yaw,
+          'coffee_bar', seatIndex++, x, z,
+          'chairCushion', 'interact-right',
+        )
+        seats.push(seat)
+      }
       this.factory.createUmbrella(root, slot.x, slot.z, 0, 1.9, 0.75)
     }
 
