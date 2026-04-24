@@ -35,9 +35,7 @@ def _to_read(todo: BUDTodo) -> BUDTodoRead:
     return data
 
 
-async def _fetch_or_404(
-    db: AsyncSession, org_id: uuid.UUID, bud_id: uuid.UUID
-) -> None:
+async def _fetch_or_404(db: AsyncSession, org_id: uuid.UUID, bud_id: uuid.UUID) -> None:
     """Ensure the BUD exists and belongs to the current org."""
     bud_repo = BUDRepository(db, org_id=org_id)
     if await bud_repo.get_by_id(bud_id) is None:
@@ -157,8 +155,4 @@ async def claim_todo(
 
     refreshed = await repo.get_by_sequence(bud_id, todo.sequence)
     assert refreshed is not None
-    return BUDTodoClaimResponse(
-        todo=_to_read(refreshed), previous_assignee_id=previous
-    )
-
-
+    return BUDTodoClaimResponse(todo=_to_read(refreshed), previous_assignee_id=previous)

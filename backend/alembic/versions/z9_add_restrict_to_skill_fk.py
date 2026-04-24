@@ -21,9 +21,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Replace skill_id FK with RESTRICT ondelete."""
-    op.drop_constraint(
-        "bud_agent_tasks_skill_id_fkey", "bud_agent_tasks", type_="foreignkey"
-    )
+    op.drop_constraint("bud_agent_tasks_skill_id_fkey", "bud_agent_tasks", type_="foreignkey")
     op.create_foreign_key(
         "bud_agent_tasks_skill_id_fkey",
         "bud_agent_tasks",
@@ -36,9 +34,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Revert to FK without ondelete."""
-    op.drop_constraint(
-        "bud_agent_tasks_skill_id_fkey", "bud_agent_tasks", type_="foreignkey"
-    )
+    op.drop_constraint("bud_agent_tasks_skill_id_fkey", "bud_agent_tasks", type_="foreignkey")
     op.create_foreign_key(
         "bud_agent_tasks_skill_id_fkey",
         "bud_agent_tasks",

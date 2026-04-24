@@ -14,7 +14,7 @@ import * as pc from 'playcanvas'
 import type { AssetLoader } from '../assets/AssetLoader'
 import { PATH } from '../assets/AssetManifest'
 import { getHouseTier } from '../buildings/HouseTierConfig'
-import type { StreetDef, VillagePlacement } from '../buildings/VillageLayout'
+import type { StreetDef, VillagePlacement } from '@shared/world/VillageLayout'
 import { randRange } from '../utils/MathUtils'
 
 // ─── Constants ──────────────────────────────────────

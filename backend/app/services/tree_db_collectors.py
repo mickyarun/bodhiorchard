@@ -25,7 +25,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_activity import AgentActivityLog
-from app.models.agent_log import AgentLog
 from app.models.bud import BUDDocument
 from app.models.bud_agent_task import BUDAgentTask
 from app.models.bug import Bug, BugStatus
@@ -244,7 +243,9 @@ async def collect_features(
 
 
 async def collect_bud_stages(
-    db: AsyncSession, org_id: uuid.UUID, tree: TreeData,
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    tree: TreeData,
 ) -> None:
     """Count BUDs at each lifecycle stage and collect individual BUD items.
 
@@ -303,7 +304,9 @@ async def collect_bud_stages(
 
 
 async def collect_agents(
-    db: AsyncSession, org_id: uuid.UUID, tree: TreeData,
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    tree: TreeData,
 ) -> None:
     """Collect agent activity for 3D visualization.
 
@@ -391,30 +394,14 @@ async def collect_agents(
             )
         )
 
-    # Legacy AgentLog fallback (backward compat)
-    if not tree.agent_activity:
-        legacy = await db.execute(
-            select(AgentLog)
-            .where(AgentLog.org_id == org_id)
-            .order_by(AgentLog.created_at.desc())
-            .limit(10)
-        )
-        for log in legacy.scalars().all():
-            tree.agent_activity.append(
-                AgentActivityItem(
-                    agent_name=log.agent_name or "unknown",
-                    action=log.output_summary or log.input_summary or "",
-                    timestamp=log.created_at.isoformat() if log.created_at else "",
-                    status=log.status or "completed",
-                )
-            )
-
 
 # ─── Members ─────────────────────────────────────────────────────────────
 
 
 async def collect_members(
-    db: AsyncSession, org_id: uuid.UUID, tree: TreeData,
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    tree: TreeData,
 ) -> None:
     """Collect ALL org members with their contribution percentages.
 
@@ -433,9 +420,7 @@ async def collect_members(
     from app.models.organization import Organization
     from app.models.user import OrgToUser
 
-    cfg_row = await db.execute(
-        select(Organization.config).where(Organization.id == org_id)
-    )
+    cfg_row = await db.execute(select(Organization.config).where(Organization.id == org_id))
     presence_settings = get_presence_settings(cfg_row.scalar_one_or_none() or {})
 
     result = await db.execute(

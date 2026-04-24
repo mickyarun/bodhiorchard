@@ -4,122 +4,105 @@
 /**
  * WorldLayout — Server-side layout helpers.
  *
- * Zone data (ZONES, Zone, getZone) comes from `@shared/world/zones` —
- * the SAME source the frontend uses. When you move a zone, edit
- * shared/world/zones.ts ONLY; both sides pick up the change.
+ * All the math here is now thin wrappers around the shared layout + geometry
+ * in `shared/world/VillageLayout.ts` and `shared/world/HouseTiers.ts`. This
+ * file's job is purely to:
+ *   1. Memoise the village layout per (zone, totalMembers) so per-member
+ *      getters don't re-run the algorithm.
+ *   2. Apply the housing zone's rotation to house origins and interior
+ *      seat positions before returning world-space coordinates.
  *
- * This file still owns server-specific layout math that mirrors
- * frontend/src/engine/buildings/VillageLayout.ts + HouseTierConfig.ts
- * (house placement, desk/bed seat positions). Those haven't been
- * shared yet; when they are, this file can shrink further.
+ * When tier geometry or the village algorithm changes, there is no second
+ * file to update.
  */
+
+import {
+  computeVillageLayout,
+  type VillageLayoutResult,
+} from "../../../shared/world/VillageLayout"
+import { rotatePointAroundPivot, toWorld } from "../../../shared/world/geom"
+import {
+  getHouseTierGeometry,
+  BED_SURFACE_Y,
+  DESK_SEAT_Y,
+} from "../../../shared/world/HouseTiers"
 
 export { ZONES, getZone, type Zone } from "../../../shared/world/zones"
-import { getZone } from "../../../shared/world/zones"
+import { getZone, type Zone } from "../../../shared/world/zones"
 
-// ─── VillageLayout constants (mirror frontend/src/engine/buildings/VillageLayout.ts) ───
+// ─── Layout memoisation ─────────────────────────
+//
+// Placements are count-pure (see computeVillageLayout docs): they depend
+// only on totalMembers and the zone. Key on a stable signature so distinct
+// zones and rotations get distinct entries. If zone coords change at
+// runtime (they don't today), the key changes and the cache naturally
+// repopulates on the next call.
+const layoutCache = new Map<string, VillageLayoutResult>()
 
-const HOUSE_SPACING_ALONG = 5.5
-const ROW_OFFSET = 6
-const STREET_GAP = 18
-const HOUSES_PER_SIDE = 4
-const HOUSES_PER_STREET = HOUSES_PER_SIDE * 2
-
-/** Desk chair seat height — mirrors frontend HouseTierConfig.DESK_SEAT_Y. */
-const DESK_SEAT_Y = 0.15
-/** Bed mattress surface height — mirrors frontend HouseTierConfig.BED_SURFACE_Y. */
-const BED_SURFACE_Y = 0.38
+function cacheKey(zone: Zone, totalMembers: number): string {
+  return `${zone.name}|${zone.x}|${zone.z}|${zone.yawDeg ?? 0}|${totalMembers}`
+}
 
 /**
- * ── Tier geometry (mirrors frontend/src/engine/buildings/HouseTierConfig.ts) ──
- *
- * Single source of truth is the frontend HouseTierConfig. These values MUST
- * stay in sync. When adding a new tier, update both files.
- *
- * Layout:  { width, depth, doorIndex, bed: {x,z}, desk: {x,z,yaw} }
- *   Tier 1 (Hut):     3×3, door=1, bed=(1.0, 0.7), desk=(2.2, 1.3, 180)
- *   Tier 2 (Cottage):  4×4, door=1, bed=(1.0, 1.1), desk=(3.2, 1.3, 180)
- *   Tier 3 (Mansion):  5×5, door=2, bed=(1.5, 0.8), desk=(3.4, 1.3, 180)
- *   Tier 4 (Villa):    5×5, door=2, bed=(1.5, 0.8), desk=(3.4, 1.3, 180)
+ * Exported so a test harness or future live-reload can flush the cache
+ * without reaching into the module's private state.
  */
-const TIER_CONFIG: Record<number, {
-  width: number; depth: number
-  bed: { x: number; z: number }
-  desk: { x: number; z: number; yaw: number }
-}> = {
-  1: { width: 3, depth: 3, bed: { x: 1.0, z: 0.7 }, desk: { x: 2.2, z: 1.3, yaw: 180 } },
-  2: { width: 4, depth: 4, bed: { x: 1.0, z: 1.1 }, desk: { x: 3.2, z: 1.3, yaw: 180 } },
-  3: { width: 5, depth: 5, bed: { x: 1.5, z: 0.8 }, desk: { x: 3.4, z: 1.3, yaw: 180 } },
-  4: { width: 5, depth: 5, bed: { x: 1.5, z: 0.8 }, desk: { x: 3.4, z: 1.3, yaw: 180 } },
+export function resetVillageLayoutCache(): void {
+  layoutCache.clear()
 }
 
-/** Centering offset derived from width/depth — no longer hardcoded. */
-function centerOffset(houseLevel: number): { x: number; z: number } {
-  const c = TIER_CONFIG[houseLevel] ?? TIER_CONFIG[1]
-  return { x: -c.width / 2, z: -c.depth / 2 }
+function getHousingLayout(totalMembers: number): VillageLayoutResult | null {
+  const zone = getZone("housing")
+  if (!zone || totalMembers <= 0) return null
+  const key = cacheKey(zone, totalMembers)
+  let cached = layoutCache.get(key)
+  if (!cached) {
+    // Shape the members[] to exactly what computeVillageLayout needs — the
+    // placement math is count-pure, so real user_id/name never matter here.
+    const members = Array.from({ length: totalMembers }, (_, i) => ({
+      user_id: `m${i}`, name: `m${i}`,
+    }))
+    cached = computeVillageLayout(members, zone)
+    layoutCache.set(key, cached)
+  }
+  return cached
 }
+
+// ─── Public API (unchanged signatures) ───────────
 
 /**
- * Compute the world-space position and rotation of a member's house.
- * Mirrors frontend VillageLayout.computeVillageLayout() exactly.
- * One road per street, houses on both sides facing inward.
+ * Compute world-space origin + yaw for a member's house.
+ *
+ * Returns null if the housing zone is missing or totalMembers is 0.
+ * Callers (MemberPlacement) already handle null by falling back to garden.
  */
 export function getHouseOrigin(
   memberIndex: number,
   totalMembers: number,
 ): { x: number; z: number; yawDeg: number } | null {
+  const layout = getHousingLayout(totalMembers)
+  if (!layout) return null
+  const placement = layout.placements[memberIndex]
+  if (!placement) return null
   const zone = getZone("housing")
-  if (!zone || totalMembers === 0) return null
-
-  const streetCount = Math.max(1, Math.ceil(totalMembers / HOUSES_PER_STREET))
-  const totalDepth = (streetCount - 1) * STREET_GAP
-  const baseZ = zone.z - totalDepth / 2
-
-  const streetIdx = Math.floor(memberIndex / HOUSES_PER_STREET)
-  const posInStreet = memberIndex % HOUSES_PER_STREET
-  const streetStart = streetIdx * HOUSES_PER_STREET
-  const membersOnStreet = Math.min(HOUSES_PER_STREET, totalMembers - streetStart)
-
-  // Determine side
-  let side: 'north' | 'south'
-  if (membersOnStreet <= HOUSES_PER_SIDE) {
-    side = 'north'
-  } else {
-    side = posInStreet % 2 === 0 ? 'north' : 'south'
-  }
-
-  // Count per side for X layout
-  let northCount = 0, southCount = 0
-  for (let i = streetStart; i < streetStart + membersOnStreet; i++) {
-    const pos = i % HOUSES_PER_STREET
-    if (membersOnStreet <= HOUSES_PER_SIDE) { northCount++ }
-    else if (pos % 2 === 0) { northCount++ }
-    else { southCount++ }
-  }
-
-  // Compute slot on this member's side
-  let slotOnSide = 0
-  for (let i = streetStart; i < memberIndex; i++) {
-    const pos = i % HOUSES_PER_STREET
-    const iSide = membersOnStreet <= HOUSES_PER_SIDE ? 'north' : (pos % 2 === 0 ? 'north' : 'south')
-    if (iSide === side) slotOnSide++
-  }
-
-  const streetZ = baseZ + streetIdx * STREET_GAP
-  const maxPerSide = Math.max(northCount, southCount)
-  const rowWidth = (maxPerSide - 1) * HOUSE_SPACING_ALONG
-  const startX = zone.x - rowWidth / 2
-
+  if (!zone) return null
+  // Placement is LOCAL (yaw-free, centred on 0,0) — rotate around the zone
+  // centre and translate to world. House-yaw composes with zone-yaw so
+  // front-of-house stays facing the rotated road.
+  const world = rotatePointAroundPivot(
+    placement.x + zone.x, placement.z + zone.z, layout.yawRad, zone.x, zone.z,
+  )
   return {
-    x: startX + slotOnSide * HOUSE_SPACING_ALONG,
-    z: side === 'north' ? streetZ - ROW_OFFSET : streetZ + ROW_OFFSET,
-    yawDeg: side === 'north' ? 0 : 180,
+    x: world.x,
+    z: world.z,
+    yawDeg: placement.yawDeg + (zone.yawDeg ?? 0),
   }
 }
 
 /**
  * Compute world-space desk seat position for a member's house.
- * Applies centering offset (corner → center) then house rotation.
+ * Applies the house's corner → centre offset (tile-local) then the
+ * composed house+village rotation.
  */
 export function getHouseDeskSeat(
   memberIndex: number,
@@ -128,26 +111,24 @@ export function getHouseDeskSeat(
 ): { x: number; y: number; z: number; yaw: number } | null {
   const origin = getHouseOrigin(memberIndex, totalMembers)
   if (!origin) return null
-
-  const cfg = TIER_CONFIG[houseLevel] ?? TIER_CONFIG[1]
-  const offset = centerOffset(houseLevel)
-  const cx = offset.x + cfg.desk.x
-  const cz = offset.z + cfg.desk.z
-  const rad = origin.yawDeg * Math.PI / 180
-  const cos = Math.cos(rad)
-  const sin = Math.sin(rad)
-
+  const geom = getHouseTierGeometry(houseLevel)
+  // Desk is corner-local; shift to house-centre space (matches HouseBuilder's
+  // pivot, which centres the rendered tile footprint on the placement).
+  const cx = geom.desk.x - geom.width / 2
+  const cz = geom.desk.z - geom.depth / 2
+  const world = toWorld({ x: cx, z: cz }, { x: origin.x, z: origin.z, yawDeg: origin.yawDeg })
   return {
-    x: origin.x + cx * cos + cz * sin,
+    x: world.x,
     y: DESK_SEAT_Y,
-    z: origin.z - cx * sin + cz * cos,
-    yaw: cfg.desk.yaw + origin.yawDeg,
+    z: world.z,
+    yaw: geom.desk.yaw + origin.yawDeg,
   }
 }
 
 /**
- * Compute world-space bed position for a member's house.
- * Applies centering offset (corner → center) then house rotation.
+ * Compute world-space bed position for a member's house. Same transform
+ * chain as `getHouseDeskSeat` — the bed is just a different corner-local
+ * point within the same tile.
  */
 export function getHouseBedPosition(
   memberIndex: number,
@@ -156,27 +137,26 @@ export function getHouseBedPosition(
 ): { x: number; y: number; z: number; yaw: number } | null {
   const origin = getHouseOrigin(memberIndex, totalMembers)
   if (!origin) return null
-
-  const cfg = TIER_CONFIG[houseLevel] ?? TIER_CONFIG[1]
-  const offset = centerOffset(houseLevel)
-  const cx = offset.x + cfg.bed.x
-  const cz = offset.z + cfg.bed.z
-  const rad = origin.yawDeg * Math.PI / 180
-  const cos = Math.cos(rad)
-  const sin = Math.sin(rad)
-
+  const geom = getHouseTierGeometry(houseLevel)
+  const cx = geom.bed.x - geom.width / 2
+  const cz = geom.bed.z - geom.depth / 2
+  const world = toWorld({ x: cx, z: cz }, { x: origin.x, z: origin.z, yawDeg: origin.yawDeg })
   return {
-    x: origin.x + cx * cos + cz * sin,
+    x: world.x,
     y: BED_SURFACE_Y,
-    z: origin.z - cx * sin + cz * cos,
+    z: world.z,
     yaw: origin.yawDeg,
   }
 }
 
 // ─── Tree positions (repo trees in orchard) ─────
 // Re-export from shared so client + server agree byte-for-byte.
-export { getTreePositions } from "../../../shared/world/treePositions"
+export {
+  getTreePositions,
+  getAgentSlotAtTree,
+  getAgentFallbackSlot,
+} from "../../../shared/world/treePositions"
 
-// Break zone seats are now generated dynamically by BreakSeatGenerator.ts
+// Break zone seats are generated dynamically by BreakSeatGenerator.ts
 // based on team size. See generateBreakSeats(teamSize) for the layout
 // engines that mirror the frontend builders' exact furniture positions.

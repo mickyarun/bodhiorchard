@@ -28,22 +28,6 @@ logger = structlog.get_logger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────
 
-_FRONTEND_DEPS = frozenset(
-    {
-        "vue",
-        "react",
-        "react-dom",
-        "next",
-        "nuxt",
-        "@angular/core",
-        "svelte",
-        "@sveltejs/kit",
-        "vuetify",
-        "@mui/material",
-        "tailwindcss",
-    }
-)
-
 _HOOK_MARKER = "# installed-by-bodhiorchard"
 
 _PREPARE_CMD = "git config core.hooksPath .githooks"
@@ -207,29 +191,6 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
 
     claude_md.write_text(content)
     return True
-
-
-# ── Repo type detection ───────────────────────────────────────────
-
-
-def detect_repo_type(repo_path: str) -> str | None:
-    """Detect if repo is 'frontend' or 'backend' by checking package.json deps.
-
-    Args:
-        repo_path: Absolute path to the git repository.
-
-    Returns:
-        'frontend', 'backend', or None if detection fails.
-    """
-    pkg_path = Path(repo_path) / "package.json"
-    if not pkg_path.exists():
-        return "backend"
-    try:
-        pkg = json.loads(pkg_path.read_text())
-        all_deps = set(pkg.get("dependencies", {})) | set(pkg.get("devDependencies", {}))
-        return "frontend" if all_deps & _FRONTEND_DEPS else "backend"
-    except (json.JSONDecodeError, OSError):
-        return None
 
 
 # ── Worktree management ───────────────────────────────────────────
@@ -1295,9 +1256,7 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
     # overwrite dirty files. Stash everything (including untracked) so the
     # switch is clean; we pop the stash back in the ``finally`` below so
     # the staging step below still has the files to commit.
-    _, _, dirty_rc = await run_git(
-        ["diff-index", "--quiet", "HEAD", "--"], cwd=repo_path
-    )
+    _, _, dirty_rc = await run_git(["diff-index", "--quiet", "HEAD", "--"], cwd=repo_path)
     _, untracked_out, _ = await run_git(
         ["ls-files", "--others", "--exclude-standard"], cwd=repo_path
     )

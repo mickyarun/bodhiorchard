@@ -11,7 +11,6 @@
  *     z=+5.0  · · ·  (far picnic row: 2 tables)
  *     z=+2.0  · · ·  (near picnic row: 2 tables)
  *     z= 0.0  [===== zone center =====]
- *     z=-0.4  [== pickup counter + props ==]
  *     z=-0.8  [===== HUT FRONT + DOOR =====]
  *     z=-2.3  [   HUT INTERIOR (kitchen) ]
  *     z=-3.8  [===== HUT BACK WALL =========]
@@ -26,8 +25,6 @@
  *
  * Differentiators vs. the coffee bar:
  *   - Warm yellow awning + chalkboard menu + "🍽 CAFETERIA" sign
- *   - Pickup counter with food props flanking the door (fruit bowl, donuts)
- *   - Outdoor BBQ grill station on the right side of the hut
  *   - Picnic benches (not chairs) under red umbrellas
  *   - Vegetable-patch-adjacent back garden to evoke a farm-to-table vibe
  */
@@ -39,19 +36,19 @@ import { placeScaledFurniture } from '../coffeebar/ScaledFurniture'
 import { LabelRenderer } from '../rendering/LabelRenderer'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 import type { ExclusionZone } from '../utils/MathUtils'
+import { CAFETERIA_LAYOUT } from '../../../../shared/world/breakSeats'
 
-/** Longest-axis targets (metres) for café-pack props. The Coffeehouse Lounge
- *  Pack bakes node-level scale transforms so raw AABBs render 10–100× too
- *  large — placeScaledFurniture rescales them uniformly. */
-const FIT_PROP = 0.18   // mug, donut, cupcake
-const FIT_SMALL = 0.45  // pastry display, fruit bowl, coffee pot, storage crate
+/** Longest-axis target (metres) for café-pack props on the interior prep bar.
+ *  The Coffeehouse Lounge Pack bakes node-level scale transforms so raw AABBs
+ *  render 10–100× too large — placeScaledFurniture rescales them uniformly. */
+const FIT_SMALL = 0.45  // fruit bowl, fancy donuts
 
 /** Actual Kenney wall height from GLB measurement. */
 const WALL_HEIGHT = 1.29
 const HUT_WIDTH = 5
 const HUT_DEPTH = 3
 /** Center the hut in X; push the back wall toward the fence so the front
- *  yard (dining + pickup) gets the bulk of the 9-unit zone radius. */
+ *  yard (dining) gets the bulk of the 9-unit zone radius. */
 const HUT_OFFSET_X = -HUT_WIDTH / 2
 const HUT_SETBACK = 0.8
 const HUT_OFFSET_Z = -HUT_DEPTH - HUT_SETBACK
@@ -68,16 +65,11 @@ const ROOF_TERRACOTTA: [number, number, number] = [0.52, 0.30, 0.22]
 const CHALKBOARD_GREEN: [number, number, number] = [0.08, 0.28, 0.18]
 const CHIMNEY_BRICK: [number, number, number] = [0.55, 0.28, 0.22]
 
-/** Picnic-table slots in root-local coords (two rows × two tables). */
-const TABLE_SLOTS: ReadonlyArray<{ x: number; z: number }> = [
-  { x: -2.0, z: 2.0 },
-  { x:  2.0, z: 2.0 },
-  { x: -2.0, z: 5.0 },
-  { x:  2.0, z: 5.0 },
-]
+// Picnic-table slots + bench offsets live in shared/world/breakSeats.ts
+// (CAFETERIA_LAYOUT). Keeping them shared guarantees the multiplayer break
+// seats line up with the benches the frontend physically renders here.
 
 interface DecorSlot { asset: string; x: number; z: number }
-interface ScaledSlot { asset: string; x: number; z: number; maxDim: number }
 
 /** Back-garden props that fill the arc behind the hut (root-local coords).
  *  Z values are relative to HUT_OFFSET_Z so repositioning the hut cascades
@@ -106,15 +98,6 @@ const SIDE_YARD: ReadonlyArray<DecorSlot> = [
   { asset: BUILDING.plantSmall2, x:  6.2, z: 4.0 },
   { asset: DECOR.bushRound,      x: -5.0, z: 7.0 },
   { asset: DECOR.bushRound,      x:  5.0, z: 7.0 },
-]
-
-/** Pickup-counter treats (world-space size via the auto-scaler). X/Z are
- *  root-local; Y is the counter top, derived at build time. */
-const PICKUP_TREATS: ReadonlyArray<ScaledSlot> = [
-  { asset: CAFE.coffeePot,   x: -1.5,  z: 0, maxDim: FIT_SMALL },
-  { asset: CAFE.mugs,        x: -1.1,  z: 0, maxDim: FIT_PROP },
-  { asset: CAFE.fancyDonuts, x:  1.1,  z: 0, maxDim: FIT_SMALL },
-  { asset: CAFE.cupcake,     x:  1.55, z: 0, maxDim: FIT_PROP },
 ]
 
 export interface CafeteriaResult {
@@ -194,30 +177,17 @@ export class CafeteriaBuilder {
     await this.placeScaled(app, hut, CAFE.fruitBowl,   HUT_WIDTH / 2 - 0.5, barH, 1.6, FIT_SMALL)
     await this.placeScaled(app, hut, CAFE.fancyDonuts, HUT_WIDTH / 2 + 0.4, barH, 1.6, FIT_SMALL)
 
-    // ─── Pickup counter outside the door (root-local coords) ───────────
-    // Two short side tables just outside the front wall to the left and
-    // right of the door, loaded with treat props. Cafe-pack props pass
-    // through the auto-scaler since their GLBs bake inconsistent node scale.
-    const counterZ = CAFETERIA_DOOR_OFFSET.z + 0.5
-    const counterLeft = await this.factory.placeFurnitureCentered(root, BUILDING.sideTable, -1.3, 0, counterZ)
-    await this.factory.placeFurnitureCentered(root, BUILDING.sideTable,  1.3, 0, counterZ)
-    const counterH = BuildingFactory.getEntityHeight(counterLeft)
-    for (const t of PICKUP_TREATS) {
-      await this.placeScaled(app, root, t.asset, t.x, counterH, counterZ + t.z, t.maxDim)
-    }
-
     // ─── Outdoor picnic tables + benches (zone-centered coords) ────────
+    // Nested loop order matches forEachBreakSeat(CAFETERIA_LAYOUT) so
+    // seatIndex here aligns 1:1 with the server's BreakSeatGenerator.
     let seatIndex = 0
-    const benchOffset = 0.55
-    for (const slot of TABLE_SLOTS) {
+    for (const slot of CAFETERIA_LAYOUT.tables) {
       await this.factory.placeFurnitureCentered(root, BUILDING.tableCloth, slot.x, 0, slot.z)
 
-      // Benches snug against the table on both sides
-      for (const side of [-1, 1] as const) {
-        const bz = slot.z + side * benchOffset
-        const facing = side > 0 ? 180 : 0
+      for (const bench of CAFETERIA_LAYOUT.chairs) {
         const { seat } = await this.factory.placeSeat(
-          root, BUILDING.benchCushion, slot.x, bz, facing,
+          root, BUILDING.benchCushion,
+          slot.x + bench.dx, slot.z + bench.dz, bench.yaw,
           'cafeteria', seatIndex++, x, z, 'benchCushion',
         )
         seats.push(seat)
@@ -226,13 +196,6 @@ export class CafeteriaBuilder {
       // Red umbrella shade over each picnic table
       this.factory.createUmbrella(root, slot.x, slot.z, 0, 2.0, 0.85)
     }
-
-    // ─── Outdoor grill station (right of the hut) ──────────────────────
-    const grillX = HUT_OFFSET_X + HUT_WIDTH + 0.9 // just outside hut right wall
-    const grillZ = HUT_OFFSET_Z + 1.2
-    await this.factory.placeFurnitureCentered(root, BUILDING.kitchenStove, grillX, 0, grillZ)
-    await this.placeScaled(app, root, CAFE.storageCrate, grillX - 0.9, 0, grillZ, FIT_SMALL)
-    await this.factory.placeFurnitureCentered(root, BUILDING.pottedPlant, grillX + 0.8, 0, grillZ + 1.3)
 
     // ─── Back garden fills the arc BEHIND the hut; side yards line the
     // fence's interior edge. Z values in BACK_GARDEN are relative to the
@@ -245,7 +208,7 @@ export class CafeteriaBuilder {
     // ─── String lights framing the full patio ───────────────────────────
     const stringH = WALL_HEIGHT + 1.2
     this.factory.createStringLights(root, [
-      // Cross string along the hut front (above the pickup counter)
+      // Cross string along the hut front
       { start: { x: -4.5, y: stringH, z: HUT_OFFSET_Z + HUT_DEPTH + 0.1 }, end: { x:  4.5, y: stringH, z: HUT_OFFSET_Z + HUT_DEPTH + 0.1 }, bulbCount: 6 },
       // Left perimeter — along the dining area
       { start: { x: -4.5, y: stringH, z: HUT_OFFSET_Z + HUT_DEPTH + 0.1 }, end: { x: -4.5, y: stringH, z: 7.0 }, bulbCount: 4 },

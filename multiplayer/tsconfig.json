@@ -16,6 +16,6 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true
   },
-  "include": ["src/**/*", "../shared/race/**/*.ts"],
+  "include": ["src/**/*", "../shared/**/*.ts"],
   "exclude": ["node_modules", "dist", "../shared/**/*.test.ts"]
 }

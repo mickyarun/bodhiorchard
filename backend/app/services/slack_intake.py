@@ -191,7 +191,13 @@ async def handle_pm_approval(
         from app.services.slack_bug_intake import handle_bug_approval
 
         await handle_bug_approval(
-            db, org, bot_token, channel, message_ts, approver_slack_id, approved,
+            db,
+            org,
+            bot_token,
+            channel,
+            message_ts,
+            approver_slack_id,
+            approved,
         )
         return
 
@@ -313,7 +319,12 @@ async def handle_pm_approval(
     from app.services.bud_agent_trigger import create_agent_task_for_stage
 
     await create_agent_task_for_stage(
-        bud, "bud", org.id, db, triggered_by=approver.id, force=True,
+        bud,
+        "bud",
+        org.id,
+        db,
+        triggered_by=approver.id,
+        force=True,
     )
 
 

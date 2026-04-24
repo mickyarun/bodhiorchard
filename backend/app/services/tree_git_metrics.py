@@ -53,7 +53,8 @@ async def collect_git_history(
         try:
             # Get total file count
             proc = await asyncio.create_subprocess_exec(
-                "git", "ls-files",
+                "git",
+                "ls-files",
                 cwd=repo_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -66,7 +67,11 @@ async def collect_git_history(
 
             # Get first commit date for project age
             proc = await asyncio.create_subprocess_exec(
-                "git", "log", "--reverse", "--format=%aI", "-1",
+                "git",
+                "log",
+                "--reverse",
+                "--format=%aI",
+                "-1",
                 cwd=repo_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -81,8 +86,11 @@ async def collect_git_history(
             # Get recent commits (last 90 days) for leaves
             since_date = (now - timedelta(days=90)).strftime("%Y-%m-%d")
             proc = await asyncio.create_subprocess_exec(
-                "git", "log", f"--since={since_date}",
-                "--format=%H %aI", "--name-only",
+                "git",
+                "log",
+                f"--since={since_date}",
+                "--format=%H %aI",
+                "--name-only",
                 cwd=repo_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,

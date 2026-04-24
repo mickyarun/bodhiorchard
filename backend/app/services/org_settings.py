@@ -132,6 +132,54 @@ def get_phase_order(org_config: dict | None) -> list[str]:
     return [p for p in PHASE_ORDER if p != "uat"]
 
 
+# Maps the ``llm.preset`` org-config value (set via the AI Config settings
+# page) to the human-readable agent name and a productivity hint that gets
+# injected into the estimation prompt. Adding a new agent is a one-line
+# entry here; the prompt builder and tests then pick it up automatically.
+# Why a dict, not Pydantic: the schema lives elsewhere (``AIConfigSettings``);
+# this is just prompt-facing copy keyed off the validated preset string.
+_AI_AGENT_PROFILES: dict[str, dict[str, str]] = {
+    "claude-code": {
+        "name": "Claude Code",
+        "hint": "Routine PRs typically merge in hours; trivial UI work in <1 day.",
+    },
+    "cloud": {
+        "name": "Cloud LLM",
+        "hint": "AI-assisted via cloud API; expect a modest speed-up over human-only work.",
+    },
+    "ollama": {
+        "name": "Local LLM",
+        "hint": "AI-assisted via a local model; modest speed-up; latency varies.",
+    },
+    "codex": {
+        "name": "Codex",
+        "hint": "AI-assisted; routine PRs typically merge in hours.",
+    },
+}
+
+_DEFAULT_AGENT_PRESET = "claude-code"
+
+
+def get_ai_agent_profile(org_config: dict | None) -> dict[str, str]:
+    """Resolve the AI coding agent profile (display name + productivity hint).
+
+    Reads ``org.config["llm"]["preset"]`` (the same key written by the AI
+    Config settings page) and returns the prompt-facing copy for that
+    agent. Unknown or missing presets fall back to claude-code so the
+    estimator never crashes on a partially-configured org.
+
+    Args:
+        org_config: The raw ``organization.config`` JSONB dict, or None.
+
+    Returns:
+        A dict with ``name`` (e.g. "Claude Code") and ``hint`` (a short
+        productivity sentence) — both safe to interpolate into prompts.
+    """
+    llm = (org_config or {}).get("llm") or {}
+    preset = llm.get("preset") or _DEFAULT_AGENT_PRESET
+    return _AI_AGENT_PROFILES.get(preset, _AI_AGENT_PROFILES[_DEFAULT_AGENT_PRESET])
+
+
 def get_jira_settings(org_config: dict | None) -> JiraSettings:
     """Resolve Jira connection settings from an organization config dict.
 

@@ -72,9 +72,7 @@ class BUDAgentTask(BaseModel):
         String(20), nullable=False, default=AgentTaskStatus.PENDING, server_default="pending"
     )
     job_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    attempt: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, server_default="1"
-    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

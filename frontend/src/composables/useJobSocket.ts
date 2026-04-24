@@ -23,6 +23,15 @@ export function useJobSocket() {
     getResult: (d) => d.result,
     pollIntervalMs: 1000,
     pollTimeoutMs: 660_000, // 11 min — must exceed backend max job timeout (600s)
+    // Jobs are WS-native but the WS subscribe can land AFTER the worker
+    // has already published the terminal event — the frontend sees the
+    // running banner forever because `onComplete` never fires. Keep
+    // polling running alongside the WS (1 Hz) as a safety net; the
+    // tracker handles 404-after-cleanup silently so there's no spurious
+    // "Failed to check status" when the 5-min TTL reaps the in-memory
+    // entry. Same pattern `useScanSocket` uses for the identical race.
+    fetchInitialStateViaRest: false,
+    pollAlongsideWs: true,
   })
 
   return {

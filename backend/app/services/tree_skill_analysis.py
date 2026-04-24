@@ -76,8 +76,7 @@ async def compute_feature_skills(
         if raw_title.startswith("feature:"):
             raw_title = raw_title[8:]
         title_words = [
-            w for w in raw_title.split()
-            if len(w) > 2 and w not in {"the", "and", "for", "with"}
+            w for w in raw_title.split() if len(w) > 2 and w not in {"the", "and", "for", "with"}
         ]
 
         # Match by branch_name (module == branch/community name)

@@ -75,9 +75,7 @@ async def sync_todos_from_tech_spec(
     return len(parsed)
 
 
-async def _load_existing_todos(
-    db: AsyncSession, bud_id: uuid.UUID
-) -> dict[int, BUDTodo]:
+async def _load_existing_todos(db: AsyncSession, bud_id: uuid.UUID) -> dict[int, BUDTodo]:
     result = await db.execute(select(BUDTodo).where(BUDTodo.bud_id == bud_id))
     return {todo.sequence: todo for todo in result.scalars().all()}
 

@@ -63,7 +63,8 @@ async def _load_hardcoded_branches(
     """Create hardcoded 6-8 branches from top-level dirs for a single-repo tree."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git", "ls-files",
+            "git",
+            "ls-files",
             cwd=repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -133,7 +134,8 @@ async def _load_branches_from_directories(
     """Create branches from top-level directory structure as fallback."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git", "ls-files",
+            "git",
+            "ls-files",
             cwd=repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,

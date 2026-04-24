@@ -126,7 +126,9 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     _chat_org_id = payload.org_id
 
     await log_agent_activity(
-        None, org_id=uuid_mod.UUID(_chat_org_id), event_type="skill_invoked",
+        None,
+        org_id=uuid_mod.UUID(_chat_org_id),
+        event_type="skill_invoked",
         skill_slug=skill_name,
         message=f"Chat '{skill_name}' invoked for {payload.section}",
         bud_id=uuid_mod.UUID(payload.bud_id),
@@ -167,7 +169,9 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
 
     if not result.success:
         await log_agent_activity(
-            None, org_id=uuid_mod.UUID(_chat_org_id), event_type="skill_failed",
+            None,
+            org_id=uuid_mod.UUID(_chat_org_id),
+            event_type="skill_failed",
             skill_slug=skill_name,
             message=result.error or "AI unavailable",
             bud_id=uuid_mod.UUID(payload.bud_id),
@@ -198,7 +202,9 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             session_id=payload.session_id,
         )
         await log_agent_activity(
-            None, org_id=uuid_mod.UUID(_chat_org_id), event_type="skill_completed",
+            None,
+            org_id=uuid_mod.UUID(_chat_org_id),
+            event_type="skill_completed",
             skill_slug=skill_name,
             message=f"Chat '{skill_name}' completed for {payload.section}",
             bud_id=uuid_mod.UUID(payload.bud_id),
@@ -232,7 +238,9 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     )
 
     await log_agent_activity(
-        None, org_id=uuid_mod.UUID(_chat_org_id), event_type="skill_completed",
+        None,
+        org_id=uuid_mod.UUID(_chat_org_id),
+        event_type="skill_completed",
         skill_slug=skill_name,
         message=f"Chat '{skill_name}' completed for {payload.section}",
         bud_id=uuid_mod.UUID(payload.bud_id),
@@ -254,8 +262,6 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         section=payload.section,
         job_id=job_id,
     )
-
-
 
 
 def _parse_chat_response(output: str) -> dict[str, Any] | None:

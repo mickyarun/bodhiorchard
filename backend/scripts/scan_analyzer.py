@@ -62,8 +62,10 @@ async def run_analysis(output_file: str | None = None) -> None:
         repos = list(repos_result.scalars().all())
         log(f"--- Tracked Repositories ({len(repos)}) ---")
         for r in repos:
-            log(f"  {r.name:30s}  status={r.status}  main={r.main_branch}  "
-                f"head_sha={str(r.head_sha or '')[:8]}  path={r.path}")
+            log(
+                f"  {r.name:30s}  status={r.status}  main={r.main_branch}  "
+                f"head_sha={str(r.head_sha or '')[:8]}  path={r.path}"
+            )
         log()
 
         # --- Features ---
@@ -81,9 +83,7 @@ async def run_analysis(output_file: str | None = None) -> None:
         no_repo_link = 0
         for f in features:
             repo_links = await db.execute(
-                select(KnowledgeRepoLink).where(
-                    KnowledgeRepoLink.knowledge_id == f.id
-                )
+                select(KnowledgeRepoLink).where(KnowledgeRepoLink.knowledge_id == f.id)
             )
             links = list(repo_links.scalars().all())
 
@@ -95,9 +95,7 @@ async def run_analysis(output_file: str | None = None) -> None:
             for link in links:
                 # Get repo name
                 repo_result = await db.execute(
-                    select(TrackedRepository.name).where(
-                        TrackedRepository.id == link.repo_id
-                    )
+                    select(TrackedRepository.name).where(TrackedRepository.id == link.repo_id)
                 )
                 rname = repo_result.scalar_one_or_none() or "???"
                 repo_names.append(rname)
@@ -106,18 +104,24 @@ async def run_analysis(output_file: str | None = None) -> None:
                 no_repo_link += 1
 
             log(f"  {f.title}")
-            log(f"    source={f.source}  status={f.feature_status}  "
+            log(
+                f"    source={f.source}  status={f.feature_status}  "
                 f"embed={'YES' if has_embed else 'NULL'}  "
-                f"repos={repo_names or 'NONE'}")
+                f"repos={repo_names or 'NONE'}"
+            )
             if links:
                 for link in links:
                     locs = link.code_locations or {}
                     locs_summary = {k: len(v) for k, v in locs.items()} if locs else "EMPTY"
-                    log(f"    junction: repo_id={str(link.repo_id)[:8]}  "
-                        f"code_locations={locs_summary}")
+                    log(
+                        f"    junction: repo_id={str(link.repo_id)[:8]}  "
+                        f"code_locations={locs_summary}"
+                    )
         log()
-        log(f"  SUMMARY: {len(features)} features, {null_embed} NULL embeddings, "
-            f"{no_repo_link} without repo links")
+        log(
+            f"  SUMMARY: {len(features)} features, {null_embed} NULL embeddings, "
+            f"{no_repo_link} without repo links"
+        )
         log()
 
         # --- Skill Profiles ---
@@ -153,11 +157,15 @@ async def run_analysis(output_file: str | None = None) -> None:
                 feat_title = feat_result.scalar_one_or_none() or "???"
 
             log(f"  {user_name:20s}  {email:30s}  module={sp.module}")
-            log(f"    score={sp.skill_score:.2f}  touches={sp.touch_count}  "
-                f"langs={langs}  feature_id={'YES → ' + feat_title if feat_title else 'NULL'}")
+            log(
+                f"    score={sp.skill_score:.2f}  touches={sp.touch_count}  "
+                f"langs={langs}  feature_id={'YES → ' + feat_title if feat_title else 'NULL'}"
+            )
         log()
-        log(f"  SUMMARY: {len(profiles)} profiles, {null_feature} NULL feature_id, "
-            f"{empty_lang} empty languages")
+        log(
+            f"  SUMMARY: {len(profiles)} profiles, {null_feature} NULL feature_id, "
+            f"{empty_lang} empty languages"
+        )
         log()
 
         # --- Feature Map (what load_feature_map would produce) ---

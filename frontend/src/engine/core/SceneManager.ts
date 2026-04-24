@@ -47,6 +47,7 @@ import { DecorativePropScatter } from '../world/DecorativePropScatter'
 import { CoffeeBarBuilder } from '../buildings/CoffeeBarBuilder'
 import { CafeteriaBuilder } from '../buildings/CafeteriaBuilder'
 import { HousingVillage } from '../buildings/HousingVillage'
+import { HousingState } from '../buildings/HousingState'
 import { StandupPavilion } from '../buildings/StandupPavilion'
 import { PoolResortBuilder } from '../buildings/PoolResortBuilder'
 import type { WaterSurface } from '../effects/WaterSurface'
@@ -110,13 +111,12 @@ export class SceneManager {
   private _takeoverPhysicsBuilder: TakeoverPhysicsBuilder | null = null
   private buildingHuts: HutInfo[] = []
   private pondObstacle: PondObstacle | null = null
+  private bodhiTrunk: { x: number; z: number; radius: number; topY: number } | null = null
   private poolWater: WaterSurface | null = null
 
   // Shared data for Phase 3+
   private _memberHouseMap = new Map<string, HouseResult>()
-  private _housingVillage: HousingVillage | null = null
-  private _housingGatePosition: { x: number; z: number } | null = null
-  private _housingFenceBounds: import('../buildings/VillageLayout').FenceBounds | null = null
+  private _housing = new HousingState()
 
   /** Member lookup by user_id — includes character_model for identity preservation when visiting houses. */
   private _memberDataMap = new Map<string, { user_id: string; name: string; character_model: string | null }>()
@@ -198,6 +198,7 @@ export class SceneManager {
     if (checkCancelled()) return
     this.buildingEntities.push(hubResult.entity)
     this.layout.addExclusionZones([hubResult.exclusionZone])
+    this.bodhiTrunk = hubResult.trunkCollider
 
     // 3. Repo visualization (default: trees with decoration)
     this.repoVis = this.createRepoVisualization()
@@ -258,16 +259,14 @@ export class SceneManager {
 
     // Housing village (builds its own fence + roads + driveways)
     if (data.members.length > 0) {
-      this._housingVillage = new HousingVillage(this.loader)
-      const village = this._housingVillage
+      const village = new HousingVillage(this.loader)
       const housingResult = await village.build(this.app, data.members, this.layout, this.materials)
       if (checkCancelled()) return
       this.buildingEntities.push(housingResult.entity)
       this.layout.addExclusionZones([housingResult.exclusionZone])
       this.layout.registerSeats(housingResult.seats)
       this._memberHouseMap = housingResult.memberHouseMap
-      this._housingGatePosition = housingResult.gatePosition
-      this._housingFenceBounds = housingResult.fenceBounds
+      this._housing.absorb(village, housingResult)
     }
 
     if (poolZone) {
@@ -317,8 +316,8 @@ export class SceneManager {
     const zones = this.layout.getAllZones()
     // Housing: route to the gate entrance (world-space, accounts for village rotation)
     const pathZones = zones.map(z => {
-      if (z.name === 'housing' && this._housingGatePosition) {
-        return { ...z, ...this._housingGatePosition }
+      if (z.name === 'housing' && this._housing.gatePosition) {
+        return { ...z, ...this._housing.gatePosition }
       }
       return z
     })
@@ -463,7 +462,7 @@ export class SceneManager {
   get repoVisualization(): RepoVisualization | null { return this.repoVis }
   get arcsRef(): RelationshipArcs | null { return this.arcs }
   get memberHouseMap(): Map<string, HouseResult> { return this._memberHouseMap }
-  get housingVillageRef(): HousingVillage | null { return this._housingVillage }
+  get housingVillageRef(): HousingVillage | null { return this._housing.village }
   get characterSystemRef(): CharacterSystem | null { return this.characterSystem }
   get worldLayout(): WorldLayout { return this.layout }
   get gardenRootEntity(): pc.Entity | null { return this._gardenRoot }
@@ -543,10 +542,11 @@ export class SceneManager {
       if (this.pondObstacle) {
         builder.registerPond(this.pondObstacle)
       }
-      builder.registerPerimeter(this.layout.getWorldRadius() + 8)
-      if (this._housingFenceBounds && this._housingGatePosition) {
-        builder.registerRectFence(this._housingFenceBounds, this._housingGatePosition)
+      if (this.bodhiTrunk) {
+        builder.registerHubAnchor(this.bodhiTrunk)
       }
+      builder.registerPerimeter(this.getOuterPerimeterRadius())
+      this._housing.registerPhysicsFence(builder)
       const fencedZones = this.layout.getAllZones().filter(z => !this.ZONES_WITHOUT_FENCES.has(z.name))
       builder.registerCircularFences(fencedZones)
       // Keep the builder alive so rebuildHousePhysics can reuse its
@@ -604,6 +604,17 @@ export class SceneManager {
     }
   }
 
+  /**
+   * Outer perimeter radius used by BOTH the visual rail fence and the
+   * Rapier physics collider. Taking the max of the static zone-derived
+   * world radius and the dynamic village reach means the rail grows to
+   * enclose the housing village when house count pushes its footprint
+   * beyond the fixed `housing` zone radius in `shared/world/zones.ts`.
+   */
+  private getOuterPerimeterRadius(): number {
+    return this._housing.getOuterPerimeterRadius(this.layout.getWorldRadius())
+  }
+
   private buildZoneFences(factory: BuildingFactory): void {
     if (!factory.materialFactory) return
     const fence = new CircularFence(factory.materialFactory)
@@ -625,9 +636,7 @@ export class SceneManager {
     }
 
     // ── Outer campus perimeter (light rail) ────────────────────────────────────
-    // worldRadius is the furthest zone edge from origin (~51 units).
-    // +8 gives a comfortable visual margin before the green ground fades out.
-    const outerRadius = this.layout.getWorldRadius() + 8
+    const outerRadius = this.getOuterPerimeterRadius()
     this.buildingEntities.push(fence.build(this.app.root, {
       radius:    outerRadius,
       cx:        0,
@@ -688,9 +697,7 @@ export class SceneManager {
       entity.destroy()
     }
     this.buildingEntities = []
-    this._housingVillage = null
-    this._housingGatePosition = null
-    this._housingFenceBounds = null
+    this._housing.reset()
     this._memberHouseMap.clear()
     this._memberDataMap.clear()
 
@@ -738,6 +745,7 @@ export class SceneManager {
     this._takeoverPhysicsBuilder = null
     this.buildingHuts = []
     this.pondObstacle = null
+    this.bodhiTrunk = null
 
     this.layout.reset()
   }

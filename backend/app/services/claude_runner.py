@@ -105,6 +105,22 @@ async def _run_with_streaming(
     cost: float | None = None
     turns: int | None = None
     error_subtype: str | None = None
+    # Structured error surfaced by any event (not just ``result``). The CLI
+    # can emit ``is_error: true`` payloads on auth / credit / rate-limit /
+    # argv-too-long failures and then exit non-zero without ever sending a
+    # ``result`` event — in which case the only signal to the user would
+    # otherwise be "Exit code 1:" with empty stderr.
+    event_error_message: str | None = None
+    # Last few raw stdout lines kept as a diagnostic fallback when every
+    # structured path has failed.
+    recent_lines: list[str] = []
+    # stderr drained concurrently so the OS pipe buffer never fills up
+    # and stalls the CLI. Classic asyncio subprocess deadlock.
+    stderr_chunks: list[bytes] = []
+    # Pre-bind so the ``CancelledError`` / ``TimeoutError`` branches can
+    # reference ``proc`` even if cancellation fires before the subprocess
+    # is actually spawned.
+    proc: asyncio.subprocess.Process | None = None
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -116,8 +132,28 @@ async def _run_with_streaming(
             limit=10 * 1024 * 1024,  # 10MB — Claude stream-json lines can exceed 64KB default
         )
 
+        async def _drain_stderr() -> None:
+            """Continuously drain stderr so the OS pipe buffer never fills.
+
+            Without this, writing more than ~64 KB to stderr blocks the
+            subprocess, which stops stdout, which stalls the stream-json
+            reader, which sits there until the 10-minute timeout fires.
+            Seen in the wild when the Claude CLI's ``--verbose`` flag
+            emits hook / MCP startup logs on real repos.
+            """
+            assert proc.stderr is not None  # noqa: S101
+            while True:
+                try:
+                    chunk = await proc.stderr.read(65536)
+                except ValueError:
+                    continue
+                if not chunk:
+                    break
+                if sum(len(c) for c in stderr_chunks) < 1_000_000:
+                    stderr_chunks.append(chunk)
+
         async def _read_and_wait() -> None:
-            nonlocal result_text, cost, turns, error_subtype
+            nonlocal result_text, cost, turns, error_subtype, event_error_message
             assert proc.stdout is not None  # noqa: S101
             while True:
                 try:
@@ -131,6 +167,10 @@ async def _run_with_streaming(
                 text = line.decode("utf-8", errors="replace").strip()
                 if not text:
                     continue
+                # Keep a rolling tail of raw lines as a diagnostic fallback.
+                recent_lines.append(text)
+                if len(recent_lines) > 20:
+                    recent_lines.pop(0)
                 try:
                     event = json.loads(text)
                 except json.JSONDecodeError:
@@ -138,6 +178,14 @@ async def _run_with_streaming(
 
                 # Look for tool_use blocks anywhere in the event
                 _find_tool_uses(event, progress_callback)
+
+                # Structured error anywhere in the stream — the CLI sends
+                # ``is_error: true`` on auth / credit / rate-limit failures
+                # without necessarily wrapping them in a ``result`` event.
+                if event_error_message is None and isinstance(event, dict):
+                    extracted = _extract_event_error(event)
+                    if extracted:
+                        event_error_message = extracted
 
                 # Capture the final result event
                 if isinstance(event, dict) and event.get("type") == "result":
@@ -151,19 +199,46 @@ async def _run_with_streaming(
             # Wait for process exit under the same timeout
             await proc.wait()
 
-        await asyncio.wait_for(_read_and_wait(), timeout=timeout)
-    except TimeoutError:
-        try:
-            proc.kill()
-            await proc.wait()
-            logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
-        except ProcessLookupError:
-            pass
-        return ClaudeRunResult(
-            success=False,
-            output="",
-            error=f"Timed out after {timeout}s",
+        await asyncio.wait_for(
+            asyncio.gather(_read_and_wait(), _drain_stderr()),
+            timeout=timeout,
         )
+    except TimeoutError:
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+                logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
+            except ProcessLookupError:
+                pass
+        # Include whatever diagnostic signal we did capture before the
+        # timeout — a timed-out CLI usually still produced *some* output,
+        # and knowing the last line often points at the real hang.
+        stderr_preview = b"".join(stderr_chunks).decode("utf-8", errors="replace")[:300]
+        last_stdout = recent_lines[-1][:200] if recent_lines else ""
+        logger.error(
+            "claude_run_timeout",
+            timeout=timeout,
+            last_stdout=last_stdout,
+            stderr_preview=stderr_preview,
+        )
+        detail = f"Timed out after {timeout}s"
+        if last_stdout:
+            detail += f"; last stdout: {last_stdout}"
+        elif stderr_preview:
+            detail += f"; stderr: {stderr_preview[:200]}"
+        return ClaudeRunResult(success=False, output="", error=detail)
+    except asyncio.CancelledError:
+        # Caller cancelled the job — kill the CLI so it stops making
+        # MCP tool calls (and spending tokens) before we re-raise.
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+                logger.info("claude_subprocess_killed_on_cancel", pid=proc.pid)
+            except ProcessLookupError:
+                pass
+        raise
     except FileNotFoundError:
         return ClaudeRunResult(
             success=False,
@@ -171,8 +246,8 @@ async def _run_with_streaming(
             error="Claude CLI binary not found",
         )
 
-    # Read any remaining stderr
-    stderr_bytes = await proc.stderr.read() if proc.stderr else b""
+    # stderr was drained concurrently (above) so the pipe never blocked.
+    stderr_bytes = b"".join(stderr_chunks)
     stderr_str = stderr_bytes.decode("utf-8", errors="replace")
 
     logger.info(
@@ -184,15 +259,33 @@ async def _run_with_streaming(
     )
 
     if proc.returncode != 0:
+        # Prefer, in order: structured error from any event; error_subtype
+        # on the final result event; stderr; last raw stdout lines. The
+        # last-line fallback is ugly but vastly more useful than a bare
+        # "Exit code 1:" when every structured path has failed.
+        detail = event_error_message
+        if not detail and error_subtype:
+            detail = f"{error_subtype} after {turns or 0} turns"
+        if not detail and stderr_str:
+            detail = stderr_str[:500]
+        if not detail and recent_lines:
+            detail = "last CLI output: " + " | ".join(recent_lines[-3:])[:500]
         logger.error(
             "claude_run_failed",
             returncode=proc.returncode,
             stderr=stderr_str[:500],
+            event_error=event_error_message,
+            error_subtype=error_subtype,
+            recent_lines=recent_lines[-5:],
         )
         return ClaudeRunResult(
             success=False,
             output=result_text,
-            error=f"Exit code {proc.returncode}: {stderr_str[:500]}",
+            error=(
+                f"Exit code {proc.returncode}: {detail}"
+                if detail
+                else f"Exit code {proc.returncode} (no diagnostic output)"
+            ),
         )
 
     if error_subtype:
@@ -358,7 +451,11 @@ async def run_claude_code(
     if progress_callback is not None:
         try:
             return await _run_with_streaming(
-                cmd, cwd, config.timeout_seconds, progress_callback, env=sub_env,
+                cmd,
+                cwd,
+                config.timeout_seconds,
+                progress_callback,
+                env=sub_env,
             )
         finally:
             if mcp_config_file is not None:
@@ -392,15 +489,21 @@ async def run_claude_code(
         )
 
         if proc.returncode != 0:
+            # The CLI writes structured errors (auth, credit, rate-limit, model
+            # deprecation) to stdout JSON with empty stderr. Surface that human
+            # message instead of the opaque "Exit code N:".
+            api_error = _parse_cli_error_payload(stdout_str)
+            error_msg = api_error or f"Exit code {proc.returncode}: {stderr_str[:500]}"
             logger.error(
                 "claude_run_failed",
                 returncode=proc.returncode,
                 stderr=stderr_str[:500],
+                api_error=api_error,
             )
             return ClaudeRunResult(
                 success=False,
                 output=stdout_str,
-                error=f"Exit code {proc.returncode}: {stderr_str[:500]}",
+                error=error_msg,
             )
 
         # Parse JSON output from Claude Code CLI
@@ -475,6 +578,15 @@ async def run_claude_code(
             output="",
             error=f"Timed out after {config.timeout_seconds}s",
         )
+    except asyncio.CancelledError:
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+                logger.info("claude_subprocess_killed_on_cancel", pid=proc.pid)
+            except ProcessLookupError:
+                pass
+        raise
     except FileNotFoundError:
         return ClaudeRunResult(
             success=False,
@@ -534,6 +646,67 @@ async def ensure_gitnexus_mcp() -> None:
         logger.info("gitnexus_mcp_registered", npx=npx)
     except (TimeoutError, FileNotFoundError, OSError) as exc:
         logger.warning("gitnexus_mcp_register_failed", error=str(exc))
+
+
+def _extract_event_error(event: dict) -> str | None:
+    """Pull a human error message out of a single stream-json event.
+
+    The Claude CLI emits errors in several shapes depending on where the
+    failure occurred (auth, credit, rate-limit, argv-too-long, subprocess
+    crash in a plugin, …). This function normalizes them.
+
+    Returns:
+        A short human string, or ``None`` if no error was detectable in
+        this event.
+    """
+    if not isinstance(event, dict):
+        return None
+    # Pattern 1: top-level {"is_error": true, "result": "...", "api_error_status": 429}
+    if event.get("is_error"):
+        msg = (event.get("result") or event.get("error") or "").strip()
+        status = event.get("api_error_status")
+        if msg and status:
+            return f"{msg} (HTTP {status})"[:500]
+        if msg:
+            return msg[:500]
+    # Pattern 2: {"type": "error", "message": "..."} or {"type": "error",
+    # "error": {...}}
+    if event.get("type") == "error":
+        message = event.get("message")
+        if isinstance(message, str) and message:
+            return message[:500]
+        err = event.get("error")
+        if isinstance(err, dict):
+            return (err.get("message") or err.get("type") or "unknown error")[:500]
+        if isinstance(err, str):
+            return err[:500]
+    # Pattern 3: result event with subtype starting with "error_" often
+    # carries a human blurb in ``result``.
+    subtype = event.get("subtype")
+    if isinstance(subtype, str) and subtype.startswith("error"):
+        msg = (event.get("result") or "").strip()
+        if msg:
+            return f"{subtype}: {msg}"[:500]
+    return None
+
+
+def _parse_cli_error_payload(stdout_str: str) -> str | None:
+    """Extract a human error message from a non-zero CLI run's stdout JSON.
+
+    Returns ``None`` when stdout isn't a recognisable Claude CLI error envelope,
+    so the caller can fall back to the generic exit-code message.
+    """
+    try:
+        parsed = json.loads(stdout_str)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict) or not parsed.get("is_error"):
+        return None
+    msg = (parsed.get("result") or "").strip()
+    status_code = parsed.get("api_error_status")
+    if msg and status_code:
+        return f"{msg} (HTTP {status_code})"
+    return msg or None
 
 
 async def _get_claude_version() -> str | None:
@@ -602,7 +775,9 @@ async def test_claude_connection(
     test_result = await run_claude_code(
         prompt="Reply with exactly: BODHIORCHARD_CONNECTION_OK",
         config=ClaudeRunnerConfig(
-            max_turns=1, timeout_seconds=90, env_extra=env_extra,
+            max_turns=1,
+            timeout_seconds=90,
+            env_extra=env_extra,
         ),
     )
 

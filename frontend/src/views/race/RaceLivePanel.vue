@@ -41,6 +41,11 @@
     <div v-if="isParticipant" class="controls-hint">
       Hold <kbd>W</kbd> or <kbd>↑</kbd> to move · tap <kbd>Shift</kbd> to sprint
     </div>
+
+    <TouchControls
+      v-if="isTouch && isParticipant && phase !== 'finished'"
+      context="race"
+    />
   </div>
 </template>
 
@@ -52,6 +57,10 @@ import { useAuthStore } from '@/stores/auth'
 import { RaceEngine } from '@/engine/race'
 import type { RacePhase } from '@shared/race/types'
 import type { RaceRoomClientLike, RaceStateSnapshot } from '@/multiplayer/RaceRoomClient'
+import TouchControls from '@/components/touch/TouchControls.vue'
+import { useTouchDevice } from '@/composables/useTouchDevice'
+
+const { isTouch } = useTouchDevice()
 
 const props = defineProps<{
   snapshot: RaceStateSnapshot

@@ -60,22 +60,42 @@
           </v-chip>
         </div>
         <div class="d-flex flex-wrap ga-3">
-          <div class="index-stat">
-            <div class="text-h6 font-weight-bold">{{ indexStats.knowledgeItems.byCategory.feature_registry || 0 }}</div>
-            <div class="text-caption text-medium-emphasis">Features</div>
-          </div>
-          <div class="index-stat">
-            <div class="text-h6 font-weight-bold">{{ indexStats.knowledgeItems.embedded }}</div>
-            <div class="text-caption text-medium-emphasis">Embedded</div>
-          </div>
-          <div class="index-stat">
-            <div class="text-h6 font-weight-bold">{{ indexStats.skillProfiles }}</div>
-            <div class="text-caption text-medium-emphasis">Profiles</div>
-          </div>
-          <div class="index-stat">
-            <div class="text-h6 font-weight-bold">{{ settingsStore.repos.length }}</div>
-            <div class="text-caption text-medium-emphasis">Repos</div>
-          </div>
+          <v-tooltip content-class="scan-tooltip" location="top" max-width="280">
+            <template #activator="{ props }">
+              <div v-bind="props" class="index-stat">
+                <div class="text-h6 font-weight-bold">{{ indexStats.knowledgeItems.byCategory.feature_registry || 0 }}</div>
+                <div class="text-caption text-medium-emphasis">Features</div>
+              </div>
+            </template>
+            Distinct code areas detected across your repos (e.g. "Payment Link Lifecycle"). Synthesised from code clusters during each scan and used to group BUDs, bugs, and knowledge items.
+          </v-tooltip>
+          <v-tooltip content-class="scan-tooltip" location="top" max-width="280">
+            <template #activator="{ props }">
+              <div v-bind="props" class="index-stat">
+                <div class="text-h6 font-weight-bold">{{ indexStats.knowledgeItems.embedded }}</div>
+                <div class="text-caption text-medium-emphasis">Embedded</div>
+              </div>
+            </template>
+            Features that have vector embeddings computed. Embeddings power "find similar" lookups — e.g. matching a new bug to the most likely related feature.
+          </v-tooltip>
+          <v-tooltip content-class="scan-tooltip" location="top" max-width="280">
+            <template #activator="{ props }">
+              <div v-bind="props" class="index-stat">
+                <div class="text-h6 font-weight-bold">{{ indexStats.skillProfiles }}</div>
+                <div class="text-caption text-medium-emphasis">Profiles</div>
+              </div>
+            </template>
+            One row per (developer × code module), derived from git history. Feeds BUD assignment suggestions, XP, and "who knows this code?" lookups.
+          </v-tooltip>
+          <v-tooltip content-class="scan-tooltip" location="top" max-width="280">
+            <template #activator="{ props }">
+              <div v-bind="props" class="index-stat">
+                <div class="text-h6 font-weight-bold">{{ settingsStore.repos.length }}</div>
+                <div class="text-caption text-medium-emphasis">Repos</div>
+              </div>
+            </template>
+            Git repositories currently tracked by Bodhiorchard. Scans walk each one to synthesise features and compute skill profiles.
+          </v-tooltip>
         </div>
       </div>
     </v-expand-transition>
@@ -391,7 +411,7 @@
             label="Timeout (seconds)"
             type="number"
             :min="60"
-            :max="1800"
+            :max="3600"
             density="compact"
             variant="outlined"
           >
@@ -401,7 +421,7 @@
                   <v-icon v-bind="props" icon="mdi-help-circle-outline" size="18" color="grey" />
                 </template>
                 How long the scan can run before it stops. Large repos with many features
-                may need more time. Default: 300s (5 min). Try 600s if scans time out.
+                may need more time. Default: 300s (5 min). Max 3600s (1 hr).
               </v-tooltip>
             </template>
           </v-text-field>
@@ -541,29 +561,35 @@
           </v-chip>
         </div>
 
-        <v-text-field
-          v-model="cloneUrl"
-          label="GitHub URL"
-          placeholder="https://github.com/owner/repo"
-          variant="outlined"
-          density="comfortable"
-          prepend-inner-icon="mdi-link-variant"
-          :hint="cloneUrlHint"
-          persistent-hint
-          class="mb-3"
-          @keyup.enter="addUrlToQueue"
-        >
-          <template #append-inner>
-            <v-btn
-              icon="mdi-plus"
-              size="small"
-              variant="text"
-              density="compact"
-              :disabled="!cloneUrl.trim() || cloning"
-              @click="addUrlToQueue"
-            />
-          </template>
-        </v-text-field>
+        <div class="d-flex align-start ga-2 mb-1">
+          <v-text-field
+            v-model="cloneUrl"
+            label="GitHub URL"
+            placeholder="https://github.com/owner/repo"
+            variant="outlined"
+            density="comfortable"
+            prepend-inner-icon="mdi-link-variant"
+            hide-details
+            class="flex-grow-1"
+            @keyup.enter="addUrlToQueue"
+          />
+          <v-btn
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-plus"
+            :disabled="!cloneUrl.trim() || cloning"
+            style="min-height: 48px;"
+            @click="addUrlToQueue"
+          >
+            Add
+          </v-btn>
+        </div>
+        <div class="text-caption text-medium-emphasis mb-3 ml-1">
+          {{ cloneUrlHint }}
+          <span v-if="cloneQueue.length === 0" class="text-primary">
+            Add as many as you want, then Clone.
+          </span>
+        </div>
 
         <v-switch
           v-model="cloneIsPrivate"
@@ -810,7 +836,7 @@
       </div>
 
       <template v-else>
-        <v-select
+        <v-combobox
           v-model="branchDialogMain"
           :items="branchDialogBranches"
           label="Production (main) Branch *"
@@ -818,9 +844,11 @@
           density="compact"
           prepend-inner-icon="mdi-source-branch"
           class="mb-3"
+          hint="Pick from the list or type a custom name (e.g. trunk, prod)."
+          persistent-hint
           :rules="[v => !!v || 'Required']"
         />
-        <v-select
+        <v-combobox
           v-model="branchDialogDev"
           :items="branchDialogBranches"
           label="Develop Branch *"
@@ -828,6 +856,8 @@
           density="compact"
           prepend-inner-icon="mdi-source-branch"
           :class="uatStageEnabled ? 'mb-3' : ''"
+          hint="Pick from the list or type a name. If there's no dedicated develop branch, reuse the main branch name."
+          persistent-hint
           :rules="[v => !!v || 'Required']"
         />
         <v-combobox
@@ -846,7 +876,7 @@
 
       <v-card-actions class="pa-0 mt-4">
         <v-spacer />
-        <v-btn variant="text" @click="showBranchDialog = false">Cancel</v-btn>
+        <v-btn variant="text" @click="cancelBranchDialog">Cancel</v-btn>
         <v-btn
           color="primary"
           variant="flat"
@@ -952,16 +982,6 @@ function isHttpsUrl(url: string): boolean {
 
 const urlIsSsh = computed<boolean>(() => isSshUrl(cloneUrl.value))
 const urlIsHttps = computed<boolean>(() => isHttpsUrl(cloneUrl.value))
-
-// Shape hints derived from the queue (not just the current input) so the
-// PAT field appears/disappears based on what's actually queued.
-const queueHasSsh = computed<boolean>(() =>
-  cloneQueue.value.some((q) => isSshUrl(q.url)) || urlIsSsh.value,
-)
-const queueHasHttps = computed<boolean>(() =>
-  cloneQueue.value.some((q) => isHttpsUrl(q.url)) || urlIsHttps.value
-  || (!queueHasSsh.value && cloneQueue.value.length + (cloneUrl.value.trim() ? 1 : 0) > 0),
-)
 
 const cloneUrlHint = computed<string>(() => {
   const v = cloneUrl.value.trim()
@@ -1174,12 +1194,16 @@ async function handleClone(): Promise<void> {
   // Stage any typed-but-not-queued URL first.
   addUrlToQueue()
 
+  // Snapshot repo IDs so we can tell which rows are new after fetchRepos.
+  // Auto-detection fills main from GitHub's default branch, but develop
+  // often doesn't exist as a branch name — we walk the user through the
+  // mapping dialog for each new-but-unmapped repo before scanning.
+  const existingIds = new Set(settingsStore.repos.map((r) => r.id))
+
   cloning.value = true
   cloneError.value = ''
   let anySucceeded = false
   try {
-    // Sequential clone — one at a time keeps network load predictable and
-    // makes per-item error reporting obvious. Skip items already done.
     for (const item of cloneQueue.value) {
       if (item.status === 'done') continue
       item.status = 'cloning'
@@ -1202,14 +1226,54 @@ async function handleClone(): Promise<void> {
   }
 
   const allDone = cloneQueue.value.every((q) => q.status === 'done')
-  if (allDone) {
-    closeAddRepoDialog()
-    if (anySucceeded && scanAfterAdd.value) {
+  if (!allDone) {
+    // Partial failures leave the dialog open so the user can retry just
+    // the errored rows (by clicking Clone again — successes are skipped).
+    return
+  }
+
+  closeAddRepoDialog()
+
+  if (anySucceeded) {
+    const newlyUnmapped = settingsStore.repos.filter(
+      (r) => !existingIds.has(r.id) && (!r.mainBranch || !r.developBranch),
+    )
+    if (newlyUnmapped.length > 0) {
+      pendingMapping.value = [...newlyUnmapped]
+      scanAfterMapping.value = scanAfterAdd.value
+      await openBranchDialog(pendingMapping.value[0])
+      return   // triggerScan runs from the mapping-walkthrough completion
+    }
+    if (scanAfterAdd.value) triggerScan(false)
+  }
+}
+
+// Branch-mapping walkthrough state — when multiple freshly-cloned repos
+// need mapping, we queue them and re-open the dialog from saveBranchMapping
+// / cancel until the queue drains. Scan fires at the end so users don't hit
+// "Map branches before scanning" after a batch clone.
+const pendingMapping = ref<RepoInfo[]>([])
+const scanAfterMapping = ref(false)
+
+async function advanceMappingWalkthrough(): Promise<void> {
+  if (pendingMapping.value.length === 0) {
+    if (scanAfterMapping.value) {
+      scanAfterMapping.value = false
       triggerScan(false)
     }
+    return
   }
-  // Partial failures leave the dialog open so the user can retry just the
-  // errored rows (by clicking Clone again — successes are skipped).
+  const next = pendingMapping.value.shift()
+  if (next) await openBranchDialog(next)
+}
+
+function cancelBranchDialog(): void {
+  showBranchDialog.value = false
+  // Cancelling mid-walkthrough aborts the batch — don't keep nagging the
+  // user. Leaves remaining repos unmapped; they'll surface via the normal
+  // "Not mapped" chip + scan-guard flow.
+  pendingMapping.value = []
+  scanAfterMapping.value = false
 }
 
 async function copyDeployKey(): Promise<void> {
@@ -1270,6 +1334,10 @@ async function saveBranchMapping(): Promise<void> {
   )
   branchSaving.value = false
   showBranchDialog.value = false
+  // If we're walking a post-clone queue, open the next unmapped repo; the
+  // walkthrough triggers the deferred scan once the queue drains. Safe to
+  // call for one-off edits — the queue is empty and this no-ops.
+  await advanceMappingWalkthrough()
 }
 
 function confirmAndScan(fullRescan: boolean): void {
@@ -1313,6 +1381,19 @@ async function triggerScan(fullRescan: boolean = false): Promise<void> {
   scanProgress.value = 0
   scanStatusLabel.value = 'Saving path...'
   scanError.value = ''
+  // Reset the full result — otherwise a Full Rescan after a warn/error
+  // run leaves the old "1 repo had issues" alert visible alongside the
+  // new progress bar.
+  scanResult.value = {
+    scanMode: 'full',
+    featuresIndexed: 0,
+    featuresSkipped: 0,
+    profilesFound: 0,
+    staleCleaned: 0,
+    unmatchedAuthors: [],
+    synthesisWarning: '',
+    repoWarnings: [],
+  }
 
   try {
     await api.patch('/v1/settings/connections', {

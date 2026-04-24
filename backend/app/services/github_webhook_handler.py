@@ -297,7 +297,12 @@ async def _maybe_detect_release_promotion(
             # Fast path: BUD-branch PR merged directly into a stage branch.
             # We already know the BUD \u2014 skip the GitHub API call entirely.
             await _record_release_event_for_bud(
-                db, org_id, pr.bud_id, repo, pr_data, stage,
+                db,
+                org_id,
+                pr.bud_id,
+                repo,
+                pr_data,
+                stage,
             )
         else:
             # SHA-walk path: release PR carrying multiple BUDs.
@@ -329,7 +334,12 @@ async def _record_release_event_for_bud(
     from app.services.release_detection import _event_already_recorded, _maybe_auto_close_bud
 
     already = await _event_already_recorded(
-        db, org_id, bud_id, stage, pr_data.number, repo.id,  # type: ignore[arg-type]
+        db,
+        org_id,
+        bud_id,
+        stage,
+        pr_data.number,
+        repo.id,  # type: ignore[arg-type]
     )
     if already:
         return

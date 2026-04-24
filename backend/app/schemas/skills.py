@@ -73,9 +73,7 @@ class ScanStatus(BaseModel):
     unmatched_authors: list[str] = Field(default_factory=list, alias="unmatchedAuthors")
     synthesis_warning: str | None = Field(default=None, alias="synthesisWarning")
     setup_pr_message: str | None = Field(default=None, alias="setupPrMessage")
-    repo_warnings: list[RepoScanWarning] = Field(
-        default_factory=list, alias="repoWarnings"
-    )
+    repo_warnings: list[RepoScanWarning] = Field(default_factory=list, alias="repoWarnings")
     error: str | None = None
 
     @computed_field(alias="statusLabel")  # type: ignore[misc]
@@ -109,27 +107,6 @@ class SkillProfileRead(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class KnowledgeSearchRequest(BaseModel):
-    """Request body for semantic knowledge search."""
-
-    query: str
-    limit: int = 10
-    category: str | None = None
-
-
-class KnowledgeSearchResult(BaseModel):
-    """A single result from knowledge search."""
-
-    title: str
-    content: str
-    category: str
-    score: float
-    source_ref: str | None = Field(None, alias="sourceRef")
-    feature_status: str | None = Field(None, alias="featureStatus")
-
-    model_config = {"populate_by_name": True}
-
-
 class KnowledgeItemRead(BaseModel):
     """Knowledge item for API response."""
 
@@ -144,3 +121,12 @@ class KnowledgeItemRead(BaseModel):
     repo_ids: list[uuid.UUID] = Field(default_factory=list, alias="repoIds")
 
     model_config = {"populate_by_name": True, "from_attributes": True}
+
+
+class KnowledgeItemPage(BaseModel):
+    """Paginated response for the knowledge list endpoint."""
+
+    items: list[KnowledgeItemRead]
+    total: int
+
+    model_config = {"populate_by_name": True}

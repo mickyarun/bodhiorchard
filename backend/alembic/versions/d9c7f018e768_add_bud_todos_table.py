@@ -92,9 +92,7 @@ def upgrade() -> None:
     # ── Incidental drift fixes ────────────────────────────────
     # Use IF NOT EXISTS: zd_bug_type_column already creates this index,
     # so fresh schemas already have it by the time this migration runs.
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_bugs_bud_id_status ON bugs (bud_id, status)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS ix_bugs_bud_id_status ON bugs (bud_id, status)")
 
     for table in ("jira_import_sessions", "jira_issue_bud_map"):
         for col in ("created_at", "updated_at"):

@@ -13,6 +13,7 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mcp.handler_utils import require_non_empty
 from app.models.knowledge_item import KnowledgeItem
 from app.models.organization import Organization
 from app.repositories.knowledge_item import KnowledgeItemRepository
@@ -173,6 +174,16 @@ async def handle_write_feature_registry(
     """
     from app.mcp.synthesis_queue import get_queue_remaining, remove_from_queue
 
+    error = require_non_empty(
+        params,
+        "feature_name",
+        "description",
+        "capabilities",
+        "tags",
+    )
+    if error:
+        return error
+
     feature_name = params["feature_name"]
     repo_name = params.get("repo_name")
     source_clusters = params.get("source_clusters", [])
@@ -261,9 +272,7 @@ async def handle_write_feature_registry(
 
     # Link to repo via junction table (with per-repo code_locations)
     if repo_id and item:
-        await ki_repo.link_to_repo(
-            item.id, repo_id, code_locations=params.get("code_locations")
-        )
+        await ki_repo.link_to_repo(item.id, repo_id, code_locations=params.get("code_locations"))
         await ki_repo.flush()
 
     # Deactivate originals when merging cross-repo features.
@@ -374,6 +383,10 @@ async def handle_merge_features(
     Keeps the feature with ``keep_title``, deactivates features in
     ``merge_titles``, and links the kept feature to all specified repos.
     """
+    error = require_non_empty(params, "keep_title", "repo_names")
+    if error:
+        return error
+
     keep_title = params["keep_title"]
     merge_titles = params.get("merge_titles", [])
     repo_names = params.get("repo_names", [])
