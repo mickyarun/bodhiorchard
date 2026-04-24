@@ -304,8 +304,19 @@ async def handle_design_extract_job(job_id: str, raw_payload: dict[str, Any]) ->
     )
 
     from app.services.design_system_extractor import extract_design_system
+    from app.services.platforms import get_platform
 
-    extraction = await extract_design_system(repo_path)
+    try:
+        platform = get_platform(payload.platform)
+    except KeyError:
+        update_job(
+            job_id,
+            state=JobState.FAILED,
+            error=f"Unknown platform slug in payload: {payload.platform!r}",
+        )
+        return
+
+    extraction = await extract_design_system(repo_path, platform)
 
     if extraction.error:
         update_job(

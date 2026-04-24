@@ -46,6 +46,30 @@ logger = structlog.get_logger(__name__)
 # If >30% of tracked files changed, fall back to full scan
 INCREMENTAL_THRESHOLD = 0.30
 
+# ─── Progress-percentage budget ────────────────────────────────────────────
+# The scan progress bar reserves 0..REPO_WINDOW_START for pre-repo setup,
+# REPO_WINDOW_START..REPO_WINDOW_END for per-repo phases (shared across N
+# repos), and REPO_WINDOW_END..100 for post-repo phases (merge, skills,
+# persist). PER_REPO_OFFSET_MAX must be ≥ the largest ``base_pct + X``
+# literal anywhere in this file or scan_phases.py — a unit test enforces
+# this invariant (tests/services/test_scan_pipeline_progress.py).
+REPO_WINDOW_START = 5
+REPO_WINDOW_END = 60
+PER_REPO_OFFSET_MAX = 52
+
+
+def _repo_base_pct(repo_idx: int, total_repos: int) -> int:
+    """Starting pct for a repo so ``base_pct + PER_REPO_OFFSET_MAX`` stays
+    within the per-repo window regardless of ``total_repos``.
+
+    For 1 repo: step=0 (base_pct stays at REPO_WINDOW_START).
+    For N repos: last base_pct = REPO_WINDOW_END - PER_REPO_OFFSET_MAX, so
+    the max per-repo pct lands exactly on REPO_WINDOW_END.
+    """
+    max_base = max(REPO_WINDOW_END - PER_REPO_OFFSET_MAX, REPO_WINDOW_START)
+    step = (max_base - REPO_WINDOW_START) / max(total_repos - 1, 1) if total_repos > 1 else 0
+    return int(REPO_WINDOW_START + repo_idx * step)
+
 
 # Max features per LLM merge call (configurable via LLM_MERGE_BATCH_SIZE env)
 def get_merge_batch_size() -> int:
@@ -257,16 +281,26 @@ async def _maybe_extract_design_system(
         discover_design_files,
         read_discovered_files,
     )
-    from app.services.repo_setup import detect_repo_type
-
-    if detect_repo_type(scan_path) != "frontend":
-        logger.debug("design_system_skip_non_frontend", repo=Path(scan_path).name)
-        return
+    from app.services.platforms import UI_KINDS, detect_platform
 
     repo = Path(scan_path)
-    discovered = discover_design_files(repo)
+    platform = detect_platform(repo)
+    if platform is None or platform.kind not in UI_KINDS:
+        logger.debug(
+            "design_system_skip_non_ui_platform",
+            repo=repo.name,
+            platform=platform.slug if platform else None,
+        )
+        return
+
+    discovered = discover_design_files(repo, platform)
     if not discovered:
-        return  # No design files — skip silently
+        logger.debug(
+            "design_system_no_files_discovered",
+            repo=repo.name,
+            platform=platform.slug,
+        )
+        return
 
     repo_id = tracked_repo.id if tracked_repo and hasattr(tracked_repo, "id") else None
     if repo_id is None:
@@ -307,11 +341,13 @@ async def _maybe_extract_design_system(
             repo_id=str(repo_id),
             repo_path=permanent_path,
             is_default=existing_default is None,
+            platform=platform.slug,
         ).model_dump(),
     )
     logger.info(
         "design_extract_enqueued",
         repo=repo.name,
+        platform=platform.slug,
         file_count=len(discovered),
         job_id=job.job_id,
     )
@@ -396,7 +432,7 @@ async def run_scan_pipeline(
 
             for repo_idx, repo_path in enumerate(repo_paths):
                 repo_name = Path(repo_path).name
-                base_pct = int(5 + (repo_idx / len(repo_paths)) * 55)
+                base_pct = _repo_base_pct(repo_idx, len(repo_paths))
 
                 if is_workspace:
                     logger.info(
