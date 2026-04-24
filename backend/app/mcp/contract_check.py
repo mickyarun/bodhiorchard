@@ -110,9 +110,7 @@ def check_mcp_contracts() -> None:
     skipped: list[str] = []
 
     for tool in MCP_TOOLS:
-        schema_props: set[str] = set(
-            (tool.input_schema.get("properties") or {}).keys()
-        )
+        schema_props: set[str] = set((tool.input_schema.get("properties") or {}).keys())
         required: set[str] = set(tool.input_schema.get("required") or [])
 
         handler = TOOL_HANDLERS.get(tool.name) or AUTH_TOOL_HANDLERS.get(tool.name)

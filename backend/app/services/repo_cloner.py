@@ -122,9 +122,7 @@ async def _run_git(
     )
 
 
-async def _detect_default_branch(
-    clone_path: Path, env: dict[str, str] | None
-) -> str | None:
+async def _detect_default_branch(clone_path: Path, env: dict[str, str] | None) -> str | None:
     """Ask the remote which branch is HEAD (GitHub's ``default`` branch)."""
     rc, out, _ = await _run_git(
         ["symbolic-ref", "refs/remotes/origin/HEAD"],
@@ -169,14 +167,8 @@ async def clone_or_update(
             ),
         )
     owner, repo = parsed
-    if (
-        not _SAFE_SEG.match(owner)
-        or not _SAFE_SEG.match(repo)
-        or not _SAFE_SEG.match(org_slug)
-    ):
-        return CloneResult(
-            success=False, error="Invalid characters in owner, repo, or org slug."
-        )
+    if not _SAFE_SEG.match(owner) or not _SAFE_SEG.match(repo) or not _SAFE_SEG.match(org_slug):
+        return CloneResult(success=False, error="Invalid characters in owner, repo, or org slug.")
 
     dest = CLONE_ROOT / org_slug / repo
     dest.parent.mkdir(parents=True, exist_ok=True)

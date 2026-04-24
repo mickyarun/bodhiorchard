@@ -90,12 +90,14 @@ async def get_pr_checklist(
             item_status = "open"
         else:
             item_status = "no_pr"
-        items.append(PRChecklistItem(
-            repo_id=repo_id,
-            repo_name=repo_name,
-            pr=pr,
-            status=item_status,
-        ))
+        items.append(
+            PRChecklistItem(
+                repo_id=repo_id,
+                repo_name=repo_name,
+                pr=pr,
+                status=item_status,
+            )
+        )
 
     return items
 
@@ -242,8 +244,8 @@ async def get_bud_release_stage(
         if pr.github_pr_id in seen_pr_ids:
             continue
         target_branch = (
-            repo.uat_branch if typed_stage == "uat" else repo.main_branch
-        ) if repo else None
+            (repo.uat_branch if typed_stage == "uat" else repo.main_branch) if repo else None
+        )
         if target_branch and branch_matches(pr.base_branch, target_branch):
             seen_pr_ids.add(pr.github_pr_id)
             open_prs.append(

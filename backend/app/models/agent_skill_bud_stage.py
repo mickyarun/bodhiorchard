@@ -60,9 +60,7 @@ class AgentSkillBudStage(BaseModel):
     )
 
     # Relationships
-    skill: Mapped["AgentSkill"] = relationship(
-        back_populates="bud_stages", lazy="joined"
-    )
+    skill: Mapped["AgentSkill"] = relationship(back_populates="bud_stages", lazy="joined")
 
     def __repr__(self) -> str:
         return (

@@ -47,9 +47,7 @@ class BugRepository(BaseRepository[Bug]):
     async def list_for_bud(self, bud_id: uuid.UUID) -> list[Bug]:
         """All bugs linked to a specific BUD, newest first."""
         stmt = self._scoped(
-            select(Bug)
-            .where(Bug.bud_id == bud_id)
-            .order_by(Bug.created_at.desc()),
+            select(Bug).where(Bug.bud_id == bud_id).order_by(Bug.created_at.desc()),
         )
         result = await self._db.execute(stmt)
         return list(result.scalars().all())

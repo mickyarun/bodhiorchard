@@ -223,9 +223,7 @@ async def override_phase_date(
     org = await OrganizationRepository(db).get_by_id(org_id)
     allowed_phases = get_phase_order(org.config if org else None)
     if phase not in allowed_phases:
-        raise ValueError(
-            f"Invalid phase '{phase}' for this org (allowed: {allowed_phases})"
-        )
+        raise ValueError(f"Invalid phase '{phase}' for this org (allowed: {allowed_phases})")
     estimated = dict(bud.estimated_dates or {})
     old_date = (estimated.get(phase) or {}).get("estimated_completion")
 
@@ -278,5 +276,3 @@ async def override_phase_date(
     await db.flush()
     await db.refresh(bud)
     return estimated[phase]
-
-

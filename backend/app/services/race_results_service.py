@@ -64,13 +64,9 @@ async def post_results(db: AsyncSession, req: PostRaceResultsRequest) -> int:
         if row.place < 1:
             raise RaceResultsValidationError(f"place must be >= 1, got {row.place}")
         if row.finished and row.finish_time_ms is None:
-            raise RaceResultsValidationError(
-                "finished=True requires finish_time_ms to be set"
-            )
+            raise RaceResultsValidationError("finished=True requires finish_time_ms to be set")
         if not row.finished and row.finish_time_ms is not None:
-            raise RaceResultsValidationError(
-                "finished=False requires finish_time_ms=None"
-            )
+            raise RaceResultsValidationError("finished=False requires finish_time_ms=None")
 
     repo = RaceResultRepository(db, org_id=req.org_id)
     return await repo.upsert_many(req.room_id, req.placings)

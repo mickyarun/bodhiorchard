@@ -116,7 +116,8 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
         super().__init__(DevActivityLog, db, org_id=org_id)
 
     def _commit_filter(
-        self, bud_id: uuid.UUID,
+        self,
+        bud_id: uuid.UUID,
     ) -> Select[tuple[DevActivityLog, ...]]:
         """Base query for commit events linked to a BUD."""
         return self._scoped(
@@ -142,9 +143,7 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
         every row is returned — preserves backward compatibility for callers
         that haven't migrated to the role-aware variants.
         """
-        stmt = self._scoped(
-            select(DevActivityLog).where(DevActivityLog.bud_id == bud_id)
-        )
+        stmt = self._scoped(select(DevActivityLog).where(DevActivityLog.bud_id == bud_id))
         stmt = _apply_role_filter(stmt, role, exclude_role)
         stmt = stmt.order_by(DevActivityLog.created_at.desc()).limit(limit)
         result = await self._db.execute(stmt)
@@ -229,9 +228,7 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
             )
         )
         count_subq = (
-            _apply_role_filter(count_stmt, role, exclude_role)
-            .group_by(DAL.repo_id)
-            .subquery()
+            _apply_role_filter(count_stmt, role, exclude_role).group_by(DAL.repo_id).subquery()
         )
 
         stmt = (
@@ -285,9 +282,7 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
             )
         )
         stmt = _apply_role_filter(stmt, role, exclude_role)
-        stmt = stmt.group_by(DAL.repo_path).order_by(
-            func.count(DAL.id).desc()
-        )
+        stmt = stmt.group_by(DAL.repo_path).order_by(func.count(DAL.id).desc())
         result = await self._db.execute(stmt)
         return [
             UntrackedRepoSummary(
@@ -298,7 +293,8 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
         ]
 
     async def get_last_sha_per_repo(
-        self, bud_id: uuid.UUID,
+        self,
+        bud_id: uuid.UUID,
     ) -> dict[str, str]:
         """Get the most recent commit SHA per repo for a BUD.
 
@@ -326,8 +322,7 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
             select(TR.path.label("repo_path"), DAL.commit_sha)
             .join(
                 subq,
-                (DAL.repo_id == subq.c.repo_id)
-                & (DAL.created_at == subq.c.max_created),
+                (DAL.repo_id == subq.c.repo_id) & (DAL.created_at == subq.c.max_created),
             )
             .join(TR, DAL.repo_id == TR.id)
             .where(
@@ -340,7 +335,8 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
         return {row.repo_path: row.commit_sha for row in result.all()}
 
     async def count_by_event_type(
-        self, bud_id: uuid.UUID,
+        self,
+        bud_id: uuid.UUID,
     ) -> dict[str, int]:
         """Count activity events by type for a BUD.
 

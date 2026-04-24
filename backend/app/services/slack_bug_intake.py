@@ -52,9 +52,7 @@ async def start_bug_triage(
         return
 
     original_text = messages[0].get("text", "")
-    requester_name = (
-        messages[0].get("user_profile", {}).get("real_name") or requester_slack_id
-    )
+    requester_name = messages[0].get("user_profile", {}).get("real_name") or requester_slack_id
 
     thread_result = await slack_client.chat_post_message(
         bot_token,
@@ -109,7 +107,8 @@ async def handle_bug_approval(
     if not approved:
         session.status = TriageStatus.REJECTED
         await slack_client.chat_post_message(
-            bot_token, channel,
+            bot_token,
+            channel,
             "❌ Bug report discarded.",
             thread_ts=session.thread_ts,
         )
@@ -130,7 +129,8 @@ async def handle_bug_approval(
     row = result.first()
     if not row:
         await slack_client.chat_post_message(
-            bot_token, channel,
+            bot_token,
+            channel,
             "⚠️ Could not resolve your user account.",
             thread_ts=session.thread_ts,
         )
@@ -140,7 +140,8 @@ async def handle_bug_approval(
     approver_role_val = UserRole(approver_role) if approver_role else None
     if approver_role_val not in _PM_ROLES:
         await slack_client.chat_post_message(
-            bot_token, channel,
+            bot_token,
+            channel,
             "⚠️ Only PMs and admins can approve bug reports.",
             thread_ts=session.thread_ts,
         )
@@ -178,7 +179,8 @@ async def handle_bug_approval(
         link_msg = f" Linked to *BUD-{matched_bud.bud_number:03d}*."
 
     await slack_client.chat_post_message(
-        bot_token, channel,
+        bot_token,
+        channel,
         f"✅ Bug created: *{bug.title}* (severity: {bug.severity}).{link_msg}",
         thread_ts=session.thread_ts,
     )
@@ -219,7 +221,8 @@ async def run_bug_triage_agent(
 
     if not result.success:
         await slack_client.chat_post_message(
-            bot_token, session.slack_channel,
+            bot_token,
+            session.slack_channel,
             "⚠️ Bug triage is taking longer than expected. A team member will follow up.",
             thread_ts=session.thread_ts,
         )
@@ -228,7 +231,8 @@ async def run_bug_triage_agent(
     response = _parse_agent_response(result.output)
     if response is None:
         await slack_client.chat_post_message(
-            bot_token, session.slack_channel,
+            bot_token,
+            session.slack_channel,
             result.output[:3000],
             thread_ts=session.thread_ts,
         )
@@ -239,7 +243,8 @@ async def run_bug_triage_agent(
 
     if action == "question":
         await slack_client.chat_post_message(
-            bot_token, session.slack_channel,
+            bot_token,
+            session.slack_channel,
             data.get("message", "Could you provide more details about the bug?"),
             thread_ts=session.thread_ts,
         )
@@ -250,7 +255,8 @@ async def run_bug_triage_agent(
 
         summary_text = data.get("message", "Bug summary unavailable.")
         summary_result = await slack_client.chat_post_message(
-            bot_token, session.slack_channel,
+            bot_token,
+            session.slack_channel,
             summary_text,
             thread_ts=session.thread_ts,
         )
@@ -272,8 +278,7 @@ def _build_bug_triage_prompt(
 ) -> str:
     """Build the system prompt for the bug triage agent."""
     thread_text = "\n".join(
-        f"{'[Bot]' if m.get('bot_id') else '[User]'}: {m.get('text', '')}"
-        for m in thread_messages
+        f"{'[Bot]' if m.get('bot_id') else '[User]'}: {m.get('text', '')}" for m in thread_messages
     )
 
     return f"""You are a bug triage assistant. Your job is to gather enough information
@@ -293,7 +298,7 @@ CONVERSATION SO FAR:
 {thread_text}
 
 EXISTING CONTEXT:
-{triage_context or 'None yet'}
+{triage_context or "None yet"}
 
 INSTRUCTIONS:
 - If you have ALL required info, respond with a JSON summary action.

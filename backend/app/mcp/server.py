@@ -301,8 +301,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 "repo_id": {
                     "type": "string",
                     "description": (
-                        "Optional repo UUID to scope team context to. "
-                        "Omit for org-wide view."
+                        "Optional repo UUID to scope team context to. Omit for org-wide view."
                     ),
                 },
             },

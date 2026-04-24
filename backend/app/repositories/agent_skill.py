@@ -33,9 +33,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
         Returns:
             The skill row, or None if not found.
         """
-        stmt = self._scoped(
-            select(AgentSkill).where(AgentSkill.skill_slug == skill_slug)
-        )
+        stmt = self._scoped(select(AgentSkill).where(AgentSkill.skill_slug == skill_slug))
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 

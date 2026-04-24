@@ -374,9 +374,7 @@ async def set_member_password(
     slack_error: str | None = None
 
     if send_via == "slack":
-        slack_sent, slack_error = await _send_credentials_slack(
-            org, user, password
-        )
+        slack_sent, slack_error = await _send_credentials_slack(org, user, password)
 
     from app.config import settings
 

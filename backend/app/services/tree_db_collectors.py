@@ -243,7 +243,9 @@ async def collect_features(
 
 
 async def collect_bud_stages(
-    db: AsyncSession, org_id: uuid.UUID, tree: TreeData,
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    tree: TreeData,
 ) -> None:
     """Count BUDs at each lifecycle stage and collect individual BUD items.
 
@@ -302,7 +304,9 @@ async def collect_bud_stages(
 
 
 async def collect_agents(
-    db: AsyncSession, org_id: uuid.UUID, tree: TreeData,
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    tree: TreeData,
 ) -> None:
     """Collect agent activity for 3D visualization.
 
@@ -395,7 +399,9 @@ async def collect_agents(
 
 
 async def collect_members(
-    db: AsyncSession, org_id: uuid.UUID, tree: TreeData,
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    tree: TreeData,
 ) -> None:
     """Collect ALL org members with their contribution percentages.
 
@@ -414,9 +420,7 @@ async def collect_members(
     from app.models.organization import Organization
     from app.models.user import OrgToUser
 
-    cfg_row = await db.execute(
-        select(Organization.config).where(Organization.id == org_id)
-    )
+    cfg_row = await db.execute(select(Organization.config).where(Organization.id == org_id))
     presence_settings = get_presence_settings(cfg_row.scalar_one_or_none() or {})
 
     result = await db.execute(

@@ -220,7 +220,8 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         return list(result.all())
 
     async def get_by_github_full_name(
-        self, full_name: str,
+        self,
+        full_name: str,
     ) -> TrackedRepository | None:
         """Look up a repo by GitHub full name (owner/repo).
 

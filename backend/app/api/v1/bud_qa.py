@@ -187,7 +187,7 @@ async def download_evidence(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     # Sanitize filename for Content-Disposition header (prevent header injection)
-    safe_name = evidence.filename.replace('"', '_').replace('\n', '_').replace('\r', '_')
+    safe_name = evidence.filename.replace('"', "_").replace("\n", "_").replace("\r", "_")
     return Response(
         content=data,
         media_type=content_type,

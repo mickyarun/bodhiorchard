@@ -134,9 +134,7 @@ async def post_race_results(
     try:
         rows_written = await post_results(db, req)
     except RaceResultsValidationError as err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
-        ) from err
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
 
     await db.commit()
     logger.info(
@@ -170,9 +168,7 @@ async def get_race_leaderboard(
             limit=limit,
         )
     except RaceResultsValidationError as err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
-        ) from err
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
 
     return LeaderboardResponse(
         distance_m=distance,

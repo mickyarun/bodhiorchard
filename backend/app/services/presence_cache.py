@@ -180,7 +180,10 @@ async def refresh_all_presence(db: AsyncSession) -> None:
         # of presence updates.
         try:
             org_polled, org_errors = await _refresh_org_presence(
-                db, org_id, encrypted_token, org_config,
+                db,
+                org_id,
+                encrypted_token,
+                org_config,
             )
             polled += org_polled
             errors += org_errors
@@ -255,11 +258,7 @@ async def _refresh_org_presence(
             User.is_active.is_(True),
         )
     )
-    user_slack_pairs = [
-        (user_id, slack_id)
-        for user_id, slack_id in user_result.all()
-        if slack_id
-    ]
+    user_slack_pairs = [(user_id, slack_id) for user_id, slack_id in user_result.all() if slack_id]
     logger.debug(
         "presence_refresh_org",
         org_id=org_id_str,

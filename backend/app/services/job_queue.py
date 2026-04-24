@@ -200,8 +200,7 @@ def cleanup_completed_jobs() -> int:
     stale = [
         jid
         for jid, entry in _job_store.items()
-        if entry.status.state in terminal_states
-        and entry.created_mono + _COMPLETED_TTL < now
+        if entry.status.state in terminal_states and entry.created_mono + _COMPLETED_TTL < now
     ]
     from app.services.event_bus import cleanup_topic
 
@@ -280,7 +279,8 @@ async def _worker(
             # the worker's outer coroutine would kill the worker for
             # all subsequent jobs too.
             handler_task = asyncio.create_task(
-                handler(job_id, payload), name=f"job-handler-{job_id}",
+                handler(job_id, payload),
+                name=f"job-handler-{job_id}",
             )
             _running_tasks[job_id] = handler_task
             try:
@@ -292,9 +292,7 @@ async def _worker(
             # is responsible for its own DB/subprocess cleanup on
             # CancelledError; we just emit the terminal WS event.
             entry = _job_store.get(job_id)
-            reason = (
-                entry.status.status_message if entry else None
-            ) or "Cancelled by user"
+            reason = (entry.status.status_message if entry else None) or "Cancelled by user"
             update_job(
                 job_id,
                 state=JobState.CANCELLED,

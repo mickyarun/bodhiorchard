@@ -400,12 +400,14 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             # we can recover it via the public accessor without reaching
             # into job_queue internals.
             from app.services.job_queue import get_job  # noqa: PLC0415
+
             job = get_job(job_id)
             reason = (job.status_message if job else None) or "Cancelled by user"
             async with AsyncSessionLocal() as err_db:
                 err_task = await err_db.get(BUDAgentTask, task_id)
                 if err_task and err_task.status in (
-                    AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING,
+                    AgentTaskStatus.PENDING,
+                    AgentTaskStatus.RUNNING,
                 ):
                     err_task.status = AgentTaskStatus.FAILED
                     err_task.error_message = reason[:500]
@@ -420,7 +422,7 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 task_id=task_id,
             )
             logger.info("bud_agent_job_cancelled", task_id=str(task_id), reason=reason)
-            raise   # Let the worker's CancelledError branch emit the WS terminal event
+            raise  # Let the worker's CancelledError branch emit the WS terminal event
 
         except Exception as exc:
             await db.rollback()
@@ -490,4 +492,3 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             "created_at": "",
         },
     )
-
