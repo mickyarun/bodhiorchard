@@ -40,7 +40,13 @@ export interface TrackerConfig<T> {
   getResult?: (data: T) => unknown
   /** Polling interval in ms (default: 2000) */
   pollIntervalMs?: number
-  /** Max polling duration in ms (default: 1_800_000 = 30 min) */
+  /**
+   * Max polling duration in ms. Default is ``Infinity`` — the tracker
+   * runs until the backend reports a terminal status (``completed`` /
+   * ``failed``) or a persistent error. A finite value is a last-resort
+   * safety valve only; for long-running resources (scans, builds) leave
+   * it unset so the UI never gives up before the backend does.
+   */
   pollTimeoutMs?: number
   /** Delay before falling back to polling (default: 3000) */
   fallbackDelayMs?: number
@@ -78,7 +84,7 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
   const isActive = ref(false)
 
   const pollIntervalMs = config.pollIntervalMs ?? 2000
-  const pollTimeoutMs = config.pollTimeoutMs ?? 1_800_000
+  const pollTimeoutMs = config.pollTimeoutMs ?? Number.POSITIVE_INFINITY
   const fallbackDelayMs = config.fallbackDelayMs ?? 3000
   const connectionCheckMs = config.connectionCheckMs ?? 5000
   const pollAlongsideWs = config.pollAlongsideWs ?? false
