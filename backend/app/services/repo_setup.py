@@ -9,7 +9,6 @@ updating ``.gitignore``, adding a ``prepare`` script to ``package.json``,
 and committing + pushing the result as a PR-ready branch.
 """
 
-import functools
 import json
 import shutil
 import textwrap
@@ -192,45 +191,6 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
 
     claude_md.write_text(content)
     return True
-
-
-# ── Repo type detection ───────────────────────────────────────────
-
-
-@functools.lru_cache(maxsize=256)
-def detect_repo_type(repo_path: str) -> str | None:
-    """Classify a repo as 'frontend' or 'backend' for the settings UI badge.
-
-    Delegates to :func:`app.services.platforms.detect_platform` and maps any
-    UI-bearing platform (web, mobile, desktop, static site, tokens-only) to
-    the coarse ``"frontend"`` label the settings UI expects. All other repos
-    — including those with no recognizable markers — fall to ``"backend"``.
-
-    This function exists only for the settings-UI surface. New code should
-    call ``detect_platform`` directly to access the full platform metadata.
-
-    Result is cached per path: each call walks 23 platform detectors with
-    filesystem reads, which costs ~600-1400ms on a warm disk. A repo's
-    platform almost never changes mid-process, and the cache resets on
-    every worker restart (so ``--reload`` picks up schema changes). For a
-    manual cache bust (e.g. after moving files) call
-    ``detect_repo_type.cache_clear()``.
-
-    Args:
-        repo_path: Absolute path to the git repository.
-
-    Returns:
-        'frontend' if a UI-bearing platform is detected, else 'backend'.
-        In practice ``None`` is unreachable because ``backend_fallback``
-        always matches; the ``| None`` return type is retained only because
-        the settings schema's ``repoType`` field is nullable.
-    """
-    from app.services.platforms import UI_KINDS, detect_platform
-
-    platform = detect_platform(Path(repo_path))
-    if platform is None:
-        return "backend"
-    return "frontend" if platform.kind in UI_KINDS else "backend"
 
 
 # ── Worktree management ───────────────────────────────────────────

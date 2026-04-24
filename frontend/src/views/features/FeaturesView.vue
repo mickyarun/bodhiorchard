@@ -15,7 +15,6 @@
       <v-spacer />
 
       <v-select
-        v-if="repos.length > 1"
         v-model="selectedRepoId"
         :items="repoOptions"
         item-title="label"
@@ -23,8 +22,9 @@
         variant="outlined"
         density="compact"
         hide-details
-        style="max-width: 200px;"
+        style="max-width: 240px;"
         label="Repository"
+        :disabled="repos.length === 0"
       />
 
       <v-text-field

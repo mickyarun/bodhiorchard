@@ -433,7 +433,6 @@ export interface RepoInfo {
   developBranch: string | null
   uatBranch: string | null
   hasUncommittedChanges: boolean
-  repoType: string | null
   setupStatus: 'merged' | 'not_setup'
   designSystemStatus: 'none' | 'extracting' | 'ready'
 }
