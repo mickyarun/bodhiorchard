@@ -12,36 +12,43 @@ Phase implementations live in ``scan_phases.py``; reusable helpers
 """
 
 import uuid
-from pathlib import Path
 
 import structlog
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
-from app.services.claude_runner import is_claude_cli_available
-from app.services.git_analyzer import analyze_repo_skills, get_head_sha
-from app.services.git_operations import create_scan_worktree, remove_scan_worktree
-from app.services.gitnexus_indexer import GitNexusNotInstalledError, index_repo_with_gitnexus
-from app.services.scan_helpers import (
-    PhaseTimer,
-    cleanup_stale_references,
-    embed_missing_items,
-    load_feature_map,
+from app.scan.prompts import (
+    build_direct_scan_prompt,
+    build_merge_prompt,
+    build_synthesis_prompt,
 )
+from app.scan.soft_delete import (
+    rollback_soft_deleted_features,
+    soft_delete_for_changed_repos,
+)
+from app.services.gitnexus_indexer import GitNexusNotInstalledError
+from app.services.scan_helpers import PhaseTimer, embed_missing_items
 from app.services.scan_phases import (
-    phase_a_scan_mode,
-    phase_b1_repo_setup,
     phase_b2_synthesis,
     phase_b3_merge,
     phase_e2_skill_remap,
-    phase_e_skills,
     phase_g_persist,
 )
-from app.services.scan_progress import append_repo_warning, update_scan_progress
+from app.services.scan_progress import update_scan_progress
+from app.services.scan_repo_loop import process_one_repo
 
 logger = structlog.get_logger(__name__)
+
+# Prompt builders re-exported here so legacy imports inside phase
+# modules (`from app.services.scan_pipeline import build_synthesis_prompt`)
+# keep resolving without a churn-heavy rename across call sites.
+__all__ = [
+    "build_direct_scan_prompt",
+    "build_merge_prompt",
+    "build_synthesis_prompt",
+    "run_scan_pipeline",
+]
 
 # If >30% of tracked files changed, fall back to full scan
 INCREMENTAL_THRESHOLD = 0.30
@@ -77,280 +84,6 @@ def get_merge_batch_size() -> int:
     from app.config import settings
 
     return settings.llm.merge_batch_size
-
-
-_WRITE_FEATURE_DOCS = """      - feature_name: Human-readable name (e.g., "Card Payments")
-      - description: 1-2 sentences of what this feature does in business terms
-      - capabilities: 3-6 specific things this feature does
-      - code_locations: Map layers to file paths, e.g.:
-        {{"backend": ["src/services/card/"], "frontend": ["src/views/Pay.vue"]}}
-        Layers: backend, frontend, batch (background jobs), other
-      - tags: 2-5 lowercase search keywords"""
-
-_GROUPING_RULES = """## Grouping Rules
-
-- Group related functionality into a SINGLE feature
-- Target broad domain-level features, not narrow per-file features
-- Skip infrastructure (config, build, CI/CD, testing utilities)"""
-
-
-def build_synthesis_prompt(
-    repo_name: str,
-    readme_overview: str,
-    is_workspace: bool,
-) -> str:
-    """Build the Claude Code prompt for feature synthesis.
-
-    Args:
-        repo_name: Name of the repository being processed.
-        readme_overview: First 2000 chars of the repo README.
-        is_workspace: Whether this is a multi-repo workspace scan.
-
-    Returns:
-        Prompt string for Claude Code CLI.
-    """
-    repo_name_line = f'      - repo_name: "{repo_name}"'
-    return f"""You are synthesizing human-readable feature descriptions \
-for repository "{repo_name}".
-
-README Overview:
-{readme_overview[:2000]}
-
-## Instructions
-
-Follow this loop exactly:
-
-1. Call `get_pending_features` to get the next batch of unprocessed clusters
-2. If the response has `done: true`, you are finished — stop here
-3. For each cluster in the batch:
-   a. Read the cluster's key files to understand what the code does
-   b. Skip infrastructure/utility clusters (logging, config, migrations, CI/CD)
-   c. For real business features, call `write_feature_registry` with:
-{_WRITE_FEATURE_DOCS}
-      - source_clusters: Array containing the cluster name(s)
-{repo_name_line}
-4. Go back to step 1
-
-{_GROUPING_RULES}
-
-- When multiple clusters clearly belong to the same domain, combine them
-  into one `write_feature_registry` call with all their code_locations merged.
-- Target 8-15 features per repo. Prefer broader domain-level features
-  over narrow per-function features.
-
-Important: Process ALL clusters returned by get_pending_features before calling
-it again. Do not call get_pending_features mid-batch."""
-
-
-def build_direct_scan_prompt(
-    repo_name: str,
-    readme_overview: str,
-    file_tree: str,
-) -> str:
-    """Build prompt for repos where GitNexus found no clusters.
-
-    Claude scans the file structure directly to identify features instead of
-    processing a cluster queue.
-
-    Args:
-        repo_name: Name of the repository being processed.
-        readme_overview: First 2000 chars of the repo README.
-        file_tree: Newline-separated list of source files.
-
-    Returns:
-        Prompt string for Claude Code CLI.
-    """
-    repo_name_line = f'      - repo_name: "{repo_name}"'
-    return f"""You are scanning repository "{repo_name}" to identify business features.
-This repo had no code clusters detected, so scan the file structure directly.
-
-README Overview:
-{readme_overview[:2000]}
-
-## File Structure
-{file_tree[:3000]}
-
-## Instructions
-
-1. Read the key source files to understand what the code does
-2. Identify 3-8 business-level features (not infrastructure/utilities)
-3. For each feature, call `write_feature_registry` with:
-{_WRITE_FEATURE_DOCS}
-      - source_clusters: ["direct_scan"]
-{repo_name_line}
-
-{_GROUPING_RULES}"""
-
-
-def build_merge_prompt(
-    features: list[dict],
-    unlinked_repos: list[dict] | None = None,
-) -> str:
-    """Build a prompt for cross-repo feature merging.
-
-    Lists all features with their repo names and tags. The LLM calls
-    ``merge_features`` for groups that represent the same business
-    capability across repos.
-
-    Also lists repos whose code wasn't clustered (e.g. small frontend
-    repos) so the LLM can link them to existing features by name.
-
-    Args:
-        features: List of dicts with keys: title, repo_names, tags.
-        unlinked_repos: Repos with 0 clusters — include their file
-            listing so the LLM can link them to features.
-
-    Returns:
-        Prompt string for Claude Code CLI.
-    """
-    lines = []
-    for i, f in enumerate(features, 1):
-        repos = ", ".join(f["repo_names"]) if f["repo_names"] else "unlinked"
-        tags = ", ".join(f.get("tags") or [])
-        lines.append(f'{i}. "{f["title"]}" ({repos}) — {tags}')
-
-    feature_list = "\n".join(lines)
-
-    unlinked_section = ""
-    if unlinked_repos:
-        repo_lines = []
-        for repo in unlinked_repos:
-            files = ", ".join(repo["files"][:20])
-            repo_lines.append(f"- **{repo['name']}**: {files}")
-        unlinked_section = f"""
-
-## Repos with no features yet
-
-These repos were scanned but produced no features (too small for clustering).
-Link them to existing features if their code matches:
-
-{chr(10).join(repo_lines)}
-"""
-
-    return f"""You are merging duplicate features across repositories.
-
-## Features
-
-{feature_list}
-{unlinked_section}
-## Instructions
-
-1. Look for features that represent the SAME business capability but exist
-   in different repos (or have slightly different names). Call `merge_features`
-   to consolidate them.
-
-2. For repos listed under "Repos with no features yet", if their files clearly
-   belong to an existing feature (e.g. a frontend repo with auth views matches
-   "Authentication"), call `merge_features` with that repo added to repo_names.
-
-Parameters for merge_features:
-- keep_title: The most descriptive title from the group (exact match required)
-- merge_titles: The other titles to merge into it (will be deactivated)
-- repo_names: ALL repository names this feature belongs to
-
-Rules:
-- Only merge features that are clearly the same domain
-- Do NOT merge features that are merely related (e.g. "Billing" and "Payments" are separate)
-- If no duplicates or links exist, you are done — do nothing"""
-
-
-async def _maybe_extract_design_system(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    scan_path: str,
-    tracked_repo: object | None,
-    full_rescan: bool,
-) -> None:
-    """Enqueue async design system extraction if design files are detected.
-
-    Performs fast checks (repo type, file discovery, hash comparison) inline,
-    then delegates the actual LLM/regex extraction to a background worker via
-    JOB_DESIGN_EXTRACT. Skips if source files haven't changed since last
-    extraction (by hash), unless full_rescan is True.
-
-    Args:
-        db: Async database session.
-        org_id: Organization UUID.
-        scan_path: Path to scan (may be a worktree — used for file discovery/hash only).
-        tracked_repo: TrackedRepository model instance (or None).
-        full_rescan: Whether this is a full rescan (force re-extraction).
-    """
-    from app.repositories.design_system import DesignSystemRefRepository
-    from app.services.design_system_extractor import (
-        compute_hash,
-        discover_design_files,
-        read_discovered_files,
-    )
-    from app.services.platforms import UI_KINDS, detect_platform
-
-    repo = Path(scan_path)
-    platform = detect_platform(repo)
-    if platform is None or platform.kind not in UI_KINDS:
-        logger.debug(
-            "design_system_skip_non_ui_platform",
-            repo=repo.name,
-            platform=platform.slug if platform else None,
-        )
-        return
-
-    discovered = discover_design_files(repo, platform)
-    if not discovered:
-        logger.debug(
-            "design_system_no_files_discovered",
-            repo=repo.name,
-            platform=platform.slug,
-        )
-        return
-
-    repo_id = tracked_repo.id if tracked_repo and hasattr(tracked_repo, "id") else None
-    if repo_id is None:
-        return
-
-    # Check if source files changed since last extraction (skip if unchanged)
-    file_contents = read_discovered_files(discovered)
-    source_hash = compute_hash(file_contents)
-
-    ds_repo = DesignSystemRefRepository(db, org_id=org_id)
-    existing = await ds_repo.get_for_repo(repo_id)
-
-    if existing and existing.source_hash == source_hash and not full_rescan:
-        logger.info(
-            "design_system_unchanged",
-            repo=repo.name,
-            hash=source_hash[:12],
-        )
-        return
-
-    # Enqueue async extraction instead of blocking the scan
-    from app.schemas.jobs import DesignExtractJobPayload
-    from app.services.job_queue import JOB_DESIGN_EXTRACT, create_job, is_job_active
-
-    if is_job_active(JOB_DESIGN_EXTRACT, {"repo_id": str(repo_id)}):
-        logger.info("design_extract_already_queued", repo=repo.name)
-        return
-
-    existing_default = await ds_repo.get_default()
-
-    # Use tracked_repo.path (permanent) not scan_path (worktree, may be deleted)
-    permanent_path = tracked_repo.path if hasattr(tracked_repo, "path") else scan_path
-
-    job = create_job(
-        JOB_DESIGN_EXTRACT,
-        payload=DesignExtractJobPayload(
-            org_id=str(org_id),
-            repo_id=str(repo_id),
-            repo_path=permanent_path,
-            is_default=existing_default is None,
-            platform=platform.slug,
-        ).model_dump(),
-    )
-    logger.info(
-        "design_extract_enqueued",
-        repo=repo.name,
-        platform=platform.slug,
-        file_count=len(discovered),
-        job_id=job.job_id,
-    )
 
 
 async def run_scan_pipeline(
@@ -415,12 +148,19 @@ async def run_scan_pipeline(
 
             tracked_repo_repo = TrackedRepoRepository(db, org_id=org_id)
 
-            # On full scan, soft-delete old scan-sourced features (preserves
-            # data for rollback if the pipeline fails partway through).
+            # Soft-delete scoped to repos whose HEAD SHA actually changed
+            # since the last scan. Unchanged repos keep their feature
+            # rows live through the whole scan — a full-rescan of an org
+            # where only one repo has changes no longer dirties every
+            # repo's features. See §D.7 of the plan.
             ki_repo = KnowledgeItemRepository(db, org_id=org_id)
             if full_rescan or not config.get("knowledge", {}).get("last_commit_sha"):
-                soft_deleted_ids = await ki_repo.soft_delete_by_category_excluding_source(
-                    "feature_registry", exclude_source="bud"
+                soft_deleted_ids = await soft_delete_for_changed_repos(
+                    db,
+                    org_id=org_id,
+                    repo_paths=repo_paths,
+                    tracked_repo_repo=tracked_repo_repo,
+                    full_rescan=full_rescan,
                 )
                 await db.flush()
                 if soft_deleted_ids:
@@ -430,311 +170,153 @@ async def run_scan_pipeline(
                         deactivated=len(soft_deleted_ids),
                     )
 
+            scan_uuid = uuid.UUID(scan_id)
+
             for repo_idx, repo_path in enumerate(repo_paths):
-                repo_name = Path(repo_path).name
                 base_pct = _repo_base_pct(repo_idx, len(repo_paths))
-
-                if is_workspace:
-                    logger.info(
-                        "scan_workspace_repo",
-                        scan_id=scan_id,
-                        repo=repo_name,
-                        index=repo_idx + 1,
-                        total=len(repo_paths),
-                    )
-
-                tracked_repo = await tracked_repo_repo.get_by_path(repo_path)
-
-                # Auto-populate GitHub repo name from git remote if missing
-                if tracked_repo and not tracked_repo.github_repo_full_name:
-                    from app.services.git_operations import get_github_repo_full_name
-
-                    gh_name = await get_github_repo_full_name(repo_path)
-                    if gh_name:
-                        tracked_repo.github_repo_full_name = gh_name
-                        await db.flush()
-
-                main_branch = (tracked_repo.main_branch if tracked_repo else None) or "main"
-
-                # Create a temporary worktree for scanning the main branch
-                # without touching the user's working tree.
-                await update_scan_progress(
-                    scan_id,
-                    status="checking_out",
-                    progress_pct=base_pct,
+                repo_result = await process_one_repo(
+                    db=db,
+                    org_id=org_id,
+                    scan_id=scan_id,
+                    scan_uuid=scan_uuid,
+                    repo_idx=repo_idx,
+                    total_repos=len(repo_paths),
+                    is_workspace=is_workspace,
+                    repo_path=repo_path,
+                    base_pct=base_pct,
+                    full_rescan=full_rescan,
+                    config=config,
+                    scan_cfg=scan_cfg,
+                    timer=timer,
+                    tracked_repo_repo=tracked_repo_repo,
+                    ki_repo=ki_repo,
+                    email_to_user=email_to_user,
                 )
-                try:
-                    scan_path = await create_scan_worktree(repo_path, main_branch)
-                except RuntimeError:
-                    logger.warning(
-                        "scan_worktree_failed_using_repo",
-                        scan_id=scan_id,
-                        repo=repo_name,
-                    )
-                    scan_path = repo_path  # Fallback: scan in-place
+                if repo_result.is_incremental:
+                    overall_mode = "incremental"
+                if repo_result.head_sha:
+                    new_shas[repo_path] = repo_result.head_sha
+                total_stale += repo_result.stale_cleaned
+                total_profiles += repo_result.profiles_added
+                all_unmatched.extend(
+                    e for e in repo_result.unmatched_emails if e not in all_unmatched
+                )
+                if repo_result.pending_synthesis is not None:
+                    _pending_synthesis.append(repo_result.pending_synthesis)
 
-                try:
-                    # --- Phase A: Determine scan mode ---
-                    timer.start()
-                    await update_scan_progress(
-                        scan_id,
-                        status="analyzing_changes",
-                        progress_pct=base_pct + 5,
-                    )
+            # Global-phase wrapper: each FEATURE_SYNTHESIS / SKILL_REMAP /
+            # FEATURE_MERGE / EMBEDDING_BACKFILL / PERSIST_RESULTS call
+            # is checkpoint-gated with ``repo_id=None`` so resume can
+            # skip completed ones and retry failed ones. Without this
+            # wrap, the per-phase checkpoint table would be empty for
+            # the entire global stripe and the UI timeline would render
+            # zero rows for everything after the per-repo phases.
+            #
+            # State-recovery invariant: downstream phases must not
+            # depend on ``nonlocal`` side-effects set inside the phase
+            # body, because on a resume the body is skipped. After each
+            # global phase we re-derive any state the next phase needs
+            # from the DB — the source of truth — rather than trusting
+            # an assignment that may never have run.
+            from collections.abc import Awaitable, Callable
+            from typing import Any
 
-                    last_sha = tracked_repo.head_sha if tracked_repo else None
-                    if not last_sha:
-                        knowledge_cfg = config.get("knowledge") or {}
-                        last_sha = knowledge_cfg.get("repo_shas", {}).get(
-                            repo_path
-                        ) or knowledge_cfg.get("last_commit_sha")
+            from app.models.scan_phase import ScanPhase as _ScanPhase
+            from app.services.scan_checkpoints import (
+                PhaseRunOutcome,
+                run_checkpointed_phase,
+            )
 
-                    # Per-repo copy so one repo forcing full_rescan doesn't
-                    # leak to subsequent repos (Bug 1 fix).
-                    repo_full_rescan = full_rescan
-                    is_incremental, repo_full_rescan, deleted_files = await phase_a_scan_mode(
-                        db,
-                        org_id,
-                        repo_path,
-                        repo_name,
-                        repo_full_rescan,
-                        last_sha,
-                        ki_repo,
-                        scan_id,
-                    )
-                    if is_incremental:
-                        overall_mode = "incremental"
-
-                    timer.mark(f"A_scan_mode/{repo_name}")
-
-                    # --- Phase B: GitNexus indexing ---
-                    timer.start()
-                    await update_scan_progress(
-                        scan_id,
-                        status="indexing_code",
-                        progress_pct=base_pct + 10,
-                    )
-
-                    gitnexus_result = await index_repo_with_gitnexus(
-                        scan_path,
-                        force=not is_incremental,
-                    )
-
-                    if gitnexus_result.success:
-                        from app.services.claude_runner import ensure_gitnexus_mcp
-
-                        await update_scan_progress(
-                            scan_id,
-                            status="setting_up_gitnexus",
-                            progress_pct=base_pct + 15,
-                        )
-                        await ensure_gitnexus_mcp()
-                    elif gitnexus_result.error:
-                        await append_repo_warning(
-                            scan_id,
-                            repo=repo_name,
-                            phase="indexing_code",
-                            summary=gitnexus_result.error,
-                            hint=gitnexus_result.error_hint,
-                        )
-
-                    await db.flush()
-                    timer.mark(f"B_gitnexus/{repo_name}")
-
-                    # --- Phase B1: Worktrees, MCP init, hooks, .gitignore ---
-                    timer.start()
-                    setup_pr_msg = await phase_b1_repo_setup(
-                        db,
-                        org_id,
-                        repo_path,
-                        repo_name,
-                        tracked_repo,
-                        scan_id,
-                        base_pct,
-                    )
-                    if setup_pr_msg:
-                        await update_scan_progress(
-                            scan_id,
-                            setup_pr_message=setup_pr_msg,
-                        )
-                    timer.mark(f"B1_repo_setup/{repo_name}")
-
-                    # --- Collect Phase B2 synthesis task ---
-                    if (
-                        not is_incremental
-                        and gitnexus_result.success
-                        and is_claude_cli_available()
-                    ):
-                        if gitnexus_result.features:
-                            # Normal: queue clusters for synthesis
-                            from app.mcp.server import set_synthesis_queue
-
-                            total_clusters = len(gitnexus_result.features)
-                            min_files = 2 if total_clusters < 10 else 3
-                            queue_items = [
-                                {
-                                    "name": f.name,
-                                    "files": f.files[:15],
-                                    "symbols": len(f.files),
-                                    "repo_name": repo_name,
-                                }
-                                for f in gitnexus_result.features
-                                if len(f.files) >= min_files
-                            ]
-                            queue_key = set_synthesis_queue(
-                                str(org_id),
-                                queue_items,
-                                repo_name=repo_name,
-                            )
-                            _pending_synthesis.append(
-                                {
-                                    "repo_name": repo_name,
-                                    "repo_path": repo_path,
-                                    "overview": gitnexus_result.repo_overview or "",
-                                    "queue_key": queue_key,
-                                    "cluster_count": len(queue_items),
-                                }
-                            )
-                        else:
-                            # Direct scan: no clusters, Claude scans file tree
-                            import asyncio
-
-                            from app.services.scan_phases import _list_repo_files
-
-                            files = await asyncio.to_thread(_list_repo_files, Path(repo_path))
-                            if files:
-                                _pending_synthesis.append(
-                                    {
-                                        "repo_name": repo_name,
-                                        "repo_path": repo_path,
-                                        "overview": gitnexus_result.repo_overview or "",
-                                        "queue_key": None,
-                                        "cluster_count": 0,
-                                        "direct_scan": True,
-                                        "file_tree": "\n".join(files),
-                                    }
-                                )
-                    elif not is_incremental and not is_claude_cli_available():
-                        logger.info("feature_synthesis_skipped_no_claude_cli")
-
-                    # --- Phase D: Stale reference cleanup (incremental only) ---
-                    timer.start()
-                    if is_incremental and deleted_files:
-                        await update_scan_progress(
-                            scan_id,
-                            status="cleaning_stale",
-                            progress_pct=base_pct + 32,
-                        )
-                        cleaned = await cleanup_stale_references(db, org_id, deleted_files)
-                        total_stale += cleaned
-                        await db.flush()
-
-                    timer.mark(f"D_stale_cleanup/{repo_name}")
-
-                    # --- Phase E: Git skill analysis ---
-                    timer.start()
-                    await update_scan_progress(
-                        scan_id,
-                        status="analyzing_skills",
-                        progress_pct=base_pct + 38,
-                    )
-
-                    feature_map = await load_feature_map(db, org_id)
-                    skill_entries = await analyze_repo_skills(
-                        scan_path, feature_map=feature_map or None
-                    )
-
-                    profiles, unmatched, email_to_user = await phase_e_skills(
-                        db,
-                        org_id,
-                        repo_path,
-                        skill_entries,
-                        email_to_user,
-                        scan_cfg,
-                    )
-                    total_profiles += profiles
-                    all_unmatched.extend(u for u in unmatched if u not in all_unmatched)
-
-                    timer.mark(f"E_skills/{repo_name}")
-
-                    # --- Phase E1b: Auto-extract design system ---
-                    timer.start()
-                    await update_scan_progress(
-                        scan_id,
-                        status="extracting_design_system",
-                        progress_pct=base_pct + 48,
-                    )
-                    try:
-                        await _maybe_extract_design_system(
-                            db,
-                            org_id,
-                            scan_path,
-                            tracked_repo,
-                            repo_full_rescan,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "design_system_auto_extract_failed",
-                            scan_id=scan_id,
-                            repo=repo_name,
-                        )
-                    timer.mark(f"E1b_design_system/{repo_name}")
-
-                    # Track HEAD SHA per repo (use scan_path for accurate SHA)
-                    await update_scan_progress(
-                        scan_id,
-                        status="finalizing_repo",
-                        progress_pct=base_pct + 52,
-                    )
-                    head_sha = await get_head_sha(scan_path)
-                    if head_sha:
-                        new_shas[repo_path] = head_sha
-
-                finally:
-                    await remove_scan_worktree(repo_path)
+            async def _global_phase(
+                phase: _ScanPhase,
+                fn: Callable[[], Awaitable[dict[str, Any]]],
+            ) -> PhaseRunOutcome:
+                return await run_checkpointed_phase(
+                    db=db,
+                    scan_id=scan_uuid,
+                    org_id=org_id,
+                    phase=phase,
+                    phase_fn=fn,
+                    repo_id=None,
+                )
 
             # --- Phase B2: Parallel feature synthesis via Claude Code ---
             timer.start()
-            total_features_synthesized = await phase_b2_synthesis(
-                db,
-                org_id,
-                _pending_synthesis,
-                is_workspace,
-                scan_cfg,
-                scan_id,
-                ki_repo,
-            )
+
+            async def _run_b2() -> dict[str, Any]:
+                # phase_b2_synthesis returns an int from ki_repo.count_active,
+                # but that value can under-report if B2 runs partially and
+                # crashes — the subsequent re-derive after this phase uses
+                # the live DB count anyway, so we stamp the same
+                # authoritative count into the payload for UI fidelity
+                # on resumed runs where the body is skipped.
+                await phase_b2_synthesis(
+                    db,
+                    org_id,
+                    _pending_synthesis,
+                    is_workspace,
+                    scan_cfg,
+                    scan_id,
+                    ki_repo,
+                )
+                count = await ki_repo.count_active(category="feature_registry")
+                return {"features_synthesized": count}
+
+            await _global_phase(_ScanPhase.FEATURE_SYNTHESIS, _run_b2)
+            # Re-derive from DB: on resume the body skipped, nonlocal
+            # wouldn't fire, so read the authoritative count of
+            # scan-sourced feature rows.
+            total_features_synthesized = await ki_repo.count_active(category="feature_registry")
             timer.mark("B2_synthesis_parallel")
 
             # --- Phase B3: Cross-repo merge + embedding + dedup ---
             # Must run BEFORE E2 so skill remap uses merged feature names.
             timer.start()
-            merge_config = await phase_b3_merge(
-                db,
-                org_id,
-                repo_paths,
-                is_workspace,
-                total_features_synthesized,
-                scan_cfg,
-                scan_id,
-                ki_repo,
-            )
-            if merge_config:
-                config = merge_config
+
+            async def _run_b3() -> dict[str, Any]:
+                # phase_b3_merge mutates organizations.config (inside its
+                # own nested transaction). The post-wrapper re-read from
+                # DB is the single source of truth for the local ``config``
+                # dict, so no nonlocal assignment is needed here.
+                await phase_b3_merge(
+                    db,
+                    org_id,
+                    repo_paths,
+                    is_workspace,
+                    total_features_synthesized,
+                    scan_cfg,
+                    scan_id,
+                    ki_repo,
+                )
+                return {}
+
+            await _global_phase(_ScanPhase.FEATURE_MERGE, _run_b3)
+            # Re-derive config from DB: merge may have mutated
+            # ``organizations.config`` and on resume our local ``config``
+            # dict would otherwise be stale.
+            org = await org_repo.get_by_id(org_id)
+            if org is not None and org.config:
+                config = dict(org.config)
             timer.mark("B3_merge")
 
             # --- Phase E2: Re-run skill analysis with merged feature names ---
             if _pending_synthesis and total_features_synthesized > 0:
                 timer.start()
-                e2_profiles = await phase_e2_skill_remap(
-                    db,
-                    org_id,
-                    repo_paths,
-                    email_to_user,
-                    scan_id,
-                )
-                if e2_profiles:
-                    total_profiles = e2_profiles
+
+                async def _run_e2() -> dict[str, Any]:
+                    e2_profiles = await phase_e2_skill_remap(
+                        db,
+                        org_id,
+                        repo_paths,
+                        email_to_user,
+                        scan_id,
+                    )
+                    return {"profiles": e2_profiles}
+
+                e2_outcome = await _global_phase(_ScanPhase.SKILL_REMAP, _run_e2)
+                e2_profiles_from_checkpoint = e2_outcome.payload.get("profiles", 0)
+                if e2_profiles_from_checkpoint:
+                    total_profiles = e2_profiles_from_checkpoint
                 timer.mark("E2_skill_remap")
 
             # Synthesis + merge succeeded — hard-delete only the features that
@@ -745,6 +327,18 @@ async def run_scan_pipeline(
                     await db.flush()
                     logger.info("scan_purged_stale_features", scan_id=scan_id, purged=purged)
 
+            # --- Phase F: Embed any items still missing embeddings ---
+            # Runs before G so the persisted feature_count is accurate.
+            await update_scan_progress(scan_id, status="finalizing", progress_pct=93)
+
+            async def _run_f() -> dict[str, Any]:
+                final_embedded = await embed_missing_items(db, org_id)
+                if final_embedded:
+                    logger.info("scan_final_embed_pass", scan_id=scan_id, embedded=final_embedded)
+                return {"embedded": final_embedded}
+
+            await _global_phase(_ScanPhase.EMBEDDING_BACKFILL, _run_f)
+
             # --- Phase G: Save last commit SHAs + scan results ---
             timer.start()
             await update_scan_progress(
@@ -752,29 +346,65 @@ async def run_scan_pipeline(
                 status="saving_results",
                 progress_pct=96,
             )
-            actual_features = await phase_g_persist(
-                db,
-                org_id,
-                repo_paths,
-                new_shas,
-                config,
-                total_profiles,
-                all_unmatched,
-                overall_mode,
-                ki_repo,
-            )
+
+            async def _run_g() -> dict[str, Any]:
+                count = await phase_g_persist(
+                    db,
+                    org_id,
+                    repo_paths,
+                    new_shas,
+                    config,
+                    total_profiles,
+                    all_unmatched,
+                    overall_mode,
+                    ki_repo,
+                )
+                return {"actual_features": count}
+
+            g_outcome = await _global_phase(_ScanPhase.PERSIST_RESULTS, _run_g)
+            # Always prefer the checkpoint payload — it holds the count
+            # whether this run executed G or copied a DONE row from
+            # an earlier scan. Falls back to a fresh DB count if the
+            # payload is somehow empty (e.g. a legacy DONE checkpoint
+            # written before this field existed).
+            actual_features = g_outcome.payload.get("actual_features")
+            if actual_features is None:
+                actual_features = await ki_repo.count_active(category="feature_registry")
             timer.mark("G_persist")
 
-            # Final catch-all: embed any items still missing embeddings
-            # (e.g. created during merge after the earlier embed pass).
-            await update_scan_progress(
-                scan_id,
-                status="finalizing",
-                progress_pct=98,
+            # Cross-phase audit. Each phase's in-line guards already raise
+            # for the failure modes they own (orphan features, unvisited
+            # merges, unmatched authors). The audit catches signals that
+            # are only visible end-to-end — most importantly, repos that
+            # GitNexus indexed but produced zero synthesized_features
+            # (the Bug A early-warning). Warn-only by design: a clean
+            # scan can legitimately produce zero features for a repo
+            # whose clusters were all infrastructure.
+            from app.scan.audit import audit_scan
+            from app.scan.context import ScanContext as _ScanContextDC
+
+            audit_report = await audit_scan(
+                _ScanContextDC(scan_id=scan_uuid, org_id=org_id),
             )
-            final_embedded = await embed_missing_items(db, org_id)
-            if final_embedded:
-                logger.info("scan_final_embed_pass", scan_id=scan_id, embedded=final_embedded)
+            if audit_report.missing_repo_synth:
+                logger.warning(
+                    "scan_audit_missing_repo_synth",
+                    scan_id=scan_id,
+                    repos=[
+                        {
+                            "name": a.repo_name,
+                            "clusters": a.cluster_count,
+                            "synth": a.synth_count,
+                        }
+                        for a in audit_report.missing_repo_synth
+                    ],
+                )
+            if audit_report.orphan_features:
+                logger.warning(
+                    "scan_audit_orphan_features",
+                    scan_id=scan_id,
+                    count=len(audit_report.orphan_features),
+                )
 
             await update_scan_progress(
                 scan_id,
@@ -813,7 +443,7 @@ async def run_scan_pipeline(
     except GitNexusNotInstalledError as exc:
         logger.error("scan_gitnexus_not_installed", scan_id=scan_id, error=str(exc))
         await update_scan_progress(scan_id, status="failed", error=str(exc))
-        await _rollback_soft_deleted_features(org_id, scan_id, soft_deleted_ids)
+        await rollback_soft_deleted_features(org_id, scan_id, soft_deleted_ids)
         if user_id:
             from app.services.notification_service import send_scan_notification
 
@@ -827,7 +457,7 @@ async def run_scan_pipeline(
     except Exception as exc:
         logger.exception("scan_pipeline_error", scan_id=scan_id)
         await update_scan_progress(scan_id, status="failed", error=str(exc)[:500])
-        await _rollback_soft_deleted_features(org_id, scan_id, soft_deleted_ids)
+        await rollback_soft_deleted_features(org_id, scan_id, soft_deleted_ids)
         if user_id:
             from app.services.notification_service import send_scan_notification
 
@@ -838,37 +468,3 @@ async def run_scan_pipeline(
                 completed=False,
                 error_message=str(exc)[:500],
             )
-
-
-async def _rollback_soft_deleted_features(
-    org_id: uuid.UUID,
-    scan_id: str,
-    deactivated_ids: list[uuid.UUID],
-) -> None:
-    """Reactivate only the features soft-deleted by this scan run.
-
-    Uses a fresh DB session since the original session may be in a bad state.
-
-    Args:
-        org_id: Organization UUID.
-        scan_id: Scan identifier for logging.
-        deactivated_ids: IDs of items soft-deleted at scan start.
-    """
-    if not deactivated_ids:
-        return
-
-    from app.database import AsyncSessionLocal
-
-    try:
-        async with AsyncSessionLocal() as recovery_db:
-            ki_recovery = KnowledgeItemRepository(recovery_db, org_id=org_id)
-            restored = await ki_recovery.reactivate_by_ids(deactivated_ids)
-            await recovery_db.commit()
-            if restored:
-                logger.info(
-                    "scan_rollback_restored_features",
-                    scan_id=scan_id,
-                    restored=restored,
-                )
-    except Exception:
-        logger.exception("scan_rollback_failed", scan_id=scan_id)

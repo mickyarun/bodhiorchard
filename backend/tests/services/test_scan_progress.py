@@ -1,127 +1,112 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Tests for scan_progress clamp + fallback semantics + resolve fallthrough.
+"""Tests for the DB-backed ``scans`` table surface.
 
-Covers the three invariants the tab-switch-scan-404 + >100% bugs rely on:
-
-1. ``_clamp_pct`` never returns above 100 and never regresses.
-2. Fallback dict entries survive a terminal status update (only age out
-   via ``_prune_stale_fallback``), so a poll arriving milliseconds after
-   completion still finds the scan.
-3. ``resolve_scan_progress`` falls back to the org's active scan when a
-   direct id lookup misses — the Redis path is monkeypatched to ``None``
-   so we exercise the in-memory code path deterministically.
+Covers the pure bits of the repo layer — the constant that gates
+``get_latest_active``, the model ``__repr__``, and the schema
+translation from ORM row to ``ScanStatus``. The DB-integration paths
+(INSERT / UPDATE / RETURNING) are exercised end-to-end through the
+scan pipeline; running them as unit tests against the shared
+session-scoped ``db_session`` fixture deadlocks on asyncpg's
+"another operation in progress" because our engine is singleton.
 """
 
 from __future__ import annotations
 
-import time
+import uuid
 
-import pytest
-
-from app.services import scan_progress
-
-
-@pytest.fixture(autouse=True)
-def _reset_fallback() -> None:
-    """Isolate the module-level dict between tests — no bleed across."""
-    scan_progress._fallback.clear()
-    scan_progress._org_scan_map.clear()
-    yield
-    scan_progress._fallback.clear()
-    scan_progress._org_scan_map.clear()
+from app.models.scan import ACTIVE_SCAN_STATUSES, Scan, ScanAggregateStatus
+from app.repositories.scan import _active_status_values
+from app.services.scan_progress import _scan_to_status
 
 
-@pytest.fixture
-def _force_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pretend Redis is unavailable so the fallback path is exercised."""
-
-    async def _no_redis() -> None:
-        return None
-
-    monkeypatch.setattr("app.services.redis_client.get_redis", _no_redis)
-
-
-# ─── _clamp_pct ─────────────────────────────────────────────────────────────
+def test_active_statuses_exclude_terminal() -> None:
+    """``get_latest_active`` depends on this set omitting terminal states —
+    otherwise a completed scan would mask a freshly-dispatched one."""
+    assert ScanAggregateStatus.COMPLETED not in ACTIVE_SCAN_STATUSES
+    assert ScanAggregateStatus.FAILED not in ACTIVE_SCAN_STATUSES
+    # Sanity: the set is non-empty and contains the very first state.
+    assert ScanAggregateStatus.STARTED in ACTIVE_SCAN_STATUSES
 
 
-@pytest.mark.parametrize(
-    ("current", "requested", "expected"),
-    [
-        (0, 0, 0),
-        (0, 50, 50),
-        (50, 100, 100),
-        (50, 120, 100),  # upper bound clamp — the bug we're fixing
-        (90, 40, 90),  # monotonic — never regress
-        (100, 100, 100),
-        (100, 200, 100),  # stays at ceiling even with huge overshoot
-    ],
-)
-def test_clamp_pct_bounds(current: int, requested: int, expected: int) -> None:
-    assert scan_progress._clamp_pct(current, requested) == expected
+def test_active_status_values_is_string_list() -> None:
+    """The SQL ``IN (...)`` clause wants plain strings, not enum members."""
+    values = _active_status_values()
+    assert "started" in values
+    assert "completed" not in values
+    assert all(isinstance(v, str) for v in values)
 
 
-# ─── Fallback not popped on terminal ────────────────────────────────────────
-
-
-async def test_fallback_survives_terminal_status(_force_fallback: None) -> None:
-    """After a scan completes, the fallback entry must stay readable
-    until TTL. A poll landing right after completion needs to see the
-    final status, not a phantom 404."""
-    await scan_progress.create_scan_progress("scan-x", "org-1")
-    await scan_progress.update_scan_progress("scan-x", status="completed", progress_pct=100)
-
-    status = await scan_progress.get_scan_progress("scan-x")
-    assert status is not None
-    assert status.status == "completed"
-    assert status.progress_pct == 100
-
-
-async def test_fallback_prunes_stale_entries(
-    _force_fallback: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fallback entries older than ``_SCAN_TTL`` get swept when any read
-    happens — bounding memory without eager deletion."""
-    await scan_progress.create_scan_progress("scan-old", "org-old")
-    # Back-date the updated_at so the entry appears stale.
-    scan_progress._fallback["scan-old"]["updated_at"] = str(
-        time.time() - scan_progress._SCAN_TTL - 1
+def test_scan_model_repr_has_status_and_id() -> None:
+    """``__repr__`` shows up in structlog output; guard against typos."""
+    row = Scan(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+        org_id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+        status="analyzing_changes",
     )
-
-    # Reading any scan triggers the prune sweep.
-    await scan_progress.get_scan_progress("scan-old")
-    assert "scan-old" not in scan_progress._fallback
-    assert "org-old" not in scan_progress._org_scan_map
-
-
-# ─── resolve_scan_progress fall-through ─────────────────────────────────────
+    rendered = repr(row)
+    assert "Scan(" in rendered
+    assert "analyzing_changes" in rendered
+    assert "00000000-0000-0000-0000-000000000001" in rendered
 
 
-async def test_resolve_falls_back_to_active_org_scan(_force_fallback: None) -> None:
-    """If the direct id lookup misses BUT the org has the same scan_id
-    registered as active (e.g. a transient miss during a tab switch),
-    resolve_scan_progress should return the live status."""
-    await scan_progress.create_scan_progress("scan-y", "org-2")
-    # Remove the direct entry to simulate a transient cache miss while
-    # keeping the org → scan_id mapping intact (mimics what the bug
-    # produces in practice).
-    direct = scan_progress._fallback.pop("scan-y")
-    # Re-seed under a shadow key so get_active_scan_for_org can still
-    # resolve via _org_scan_map.
-    scan_progress._fallback["scan-y-shadow"] = direct
-    scan_progress._org_scan_map["org-2"] = "scan-y-shadow"
-    direct["scan_id"] = "scan-y-shadow"
+def test_scan_to_status_translates_known_fields() -> None:
+    """The façade translates ORM rows to ``ScanStatus`` for the API.
 
-    resolved = await scan_progress.resolve_scan_progress("scan-y-shadow", "org-2")
-    assert resolved is not None
-    assert resolved.scan_id == "scan-y-shadow"
+    Captures the happy path — any column rename on ``Scan`` that
+    forgets ``_scan_to_status`` surfaces here first.
+    """
+    row = Scan(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000099"),
+        org_id=uuid.UUID("00000000-0000-0000-0000-0000000000aa"),
+        parent_scan_id=uuid.UUID("00000000-0000-0000-0000-0000000000bb"),
+        status="synthesizing_features",
+        scan_mode="incremental",
+        progress_pct=42,
+        features_indexed=7,
+        features_skipped=2,
+        profiles_found=11,
+        stale_cleaned=3,
+        unmatched_authors=["alice@co", "bob@co"],
+        synthesis_warning="partial sync",
+        setup_pr_message="opened PR #14",
+        error=None,
+        repo_warnings=[{"repo": "r1", "phase": "B", "summary": "slow"}],
+    )
+    status = _scan_to_status(row)
+    assert status.scan_id == "00000000-0000-0000-0000-000000000099"
+    assert status.parent_scan_id == "00000000-0000-0000-0000-0000000000bb"
+    assert status.status == "synthesizing_features"
+    assert status.scan_mode == "incremental"
+    assert status.progress_pct == 42
+    assert status.features_indexed == 7
+    assert status.unmatched_authors == ["alice@co", "bob@co"]
+    assert status.synthesis_warning == "partial sync"
+    assert len(status.repo_warnings) == 1
+    assert status.repo_warnings[0].repo == "r1"
 
 
-async def test_resolve_returns_none_for_unknown_scan(_force_fallback: None) -> None:
-    """When there's no direct entry AND the org has no active scan with
-    the requested id, resolve_scan_progress returns None so the endpoint
-    can honestly 404."""
-    result = await scan_progress.resolve_scan_progress("does-not-exist", "org-3")
-    assert result is None
+def test_scan_to_status_handles_null_optional_fields() -> None:
+    """Null *text* columns translate to None.
+
+    ``unmatched_authors`` / ``repo_warnings`` are NOT NULL with
+    ``default=list``, so a freshly-constructed row has empty arrays,
+    not None. The translator is exercised on the realistic initial
+    shape the DB insert would produce.
+    """
+    row = Scan(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+        org_id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+    )
+    status = _scan_to_status(row)
+    # Non-nullable defaults landed.
+    assert status.unmatched_authors == []
+    assert status.repo_warnings == []
+    assert status.status == "started"
+    assert status.progress_pct == 0
+    # Nullable columns stay None.
+    assert status.synthesis_warning is None
+    assert status.setup_pr_message is None
+    assert status.error is None
+    assert status.parent_scan_id is None

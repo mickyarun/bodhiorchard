@@ -197,17 +197,33 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
 
 
 async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]:
-    """Create main + develop worktrees for a repo.
+    """Create or adopt main + develop worktrees for a repo.
 
-    Creates worktrees under ``<repo>/.bodhiorchard/main/`` and
-    ``<repo>/.bodhiorchard/develop/``. Pulls both to latest.
+    Idempotent: if a prior scan crashed and left ``git worktree`` state
+    behind, this function adopts the existing worktree instead of
+    letting ``git worktree add`` fail with
+    ``fatal: '<branch>' is already used by worktree at '...'``.
+
+    Resolution order for each (branch, dirname) pair:
+
+    1. Branch is already checked out in the bare repo → return the
+       repo path (nothing to do).
+    2. ``git worktree list`` has a registration for the branch pointing
+       at the expected path AND the path exists → adopt, pull latest.
+    3. Registration exists but at a different path, or the expected
+       path is missing → ``git worktree remove --force`` + prune, then
+       recreate.
+    4. Registration missing but the directory exists on disk (orphan) →
+       remove the orphan dir, then add.
+    5. Neither registered nor on disk → add cleanly.
 
     Args:
         repo_path: Absolute path to the git repository.
 
     Returns:
         Tuple of (main_worktree_path, develop_worktree_path).
-        Either may be None if the branch doesn't exist.
+        Either may be None if the branch doesn't exist or adoption
+        fails in a way that requires manual intervention.
     """
     repo = Path(repo_path)
     worktree_dir = repo / ".bodhiorchard"
@@ -216,41 +232,36 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
     main_branch = await _detect_main_branch(repo_path)
     develop_branch = await _detect_develop_branch(repo_path)
 
-    # Detect current branch to avoid worktree conflict
     current_branch, _, _ = await run_git(
         ["rev-parse", "--abbrev-ref", "HEAD"],
         cwd=repo_path,
     )
     current_branch = current_branch.strip()
 
-    results: list[str | None] = [None, None]
+    # Start with a prune so any registrations whose worktree dirs got
+    # rm -rf'd out from under git don't block the adoption check below.
+    await run_git(["worktree", "prune"], cwd=repo_path)
+    registered = await _list_registered_worktrees(repo_path)
 
-    for idx, (branch, dirname) in enumerate([(main_branch, "main"), (develop_branch, "develop")]):
+    results: list[str | None] = [None, None]
+    for idx, (branch, dirname) in enumerate(
+        [(main_branch, "main"), (develop_branch, "develop")]
+    ):
         if branch is None:
             continue
-
-        # If this branch is already checked out, use repo path directly
         if branch == current_branch:
             results[idx] = repo_path
             continue
 
         wt_path = worktree_dir / dirname
-        if not wt_path.exists():
-            _, stderr, rc = await run_git(["worktree", "add", str(wt_path), branch], cwd=repo_path)
-            if rc != 0:
-                logger.warning(
-                    "worktree_add_failed",
-                    branch=branch,
-                    error=stderr[:200],
-                )
-                continue
-        else:
-            # Pull latest
-            _, stderr, rc = await run_git(["pull"], cwd=str(wt_path))
-            if rc != 0:
-                logger.warning("worktree_pull_failed", branch=branch, error=stderr[:200])
-
-        results[idx] = str(wt_path)
+        path = await _adopt_or_create_worktree(
+            repo_path=repo_path,
+            wt_path=wt_path,
+            branch=branch,
+            registered=registered,
+        )
+        if path is not None:
+            results[idx] = path
 
     logger.info(
         "worktrees_ensured",
@@ -259,6 +270,93 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
         develop=results[1] is not None,
     )
     return results[0], results[1]
+
+
+async def _list_registered_worktrees(repo_path: str) -> dict[str, Path]:
+    """Parse ``git worktree list --porcelain`` into ``branch → path``.
+
+    Returns an empty dict on any git failure — the caller falls back
+    to treating every branch as "not registered", which is the safe
+    default (worst case: one extra ``worktree add`` attempt that
+    returns the same error we'd catch anyway).
+    """
+    out, _, rc = await run_git(
+        ["worktree", "list", "--porcelain"], cwd=repo_path
+    )
+    if rc != 0:
+        return {}
+
+    registrations: dict[str, Path] = {}
+    current_path: Path | None = None
+    for raw in out.splitlines():
+        line = raw.strip()
+        if line.startswith("worktree "):
+            current_path = Path(line[len("worktree ") :])
+        elif line.startswith("branch ") and current_path is not None:
+            ref = line[len("branch ") :]
+            # Porcelain output is ``refs/heads/<branch>``.
+            branch = ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ref
+            registrations[branch] = current_path
+    return registrations
+
+
+async def _adopt_or_create_worktree(
+    *,
+    repo_path: str,
+    wt_path: Path,
+    branch: str,
+    registered: dict[str, Path],
+) -> str | None:
+    """Resolve the state for one (branch, path) pair — see cases in caller."""
+    existing = registered.get(branch)
+
+    if existing is not None and _same_path(existing, wt_path) and wt_path.exists():
+        _, stderr, rc = await run_git(["pull"], cwd=str(wt_path))
+        if rc != 0:
+            logger.warning("worktree_pull_failed", branch=branch, error=stderr[:200])
+        return str(wt_path)
+
+    if existing is not None:
+        # Registered at a different path, or expected path is gone.
+        # Force-remove and re-prune so the next ``add`` is unblocked.
+        _, stderr, rc = await run_git(
+            ["worktree", "remove", "--force", str(existing)],
+            cwd=repo_path,
+        )
+        if rc != 0:
+            logger.warning(
+                "worktree_force_remove_failed",
+                branch=branch,
+                path=str(existing),
+                error=stderr[:200],
+            )
+        await run_git(["worktree", "prune"], cwd=repo_path)
+
+    if wt_path.exists():
+        # Orphaned dir with no registration — shed it before add.
+        shutil.rmtree(wt_path, ignore_errors=True)
+
+    _, stderr, rc = await run_git(
+        ["worktree", "add", str(wt_path), branch], cwd=repo_path
+    )
+    if rc != 0:
+        logger.warning("worktree_add_failed", branch=branch, error=stderr[:200])
+        return None
+    return str(wt_path)
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    """True when two paths resolve to the same inode-level target.
+
+    Uses ``resolve(strict=False)`` so a registered-but-missing
+    worktree path still compares meaningfully against the expected
+    one. Falls back to string comparison on resolve failure (e.g.
+    permission errors traversing a symlink).
+    """
+    try:
+        return a.resolve(strict=False) == b.resolve(strict=False)
+    except OSError:
+        return str(a) == str(b)
 
 
 # ── Bodhiorchard MCP server init ─────────────────────────────────────

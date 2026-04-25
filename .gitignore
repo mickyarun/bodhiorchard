@@ -41,6 +41,11 @@ Thumbs.db
 # Docker
 *.log
 
+# Backend log capture (rotating handler in app/core/logging.py writes here;
+# also covers any one-off `tee` output like logs.txt that may contain JWTs).
+backend/logs/
+logs.txt
+
 # Database
 *.sqlite3
 *.db

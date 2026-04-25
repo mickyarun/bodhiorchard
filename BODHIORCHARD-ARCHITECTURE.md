@@ -8598,6 +8598,88 @@ Addressing any of these without addressing the other two still leaves the pipeli
 | Frontend composable | `frontend/src/composables/useScanSocket.ts:39-65` | `useScanSocket` |
 | Frontend trigger | `frontend/src/components/SetupChecklist.vue` | Scan checklist item |
 
+### 18.12 How Skills Are Computed
+
+Developer "skills" aren't inferred from anywhere fancy — they're a direct function of the git log. Two passes run during a scan:
+
+**Pass 1 — `SKILL_EXTRACTION` (per-repo, directory-based).** Source: `backend/app/services/git_analyzer.py:115-219`. Steps:
+
+1. Enumerate commits via `git log --format=%H|%ae|%an|%aI --no-merges --since=6.months.ago` (window is `DEFAULT_SINCE` at `git_analyzer.py:22`). Merge commits excluded so reviewers don't inherit author credit.
+2. For each commit, pull the changed file list (`git show --name-only`).
+3. Map every file to a **module**. Default: the top-level directory (`backend/…` → `backend`). Paths under `_SKIP_SKILL_PATHS` (`.claude`, `.githooks`, `.bodhiorchard`, `.gitnexus`, `.github`, `.vscode`, `.idea`) are dropped as tooling, not code.
+4. Accumulate per `(email, module)` a `ModuleStats`: `touch_count`, `languages` (derived from extension via `LANG_MAP`), `last_touch`.
+5. Compute `skill_score = min(1.0, touch_count / 50.0) * recency_weight`. The `/ 50.0` saturates at 50 touches so an outlier 500-touch author doesn't pin the curve; `recency_weight` exponentially decays from `last_touch` to "now".
+6. Upsert into `skill_profiles` keyed on `(user_id, org_id, module)`. Authors whose email doesn't resolve to a `User` surface as `unmatched_authors` in the `ScanStatus` payload; the scan is never blocked by them.
+
+**Pass 2 — `SKILL_REMAP` (global, feature-based).** Source: `backend/app/services/scan_phases.py::phase_e2_skill_remap` and the `upsert_skill_profiles` helper at `scan_helpers.py:55-108`. Runs only when synthesis produced enough features — gated by `new_count >= 0.7 * old_count` (constant `_E2_SPARSE_THRESHOLD`). When it fires:
+
+1. Build a `feature_map` from `knowledge_to_repo.code_locations`: one entry per feature with its path prefixes (longest-prefix-wins).
+2. Re-run `analyze_repo_skills` per repo with that map — files matching a feature prefix land under the feature name instead of the directory.
+3. In a single DB **SAVEPOINT** (`async with db.begin_nested()`): DELETE all scan-sourced rows, then INSERT the feature-keyed profiles. A crash between delete and insert rolls the savepoint back, leaving the old rows intact — the "empty skills table until next scan" window is closed.
+
+When the 70% gate doesn't fire (sparse feature map), E2 does a partial upsert without wiping — a tiny feature set never nukes established directory profiles.
+
+### 18.13 Resumability
+
+Shipped in P1–P13 of the "Scan Repo Waterfall — Resumable Pipeline Design" plan at `.claude/plans/scan-repo-for-big-elegant-waterfall.md`. This subsection summarises what landed.
+
+**Two new tables + typed enum.** `backend/app/models/scan_phase.py` defines the `ScanPhase`, `PhaseScope`, `CheckpointStatus`, `MergeOutcome`, and `ScanErrorCode` StrEnums (legacy A..G codes preserved in comments for grep). The 11 phases:
+
+| Enum value | Was | Scope |
+|------------|-----|-------|
+| `mode_detection` | A | per-repo |
+| `gitnexus_index` | B | per-repo |
+| `repo_setup` | B1 | per-repo |
+| `stale_cleanup` | D | per-repo (incremental only) |
+| `skill_extraction` | E | per-repo |
+| `design_system_extract` | E1b | per-repo |
+| `feature_synthesis` | B2 | per-repo (runs under the global stripe, parallel per repo) |
+| `skill_remap` | E2 | global |
+| `feature_merge` | B3 | global |
+| `embedding_backfill` | F | global |
+| `persist_results` | G | global |
+
+`SHA_REUSABLE_PHASES = {GITNEXUS_INDEX, SKILL_EXTRACTION, DESIGN_SYSTEM_EXTRACT}` — these three phases copy their payload from an earlier DONE row when the repo HEAD SHA matches, so a full-rescan of an unchanged repo costs nothing beyond the lookup.
+
+**`scan_phase_checkpoints`** (migration `zn_scan_phase_checkpoints.py`). One row per `(scan_id, repo_id, phase, attempt)`. Stores lifecycle (`pending` / `running` / `done` / `failed` / `skipped`), `sha_at_run`, `error_code`, `error_message`, JSONB `payload`, and `parent_scan_id` for resume lineage. Indexed on `(scan_id, phase)`, `(org_id, phase, sha_at_run)` for cross-scan reuse lookups, and `(org_id, status)` for admin listings.
+
+**`synthesized_features`** (migration `zo_synthesized_features.py`). Immutable, append-only record written by the MCP `write_feature_registry` handler during `FEATURE_SYNTHESIS`. `repo_id` is NOT NULL — unresolvable `repo_name` now hard-fails in the MCP handler instead of silently creating an orphan. `merge_outcome` is an enum (`canonical` / `merged_into` / `unvisited`) with a self-FK `merged_into_id` pointing at the surviving canonical row. Superseded rows get `superseded_at` set but are never hard-deleted — the partial index `ix_synth_feat_latest WHERE superseded_at IS NULL` keeps "current view" queries fast.
+
+**Checkpoint wrapper.** `backend/app/services/scan_checkpoints.py::run_checkpointed_phase` handles all three axes of skip logic in one place:
+
+1. Within-scan skip — if the current scan already has a DONE / SKIPPED checkpoint for this phase, return its payload.
+2. Cross-scan SHA reuse — for phases in `SHA_REUSABLE_PHASES` with a matching `sha_at_run` row in any prior scan, copy the payload and stamp a new DONE row with `started_at == finished_at` (the "cached" signal the frontend renders).
+3. Run + classify — otherwise execute the phase body, classify any exception via `classify_scan_error`, stamp the checkpoint accordingly, and re-raise.
+
+The typed `ScanPhaseError` hierarchy (`MaxTurnsError`, `ClaudeSubprocessError`, `MCPError`, `PhaseTimeoutError`, `OrphanFeaturesError`, `MergeIncompleteError`) lets the scan body raise a specific failure mode and have the UI render an actionable hint without string-matching.
+
+**Per-repo stripe.** `backend/app/services/scan_repo_loop.py::process_one_repo` replaces the inline per-repo loop body that used to live in `run_scan_pipeline`. Each of the six per-repo phases runs through a local `_ckpt(phase, phase_fn)` wrapper that forwards to `run_checkpointed_phase` with the captured SHA. Sibling modules `scan_design_system.py` and `scan_synthesis_queue.py` hold two helpers (`maybe_extract_design_system`, `build_pending_synthesis`) extracted to keep the loop module under 400 lines.
+
+**B2 self-heal + audit.** `phase_b2_synthesis` now queries `synthesized_features.cluster_names_for_repo` before launching the Claude subprocess and rewrites the in-memory queue to the pending subset — resume always picks up exactly where the previous attempt left off, without any durable queue. After the subprocess exits successfully, `KnowledgeItemScanRepository.find_items_missing_repo_link` runs as a belt-and-braces audit; auto-repair inserts missing links, and anything unfixable surfaces as `OrphanFeaturesError` → `error_code='orphan_feature'` on the checkpoint.
+
+**B3 post-merge audit.** `phase_b3_merge` ends with `SynthesizedFeatureRepository.mark_unvisited_for_scan(scan_id)`. Any synth row still NULL has not been mentioned by the merge subprocess — it's flagged `unvisited` and the phase raises `MergeIncompleteError`. The retry endpoint can then re-run merge with only the unvisited subset as input.
+
+**Durable checkpoint sessions.** Every checkpoint write — RUNNING insert, DONE finalize, FAILED finalize, SHA-reuse copy-forward — runs inside a dedicated `_checkpoint_tx(org_id)` async context (`scan_checkpoints.py`) that opens its own `AsyncSessionLocal()`, commits on clean exit, rolls back and re-raises on exception. The pipeline's outer `db` session is *never* used for checkpoint I/O. This decouples the WAL of phase transitions from the phase body's transaction: when a phase raises and the pipeline session rolls back its work, the FAILED checkpoint is already committed independently and stays durable. Repository writers (`start`, `finalize_by_id`, `insert_reused`) return primitive types (`uuid.UUID` / `None`) rather than ORM rows, so callers can't accidentally hold a detached instance after the helper closes its session. `run_checkpointed_phase` carries the checkpoint id between the start and the finalize as a UUID — the FAILED `UPDATE` then targets a primary key in a fresh session, no identity-map dependency. Cancellation (`asyncio.CancelledError`) is the one exception path that intentionally leaves the row in RUNNING — `reconcile_orphan_scans` flips it to FAILED on next boot.
+
+**Soft-delete scope.** `run_scan_pipeline` now computes `changed_repos` upfront by comparing each active repo's `git rev-parse HEAD` against `tracked_repositories.head_sha`. Only those repos' feature rows are soft-deleted at scan start (via `KnowledgeItemScanRepository.soft_delete_by_repo_ids`). Unchanged repos keep their rows live for the whole scan — the "features temporarily vanish during a full rescan of a mostly-unchanged workspace" UX gap is closed.
+
+**HTTP surface.** Under `/api/v1/skills`:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/scan` | Unchanged. Fresh scan. |
+| `POST` | `/scan/{scan_id}/resume` | Mint a child scan that inherits parent's DONE / SKIPPED checkpoints; re-run the rest. |
+| `POST` | `/scan/{scan_id}/phases/{phase}/retry?repo_id=…` | Same as resume, but the child scan omits the specified phase (optionally one repo) so it runs fresh. |
+| `GET`  | `/scan/{scan_id}/checkpoints` | Full checkpoint list powering the frontend timeline. |
+| `POST` | `/scan/recover/feature/{synth_feature_id}` | Bad-merge recovery — re-insert a feature from its immutable pre-merge synth row into `knowledge_items` + `knowledge_to_repo`. |
+| `GET`  | `/scan/{scan_id}/status` | Now enriched with `phases[]` and `parentScanId` via `enrich_status_with_phases`. |
+
+All require `org:edit_settings`, matching `trigger_scan`.
+
+**WebSocket delivery.** Stays on the existing `scan:{scan_id}` topic — no sub-topic, no wildcard subscription (`event_bus` doesn't support them). `_publish` in `scan_progress.py` routes through `publish_scan_status` which hashes the payload and silently drops no-op republishes. Non-UUID `scan_id` sentinels used in older tests fall through to the raw publish path unchanged.
+
+**Frontend wiring.** `frontend/src/composables/useScanSocket.ts` `ScanStatusData` grew `phases: PhaseStatus[]` and `parentScanId`. A new `frontend/src/stores/scan.ts` Pinia store centralises scan state and exposes `resume()` / `retryPhase()` actions. `frontend/src/components/scan/ScanPhaseTimeline.vue` renders the per-phase timeline with per-row retry buttons. `SetupChecklist.vue` swaps in the timeline when `phases.length > 0` and falls back to the legacy progress bar when it's empty (pre-migration scans).
+
 ---
 
 **This document is implementation-ready and provides all technical details needed for a senior engineer to build Bodhiorchard from scratch.**

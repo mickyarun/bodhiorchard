@@ -196,15 +196,25 @@ async def handle_write_feature_registry(
         feature_status="implemented",
     )
 
-    # Resolve repo_id from repo_name for FK link
+    # Resolve repo_id from repo_name. Previously this failed open —
+    # an unresolvable repo_name produced a feature with repo_id=NULL,
+    # the "fails to fetch skill lib" orphan symptom. Now it's a hard
+    # error so Claude sees the problem and can retry with a valid name.
     repo_id = None
     if repo_name:
         from app.repositories.tracked_repository import TrackedRepoRepository
 
         tr_repo = TrackedRepoRepository(db, org_id=org.id)
         tracked = await tr_repo.get_by_name(repo_name)
-        if tracked:
-            repo_id = tracked.id
+        if tracked is None:
+            return {
+                "success": False,
+                "error": (
+                    f"Unknown repo_name: {repo_name!r}. Call the tool "
+                    "again with one of the org's active tracked repository names."
+                ),
+            }
+        repo_id = tracked.id
 
     # 1. Try exact-title upsert
     ki_repo = KnowledgeItemRepository(db, org_id=org.id)
@@ -274,6 +284,25 @@ async def handle_write_feature_registry(
     if repo_id and item:
         await ki_repo.link_to_repo(item.id, repo_id, code_locations=params.get("code_locations"))
         await ki_repo.flush()
+
+        # Append an immutable pre-merge row to ``synthesized_features``
+        # for bad-merge recovery, B2 queue self-heal, and per-feature
+        # merge-outcome visibility. Same tx as the KI write — the
+        # synth row's repo_id NOT NULL is the DB-level guard that
+        # enforces the hard-fail policy above.
+        from app.mcp.synth_feature_writer import persist_synth_feature
+
+        await persist_synth_feature(
+            db=db,
+            org=org,
+            repo_id=repo_id,
+            feature_title=title,
+            description=params["description"],
+            capabilities=params["capabilities"],
+            cluster_names=source_clusters,
+            code_locations=params.get("code_locations"),
+            knowledge_item_id=item.id,
+        )
 
     # Deactivate originals when merging cross-repo features.
     # First, transfer repo links from source features to the merged feature
@@ -409,6 +438,20 @@ async def handle_merge_features(
             )
             await ki_repo.flush()
 
+    # 2b. Mark merge outcomes on ``synthesized_features`` so the audit
+    # trail records which rows were consolidated into which canonical.
+    # Runs even when merge_titles is empty so ``keep_title`` still gets
+    # flagged CANONICAL (identifies the surviving feature on a link-only
+    # merge call).
+    from app.mcp.synth_feature_writer import apply_merge_outcomes
+
+    canonical_marked, merged_outcomes = await apply_merge_outcomes(
+        db=db,
+        org=org,
+        keep_title=keep_title,
+        merge_titles=merge_titles,
+    )
+
     # 3. Link to all specified repos
     repos_linked = 0
     if repo_names:
@@ -439,6 +482,8 @@ async def handle_merge_features(
         kept=keep_title,
         merged=merged_count,
         repos_linked=repos_linked,
+        synth_canonical=canonical_marked,
+        synth_merged=merged_outcomes,
     )
     return {
         "success": True,

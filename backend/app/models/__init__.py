@@ -44,8 +44,22 @@ from app.models.permission import (
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.qa_test_evidence import QATestEvidence
 from app.models.race_result import RaceResult
+from app.models.scan import ACTIVE_SCAN_STATUSES, Scan, ScanAggregateStatus
+from app.models.scan_phase import (
+    PHASE_SCOPE,
+    SHA_REUSABLE_PHASES,
+    TERMINAL_CHECKPOINT_STATUSES,
+    CheckpointStatus,
+    MergeOutcome,
+    PhaseScope,
+    ScanErrorCode,
+    ScanPhase,
+    is_per_repo,
+)
+from app.models.scan_phase_checkpoint import ScanPhaseCheckpoint
 from app.models.skill_profile import SkillProfile
 from app.models.standup import StandupReport
+from app.models.synthesized_feature import SynthesizedFeature
 from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
@@ -99,8 +113,22 @@ __all__ = [
     "Role",
     "RolePermission",
     "RoleScopeType",
+    "Scan",
+    "ScanAggregateStatus",
+    "ACTIVE_SCAN_STATUSES",
+    "ScanPhaseCheckpoint",
+    "ScanPhase",
+    "ScanErrorCode",
+    "MergeOutcome",
+    "PhaseScope",
+    "CheckpointStatus",
+    "PHASE_SCOPE",
+    "SHA_REUSABLE_PHASES",
+    "TERMINAL_CHECKPOINT_STATUSES",
+    "is_per_repo",
     "SkillProfile",
     "StandupReport",
+    "SynthesizedFeature",
     "TrackedRepository",
     "TriageSession",
     "TriageStatus",

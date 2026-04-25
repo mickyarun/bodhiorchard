@@ -139,13 +139,13 @@
           color="surface"
         >
           <!-- Module header -->
-          <div class="d-flex align-center ga-3 mb-4">
+          <div class="d-flex align-start ga-3 mb-4">
             <v-avatar size="40" color="secondary" variant="tonal">
               <v-icon icon="mdi-cube-outline" size="20" />
             </v-avatar>
             <div class="flex-grow-1 overflow-hidden">
-              <div class="text-body-1 font-weight-medium text-truncate">{{ mod.name }}</div>
-              <div class="d-flex ga-1 mt-1">
+              <div class="text-body-1 font-weight-medium module-title">{{ mod.name }}</div>
+              <div class="d-flex flex-wrap ga-1 mt-1">
                 <v-chip
                   v-for="lang in mod.languages.slice(0, 4)"
                   :key="lang"
@@ -322,5 +322,14 @@ onMounted(() => {
   padding: 8px 12px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
+}
+
+.module-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
 }
 </style>

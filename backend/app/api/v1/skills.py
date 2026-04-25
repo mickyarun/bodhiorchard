@@ -27,7 +27,11 @@ from app.schemas.skills import (
     SkillProfileRead,
 )
 from app.services.scan_pipeline import run_scan_pipeline
-from app.services.scan_progress import create_scan_progress, resolve_scan_progress
+from app.services.scan_progress import (
+    create_scan_progress,
+    enrich_status_with_phases,
+    resolve_scan_progress,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -109,6 +113,23 @@ async def trigger_scan(
         )
     repo_paths = valid_paths
 
+    # A full rescan is the user saying "ignore any SHA shortcuts —
+    # rebuild this org from scratch". Clearing ``head_sha`` +
+    # ``last_scanned_at`` is what tells ``phase_a_scan_mode`` to treat
+    # every active repo as a first-time index. The dedicated
+    # ``/scan/reset`` endpoint does the same via
+    # ``TrackedRepoRepository.reset_head_shas``; keep the two dispatch
+    # paths consistent so users don't have to reach for Reset just to
+    # defeat the incremental shortcut.
+    if body.full_rescan:
+        cleared = await repo_repo.reset_head_shas()
+        await db.commit()
+        logger.info(
+            "scan_full_rescan_cleared_shas",
+            org_id=str(org.id),
+            repos_cleared=cleared,
+        )
+
     scan_id = str(uuid.uuid4())
     await create_scan_progress(scan_id, str(org.id))
 
@@ -151,7 +172,7 @@ async def get_scan_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Scan not found: {scan_id}",
         )
-    return scan_progress
+    return await enrich_status_with_phases(db, org.id, scan_progress)
 
 
 @router.post(
