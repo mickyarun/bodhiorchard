@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from app.services.event_bus import publish
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,7 +109,6 @@ async def send_race_invite_notification(
     )
 
     from app.models.notification import Notification, NotificationType
-    from app.services.event_bus import publish
 
     notif_id = uuid.uuid4()
     deep_link = f"/raceview/{room_id}"
