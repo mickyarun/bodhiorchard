@@ -81,6 +81,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("permission_seed_failed_at_startup")
 
+    # 4b. Reconcile orphan scans. Any scan still in a non-terminal
+    # status with no running task (i.e. updated_at older than 60s at
+    # fresh-process boot) gets marked ``failed`` with a restart-hint
+    # error so the frontend exits its polling loop and surfaces a
+    # Resume button instead of waiting indefinitely for a coroutine
+    # that was torn down mid-run.
+    from app.services.scan_progress import reconcile_orphan_scans
+
+    try:
+        orphaned = await reconcile_orphan_scans()
+        if orphaned:
+            logger.info("scan_orphans_reconciled_at_startup", count=orphaned)
+    except Exception:
+        logger.warning("scan_orphan_reconcile_failed_at_startup", exc_info=True)
+
     # 5. Seed agent skills + BUD stage mappings for all orgs (idempotent)
     from app.models.organization import Organization
     from app.services.bud_stage_seeder import seed_stage_mappings_for_org

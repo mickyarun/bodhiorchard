@@ -79,6 +79,26 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         )
         return result.scalar_one_or_none()
 
+    async def reset_head_shas(self) -> int:
+        """Clear ``head_sha`` + ``last_scanned_at`` on every active repo.
+
+        Called by ``POST /scan/reset`` so the next scan treats each repo
+        as a first-time index — the SHA-diff in ``phase_a_scan_mode``
+        sees no prior SHA and forces a full rebuild.
+
+        Returns:
+            Number of rows updated.
+        """
+        result = await self._db.execute(
+            update(TrackedRepository)
+            .where(
+                TrackedRepository.org_id == self._org_id,
+                TrackedRepository.status == RepoStatus.ACTIVE,
+            )
+            .values(head_sha=None, last_scanned_at=None)
+        )
+        return result.rowcount
+
     async def upsert(self, path: str, name: str) -> TrackedRepository:
         """Insert a new repo or re-activate if previously removed/ignored.
 

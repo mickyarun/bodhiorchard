@@ -799,42 +799,9 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         return list(result.scalars().all())
 
     # --- Soft-delete / reactivate (transactional safety) ---
-
-    async def soft_delete_by_category_excluding_source(
-        self,
-        category: str,
-        *,
-        exclude_source: str | None = None,
-    ) -> list[uuid.UUID]:
-        """Soft-delete items in a category by setting is_active=False.
-
-        Unlike ``delete_by_category_excluding_source``, this preserves data
-        so it can be rolled back via ``reactivate_by_ids`` if the scan
-        pipeline fails.
-
-        Args:
-            category: Category to deactivate.
-            exclude_source: Source value to exclude from deactivation.
-
-        Returns:
-            List of deactivated item IDs (for scoped rollback).
-        """
-        # First collect IDs, then bulk-update
-        id_stmt = select(KnowledgeItem.id).where(
-            KnowledgeItem.org_id == self._org_id,
-            KnowledgeItem.category == category,
-            KnowledgeItem.is_active.is_(True),
-        )
-        if exclude_source:
-            id_stmt = id_stmt.where(KnowledgeItem.source != exclude_source)
-        id_rows = await self._db.execute(id_stmt)
-        ids = [row[0] for row in id_rows.all()]
-        if not ids:
-            return []
-        await self._db.execute(
-            sql_update(KnowledgeItem).where(KnowledgeItem.id.in_(ids)).values(is_active=False)
-        )
-        return ids
+    # Org-wide soft-delete was replaced in P13 by scope-to-changed-repos
+    # via ``KnowledgeItemScanRepository.soft_delete_by_repo_ids``. The
+    # rollback path still uses ``reactivate_by_ids`` below to undo it.
 
     async def reactivate_by_ids(self, ids: list[uuid.UUID]) -> int:
         """Reactivate specific soft-deleted items for rollback on scan failure.

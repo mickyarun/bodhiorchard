@@ -46,6 +46,24 @@
           </template>
           Rebuilds the entire index from scratch. Use when the index seems out of sync or after major refactors.
         </v-tooltip>
+        <v-tooltip content-class="scan-tooltip" location="bottom" max-width="280">
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              v-if="scanStatus !== 'running'"
+              variant="outlined"
+              size="small"
+              color="error"
+              prepend-icon="mdi-nuke"
+              :loading="resetting"
+              :disabled="settingsStore.repos.length === 0 || !settingsStore.allReposMapped"
+              @click="confirmReset"
+            >
+              Reset Index
+            </v-btn>
+          </template>
+          Hard-wipes every scan-sourced feature and skill profile, clears repo SHAs, and starts a full rescan. Use when a bad scan left stale data that Full Rescan can't clear.
+        </v-tooltip>
       </div>
     </div>
 
@@ -193,15 +211,27 @@
     </v-expand-transition>
 
     <v-expand-transition>
-      <v-alert
+      <v-card
         v-if="scanStatus === 'failed'"
-        type="error"
-        variant="tonal"
-        density="compact"
-        class="mb-4"
+        variant="outlined"
+        class="scan-failed-card mb-4"
       >
-        Scan failed: {{ scanError }}
-      </v-alert>
+        <div class="scan-failed-header d-flex align-center ga-3 px-4 py-3">
+          <v-icon icon="mdi-alert-circle" color="error" size="20" />
+          <div class="flex-grow-1">
+            <div class="text-body-2 font-weight-medium">Scan failed</div>
+            <div class="text-caption text-medium-emphasis">{{ scanError }}</div>
+          </div>
+        </div>
+        <v-divider />
+        <ScanPhaseTimeline
+          v-if="scanStore.phases.length"
+          :phases="scanStore.phases"
+          :resuming="resuming"
+          class="px-2 pt-2 pb-1"
+          @retry="onPhaseRetry"
+        />
+      </v-card>
     </v-expand-transition>
 
     <!-- Repository table -->
@@ -905,12 +935,21 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import DirectoryPicker from '@/components/setup/DirectoryPicker.vue'
 import api from '@/services/api'
+import ScanPhaseTimeline from '@/components/scan/ScanPhaseTimeline.vue'
 import { useScanSocket } from '@/composables/useScanSocket'
-import type { ScanStatusData, RepoScanWarning } from '@/composables/useScanSocket'
+import type {
+  PhaseStatus,
+  RepoScanWarning,
+  ScanStatusData,
+} from '@/composables/useScanSocket'
+import { useScanStore } from '@/stores/scan'
 import type { RepoInfo } from '@/types'
 
 const settingsStore = useSettingsStore()
 const { startTracking: startScanWs, stopTracking: stopScanWs } = useScanSocket()
+const scanStore = useScanStore()
+const resuming = ref(false)
+const resetting = ref(false)
 
 // Disable repo editing while a scan is running
 const isLocked = computed(() => scanStatus.value === 'running')
@@ -1117,34 +1156,47 @@ watch(showAddRepoDialog, async (open) => {
 onMounted(async () => {
   fetchIndexStats()
   settingsStore.fetchRepos()
-
-  // Resume tracking if a scan is running (from this page or setup)
-  const savedScanId = localStorage.getItem('bodhiorchard_scan_id')
-  if (savedScanId && scanStatus.value === 'idle') {
-    currentScanId = savedScanId
-    scanStatus.value = 'running'
-    scanStatusLabel.value = 'Scanning...'
-    startPolling()
-    return
-  }
-
-  // Fallback: check backend for active scan (e.g. page opened mid-scan)
-  if (scanStatus.value === 'idle') {
-    try {
-      const { data } = await api.get('/setup/checklist-status')
-      if (data.scanInProgress && data.scanId) {
-        currentScanId = data.scanId
-        localStorage.setItem('bodhiorchard_scan_id', currentScanId)
-        scanStatus.value = 'running'
-        scanProgress.value = data.scanProgress || 0
-        scanStatusLabel.value = 'Scanning...'
-        startPolling()
-      }
-    } catch {
-      // Ignore — setup endpoint may not be available
-    }
-  }
+  await hydrateLatestScan()
 })
+
+/** Single source of truth on mount: ask the backend for the org's most
+ * recent scan and render whatever state it's in. Replaces the previous
+ * localStorage hints, which could silently drift out of sync with the
+ * backend (lost on cache clear, stale across devices, wiped on log-out).
+ */
+async function hydrateLatestScan(): Promise<void> {
+  try {
+    const res = await api.get<ScanStatusData | ''>('/v1/skills/scan/latest', {
+      validateStatus: (s) => s === 200 || s === 204,
+    })
+    if (res.status === 204 || !res.data) {
+      return // Clean state — no scans ever, or endpoint gave no payload.
+    }
+    const data = res.data as ScanStatusData
+    scanStore.ingestStatus(data)
+    currentScanId = data.scanId
+    // The backend's status is the active *phase label* while a scan
+    // is in flight (e.g. ``indexing_code``, ``analyzing_skills``) —
+    // only ``completed`` and ``failed`` are terminal. Everything else
+    // means "running"; hydrate the tracker accordingly. Previously we
+    // matched the literal ``'running'`` which never fires in
+    // production and left the UI stuck on a stale card after a
+    // tab-switch during an active scan.
+    if (data.status === 'failed') {
+      scanStatus.value = 'failed'
+      scanError.value = data.error || 'Scan failed.'
+    } else if (data.status !== 'completed') {
+      scanStatus.value = 'running'
+      scanProgress.value = data.progressPct || 0
+      scanStatusLabel.value = data.statusLabel || formatStatusLabel(data.status)
+      startPolling()
+    }
+    // status === 'completed' → nothing to render; the index stats above
+    // already reflect the successful outcome.
+  } catch {
+    // Endpoint errors aren't surfaced — the page renders its clean state.
+  }
+}
 
 onUnmounted(() => {
   stopScanWs()
@@ -1412,12 +1464,64 @@ async function triggerScan(fullRescan: boolean = false): Promise<void> {
     scanStatusLabel.value = 'Starting'
     const { data } = await api.post('/v1/skills/scan', { fullRescan: Boolean(fullRescan) })
     currentScanId = data.scanId
-    localStorage.setItem('bodhiorchard_scan_id', currentScanId)
     startPolling()
   } catch (err: unknown) {
     scanStatus.value = 'failed'
     const axiosErr = err as { response?: { data?: { detail?: string } } }
     scanError.value = axiosErr?.response?.data?.detail || 'Failed to start scan.'
+  }
+}
+
+async function confirmReset(): Promise<void> {
+  const ok = window.confirm(
+    'Reset Index will hard-delete every scan-sourced feature and skill ' +
+      'profile in this org and then kick off a full rescan. BUD-authored ' +
+      'features are preserved. Continue?',
+  )
+  if (!ok) return
+  resetting.value = true
+  try {
+    const { data } = await api.post<{
+      newScanId: string
+      featuresDeleted: number
+      skillProfilesDeleted: number
+      reposReset: number
+    }>('/v1/skills/scan/reset')
+    currentScanId = data.newScanId
+    scanStatus.value = 'running'
+    scanError.value = ''
+    scanProgress.value = 0
+    scanStatusLabel.value = 'Starting fresh rescan'
+    startPolling()
+  } catch (err) {
+    const axiosErr = err as { response?: { data?: { detail?: string } } }
+    scanStatus.value = 'failed'
+    scanError.value = axiosErr?.response?.data?.detail || 'Reset failed.'
+  } finally {
+    resetting.value = false
+  }
+}
+
+async function onPhaseRetry(row: PhaseStatus): Promise<void> {
+  // Re-run one specific phase (optionally scoped to one repo). Mints
+  // a child scan that copies every other DONE/SKIPPED checkpoint so
+  // the retry only redoes the phase the user pointed at.
+  resuming.value = true
+  try {
+    const newScanId = await scanStore.retryPhase(row.phase, row.repoId ?? undefined)
+    if (newScanId) {
+      currentScanId = newScanId
+      scanStatus.value = 'running'
+      scanError.value = ''
+      scanProgress.value = 0
+      scanStatusLabel.value = 'Starting'
+      startPolling()
+    }
+  } catch (err) {
+    const axiosErr = err as { response?: { data?: { detail?: string } } }
+    scanError.value = axiosErr?.response?.data?.detail || 'Retry failed.'
+  } finally {
+    resuming.value = false
   }
 }
 
@@ -1430,6 +1534,9 @@ function startPolling(): void {
     scanProgress.value = data.progressPct || 0
     scanStatusLabel.value = data.statusLabel || formatStatusLabel(data.status)
     scanResult.value.repoWarnings = data.repoWarnings || []
+    // Feed the Pinia store so the shared timeline + Resume button read
+    // from a single source of truth across this page and SetupChecklist.
+    scanStore.ingestStatus(data)
   }
 
   function handleComplete(data: ScanStatusData): void {
@@ -1444,7 +1551,6 @@ function startPolling(): void {
       synthesisWarning: data.synthesisWarning || '',
       repoWarnings: data.repoWarnings || [],
     }
-    localStorage.removeItem('bodhiorchard_scan_id')
     fetchIndexStats()
     notifyScanDone(true, data.featuresIndexed || 0, data.profilesFound || 0)
   }
@@ -1452,7 +1558,8 @@ function startPolling(): void {
   function handleError(error: string): void {
     scanStatus.value = 'failed'
     scanError.value = error || 'Scan failed.'
-    localStorage.removeItem('bodhiorchard_scan_id')
+    // No localStorage write: on next mount the page asks
+    // /scan/latest for the authoritative state.
     notifyScanDone(false)
   }
 
@@ -1504,3 +1611,13 @@ function formatStatusLabel(status: string): string {
   return labels[status] || status
 }
 </script>
+
+<style scoped>
+.scan-failed-card {
+  border-color: rgba(var(--v-theme-error), 0.35) !important;
+  background: rgba(var(--v-theme-error), 0.04);
+}
+.scan-failed-header {
+  background: rgba(var(--v-theme-error), 0.06);
+}
+</style>

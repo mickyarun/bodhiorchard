@@ -19,6 +19,48 @@ export interface RepoScanWarning {
   hint: string | null
 }
 
+/** Matches backend `ScanPhase` enum values. Stringly-typed here since
+ * the TS side doesn't generate the enum from the Python source — one
+ * new phase requires adding a string in both places, caught immediately
+ * because the timeline component won't render unknown phases. */
+export type ScanPhaseCode =
+  | 'mode_detection'
+  | 'gitnexus_index'
+  | 'repo_setup'
+  | 'stale_cleanup'
+  | 'skill_extraction'
+  | 'design_system_extract'
+  | 'feature_synthesis'
+  | 'skill_remap'
+  | 'feature_merge'
+  | 'embedding_backfill'
+  | 'persist_results'
+
+export type PhaseCheckpointStatus =
+  | 'pending'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'skipped'
+
+/** One row in the per-phase timeline the `ScanPhaseTimeline` renders. */
+export interface PhaseStatus {
+  phase: ScanPhaseCode
+  phaseLabel: string
+  scope: 'per_repo' | 'global'
+  repoId: string | null
+  repoName: string | null
+  status: PhaseCheckpointStatus
+  attempt: number
+  errorCode: string | null
+  errorMessage: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  /** True when the checkpoint was copied from a prior scan's DONE row
+   * with matching SHA — the phase body didn't actually run this time. */
+  shaReused: boolean
+}
+
 export interface ScanStatusData {
   scanId: string
   status: string
@@ -33,6 +75,12 @@ export interface ScanStatusData {
   synthesisWarning: string | null
   setupPrMessage: string | null
   repoWarnings: RepoScanWarning[]
+  /** Per-phase timeline. Empty on legacy / pre-migration scans — the
+   * UI must fall back to the aggregate progress bar in that case. */
+  phases: PhaseStatus[]
+  /** Set on resumed / retried scans; points back to the scan this one
+   * inherits done/skipped checkpoints from. */
+  parentScanId: string | null
   error: string | null
 }
 

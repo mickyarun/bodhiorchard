@@ -59,6 +59,59 @@ class RepoScanWarning(BaseModel):
     hint: str | None = None
 
 
+class PhaseStatus(BaseModel):
+    """One row of the per-phase timeline the frontend renders.
+
+    Derived from a ``scan_phase_checkpoints`` row with three extras:
+
+    - ``phase_label`` — the human-readable name (same pattern as
+      ``ScanStatus.status_label``).
+    - ``repo_name`` — resolved from ``tracked_repositories`` so the
+      timeline doesn't have to do a separate lookup.
+    - ``sha_reused`` — ``True`` when ``started_at == finished_at``,
+      which is how ``insert_reused`` marks a row copied from a prior
+      scan's cached payload.
+
+    All fields are optional so the same DTO can describe either a
+    fresh running phase or a terminal checkpoint.
+    """
+
+    phase: str
+    phase_label: str = Field(alias="phaseLabel")
+    scope: str
+    repo_id: str | None = Field(default=None, alias="repoId")
+    repo_name: str | None = Field(default=None, alias="repoName")
+    status: str
+    attempt: int = 1
+    error_code: str | None = Field(default=None, alias="errorCode")
+    error_message: str | None = Field(default=None, alias="errorMessage")
+    started_at: str | None = Field(default=None, alias="startedAt")
+    finished_at: str | None = Field(default=None, alias="finishedAt")
+    sha_reused: bool = Field(default=False, alias="shaReused")
+
+    model_config = {"populate_by_name": True}
+
+
+_PHASE_LABELS: dict[str, str] = {
+    "mode_detection": "Detecting changes",
+    "gitnexus_index": "Indexing code structure",
+    "repo_setup": "Setting up repository",
+    "stale_cleanup": "Cleaning stale references",
+    "skill_extraction": "Analysing developer skills",
+    "design_system_extract": "Extracting design system",
+    "feature_synthesis": "Synthesising features",
+    "skill_remap": "Remapping skills to features",
+    "feature_merge": "Merging cross-repo features",
+    "embedding_backfill": "Generating embeddings",
+    "persist_results": "Saving results",
+}
+
+
+def phase_label(phase: str) -> str:
+    """Human-readable label for a ``ScanPhase`` value, with a safe fallback."""
+    return _PHASE_LABELS.get(phase, phase.replace("_", " ").capitalize())
+
+
 class ScanStatus(BaseModel):
     """Status of a running or completed scan."""
 
@@ -74,6 +127,8 @@ class ScanStatus(BaseModel):
     synthesis_warning: str | None = Field(default=None, alias="synthesisWarning")
     setup_pr_message: str | None = Field(default=None, alias="setupPrMessage")
     repo_warnings: list[RepoScanWarning] = Field(default_factory=list, alias="repoWarnings")
+    phases: list[PhaseStatus] = Field(default_factory=list)
+    parent_scan_id: str | None = Field(default=None, alias="parentScanId")
     error: str | None = None
 
     @computed_field(alias="statusLabel")  # type: ignore[misc]
