@@ -10,16 +10,14 @@ from dataclasses import dataclass
 
 import structlog
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_db
 from app.core.security import verify_password
 from app.models.organization import Organization
 from app.models.user import User
-from app.models.user_mcp_token import UserMCPToken
 from app.repositories.organization import OrganizationRepository
+from app.repositories.user_mcp_token import UserMCPTokenRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -129,15 +127,8 @@ async def verify_mcp_token(
 
     # 2. Check per-user tokens — filter by prefix (indexed), then bcrypt
     prefix = compute_token_prefix(token)
-    result = await db.execute(
-        select(UserMCPToken)
-        .where(UserMCPToken.token_prefix == prefix)
-        .options(
-            selectinload(UserMCPToken.user),
-            selectinload(UserMCPToken.organization),
-        )
-    )
-    for ut in result.scalars().all():
+    candidates = await UserMCPTokenRepository(db).list_by_prefix_with_relations(prefix)
+    for ut in candidates:
         if verify_password(token, ut.token_hash):
             logger.debug(
                 "mcp_auth_user_token",

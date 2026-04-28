@@ -16,12 +16,14 @@ from app.repositories.base import BaseRepository
 class TrackedRepoRepository(BaseRepository[TrackedRepository]):
     """Repository for TrackedRepository, scoped to an organization."""
 
-    def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
+    def __init__(self, db: AsyncSession, *, org_id: uuid.UUID | None = None) -> None:
         """Initialize the repository.
 
         Args:
             db: Async SQLAlchemy session.
-            org_id: Organization UUID for scoping queries.
+            org_id: Organization UUID for scoping queries. If ``None``,
+                queries are unscoped — only valid for cross-org lookups
+                (e.g. resolving the org for an inbound webhook).
         """
         super().__init__(TrackedRepository, db, org_id=org_id)
 
@@ -238,6 +240,12 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
             ).order_by(TrackedRepository.name)
         )
         return list(result.all())
+
+    async def get_name_by_id(self, repo_id: uuid.UUID) -> str | None:
+        """Return only the ``name`` column for a tracked repo, or None."""
+        stmt = self._scoped(select(TrackedRepository.name).where(TrackedRepository.id == repo_id))
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def get_by_github_full_name(
         self,

@@ -12,10 +12,15 @@ import hmac
 
 import structlog
 from fastapi import APIRouter, Request, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt_secret
 from app.database import AsyncSessionLocal
+from app.models.organization import Organization
 from app.models.tracked_repository import TrackedRepository
+from app.repositories.organization import OrganizationRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
+from app.services.github_webhook_handler import handle_github_event
 
 logger = structlog.get_logger(__name__)
 
@@ -105,8 +110,6 @@ async def github_webhook(request: Request) -> Response:
             logger.info("github_installation_id_auto_detected", install_id=install_id)
 
         # Dispatch to handler
-        from app.services.github_webhook_handler import handle_github_event
-
         await handle_github_event(
             org_id=org.id,
             repo=repo,
@@ -119,23 +122,12 @@ async def github_webhook(request: Request) -> Response:
 
 
 async def _resolve_org_from_repo(
-    db: "AsyncSession",  # noqa: F821
+    db: AsyncSession,
     full_name: str,
-) -> tuple[TrackedRepository | None, "Organization | None"]:  # noqa: F821
+) -> tuple[TrackedRepository | None, Organization | None]:
     """Look up org from a GitHub repo full name (cross-org search)."""
-    from sqlalchemy import select
-
-    from app.models.organization import Organization
-
-    stmt = (
-        select(TrackedRepository)
-        .where(TrackedRepository.github_repo_full_name == full_name)
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    repo = result.scalar_one_or_none()
+    repo = await TrackedRepoRepository(db).get_by_github_full_name(full_name)
     if not repo:
         return None, None
-
-    org = await db.get(Organization, repo.org_id)
+    org = await OrganizationRepository(db).get_by_id(repo.org_id)
     return repo, org

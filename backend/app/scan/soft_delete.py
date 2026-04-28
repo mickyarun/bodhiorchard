@@ -35,11 +35,11 @@ import uuid
 from typing import TYPE_CHECKING
 
 import structlog
-from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
-from app.models.knowledge_item import KnowledgeItem
 from app.repositories.knowledge_item import KnowledgeItemRepository
+from app.repositories.knowledge_item_scan import KnowledgeItemScanRepository
+from app.services.git_analyzer import get_head_sha
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,9 +72,6 @@ async def soft_delete_for_changed_repos(
         ``rollback_soft_deleted_features`` can restore exactly this
         set on pipeline failure.
     """
-    from app.repositories.knowledge_item_scan import KnowledgeItemScanRepository
-    from app.services.git_analyzer import get_head_sha
-
     changed_repo_ids: list[uuid.UUID] = []
     for path in repo_paths:
         tracked = await tracked_repo_repo.get_by_path(path)
@@ -127,34 +124,22 @@ async def rollback_soft_deleted_features(
 
     try:
         async with AsyncSessionLocal() as recovery_db:
+            ki_recovery = KnowledgeItemRepository(recovery_db, org_id=org_id)
+
             # Pull the (id, title) pairs for the soft-deleted candidates.
-            candidate_rows = await recovery_db.execute(
-                select(KnowledgeItem.id, KnowledgeItem.title).where(
-                    KnowledgeItem.org_id == org_id,
-                    KnowledgeItem.id.in_(deactivated_ids),
-                )
-            )
-            candidates = list(candidate_rows.all())
+            candidates = await ki_recovery.get_id_title_pairs_by_ids(deactivated_ids)
             if not candidates:
                 return
 
-            titles = {title for _, title in candidates}
             # Find titles that are currently held by an ACTIVE
             # feature_registry row — these slots are taken.
-            active_rows = await recovery_db.execute(
-                select(KnowledgeItem.title).where(
-                    KnowledgeItem.org_id == org_id,
-                    KnowledgeItem.category == "feature_registry",
-                    KnowledgeItem.is_active.is_(True),
-                    KnowledgeItem.title.in_(titles),
-                )
+            taken_titles = await ki_recovery.get_active_feature_titles_in(
+                {title for _, title in candidates}
             )
-            taken_titles = {title for (title,) in active_rows.all()}
 
             superseded_ids = [cid for cid, title in candidates if title in taken_titles]
             restorable_ids = [cid for cid, title in candidates if title not in taken_titles]
 
-            ki_recovery = KnowledgeItemRepository(recovery_db, org_id=org_id)
             purged = 0
             restored = 0
             if superseded_ids:

@@ -13,11 +13,11 @@ import time
 
 import structlog
 from fastapi import APIRouter, Request, Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
 from app.models.organization import Organization
+from app.repositories.organization import OrganizationRepository
 from app.schemas.jobs import TriageJobPayload
 from app.schemas.slack import SlackEventWrapper, SlackMessageEvent, SlackReactionEvent
 from app.services.job_queue import JOB_TRIAGE, create_job
@@ -105,8 +105,7 @@ async def _resolve_org_by_team_id(db: AsyncSession, team_id: str) -> Organizatio
     Returns:
         The matching Organization, or None.
     """
-    result = await db.execute(select(Organization).where(Organization.slack_team_id == team_id))
-    return result.scalar_one_or_none()
+    return await OrganizationRepository(db).get_by_slack_team_id(team_id)
 
 
 # ── Main webhook endpoint ──────────────────────────────────────────

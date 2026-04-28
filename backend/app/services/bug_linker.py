@@ -16,11 +16,11 @@ Called from:
 import uuid
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
 from app.models.bug import Bug
+from app.repositories.bud import BUDRepository
 from app.services.embedding_service import embedding_service
 
 logger = structlog.get_logger(__name__)
@@ -85,24 +85,11 @@ async def find_closest_bud(
     Returns ``None`` if no BUD is within the threshold distance, or if
     no BUDs have embeddings at all.
     """
-    stmt = (
-        select(
-            BUDDocument,
-            BUDDocument.embedding.cosine_distance(vector).label("distance"),
-        )
-        .where(
-            BUDDocument.org_id == org_id,
-            BUDDocument.embedding.is_not(None),
-        )
-        .order_by("distance")
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    row = result.first()
-    if row is None:
+    pair = await BUDRepository(db, org_id=org_id).find_nearest_full_with_distance(vector)
+    if pair is None:
         return None
 
-    bud, distance = row
+    bud, distance = pair
     if distance > threshold:
         logger.debug(
             "bug_link_no_match",

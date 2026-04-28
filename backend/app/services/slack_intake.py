@@ -8,15 +8,15 @@ Each function is called from background tasks in the Slack webhook handler.
 """
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.organization import Organization
 from app.models.triage_session import TriageSession, TriageStatus
-from app.models.user import User, UserRole
+from app.models.user import UserRole
 from app.repositories.bud import BUDRepository
 from app.repositories.triage_session import TriageSessionRepository
+from app.repositories.user import UserRepository
 from app.services import slack_client
 from app.services.feature_lifecycle import create_planned_feature
 from app.services.prompt_builder import build_prd_prompt, build_slack_triage_prompt
@@ -205,19 +205,9 @@ async def handle_pm_approval(
         return  # Session not in approval state
 
     # Verify the approver is a PM or org owner
-    from app.models.user import OrgToUser
-
-    result = await db.execute(
-        select(User, OrgToUser.role)
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .where(
-            OrgToUser.org_id == org.id,
-            User.slack_id == approver_slack_id,
-        )
-    )
-    row = result.one_or_none()
-    approver = row[0] if row else None
-    approver_role_val = row[1] if row else None
+    pair = await UserRepository(db).get_by_slack_id_with_role(org.id, approver_slack_id)
+    approver = pair[0] if pair else None
+    approver_role_val = pair[1] if pair else None
 
     if approver is None or approver_role_val not in _PM_ROLES:
         await slack_client.chat_post_message(

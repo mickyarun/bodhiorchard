@@ -17,7 +17,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +44,82 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
             org_id: Organization UUID for scoping queries.
         """
         super().__init__(SynthesizedFeature, db, org_id=org_id)
+
+    async def list_for_merge_scan(
+        self, scan_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str | None, dict | None, list[str] | None, dict | None]]:
+        """Per-scan synth rows surfaced by the merge prompt collector.
+
+        Returns ``(knowledge_item_id, description, capabilities,
+        cluster_names, code_locations)`` for non-superseded synth rows
+        in the given scan, oldest-first so the collector can let later
+        rows overwrite earlier ones for the same KI.
+        """
+        stmt = self._scoped(
+            select(
+                SynthesizedFeature.knowledge_item_id,
+                SynthesizedFeature.description,
+                SynthesizedFeature.capabilities,
+                SynthesizedFeature.cluster_names,
+                SynthesizedFeature.code_locations,
+            )
+            .where(
+                SynthesizedFeature.scan_id == scan_id,
+                SynthesizedFeature.superseded_at.is_(None),
+                SynthesizedFeature.knowledge_item_id.is_not(None),
+            )
+            .order_by(SynthesizedFeature.synthesized_at.asc())
+        )
+        result = await self._db.execute(stmt)
+        return [
+            (
+                row.knowledge_item_id,
+                row.description,
+                row.capabilities,
+                row.cluster_names,
+                row.code_locations,
+            )
+            for row in result.all()
+        ]
+
+    async def list_clusters_for_kis(
+        self, knowledge_item_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, list[str] | None]]:
+        """Cluster names from the latest non-superseded synth row per KI.
+
+        Returns ``(knowledge_item_id, cluster_names)`` ordered newest
+        first so the caller can deduplicate while preserving recency.
+        """
+        if not knowledge_item_ids:
+            return []
+        stmt = self._scoped(
+            select(SynthesizedFeature.knowledge_item_id, SynthesizedFeature.cluster_names)
+            .where(
+                SynthesizedFeature.knowledge_item_id.in_(knowledge_item_ids),
+                SynthesizedFeature.superseded_at.is_(None),
+            )
+            .order_by(SynthesizedFeature.synthesized_at.desc())
+        )
+        result = await self._db.execute(stmt)
+        return [(row.knowledge_item_id, row.cluster_names) for row in result.all()]
+
+    async def count_active_per_repo(self) -> dict[uuid.UUID, int]:
+        """Per-repo counts of non-superseded synthesized features for the org.
+
+        Returns:
+            Dict ``repo_id -> active synth count``. Repos with zero active
+            rows are absent.
+        """
+        stmt = self._scoped(
+            select(
+                SynthesizedFeature.repo_id,
+                func.count(SynthesizedFeature.id).label("synth_count"),
+            )
+            .where(SynthesizedFeature.superseded_at.is_(None))
+            .group_by(SynthesizedFeature.repo_id)
+        )
+        result = await self._db.execute(stmt)
+        return {row.repo_id: row.synth_count for row in result.all()}
 
     # --- Writes ---------------------------------------------------------
 
@@ -138,7 +214,7 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
 
         These rows represent features the merge subprocess saw in its
         prompt and rationally chose not to merge — a unique feature has
-        no duplicate, so ``merge_features`` is never called on it.
+        no duplicate, so ``apply_feature_merge_plan`` never absorbs it.
         They are canonical by default; flagging them as ``unvisited``
         (the legacy single-tier audit's behaviour) produced spurious
         ``merge_incomplete`` failures and prevented the SKILL_REMAP
@@ -233,13 +309,35 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
 
         A single feature can have multiple rows when several repos each
         synthesised the same title; all of them share the same merge fate.
-        Used by the ``merge_features`` MCP handler and the post-merge
-        audit to mark outcomes in lockstep.
+        Used by the post-merge audit to mark outcomes in lockstep when
+        a single feature was synthesised under multiple repo runs.
         """
         result = await self._db.execute(
             self._scoped(
                 select(SynthesizedFeature).where(
                     SynthesizedFeature.feature_title == feature_title,
+                    SynthesizedFeature.superseded_at.is_(None),
+                )
+            ).order_by(SynthesizedFeature.synthesized_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def find_current_by_knowledge_item_ids(
+        self,
+        knowledge_item_ids: list[uuid.UUID],
+    ) -> list[SynthesizedFeature]:
+        """Return all current rows whose ``knowledge_item_id`` matches one of the inputs.
+
+        Id-keyed counterpart to :meth:`find_current_by_title`. Used by
+        ``apply_feature_merge_plan`` so the post-merge audit is stable
+        under feature rename or title collision.
+        """
+        if not knowledge_item_ids:
+            return []
+        result = await self._db.execute(
+            self._scoped(
+                select(SynthesizedFeature).where(
+                    SynthesizedFeature.knowledge_item_id.in_(knowledge_item_ids),
                     SynthesizedFeature.superseded_at.is_(None),
                 )
             ).order_by(SynthesizedFeature.synthesized_at.asc())

@@ -5,9 +5,10 @@
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, String, and_, case, cast, func, or_, select
+from sqlalchemy import Select, String, and_, case, cast, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dev_activity import DevActivityLog
@@ -114,6 +115,103 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
         """Initialize the repository."""
         super().__init__(DevActivityLog, db, org_id=org_id)
+
+    async def map_shas_to_bud_ids(self, shas: list[str]) -> dict[str, uuid.UUID]:
+        """Distinct ``sha -> bud_id`` mapping for matching commit SHAs."""
+        if not shas:
+            return {}
+        stmt = self._scoped(
+            select(DevActivityLog.commit_sha, DevActivityLog.bud_id).where(
+                DevActivityLog.commit_sha.in_(shas),
+                DevActivityLog.bud_id.is_not(None),
+            )
+        ).distinct()
+        result = await self._db.execute(stmt)
+        return {row[0]: row[1] for row in result.all() if row[0] and row[1]}
+
+    async def count_events_by_user_in_window(
+        self,
+        event_types: list[str],
+        since: datetime,
+        until: datetime,
+    ) -> dict[tuple[uuid.UUID, str], int]:
+        """Count events grouped by ``(user_id, event_type)`` in a time window.
+
+        Returns:
+            Mapping of ``(user_id, event_type)`` tuples to counts. Rows
+            with NULL ``user_id`` are excluded.
+        """
+        stmt = self._scoped(
+            select(
+                DevActivityLog.user_id,
+                DevActivityLog.event_type,
+                func.count().label("cnt"),
+            )
+            .where(
+                DevActivityLog.created_at >= since,
+                DevActivityLog.created_at < until,
+                DevActivityLog.event_type.in_(event_types),
+                DevActivityLog.user_id.isnot(None),
+            )
+            .group_by(DevActivityLog.user_id, DevActivityLog.event_type)
+        )
+        result = await self._db.execute(stmt)
+        return {(row.user_id, row.event_type): row.cnt for row in result.all()}
+
+    async def commit_sha_exists(self, commit_sha: str) -> bool:
+        """Return True if a commit event with this SHA is already recorded."""
+        stmt = self._scoped(
+            select(DevActivityLog.id)
+            .where(
+                DevActivityLog.event_type == "commit",
+                DevActivityLog.commit_sha == commit_sha,
+            )
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def backfill_session_bud(self, session_id: str, bud_id: uuid.UUID) -> None:
+        """Set ``bud_id`` on prior session events that lacked one."""
+        stmt = (
+            update(DevActivityLog)
+            .where(
+                DevActivityLog.session_id == session_id,
+                DevActivityLog.org_id == self._org_id,
+                DevActivityLog.bud_id.is_(None),
+            )
+            .values(bud_id=bud_id)
+        )
+        await self._db.execute(stmt)
+
+    async def list_recent_branch_activity_for_bud(
+        self,
+        bud_id: uuid.UUID,
+        *,
+        limit: int = 200,
+    ) -> list[tuple[str | None, str | None, uuid.UUID | None, str | None]]:
+        """Recent branch-tagged dev events for a BUD.
+
+        Returns ``(branch, actor_name, user_id, files_changed)`` tuples for
+        the most recent ``limit`` rows that have a non-null ``branch``.
+        Used to summarize cross-developer activity on a BUD's branches.
+        """
+        stmt = self._scoped(
+            select(
+                DevActivityLog.branch,
+                DevActivityLog.actor_name,
+                DevActivityLog.user_id,
+                DevActivityLog.files_changed,
+            )
+            .where(
+                DevActivityLog.bud_id == bud_id,
+                DevActivityLog.branch.is_not(None),
+            )
+            .order_by(DevActivityLog.created_at.desc())
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.all())
 
     def _commit_filter(
         self,

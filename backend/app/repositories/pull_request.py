@@ -4,11 +4,13 @@
 """Pull request repository for GitHub PR tracking."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pull_request import PRState, PullRequest
+from app.models.tracked_repository import TrackedRepository
 from app.repositories.base import BaseRepository
 
 
@@ -18,6 +20,69 @@ class PullRequestRepository(BaseRepository[PullRequest]):
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
         """Initialize the repository."""
         super().__init__(PullRequest, db, org_id=org_id)
+
+    async def get_by_repo_and_number(
+        self, repo_full_name: str, pr_number: int
+    ) -> PullRequest | None:
+        """Look up a PR by ``(repo_full_name, github_pr_number)`` within the org."""
+        stmt = self._scoped(
+            select(PullRequest)
+            .where(
+                PullRequest.github_pr_number == pr_number,
+                PullRequest.github_repo_full_name == repo_full_name,
+            )
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def map_shas_to_bud_ids(self, shas: list[str]) -> dict[str, uuid.UUID]:
+        """For each SHA in ``shas`` that matches a PR's ``merge_commit_sha``
+        with a non-null ``bud_id``, return ``sha -> bud_id``.
+        """
+        if not shas:
+            return {}
+        stmt = self._scoped(
+            select(PullRequest.merge_commit_sha, PullRequest.bud_id).where(
+                PullRequest.merge_commit_sha.in_(shas),
+                PullRequest.bud_id.is_not(None),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return {row[0]: row[1] for row in result.all() if row[0] and row[1]}
+
+    async def count_opened_by_author_in_window(
+        self, since: datetime, until: datetime
+    ) -> dict[uuid.UUID, int]:
+        """Count PRs opened per author with ``created_at`` in [since, until)."""
+        stmt = self._scoped(
+            select(PullRequest.author_user_id, func.count().label("cnt"))
+            .where(
+                PullRequest.created_at >= since,
+                PullRequest.created_at < until,
+                PullRequest.author_user_id.isnot(None),
+            )
+            .group_by(PullRequest.author_user_id)
+        )
+        result = await self._db.execute(stmt)
+        return {row.author_user_id: row.cnt for row in result.all()}
+
+    async def count_merged_by_author_in_window(
+        self, since: datetime, until: datetime
+    ) -> dict[uuid.UUID, int]:
+        """Count PRs merged per author with ``merged_at`` in [since, until)."""
+        stmt = self._scoped(
+            select(PullRequest.author_user_id, func.count().label("cnt"))
+            .where(
+                PullRequest.state == PRState.MERGED,
+                PullRequest.merged_at >= since,
+                PullRequest.merged_at < until,
+                PullRequest.author_user_id.isnot(None),
+            )
+            .group_by(PullRequest.author_user_id)
+        )
+        result = await self._db.execute(stmt)
+        return {row.author_user_id: row.cnt for row in result.all()}
 
     async def get_by_github_pr_id(self, github_pr_id: int) -> PullRequest | None:
         """Look up a PR by its GitHub global ID."""
@@ -45,6 +110,46 @@ class PullRequestRepository(BaseRepository[PullRequest]):
         )
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_open_for_bud_with_repo(
+        self,
+        bud_id: uuid.UUID,
+        *,
+        impacted_repo_ids: list[uuid.UUID] | None = None,
+    ) -> list[tuple[PullRequest, TrackedRepository | None]]:
+        """List open PRs for a BUD joined with their tracked repository.
+
+        When ``impacted_repo_ids`` is provided, the result includes any open
+        PR that is either linked to ``bud_id`` directly OR targets one of
+        the impacted repos. Used by release-stage views that need to surface
+        open PRs in repos affected by the BUD even if the PR forgot to set
+        a ``bud_id``.
+
+        Args:
+            bud_id: The BUD UUID to filter on.
+            impacted_repo_ids: Additional repo UUIDs to include open PRs for.
+
+        Returns:
+            List of ``(PullRequest, TrackedRepository | None)`` tuples.
+        """
+        filters = [PullRequest.bud_id == bud_id]
+        if impacted_repo_ids:
+            filters.append(PullRequest.repo_id.in_(impacted_repo_ids))
+
+        stmt = self._scoped(
+            select(PullRequest, TrackedRepository)
+            .join(
+                TrackedRepository,
+                PullRequest.repo_id == TrackedRepository.id,
+                isouter=True,
+            )
+            .where(
+                PullRequest.state == PRState.OPEN,
+                or_(*filters),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return list(result.tuples().all())
 
     async def get_repo_ids_with_prs(self, bud_id: uuid.UUID) -> set[str]:
         """Get set of repo_id strings that have at least one PR for this BUD."""

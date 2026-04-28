@@ -9,7 +9,6 @@ import uuid
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -242,12 +241,8 @@ async def unlink_slack_member(
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
 
-    result = await db.execute(
-        select(User)
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .where(OrgToUser.org_id == org.id, User.slack_id == slack_id)
-    )
-    user = result.scalar_one_or_none()
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_slack_id_in_org(org.id, slack_id)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -6,7 +6,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +19,33 @@ class BUDTodoRepository(BaseRepository[BUDTodo]):
 
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
         super().__init__(BUDTodo, db, org_id=org_id)
+
+    async def list_unassigned_non_checkpoint_for_bud(self, bud_id: uuid.UUID) -> list[BUDTodo]:
+        """Pending unassigned non-checkpoint todos for a BUD, ordered by sequence."""
+        stmt = self._scoped(
+            select(BUDTodo)
+            .where(
+                BUDTodo.bud_id == bud_id,
+                BUDTodo.assignee_id.is_(None),
+                BUDTodo.status == BUDTodoStatus.PENDING.value,
+                BUDTodo.is_checkpoint.is_(False),
+            )
+            .order_by(BUDTodo.sequence.asc())
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_remaining_for_bud(self, bud_id: uuid.UUID) -> int:
+        """Count non-checkpoint todos that are not yet completed for a BUD."""
+        stmt = self._scoped(
+            select(func.count(BUDTodo.id)).where(
+                BUDTodo.bud_id == bud_id,
+                BUDTodo.status != BUDTodoStatus.COMPLETED.value,
+                BUDTodo.is_checkpoint.is_(False),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return int(result.scalar_one())
 
     async def list_for_bud(self, bud_id: uuid.UUID) -> list[BUDTodo]:
         """Return all TODOs for a BUD ordered by sequence, with assignee eager-loaded."""

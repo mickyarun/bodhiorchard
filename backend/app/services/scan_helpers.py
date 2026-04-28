@@ -21,6 +21,7 @@ from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.skill_profile import SkillProfileRepository
 from app.services.embedding_service import embedding_service
 from app.services.git_analyzer import DevSkillEntry, FeatureMap
+from app.utils.code_locations import merge_code_locations
 
 logger = structlog.get_logger(__name__)
 
@@ -269,30 +270,6 @@ async def load_feature_map(
     # Sort by longest path first for greedy matching
     result.sort(key=lambda entry: max((len(p) for p in entry[1]), default=0), reverse=True)
     return result
-
-
-def merge_code_locations(
-    existing: dict[str, list[str]] | None,
-    incoming: dict[str, list[str]] | None,
-) -> dict[str, list[str]]:
-    """Merge two code_locations dicts, unioning paths per layer.
-
-    Shared helper used by the MCP handler, repository junction logic,
-    and feature merge pipeline.
-    """
-    merged: dict[str, list[str]] = {}
-    all_layers = set((existing or {}).keys()) | set((incoming or {}).keys())
-    for layer in sorted(all_layers):
-        existing_paths: list[str] = (existing or {}).get(layer, [])
-        incoming_paths: list[str] = (incoming or {}).get(layer, [])
-        seen: set[str] = set(existing_paths)
-        combined = list(existing_paths)
-        for p in incoming_paths:
-            if p not in seen:
-                seen.add(p)
-                combined.append(p)
-        merged[layer] = combined
-    return merged
 
 
 async def link_orphan_features(

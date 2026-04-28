@@ -15,7 +15,9 @@ from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
+from app.models.tracked_repository import TrackedRepository
 from app.repositories.base import BaseRepository
+from app.utils.code_locations import merge_code_locations
 
 
 class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
@@ -35,6 +37,148 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         super().__init__(KnowledgeItem, db, org_id=org_id)
 
     # --- Single-item lookup ---
+
+    async def list_features_with_repo_paths(
+        self,
+    ) -> list[tuple[uuid.UUID, str | None, str | None, str | None, dict | None, str | None]]:
+        """Per-repo rows for active feature_registry items.
+
+        Returns ``(ki_id, title, source_ref, feature_status,
+        code_locations, repo_path)`` tuples — one row per linked repo,
+        plus a row with ``repo_path=None`` for orphans. The dashboard
+        tree groups by ki_id and emits one feature node per linked repo.
+        """
+        stmt = self._scoped(
+            select(
+                KnowledgeItem.id.label("ki_id"),
+                KnowledgeItem.title,
+                KnowledgeItem.source_ref,
+                KnowledgeItem.feature_status,
+                KnowledgeRepoLink.code_locations,
+                TrackedRepository.path.label("repo_path"),
+            )
+            .outerjoin(
+                KnowledgeRepoLink,
+                KnowledgeRepoLink.knowledge_id == KnowledgeItem.id,
+            )
+            .outerjoin(
+                TrackedRepository,
+                TrackedRepository.id == KnowledgeRepoLink.repo_id,
+            )
+            .where(KnowledgeItem.category == "feature_registry")
+            .where(KnowledgeItem.is_active.is_(True))
+            .order_by(KnowledgeItem.created_at.desc())
+        )
+        result = await self._db.execute(stmt)
+        return [
+            (
+                row.ki_id,
+                row.title,
+                row.source_ref,
+                row.feature_status,
+                row.code_locations,
+                row.repo_path,
+            )
+            for row in result.all()
+        ]
+
+    async def list_active_features_with_repo_names(
+        self,
+    ) -> list[tuple[uuid.UUID, str, list[str] | None, str | None, str | None]]:
+        """One row per (active feature_registry KI, linked repo) pair.
+
+        Returns ``(id, title, tags, content, repo_name)`` tuples; rows
+        without a linked repo include ``repo_name=None``. Used by the
+        cross-repo merge collector to bucket features by KI id.
+        """
+        stmt = self._scoped(
+            select(
+                KnowledgeItem.id,
+                KnowledgeItem.title,
+                KnowledgeItem.tags,
+                KnowledgeItem.content,
+                TrackedRepository.name.label("repo_name"),
+            )
+            .outerjoin(KnowledgeRepoLink, KnowledgeRepoLink.knowledge_id == KnowledgeItem.id)
+            .outerjoin(TrackedRepository, TrackedRepository.id == KnowledgeRepoLink.repo_id)
+            .where(
+                KnowledgeItem.category == "feature_registry",
+                KnowledgeItem.is_active.is_(True),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row.id, row.title, row.tags, row.content, row.repo_name) for row in result.all()]
+
+    async def get_linked_repo_ids(self) -> set[uuid.UUID]:
+        """Distinct repo ids that have at least one knowledge_to_repo link
+        joined to an org-scoped KnowledgeItem.
+        """
+        stmt = (
+            select(KnowledgeRepoLink.repo_id)
+            .distinct()
+            .join(KnowledgeItem, KnowledgeItem.id == KnowledgeRepoLink.knowledge_id)
+            .where(KnowledgeItem.org_id == self._org_id)
+        )
+        result = await self._db.execute(stmt)
+        return set(result.scalars().all())
+
+    async def get_id_title_pairs_by_ids(
+        self, item_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str]]:
+        """Fetch ``(id, title)`` pairs for the given knowledge item ids in this org.
+
+        Used by recovery code that needs to compare titles before
+        reactivation. Returns an empty list when ``item_ids`` is empty.
+        """
+        if not item_ids:
+            return []
+        stmt = self._scoped(
+            select(KnowledgeItem.id, KnowledgeItem.title).where(KnowledgeItem.id.in_(item_ids))
+        )
+        result = await self._db.execute(stmt)
+        return [(row.id, row.title) for row in result.all()]
+
+    async def get_active_feature_titles_in(self, titles: set[str]) -> set[str]:
+        """Subset of ``titles`` that already have an active feature_registry row.
+
+        Used to detect title collisions before reactivating soft-deleted
+        rows (the partial unique index allows only one active per title).
+        """
+        if not titles:
+            return set()
+        stmt = self._scoped(
+            select(KnowledgeItem.title).where(
+                KnowledgeItem.category == "feature_registry",
+                KnowledgeItem.is_active.is_(True),
+                KnowledgeItem.title.in_(titles),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return {row[0] for row in result.all()}
+
+    async def find_orphan_feature_ids(self) -> list[uuid.UUID]:
+        """Active feature_registry items missing any repo-link row.
+
+        Returns:
+            List of KnowledgeItem ids for active features with no
+            ``knowledge_to_repo`` row in the scoped org. Empty list is the
+            healthy state; non-empty surfaces drift the per-phase audits
+            could not catch.
+        """
+        stmt = self._scoped(
+            select(KnowledgeItem.id)
+            .outerjoin(
+                KnowledgeRepoLink,
+                KnowledgeRepoLink.knowledge_id == KnowledgeItem.id,
+            )
+            .where(
+                KnowledgeItem.category == "feature_registry",
+                KnowledgeItem.is_active.is_(True),
+                KnowledgeRepoLink.repo_id.is_(None),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [row.id for row in result.all()]
 
     async def get_active_by_id(self, item_id: uuid.UUID) -> KnowledgeItem | None:
         """Fetch a single active knowledge item by ID within the org.
@@ -167,6 +311,28 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
             )
         if title_query:
             stmt = stmt.where(KnowledgeItem.title.ilike(f"%{title_query}%"))
+        result = await self._db.execute(stmt)
+        return result.scalar() or 0
+
+    async def distinct_active_repo_count(self, category: str) -> int:
+        """Count distinct repos linked to active items in this category.
+
+        Used by the cross-repo merge gate: merge runs once an org has
+        active features linked to two or more repos, regardless of
+        whether the current scan is single- or multi-repo. This makes
+        adding a new repo to an org with prior canonicals trigger
+        merge against the existing set instead of skipping.
+        """
+        stmt = (
+            select(func.count(func.distinct(KnowledgeRepoLink.repo_id)))
+            .select_from(KnowledgeRepoLink)
+            .join(KnowledgeItem, KnowledgeItem.id == KnowledgeRepoLink.knowledge_id)
+            .where(
+                KnowledgeItem.org_id == self._org_id,
+                KnowledgeItem.category == category,
+                KnowledgeItem.is_active.is_(True),
+            )
+        )
         result = await self._db.execute(stmt)
         return result.scalar() or 0
 
@@ -877,6 +1043,4 @@ def _merge_junction_code_locations(
     incoming: dict[str, list[str]] | None,
 ) -> dict[str, list[str]]:
     """Merge two code_locations dicts, unioning paths per layer."""
-    from app.services.scan_helpers import merge_code_locations
-
     return merge_code_locations(existing, incoming)

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bug import Bug, BugStatus
 from app.models.user import User
+from app.repositories.bud import BUDRepository
 from app.repositories.bug import BugRepository
 from app.repositories.user import UserRepository
 from app.schemas.bug import (
@@ -345,19 +346,9 @@ async def _resolve_bud_info(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud_ids: set[uuid.UUID],
-) -> dict[uuid.UUID, dict]:
+) -> dict[uuid.UUID, dict[str, str | int]]:
     """Batch-resolve BUD IDs to {number, title} dicts."""
-    if not bud_ids:
-        return {}
-    from sqlalchemy import select
-
-    from app.models.bud import BUDDocument
-
-    stmt = select(BUDDocument.id, BUDDocument.bud_number, BUDDocument.title).where(
-        BUDDocument.org_id == org_id, BUDDocument.id.in_(bud_ids)
-    )
-    result = await db.execute(stmt)
-    return {row.id: {"number": row.bud_number, "title": row.title} for row in result.all()}
+    return await BUDRepository(db, org_id=org_id).get_minimal_info_by_ids(bud_ids)
 
 
 async def _award_bug_sp(

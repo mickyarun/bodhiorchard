@@ -20,7 +20,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Integer, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,7 @@ from app.models.scan_phase import (
     ScanPhase,
 )
 from app.models.scan_phase_checkpoint import ScanPhaseCheckpoint
+from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.repositories.base import BaseRepository
 
 
@@ -50,6 +51,34 @@ class ScanPhaseCheckpointRepository(BaseRepository[ScanPhaseCheckpoint]):
             org_id: Organization UUID for scoping queries.
         """
         super().__init__(ScanPhaseCheckpoint, db, org_id=org_id)
+
+    async def list_active_repo_cluster_counts(
+        self, scan_id: uuid.UUID, phase: ScanPhase
+    ) -> list[tuple[uuid.UUID, str, int]]:
+        """For each active repo with a checkpoint in this scan/phase,
+        return (repo_id, repo_name, cluster_count) where ``cluster_count``
+        is the integer ``feature_count`` from the checkpoint payload.
+
+        Used by the end-of-scan audit to compare gitnexus cluster counts
+        against the synth output.
+        """
+        stmt = self._scoped(
+            select(
+                ScanPhaseCheckpoint.repo_id,
+                TrackedRepository.name,
+                ScanPhaseCheckpoint.payload["feature_count"]
+                .astext.cast(Integer)
+                .label("cluster_count"),
+            )
+            .join(TrackedRepository, TrackedRepository.id == ScanPhaseCheckpoint.repo_id)
+            .where(
+                ScanPhaseCheckpoint.scan_id == scan_id,
+                ScanPhaseCheckpoint.phase == phase,
+                TrackedRepository.status == RepoStatus.ACTIVE,
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row.repo_id, row.name, row.cluster_count) for row in result.all()]
 
     # --- Read paths -----------------------------------------------------
 

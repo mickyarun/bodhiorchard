@@ -14,15 +14,15 @@ import contextlib
 import uuid
 
 import structlog
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.auth import MCPAuthResult
 from app.mcp.handlers_hooks import _resolve_bud, _resolve_repo_id
 from app.models.agent_activity import AgentActivityLog
-from app.models.agent_skill import AgentSkill
-from app.models.bud import BUDDocument
-from app.models.tracked_repository import TrackedRepository
+from app.repositories.agent_activity import AgentActivityLogRepository
+from app.repositories.agent_skill import AgentSkillRepository
+from app.repositories.bud import BUDRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.agent_activity import (
     AgentActivityHookRequest,
     AgentActivityHookResponse,
@@ -83,26 +83,20 @@ async def handle_agent_activity(
             task_id = uuid.UUID(body.agent_task_id)
 
     # 6. Dedup: skip if this commit SHA was already recorded
-    if body.event_type == "commit" and body.commit_sha:
-        dup_stmt = (
-            select(AgentActivityLog.id)
-            .where(
-                AgentActivityLog.org_id == org.id,
-                AgentActivityLog.event_type == "commit",
-                AgentActivityLog.commit_sha == body.commit_sha,
-            )
-            .limit(1)
+    activity_repo = AgentActivityLogRepository(db, org_id=org.id)
+    if (
+        body.event_type == "commit"
+        and body.commit_sha
+        and await activity_repo.commit_sha_exists(body.commit_sha)
+    ):
+        logger.debug("agent_activity_commit_duplicate", sha=body.commit_sha[:8])
+        return AgentActivityHookResponse(
+            success=True,
+            event_type=body.event_type,
+            bud_number=bud_number,
+            user_resolved=user_id is not None,
+            skill_resolved=skill_id is not None,
         )
-        dup = await db.execute(dup_stmt)
-        if dup.scalar_one_or_none() is not None:
-            logger.debug("agent_activity_commit_duplicate", sha=body.commit_sha[:8])
-            return AgentActivityHookResponse(
-                success=True,
-                event_type=body.event_type,
-                bud_number=bud_number,
-                user_resolved=user_id is not None,
-                skill_resolved=skill_id is not None,
-            )
 
     # 7. Merge author_email into metadata
     meta = dict(body.metadata) if body.metadata else {}
@@ -137,28 +131,17 @@ async def handle_agent_activity(
 
     # 9. Backfill prior session events that arrived without a bud_id
     if bud_id and body.session_id:
-        await db.execute(
-            update(AgentActivityLog)
-            .where(
-                AgentActivityLog.session_id == body.session_id,
-                AgentActivityLog.org_id == org.id,
-                AgentActivityLog.bud_id.is_(None),
-            )
-            .values(bud_id=bud_id)
-        )
+        await activity_repo.backfill_session_bud(body.session_id, bud_id)
 
     # 10. Publish for real-time WebSocket updates (org-scoped for security)
     # Resolve repo_name for the payload so live-spawned robots have positioning data
     _pub_repo_name: str | None = None
     if repo_id:
-        _repo_row = await db.execute(
-            select(TrackedRepository.name).where(TrackedRepository.id == repo_id)
-        )
-        _pub_repo_name = _repo_row.scalar_one_or_none()
+        _pub_repo_name = await TrackedRepoRepository(db, org_id=org.id).get_name_by_id(repo_id)
 
     # Resolve impacted_repo_names from the BUD (needed by the Colyseus
     # server simulation to drive multi-repo shuffle walking).
-    impacted_repo_names = await _resolve_impacted_repos(db, bud_id)
+    impacted_repo_names = await _resolve_impacted_repos(db, org.id, bud_id)
 
     agent_activity_payload = {
         "id": str(log.id),
@@ -210,20 +193,13 @@ async def _resolve_skill_id(
     """Resolve a skill_slug to agent_skills.id for this org."""
     if not skill_slug:
         return None
-    stmt = (
-        select(AgentSkill.id)
-        .where(
-            AgentSkill.org_id == org_id,
-            AgentSkill.skill_slug == skill_slug,
-        )
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    return result.scalar_one_or_none()
+    skill = await AgentSkillRepository(db, org_id=org_id).get_by_slug(skill_slug)
+    return skill.id if skill else None
 
 
 async def _resolve_impacted_repos(
     db: AsyncSession,
+    org_id: uuid.UUID,
     bud_id: uuid.UUID | None,
 ) -> list[str]:
     """Resolve the list of repo names a BUD impacts.
@@ -234,6 +210,7 @@ async def _resolve_impacted_repos(
 
     Args:
         db: Async DB session.
+        org_id: Organization UUID for tenant scoping.
         bud_id: BUD document id; when None, returns an empty list.
 
     Returns:
@@ -241,9 +218,7 @@ async def _resolve_impacted_repos(
     """
     if not bud_id:
         return []
-    stmt = select(BUDDocument.impacted_repos).where(BUDDocument.id == bud_id)
-    result = await db.execute(stmt)
-    raw = result.scalar_one_or_none()
+    raw = await BUDRepository(db, org_id=org_id).get_impacted_repos(bud_id)
     if not raw:
         return []
     names: list[str] = []
