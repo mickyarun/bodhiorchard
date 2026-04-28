@@ -12,12 +12,11 @@ import uuid
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.developer_xp import RewardType
-from app.models.user import OrgToUser
 from app.repositories.developer_xp import DeveloperXPRepository, RewardEventRepository
+from app.repositories.user import UserRepository
 from app.services.event_bus import publish
 
 logger = structlog.get_logger(__name__)
@@ -130,10 +129,5 @@ async def get_user_role(
     org_id: uuid.UUID,
 ) -> str:
     """Resolve a user's role within an org. Returns role string or 'developer' as default."""
-    stmt = select(OrgToUser.role).where(
-        OrgToUser.user_id == user_id,
-        OrgToUser.org_id == org_id,
-    )
-    result = await db.execute(stmt)
-    role = result.scalar_one_or_none()
+    role = await UserRepository(db).get_role(user_id, org_id)
     return role.value if role else "developer"

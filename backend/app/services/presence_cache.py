@@ -24,12 +24,11 @@ import zoneinfo
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt_secret
-from app.models.organization import Organization
-from app.models.user import User
+from app.repositories.organization import OrganizationRepository
+from app.repositories.user import UserRepository
 from app.schemas.settings import PresenceSettings
 from app.services import slack_client
 from app.services.colyseus_bridge import publish_to_colyseus
@@ -163,14 +162,7 @@ async def refresh_all_presence(db: AsyncSession) -> None:
     Iterates over organizations with a slack_bot_token, then queries
     all users with a slack_id and fetches their presence.
     """
-    result = await db.execute(
-        select(
-            Organization.id,
-            Organization.slack_bot_token,
-            Organization.config,
-        ).where(Organization.slack_bot_token.isnot(None))
-    )
-    orgs = result.all()
+    orgs = await OrganizationRepository(db).list_with_slack_token_and_config()
 
     polled = 0
     errors = 0
@@ -247,18 +239,7 @@ async def _refresh_org_presence(
         bot_user=auth_info.get("user"),
     )
 
-    from app.models.user import OrgToUser
-
-    user_result = await db.execute(
-        select(User.id, User.slack_id)
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .where(
-            OrgToUser.org_id == org_id,
-            User.slack_id.isnot(None),
-            User.is_active.is_(True),
-        )
-    )
-    user_slack_pairs = [(user_id, slack_id) for user_id, slack_id in user_result.all() if slack_id]
+    user_slack_pairs = await UserRepository(db).list_active_slack_user_pairs(org_id)
     logger.debug(
         "presence_refresh_org",
         org_id=org_id_str,

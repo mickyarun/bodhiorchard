@@ -21,16 +21,15 @@ import uuid
 from typing import Any
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.auth import MCPAuthResult
 from app.mcp.handler_utils import require_non_empty
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
-from app.models.dev_activity import DevActivityLog
-from app.models.pull_request import PullRequest
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_todo import BUDTodoRepository
+from app.repositories.dev_activity import DevActivityLogRepository
+from app.repositories.pull_request import PullRequestRepository
 from app.services.bud_timeline import record_event
 from app.services.event_bus import publish
 
@@ -286,17 +285,7 @@ async def handle_complete_todo(
 
 
 async def _count_remaining_todos(db: AsyncSession, org_id: uuid.UUID, bud_id: uuid.UUID) -> int:
-    from sqlalchemy import func
-
-    result = await db.execute(
-        select(func.count(BUDTodo.id)).where(
-            BUDTodo.org_id == org_id,
-            BUDTodo.bud_id == bud_id,
-            BUDTodo.status != BUDTodoStatus.COMPLETED.value,
-            BUDTodo.is_checkpoint.is_(False),
-        )
-    )
-    return int(result.scalar_one())
+    return await BUDTodoRepository(db, org_id=org_id).count_remaining_for_bud(bud_id)
 
 
 # ── Cross-branch context for get_bud_plan ──────────────────────────
@@ -317,22 +306,9 @@ async def _collect_other_branches(
     """
     branch_info: dict[str, dict[str, Any]] = {}
 
-    activity = await db.execute(
-        select(
-            DevActivityLog.branch,
-            DevActivityLog.actor_name,
-            DevActivityLog.user_id,
-            DevActivityLog.files_changed,
-        )
-        .where(
-            DevActivityLog.org_id == org_id,
-            DevActivityLog.bud_id == bud_id,
-            DevActivityLog.branch.is_not(None),
-        )
-        .order_by(DevActivityLog.created_at.desc())
-        .limit(200)
-    )
-    for branch, actor_name, user_id, files_changed in activity.all():
+    activity_repo = DevActivityLogRepository(db, org_id=org_id)
+    activity = await activity_repo.list_recent_branch_activity_for_bud(bud_id)
+    for branch, actor_name, user_id, files_changed in activity:
         if user_id == current_user_id:
             continue
         if not branch or not branch.startswith(f"bud-{bud_number:03d}"):
@@ -346,10 +322,8 @@ async def _collect_other_branches(
                 if path:
                     entry["recent_files"].add(path)
 
-    prs = await db.execute(
-        select(PullRequest).where(PullRequest.org_id == org_id, PullRequest.bud_id == bud_id)
-    )
-    for pr in prs.scalars().all():
+    prs = await PullRequestRepository(db, org_id=org_id).list_for_bud(bud_id)
+    for pr in prs:
         if pr.head_branch in branch_info:
             branch_info[pr.head_branch]["pr"] = {
                 "number": pr.github_pr_number,

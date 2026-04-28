@@ -39,14 +39,12 @@ import uuid
 from dataclasses import dataclass, field
 
 import structlog
-from sqlalchemy import Integer, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
 from app.models.scan_phase import ScanPhase
-from app.models.scan_phase_checkpoint import ScanPhaseCheckpoint
-from app.models.synthesized_feature import SynthesizedFeature
-from app.models.tracked_repository import RepoStatus, TrackedRepository
+from app.repositories.knowledge_item import KnowledgeItemRepository
+from app.repositories.scan_phase_checkpoint import ScanPhaseCheckpointRepository
+from app.repositories.synthesized_feature import SynthesizedFeatureRepository
 from app.scan.context import ScanContext
 from app.scan.session import with_session
 
@@ -145,55 +143,28 @@ async def _find_repos_with_clusters_but_no_synth(
     not "this is wrong".
     """
     # Per-repo synth counts in one query.
-    synth_counts_stmt = (
-        select(
-            SynthesizedFeature.repo_id,
-            func.count(SynthesizedFeature.id).label("synth_count"),
-        )
-        .where(
-            SynthesizedFeature.org_id == ctx.org_id,
-            SynthesizedFeature.superseded_at.is_(None),
-        )
-        .group_by(SynthesizedFeature.repo_id)
-    )
-    synth_rows = (await session.execute(synth_counts_stmt)).all()
-    synth_by_repo = {row.repo_id: row.synth_count for row in synth_rows}
+    synth_repo = SynthesizedFeatureRepository(session, org_id=ctx.org_id)
+    synth_by_repo = await synth_repo.count_active_per_repo()
 
     # GitNexus cluster counts for this scan, joined to the active repo.
     # The ``feature_count`` payload key is set by ``_run_gitnexus_index``
     # in scan_repo_loop.py — staying in sync with that contract.
-    cluster_stmt = (
-        select(
-            ScanPhaseCheckpoint.repo_id,
-            TrackedRepository.name,
-            ScanPhaseCheckpoint.payload["feature_count"]
-            .astext.cast(Integer)
-            .label("cluster_count"),
-        )
-        .join(
-            TrackedRepository,
-            TrackedRepository.id == ScanPhaseCheckpoint.repo_id,
-        )
-        .where(
-            ScanPhaseCheckpoint.scan_id == ctx.scan_id,
-            ScanPhaseCheckpoint.phase == ScanPhase.GITNEXUS_INDEX,
-            ScanPhaseCheckpoint.org_id == ctx.org_id,
-            TrackedRepository.status == RepoStatus.ACTIVE,
-        )
+    checkpoint_repo = ScanPhaseCheckpointRepository(session, org_id=ctx.org_id)
+    cluster_rows = await checkpoint_repo.list_active_repo_cluster_counts(
+        ctx.scan_id, ScanPhase.GITNEXUS_INDEX
     )
-    cluster_rows = (await session.execute(cluster_stmt)).all()
 
     anomalies: list[RepoAnomaly] = []
-    for row in cluster_rows:
-        cluster_count = row.cluster_count or 0
+    for repo_id, repo_name, cluster_count in cluster_rows:
+        cluster_count = cluster_count or 0
         if cluster_count <= 0:
             continue
-        synth_count = synth_by_repo.get(row.repo_id, 0)
+        synth_count = synth_by_repo.get(repo_id, 0)
         if synth_count == 0:
             anomalies.append(
                 RepoAnomaly(
-                    repo_id=row.repo_id,
-                    repo_name=row.name,
+                    repo_id=repo_id,
+                    repo_name=repo_name,
                     cluster_count=cluster_count,
                     synth_count=0,
                 )
@@ -213,18 +184,4 @@ async def _find_orphan_features(
     e.g. a merge that consolidated two features and accidentally
     detached their links. Empty list is the healthy state.
     """
-    stmt = (
-        select(KnowledgeItem.id)
-        .outerjoin(
-            KnowledgeRepoLink,
-            KnowledgeRepoLink.knowledge_id == KnowledgeItem.id,
-        )
-        .where(
-            KnowledgeItem.org_id == ctx.org_id,
-            KnowledgeItem.category == "feature_registry",
-            KnowledgeItem.is_active.is_(True),
-            KnowledgeRepoLink.repo_id.is_(None),
-        )
-    )
-    result = await session.execute(stmt)
-    return [row.id for row in result.all()]
+    return await KnowledgeItemRepository(session, org_id=ctx.org_id).find_orphan_feature_ids()

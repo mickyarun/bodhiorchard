@@ -13,17 +13,18 @@ import re
 import uuid
 
 import structlog
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.auth import MCPAuthResult
 from app.models.dev_activity import DevActivityLog
-from app.models.tracked_repository import TrackedRepository
 from app.repositories.bud import BUDRepository
+from app.repositories.dev_activity import DevActivityLogRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.dev_activity import DevActivityHookRequest, DevActivityHookResponse
 from app.services.colyseus_bridge import publish_to_colyseus
 from app.services.event_bus import publish
+from app.services.user_resolution import resolve_user_by_email
+from app.services.xp_service import award_xp, check_and_award_streak
 
 logger = structlog.get_logger(__name__)
 
@@ -58,8 +59,6 @@ async def handle_dev_activity(
     token_owner_email = user.email if user else None
     resolved_via = "token" if user else "none"
     if user is None and body.author_email:
-        from app.services.user_resolution import resolve_user_by_email
-
         user = await resolve_user_by_email(db, org.id, body.author_email)
         if user:
             resolved_via = "email_fallback"
@@ -96,25 +95,19 @@ async def handle_dev_activity(
     )
 
     # 4. Dedup: skip if this commit SHA was already recorded
-    if body.event_type == "commit" and body.commit_sha:
-        dup_stmt = (
-            select(DevActivityLog.id)
-            .where(
-                DevActivityLog.org_id == org.id,
-                DevActivityLog.event_type == "commit",
-                DevActivityLog.commit_sha == body.commit_sha,
-            )
-            .limit(1)
+    activity_repo = DevActivityLogRepository(db, org_id=org.id)
+    if (
+        body.event_type == "commit"
+        and body.commit_sha
+        and await activity_repo.commit_sha_exists(body.commit_sha)
+    ):
+        logger.debug("hook_commit_duplicate", sha=body.commit_sha[:8])
+        return DevActivityHookResponse(
+            success=True,
+            event_type=body.event_type,
+            bud_number=bud_number,
+            user_resolved=user_id is not None,
         )
-        dup = await db.execute(dup_stmt)
-        if dup.scalar_one_or_none() is not None:
-            logger.debug("hook_commit_duplicate", sha=body.commit_sha[:8])
-            return DevActivityHookResponse(
-                success=True,
-                event_type=body.event_type,
-                bud_number=bud_number,
-                user_resolved=user_id is not None,
-            )
 
     # 5. Merge author_email into metadata for contributor resolution
     meta = dict(body.metadata) if body.metadata else {}
@@ -150,23 +143,12 @@ async def handle_dev_activity(
 
     # Backfill prior session events that arrived without a bud_id
     if bud_id and body.session_id:
-        await db.execute(
-            update(DevActivityLog)
-            .where(
-                DevActivityLog.session_id == body.session_id,
-                DevActivityLog.org_id == org.id,
-                DevActivityLog.bud_id.is_(None),
-            )
-            .values(bud_id=bud_id)
-        )
+        await activity_repo.backfill_session_bud(body.session_id, bud_id)
 
     # Resolve repo_name for real-time payloads (same pattern as handle_agent_activity)
     _pub_repo_name: str | None = None
     if repo_id:
-        _repo_row = await db.execute(
-            select(TrackedRepository.name).where(TrackedRepository.id == repo_id)
-        )
-        _pub_repo_name = _repo_row.scalar_one_or_none()
+        _pub_repo_name = await TrackedRepoRepository(db, org_id=org.id).get_name_by_id(repo_id)
 
     # Publish for real-time WebSocket updates if BUD-linked
     if bud_id:
@@ -207,8 +189,6 @@ async def handle_dev_activity(
     # Award XP for developer activity (non-blocking — XP errors must not break hooks)
     if user_id:
         try:
-            from app.services.xp_service import award_xp, check_and_award_streak
-
             await check_and_award_streak(db, user_id=user_id, org_id=org.id)
             if body.event_type == "commit" and body.commit_sha:
                 await award_xp(

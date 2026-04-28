@@ -28,12 +28,13 @@ from __future__ import annotations
 import asyncio
 import uuid
 from pathlib import Path
+from typing import Any
 
 import structlog
-from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.knowledge_item import KnowledgeItemRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.claude_runner import (
     ClaudeRunnerConfig,
     MCPServerConfig,
@@ -90,40 +91,17 @@ def _list_repo_files(repo_path: Path, max_files: int = 50) -> list[str]:
 async def _collect_feature_dicts(
     db: AsyncSession,
     org_id: uuid.UUID,
-) -> list[dict]:
-    """Collect active features with their repo names for the merge prompt.
+    scan_uuid: uuid.UUID,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return ``(existing_canonicals, new_features)`` for the merge prompt.
 
-    Uses a single joined query to avoid N+1. Returns only features
-    that are linked to at least one repo (orphans are excluded).
+    Thin wrapper around ``feature_merge_collect.collect_feature_dicts`` —
+    kept here so the orchestrator only imports one place for the data,
+    and so callers that mock/patch the collector see a single boundary.
     """
-    from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
-    from app.models.tracked_repository import TrackedRepository
+    from app.scan.global_.feature_merge_collect import collect_feature_dicts
 
-    rows = (
-        await db.execute(
-            sa_select(
-                KnowledgeItem.title,
-                KnowledgeItem.tags,
-                TrackedRepository.name.label("repo_name"),
-            )
-            .outerjoin(KnowledgeRepoLink, KnowledgeRepoLink.knowledge_id == KnowledgeItem.id)
-            .outerjoin(TrackedRepository, TrackedRepository.id == KnowledgeRepoLink.repo_id)
-            .where(
-                KnowledgeItem.org_id == org_id,
-                KnowledgeItem.category == "feature_registry",
-                KnowledgeItem.is_active.is_(True),
-            )
-        )
-    ).all()
-
-    grouped: dict[str, dict] = {}
-    for title, tags, repo_name in rows:
-        if title not in grouped:
-            grouped[title] = {"title": title, "repo_names": [], "tags": tags or []}
-        if repo_name and repo_name not in grouped[title]["repo_names"]:
-            grouped[title]["repo_names"].append(repo_name)
-
-    return [f for f in grouped.values() if f["repo_names"]]
+    return await collect_feature_dicts(db, org_id, scan_uuid)
 
 
 async def _find_repos_without_features(
@@ -135,24 +113,11 @@ async def _find_repos_without_features(
     Returns their name + top-level file listing so the merge prompt
     can ask the LLM to link them to existing features.
     """
-    from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
-    from app.repositories.tracked_repository import TrackedRepoRepository
-
     tr_repo = TrackedRepoRepository(db, org_id=org_id)
     all_repos = await tr_repo.list_active()
 
-    linked_repo_ids = set(
-        (
-            await db.execute(
-                sa_select(KnowledgeRepoLink.repo_id)
-                .distinct()
-                .join(KnowledgeItem, KnowledgeItem.id == KnowledgeRepoLink.knowledge_id)
-                .where(KnowledgeItem.org_id == org_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    ki_repo = KnowledgeItemRepository(db, org_id=org_id)
+    linked_repo_ids = await ki_repo.get_linked_repo_ids()
 
     result: list[dict] = []
     for repo in all_repos:
@@ -172,8 +137,6 @@ async def phase_b3_merge(
     db: AsyncSession,
     org_id: uuid.UUID,
     repo_paths: list[str],
-    is_workspace: bool,
-    total_features_synthesized: int,
     scan_cfg: dict,
     scan_id: str,
     ki_repo: KnowledgeItemRepository,
@@ -188,8 +151,6 @@ async def phase_b3_merge(
         db: Async database session.
         org_id: Organization UUID.
         repo_paths: List of all repo paths being scanned.
-        is_workspace: Whether this is a multi-repo workspace scan.
-        total_features_synthesized: Count of features from synthesis.
         scan_cfg: Scan configuration dict from org config.
         scan_id: Scan identifier for progress tracking.
         ki_repo: Knowledge item repository instance.
@@ -199,77 +160,101 @@ async def phase_b3_merge(
     """
     from app.repositories.organization import OrganizationRepository
     from app.repositories.synthesized_feature import SynthesizedFeatureRepository
+    from app.scan.global_.feature_merge_collect import pick_merge_model
+    from app.scan.prompts import build_merge_prompt
+    from app.services.org_settings import get_merge_models
     from app.services.scan_checkpoints import MergeIncompleteError
     from app.services.scan_helpers import link_orphan_features
     from app.services.scan_phases import make_scan_progress_logger
-    from app.services.scan_pipeline import build_merge_prompt, get_merge_batch_size
     from app.services.scan_progress import update_scan_progress
 
     await update_scan_progress(scan_id, status="generating_embeddings", progress_pct=80)
     await embed_missing_items(db, org_id)
 
     config: dict = {}
-    if is_workspace and total_features_synthesized >= 2 and is_claude_cli_available():
+    # Gate on org-wide cross-repo coverage rather than the current scan's
+    # workspace flag. Adding a new repo to an org with prior canonicals
+    # now triggers merge against the existing set, instead of skipping
+    # merge whenever the current scan happens to be single-repo.
+    distinct_repos = await ki_repo.distinct_active_repo_count("feature_registry")
+    if distinct_repos >= 2 and is_claude_cli_available():
         await update_scan_progress(scan_id, status="merging_features", progress_pct=88)
 
-        linked_features = await _collect_feature_dicts(db, org_id)
+        scan_uuid = uuid.UUID(scan_id)
+        existing_canonicals, new_features = await _collect_feature_dicts(db, org_id, scan_uuid)
         unlinked_repos = await _find_repos_without_features(db, org_id)
 
-        if linked_features:
+        # Skip the LLM call when this scan added nothing new; the post-
+        # merge audit still stamps any genuinely-unique prior rows
+        # CANONICAL via the active-KI fallback below.
+        if new_features:
             await db.commit()
 
-            from app.config import settings
+            from app.config import settings as app_settings
             from app.mcp.auth import create_internal_mcp_token
+            from app.repositories.organization import OrganizationRepository as _OrgRepo
 
-            merge_batch_size = get_merge_batch_size()
-            prev_count = await ki_repo.count_active(category="feature_registry")
-            for _pass in range(3):  # Re-run if batch < total (cross-batch dupes)
-                for batch_start in range(0, len(linked_features), merge_batch_size):
-                    batch = linked_features[batch_start : batch_start + merge_batch_size]
-                    merge_prompt = build_merge_prompt(batch, unlinked_repos=unlinked_repos)
+            org_repo_for_model = _OrgRepo(db)
+            org_for_model = await org_repo_for_model.get_by_id(org_id)
+            org_config_for_model = dict(org_for_model.config or {}) if org_for_model else {}
+            default_model, large_model = get_merge_models(org_config_for_model)
 
-                    merge_token = create_internal_mcp_token(org_id)
-                    merge_cfg = ClaudeRunnerConfig(
-                        max_turns=scan_cfg.get("max_turns", 40),
-                        timeout_seconds=scan_cfg.get("timeout_seconds", 300),
-                        output_format="json",
-                        model=settings.llm.merge_model,
-                        mcp=MCPServerConfig(
-                            backend_url=settings.mcp_backend_url,
-                            mcp_token=merge_token,
-                        ),
-                    )
-                    result = await run_claude_code(
-                        prompt=merge_prompt,
-                        working_dir=str(Path(repo_paths[0]).parent),
-                        config=merge_cfg,
-                        progress_callback=make_scan_progress_logger(
-                            scan_id=scan_id,
-                            phase="feature_merge",
-                        ),
-                    )
-                    if result.success:
-                        logger.info(
-                            "llm_merge_complete",
-                            pass_num=_pass + 1,
-                            batch_size=len(batch),
-                            cost=result.cost_usd,
-                        )
-                    else:
-                        logger.warning("llm_merge_failed", error=result.error)
+            active_count = await ki_repo.count_active(category="feature_registry")
+            chosen_model = pick_merge_model(
+                active_count,
+                default_model=default_model,
+                large_model=large_model,
+            )
+            logger.info(
+                "merge_model_selected",
+                scan_id=scan_id,
+                active_count=active_count,
+                model=chosen_model,
+                existing=len(existing_canonicals),
+                new=len(new_features),
+            )
 
-                new_count = await ki_repo.count_active(category="feature_registry")
-                if new_count >= prev_count:
-                    break  # No merges — done
-                prev_count = new_count
-
-                linked_features = await _collect_feature_dicts(db, org_id)
+            merge_prompt = build_merge_prompt(
+                new_features=new_features,
+                existing_canonicals=existing_canonicals,
+                unlinked_repos=unlinked_repos,
+            )
+            merge_token = create_internal_mcp_token(org_id)
+            merge_cfg = ClaudeRunnerConfig(
+                max_turns=scan_cfg.get("max_turns", 40),
+                timeout_seconds=scan_cfg.get("timeout_seconds", 300),
+                output_format="json",
+                model=chosen_model,
+                mcp=MCPServerConfig(
+                    backend_url=app_settings.mcp_backend_url,
+                    mcp_token=merge_token,
+                ),
+            )
+            result = await run_claude_code(
+                prompt=merge_prompt,
+                working_dir=str(Path(repo_paths[0]).parent),
+                config=merge_cfg,
+                progress_callback=make_scan_progress_logger(
+                    scan_id=scan_id,
+                    phase="feature_merge",
+                ),
+            )
+            if result.success:
+                logger.info(
+                    "llm_merge_complete",
+                    new_count=len(new_features),
+                    existing_count=len(existing_canonicals),
+                    cost=result.cost_usd,
+                )
+            else:
+                logger.warning("llm_merge_failed", error=result.error)
 
             await embed_missing_items(db, org_id)
 
             org_repo = OrganizationRepository(db)
             org = await org_repo.get_by_id(org_id)
-            config = dict(org.config or {})
+            if org is not None:
+                config = dict(org.config or {})
 
     deduped = await dedup_merged_features(db, org_id)
     if deduped:

@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
 from app.models.triage_session import TriageSession, TriageStatus
-from app.models.user import User, UserRole
+from app.models.user import UserRole
 from app.repositories.triage_session import TriageSessionRepository
+from app.repositories.user import UserRepository
 from app.services import slack_client
 
 logger = structlog.get_logger(__name__)
@@ -115,18 +116,7 @@ async def handle_bug_approval(
         return
 
     # Resolve approver + verify PM/admin role
-    from sqlalchemy import select as sql_select
-
-    from app.models.user import OrgToUser
-
-    stmt = (
-        sql_select(User, OrgToUser.role)
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .where(OrgToUser.org_id == org.id, User.slack_id == approver_slack_id)
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    row = result.first()
+    row = await UserRepository(db).get_by_slack_id_with_role(org.id, approver_slack_id)
     if not row:
         await slack_client.chat_post_message(
             bot_token,

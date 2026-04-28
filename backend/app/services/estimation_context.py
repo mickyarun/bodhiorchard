@@ -10,12 +10,16 @@ and historical calibration data to feed the estimation engine.
 import uuid
 
 import structlog
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument, BUDStatus
-from app.models.bug import Bug, BugStatus
-from app.models.skill_profile import SkillProfile
+from app.models.bug import BugStatus
+from app.repositories.bud import BUDRepository
+from app.repositories.bud_estimate import BUDEstimateQueryRepository
+from app.repositories.bug import BugRepository
+from app.repositories.skill_profile import SkillProfileRepository
+from app.services.estimation_engine import DEFAULT_PHASE_DAYS
+from app.services.estimation_heuristics import compute_complexity
 
 logger = structlog.get_logger(__name__)
 
@@ -46,8 +50,6 @@ def compute_bud_complexity(bud: BUDDocument, open_bug_count: int = 0) -> int:
     so existing callers that have not been updated keep working —
     behaviour-preserving.
     """
-    from app.services.estimation_heuristics import compute_complexity
-
     qa_count = len(bud.qa_automation_cases or []) + len(bud.qa_manual_cases or [])
     base = compute_complexity(
         requirements_len=len(bud.requirements_md or ""),
@@ -70,16 +72,10 @@ async def get_bug_context(
     ``{"open_bug_count": int}``; future fields (e.g. severity breakdown,
     per-module counts) slot in here without touching call sites.
     """
-    result = await db.execute(
-        select(func.count())
-        .select_from(Bug)
-        .where(
-            Bug.org_id == org_id,
-            Bug.bud_id == bud.id,
-            Bug.status.in_(_OPEN_BUG_STATUSES),
-        )
+    open_count = await BugRepository(db, org_id=org_id).count_open_for_bud_with_statuses(
+        bud.id, _OPEN_BUG_STATUSES
     )
-    return {"open_bug_count": result.scalar_one()}
+    return {"open_bug_count": open_count}
 
 
 async def get_backlog_context(
@@ -88,25 +84,17 @@ async def get_backlog_context(
     bud: BUDDocument,
 ) -> dict:
     """Gather backlog depth and assignee workload."""
-    from app.repositories.bud_estimate import BUDEstimateQueryRepository
-
     est_repo = BUDEstimateQueryRepository(db, org_id=org_id)
     status_val = bud.status.value if isinstance(bud.status, BUDStatus) else bud.status
     queue_depth = await est_repo.count_ahead_in_queue(bud.bud_number, status_val)
 
     assignee_workload = 0
     if bud.assignee_id:
-        result = await db.execute(
-            select(func.count())
-            .select_from(BUDDocument)
-            .where(
-                BUDDocument.org_id == org_id,
-                BUDDocument.assignee_id == bud.assignee_id,
-                BUDDocument.status.notin_([s.value for s in _TERMINAL_STATUSES]),
-                BUDDocument.id != bud.id,
-            )
+        assignee_workload = await BUDRepository(db, org_id=org_id).count_assignee_workload(
+            bud.assignee_id,
+            [s.value for s in _TERMINAL_STATUSES],
+            exclude_bud_id=bud.id,
         )
-        assignee_workload = result.scalar_one()
 
     return {"queue_depth": queue_depth, "assignee_workload": assignee_workload}
 
@@ -123,13 +111,9 @@ async def get_skill_context(
 
     # Get assignee's skill profiles directly — no LLM call needed.
     # The estimation LLM reads the tech spec and judges relevance itself.
-    sp_result = await db.execute(
-        select(SkillProfile).where(
-            SkillProfile.org_id == org_id,
-            SkillProfile.user_id == bud.assignee_id,
-        )
+    assignee_skills = await SkillProfileRepository(db, org_id=org_id).list_for_user(
+        bud.assignee_id
     )
-    assignee_skills = list(sp_result.scalars().all())
     modules = {sp.module.lower() for sp in assignee_skills}
 
     return {
@@ -157,17 +141,7 @@ async def get_historical_context(
     org_id: uuid.UUID,
 ) -> str:
     """Build few-shot historical context from completed BUDs (if any)."""
-    result = await db.execute(
-        select(BUDDocument)
-        .where(
-            BUDDocument.org_id == org_id,
-            BUDDocument.status.in_([BUDStatus.PROD.value, BUDStatus.CLOSED.value]),
-            BUDDocument.estimated_dates.isnot(None),
-        )
-        .order_by(BUDDocument.updated_at.desc())
-        .limit(5)
-    )
-    completed = list(result.scalars().all())
+    completed = await BUDRepository(db, org_id=org_id).list_recent_completed(limit=5)
     if not completed:
         return ""
 
@@ -219,22 +193,11 @@ async def get_historical_phase_durations(
     bucket has no completed BUDs — caller should treat empty as "fall
     back to LLM-only" (zero historical_weight).
     """
-    from app.services.estimation_engine import DEFAULT_PHASE_DAYS
-
     low = max(1, target_complexity - _COMPLEXITY_BUCKET_HALF_WIDTH)
     high = min(5, target_complexity + _COMPLEXITY_BUCKET_HALF_WIDTH)
-    result = await db.execute(
-        select(BUDDocument)
-        .where(
-            BUDDocument.org_id == org_id,
-            BUDDocument.status.in_([BUDStatus.PROD.value, BUDStatus.CLOSED.value]),
-            BUDDocument.complexity.between(low, high),
-            BUDDocument.created_at.isnot(None),
-        )
-        .order_by(BUDDocument.updated_at.desc())
-        .limit(_HISTORICAL_LIMIT)
+    completed = await BUDRepository(db, org_id=org_id).list_completed_in_complexity_range(
+        low, high, limit=_HISTORICAL_LIMIT
     )
-    completed = list(result.scalars().all())
     if not completed:
         return {}
 

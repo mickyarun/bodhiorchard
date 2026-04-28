@@ -10,15 +10,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
+from app.core.encryption import decrypt_secret
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.organization import Organization
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import User
 from app.repositories.bud import BUDRepository
+from app.repositories.organization import OrganizationRepository
 from app.repositories.triage_session import TriageSessionRepository
+from app.repositories.user import UserRepository
 from app.schemas.triage_session import TriageApprovalRequest, TriageSessionRead
 from app.services import slack_client
+from app.services.bud_agent_trigger import create_agent_task_for_stage
 from app.services.feature_lifecycle import create_planned_feature
+from app.services.slack_intake import _build_bud_content
 
 logger = structlog.get_logger(__name__)
 
@@ -27,10 +32,7 @@ router = APIRouter(tags=["triage"])
 
 async def _get_org(user: User, db: AsyncSession) -> Organization:
     """Resolve the user's organization."""
-    from sqlalchemy import select
-
-    result = await db.execute(select(Organization).where(Organization.id == user.org_id))
-    org = result.scalar_one_or_none()
+    org = await OrganizationRepository(db).get_by_id(user.org_id)
     if org is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
     return org
@@ -93,23 +95,7 @@ async def _resolve_slack_names(
     Returns:
         Mapping of slack_id → user display name.
     """
-    if not slack_ids:
-        return {}
-
-    from sqlalchemy import select
-
-    from app.models.user import OrgToUser
-
-    stmt = (
-        select(User.slack_id, User.name)
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .where(
-            OrgToUser.org_id == org_id,
-            User.slack_id.in_(slack_ids),
-        )
-    )
-    result = await db.execute(stmt)
-    return {row.slack_id: row.name for row in result.all() if row.slack_id and row.name}
+    return await UserRepository(db).get_slack_id_to_name(org_id, slack_ids)
 
 
 @router.post(
@@ -155,8 +141,6 @@ async def approve_triage_session(
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     next_number = await bud_repo.next_bud_number()
 
-    from app.services.slack_intake import _build_bud_content
-
     requirements_md = _build_bud_content(session)
 
     bud = BUDDocument(
@@ -197,8 +181,6 @@ async def approve_triage_session(
         )
 
     # Trigger PRD agent via the agent task system
-    from app.services.bud_agent_trigger import create_agent_task_for_stage
-
     await create_agent_task_for_stage(
         bud, "bud", current_user.org_id, db, triggered_by=current_user.id
     )
@@ -285,7 +267,4 @@ def _get_bot_token(org: Organization) -> str | None:
     """Decrypt and return the Slack bot token from the org, or None."""
     if not org.slack_bot_token:
         return None
-
-    from app.core.encryption import decrypt_secret
-
     return decrypt_secret(org.slack_bot_token)

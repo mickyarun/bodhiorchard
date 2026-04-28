@@ -32,14 +32,13 @@ import uuid
 from typing import Literal
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.bud import BUDTimelineEvent
-from app.models.dev_activity import DevActivityLog
 from app.models.organization import Organization
-from app.models.pull_request import PullRequest
 from app.models.tracked_repository import TrackedRepository
+from app.repositories.bud_timeline import BUDTimelineRepository
+from app.repositories.dev_activity import DevActivityLogRepository
+from app.repositories.pull_request import PullRequestRepository
 from app.schemas.github import GitHubPullRequest
 from app.services.bud_timeline import record_event
 from app.services.event_bus import publish
@@ -71,35 +70,15 @@ async def find_buds_for_shas(
     if not shas:
         return {}
 
-    result_map: dict[str, uuid.UUID] = {}
-
     # Strategy 1: bulk PullRequest.merge_commit_sha lookup
-    pr_stmt = select(PullRequest.merge_commit_sha, PullRequest.bud_id).where(
-        PullRequest.org_id == org_id,
-        PullRequest.merge_commit_sha.in_(shas),
-        PullRequest.bud_id.is_not(None),
-    )
-    pr_result = await db.execute(pr_stmt)
-    for sha, bud_id in pr_result.all():
-        if sha and bud_id:
-            result_map[sha] = bud_id
+    result_map = await PullRequestRepository(db, org_id=org_id).map_shas_to_bud_ids(shas)
 
     # Strategy 2: bulk DevActivityLog.commit_sha lookup for unmatched SHAs
     remaining = [s for s in shas if s not in result_map]
     if remaining:
-        dev_stmt = (
-            select(DevActivityLog.commit_sha, DevActivityLog.bud_id)
-            .where(
-                DevActivityLog.org_id == org_id,
-                DevActivityLog.commit_sha.in_(remaining),
-                DevActivityLog.bud_id.is_not(None),
-            )
-            .distinct()
-        )
-        dev_result = await db.execute(dev_stmt)
-        for sha, bud_id in dev_result.all():
-            if sha and bud_id and sha not in result_map:
-                result_map[sha] = bud_id
+        dev_map = await DevActivityLogRepository(db, org_id=org_id).map_shas_to_bud_ids(remaining)
+        for sha, bud_id in dev_map.items():
+            result_map.setdefault(sha, bud_id)
 
     return result_map
 
@@ -119,13 +98,10 @@ async def _event_already_recorded(
     BUD has very few release events (one per stage per repo, typically).
     """
     event_type = f"merged_to_{stage}"
-    stmt = select(BUDTimelineEvent).where(
-        BUDTimelineEvent.org_id == org_id,
-        BUDTimelineEvent.bud_id == bud_id,
-        BUDTimelineEvent.event_type == event_type,
+    events = await BUDTimelineRepository(db, org_id=org_id).list_for_bud_by_event_type(
+        bud_id, event_type
     )
-    result = await db.execute(stmt)
-    for event in result.scalars():
+    for event in events:
         d = event.detail or {}
         if d.get("release_pr_number") == release_pr_number and d.get("repo_id") == str(repo_id):
             return True
@@ -298,13 +274,9 @@ async def _maybe_auto_close_bud(
         return
 
     # Check which repos already have merged_to_prod events for this BUD
-    stmt = select(BUDTimelineEvent).where(
-        BUDTimelineEvent.org_id == org_id,
-        BUDTimelineEvent.bud_id == bud_id,
-        BUDTimelineEvent.event_type == "merged_to_prod",
+    prod_events = await BUDTimelineRepository(db, org_id=org_id).list_for_bud_by_event_type(
+        bud_id, "merged_to_prod"
     )
-    result = await db.execute(stmt)
-    prod_events = list(result.scalars())
     repos_with_prod = {e.detail.get("repo_id") for e in prod_events if e.detail}
 
     if not impacted_repo_ids.issubset(repos_with_prod):

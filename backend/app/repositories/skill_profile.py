@@ -135,3 +135,58 @@ class SkillProfileRepository(BaseRepository[SkillProfile]):
             select(func.count(SkillProfile.id)).where(SkillProfile.org_id == self._org_id)
         )
         return result.scalar() or 0
+
+    async def list_modules_for_users(
+        self, user_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str, float]]:
+        """``(user_id, module, skill_score)`` rows for the given users in this org,
+        ordered by user then by score descending.
+        """
+        if not user_ids:
+            return []
+        stmt = self._scoped(
+            select(SkillProfile.user_id, SkillProfile.module, SkillProfile.skill_score)
+            .where(SkillProfile.user_id.in_(user_ids))
+            .order_by(SkillProfile.user_id, SkillProfile.skill_score.desc())
+        )
+        result = await self._db.execute(stmt)
+        return [(row.user_id, row.module, row.skill_score) for row in result.all()]
+
+    async def list_for_user(self, user_id: uuid.UUID) -> list[SkillProfile]:
+        """All skill profile rows for a user within the scoped org."""
+        stmt = self._scoped(select(SkillProfile).where(SkillProfile.user_id == user_id))
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_for_users(self, user_ids: list[uuid.UUID]) -> list[SkillProfile]:
+        """All skill profile rows for the given users in this org."""
+        if not user_ids:
+            return []
+        stmt = self._scoped(select(SkillProfile).where(SkillProfile.user_id.in_(user_ids)))
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_active_skill_devs(
+        self, *, min_skill_score: float = 0.1
+    ) -> list[tuple[str, uuid.UUID, float, uuid.UUID | None, str]]:
+        """``(module, user_id, skill_score, feature_id, dev_name)`` for active
+        skill rows whose score exceeds ``min_skill_score``, sorted by score desc.
+        """
+        stmt = self._scoped(
+            select(
+                SkillProfile.module,
+                SkillProfile.user_id,
+                SkillProfile.skill_score,
+                SkillProfile.feature_id,
+                User.name.label("dev_name"),
+            )
+            .join(User, User.id == SkillProfile.user_id)
+            .where(SkillProfile.skill_score > min_skill_score)
+            .where(User.is_active.is_(True))
+            .order_by(SkillProfile.skill_score.desc())
+        )
+        result = await self._db.execute(stmt)
+        return [
+            (row.module, row.user_id, row.skill_score, row.feature_id, row.dev_name)
+            for row in result.all()
+        ]

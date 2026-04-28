@@ -3,6 +3,8 @@
 
 """Organization data access repository."""
 
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,6 +53,57 @@ class OrganizationRepository(BaseRepository[Organization]):
         """
         result = await self._db.execute(select(Organization).where(Organization.id == user.org_id))
         return result.scalar_one()
+
+    async def get_first_with_claude_api_key(self, auth_mode: str) -> Organization | None:
+        """First org configured for ``auth_mode`` with a stored Claude API key."""
+        result = await self._db.execute(
+            select(Organization)
+            .where(Organization.claude_auth_mode == auth_mode)
+            .where(Organization.claude_api_key_encrypted.is_not(None))
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_with_slack_token_and_config(
+        self,
+    ) -> list[tuple[uuid.UUID, str, dict | None]]:
+        """For every org with a Slack bot token set, return ``(id, encrypted_token, config)``."""
+        result = await self._db.execute(
+            select(
+                Organization.id,
+                Organization.slack_bot_token,
+                Organization.config,
+            ).where(Organization.slack_bot_token.is_not(None))
+        )
+        return [(row[0], row[1], row[2]) for row in result.all()]
+
+    async def get_slack_bot_token(self, org_id: uuid.UUID) -> str | None:
+        """Return the (still-encrypted) Slack bot token for an org, or None."""
+        result = await self._db.execute(
+            select(Organization.slack_bot_token).where(Organization.id == org_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_config(self, org_id: uuid.UUID) -> dict | None:
+        """Return the JSONB ``config`` blob for an org, or None if absent."""
+        result = await self._db.execute(
+            select(Organization.config).where(Organization.id == org_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_slack_team_id(self, team_id: str) -> Organization | None:
+        """Fetch an organization by its Slack workspace team_id.
+
+        Args:
+            team_id: Slack ``team_id`` (workspace identifier).
+
+        Returns:
+            The matching Organization or None.
+        """
+        result = await self._db.execute(
+            select(Organization).where(Organization.slack_team_id == team_id)
+        )
+        return result.scalar_one_or_none()
 
     async def get_all_with_mcp_tokens(self) -> list[Organization]:
         """Fetch all organizations that have an MCP token hash set.

@@ -10,11 +10,9 @@ before being called.
 
 import uuid
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.skill_profile import SkillProfile
-from app.models.user import User
+from app.repositories.skill_profile import SkillProfileRepository
 from app.schemas.dashboard import FeatureSkillSummary, TreeData
 
 
@@ -40,21 +38,7 @@ async def compute_feature_skills(
         tree: The tree data; ``tree.features`` must be populated first.
     """
     # 1. Load all skill profiles for this org (module → developers)
-    result = await db.execute(
-        select(
-            SkillProfile.module,
-            SkillProfile.user_id,
-            SkillProfile.skill_score,
-            SkillProfile.feature_id,
-            User.name.label("dev_name"),
-        )
-        .join(User, User.id == SkillProfile.user_id)
-        .where(SkillProfile.org_id == org_id)
-        .where(SkillProfile.skill_score > 0.1)
-        .where(User.is_active.is_(True))
-        .order_by(SkillProfile.skill_score.desc())
-    )
-    rows = result.all()
+    rows = await SkillProfileRepository(db, org_id=org_id).list_active_skill_devs()
 
     # Build module→developers lookup: module_lower → [(uid, name, score)]
     module_devs: dict[str, list[tuple[str, str, float]]] = {}
