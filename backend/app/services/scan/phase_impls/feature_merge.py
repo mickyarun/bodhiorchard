@@ -28,6 +28,10 @@ Post-merge sequence:
    outcome. Anything still leftover here is a real logic bug; raise
    ``MergeIncompleteError`` so FEATURE_MERGE lands FAILED with
    ``error_code='merge_incomplete'``.
+3. **Orphan-ratio gate** — if the fallback promoted ≥
+   ``_ORPHAN_FAILURE_RATIO`` of this scan's rows, raise after
+   committing the rescue. Preserves data while keeping the
+   "Claude returned nothing" signal visible on the step row.
 """
 
 from __future__ import annotations
@@ -249,12 +253,20 @@ async def _run_llm_merge(
         )
 
 
+# Above this fraction of orphans, we still promote (preserves data) but
+# raise MergeIncompleteError so the FEATURE_MERGE step lands FAILED.
+# Tuned for "Claude returned an empty/incomplete plan" cases vs "one
+# subprocess hiccup". 30% leans toward catching real breakage early —
+# a single 50-row scan losing 15 rows is broken; losing 1-3 isn't.
+_ORPHAN_FAILURE_RATIO = 0.30
+
+
 async def _promote_orphan_rows(
     *,
     db: AsyncSession,
     org: Organization,
     scan_uuid: uuid.UUID,
-) -> int:
+) -> tuple[int, int]:
     """Best-effort promote any synth row Claude's cluster pass left unmerged.
 
     Reasons a row reaches here: Claude timed out before emitting a plan
@@ -264,21 +276,29 @@ async def _promote_orphan_rows(
     already exists the row is linked as MERGED_INTO instead of creating
     a duplicate KI. Otherwise it lands as a fresh canonical — better
     than failing the entire scan over a 1-row gap.
+
+    Returns:
+        ``(orphan_count, scan_total)`` — caller uses the ratio to decide
+        whether to raise after promoting (see ``_ORPHAN_FAILURE_RATIO``).
     """
     synth_repo = SynthesizedFeatureRepository(db, org_id=org.id)
     leftover = await synth_repo.list_unmerged_for_scan(scan_uuid)
+    scan_total = await synth_repo.count_for_scan(scan_uuid)
     if not leftover:
-        return 0
+        return 0, scan_total
+    ratio = len(leftover) / scan_total if scan_total > 0 else 0.0
     logger.warning(
         "feature_merge_orphan_promote",
         scan_id=str(scan_uuid),
         count=len(leftover),
+        scan_total=scan_total,
+        ratio=round(ratio, 3),
         sample_ids=[str(r.id) for r in leftover[:5]],
     )
     for row in leftover:
         await promote_synth_to_ki(db=db, org=org, synth=row)
     await db.flush()
-    return len(leftover)
+    return len(leftover), scan_total
 
 
 async def _audit_strict(
@@ -402,8 +422,24 @@ async def phase_b3_merge(
         )
         await db.flush()
 
-    await _promote_orphan_rows(db=db, org=org, scan_uuid=scan_uuid)
+    orphan_count, scan_total = await _promote_orphan_rows(
+        db=db, org=org, scan_uuid=scan_uuid
+    )
     await _audit_strict(db=db, org_id=org_id, scan_uuid=scan_uuid)
+
+    # Surface a high-orphan ratio as a hard failure so it shows up in the
+    # FEATURE_MERGE step row + scan status, not just a warning log line.
+    # We commit first so the promotes already done survive the raise —
+    # ``with_session`` would otherwise rollback the orphan rescue work.
+    if scan_total > 0 and orphan_count / scan_total >= _ORPHAN_FAILURE_RATIO:
+        await db.commit()
+        raise MergeIncompleteError(
+            f"feature_merge orphan ratio {orphan_count / scan_total:.0%} exceeds "
+            f"{_ORPHAN_FAILURE_RATIO:.0%} threshold ({orphan_count}/{scan_total} rows). "
+            "Rows promoted as fallback; flagging as failed because Claude likely "
+            "returned an empty or incomplete plan."
+        )
+
     await embed_missing_items(db, org_id)
     return await _reload_org_config(db, org_id)
 

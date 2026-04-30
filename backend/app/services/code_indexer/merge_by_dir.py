@@ -90,6 +90,8 @@ def merge_clusters_by_directory(
     *,
     dir_depth: int = _DIR_DEPTH,
     max_depth: int = _MAX_DIR_DEPTH,
+    recurse_min_files: int = _RECURSE_MIN_FILES,
+    recurse_min_subbuckets: int = _RECURSE_MIN_SUBBUCKETS,
 ) -> dict[int, list[str]]:
     """Collapse same-directory clusters from a graphify partition.
 
@@ -101,6 +103,14 @@ def merge_clusters_by_directory(
             and re-added as singletons keyed by their original cluster.
         dir_depth: Initial path-depth budget. Default 3.
         max_depth: Recursion ceiling. Default 6.
+        recurse_min_files: Minimum bucket size before we consider going
+            one level deeper. Lower this for repos with smaller layer
+            dirs (e.g., 25-file controllers/api/) where the default
+            (30) leaves layers mega-clustered.
+        recurse_min_subbuckets: Minimum number of meaningful (≥ 2-file)
+            child folders required to accept a deeper split. Tunes the
+            "layer vs domain" discrimination — lower this for repos
+            where layers fan out across only 3-4 child folders.
 
     Returns:
         A new ``{cluster_idx: [node_id]}`` dict. Cluster indices are
@@ -118,7 +128,13 @@ def merge_clusters_by_directory(
             else:
                 no_file_buckets.setdefault(cid, []).append(nid)
 
-    buckets = _bucketize(pairs, depth=dir_depth, max_depth=max_depth)
+    buckets = _bucketize(
+        pairs,
+        depth=dir_depth,
+        max_depth=max_depth,
+        min_files=recurse_min_files,
+        min_subbuckets=recurse_min_subbuckets,
+    )
 
     merged: dict[int, list[str]] = {}
     next_idx = 0
@@ -136,6 +152,8 @@ def _bucketize(
     *,
     depth: int,
     max_depth: int,
+    min_files: int,
+    min_subbuckets: int,
 ) -> list[list[str]]:
     """Group ``(node_id, source_file)`` pairs by directory key, recursing
     into layer-shaped buckets one level deeper until they look domain-shaped
@@ -147,14 +165,27 @@ def _bucketize(
 
     out: list[list[str]] = []
     for items in by_key.values():
-        if depth < max_depth and _should_recurse(items, depth):
-            out.extend(_bucketize(items, depth=depth + 1, max_depth=max_depth))
+        if depth < max_depth and _should_recurse(items, depth, min_files, min_subbuckets):
+            out.extend(
+                _bucketize(
+                    items,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                    min_files=min_files,
+                    min_subbuckets=min_subbuckets,
+                )
+            )
         else:
             out.append([nid for nid, _src in items])
     return out
 
 
-def _should_recurse(items: list[tuple[str, str]], depth: int) -> bool:
+def _should_recurse(
+    items: list[tuple[str, str]],
+    depth: int,
+    min_files: int,
+    min_subbuckets: int,
+) -> bool:
     """Decide whether bucketing this group at ``depth+1`` would produce
     a useful split.
 
@@ -164,7 +195,7 @@ def _should_recurse(items: list[tuple[str, str]], depth: int) -> bool:
     two child folders even if the file count is high. Only the layer
     case warrants deeper splitting.
     """
-    if len(items) < _RECURSE_MIN_FILES:
+    if len(items) < min_files:
         return False
     deeper_keys = Counter(_dir_key(src, depth + 1) for _nid, src in items)
     # Single key at depth+1 means the deeper budget didn't add a new
@@ -173,7 +204,7 @@ def _should_recurse(items: list[tuple[str, str]], depth: int) -> bool:
     if len(deeper_keys) <= 1:
         return False
     meaningful = sum(1 for n in deeper_keys.values() if n >= 2)
-    return meaningful >= _RECURSE_MIN_SUBBUCKETS
+    return meaningful >= min_subbuckets
 
 
 def _dir_key(source_file: str, depth: int) -> str:
