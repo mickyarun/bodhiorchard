@@ -50,6 +50,53 @@ from app.services.code_indexer.skip_lists import filter_paths
 logger = structlog.get_logger(__name__)
 
 
+# graphify's ``collect_files`` hardcodes a 25-suffix allow-list that omits
+# ten extensions its own ``_DISPATCH`` table already routes to a working
+# extractor. The result: Vue / Svelte / Flutter / React-JSX / Elixir /
+# Julia / Verilog repos collect zero source files even though graphify can
+# parse them. We close the gap by re-walking the tree for the missing
+# suffixes and unioning with graphify's own output. ``filter_paths`` runs
+# right after, so vendored hits inside ``node_modules`` / ``.nuxt`` /
+# ``.dart_tool`` are dropped without extra work here.
+_EXTRA_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".vue",  # Vue SFC (Nuxt, Vite)
+        ".svelte",  # Svelte / SvelteKit
+        ".jsx",  # React (JS variant) — .tsx already collected
+        ".mjs",  # ES modules
+        ".dart",  # Flutter / Dart
+        ".ex",  # Elixir source
+        ".exs",  # Elixir scripts
+        ".jl",  # Julia
+        ".v",  # Verilog
+        ".sv",  # SystemVerilog
+    }
+)
+
+
+def _collect_repo_files(repo: Path) -> list[Path]:
+    """Wrap ``gx_collect_files`` to include extensions graphify forgot.
+
+    Graphify can extract every suffix in ``_EXTRA_EXTENSIONS`` (its
+    ``_DISPATCH`` maps them to a real extractor) but its file walker
+    doesn't list them. We rglob each missing suffix and union with
+    graphify's output, skipping dotfile / dotdir paths the same way
+    graphify does internally. Vendor filtering happens in the caller's
+    ``filter_paths`` step, so we don't duplicate it here.
+    """
+    base = list(gx_collect_files(repo))
+    seen: set[Path] = set(base)
+    for ext in _EXTRA_EXTENSIONS:
+        for p in repo.rglob(f"*{ext}"):
+            if any(part.startswith(".") for part in p.parts):
+                continue
+            if p in seen:
+                continue
+            seen.add(p)
+            base.append(p)
+    return sorted(base)
+
+
 @dataclass(frozen=True, slots=True)
 class ClusterEntry:
     """One community produced by the indexer."""
@@ -106,7 +153,7 @@ async def index_repo(
         return result
 
     try:
-        raw_files = await asyncio.to_thread(gx_collect_files, repo)
+        raw_files = await asyncio.to_thread(_collect_repo_files, repo)
     except Exception as exc:  # noqa: BLE001 — narrow on next iter
         result.error = f"collect_files failed: {exc}"
         result.elapsed_s = round(time.monotonic() - t0, 2)
@@ -124,7 +171,7 @@ async def index_repo(
             repo=str(repo),
             kept=len(files),
             dropped=dropped,
-            ratio=f"{dropped/(dropped+len(files)):.0%}",
+            ratio=f"{dropped / (dropped + len(files)):.0%}",
         )
 
     result.file_count = len(files)
