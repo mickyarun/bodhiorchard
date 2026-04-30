@@ -25,7 +25,7 @@ from app.api.v1.public import router as public_router
 from app.api.v1.races import internal_router as races_internal_router
 from app.api.v1.races import router as races_router
 from app.api.v1.roles import router as roles_router
-from app.api.v1.scan_recovery import router as scan_recovery_router
+from app.api.v1.scans import router as scans_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.setup import router as setup_router
 from app.api.v1.skills import router as skills_router
@@ -51,7 +51,6 @@ api_router.include_router(roles_router, prefix="/api/v1")
 api_router.include_router(agent_skills_router, prefix="/api/v1/settings/agent-skills")
 api_router.include_router(settings_router, prefix="/api/v1/settings")
 api_router.include_router(skills_router, prefix="/api/v1/skills")
-api_router.include_router(scan_recovery_router, prefix="/api/v1/skills")
 api_router.include_router(members_router, prefix="/api/v1")
 api_router.include_router(notifications_router, prefix="/api/v1/notifications")
 api_router.include_router(slack_router, prefix="/api/v1/slack")
@@ -68,3 +67,4 @@ api_router.include_router(mcp_router)
 api_router.include_router(internal_colyseus_router, prefix="/api/v1")
 api_router.include_router(races_router, prefix="/api/v1/races")
 api_router.include_router(races_internal_router, prefix="/api/v1")
+api_router.include_router(scans_router, prefix="/api/v1/reposcanv2")

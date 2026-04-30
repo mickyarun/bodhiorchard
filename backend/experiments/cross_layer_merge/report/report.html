@@ -1,0 +1,2093 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cross-Layer Merge Sandbox — Report</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1f242c;
+    --fg: #e6edf3; --dim: #8b949e; --line: #30363d;
+    --green: #3fb950; --red: #f85149; --amber: #d29922;
+    --blue: #58a6ff; --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.5 -apple-system, Segoe UI, sans-serif; margin: 0; padding: 24px; }
+  h1 { margin: 0 0 8px; font-size: 22px; }
+  h2 { margin: 32px 0 12px; font-size: 16px; color: var(--blue); }
+  .dim { color: var(--dim); }
+  .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin: 16px 0; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+  .stat .v { font-size: 24px; font-weight: 600; }
+  .stat .l { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .repos { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .repo { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+  .repo .name { font-weight: 600; }
+  .repo .meta { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .layer { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  .layer.frontend { background: #1f3a5c; color: #79c0ff; }
+  .layer.backend { background: #2c3a1f; color: #b9e35a; }
+  .layer.processor { background: #3a2c1f; color: #ffa657; }
+  .layer.shared, .layer.unclassified { background: #2c2c2c; color: var(--dim); }
+  details.pair { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 12px; }
+  details.pair > summary { list-style: none; padding: 12px 16px; cursor: pointer; display: flex; align-items: center; gap: 12px; }
+  details.pair > summary::-webkit-details-marker { display: none; }
+  details.pair > summary::before { content: "▶"; color: var(--dim); font-size: 10px; transition: transform .15s; }
+  details.pair[open] > summary::before { transform: rotate(90deg); }
+  details.pair[open] > summary { border-bottom: 1px solid var(--line); }
+  .pair-body { padding: 12px 16px; }
+  .pair-pair { font-weight: 600; }
+  .pair-meta { margin-left: auto; color: var(--dim); font-size: 12px; }
+  .status { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  .status.done { background: #1f3a2c; color: var(--green); }
+  .status.running { background: #3a2c1f; color: var(--amber); }
+  .status.failed { background: #3a1f1f; color: var(--red); }
+  .status.pending { background: #2c2c2c; color: var(--dim); }
+  .verdict { display: grid; grid-template-columns: 2fr 3fr 110px; gap: 16px; padding: 12px; border-top: 1px solid var(--line); align-items: start; }
+  .verdict:first-child { border-top: none; }
+  .verdict .source { background: var(--panel-2); padding: 10px; border-radius: 4px; }
+  .verdict .source .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .verdict .candidates ul { list-style: none; padding: 0; margin: 0; }
+  .verdict .candidates li { padding: 6px 8px; border-radius: 4px; margin-bottom: 4px; background: var(--panel-2); }
+  .verdict .candidates li.absorbed { background: #1f3a2c; }
+  .tag { background: var(--green); color: var(--bg); font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+  .action { text-align: center; padding-top: 8px; }
+  .action-pill { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+  .action-pill.merge { background: #1f3a2c; color: var(--green); }
+  .action-pill.no_match { background: #2c2c2c; color: var(--dim); }
+  .rationale { grid-column: 1 / -1; color: var(--dim); font-size: 12px; padding: 0 4px; font-style: italic; }
+</style>
+</head>
+<body>
+<h1>Cross-Layer Merge Sandbox — Report</h1>
+<p class="dim">Refresh this page after each <code>run.py verify</code> to see new verdicts.</p>
+
+<div class="stats">
+  <div class="stat"><div class="v">108</div><div class="l">Active KIs</div></div>
+  <div class="stat"><div class="v">5</div><div class="l">Absorbed</div></div>
+  <div class="stat"><div class="v">11</div><div class="l">Multi-repo (10.2%)</div></div>
+  <div class="stat"><div class="v">5</div><div class="l">Pairs done</div></div>
+  <div class="stat"><div class="v">0</div><div class="l">Pairs failed</div></div>
+  <div class="stat"><div class="v">5</div><div class="l">Total merges</div></div>
+</div>
+
+<h2>Repos</h2>
+<div class="repos"><div class="repo">
+  <div class="name">ATOAConsumerWebNew</div>
+  <div><span class="layer frontend">frontend</span></div>
+  <div class="meta">tech: vue3 · db: —</div>
+</div>
+<div class="repo">
+  <div class="name">ATOACore</div>
+  <div><span class="layer backend">backend</span></div>
+  <div class="meta">tech: express · db: mongo</div>
+</div>
+<div class="repo">
+  <div class="name">ATOAMerchantDashboard</div>
+  <div><span class="layer frontend">frontend</span></div>
+  <div class="meta">tech: nuxt · db: —</div>
+</div>
+<div class="repo">
+  <div class="name">ATOAPayment</div>
+  <div><span class="layer backend">backend</span></div>
+  <div class="meta">tech: express · db: mongo</div>
+</div></div>
+
+<h2>Pairs &amp; verdicts</h2>
+<details class="pair" >
+  <summary>
+    <span class="pair-pair">ATOACore &harr; ATOAPayment</span>
+    <span class="dim">backend×backend</span>
+    <span class="status done">done</span>
+    <span class="pair-meta">49 verdicts · 2 merged · 450s</span>
+  </summary>
+  <div class="pair-body"><div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Analytics</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover analytics event emission or BI forwarding; they address rate limiting, bank account computation, bank directories, card payments, and payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: App Configuration Management</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover app configuration, feature flags, or version gating; they address rate limiting, bank accounts, bank directories, card payments, or payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Atoa Employee Admin</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to internal employee admin accounts or back-office authorization tooling.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: AWS S3 File Storage</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to file storage/S3 asset management; they cover rate limiting, bank accounts, card payments, and payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Bank Feed (AIS)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover the AIS bank-feed transaction ingestion/notification capability; they address rate limiting, IBAN computation, bank directory listings, card payments, and card payouts respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Box QR Codes</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to physical box QR codes for in-store face-to-face payments; they cover unrelated domains (rate limiting, bank accounts, bank directory, card payments, card payouts).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Bulk Business Onboarding</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates share the bulk business onboarding capability — they cover rate limiting, bank account computation, bank directory, card payments, and card payouts respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Business Management &amp; KYB</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (rate limiting, IBAN computation, bank directory, card payments, card payouts) share the business entity/KYB lifecycle goal of the source feature.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Business Plans &amp; Pricing</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address business plan assignment or plan-tier surfacing for feature-gating; they cover unrelated payment, banking, and rate-limiting capabilities.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Business User Access Requests</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to business user invitations or access request workflows; they cover rate limiting, banking, card payments, and payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Captcha (Cloudflare Turnstile)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">Captcha/Turnstile bot-gating is a distinct capability from rate limiting, bank account validation, bank directory, card payments, or payouts — no candidate shares the anti-bot token verification goal.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Charity Donations</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to charity merchant configuration or donation checkout flows; they cover unrelated payment infrastructure concerns.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Communication Preferences</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to user communication preferences or notification channel toggles; they cover rate limiting, banking, card payments, and payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Contact Us</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (rate limiting, IBAN, bank directory, card payments, card payouts) share the contact-form enquiry capture and Slack/CRM forwarding goal of the source feature.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: CORS Origin Management</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to CORS origin management; they cover rate limiting, bank accounts, bank directory, card payments, or payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Custom SMS Sender Name</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to custom SMS sender ID branding; they cover rate limiting, bank accounts, bank directory, card payments, and card payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Firebase Dynamic Links &amp; Service URLs</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to Firebase dynamic link shortening or environment-specific service URL resolution; they cover rate limiting, bank accounts, bank directories, card payments, and card payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Google Reviews Integration</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to Google Reviews integration or post-payment review solicitation; they cover rate limiting, IBAN, bank directory, card payments, and payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: IBAN Validation</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class='absorbed'><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation  <span class=tag>absorbed</span></li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill merge">merge</span></div>
+  <div class="rationale">Both features implement IBAN validation via identically-named IBANService.ts/IBANServiceInterface.ts paths, sharing the same end-user capability of validating IBANs for bank account onboarding/payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Login History &amp; Session Metadata</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover login event auditing or session metadata tracking; they address rate limiting, bank accounts, bank directory, card payments, and payouts respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Magic Link Authentication</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover magic-link/passwordless authentication; they address rate limiting, bank account computation, bank directory, card payments, and card payouts — all distinct end-user goals.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Manual Refunds</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover the manual-refund merchant workflow; Card Payments &amp; Refunds handles card-acquirer refund lifecycle which is a distinct payment rail from manual refunds in ATOACore.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant App Rating</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to merchant app rating capture or satisfaction metrics; they cover rate limiting, bank accounts, bank directory, card payments, and payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant Bank Accounts</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">Source manages merchant payout bank accounts (verification, primary selection, payment routing), while candidate 2 only validates/computes IBAN fields and shapes Stripe mandate bodies — related bank-account domain but distinct capabilities.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant Integration (External Channels)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover the same end-user goal of exposing merchant data and QR endpoints to external integration partners.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant Management &amp; Onboarding</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover merchant entity lifecycle, profile/theme, stores, KYB documents, or merchant payment page configuration — they address rate limiting, bank account computation, bank directory, card payments, and card payouts respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant QR Codes</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover merchant QR code generation/resolution; they address rate limiting, IBAN, bank directory, card payments, or card payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant Referral Program</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to merchant referral codes, redemption tracking, or referral SMS notifications—they cover rate limiting, bank accounts, card payments, and payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Order QR Codes</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to per-order QR code generation or scan resolution; they cover unrelated payment infrastructure capabilities.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Password Management</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address password management; they cover rate limiting, bank account computation, bank directory, card payments, and card payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment Links</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover payment link generation/management; they address rate limiting, bank account validation, bank directories, card payments/refunds, and card payouts — distinct capabilities from payment links.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment &amp; Merchant Notifications</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover transactional notification delivery (SMS/email via Twilio/templates) for payments, merchants, or referrals — they address rate limiting, IBAN computation, bank directory, card payments, and payouts respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment Processing</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover the same end-user goal as the source&#x27;s generic payment request lifecycle — they address distinct capabilities (rate limiting, IBAN computation, bank directory, card payments, card payouts).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment Recovery</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address payment recovery/dunning for failed or abandoned payments; they cover unrelated domains (rate limiting, IBAN, bank directory, card payments, payouts).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment Timeline</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address payment timeline composition or audit history; they cover rate limiting, IBAN, bank directory, card payments/refunds, and payouts — distinct capabilities.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: PDF Generation &amp; Download</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates share the PDF generation/download end-user goal — they cover rate limiting, bank account computation, bank directory, card payments, and card payouts respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Pipedrive CRM Sync</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to Pipedrive CRM lead syncing; they cover rate limiting, bank/IBAN, bank directory, card payments, and card payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: POS Terminals</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class='absorbed'><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds  <span class=tag>absorbed</span></li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill merge">merge</span></div>
+  <div class="rationale">Both features cover POS terminal card payment processing — source manages terminal registration/binding while candidate 4 explicitly processes POS card payments via external acquirer (PAX), sharing the &#x27;pos&#x27; tag and same end-user goal of in-store card transactions.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Roles &amp; Permissions (RBAC)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address RBAC/roles/permissions; they cover rate limiting, bank account computation, bank directory, card payments, and payouts respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: SDK Card Payments &amp; Access</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">The SDK card payment feature exposes embeddable partner SDK access controls and SDK-tagged transaction history, which is distinct from the general card acquiring/refund stack and unrelated to rate limiting, IBAN, bank directory, or payouts candidates.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Signup Source Tracking</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to signup origin/attribution tracking; they cover rate limiting, bank accounts, card payments, and payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Slack Notifications</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates share the source&#x27;s end-user goal of internal Slack ops alerting; Candidate 5 merely uses Slack as one notification sink within a payout reporting feature, which is related-but-different.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Telesales Workflow</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (rate limiting, IBAN computation, bank directory, card payments, card payouts) share the telesales prospect data/outbound sales goal of the source feature.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Two-Factor Authentication</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover two-factor authentication; they address rate limiting, bank account computation, bank directory, card payments, or card payouts — all distinct capabilities from 2FA enrolment/verification and backup codes.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: UBO / KYB Document Checks</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address UBO/KYB compliance validation; they cover unrelated domains (rate limiting, IBAN, bank directory, card payments, payouts).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: User Authentication &amp; Sessions</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover user authentication, session lifecycle, or authorization decorators — they address rate limiting, bank account computation, bank directory, card payments, and card payouts respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: User Home Dashboard</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (rate limiting, IBAN computation, bank directory, card payments, card payouts) share the source&#x27;s end-user goal of aggregating a user home dashboard view.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: User Profile</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to user profile management; they cover rate limiting, bank account validation, bank directory, card payments, and card payouts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Virtual Accounts</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAPayment</strong>: Feature: Bank Account &amp; IBAN Computation</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payments &amp; Refunds</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover virtual account lookup or inbound payment reconciliation against tenant-specific account references.</div>
+</div></div>
+</details>
+<details class="pair" >
+  <summary>
+    <span class="pair-pair">ATOAMerchantDashboard &harr; ATOAPayment</span>
+    <span class="dim">backend×frontend</span>
+    <span class="status done">done</span>
+    <span class="pair-meta">31 verdicts · 1 merged · 299s</span>
+  </summary>
+  <div class="pair-body"><div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Accounting &amp; Bookkeeping Integrations</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover accounting/bookkeeping integrations like QuickBooks; they address unrelated domains (rate limiting, banks directory, card payouts, dynamic links, IBAN validation).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: AI Recovery Calling</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to AI-powered voice recovery calling for overdue payments; they cover rate limiting, bank directory, card payouts, dynamic links, and IBAN validation.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Billing &amp; Subscription Plans</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover merchant billing/subscription plan management; they address rate limiting, bank directory, card payouts, dynamic links, and IBAN validation respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Bulk CSV Upload Operations</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates share the source&#x27;s end-user goal of generic CSV bulk import for resource creation; the closest CSV-related candidate (Card Payouts) only exports settlement reports, not bulk import.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Confirmation of Payee (CoP)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover Confirmation of Payee name-matching; they address rate limiting, bank directory, card payouts, dynamic links, and IBAN validation — all distinct capabilities.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Customer Management</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address customer/payer record management; they cover rate limiting, bank directory, card payouts, dynamic links, and IBAN validation — all distinct capabilities.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Custom SMS Sender Name</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to custom SMS sender ID registration or branded SMS messaging.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Dentally Practice Integration</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to Dentally practice-management integration; they cover unrelated domains (rate limiting, banks directory, card payouts, dynamic links, IBAN validation).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Developer SDK Access &amp; API Keys</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover developer SDK/API key provisioning; they address rate limiting, bank directory, payouts, dynamic links, and IBAN validation respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Direct Debit</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover UK Direct Debit (Bacs) mandate setup or recurring DD collection — they address rate limiting, bank directory, card payouts, dynamic links, and IBAN validation respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Employee Management</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address employee/staff management on the merchant account; they cover unrelated domains (rate limiting, banks directory, card payouts, dynamic links, IBAN validation).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Hosted Payment Pages</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (rate limiting, bank directory, card payouts, dynamic links, IBAN validation) cover the same end-user goal as branded hosted payment pages.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: In-App Support Chat (Chatwoot)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the backend candidates relate to embedded support chat; they cover rate limiting, bank directory, card payouts, dynamic links, and IBAN validation.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Invoicing</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates share the invoicing end-user goal; they cover rate limiting, bank directory, card payouts, dynamic links, and IBAN validation.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: KYB Onboarding &amp; Document Verification</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address KYB onboarding or document verification; they cover unrelated capabilities like rate limiting, bank directories, payouts, dynamic links, and IBAN validation.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Magic Link Login</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover passwordless magic-link authentication; they address rate limiting, bank directory, card payouts, dynamic payment links, and IBAN validation respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Merchant Bank Accounts &amp; Bank Feeds</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover the same end-user goal of managing settlement bank accounts and bank feeds; IBAN validation and bank institution directory are related-but-distinct supporting capabilities.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Merchant Profile &amp; Custom Fields</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the backend candidates (rate limiting, bank directory, card payouts, dynamic links, IBAN validation) cover merchant profile management or custom checkout fields.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Multi-Business &amp; Multi-Store Setup</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover multi-business/multi-store account setup or context switching; they address unrelated backend concerns (rate limiting, banks directory, card payouts, dynamic links, IBAN validation).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Offers &amp; Promotions</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (rate limiting, bank directory, card payouts, dynamic links, IBAN validation) cover the same end-user goal as offers/promotions management.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Open Banking AIS Authentication</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover AIS consent/authentication flow; the closest (Bank Institutions Directory) is a related but distinct capability for bank selection rather than AIS auth itself.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Payments &amp; Payment Links</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the backend candidates cover the same end-user goal as the frontend payment links/requests feature; Dynamic Payment Links (candidate 4) is a related but distinct link-generation utility, not the full payment lifecycle.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Payouts &amp; Settlements</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class='absorbed'><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting  <span class=tag>absorbed</span></li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill merge">merge</span></div>
+  <div class="rationale">Both cover merchant payouts/settlement: frontend lists payouts, details, and stats; backend aggregates card transactions into payouts and exposes listing APIs — same end-user capability across layers.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Platform Utilities (dropped)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">Source is a dropped frontend utilities bucket (string helpers, modal/notification hooks) with no shared end-user capability with any backend candidate (rate limiting, banks directory, card payouts, dynamic links, IBAN validation).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: QR Code Management (Digital, Physical &amp; Ordering)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address QR code generation, physical QR ordering, or QR-based table ordering flows.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Real-time Payment Status Polling</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover real-time payment status polling; they address rate limiting, bank directories, card payouts, dynamic links, and IBAN validation respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Referral Partners</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (rate limiting, bank directory, card payouts, dynamic links, IBAN validation) share the referral partner end-user goal.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Refunds (Open Banking, Card &amp; VA)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover refund initiation/tracking across payment rails; they address rate limiting, bank directory, card payouts, dynamic links, and IBAN validation respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Roles, Permissions &amp; Access Control</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to role-based access control; they cover rate limiting, bank directory, payouts, dynamic links, and IBAN validation.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Subscription Add-ons</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to subscription add-ons billing; they cover rate limiting, bank directories, card payouts, dynamic links, and IBAN validation.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Transaction Analytics &amp; Stats</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Card Payouts &amp; Settlement Reporting</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover transaction analytics/stats aggregation; they address rate limiting, bank directory, card payouts, dynamic links, and IBAN validation respectively.</div>
+</div></div>
+</details>
+<details class="pair" >
+  <summary>
+    <span class="pair-pair">ATOAConsumerWebNew &harr; ATOACore</span>
+    <span class="dim">backend×frontend</span>
+    <span class="status done">done</span>
+    <span class="pair-meta">16 verdicts · 0 merged · 140s</span>
+  </summary>
+  <div class="pair-body"><div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Account &amp; AIS (Account Information Services)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) cover Open Banking AIS account linking or balance retrieval — no shared end-user goal.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Analytics &amp; Behavioural Tracking</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">Source is frontend third-party analytics/session-recording (Customer.io + Clarity) for consumer journey tracking, while Candidate 1 is a backend internal analytics service emitting domain events to BI sinks — related domain but distinct capabilities that compose rather than merge.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Cancel Payment</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) share the cancel-payment end-user goal with the source feature.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Card Payments (Rapyd 3DS)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) cover card payment processing or 3DS authentication.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Consumer Authentication (OTP Login)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">No candidate covers consumer OTP login/signup; the closest (rate limiting on OTP endpoints) is a related cross-cutting concern, not the same end-user auth capability.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Invoice &amp; Business Info Display</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the backend candidates (analytics, rate limiting, app config, employee admin, S3 storage) share the end-user goal of displaying merchant business info on invoice views.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Merchant &amp; Consumer App Redirection</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) share the post-payment merchant/app redirection capability of the source feature.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Open Banking Payment Flow</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) share the Open Banking payment flow&#x27;s end-user goal of executing a consumer bank-redirect payment.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Payment Amount Input</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the backend candidates (analytics, rate limiting, app config, employee admin, S3 storage) share the end-user goal of consumer payment amount entry with currency formatting and transaction-limit validation.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Peer-to-Peer Payments</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) share the P2P payment end-user goal of the source feature.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: PointOne POS Integration</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) share the PointOne POS integration end-user goal.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Post-Payment Review &amp; Feedback</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) cover the post-payment review/feedback questionnaire capability.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Real-time Payment Status Polling</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) share the end-user goal of real-time payment status polling.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Shopify Checkout Integration</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to Shopify checkout integration or post-payment order completion; they cover analytics, rate limiting, app config, employee admin, and S3 storage.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: SMS Payment Link Delivery</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) cover SMS payment-link delivery.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Transaction History &amp; Receipts</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: Analytics</li><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOACore</strong>: Feature: App Configuration Management</li><li class=''><strong>ATOACore</strong>: Feature: Atoa Employee Admin</li><li class=''><strong>ATOACore</strong>: Feature: AWS S3 File Storage</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (analytics, rate limiting, app config, employee admin, S3 storage) cover the consumer transaction history/receipt capability of the source feature.</div>
+</div></div>
+</details>
+<details class="pair" >
+  <summary>
+    <span class="pair-pair">ATOAConsumerWebNew &harr; ATOAPayment</span>
+    <span class="dim">backend×frontend</span>
+    <span class="status done">done</span>
+    <span class="pair-meta">16 verdicts · 0 merged · 148s</span>
+  </summary>
+  <div class="pair-body"><div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Account &amp; AIS (Account Information Services)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover AIS account linking or balance retrieval; they address rate limiting, bank directory listing, dynamic links, IBAN validation, and invoicing respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Analytics &amp; Behavioural Tracking</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the backend candidates (rate limiting, bank directory, dynamic links, IBAN validation, invoicing) share the analytics/tracking end-user goal of the source feature.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Cancel Payment</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover payment cancellation; they address rate limiting, bank directory, dynamic links, IBAN validation, and invoicing respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Card Payments (Rapyd 3DS)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (rate limiting, bank directory, dynamic links, IBAN validation, invoicing) share the card payment / 3DS checkout end-user goal of the source feature.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Consumer Authentication (OTP Login)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover consumer OTP login/signup; rate limiting on auth endpoints is a related-but-different cross-cutting concern, not the same end-user capability.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Invoice &amp; Business Info Display</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">Source displays merchant business info on invoice views to consumers; no candidate covers that same end-user capability (candidate 5 is merchant SaaS billing, not consumer-facing invoice business info display).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Merchant &amp; Consumer App Redirection</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates share the source&#x27;s end-user goal of post-payment redirection to merchant URLs or consumer app deep links; Dynamic Payment Links is the closest but covers outbound payment-request link generation, a distinct capability.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Open Banking Payment Flow</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">The source is the end-to-end consumer Open Banking payment flow (decode request, select bank, generate redirect, track journey); none of the candidates cover that same end-user goal — the bank directory and rate limiting are related-but-different sub-capabilities, and the others are unrelated.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Payment Amount Input</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover the same end-user goal of consumer-facing payment amount entry with formatting and transaction-limit validation; they address rate limiting, bank directories, dynamic links, IBAN validation, and invoicing respectively.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Peer-to-Peer Payments</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (rate limiting, bank directory, dynamic links, IBAN validation, invoicing) cover the P2P payment end-user goal of resolving peer payee details and submitting a person-to-person payment.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: PointOne POS Integration</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover PointOne POS integration for paying existing POS orders; they address unrelated concerns (rate limiting, bank directory, dynamic links, IBAN validation, invoicing).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Post-Payment Review &amp; Feedback</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover post-payment review/feedback collection; they address rate limiting, bank directory, dynamic links, IBAN validation, and invoicing.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAMerchantDashboard</div>
+    <div>Feature: Real-time Payment Status Polling</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the backend candidates (rate limiting, bank directory, dynamic links, IBAN validation, invoicing) share the source&#x27;s end-user goal of real-time payment status polling.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Shopify Checkout Integration</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address Shopify post-payment checkout completion; they cover unrelated concerns (rate limiting, bank directory, dynamic links, IBAN validation, invoicing).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: SMS Payment Link Delivery</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">The source feature is specifically about SMS delivery of payment links, while Candidate 3 (Dynamic Payment Links) handles link generation — these are related-but-different capabilities (generation vs. delivery channel) that compose into a flow but are independently replaceable.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAConsumerWebNew</div>
+    <div>Feature: Transaction History &amp; Receipts</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOACore</strong>: Feature: API Rate Limiting &amp; Throttling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAPayment</strong>: Feature: Dynamic Payment Links</li><li class=''><strong>ATOACore</strong>: Feature: IBAN Validation</li><li class=''><strong>ATOAPayment</strong>: Feature: Invoicing, Add-ons &amp; Pricing</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover transaction history or receipt viewing — they address rate limiting, bank directory, payment links, IBAN validation, and invoicing respectively.</div>
+</div></div>
+</details>
+<details class="pair" >
+  <summary>
+    <span class="pair-pair">ATOACore &harr; ATOAMerchantDashboard</span>
+    <span class="dim">backend×frontend</span>
+    <span class="status done">done</span>
+    <span class="pair-meta">51 verdicts · 2 merged · 526s</span>
+  </summary>
+  <div class="pair-body"><div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Analytics</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates describe a generic analytics event emission/BI forwarding capability; they cover unrelated domains (accounting, recovery calling, banks, billing, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: API Rate Limiting &amp; Throttling</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to rate limiting or throttling — they cover accounting, AI recovery calls, bank directory, billing plans, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: App Configuration Management</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover app-wide config, SSL/version gating, or remote feature flags — they address unrelated domains (accounting, recovery calling, bank directory, billing plans, CSV uploads).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Atoa Employee Admin</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to internal Atoa employee admin accounts or back-office authorisation tooling.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: AWS S3 File Storage</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to S3 file storage or asset upload/download — they cover accounting, recovery calls, banks, billing, and CSV import.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Bank Feed (AIS)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover the same end-user goal as the backend AIS bank-feed pipeline; the closest (Bank Institutions Directory) shares the open-banking tag but addresses bank selection during payer auth, not transaction ingestion/reconciliation notifications.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Box QR Codes</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to physical box QR codes for in-store face-to-face payments; they cover unrelated domains (accounting, AI calling, banks, billing, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Bulk Business Onboarding</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">Source is backend bulk business onboarding for ops; no candidate covers bulk business import — Candidate 5 is a generic merchant-facing CSV upload for customers/payment requests, a different end-user goal.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Business Management &amp; KYB</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover business entity lifecycle, KYB verification, ownership, or business-to-user management — they address unrelated domains (accounting integrations, AI calling, banks directory, billing plans, CSV uploads).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Business Plans &amp; Pricing</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class='absorbed'><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans  <span class=tag>absorbed</span></li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill merge">merge</span></div>
+  <div class="rationale">Both features cover the same end-user goal of business/merchant subscription plan assignment and tier surfacing, with the backend assigning plans and the frontend displaying them.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Business User Access Requests</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover business user invitations or access request approval workflows; they address unrelated domains (accounting, recovery calling, banks directory, billing plans, CSV uploads).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Captcha (Cloudflare Turnstile)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to captcha/bot-gating; they cover accounting, recovery calling, banks, billing, and CSV uploads — distinct end-user goals.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Charity Donations</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to charity donations or merchant charity-mode checkout configuration; they cover unrelated domains (accounting, recovery calling, banks directory, billing, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Communication Preferences</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address per-user communication/notification preference toggles; they cover unrelated domains (accounting, recovery calls, banks, billing, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Contact Us</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (accounting integrations, AI recovery calling, bank directory, billing plans, CSV upload) share the contact-us enquiry capture and Slack/CRM forwarding goal of the source feature.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: CORS Origin Management</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to CORS origin management or runtime config-driven security allow-listing; they cover unrelated domains (accounting, recovery calls, banks, billing, CSV uploads).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Firebase Dynamic Links &amp; Service URLs</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to Firebase dynamic link shortening or environment-specific service URL resolution.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Google Reviews Integration</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to Google Reviews integration; they cover accounting, AI recovery calls, bank directories, billing, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: IBAN Validation</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover IBAN parsing/validation; the closest (Bank Institutions Directory) is a bank picker for open-banking, not IBAN structure validation.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Login History &amp; Session Metadata</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to login history, session metadata, or authentication auditing — they cover accounting, AI recovery, banks directory, billing, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Magic Link Authentication</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to magic link authentication; they cover accounting integrations, AI recovery calling, bank directory, billing plans, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Manual Refunds</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address manual refund initiation or refund state tracking; they cover unrelated domains (accounting integrations, AI recovery, bank directory, billing plans, CSV uploads).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant App Rating</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover merchant app rating/satisfaction capture; they address unrelated domains (accounting, AI recovery, banks directory, billing, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant Bank Accounts</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">No candidate covers merchant payout bank account management; the closest (Bank Institutions Directory) is a payer-side bank picker, not merchant settlement accounts.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant Integration (External Channels)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">The source feature is about exposing merchant data/QR endpoints to external partners via outbound integration APIs, while candidates cover unrelated domains (accounting sync, AI calling, bank directory, billing, CSV uploads) with no shared end-user goal.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant Management &amp; Onboarding</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover merchant entity lifecycle management (profile, theme, stores, KYB, payment pages); they address distinct domains like accounting integrations, AI recovery, banks directory, billing plans, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant QR Codes</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to merchant QR code generation, batching, or scan resolution; they cover unrelated domains (accounting, AI recovery, banks, billing, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Merchant Referral Program</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to merchant referral codes, redemption tracking, or referral SMS notifications.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Order QR Codes</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates concern per-order QR code generation or scan resolution; they cover unrelated domains (accounting, recovery calling, bank directory, billing, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Password Management</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to password management, authentication, or credential handling — they cover accounting integrations, AI calling, bank directories, billing plans, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment Links</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover the same end-user goal of generating/managing payment links; Bulk CSV Upload is a generic import primitive that could be composed with payment links but is independently useful.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment &amp; Merchant Notifications</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover transactional notifications (SMS/email for payments, bank updates, referrals); they address unrelated domains like accounting, AI calling, banks directory, billing, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment Processing</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover the core payment request lifecycle; they address adjacent concerns (accounting sync, recovery calls, bank directory, billing plans, CSV uploads) rather than the same end-user payment-creation capability.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment Recovery</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class='absorbed'><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling  <span class=tag>absorbed</span></li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill merge">merge</span></div>
+  <div class="rationale">Both features cover the same end-user goal of triggering recovery calls for failed/overdue payments — backend service drives the calls, frontend service is the UI layer for the same capability.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Payment Timeline</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address payment timeline composition or audit history; they cover unrelated domains (accounting integrations, AI recovery calling, bank directory, billing plans, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: PDF Generation &amp; Download</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to PDF generation/export; they cover accounting integrations, AI recovery calling, bank directory, billing plans, and CSV upload — all distinct end-user goals.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Pipedrive CRM Sync</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover Pipedrive CRM lead sync; they address accounting, AI recovery calls, bank directory, billing plans, and CSV uploads — different end-user goals.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: POS Terminals</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to POS terminal management or in-store transaction routing; they cover accounting, recovery calls, banks directory, billing plans, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAPayment</div>
+    <div>Feature: Request Logging, Error Filtering &amp; Correlation</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">The source is a backend cross-cutting middleware stack (correlation IDs, structured logging, error filtering); none of the candidates address logging, tracing, or error-handling end-user goals.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Roles &amp; Permissions (RBAC)</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to RBAC/roles/permissions; they cover accounting, AI calling, banks, billing, and CSV upload.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOAPayment</div>
+    <div>Feature: Scheduled Tasks &amp; Cron Server</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates describe a scheduled task/cron execution capability; they cover unrelated domains (accounting integrations, AI calling, banks directory, billing, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: SDK Card Payments &amp; Access</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover SDK-driven card payments or SDK access-type controls; they address unrelated domains (accounting, recovery calls, bank directory, billing plans, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Signup Source Tracking</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to signup origin/attribution tracking; they cover accounting integrations, AI recovery calling, bank directory, billing plans, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Slack Notifications</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to internal Slack ops alerting; they cover accounting integrations, AI recovery calls, bank directory, billing plans, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Telesales Workflow</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover telesales prospect tooling or outbound sales workflows; they address unrelated domains (accounting, recovery calls, banks directory, billing, CSV upload).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Two-Factor Authentication</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to two-factor authentication; they cover accounting integrations, AI recovery calling, bank directory, billing plans, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: UBO / KYB Document Checks</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates relate to UBO/KYB compliance validation; they cover accounting, recovery calling, banks directory, billing, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: User Authentication &amp; Sessions</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates address user authentication, sessions, or credential validation — they cover accounting integrations, AI recovery calling, bank directories, billing plans, and CSV uploads.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: User Home Dashboard</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates describe a home/dashboard aggregation capability; they cover unrelated domains (accounting, recovery calling, banks directory, billing plans, CSV uploads).</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: User Profile</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates (accounting integrations, AI recovery calling, bank directory, billing plans, CSV upload) cover user profile read/write — no shared end-user goal.</div>
+</div>
+<div class="verdict">
+  <div class="source">
+    <div class="label">SOURCE — ATOACore</div>
+    <div>Feature: Virtual Accounts</div>
+  </div>
+  <div class="candidates">
+    <div class="label dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Candidates</div>
+    <ul><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Accounting &amp; Bookkeeping Integrations</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: AI Recovery Calling</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bank Institutions Directory</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Billing &amp; Subscription Plans</li><li class=''><strong>ATOAMerchantDashboard</strong>: Feature: Bulk CSV Upload Operations</li></ul>
+  </div>
+  <div class="action"><span class="action-pill no_match">no_match</span></div>
+  <div class="rationale">None of the candidates cover virtual account lookup or inbound payment reconciliation against per-merchant VA references; they address different domains (accounting integrations, AI recovery, bank directory, billing plans, CSV uploads).</div>
+</div></div>
+</details>
+</body>
+</html>

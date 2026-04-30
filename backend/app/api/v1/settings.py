@@ -115,9 +115,12 @@ async def get_connections(
             cloudProvider=llm_cfg.get("cloud_provider", "anthropic"),
             cloudApiKey=_mask_secret(decrypt_secret(llm_cfg.get("cloud_api_key", ""))),
             cloudModel=llm_cfg.get("cloud_model", "claude-sonnet-4-5-20250514"),
+            mergeModelDefault=llm_cfg.get("merge_model_default"),
+            mergeModelLarge=llm_cfg.get("merge_model_large"),
         ),
         scan=ScanSettings(
             timeoutSeconds=scan_cfg.get("timeout_seconds", 300),
+            mergeTimeoutSeconds=scan_cfg.get("merge_timeout_seconds", 300),
             maxTurns=scan_cfg.get("max_turns", 40),
             autoCreateMembers=scan_cfg.get("auto_create_members", True),
         ),
@@ -212,14 +215,28 @@ async def update_connections(
         if body.slack.team_id:
             org.slack_team_id = body.slack.team_id
 
-    # AI config — only persist preset (Claude Code only for now)
+    # AI config — preset + optional per-org merge model overrides.
     if body.ai_config is not None:
-        config["llm"] = {"preset": body.ai_config.preset}
+        existing_llm = dict(config.get("llm") or {})
+        existing_llm["preset"] = body.ai_config.preset
+        # None on either field means "use platform default"; persist as
+        # absent rather than null so get_merge_models's allowlist logic
+        # sees a clean fallback path.
+        if body.ai_config.merge_model_default is None:
+            existing_llm.pop("merge_model_default", None)
+        else:
+            existing_llm["merge_model_default"] = body.ai_config.merge_model_default
+        if body.ai_config.merge_model_large is None:
+            existing_llm.pop("merge_model_large", None)
+        else:
+            existing_llm["merge_model_large"] = body.ai_config.merge_model_large
+        config["llm"] = existing_llm
 
     # Scan settings
     if body.scan is not None:
         config["scan"] = {
             "timeout_seconds": body.scan.timeout_seconds,
+            "merge_timeout_seconds": body.scan.merge_timeout_seconds,
             "max_turns": body.scan.max_turns,
             "auto_create_members": body.scan.auto_create_members,
         }

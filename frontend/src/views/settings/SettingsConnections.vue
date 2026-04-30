@@ -43,14 +43,6 @@
       </div>
 
       <template v-if="!settingsStore.loading">
-      <!-- ─── REPOSITORIES ───────────────────────────────────── -->
-      <div class="section-header mb-3">
-        <v-icon icon="mdi-source-repository-multiple" size="18" color="primary" />
-        <span class="text-body-2 font-weight-medium">Repositories</span>
-      </div>
-
-      <SettingsRepositories />
-
       <!-- ─── MCP INTEGRATION ─────────────────────────────────── -->
       <div class="section-header mb-3">
         <v-icon icon="mdi-api" size="18" color="primary" />
@@ -368,7 +360,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import api from '@/services/api'
-import SettingsRepositories from './SettingsRepositories.vue'
 import SettingsSlack from './SettingsSlack.vue'
 import SettingsAiConfig from './SettingsAiConfig.vue'
 

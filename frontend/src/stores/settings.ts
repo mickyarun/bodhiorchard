@@ -16,9 +16,19 @@ export interface ConnectionsState {
   slack: { enabled: boolean; connected: boolean; botToken: string; signingSecret: string; teamId: string }
   aiConfig: {
     preset: string
+    // Per-org merge model overrides. ``null`` = use platform default
+    // (LLMConfig.merge_model_default / merge_model_large). UI surfaces
+    // this as a "Use platform default" selector.
+    mergeModelDefault: string | null
+    mergeModelLarge: string | null
   }
   scan: {
+    // Per-repo synthesis subprocess timeout. Each synthesize call gets its
+    // own budget; the cross-repo merge call uses ``mergeTimeoutSeconds``
+    // because it runs once over every active feature and routinely needs
+    // a longer ceiling than synth.
     timeoutSeconds: number
+    mergeTimeoutSeconds: number
     maxTurns: number
     autoCreateMembers: boolean
   }
@@ -56,9 +66,12 @@ function emptyState(): ConnectionsState {
     slack: { enabled: false, connected: false, botToken: '', signingSecret: '', teamId: '' },
     aiConfig: {
       preset: 'claude-code',
+      mergeModelDefault: null,
+      mergeModelLarge: null,
     },
     scan: {
       timeoutSeconds: 300,
+      mergeTimeoutSeconds: 300,
       maxTurns: 40,
       autoCreateMembers: true,
     },

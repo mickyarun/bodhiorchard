@@ -18,6 +18,7 @@ from app.models.tracked_repository import RepoStatus
 from app.models.user import User
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.organization import OrganizationRepository
+from app.repositories.scan_run import ScanRunRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.repositories.user import UserRepository
 from app.schemas.settings import (
@@ -34,6 +35,7 @@ from app.services.repo_scanner import (
     detect_uncommitted_changes,
     list_remote_branches,
 )
+from app.services.ssh_keys import get_public_key
 
 logger = structlog.get_logger(__name__)
 
@@ -66,6 +68,23 @@ def _detect_setup_status(repo_path: str) -> str:
     return "not_setup"
 
 
+def _setup_compare_url(github_repo_full_name: str | None, main_branch: str | None) -> str | None:
+    """Return the GitHub compare URL for the setup branch, or ``None``.
+
+    Used by the row chip to deep-link to GitHub's "open a PR" page when
+    the setup branch was pushed but the GitHub App isn't configured to
+    open the PR automatically. Kept server-side so the URL shape lives
+    next to ``github_repo_full_name`` ownership.
+    """
+    if not github_repo_full_name or "/" not in github_repo_full_name:
+        return None
+    base = main_branch or "main"
+    return (
+        f"https://github.com/{github_repo_full_name}/compare/"
+        f"{base}...bodhiorchard/init-setup?quick_pull=1"
+    )
+
+
 @router.get("/repos", response_model=list[RepoInfo])
 async def list_repos(
     current_user: User = Depends(get_current_user),
@@ -92,26 +111,58 @@ async def list_repos(
     all_ds = await ds_repo.list_all()
     ds_repo_ids = {str(ds.repo_id) for ds in all_ds}
 
-    return [
-        RepoInfo(
-            id=str(r.id),
-            path=r.path,
-            name=r.name,
-            status=r.status.value,
-            lastScanned=(r.last_scanned_at.isoformat() if r.last_scanned_at else None),
-            sha=r.head_sha,
-            knowledgeCount=r.knowledge_count,
-            featureCount=r.feature_count,
-            mainBranch=r.main_branch,
-            developBranch=r.develop_branch,
-            uatBranch=r.uat_branch,
-            hasUncommittedChanges=False,
-            githubRepo=r.github_repo_full_name,
-            setupStatus=_detect_setup_status(r.path),
-            designSystemStatus=_detect_design_system_status(str(r.id), ds_repo_ids),
+    # One query joins each repo with its most-recent ScanRepoRun so the
+    # row card can render "last scan: <relative time> • <N> features •
+    # <status>" without any per-repo round trips.
+    latest_runs = await ScanRunRepository(db, org_id=org.id).find_latest_per_repo(
+        repo_ids=[r.id for r in repos]
+    )
+
+    cards: list[RepoInfo] = []
+    for r in repos:
+        last_run = latest_runs.get(r.id)
+        cards.append(
+            RepoInfo(
+                id=str(r.id),
+                path=r.path,
+                name=r.name,
+                status=r.status.value,
+                lastScanned=(r.last_scanned_at.isoformat() if r.last_scanned_at else None),
+                sha=r.head_sha,
+                knowledgeCount=r.knowledge_count,
+                featureCount=r.feature_count,
+                mainBranch=r.main_branch,
+                developBranch=r.develop_branch,
+                uatBranch=r.uat_branch,
+                hasUncommittedChanges=False,
+                githubRepo=r.github_repo_full_name,
+                setupStatus=_detect_setup_status(r.path),
+                setupBranchPushedAt=(
+                    r.setup_branch_pushed_at.isoformat()
+                    if r.setup_branch_pushed_at is not None
+                    else None
+                ),
+                setupPrUrl=r.setup_pr_url,
+                setupPrNumber=r.setup_pr_number,
+                setupPrState=(r.setup_pr_state.value if r.setup_pr_state is not None else None),
+                setupCompareUrl=_setup_compare_url(r.github_repo_full_name, r.main_branch),
+                designSystemStatus=_detect_design_system_status(str(r.id), ds_repo_ids),
+                lastScanStatus=(last_run.status.value if last_run is not None else None),
+                lastScanFinishedAt=(
+                    last_run.finished_at.isoformat()
+                    if last_run is not None and last_run.finished_at is not None
+                    else None
+                ),
+                lastScanStartedAt=(
+                    last_run.started_at.isoformat()
+                    if last_run is not None and last_run.started_at is not None
+                    else None
+                ),
+                lastScanFeatureCount=(last_run.feature_count if last_run is not None else None),
+                lastScanId=(str(last_run.scan_id) if last_run is not None else None),
+            )
         )
-        for r in repos
-    ]
+    return cards
 
 
 @router.post("/repos", response_model=RepoInfo)
@@ -262,89 +313,31 @@ async def clone_and_add_repo(
         uatBranch=repo.uat_branch,
         hasUncommittedChanges=has_dirty,
         githubRepo=repo.github_repo_full_name,
+        setupCompareUrl=_setup_compare_url(repo.github_repo_full_name, repo.main_branch),
     )
 
 
-class CloneRepoBody(BaseModel):
-    """Body for ``POST /v1/settings/repos/clone`` — authenticated GitHub clone."""
-
-    url: str = Field(..., description="GitHub HTTPS or SSH URL.")
-    pat: str | None = Field(
-        default=None,
-        description="Optional GitHub personal-access token for HTTPS private repos.",
-    )
-
-
-@router.post("/repos/clone", response_model=RepoInfo)
-async def clone_and_add_repo(
-    body: CloneRepoBody,
+@router.get("/repos/deploy-key")
+async def get_repos_deploy_key(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> RepoInfo:
-    """Clone a GitHub repo into the backend volume and register it on this org.
+) -> dict[str, str]:
+    """Return the backend SSH public key for the GitHub-clone flow.
 
-    Combines ``repo_cloner.clone_or_update`` (which writes to ``/data/repos``)
-    with the same "add by local path" flow as ``POST /repos`` above — so from
-    the rest of the pipeline's perspective a cloned repo is indistinguishable
-    from a pre-existing local one.
+    The setup wizard exposes the same key at ``GET /api/setup/deploy-key``
+    only while setup is incomplete (gated by ``_require_setup_incomplete``).
+    Post-setup the Settings → Code "Add repositories" dialog needs the same
+    key so the user can paste it into GitHub before queuing SSH URLs.
+
+    The setup-side docstring already promises that "the authenticated
+    ``/v1/settings/repos/clone`` flow exposes its own deploy-key helper
+    for ongoing use" — this is that helper. The public key is harmless to
+    share but we still gate it behind a session.
     """
-    org_repo = OrganizationRepository(db)
-    org = await org_repo.get_for_user(current_user)
-
-    result = await clone_or_update(body.url, org_slug=org.slug, pat=body.pat)
-    if not result.success or not result.path:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result.error or "Clone failed.",
-        )
-
-    repo_path = Path(result.path).resolve()
-    repo_repo = TrackedRepoRepository(db, org_id=org.id)
-    repo = await repo_repo.upsert(str(repo_path), repo_path.name)
-
-    detected_main = result.default_branch or await _detect_main_branch(str(repo_path))
-    detected_dev = await _detect_develop_branch(str(repo_path))
-    has_dirty = await detect_uncommitted_changes(str(repo_path))
-
-    if detected_main:
-        repo.main_branch = detected_main
-    if detected_dev:
-        repo.develop_branch = detected_dev
-
-    if not repo.github_repo_full_name:
-        from app.services.git_operations import get_github_repo_full_name
-
-        github_name = await get_github_repo_full_name(str(repo_path))
-        if github_name:
-            repo.github_repo_full_name = github_name
-
-    await db.flush()
-
-    logger.info(
-        "repo_cloned_and_registered",
-        org_id=str(org.id),
-        repo_id=str(repo.id),
-        path=str(repo_path),
-        url_kind="ssh" if body.url.startswith(("git@", "ssh://")) else "https",
-        pat_used=body.pat is not None,
-    )
-
-    return RepoInfo(
-        id=str(repo.id),
-        path=repo.path,
-        name=repo.name,
-        status=repo.status.value,
-        lastScanned=None,
-        sha=repo.head_sha,
-        knowledgeCount=repo.knowledge_count,
-        featureCount=repo.feature_count,
-        mainBranch=repo.main_branch,
-        developBranch=repo.develop_branch,
-        uatBranch=repo.uat_branch,
-        hasUncommittedChanges=has_dirty,
-        repoType=detect_repo_type(str(repo_path)),
-        githubRepo=repo.github_repo_full_name,
-    )
+    _ = current_user
+    return {
+        "public_key": get_public_key(),
+        "fingerprint_algo": "ssh-ed25519",
+    }
 
 
 @router.delete("/repos", status_code=status.HTTP_200_OK)

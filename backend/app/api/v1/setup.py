@@ -10,10 +10,11 @@ import uuid
 from pathlib import Path
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.deps import get_current_user, get_db
 from app.core.encryption import encrypt_secret
 from app.core.security import create_access_token, hash_password
@@ -23,6 +24,7 @@ from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.repositories.user import UserRepository
+from app.schemas.scan import RunConfig
 from app.schemas.setup import (
     BrowseDirectoriesResponse,
     ClaudeCheckRequest,
@@ -31,6 +33,7 @@ from app.schemas.setup import (
     SetupResponse,
     SetupStatusResponse,
 )
+from app.services.bud_stage_seeder import seed_stage_mappings_for_org
 from app.services.claude_env import (
     AUTH_MODE_API_KEY,
     AUTH_MODE_HOST,
@@ -39,8 +42,14 @@ from app.services.claude_env import (
 )
 from app.services.claude_runner import test_claude_connection
 from app.services.deployment_info import deployment_info
+from app.services.embedding_service import embedding_service
+from app.services.git_operations import list_remote_branches
 from app.services.permission_seeder import seed_permissions
-from app.services.repo_cloner import CLONE_ROOT, clone_or_update
+from app.services.repo_cloner import clone_or_update
+from app.services.repo_scanner import _detect_develop_branch, _detect_main_branch
+from app.services.scan.runner import start_v2_scan
+from app.services.scan_progress import get_active_scan_for_org
+from app.services.skill_loader import seed_skills_for_org
 from app.services.ssh_keys import get_public_key
 
 logger = structlog.get_logger(__name__)
@@ -154,9 +163,6 @@ async def get_repo_branches(
             detail=f"Not a git repository: {path}",
         )
 
-    from app.services.git_operations import list_remote_branches
-    from app.services.repo_scanner import _detect_develop_branch, _detect_main_branch
-
     branches = await list_remote_branches(str(repo_path))
     detected_main = await _detect_main_branch(str(repo_path))
     detected_dev = await _detect_develop_branch(str(repo_path))
@@ -258,7 +264,6 @@ async def clone_repo(
             "path": result.path,
         }
     # Surface the list of branches for the UI to offer as main/develop options.
-    from app.services.git_operations import list_remote_branches
 
     branches: list[str] = []
     try:
@@ -270,7 +275,7 @@ async def clone_repo(
         "path": result.path,
         "default_branch": result.default_branch,
         "branches": branches,
-        "clone_root": str(CLONE_ROOT),
+        "clone_root": str(settings.storage.repos_dir),
     }
 
 
@@ -326,7 +331,6 @@ async def check_claude_with_credentials(
 @router.post("/initialize", response_model=SetupResponse, status_code=status.HTTP_201_CREATED)
 async def initialize_setup(
     body: SetupRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> SetupResponse:
     """Run first-time platform setup.
@@ -337,7 +341,6 @@ async def initialize_setup(
 
     Args:
         body: Setup payload with org, admin, and repo path.
-        background_tasks: FastAPI background task manager.
         db: The async database session.
 
     Returns:
@@ -414,9 +417,6 @@ async def initialize_setup(
     # Seed permissions, agent skills, and stage mappings
     await seed_permissions(db)
 
-    from app.services.bud_stage_seeder import seed_stage_mappings_for_org
-    from app.services.skill_loader import seed_skills_for_org
-
     await seed_skills_for_org(org.id, db)
     await seed_stage_mappings_for_org(org.id, db)
     role_repo = RoleRepository(db)
@@ -434,7 +434,7 @@ async def initialize_setup(
     # Auto-add repos from source_code with branch mappings
     scan_id: str | None = None
     repo_repo = TrackedRepoRepository(db, org_id=org.id)
-    valid_paths: list[str] = []
+    valid_repo_ids: list[uuid.UUID] = []
 
     for repo_cfg in body.source_code.repos:
         repo_path = Path(repo_cfg.path).resolve()
@@ -443,7 +443,7 @@ async def initialize_setup(
             continue
 
         tracked = await repo_repo.upsert(str(repo_path), repo_path.name)
-        valid_paths.append(str(repo_path))
+        valid_repo_ids.append(tracked.id)
 
         # Use branch mappings from setup (user-selected)
         if repo_cfg.main_branch:
@@ -453,41 +453,28 @@ async def initialize_setup(
 
     await db.flush()
 
-    # Commit BEFORE scheduling the background scan. FastAPI runs
-    # BackgroundTasks after the response is sent but *before* the
-    # request's dependency teardown (which is where get_db() normally
-    # commits). The scan worker opens its own AsyncSessionLocal, so if we
-    # only rely on the teardown commit the scan sees an empty DB and
-    # crashes with `AttributeError: 'NoneType' object has no attribute
-    # 'config'` at scan_pipeline.py:363.
+    # Commit BEFORE kicking off the scan. ``start_v2_scan`` opens its
+    # own AsyncSessionLocal and reads the just-created TrackedRepository
+    # rows; if we relied on the request's teardown commit it would see
+    # an empty DB and crash.
     await db.commit()
 
     # Auto-trigger scan only if embedding service is healthy
     embedding_warning: str | None = None
-    if valid_paths:
-        from app.services.embedding_service import embedding_service
-
+    if valid_repo_ids:
         embed_ok, embed_err = await embedding_service.check()
         if embed_ok:
-            from app.services.scan_pipeline import run_scan_pipeline
-            from app.services.scan_progress import create_scan_progress
-
-            scan_id = str(uuid.uuid4())
-            await create_scan_progress(scan_id, str(org.id))
-
-            background_tasks.add_task(
-                run_scan_pipeline,
-                scan_id=scan_id,
+            new_scan_id = await start_v2_scan(
                 org_id=org.id,
-                repo_paths=valid_paths,
-                full_rescan=True,
-                user_id=str(user.id),
+                repo_ids=valid_repo_ids,
+                config=RunConfig(full_rescan=True),
             )
+            scan_id = str(new_scan_id)
 
             logger.info(
                 "setup_auto_scan_triggered",
                 scan_id=scan_id,
-                repos=len(valid_paths),
+                repos=len(valid_repo_ids),
             )
         else:
             embedding_warning = (
@@ -541,7 +528,6 @@ async def get_checklist_status(
     users = await user_repo.list_by_org(org.id)
 
     # Check scan status
-    from app.services.scan_progress import get_active_scan_for_org
 
     scan_in_progress = False
     scan_id: str | None = None

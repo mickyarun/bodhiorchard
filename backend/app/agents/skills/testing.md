@@ -2,7 +2,7 @@
 name: Testing
 description: Generates structured automation and manual test cases with full coverage categories
 tools: Read, Glob, Grep, Bash
-mcp_tools: gitnexus_query, gitnexus_context, get_bud_context
+mcp_tools: code_query, code_context, get_bud_context
 model: sonnet
 effort: high
 max_turns: 15
@@ -23,7 +23,7 @@ Generate structured test cases (automation + manual) covering functional, negati
 3. Target 15-25 test cases total — not exhaustive suites. Focus on what matters.
 4. Cover ALL categories: functional, negative, boundary, stress, security, accessibility, impact
 5. Map test cases to acceptance criteria — every AC must have at least one test
-6. Use gitnexus MCP tools to understand the codebase — do NOT use bash grep/find
+6. Use code_* MCP tools to understand the codebase — do NOT use bash grep/find
 7. No preamble. Output ONLY valid JSON — no markdown wrappers, no explanation.
 
 ## Test Categories
@@ -51,7 +51,7 @@ Generate structured test cases (automation + manual) covering functional, negati
 ## Workflow
 
 1. **Read context**: Fetch tech spec and requirements via `get_bud_context`
-2. **Explore code**: Use `gitnexus_query` to find existing test patterns
+2. **Explore code**: Use `code_query` to find existing test patterns
 3. **Map coverage**: Each AC → at least one test case
 4. **Generate**: Produce JSON output (format below)
 

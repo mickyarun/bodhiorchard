@@ -8426,7 +8426,7 @@ The pipeline has two stripes:
 ```
 Per-repo (run once per repo, sequential within a repo)
     A   Scan Mode Detection       (incremental vs full)
-    B   GitNexus Indexing         (code clusters extracted)
+    B   Code Indexing             (graphify → code clusters extracted)
     B1  Repo Setup                (worktrees, hooks, CLAUDE.md, setup PR)
     D   Stale Cleanup             (incremental only)
     E   Git Skill Analysis        (directory-level skill profiles)
@@ -8460,7 +8460,7 @@ Scan state is tracked in **Redis** (progress) plus the **`tracked_repositories` 
 | # | Phase | Scope | Source | What happens | Persisted to | Resumable on rerun? |
 |---|-------|-------|--------|--------------|--------------|---------------------|
 | A | Scan Mode Detection | per-repo | `scan_pipeline.py:478-508` | Compare `head_sha` with current HEAD. If <30% of files changed → `incremental`; else `full`. Forces `full` if no scan-sourced features exist. | in-memory flag only | ❌ |
-| B | GitNexus Indexing | per-repo | `scan_pipeline.py:510-542` | Run `gitnexus analyze`; collect code clusters + repo_overview. | GitNexus index (on-disk, outside app DB) | ⚠️ index survives but orchestrator ignores it |
+| B | Code Indexing | per-repo | `app/services/scan/stages/ingest.py` | Run `code_indexer.index_repo` (graphify under the hood); persist clusters to `cluster_cache` and the call graph to `repo_graph_cache`. | `cluster_cache`, `repo_graph_cache` | ✅ DB-backed |
 | B1 | Repo Setup | per-repo | `scan_pipeline.py:544-560` | Install worktrees, hooks, `.gitignore`, CLAUDE.md; commit + push + open setup PR if branch pushed. | Git remote (setup PR) | ⚠️ |
 | D | Stale Cleanup (incremental only) | per-repo | `scan_pipeline.py:620-632` | Delete `knowledge_items` whose `code_locations` reference deleted files. | `knowledge_items`, `knowledge_to_repo` | ✅ DB-backed |
 | E | Git Skill Analysis | per-repo | `scan_pipeline.py:634-658` → `git_analyzer.py:analyze_repo_skills()` | Walk git log → compute per-author-per-module touch counts, language stats, recency score → upsert `SkillProfile`. Optional auto-create `User` rows (gated by `scan.auto_create_members`). | `skill_profiles` | ✅ DB-backed |
@@ -8628,7 +8628,7 @@ Shipped in P1–P13 of the "Scan Repo Waterfall — Resumable Pipeline Design" p
 | Enum value | Was | Scope |
 |------------|-----|-------|
 | `mode_detection` | A | per-repo |
-| `gitnexus_index` | B | per-repo |
+| `code_index` | B | per-repo |
 | `repo_setup` | B1 | per-repo |
 | `stale_cleanup` | D | per-repo (incremental only) |
 | `skill_extraction` | E | per-repo |
@@ -8639,7 +8639,7 @@ Shipped in P1–P13 of the "Scan Repo Waterfall — Resumable Pipeline Design" p
 | `embedding_backfill` | F | global |
 | `persist_results` | G | global |
 
-`SHA_REUSABLE_PHASES = {GITNEXUS_INDEX, SKILL_EXTRACTION, DESIGN_SYSTEM_EXTRACT}` — these three phases copy their payload from an earlier DONE row when the repo HEAD SHA matches, so a full-rescan of an unchanged repo costs nothing beyond the lookup.
+`SHA_REUSABLE_PHASES = {CODE_INDEX, SKILL_EXTRACTION, DESIGN_SYSTEM_EXTRACT}` — these three phases copy their payload from an earlier DONE row when the repo HEAD SHA matches, so a full-rescan of an unchanged repo costs nothing beyond the lookup.
 
 **`scan_phase_checkpoints`** (migration `zn_scan_phase_checkpoints.py`). One row per `(scan_id, repo_id, phase, attempt)`. Stores lifecycle (`pending` / `running` / `done` / `failed` / `skipped`), `sha_at_run`, `error_code`, `error_message`, JSONB `payload`, and `parent_scan_id` for resume lineage. Indexed on `(scan_id, phase)`, `(org_id, phase, sha_at_run)` for cross-scan reuse lookups, and `(org_id, status)` for admin listings.
 

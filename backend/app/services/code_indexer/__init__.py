@@ -1,0 +1,276 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 Arun Rajkumar
+
+"""Code-graph indexer for bodhiorchard scans.
+
+Replaces the legacy ``gitnexus_indexer`` module. Drives community
+detection through the MIT-licensed ``graphifyy`` library (tree-sitter
+extraction → NetworkX graph → Leiden / Louvain clustering with
+oversize-split rule) instead of the npx GitNexus CLI.
+
+Public API:
+
+- :class:`ClusterEntry` — one community + its files + symbols + label.
+- :class:`IndexResult` — a complete index of a repo at a given SHA.
+- :func:`index_repo` — async entrypoint used by the scan pipeline.
+
+Determinism is provided by:
+
+1. graphify's internal seed pinning (Leiden seeded by graspologic; the
+   Louvain fallback uses ``seed=42``).
+2. :mod:`app.services.code_indexer.seed` re-orders the partition by
+   ``(size desc, min_member_id asc, head_sha_xor)`` so identical SHAs
+   always produce identical cluster_ids.
+3. :mod:`app.services.code_indexer.labeling` produces deterministic
+   path-token TF-IDF labels.
+
+The ``IndexResult.clusters`` list is ordered largest-first.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import networkx as nx
+import structlog
+from graphify.build import build as gx_build
+from graphify.cluster import cluster as gx_cluster
+from graphify.cluster import cohesion_score
+from graphify.extract import collect_files as gx_collect_files
+from graphify.extract import extract as gx_extract
+
+from app.services.code_indexer.labeling import label_cluster
+from app.services.code_indexer.merge_by_dir import merge_clusters_by_directory
+from app.services.code_indexer.seed import order_partition
+from app.services.code_indexer.skip_lists import filter_paths
+
+logger = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterEntry:
+    """One community produced by the indexer."""
+
+    cluster_id: str
+    label: str
+    files: list[str]
+    symbols: list[str]
+    symbol_count: int
+    cohesion: float | None = None
+
+
+@dataclass
+class IndexResult:
+    """Complete index of a repo at a head_sha."""
+
+    head_sha: str
+    clusters: list[ClusterEntry] = field(default_factory=list)
+    graph: nx.Graph | None = None
+    elapsed_s: float = 0.0
+    file_count: int = 0
+    success: bool = False
+    error: str | None = None
+
+
+async def index_repo(
+    repo_path: str | Path,
+    *,
+    head_sha: str = "",
+    max_files: int = 50_000,
+) -> IndexResult:
+    """Index a repository: parse → build call graph → cluster.
+
+    Args:
+        repo_path: Absolute path to the git working tree.
+        head_sha: Optional git SHA. Used to seed cluster ordering and
+            label tie-breakers so re-runs on the same SHA produce
+            identical output. Pass an empty string for sandbox usage.
+        max_files: Skip directories whose discovery exceeds this cap.
+            Prevents accidental indexing of monorepos with vendored
+            content (``node_modules``, ``vendor/``).
+
+    Returns:
+        IndexResult — ``success=False`` and ``error`` populated on
+        controlled failure (parse error, oversized repo, etc.). Raises
+        only on programmer error.
+    """
+    t0 = time.monotonic()
+    repo = Path(repo_path).resolve()
+    result = IndexResult(head_sha=head_sha or "")
+
+    if not repo.exists():
+        result.error = f"repo path not found: {repo!s}"
+        return result
+
+    try:
+        raw_files = await asyncio.to_thread(gx_collect_files, repo)
+    except Exception as exc:  # noqa: BLE001 — narrow on next iter
+        result.error = f"collect_files failed: {exc}"
+        result.elapsed_s = round(time.monotonic() - t0, 2)
+        return result
+
+    # Drop vendored / build / cache content. graphify's own skip set
+    # only catches a handful of asset bundles; we add cross-language
+    # rules (node_modules, target, vendor, Pods, _build, …). Without
+    # this, a Node.js project's node_modules drowns the actual src
+    # tree by 20:1 and Leiden produces giant library-symbol clusters.
+    files, dropped = filter_paths(raw_files, repo)
+    if dropped:
+        logger.info(
+            "code_indexer_skip_filter",
+            repo=str(repo),
+            kept=len(files),
+            dropped=dropped,
+            ratio=f"{dropped/(dropped+len(files)):.0%}",
+        )
+
+    result.file_count = len(files)
+    if not files:
+        result.error = "no source files found"
+        result.success = True  # not a failure — just empty
+        result.elapsed_s = round(time.monotonic() - t0, 2)
+        return result
+
+    if len(files) > max_files:
+        logger.warning(
+            "code_indexer_file_cap_hit",
+            repo=str(repo),
+            file_count=len(files),
+            cap=max_files,
+        )
+        result.error = f"file count {len(files)} exceeds cap {max_files}"
+        result.elapsed_s = round(time.monotonic() - t0, 2)
+        return result
+
+    try:
+        extraction = await asyncio.to_thread(gx_extract, files, repo)
+    except Exception as exc:  # noqa: BLE001
+        result.error = f"extract failed: {exc}"
+        result.elapsed_s = round(time.monotonic() - t0, 2)
+        return result
+
+    try:
+        # Build directed so ``code_impact`` can distinguish callers from
+        # callees. graphify's ``cluster.cluster`` internally converts to
+        # undirected before running Leiden, so the partition is unaffected.
+        graph: nx.Graph = await asyncio.to_thread(gx_build, [extraction], directed=True)
+    except Exception as exc:  # noqa: BLE001
+        result.error = f"build_graph failed: {exc}"
+        result.elapsed_s = round(time.monotonic() - t0, 2)
+        return result
+
+    result.graph = graph
+
+    if graph.number_of_nodes() == 0:
+        result.success = True
+        result.elapsed_s = round(time.monotonic() - t0, 2)
+        return result
+
+    try:
+        partition = await asyncio.to_thread(gx_cluster, graph)
+    except Exception as exc:  # noqa: BLE001
+        result.error = f"cluster failed: {exc}"
+        result.elapsed_s = round(time.monotonic() - t0, 2)
+        return result
+
+    # graphify's symbol-level partition is too fine-grained for our
+    # synthesis use case — TypeScript especially produces one cluster
+    # per source file. Merge by parent-directory so ``src/services/ais/*``
+    # ends up as one ``ais`` cluster regardless of how many files /
+    # symbols sit inside.
+    node_to_file = {
+        nid: str(data.get("source_file", ""))
+        for nid, data in graph.nodes(data=True)
+        if isinstance(data.get("source_file"), str)
+    }
+    partition = merge_clusters_by_directory(partition, node_to_file)
+
+    ordered = order_partition(partition, head_sha=head_sha)
+
+    # Build the FILE-level "all corpus paths" set once for IDF.
+    corpus_files: list[str] = list(_iter_files_from_graph(graph))
+
+    entries: list[ClusterEntry] = []
+    for cluster_id, member_node_ids in ordered:
+        files_in_cluster, symbols_in_cluster = _partition_files_and_symbols(graph, member_node_ids)
+        if not files_in_cluster and not symbols_in_cluster:
+            # Empty cluster (shouldn't happen) — skip rather than emit junk.
+            continue
+        label = label_cluster(
+            files_in_cluster or [n for n in member_node_ids],
+            corpus_files=corpus_files or None,
+        )
+        try:
+            cohesion = cohesion_score(graph, member_node_ids)
+        except Exception:  # noqa: BLE001 — graphify cohesion is best-effort
+            cohesion = None
+        entries.append(
+            ClusterEntry(
+                cluster_id=cluster_id,
+                label=label,
+                files=sorted(set(files_in_cluster)),
+                symbols=sorted(set(symbols_in_cluster)),
+                symbol_count=len(member_node_ids),
+                cohesion=cohesion,
+            )
+        )
+
+    result.clusters = entries
+    result.success = True
+    result.elapsed_s = round(time.monotonic() - t0, 2)
+    logger.info(
+        "code_indexer_done",
+        repo=str(repo),
+        head_sha=(head_sha or "")[:8],
+        files=result.file_count,
+        nodes=graph.number_of_nodes(),
+        edges=graph.number_of_edges(),
+        clusters=len(entries),
+        elapsed_s=result.elapsed_s,
+    )
+    return result
+
+
+def _iter_files_from_graph(graph: nx.Graph) -> list[str]:
+    """Return repo-relative source_file values from every node in the graph."""
+    seen: set[str] = set()
+    for _node_id, data in graph.nodes(data=True):
+        src = data.get("source_file")
+        if isinstance(src, str) and src:
+            seen.add(src)
+    return sorted(seen)
+
+
+def _partition_files_and_symbols(
+    graph: nx.Graph,
+    member_node_ids: list[str],
+) -> tuple[list[str], list[str]]:
+    """Split a cluster's member node ids into source files and symbol labels.
+
+    graphify's extractor produces both file-level nodes (``source_file``
+    set, label ends in an extension) and symbol-level nodes (functions,
+    classes, methods) tagged with the same ``source_file`` value.
+    Cluster cards list both — files for code_locations, symbols for
+    descriptions.
+    """
+    files: set[str] = set()
+    symbols: list[str] = []
+    for nid in member_node_ids:
+        if nid not in graph:
+            continue
+        data = graph.nodes[nid]
+        src = data.get("source_file")
+        if isinstance(src, str) and src:
+            files.add(src)
+        label = data.get("label")
+        if isinstance(label, str) and label and not _is_file_label(label):
+            symbols.append(label)
+    return sorted(files), symbols
+
+
+def _is_file_label(label: str) -> bool:
+    """Heuristic: graphify uses the bare filename as the label for file nodes."""
+    return "." in label and "/" not in label and "(" not in label and " " not in label

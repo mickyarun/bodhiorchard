@@ -4,8 +4,11 @@
 """MCP handlers for knowledge base, feature registry, and bug search.
 
 Covers: get_knowledge, search_bugs, get_pending_features,
-write_feature_registry, check_feature_exists, format_feature_content,
-and code-location merge logic.
+write_feature_registry, check_feature_exists, and code-location merge logic.
+
+Feature-content formatting and inline embedding live in
+``app/services/feature_content.py`` so the merge writer service can
+share them without importing from the MCP layer.
 """
 
 from typing import Any
@@ -14,65 +17,16 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.handler_utils import require_non_empty
-from app.models.knowledge_item import KnowledgeItem
 from app.models.organization import Organization
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.services.embedding_service import embedding_service
+from app.services.feature_content import format_feature_content
+from app.services.feature_content import try_embed as _try_embed
 
 logger = structlog.get_logger(__name__)
 
-
-def format_feature_content(
-    description: str,
-    capabilities: list[str],
-    source_clusters: list[str],
-    *,
-    feature_status: str | None = None,
-    source_ref: str | None = None,
-) -> str:
-    """Format structured feature content for storage.
-
-    Produces a lean plain-text block optimized for embedding search
-    (description dominates vector), triage agent reading (capabilities),
-    and token efficiency (~100-150 tokens).
-
-    Code locations are stored on the junction table (knowledge_to_repo),
-    not in the content text.
-
-    Args:
-        description: 1-2 sentence business description.
-        capabilities: List of specific things the feature does.
-        source_clusters: Cluster names (kept for signature compat).
-        feature_status: Optional lifecycle status (planned/in_progress/implemented).
-        source_ref: Optional BUD reference (e.g. "BUD-042").
-
-    Returns:
-        Formatted plain-text content string.
-    """
-    lines = [description, ""]
-
-    if feature_status:
-        status_label = feature_status.upper().replace("_", " ")
-        lines.append(f"Status: {status_label}")
-        if source_ref and feature_status != "implemented":
-            lines.append(f"Source: {source_ref}")
-        lines.append("")
-
-    if capabilities:
-        lines.append("Capabilities:")
-        for cap in capabilities:
-            lines.append(f"- {cap}")
-
-    return "\n".join(lines)
-
-
-async def _try_embed(title: str, content: str) -> list[float] | None:
-    """Attempt to embed a feature inline. Returns None on failure."""
-    try:
-        return await embedding_service.embed(f"{title}\n{content}"[:2000])
-    except Exception as exc:
-        logger.warning("inline_embed_failed", title=title, error=str(exc))
-        return None
+# Re-export for legacy callers (handlers_scan imports these names).
+__all__ = ["format_feature_content", "_try_embed"]
 
 
 async def handle_get_knowledge(
@@ -166,13 +120,16 @@ async def handle_write_feature_registry(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Save a synthesized feature description and mark source clusters done.
+    """Stage one synthesized feature into ``synthesized_features``.
 
-    Supports upgrading PLANNED/IN_PROGRESS features to IMPLEMENTED when code
-    is scanned. Uses exact-title match first, then falls back to semantic
-    matching against planned items.
+    Per-repo synthesis is staging-only: this handler appends an
+    immutable pre-merge row and dequeues the cluster, but does NOT
+    touch ``knowledge_items`` or ``knowledge_to_repo``. The merge phase
+    (B3) is the sole writer of canonical KIs.
     """
+    from app.mcp.synth_feature_writer import persist_synth_feature
     from app.mcp.synthesis_queue import get_queue_remaining, remove_from_queue
+    from app.repositories.tracked_repository import TrackedRepoRepository
 
     error = require_non_empty(
         params,
@@ -189,176 +146,51 @@ async def handle_write_feature_registry(
     source_clusters = params.get("source_clusters", [])
     title = f"Feature: {feature_name}"
 
-    content = format_feature_content(
+    if not repo_name:
+        return {
+            "success": False,
+            "error": (
+                "repo_name is required so the synth row can be bound to a tracked repository."
+            ),
+        }
+
+    tr_repo = TrackedRepoRepository(db, org_id=org.id)
+    tracked = await tr_repo.get_by_name(repo_name)
+    if tracked is None:
+        return {
+            "success": False,
+            "error": (
+                f"Unknown repo_name: {repo_name!r}. Call the tool again with "
+                "one of the org's active tracked repository names."
+            ),
+        }
+    repo_id = tracked.id
+
+    await persist_synth_feature(
+        db=db,
+        org=org,
+        repo_id=repo_id,
+        feature_title=title,
         description=params["description"],
         capabilities=params["capabilities"],
-        source_clusters=source_clusters,
-        feature_status="implemented",
+        cluster_names=source_clusters,
+        code_locations=params.get("code_locations"),
+        tags=list(params.get("tags") or []),
+        knowledge_item_id=None,
     )
 
-    # Resolve repo_id from repo_name. Previously this failed open —
-    # an unresolvable repo_name produced a feature with repo_id=NULL,
-    # the "fails to fetch skill lib" orphan symptom. Now it's a hard
-    # error so Claude sees the problem and can retry with a valid name.
-    repo_id = None
-    if repo_name:
-        from app.repositories.tracked_repository import TrackedRepoRepository
-
-        tr_repo = TrackedRepoRepository(db, org_id=org.id)
-        tracked = await tr_repo.get_by_name(repo_name)
-        if tracked is None:
-            return {
-                "success": False,
-                "error": (
-                    f"Unknown repo_name: {repo_name!r}. Call the tool "
-                    "again with one of the org's active tracked repository names."
-                ),
-            }
-        repo_id = tracked.id
-
-    # 1. Try exact-title upsert
-    ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-    item = await ki_repo.get_by_title_and_category(title, "feature_registry")
-    upgraded_from = None
-
-    if item:
-        item.content = content
-        item.source = "scan"
-        item.tags = sorted(set(item.tags or []) | set(params["tags"]))[:10]
-        item.embedding = await _try_embed(title, content)
-        item.is_active = True
-        item.feature_status = "implemented"
-    else:
-        # 2. Check for PLANNED/IN_PROGRESS items to upgrade via semantic match
-        try:
-            new_vector = await embedding_service.embed(f"{title}\n{content}"[:2000])
-            match_rows = await ki_repo.find_nearest_by_status(
-                new_vector,
-                category="feature_registry",
-                statuses=["planned", "in_progress"],
-                limit=1,
-            )
-            if match_rows:
-                matched_item, distance = match_rows[0]
-                score = 1.0 - distance
-                if score >= 0.7:
-                    # Upgrade the planned item
-                    upgraded_from = matched_item.feature_status
-                    matched_item.title = title
-                    matched_item.content = content
-                    matched_item.source = "scan"
-                    matched_item.tags = sorted(set(matched_item.tags or []) | set(params["tags"]))[
-                        :10
-                    ]
-                    matched_item.embedding = await _try_embed(title, content)
-                    matched_item.is_active = True
-                    matched_item.feature_status = "implemented"
-                    item = matched_item
-                    logger.info(
-                        "feature_upgraded_from_planned",
-                        org_id=str(org.id),
-                        source_ref=matched_item.source_ref,
-                        score=round(score, 4),
-                    )
-        except Exception:
-            logger.warning("feature_semantic_match_failed", org_id=str(org.id))
-
-        # 3. No match found — create new
-        if item is None:
-            item = KnowledgeItem(
-                org_id=org.id,
-                category="feature_registry",
-                title=title,
-                content=content,
-                source="scan",
-                tags=params["tags"],
-                is_active=True,
-                feature_status="implemented",
-                embedding=await _try_embed(title, content),
-            )
-            await ki_repo.add(item)
-
-    await ki_repo.flush()
-
-    # Link to repo via junction table (with per-repo code_locations)
-    if repo_id and item:
-        await ki_repo.link_to_repo(item.id, repo_id, code_locations=params.get("code_locations"))
-        await ki_repo.flush()
-
-        # Append an immutable pre-merge row to ``synthesized_features``
-        # for bad-merge recovery, B2 queue self-heal, and per-feature
-        # merge-outcome visibility. Same tx as the KI write — the
-        # synth row's repo_id NOT NULL is the DB-level guard that
-        # enforces the hard-fail policy above.
-        from app.mcp.synth_feature_writer import persist_synth_feature
-
-        await persist_synth_feature(
-            db=db,
-            org=org,
-            repo_id=repo_id,
-            feature_title=title,
-            description=params["description"],
-            capabilities=params["capabilities"],
-            cluster_names=source_clusters,
-            code_locations=params.get("code_locations"),
-            knowledge_item_id=item.id,
-        )
-
-    # Deactivate originals when merging cross-repo features.
-    # First, transfer repo links from source features to the merged feature
-    # so cross-repo associations survive the merge.
-    # Uses bulk SQL UPDATE (not ORM load+modify) so concurrent calls
-    # are idempotent — if another request already deactivated the rows,
-    # this UPDATE matches 0 rows instead of raising StaleDataError.
-    merge_source_titles = params.get("merge_source_titles", [])
-    merged_deactivated = 0
-    if merge_source_titles:
-        # Transfer repo links from source features before deactivating them
-        if item:
-            source_items = await ki_repo.get_active_by_titles(
-                merge_source_titles, "feature_registry"
-            )
-            if source_items:
-                transferred = await ki_repo.transfer_repo_links(
-                    [s.id for s in source_items], item.id
-                )
-                if transferred:
-                    await ki_repo.flush()
-                    logger.info(
-                        "merge_repo_links_transferred",
-                        merged_title=title,
-                        source_count=len(source_items),
-                        repo_ids_transferred=transferred,
-                    )
-
-        merged_deactivated = await ki_repo.bulk_deactivate_by_titles(
-            merge_source_titles, "feature_registry"
-        )
-
-    # Mark source clusters as done in the tracker
     if source_clusters:
         remove_from_queue(str(org.id), source_clusters)
 
     remaining = len(get_queue_remaining(str(org.id)))
-    result_data: dict[str, Any] = {
-        "success": True,
-        "title": title,
-        "remaining_clusters": remaining,
-    }
-    if upgraded_from:
-        result_data["upgraded_from"] = upgraded_from
-    if merged_deactivated:
-        result_data["merged_deactivated"] = merged_deactivated
-
     logger.info(
         "mcp_write_feature_registry",
         org_id=str(org.id),
         title=title,
+        repo=repo_name,
         remaining=remaining,
-        upgraded_from=upgraded_from,
-        merged_deactivated=merged_deactivated,
     )
-    return result_data
+    return {"success": True, "title": title, "remaining_clusters": remaining}
 
 
 async def handle_check_feature_exists(
@@ -399,95 +231,4 @@ async def handle_check_feature_exists(
         "exists": len(features) > 0,
         "feature_count": len(features),
         "features": features,
-    }
-
-
-async def handle_merge_features(
-    db: AsyncSession,
-    org: Organization,
-    params: dict[str, Any],
-) -> dict[str, Any]:
-    """Merge duplicate features across repos.
-
-    Keeps the feature with ``keep_title``, deactivates features in
-    ``merge_titles``, and links the kept feature to all specified repos.
-    """
-    error = require_non_empty(params, "keep_title", "repo_names")
-    if error:
-        return error
-
-    keep_title = params["keep_title"]
-    merge_titles = params.get("merge_titles", [])
-    repo_names = params.get("repo_names", [])
-
-    ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-
-    # 1. Find the feature to keep
-    item = await ki_repo.get_by_title_and_category(keep_title, "feature_registry")
-    if not item:
-        return {"success": False, "error": f"Feature not found: {keep_title}"}
-
-    # 2. Transfer repo links from merge sources, then deactivate them
-    merged_count = 0
-    if merge_titles:
-        source_items = await ki_repo.get_active_by_titles(merge_titles, "feature_registry")
-        if source_items:
-            await ki_repo.transfer_repo_links([s.id for s in source_items], item.id)
-            merged_count = await ki_repo.bulk_deactivate_by_titles(
-                merge_titles, "feature_registry"
-            )
-            await ki_repo.flush()
-
-    # 2b. Mark merge outcomes on ``synthesized_features`` so the audit
-    # trail records which rows were consolidated into which canonical.
-    # Runs even when merge_titles is empty so ``keep_title`` still gets
-    # flagged CANONICAL (identifies the surviving feature on a link-only
-    # merge call).
-    from app.mcp.synth_feature_writer import apply_merge_outcomes
-
-    canonical_marked, merged_outcomes = await apply_merge_outcomes(
-        db=db,
-        org=org,
-        keep_title=keep_title,
-        merge_titles=merge_titles,
-    )
-
-    # 3. Link to all specified repos
-    repos_linked = 0
-    if repo_names:
-        from app.repositories.tracked_repository import TrackedRepoRepository
-
-        tr_repo = TrackedRepoRepository(db, org_id=org.id)
-        for rname in repo_names:
-            tracked = await tr_repo.get_by_name(rname)
-            if tracked:
-                await ki_repo.link_to_repo(item.id, tracked.id)
-                repos_linked += 1
-
-    await ki_repo.flush()
-
-    if merged_count == 0 and repos_linked == 0:
-        logger.info("mcp_merge_features_noop", org_id=str(org.id), kept=keep_title)
-        return {
-            "success": True,
-            "kept": keep_title,
-            "merged_count": 0,
-            "repos_linked": 0,
-            "warning": "No changes made — nothing to merge or link",
-        }
-
-    logger.info(
-        "mcp_merge_features",
-        org_id=str(org.id),
-        kept=keep_title,
-        merged=merged_count,
-        repos_linked=repos_linked,
-        synth_canonical=canonical_marked,
-        synth_merged=merged_outcomes,
-    )
-    return {
-        "success": True,
-        "kept": keep_title,
-        "merged_count": merged_count,
-        "repos_linked": repos_linked,
     }

@@ -71,7 +71,6 @@
       <ScanPhaseTimeline
         v-if="scanStore.phases.length"
         :phases="scanStore.phases"
-        @retry="onPhaseRetry"
       />
     </div>
 
@@ -121,7 +120,6 @@ import api from '@/services/api'
 import ScanPhaseTimeline from '@/components/scan/ScanPhaseTimeline.vue'
 import { useScanSocket } from '@/composables/useScanSocket'
 import type {
-  PhaseStatus,
   RepoScanWarning,
   ScanStatusData,
 } from '@/composables/useScanSocket'
@@ -238,13 +236,6 @@ async function onResume(): Promise<void> {
     }
   } finally {
     resuming.value = false
-  }
-}
-
-async function onPhaseRetry(row: PhaseStatus): Promise<void> {
-  const newScanId = await scanStore.retryPhase(row.phase, row.repoId ?? undefined)
-  if (newScanId) {
-    maybeStartWsTracking(newScanId)
   }
 }
 

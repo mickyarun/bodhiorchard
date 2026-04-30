@@ -40,6 +40,18 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         )
         return list(result.scalars().all())
 
+    async def list_all_ordered_by_name(self) -> list[TrackedRepository]:
+        """List every repo in the org, including archived/removed.
+
+        Used by the scan-page selection grid which needs to show every
+        tracked repo regardless of status so the user can spot ones in
+        unexpected states (e.g. removed by accident).
+        """
+        result = await self._db.execute(
+            self._scoped(select(TrackedRepository)).order_by(TrackedRepository.name)
+        )
+        return list(result.scalars().all())
+
     async def list_visible(self) -> list[TrackedRepository]:
         """List repos with status != removed, ordered by name.
 
@@ -84,9 +96,10 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
     async def reset_head_shas(self) -> int:
         """Clear ``head_sha`` + ``last_scanned_at`` on every active repo.
 
-        Called by ``POST /scan/reset`` so the next scan treats each repo
-        as a first-time index — the SHA-diff in ``phase_a_scan_mode``
-        sees no prior SHA and forces a full rebuild.
+        Called by the legacy ``POST /scan`` endpoint when ``full_rescan``
+        is True so the next scan treats each repo as a first-time index —
+        the SHA-diff in ``phase_a_scan_mode`` sees no prior SHA and forces
+        a full rebuild.
 
         Returns:
             Number of rows updated.
@@ -203,6 +216,23 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
             ).order_by(TrackedRepository.name)
         )
         return list(result.all())
+
+    async def get_names_by_ids(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Batch-resolve repo IDs to display names.
+
+        Used by scan-result serializers to attach repo names to lists
+        of ``ScanRepoRun`` rows in a single round-trip.
+        """
+        if not ids:
+            return {}
+        result = await self._db.execute(
+            self._scoped(
+                select(TrackedRepository.id, TrackedRepository.name).where(
+                    TrackedRepository.id.in_(ids)
+                )
+            )
+        )
+        return {row.id: row.name for row in result.all()}
 
     async def get_paths_by_ids(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
         """Batch-resolve repo IDs to filesystem paths.

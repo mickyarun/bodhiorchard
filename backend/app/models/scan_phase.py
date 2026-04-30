@@ -23,7 +23,7 @@ class ScanPhase(StrEnum):
     """
 
     MODE_DETECTION = "mode_detection"  # was A
-    GITNEXUS_INDEX = "gitnexus_index"  # was B
+    CODE_INDEX = "code_index"  # was B
     REPO_SETUP = "repo_setup"  # was B1
     STALE_CLEANUP = "stale_cleanup"  # was D  (incremental only)
     SKILL_EXTRACTION = "skill_extraction"  # was E
@@ -56,9 +56,9 @@ class MergeOutcome(StrEnum):
     """Per-feature outcome of a ``FEATURE_MERGE`` pass.
 
     Set on ``synthesized_features.merge_outcome`` by the MCP
-    ``merge_features`` handler and the post-merge audit sweep. The
-    companion ``merged_into_id`` FK (non-NULL only when outcome is
-    ``MERGED_INTO``) points at the surviving canonical row.
+    ``apply_feature_merge_plan`` handler and the post-merge audit
+    sweep. The companion ``merged_into_id`` FK (non-NULL only when
+    outcome is ``MERGED_INTO``) points at the surviving canonical row.
     """
 
     CANONICAL = "canonical"
@@ -86,7 +86,7 @@ class ScanErrorCode(StrEnum):
 
 PHASE_SCOPE: dict[ScanPhase, PhaseScope] = {
     ScanPhase.MODE_DETECTION: PhaseScope.PER_REPO,
-    ScanPhase.GITNEXUS_INDEX: PhaseScope.PER_REPO,
+    ScanPhase.CODE_INDEX: PhaseScope.PER_REPO,
     ScanPhase.REPO_SETUP: PhaseScope.PER_REPO,
     ScanPhase.STALE_CLEANUP: PhaseScope.PER_REPO,
     ScanPhase.SKILL_EXTRACTION: PhaseScope.PER_REPO,
@@ -104,13 +104,13 @@ PHASE_SCOPE: dict[ScanPhase, PhaseScope] = {
 # same ``(org_id, repo_id, phase, sha_at_run)``, it copies the prior
 # checkpoint's payload instead of re-running the work. Mutating phases
 # (synthesis, merge, persist) are never in this set.
-# GITNEXUS_INDEX is intentionally NOT in this set: its phase body
-# populates the per-repo loop's ``gitnexus_features`` closure that
+# CODE_INDEX is intentionally NOT in this set: its phase body
+# populates the per-repo loop's cluster closure that
 # ``build_pending_synthesis`` reads downstream. Cross-scan reuse skips
 # the body and leaves that closure empty, which silently produces
 # zero pending synthesis tasks → zero features. (Discovered live on
-# scan ``f1373d55-…``.) The gitnexus indexer has its own SHA-based
-# cache so re-running on every scan is cheap.
+# scan ``f1373d55-…``.) The code indexer has its own SHA-based
+# cache (cluster_cache + repo_graph_cache) so re-running per scan is cheap.
 SHA_REUSABLE_PHASES: frozenset[ScanPhase] = frozenset(
     {
         ScanPhase.SKILL_EXTRACTION,

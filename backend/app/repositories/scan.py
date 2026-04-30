@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import bindparam, func, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan import ACTIVE_SCAN_STATUSES, Scan
@@ -59,8 +60,18 @@ class ScanRepository(BaseRepository[Scan]):
 
     async def get(self, scan_id: uuid.UUID) -> Scan | None:
         """Fetch by id. Returns None if no row exists or wrong org."""
+        result = await self._db.execute(self._scoped(select(Scan).where(Scan.id == scan_id)))
+        return result.scalar_one_or_none()
+
+    async def get_latest(self) -> Scan | None:
+        """Return the org's most-recent scan regardless of status.
+
+        Used by the timeline page to rehydrate after the user navigates
+        away — we want the last scan whether it succeeded, failed, or
+        is still running.
+        """
         result = await self._db.execute(
-            self._scoped(select(Scan).where(Scan.id == scan_id))
+            self._scoped(select(Scan)).order_by(Scan.created_at.desc()).limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -73,9 +84,9 @@ class ScanRepository(BaseRepository[Scan]):
         row that simply never finished updating.
         """
         result = await self._db.execute(
-            self._scoped(
-                select(Scan).where(Scan.status.in_(_active_status_values()))
-            ).order_by(Scan.updated_at.desc()).limit(1)
+            self._scoped(select(Scan).where(Scan.status.in_(_active_status_values())))
+            .order_by(Scan.updated_at.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -170,3 +181,58 @@ class ScanRepository(BaseRepository[Scan]):
 def _active_status_values() -> list[str]:
     """String values of ``ACTIVE_SCAN_STATUSES`` for SQL ``IN (...)``."""
     return [s.value for s in ACTIVE_SCAN_STATUSES]
+
+
+async def find_orphan_active_scans(
+    db: AsyncSession,
+    *,
+    cutoff: datetime,
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """Return ``(scan_id, org_id)`` pairs for non-terminal scans older than ``cutoff``.
+
+    Cross-org sweep used by the startup reconciler — not org-scoped because
+    a backend restart needs to clean up zombie scans regardless of org.
+    """
+    result = await db.execute(
+        select(Scan.id, Scan.org_id).where(
+            Scan.status.in_(_active_status_values()),
+            Scan.updated_at < cutoff,
+        )
+    )
+    return [(row.id, row.org_id) for row in result.all()]
+
+
+async def bulk_mark_failed(
+    db: AsyncSession,
+    *,
+    scan_ids: list[uuid.UUID],
+    error: str,
+) -> int:
+    """Bulk-flip the given scans to ``status='failed'`` with the supplied error.
+
+    No org-scoping — the scan_id list is the authoritative filter and the
+    caller has already vetted those ids (e.g. via ``find_orphan_active_scans``).
+    Returns the number of rows updated.
+    """
+    if not scan_ids:
+        return 0
+    result = await db.execute(
+        sql_update(Scan)
+        .where(Scan.id.in_(scan_ids))
+        .values(
+            status="failed",
+            error=error,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    return cast(CursorResult[Any], result).rowcount or 0
+
+
+async def get_by_id_unscoped(db: AsyncSession, scan_id: uuid.UUID) -> Scan | None:
+    """Fetch a scan row without org filtering (PK lookup).
+
+    Reserved for system-level paths like the orphan reconciler that
+    operate cross-org and only need the row to publish a final WS
+    event. Application code should use ``ScanRepository.get`` instead.
+    """
+    return await db.get(Scan, scan_id)

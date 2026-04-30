@@ -26,6 +26,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     DateTime,
     Enum,
@@ -82,9 +83,21 @@ class SynthesizedFeature(BaseModel):
         default=list,
         server_default=text("ARRAY[]::varchar[]"),
     )
+    tags: Mapped[list[str]] = mapped_column(
+        ARRAY(String),
+        nullable=False,
+        default=list,
+        server_default=text("ARRAY[]::varchar[]"),
+    )
     code_locations: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"
     )
+    # Embedding of ``feature_title + description`` (BAAI/bge-small-en-v1.5,
+    # 384d). Computed once at synthesis write-time and copied to the
+    # canonical KI on promotion so the merge phase can cluster
+    # likely-duplicates without recomputing per-merge. Nullable so
+    # legacy pre-migration rows can be lazy-filled at merge time.
+    embedding = mapped_column(Vector(384), nullable=True)
     knowledge_item_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("knowledge_items.id", ondelete="SET NULL"),

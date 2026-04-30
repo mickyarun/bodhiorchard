@@ -24,6 +24,7 @@ from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.bud_estimate_snapshot import BUDEstimateSnapshot
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.models.bug import Bug, BugSeverity, BugStatus
+from app.models.cluster_cache import ClusterCache
 from app.models.design_system import DesignSystemRef
 from app.models.dev_activity import DevActivityLog
 from app.models.developer_xp import DeveloperXP, RewardEvent, RewardType
@@ -44,6 +45,7 @@ from app.models.permission import (
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.qa_test_evidence import QATestEvidence
 from app.models.race_result import RaceResult
+from app.models.repo_graph_cache import RepoGraphCache
 from app.models.scan import ACTIVE_SCAN_STATUSES, Scan, ScanAggregateStatus
 from app.models.scan_phase import (
     PHASE_SCOPE,
@@ -57,6 +59,13 @@ from app.models.scan_phase import (
     is_per_repo,
 )
 from app.models.scan_phase_checkpoint import ScanPhaseCheckpoint
+from app.models.scan_repo_run import ScanRepoRun
+from app.models.scan_repo_step import ScanRepoStep
+from app.models.scan_run_enums import (
+    RepoRunStatus,
+    ScanKind,
+    StepStatus,
+)
 from app.models.skill_profile import SkillProfile
 from app.models.standup import StandupReport
 from app.models.synthesized_feature import SynthesizedFeature
@@ -86,11 +95,16 @@ __all__ = [
     "Bug",
     "BugSeverity",
     "BugStatus",
+    "ClusterCache",
     "DesignSystemRef",
     "DevActivityLog",
     "DeveloperXP",
     "EnterpriseRule",
     "FeatureLearning",
+    "RepoGraphCache",
+    "RepoRunStatus",
+    "ScanKind",
+    "StepStatus",
     "ImportStatus",
     "JiraImportSession",
     "JiraIssueBudMap",
@@ -117,6 +131,8 @@ __all__ = [
     "ScanAggregateStatus",
     "ACTIVE_SCAN_STATUSES",
     "ScanPhaseCheckpoint",
+    "ScanRepoRun",
+    "ScanRepoStep",
     "ScanPhase",
     "ScanErrorCode",
     "MergeOutcome",

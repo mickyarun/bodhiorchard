@@ -62,6 +62,4 @@ def test_tiebreak_is_slug_alphabetical_not_import_order() -> None:
     for p in all_platforms():
         same_priority.setdefault(p.priority, []).append(p.slug)
     for priority, slugs in same_priority.items():
-        assert slugs == sorted(slugs), (
-            f"Priority {priority} platforms not in slug order: {slugs}"
-        )
+        assert slugs == sorted(slugs), f"Priority {priority} platforms not in slug order: {slugs}"

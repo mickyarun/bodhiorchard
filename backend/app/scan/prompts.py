@@ -9,7 +9,7 @@ Three prompts, one per Claude invocation point:
   ``phase_b2_synthesis``'s loop over the cluster queue. Claude calls
   ``write_feature_registry`` for each business feature it identifies.
 - ``build_direct_scan_prompt`` — fallback for small repos where
-  GitNexus found zero clusters. Claude scans the file tree directly.
+  Code indexer found zero clusters. Claude scans the file tree directly.
 - ``build_merge_prompt`` — global cross-repo dedup. Claude calls
   ``merge_features`` to consolidate same-domain features across repos.
 
@@ -92,7 +92,7 @@ def build_direct_scan_prompt(
     readme_overview: str,
     file_tree: str,
 ) -> str:
-    """Build prompt for repos where GitNexus found no clusters.
+    """Build prompt for repos where Code indexer found no clusters.
 
     Claude scans the file structure directly to identify features instead of
     processing a cluster queue.
@@ -128,72 +128,110 @@ README Overview:
 
 
 def build_merge_prompt(
-    features: list[dict],
+    new_features: list[dict],
+    existing_canonicals: list[dict],
     unlinked_repos: list[dict] | None = None,
 ) -> str:
-    """Build a prompt for cross-repo feature merging.
+    """Build a two-section prompt for cross-repo feature merging.
 
-    Lists all features with their repo names and tags. The LLM calls
-    ``merge_features`` for groups that represent the same business
-    capability across repos.
+    The merge step deduplicates the freshly-synthesised features from this
+    scan (``new_features``) AND links them against canonical features
+    persisted from prior scans (``existing_canonicals``). Each row carries
+    a typed id prefix so the LLM can name a target unambiguously:
+    ``[synth:<uuid>]`` for new rows, ``[ki:<uuid>]`` for existing canonicals.
 
-    Also lists repos whose code wasn't clustered (e.g. small frontend
-    repos) so the LLM can link them to existing features by name.
+    The LLM calls ``apply_feature_merge_plan`` (a single MCP tool) with a
+    list of merge ops; each op names exactly one canonical id (either
+    ``canonical_synth_id`` or ``canonical_knowledge_id``).
 
     Args:
-        features: List of dicts with keys: title, repo_names, tags.
-        unlinked_repos: Repos with 0 clusters — include their file
-            listing so the LLM can link them to features.
+        new_features: Synthesised features from this scan. Required keys:
+            ``synth_id``, ``title``, ``repo_names``, ``tags``,
+            ``cluster_names``, ``description``, ``capabilities``,
+            ``code_locations``.
+        existing_canonicals: Canonical features from prior scans. Required
+            keys: ``knowledge_id``, ``title``, ``repo_names``,
+            ``cluster_names``, ``summary``.
+        unlinked_repos: Tracked repos that produced zero features (too
+            small to cluster). Their files are surfaced so the LLM can
+            link them to an existing feature via the op's ``repo_ids``.
 
     Returns:
         Prompt string for Claude Code CLI.
     """
-    lines = []
-    for i, f in enumerate(features, 1):
-        repos = ", ".join(f["repo_names"]) if f["repo_names"] else "unlinked"
+    new_lines: list[str] = []
+    for f in new_features:
+        repos = ", ".join(f.get("repo_names") or []) or "unlinked"
         tags = ", ".join(f.get("tags") or [])
-        lines.append(f'{i}. "{f["title"]}" ({repos}) — {tags}')
+        clusters = ", ".join(f.get("cluster_names") or [])
+        capabilities = "; ".join(f.get("capabilities") or [])
+        code_locations = ", ".join(f.get("code_locations") or [])
+        new_lines.append(
+            f'- [synth:{f["synth_id"]}] "{f["title"]}" ({repos})\n'
+            f"    tags: {tags}\n"
+            f"    clusters: {clusters}\n"
+            f"    description: {f.get('description', '')}\n"
+            f"    capabilities: {capabilities}\n"
+            f"    code_locations: {code_locations}"
+        )
+    new_section = "## NEW features\n\n" + ("\n".join(new_lines) if new_lines else "(none)")
 
-    feature_list = "\n".join(lines)
+    existing_section = ""
+    if existing_canonicals:
+        ex_lines: list[str] = []
+        for f in existing_canonicals:
+            repos = ", ".join(f.get("repo_names") or []) or "unlinked"
+            clusters = ", ".join(f.get("cluster_names") or [])
+            ex_lines.append(
+                f'- [ki:{f["knowledge_id"]}] "{f["title"]}" ({repos})\n'
+                f"    clusters: {clusters}\n"
+                f"    summary: {f.get('summary', '')}"
+            )
+        existing_section = "## EXISTING canonicals\n\n" + "\n".join(ex_lines) + "\n\n"
 
     unlinked_section = ""
     if unlinked_repos:
-        repo_lines = []
-        for repo in unlinked_repos:
-            files = ", ".join(repo["files"][:20])
-            repo_lines.append(f"- **{repo['name']}**: {files}")
-        unlinked_section = f"""
-
-## Repos with no features yet
-
-These repos were scanned but produced no features (too small for clustering).
-Link them to existing features if their code matches:
-
-{chr(10).join(repo_lines)}
-"""
+        repo_lines = [
+            f"- **{repo['name']}**: {', '.join(repo['files'][:20])}" for repo in unlinked_repos
+        ]
+        unlinked_section = (
+            "## Repos with no features yet\n\n"
+            "These repos were scanned but produced no features (too small for "
+            "clustering). Attach them to a merge op via ``repo_ids`` if their "
+            "code clearly belongs to an existing feature.\n\n" + "\n".join(repo_lines) + "\n\n"
+        )
 
     return f"""You are merging duplicate features across repositories.
 
-## Features
+{existing_section}{new_section}
 
-{feature_list}
-{unlinked_section}
-## Instructions
+{unlinked_section}## Instructions
 
-1. Look for features that represent the SAME business capability but exist
-   in different repos (or have slightly different names). Call `merge_features`
-   to consolidate them.
+Call ``apply_feature_merge_plan`` once with a list of merge ops. Each op
+collapses a group of duplicates onto a single canonical row.
 
-2. For repos listed under "Repos with no features yet", if their files clearly
-   belong to an existing feature (e.g. a frontend repo with auth views matches
-   "Authentication"), call `merge_features` with that repo added to repo_names.
+For every op, set **exactly one of**:
 
-Parameters for merge_features:
-- keep_title: The most descriptive title from the group (exact match required)
-- merge_titles: The other titles to merge into it (will be deactivated)
-- repo_names: ALL repository names this feature belongs to
+- ``canonical_synth_id``: pick a NEW row's ``synth_id`` (group of new
+  features only — no existing canonical involved).
+- ``canonical_knowledge_id``: pick an EXISTING row's ``knowledge_id``
+  (group includes at least one existing canonical — the new rows merge
+  into it).
+
+Op fields:
+
+- ``canonical_synth_id`` OR ``canonical_knowledge_id`` (XOR — never both)
+- ``absorb_synth_ids``: list of NEW ``synth_id`` values absorbed into the
+  canonical
+- ``absorb_knowledge_ids`` (optional): list of EXISTING ``knowledge_id``
+  values absorbed into the canonical (use sparingly — only when two
+  prior canonicals are clearly the same feature)
+- ``repo_ids`` (optional): tracked-repo ids to attach to this canonical
+  (use for unlinked repos whose code matches the feature)
+- ``rationale``: one short sentence on why these are the same feature
 
 Rules:
-- Only merge features that are clearly the same domain
-- Do NOT merge features that are merely related (e.g. "Billing" and "Payments" are separate)
-- If no duplicates or links exist, you are done — do nothing"""
+- Only merge features that are clearly the same business capability
+- Do NOT merge features that are merely related ("Billing" and "Payments"
+  are separate)
+- If no duplicates or links exist, return an empty ``ops`` list — done"""

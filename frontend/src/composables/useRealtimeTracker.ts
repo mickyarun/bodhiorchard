@@ -11,7 +11,7 @@
  * Usage:
  *   const tracker = useRealtimeTracker<MyData>({
  *     topicPrefix: 'scan',
- *     pollEndpoint: (id) => `/v1/skills/scan/${id}/status`,
+ *     pollEndpoint: (id) => `/v1/reposcanv2/scans/${id}/status`,
  *     isTerminal: (d) => d.status === 'completed' ? 'completed' : d.status === 'failed' ? 'failed' : null,
  *     getError: (d) => d.error || null,
  *   })

@@ -1,116 +1,112 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Two-tier merge-audit tests.
+"""Strict post-merge audit tests.
 
-Bug B in the stabilisation plan: the legacy ``mark_unvisited_current``
-flagged every NULL-outcome synth row as ``unvisited`` — including
-unique features Claude rationally chose not to merge. Result: every
-scan with at least one unique feature failed the FEATURE_MERGE
-checkpoint, the SKILL_REMAP cascade never ran, and the Skills view
-stayed on directory modules.
+Under the staging-then-merge model, ``phase_b3_merge`` is the sole
+writer of canonical ``knowledge_items``. Every NEW synth row produced
+in a scan must end the merge with a non-NULL ``merge_outcome`` AND a
+non-NULL ``knowledge_item_id``. Anything else is a logic bug —
+``_audit_strict`` raises ``MergeIncompleteError`` so the FEATURE_MERGE
+checkpoint lands FAILED with ``error_code='merge_incomplete'``.
 
-The new contract:
-  - NULL outcome + matching KI ``is_active=True``  → CANONICAL  (no error)
-  - NULL outcome + matching KI inactive / missing  → UNVISITED  (raise)
-
-Tests use a stub repository so we exercise the audit-call ordering and
-the resulting log/raise behaviour without a live database.
+The two-tier "active-KI fallback" from the legacy flow is gone: there
+is no longer a path where a synth row can be CANONICAL without us
+having created its canonical KI ourselves.
 """
 
 from __future__ import annotations
 
+import uuid
+from typing import Any
+
 import pytest
 
 
+class _StubSynthRow:
+    """Bare-minimum stand-in for ``SynthesizedFeature`` at the audit boundary."""
+
+    def __init__(self, sid: uuid.UUID) -> None:
+        self.id = sid
+
+
 class _StubSynthRepo:
-    """Minimal stand-in tracking how many rows each tier marks.
+    """Stub for ``SynthesizedFeatureRepository`` exposing only the audit seam."""
 
-    Two attributes drive the behaviour:
-      - ``canonical_to_mark`` — what ``mark_canonical_for_active_kis``
-        will return on its first invocation.
-      - ``unvisited_to_mark`` — what ``mark_unvisited_for_inactive_kis``
-        returns AFTER the canonical pass has run. Setting this > 0
-        models the genuine partial-merge case.
-    """
-
-    def __init__(self, *, canonical_to_mark: int, unvisited_to_mark: int) -> None:
-        self.canonical_to_mark = canonical_to_mark
-        self.unvisited_to_mark = unvisited_to_mark
+    def __init__(self, leftover_ids: list[uuid.UUID]) -> None:
+        self._leftover = [_StubSynthRow(sid) for sid in leftover_ids]
         self.calls: list[str] = []
 
-    async def mark_canonical_for_active_kis(self) -> int:
-        self.calls.append("canonical")
-        return self.canonical_to_mark
-
-    async def mark_unvisited_for_inactive_kis(self) -> int:
-        # Mirrors the prod sweep: the canonical pass should have already
-        # taken every active-KI row, so this method only sees orphans.
-        self.calls.append("unvisited")
-        return self.unvisited_to_mark
+    async def list_unmerged_for_scan(self, scan_id: uuid.UUID) -> list[_StubSynthRow]:
+        self.calls.append(f"list_unmerged:{scan_id}")
+        return list(self._leftover)
 
 
-async def _run_audit(stub: _StubSynthRepo) -> tuple[int, int]:
-    """Run the audit body in isolation.
+async def _run_audit_with_stub(stub: _StubSynthRepo) -> None:
+    """Invoke the audit body, swapping in the stub repository.
 
-    Mirrors the canonical-then-unvisited ordering in
-    ``phase_b3_merge``. We import the typed exception lazily so the
-    module list at the top stays minimal.
+    ``_audit_strict`` constructs its own ``SynthesizedFeatureRepository``
+    instance internally; we monkey-patch the constructor for the
+    duration of the call so the test stays focused on the audit rule
+    instead of the repository wiring.
     """
-    canonical = await stub.mark_canonical_for_active_kis()
-    unvisited = await stub.mark_unvisited_for_inactive_kis()
-    return canonical, unvisited
+    from app.services.scan.phase_impls import feature_merge
+
+    class _Factory:
+        def __init__(self, *_: Any, **__: Any) -> None:
+            pass
+
+        async def list_unmerged_for_scan(self, scan_id: uuid.UUID) -> list[_StubSynthRow]:
+            return await stub.list_unmerged_for_scan(scan_id)
+
+    original = feature_merge.SynthesizedFeatureRepository
+    feature_merge.SynthesizedFeatureRepository = _Factory  # type: ignore[assignment,misc]
+    try:
+        await feature_merge._audit_strict(
+            db=None,  # type: ignore[arg-type]
+            org_id=uuid.uuid4(),
+            scan_uuid=uuid.uuid4(),
+        )
+    finally:
+        feature_merge.SynthesizedFeatureRepository = original  # type: ignore[assignment,misc]
 
 
-# ───────────────────────── tier semantics ─────────────────────────
+@pytest.mark.asyncio(loop_scope="function")
+async def test_audit_passes_when_no_leftover_rows() -> None:
+    """The healthy case: every NEW synth row got an outcome."""
+    stub = _StubSynthRepo(leftover_ids=[])
+    # Should NOT raise.
+    await _run_audit_with_stub(stub)
+    assert any(call.startswith("list_unmerged:") for call in stub.calls)
 
 
-async def test_audit_marks_active_ki_rows_as_canonical() -> None:
-    """9 unique features: canonical pass picks them up, unvisited stays at 0."""
-    stub = _StubSynthRepo(canonical_to_mark=9, unvisited_to_mark=0)
-    canonical, unvisited = await _run_audit(stub)
-    assert canonical == 9
-    assert unvisited == 0
-    assert stub.calls == ["canonical", "unvisited"]
-
-
-async def test_audit_marks_orphan_rows_as_unvisited() -> None:
-    """KI was deactivated mid-merge: unvisited > 0 → caller raises."""
+@pytest.mark.asyncio(loop_scope="function")
+async def test_audit_raises_when_leftover_rows_remain() -> None:
+    """A single unstamped synth row fails the whole merge phase."""
     from app.services.scan_checkpoints import MergeIncompleteError
 
-    stub = _StubSynthRepo(canonical_to_mark=0, unvisited_to_mark=2)
-    canonical, unvisited = await _run_audit(stub)
-    assert canonical == 0
-    assert unvisited == 2
+    leftover = [uuid.uuid4()]
+    stub = _StubSynthRepo(leftover_ids=leftover)
 
-    # Mirror the phase_b3_merge raise contract.
-    if unvisited:
-        with pytest.raises(MergeIncompleteError):
-            raise MergeIncompleteError(
-                f"Merge completed but {unvisited} feature(s) have inactive "
-                "knowledge_items without a merge target; retry the "
-                "FEATURE_MERGE phase to consolidate them."
-            )
+    with pytest.raises(MergeIncompleteError) as exc_info:
+        await _run_audit_with_stub(stub)
+
+    assert "1 synth row" in str(exc_info.value)
+    assert str(leftover[0]) in str(exc_info.value)
 
 
-async def test_audit_no_op_when_all_outcomes_set() -> None:
-    """Steady-state happy path: every row already has an outcome → both pass return 0."""
-    stub = _StubSynthRepo(canonical_to_mark=0, unvisited_to_mark=0)
-    canonical, unvisited = await _run_audit(stub)
-    assert canonical == 0
-    assert unvisited == 0
-    # The order is still observed — we always run canonical first so a
-    # future bug that flips the calls is caught immediately.
-    assert stub.calls == ["canonical", "unvisited"]
+@pytest.mark.asyncio(loop_scope="function")
+async def test_audit_truncates_long_leftover_lists() -> None:
+    """The error message caps the id list so logs stay readable."""
+    from app.services.scan_checkpoints import MergeIncompleteError
 
+    many = [uuid.uuid4() for _ in range(15)]
+    stub = _StubSynthRepo(leftover_ids=many)
 
-async def test_audit_canonical_runs_before_unvisited() -> None:
-    """Order invariant: a future refactor must not flip these two calls.
+    with pytest.raises(MergeIncompleteError) as exc_info:
+        await _run_audit_with_stub(stub)
 
-    If unvisited ran first, every NULL row would be flagged before
-    canonical had a chance to claim the active-KI ones — the exact
-    bug we're fixing. This test is a guard against that regression.
-    """
-    stub = _StubSynthRepo(canonical_to_mark=5, unvisited_to_mark=0)
-    await _run_audit(stub)
-    assert stub.calls.index("canonical") < stub.calls.index("unvisited")
+    msg = str(exc_info.value)
+    assert "15 synth row" in msg
+    # Truncation marker present once the count exceeds 10.
+    assert "…" in msg

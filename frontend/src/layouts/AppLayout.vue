@@ -80,6 +80,13 @@
               class="pl-10"
             />
             <v-list-item
+              v-if="canViewCodeSettings"
+              title="Code"
+              to="/settings/code"
+              rounded="lg"
+              class="pl-10"
+            />
+            <v-list-item
               v-if="canViewDesignSystems"
               title="Design Systems"
               to="/settings/design-systems"
@@ -213,6 +220,7 @@ const {
   canManageMembers,
   canViewSettings,
   canViewConnections,
+  canViewCodeSettings,
   canViewDesignSystems,
   canViewAgentPrompts,
   canViewQAAutomation,

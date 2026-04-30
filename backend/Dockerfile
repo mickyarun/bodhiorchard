@@ -18,25 +18,19 @@ WORKDIR /app
 # Runtime system dependencies for Full Docker mode:
 #   - libpq5         : PostgreSQL client (asyncpg)
 #   - git            : clone/fetch target repos agents will analyze
-#   - nodejs (20.x)  : runs the Claude Code CLI and gitnexus
+#   - nodejs (20.x)  : runs the Claude Code CLI
 #   - claude-code    : Anthropic's CLI; invoked as a subprocess by the backend
-#   - gitnexus       : code-graph analyzer; pre-installed globally so `npx
-#                      gitnexus` finds it without touching ~/.npm/_npx (which
-#                      races/corrupts under concurrent scans — see git log)
-# build-essential + python3 are needed temporarily for node-gyp to compile
-# gitnexus's tree-sitter-<lang> native bindings, then purged so the runtime
-# image stays lean (~200MB adder for the compiled node_modules tree).
-# curl/gnupg fetch the NodeSource repo key; also removed after use.
+# Code-graph indexing now runs in-process via the Python ``code_indexer``
+# module (graphify-based, MIT) — no npm dependency for that step.
+# curl/gnupg fetch the NodeSource repo key; removed after use.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        libpq5 git openssh-client curl ca-certificates gnupg \
-        build-essential python3 && \
-    ln -sf /usr/bin/python3 /usr/local/bin/python && \
+        libpq5 git openssh-client curl ca-certificates gnupg && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
-    npm install -g @anthropic-ai/claude-code@latest gitnexus@1.6.2 && \
-    apt-get purge -y --auto-remove curl gnupg build-essential && \
-    rm -rf /var/lib/apt/lists/* /root/.npm /root/.node-gyp && \
+    npm install -g @anthropic-ai/claude-code@latest && \
+    apt-get purge -y --auto-remove curl gnupg && \
+    rm -rf /var/lib/apt/lists/* /root/.npm && \
     groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid appuser --shell /bin/bash --create-home appuser
 

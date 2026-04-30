@@ -49,6 +49,24 @@ class DesignSystemRefRepository(BaseRepository[DesignSystemRef]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def exists_by_repo_id(self, repo_id: uuid.UUID) -> bool:
+        """Return True iff this org has any design system stored for the repo.
+
+        Selects ``DesignSystemRef.id`` directly rather than a row, so we
+        intentionally bypass ``_scoped`` (it expects ``Select[tuple[T,
+        ...]]`` and a single-column scalar select doesn't satisfy that
+        shape) and apply the org filter inline.
+        """
+        result = await self._db.execute(
+            select(DesignSystemRef.id)
+            .where(
+                DesignSystemRef.org_id == self._org_id,
+                DesignSystemRef.repo_id == repo_id,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def get_effective(self, repo_id: uuid.UUID | None) -> DesignSystemRef | None:
         """Return repo-specific design system if exists, else org default.
 

@@ -109,6 +109,30 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         result = await self._db.execute(stmt)
         return [(row.id, row.title, row.tags, row.content, row.repo_name) for row in result.all()]
 
+    async def list_active_features_with_embedding(
+        self,
+    ) -> list[tuple[uuid.UUID, str, list[float] | None]]:
+        """Return ``(id, title, embedding)`` for every active feature_registry KI.
+
+        Used by the merge phase clusterer to build EXISTING canonicals
+        with their vectors so unmerged synth rows can be attached to
+        the nearest existing KI by cosine similarity. Distinct rows
+        (no junction join) — clustering only needs the canonical
+        per-KI vector, not the per-repo fan-out.
+        """
+        stmt = self._scoped(
+            select(
+                KnowledgeItem.id,
+                KnowledgeItem.title,
+                KnowledgeItem.embedding,
+            ).where(
+                KnowledgeItem.category == "feature_registry",
+                KnowledgeItem.is_active.is_(True),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row.id, row.title, row.embedding) for row in result.all()]
+
     async def get_linked_repo_ids(self) -> set[uuid.UUID]:
         """Distinct repo ids that have at least one knowledge_to_repo link
         joined to an org-scoped KnowledgeItem.
@@ -399,43 +423,6 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
         result = await self._db.execute(stmt)
         return list(result.all())
 
-    async def find_nearest_by_status(
-        self,
-        vector: list[float],
-        *,
-        category: str,
-        statuses: list[str],
-        limit: int = 1,
-    ) -> list[tuple[KnowledgeItem, float]]:
-        """Find nearest items filtered by feature_status.
-
-        Args:
-            vector: The query embedding vector.
-            category: Category filter.
-            statuses: List of feature_status values to match.
-            limit: Maximum number of results.
-
-        Returns:
-            List of (KnowledgeItem, distance) tuples.
-        """
-        stmt = (
-            select(
-                KnowledgeItem,
-                KnowledgeItem.embedding.cosine_distance(vector).label("distance"),
-            )
-            .where(
-                KnowledgeItem.org_id == self._org_id,
-                KnowledgeItem.category == category,
-                KnowledgeItem.feature_status.in_(statuses),
-                KnowledgeItem.is_active.is_(True),
-                KnowledgeItem.embedding.is_not(None),
-            )
-            .order_by("distance")
-            .limit(limit)
-        )
-        result = await self._db.execute(stmt)
-        return list(result.all())
-
     # --- Upsert patterns ---
 
     async def get_by_title_and_category(
@@ -538,30 +525,6 @@ class KnowledgeItemRepository(BaseRepository[KnowledgeItem]):
             .where(KnowledgeItem.id.in_(ids))
             .values(is_active=False, embedding=None)
         )
-        return result.rowcount
-
-    async def delete_by_category_excluding_source(
-        self,
-        category: str,
-        *,
-        exclude_source: str | None = None,
-    ) -> int:
-        """Hard-delete items in a category, optionally excluding a source.
-
-        Args:
-            category: Category to delete from.
-            exclude_source: Source value to exclude from deletion.
-
-        Returns:
-            Number of rows deleted.
-        """
-        stmt = sql_delete(KnowledgeItem).where(
-            KnowledgeItem.org_id == self._org_id,
-            KnowledgeItem.category == category,
-        )
-        if exclude_source:
-            stmt = stmt.where(KnowledgeItem.source != exclude_source)
-        result = await self._db.execute(stmt)
         return result.rowcount
 
     async def delete_inactive_by_category(self, category: str) -> int:
