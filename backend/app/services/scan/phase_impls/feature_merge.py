@@ -16,11 +16,18 @@ Branching:
 - **otherwise**: build the two-section merge prompt, run Claude,
   apply ops via ``apply_feature_merge_plan``.
 
-Post-merge audit is a **strict assertion**: every NEW synth row for
-this scan must end with ``merge_outcome`` set and
-``knowledge_item_id`` non-NULL. Anything else is a logic bug; raise
-``MergeIncompleteError`` so the FEATURE_MERGE checkpoint lands FAILED
-with ``error_code='merge_incomplete'``.
+Post-merge sequence:
+
+1. ``_promote_orphan_rows`` — best-effort fallback for any synth row
+   Claude's cluster pass left unstamped (e.g., subprocess killed,
+   plan covered only part of the cluster). Promotes via
+   ``promote_synth_to_ki`` whose same-title attach folds duplicates
+   into existing canonicals. Better than failing the whole scan over
+   a 1-row gap.
+2. ``_audit_strict`` — assertion that every NEW row now has an
+   outcome. Anything still leftover here is a real logic bug; raise
+   ``MergeIncompleteError`` so FEATURE_MERGE lands FAILED with
+   ``error_code='merge_incomplete'``.
 """
 
 from __future__ import annotations
@@ -242,20 +249,56 @@ async def _run_llm_merge(
         )
 
 
+async def _promote_orphan_rows(
+    *,
+    db: AsyncSession,
+    org: Organization,
+    scan_uuid: uuid.UUID,
+) -> int:
+    """Best-effort promote any synth row Claude's cluster pass left unmerged.
+
+    Reasons a row reaches here: Claude timed out before emitting a plan
+    for the cluster, the plan covered some rows but not all, or a
+    transient fault dropped the per-cluster write. ``promote_synth_to_ki``
+    has same-title attach logic, so if a canonical with the same title
+    already exists the row is linked as MERGED_INTO instead of creating
+    a duplicate KI. Otherwise it lands as a fresh canonical — better
+    than failing the entire scan over a 1-row gap.
+    """
+    synth_repo = SynthesizedFeatureRepository(db, org_id=org.id)
+    leftover = await synth_repo.list_unmerged_for_scan(scan_uuid)
+    if not leftover:
+        return 0
+    logger.warning(
+        "feature_merge_orphan_promote",
+        scan_id=str(scan_uuid),
+        count=len(leftover),
+        sample_ids=[str(r.id) for r in leftover[:5]],
+    )
+    for row in leftover:
+        await promote_synth_to_ki(db=db, org=org, synth=row)
+    await db.flush()
+    return len(leftover)
+
+
 async def _audit_strict(
     *,
     db: AsyncSession,
     org_id: uuid.UUID,
     scan_uuid: uuid.UUID,
 ) -> None:
-    """Strict post-merge audit. Every NEW synth row must be stamped + linked."""
+    """Strict post-merge audit. Every NEW synth row must be stamped + linked.
+
+    Runs *after* :func:`_promote_orphan_rows`, so any leftover here means
+    even the fallback promote failed — a real bug worth surfacing.
+    """
     synth_repo = SynthesizedFeatureRepository(db, org_id=org_id)
     leftover = await synth_repo.list_unmerged_for_scan(scan_uuid)
     if leftover:
         ids = sorted(str(row.id) for row in leftover)
         raise MergeIncompleteError(
-            f"feature_merge left {len(leftover)} synth row(s) without an outcome: "
-            f"{ids[:10]}{'…' if len(ids) > 10 else ''}"
+            f"feature_merge left {len(leftover)} synth row(s) without an outcome "
+            f"after orphan-promote fallback: {ids[:10]}{'…' if len(ids) > 10 else ''}"
         )
 
 
@@ -359,6 +402,7 @@ async def phase_b3_merge(
         )
         await db.flush()
 
+    await _promote_orphan_rows(db=db, org=org, scan_uuid=scan_uuid)
     await _audit_strict(db=db, org_id=org_id, scan_uuid=scan_uuid)
     await embed_missing_items(db, org_id)
     return await _reload_org_config(db, org_id)

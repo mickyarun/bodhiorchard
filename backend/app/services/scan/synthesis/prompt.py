@@ -162,13 +162,33 @@ Reduced meta-communities (JSON):
 - Prefer broader domain-level features over narrow per-function ones, but
   never drop a real capability just to keep the count down.
 
+## Naming discipline (titles must reflect the dominant cluster domain)
+The ``name`` you pass to ``write_synthesis_feature`` is what users see. It
+must describe the **domain** carried by the ``cluster_ids`` you listed in
+``source_community_ids`` — not a single endpoint, file, or sub-component
+inside that domain.
+
+- Read the cluster ``label`` and the ``files`` sample. The recurring
+  path-segment in the file paths (e.g. a folder name appearing across
+  most files) IS the domain.
+- If two ``cluster_ids`` share the same label, the feature title must
+  name that shared domain — not one endpoint, route, or controller
+  file that happens to live inside it.
+- A controller, service, or repository file is part of a domain — it is
+  not the domain itself. Title features after the domain.
+- If you cannot name a single domain that covers the cluster files, the
+  cluster is composite — split it into multiple features rather than
+  picking a misleading single title.
+
 ## Process
 1. Use the Read tool to inspect a handful of files for any cluster you're
    unsure about.
 2. Group composites where appropriate (high source_count + low cohesion);
    split them where they cover distinct capabilities.
 3. For each feature, call ``write_synthesis_feature`` with:
-   - ``name``: human-readable name e.g. "Card Payments"
+   - ``name``: human-readable **domain** name derived from the dominant
+     ``cluster_ids`` (see *Naming discipline* above) — never the name of
+     one endpoint, controller, or service file inside the domain.
    - ``description``: 1-2 sentence business description
    - ``source_community_ids``: array of **``cluster_ids``** values (the
      ``c<N>`` ids from the ``cluster_ids`` field of the metas you used).
