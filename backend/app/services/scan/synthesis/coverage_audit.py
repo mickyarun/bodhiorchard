@@ -53,7 +53,9 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.synth_feature_writer import persist_synth_feature
+from app.models.cluster_cache import ClusterCache
 from app.models.organization import Organization
+from app.models.synthesized_feature import SynthesizedFeature
 from app.repositories.cluster_cache import ClusterCacheRepository
 from app.repositories.synthesized_feature import SynthesizedFeatureRepository
 
@@ -262,7 +264,7 @@ async def audit_uncovered_clusters(
 # ── Internals ──────────────────────────────────────────────────────
 
 
-def _collect_referenced_files(rows: Iterable) -> set[str]:
+def _collect_referenced_files(rows: Iterable[SynthesizedFeature]) -> set[str]:
     """Union of files referenced by ANY current synth row.
 
     Each ``code_locations`` blob is ``{layer: [paths]}``.
@@ -285,7 +287,7 @@ def _collect_referenced_files(rows: Iterable) -> set[str]:
     return referenced
 
 
-def _labels_covered_by_features(rows: Iterable) -> set[str]:
+def _labels_covered_by_features(rows: Iterable[SynthesizedFeature]) -> set[str]:
     """Tokens that appear in any current feature's title or cluster names.
 
     The audit treats a label as 'covered' when it shows up in a feature
@@ -319,7 +321,10 @@ def _label_already_covered(label: str, covered_tokens: set[str]) -> bool:
     return any(part and part in covered_tokens for part in needle.split("-"))
 
 
-def _group_orphans_by_label(clusters: Iterable, referenced_files: set[str]) -> dict[str, list]:
+def _group_orphans_by_label(
+    clusters: Iterable[ClusterCache],
+    referenced_files: set[str],
+) -> dict[str, list[ClusterCache]]:
     """Bucket clusters by ``label`` when at least one of their files is unreferenced.
 
     Path-segment evidence guard: only include a cluster if the cluster's
@@ -327,7 +332,7 @@ def _group_orphans_by_label(clusters: Iterable, referenced_files: set[str]) -> d
     Otherwise the label is incidental (e.g. a 1-token tf-idf winner) and
     promoting it would be noise.
     """
-    by_label: dict[str, list] = defaultdict(list)
+    by_label: dict[str, list[ClusterCache]] = defaultdict(list)
     for c in clusters:
         files = list(c.files or [])
         if not files:
@@ -358,7 +363,7 @@ def _label_in_path_segments(label: str, files: Iterable[str]) -> bool:
     return True
 
 
-def _unique_files(clusters: Iterable, *, exclude: set[str]) -> list[str]:
+def _unique_files(clusters: Iterable[ClusterCache], *, exclude: set[str]) -> list[str]:
     """Union files across ``clusters``, preserving order, dropping ``exclude``."""
     seen: set[str] = set()
     out: list[str] = []
@@ -378,7 +383,7 @@ async def _emit_one_feature(
     repo_id: uuid.UUID,
     scan_id: uuid.UUID,
     label: str,
-    clusters: list,
+    clusters: list[ClusterCache],
     files: list[str],
     truncated: bool,
 ) -> None:
