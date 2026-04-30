@@ -37,7 +37,7 @@ class ScanAggregateStatus(StrEnum):
     CHECKING_OUT = "checking_out"
     ANALYZING_CHANGES = "analyzing_changes"
     INDEXING_CODE = "indexing_code"
-    SETTING_UP_GITNEXUS = "setting_up_gitnexus"
+    SETTING_UP_INDEX = "setting_up_index"
     SETTING_UP_WORKTREES = "setting_up_worktrees"
     SETTING_UP_MCP = "setting_up_mcp"
     INSTALLING_HOOKS = "installing_hooks"
@@ -59,7 +59,10 @@ class ScanAggregateStatus(StrEnum):
 # Non-terminal states mean "scan is still making progress". Used by
 # ``get_active_scan_for_org`` to filter out completed/failed rows.
 ACTIVE_SCAN_STATUSES: frozenset[ScanAggregateStatus] = frozenset(
-    s for s in ScanAggregateStatus if s not in (
+    s
+    for s in ScanAggregateStatus
+    if s
+    not in (
         ScanAggregateStatus.COMPLETED,
         ScanAggregateStatus.FAILED,
     )
@@ -78,9 +81,7 @@ class Scan(BaseModel):
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
     )
-    parent_scan_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    parent_scan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # Python-side defaults mirror ``server_default`` so a freshly-
     # constructed ``Scan()`` has the same shape the DB would materialise
     # on INSERT. Matters for unit tests that build instances directly

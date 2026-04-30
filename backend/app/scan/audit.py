@@ -20,12 +20,12 @@ the in-phase guards can't see: cross-phase consistency checks that need
 the full picture once every phase has committed.
 
 The flagship example is the "Bug A early-warning":
-    GitNexus indexed N>0 clusters for a repo, but zero
+    Code indexer found N>0 clusters for a repo, but zero
     synthesized_features rows landed for it. Either (a) Claude rationally
     skipped every cluster as infrastructure (legitimate) or (b) something
     silently swallowed the synthesis output (the parallel-session bug).
     The in-phase audits can't tell these apart at synthesis time;
-    end-of-pipeline can, by checking against the gitnexus_index payload.
+    end-of-pipeline can, by checking against the code_index payload.
 
 The audit is **read-only**. The orchestrator decides what to do with the
 report — log a warning, raise a typed exception, surface to the timeline.
@@ -53,7 +53,7 @@ logger = structlog.get_logger(__name__)
 
 @dataclass(frozen=True)
 class RepoAnomaly:
-    """One repo's mismatch between gitnexus clusters and synthesized features.
+    """One repo's mismatch between clusters and synthesized features.
 
     A high cluster_count / zero synth_count gap is the signal that
     Bug A (parallel-session sharing) used to produce silently. With
@@ -126,8 +126,8 @@ async def _find_repos_with_clusters_but_no_synth(
 ) -> list[RepoAnomaly]:
     """Detect Bug-A-class silent failures.
 
-    Joins ``scan_phase_checkpoints[gitnexus_index].payload->>'feature_count'``
-    against the per-repo synth count. Any repo whose gitnexus reported
+    Joins ``scan_phase_checkpoints[code_index].payload->>'feature_count'``
+    against the per-repo synth count. Any repo whose code indexer reported
     clusters but produced zero ``synthesized_features`` rows is flagged.
 
     Returning empty here is the healthy state. A non-empty list means
@@ -146,12 +146,12 @@ async def _find_repos_with_clusters_but_no_synth(
     synth_repo = SynthesizedFeatureRepository(session, org_id=ctx.org_id)
     synth_by_repo = await synth_repo.count_active_per_repo()
 
-    # GitNexus cluster counts for this scan, joined to the active repo.
-    # The ``feature_count`` payload key is set by ``_run_gitnexus_index``
+    # cluster counts for this scan, joined to the active repo.
+    # The ``feature_count`` payload key is set by ``_run_code_index``
     # in scan_repo_loop.py — staying in sync with that contract.
     checkpoint_repo = ScanPhaseCheckpointRepository(session, org_id=ctx.org_id)
     cluster_rows = await checkpoint_repo.list_active_repo_cluster_counts(
-        ctx.scan_id, ScanPhase.GITNEXUS_INDEX
+        ctx.scan_id, ScanPhase.CODE_INDEX
     )
 
     anomalies: list[RepoAnomaly] = []

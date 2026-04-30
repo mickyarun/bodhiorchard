@@ -27,7 +27,6 @@ _SKIP_SKILL_PATHS = frozenset(
         ".claude",
         ".githooks",
         ".bodhiorchard",
-        ".gitnexus",
         ".github",
         ".vscode",
         ".idea",

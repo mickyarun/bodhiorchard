@@ -135,7 +135,7 @@ export const useSetupStore = defineStore('setup', () => {
         localStorage.setItem('bodhiorchard_token', data.access_token)
       }
       if (data.scanId) {
-        // No localStorage write: consumers probe GET /v1/skills/scan/latest
+        // No localStorage write: consumers probe GET /v1/reposcanv2/scans/latest
         // on mount, so the backend is the single source of truth for
         // "is there a scan to show?".
         scanId.value = data.scanId

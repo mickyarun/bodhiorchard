@@ -40,7 +40,7 @@ class ScanPhaseCheckpoint(BaseModel):
     - ``sha_at_run`` is set only for SHA-reusable phases and powers
       cross-scan payload reuse when the repo HEAD is unchanged.
     - ``payload`` is JSONB and holds phase-specific outputs (e.g.
-      cluster list for GITNEXUS_INDEX, feature counts for B2).
+      cluster list for CODE_INDEX, feature counts for B2).
     - ``attempt`` increments on retries; the UNIQUE constraint prevents
       duplicates within a single scan.
     """

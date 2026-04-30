@@ -53,3 +53,10 @@ logs.txt
 
 # Colyseus dev mode state (may contain JWTs)
 .devmode.json
+
+# reposcanv2 sandbox runs (JSON-on-disk persistence)
+backend/reposcanv2_runs/
+
+# Hybrid-host data dir (cloned repos + SSH deploy keypair). Default location
+# when BODHIORCHARD_DATA_DIR is unset and /data isn't writable.
+backend/.data/

@@ -30,7 +30,7 @@ STATUS_LABELS: dict[str, str] = {
     "checking_out": "Checking out repository",
     "analyzing_changes": "Analyzing changes",
     "indexing_code": "Indexing code structure",
-    "setting_up_gitnexus": "Setting up GitNexus",
+    "setting_up_index": "Setting up code index",
     "setting_up_worktrees": "Configuring worktrees",
     "setting_up_mcp": "Setting up Bodhiorchard MCP",
     "installing_hooks": "Installing git hooks",
@@ -94,7 +94,7 @@ class PhaseStatus(BaseModel):
 
 _PHASE_LABELS: dict[str, str] = {
     "mode_detection": "Detecting changes",
-    "gitnexus_index": "Indexing code structure",
+    "code_index": "Indexing code structure",
     "repo_setup": "Setting up repository",
     "stale_cleanup": "Cleaning stale references",
     "skill_extraction": "Analysing developer skills",

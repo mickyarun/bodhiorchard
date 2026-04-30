@@ -420,6 +420,9 @@ export interface SkillProfile {
 }
 
 // Repo types
+export type LastScanStatus
+  = | 'queued' | 'running' | 'done' | 'failed' | 'skipped_unchanged' | 'cancelled'
+
 export interface RepoInfo {
   id: string
   path: string
@@ -434,7 +437,24 @@ export interface RepoInfo {
   uatBranch: string | null
   hasUncommittedChanges: boolean
   setupStatus: 'merged' | 'not_setup'
+  /** MCP setup-PR tracking. `setupBranchPushedAt` is the only signal
+   *  that distinguishes "first scan never ran" from "branch on origin
+   *  but no PR" (GitHub App not configured). `setupCompareUrl` is
+   *  derived server-side, so the row chip just needs an anchor href. */
+  setupBranchPushedAt?: string | null
+  setupPrUrl?: string | null
+  setupPrNumber?: number | null
+  setupPrState?: 'open' | 'merged' | 'closed' | null
+  setupCompareUrl?: string | null
   designSystemStatus: 'none' | 'extracting' | 'ready'
+  /** Status of the most recent ScanRepoRun for this repo across all
+   *  scans. `null` when never scanned. Drives the recency pill on the
+   *  Settings → Code list when the row isn't part of the live scan. */
+  lastScanStatus?: LastScanStatus | null
+  lastScanFinishedAt?: string | null
+  lastScanStartedAt?: string | null
+  lastScanFeatureCount?: number | null
+  lastScanId?: string | null
 }
 
 export interface RepoBranchList {

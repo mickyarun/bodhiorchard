@@ -32,6 +32,10 @@ export function usePermissions() {
   // anyone who can touch QA automation can also touch presence settings.
   const canViewPresenceSettings = computed(() => hasPermission('integrations:configure'))
   const canViewJiraImport = computed(() => hasPermission('integrations:configure'))
+  // /settings/code hosts repository import (and later, scan controls).
+  // Same gate as the other configure pages so visibility tracks edit
+  // ability rather than splitting view-only access from action access.
+  const canViewCodeSettings = computed(() => hasPermission('integrations:configure'))
 
   return {
     hasPermission,
@@ -45,5 +49,6 @@ export function usePermissions() {
     canViewQAAutomation,
     canViewPresenceSettings,
     canViewJiraImport,
+    canViewCodeSettings,
   }
 }

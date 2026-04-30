@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Scan pipeline package — phases, orchestration, audit.
+"""Scan pipeline utility package — audit, context, prompts, sessions.
 
-This package replaces the legacy ``app.services.scan_*`` modules. The
-migration happens stage-by-stage (see the plan file): foundations land
-first, individual phases move in next, the audit consolidates last.
+Cross-cutting helpers consumed by ``app.services.scan`` (orchestrator
++ stages + phase implementations). The orchestration layer lives at
+``app.services.scan``; this package only holds the support modules.
 
-Public surface intentionally minimal — callers should import:
-- ``ScanContext`` from ``app.scan.context``
-- ``with_session`` / ``gather_repos`` from ``app.scan.session``
-
-Phase modules under ``app.scan.per_repo`` and ``app.scan.global_`` are
-internal to the package; the orchestrator wires them together.
+Module surface:
+- ``app.scan.context`` — ``ScanContext`` carrier shared across phases
+- ``app.scan.session`` — ``with_session`` / ``gather_repos`` async-pool helpers
+- ``app.scan.prompts`` — ``build_synthesis_prompt`` / ``build_merge_prompt`` /
+  ``build_direct_scan_prompt`` Claude prompt templates
+- ``app.scan.audit`` — ``audit_scan`` post-scan integrity check
+- ``app.scan.soft_delete`` — ``soft_delete_for_changed_repos`` /
+  ``rollback_soft_deleted_features`` data-safety helpers
 """

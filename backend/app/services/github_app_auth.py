@@ -36,6 +36,54 @@ def _generate_jwt(app_id: int, private_key_pem: str) -> str:
     return jwt.encode(payload, private_key_pem, algorithm="RS256")
 
 
+async def discover_installation_id_for_repo(
+    org: "Organization",  # noqa: F821
+    github_repo_full_name: str,
+) -> int | None:
+    """Resolve the App's installation id for a specific repo.
+
+    Used when the org has the App's credentials saved but
+    ``github_app_installation_id`` hasn't been auto-detected from a
+    webhook yet (the existing flow only stamps it on first webhook
+    delivery — which never happens for orgs whose repos haven't fired
+    a tracked event since install).
+
+    Calls ``GET /repos/{owner}/{repo}/installation`` with the App JWT
+    (not an installation token) and returns the numeric ``id`` field.
+    """
+    if not org.github_app_id or not org.github_app_private_key:
+        return None
+    if "/" not in github_repo_full_name:
+        return None
+    pem = decrypt_secret(org.github_app_private_key)
+    if not pem:
+        return None
+    app_jwt = _generate_jwt(org.github_app_id, pem)
+    url = f"{_BASE_URL}/repos/{github_repo_full_name}/installation"
+    async with AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.get(
+                url,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {app_jwt}",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            resp.raise_for_status()
+        except HTTPStatusError:
+            logger.warning(
+                "github_app_installation_lookup_failed",
+                status=resp.status_code,
+                org_id=str(org.id),
+                repo=github_repo_full_name,
+            )
+            return None
+    data = resp.json()
+    install_id = data.get("id")
+    return int(install_id) if isinstance(install_id, int) else None
+
+
 async def get_installation_token(org: "Organization") -> str | None:  # noqa: F821
     """Get a cached installation token, or generate a new one.
 

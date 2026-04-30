@@ -59,7 +59,7 @@ class ScanPhaseCheckpointRepository(BaseRepository[ScanPhaseCheckpoint]):
         return (repo_id, repo_name, cluster_count) where ``cluster_count``
         is the integer ``feature_count`` from the checkpoint payload.
 
-        Used by the end-of-scan audit to compare gitnexus cluster counts
+        Used by the end-of-scan audit to compare cluster counts
         against the synth output.
         """
         stmt = self._scoped(

@@ -4,11 +4,11 @@
 /**
  * Pinia store for scan state.
  *
- * Centralises the scan data that `SetupChecklist.vue` and the new
- * `ScanPhaseTimeline.vue` both read from, and exposes the two admin
- * actions the timeline surfaces: resume and per-phase retry. The
- * WebSocket tracker (`useScanSocket`) writes into this store on every
- * tick so components only read refs, never own their own copies.
+ * Centralises the scan data that `SetupChecklist.vue` and
+ * `ScanPhaseTimeline.vue` both read from, and exposes the resume
+ * action the timeline surfaces. The WebSocket tracker (`useScanSocket`)
+ * writes into this store on every tick so components only read refs,
+ * never own their own copies.
  */
 
 import axios from 'axios'
@@ -17,7 +17,6 @@ import { computed, ref } from 'vue'
 
 import type {
   PhaseStatus,
-  ScanPhaseCode,
   ScanStatusData,
 } from '@/composables/useScanSocket'
 
@@ -70,33 +69,15 @@ export const useScanStore = defineStore('scan', () => {
     error.value = null
   }
 
-  /** POST `/scan/{id}/resume` and hand the returned child scan_id back
-   * to the caller so it can swap its active tracker. Does not touch
-   * store state directly — the tracker's next tick will do it. */
+  /** Re-queue any non-DONE repo runs in the current scan. The new
+   * pipeline reuses the same scan id (no child scan), so the tracker
+   * keeps polling the same id and observes the resumed runs flip back
+   * to RUNNING then DONE. */
   async function resume(): Promise<string | null> {
     const parent = currentScanId.value
     if (!parent) return null
-    const res = await axios.post<{ newScanId: string }>(
-      `/v1/skills/scan/${parent}/resume`,
-    )
-    return res.data.newScanId
-  }
-
-  /** POST `/scan/{id}/phases/{phase}/retry`, optionally scoped to a
-   * single repo. Returns the child scan_id the tracker should switch to. */
-  async function retryPhase(
-    phase: ScanPhaseCode,
-    repoId?: string | null,
-  ): Promise<string | null> {
-    const parent = currentScanId.value
-    if (!parent) return null
-    const url = `/v1/skills/scan/${parent}/phases/${phase}/retry`
-    const res = await axios.post<{ newScanId: string }>(
-      url,
-      null,
-      repoId ? { params: { repo_id: repoId } } : undefined,
-    )
-    return res.data.newScanId
+    await axios.post(`/v1/reposcanv2/scans/${parent}/resume`)
+    return parent
   }
 
   return {
@@ -116,6 +97,5 @@ export const useScanStore = defineStore('scan', () => {
     reset,
     // actions
     resume,
-    retryPhase,
   }
 })

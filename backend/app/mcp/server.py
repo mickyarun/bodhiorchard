@@ -23,15 +23,24 @@ from app.mcp.handlers_bud import (
     handle_get_bud_context,
     handle_write_bud,
 )
+from app.mcp.handlers_code_graph import (
+    handle_code_community,
+    handle_code_context,
+    handle_code_god_nodes,
+    handle_code_impact,
+    handle_code_query,
+    handle_code_stats,
+)
+from app.mcp.handlers_feature_merge import handle_apply_feature_merge_plan
 from app.mcp.handlers_hooks import handle_dev_activity
 from app.mcp.handlers_knowledge import (
     handle_check_feature_exists,
     handle_get_knowledge,
     handle_get_pending_features,
-    handle_merge_features,
     handle_search_bugs,
     handle_write_feature_registry,
 )
+from app.mcp.handlers_scan import handle_write_synthesis_feature
 from app.mcp.handlers_team import (
     handle_get_design_system,
     handle_get_team_context,
@@ -191,14 +200,6 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "type": "string",
                     "description": "Repository name (links feature to tracked repo)",
                 },
-                "merge_source_titles": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Titles of repo-specific features being merged. "
-                        "Those items will be deactivated after the merged feature is saved."
-                    ),
-                },
             },
             "required": [
                 "feature_name",
@@ -206,6 +207,93 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 "capabilities",
                 "code_locations",
                 "tags",
+                "repo_name",
+            ],
+        },
+    ),
+    MCPToolDefinition(
+        name="write_synthesis_feature",
+        description=(
+            "v2 scan pipeline: persist a feature with full meta-community "
+            "linkage. Pass the community_id values you received in the "
+            "synthesis prompt — both the ones merged into this feature "
+            "(``source_community_ids``) and the ones you decided to skip "
+            "(``dropped_community_ids``). Backend writes the feature row, "
+            "links to source communities, and updates per-community "
+            "processing_status. Always pass ``scan_id`` and ``repo_id`` "
+            "from the prompt's *Scan context* block — they bind the "
+            "feature to this exact scan run."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Human-readable feature name, e.g. 'Card Payments'",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "1-2 sentence business description of the feature",
+                },
+                "source_community_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "community_id values from the synthesis prompt that "
+                        "were merged into this feature. Must be non-empty."
+                    ),
+                },
+                "dropped_community_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "community_id values from the synthesis prompt that "
+                        "you decided to skip (utility/noise). Optional."
+                    ),
+                },
+                "capabilities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "3-6 specific things this feature does",
+                },
+                "code_locations": {
+                    "type": "object",
+                    "description": (
+                        "Map of layer → file paths, e.g. {backend: [...], frontend: [...]}"
+                    ),
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2-5 lowercase search keywords",
+                },
+                "repo_name": {
+                    "type": "string",
+                    "description": "Repository name (must be tracked)",
+                },
+                "scan_id": {
+                    "type": "string",
+                    "description": (
+                        "UUID of the active scan, copied verbatim from the "
+                        "prompt's *Scan context* block. Binds this feature "
+                        "to the exact scan run. Required during v2 scans; "
+                        "omit only for legacy ad-hoc calls."
+                    ),
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "UUID of the tracked repo, copied verbatim from the "
+                        "prompt's *Scan context* block. Used in preference "
+                        "to ``repo_name`` lookup when supplied."
+                    ),
+                },
+            },
+            "required": [
+                "name",
+                "description",
+                "source_community_ids",
+                "repo_name",
             ],
         },
     ),
@@ -234,36 +322,91 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         },
     ),
     MCPToolDefinition(
-        name="merge_features",
+        name="apply_feature_merge_plan",
         description=(
-            "Merge duplicate features across repos. Keeps the feature with "
-            "keep_title, deactivates features in merge_titles, and links the "
-            "kept feature to all specified repos."
+            "Apply a structured batch of merge ops. Each op picks a "
+            "canonical feature and optionally absorbs others into it. "
+            "Canonical id types are XOR — set EXACTLY ONE of "
+            "`canonical_synth_id` (a NEW synthesized_features row from "
+            "this scan, prefix `synth:` in the prompt) OR "
+            "`canonical_knowledge_id` (an EXISTING knowledge_items row "
+            "from a prior scan, prefix `ki:` in the prompt). Likewise, "
+            "absorb ids split into `absorb_synth_ids` (NEW rows being "
+            "absorbed) and `absorb_knowledge_ids` (EXISTING rows being "
+            "absorbed; rare). All ops in one call commit together or "
+            "roll back as a unit."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "keep_title": {
-                    "type": "string",
-                    "description": (
-                        "Title of the feature to keep (e.g. 'Feature: Authentication')"
-                    ),
-                },
-                "merge_titles": {
+                "ops": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Titles of duplicate features to merge into the kept "
-                        "one (will be deactivated)"
-                    ),
-                },
-                "repo_names": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": ("All repo names this merged feature belongs to"),
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": ["merge", "link", "create"],
+                                "description": (
+                                    "merge = absorb the absorb_* ids into the "
+                                    "canonical; link = attach repo_ids to the "
+                                    "canonical without absorbing; create = "
+                                    "stamp the canonical's synth row as "
+                                    "CANONICAL with no merge or extra links"
+                                ),
+                            },
+                            "canonical_synth_id": {
+                                "type": "string",
+                                "description": (
+                                    "UUID of a synthesized_features row when the "
+                                    "canonical is NEW (this scan, prefix `synth:`). "
+                                    "XOR with canonical_knowledge_id."
+                                ),
+                            },
+                            "canonical_knowledge_id": {
+                                "type": "string",
+                                "description": (
+                                    "UUID of a knowledge_items row when the "
+                                    "canonical is EXISTING (prior scan, prefix "
+                                    "`ki:`). XOR with canonical_synth_id."
+                                ),
+                            },
+                            "absorb_synth_ids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "default": [],
+                                "description": (
+                                    "UUIDs of synthesized_features rows to absorb "
+                                    "into the canonical (the common merge case)"
+                                ),
+                            },
+                            "absorb_knowledge_ids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "default": [],
+                                "description": (
+                                    "UUIDs of knowledge_items to absorb (rare; "
+                                    "use only when an EXISTING canonical is "
+                                    "being absorbed by a NEW one)"
+                                ),
+                            },
+                            "repo_ids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "default": [],
+                                "description": (
+                                    "Tracked repository UUIDs to attach to the "
+                                    "canonical (extra repos beyond any inherited "
+                                    "from absorbed rows)"
+                                ),
+                            },
+                        },
+                        "required": ["action"],
+                    },
                 },
             },
-            "required": ["keep_title", "repo_names"],
+            "required": ["ops"],
         },
     ),
     MCPToolDefinition(
@@ -404,6 +547,113 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "required": ["bud_number", "sequence", "summary"],
         },
     ),
+    MCPToolDefinition(
+        name="code_impact",
+        description=(
+            "Return upstream callers / downstream callees of a target symbol "
+            "up to N hops, using the cached call graph from the latest scan. "
+            "Use BEFORE editing any function/method/class to assess blast radius."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Symbol label or node id (case-insensitive).",
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": "Tracked repo UUID.",
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["upstream", "downstream", "both"],
+                    "default": "upstream",
+                },
+                "depth": {
+                    "type": "integer",
+                    "default": 2,
+                    "description": "BFS hop limit (max 5).",
+                },
+            },
+            "required": ["target", "repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_query",
+        description=(
+            "Substring-rank search across all symbol labels and source files "
+            "in the cached call graph. Use to find candidate symbols by name "
+            "before calling code_impact / code_context."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "repo_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query", "repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_context",
+        description=(
+            "Single-symbol 360°: attributes, callers, and callees from the cached call graph."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "repo_id": {"type": "string"},
+            },
+            "required": ["symbol", "repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_community",
+        description=(
+            "Return cluster metadata + the file and symbol lists for a given "
+            "cluster_id (e.g. 'c0'). Lists every file the cluster touches."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string"},
+                "repo_id": {"type": "string"},
+            },
+            "required": ["cluster_id", "repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_god_nodes",
+        description=(
+            "Top-N highest-degree nodes in the call graph — likely god classes "
+            "or hub functions. Use to spot refactoring candidates."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 20},
+            },
+            "required": ["repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_stats",
+        description=(
+            "Overall stats for the cached call graph: node/edge counts, "
+            "language extension distribution, current head_sha."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string"},
+            },
+            "required": ["repo_id"],
+        },
+    ),
 ]
 
 
@@ -475,10 +725,17 @@ TOOL_HANDLERS: dict[str, Any] = {
     "get_team_context": handle_get_team_context,
     "get_pending_features": handle_get_pending_features,
     "write_feature_registry": handle_write_feature_registry,
+    "write_synthesis_feature": handle_write_synthesis_feature,
     "check_feature_exists": handle_check_feature_exists,
-    "merge_features": handle_merge_features,
+    "apply_feature_merge_plan": handle_apply_feature_merge_plan,
     "list_design_systems": handle_list_design_systems,
     "get_design_system": handle_get_design_system,
+    "code_impact": handle_code_impact,
+    "code_query": handle_code_query,
+    "code_context": handle_code_context,
+    "code_community": handle_code_community,
+    "code_god_nodes": handle_code_god_nodes,
+    "code_stats": handle_code_stats,
 }
 
 # Handlers that need the authenticated user (per-user MCP token).

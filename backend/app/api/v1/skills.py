@@ -1,16 +1,19 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Skill scanning, knowledge search, and developer profile endpoints."""
+"""Knowledge search and developer skill profile endpoints.
+
+Scan-trigger / status / cancel routes have moved to
+``app.api.v1.scans`` (mounted at ``/v1/reposcanv2/scans``).
+"""
 
 import uuid
-from pathlib import Path
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, require_permissions
+from app.core.deps import get_current_user, get_db
 from app.models.knowledge_item import KnowledgeItem
 from app.models.user import User
 from app.repositories.knowledge_item import KnowledgeItemRepository
@@ -21,187 +24,12 @@ from app.schemas.skills import (
     KnowledgeItemPage,
     KnowledgeItemRead,
     ModuleSkill,
-    ScanRequest,
-    ScanResponse,
-    ScanStatus,
     SkillProfileRead,
-)
-from app.services.scan_pipeline import run_scan_pipeline
-from app.services.scan_progress import (
-    create_scan_progress,
-    enrich_status_with_phases,
-    resolve_scan_progress,
 )
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["skills"])
-
-
-@router.post(
-    "/scan",
-    response_model=ScanResponse,
-    dependencies=[Depends(require_permissions("org:edit_settings"))],
-)
-async def trigger_scan(
-    body: ScanRequest,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> ScanResponse:
-    """Trigger a full repository scan as a background task.
-
-    Validates that the org has a configured source code path with a .git directory,
-    then kicks off GitNexus indexing, doc extraction, skill analysis, and embedding.
-
-    Args:
-        body: Scan request with optional full_rescan flag.
-        background_tasks: FastAPI background task manager.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        ScanResponse with a scan_id to poll for status.
-    """
-    # Gate: verify embedding service is healthy before scanning
-    from app.services.embedding_service import embedding_service
-
-    embed_ok, embed_err = await embedding_service.check()
-    if not embed_ok:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Embedding service unavailable: {embed_err}. Cannot scan.",
-        )
-
-    org_repo = OrganizationRepository(db)
-    org = await org_repo.get_for_user(current_user)
-
-    # Read active repos from the tracked_repositories table
-    repo_repo = TrackedRepoRepository(db, org_id=org.id)
-
-    # Gate: require both main and develop branches mapped for all active repos
-    active_repos = await repo_repo.list_active()
-    unmapped_main = [r.name for r in active_repos if not r.main_branch]
-    unmapped_dev = [r.name for r in active_repos if not r.develop_branch]
-    unmapped = sorted(set(unmapped_main + unmapped_dev))
-    if unmapped:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Map branches before scanning. Unmapped: {', '.join(unmapped)}",
-        )
-
-    repo_paths = await repo_repo.get_active_paths()
-
-    if not repo_paths:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No repositories tracked. Add repos in Settings.",
-        )
-
-    # Validate paths still exist on disk
-    valid_paths: list[str] = []
-    for rp in repo_paths:
-        if Path(rp).exists() and (Path(rp) / ".git").exists():
-            valid_paths.append(rp)
-        else:
-            logger.warning("scan_skip_missing_repo", path=rp)
-
-    if not valid_paths:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="None of the tracked repositories exist on disk.",
-        )
-    repo_paths = valid_paths
-
-    # A full rescan is the user saying "ignore any SHA shortcuts —
-    # rebuild this org from scratch". Clearing ``head_sha`` +
-    # ``last_scanned_at`` is what tells ``phase_a_scan_mode`` to treat
-    # every active repo as a first-time index. The dedicated
-    # ``/scan/reset`` endpoint does the same via
-    # ``TrackedRepoRepository.reset_head_shas``; keep the two dispatch
-    # paths consistent so users don't have to reach for Reset just to
-    # defeat the incremental shortcut.
-    if body.full_rescan:
-        cleared = await repo_repo.reset_head_shas()
-        await db.commit()
-        logger.info(
-            "scan_full_rescan_cleared_shas",
-            org_id=str(org.id),
-            repos_cleared=cleared,
-        )
-
-    scan_id = str(uuid.uuid4())
-    await create_scan_progress(scan_id, str(org.id))
-
-    background_tasks.add_task(
-        run_scan_pipeline,
-        scan_id=scan_id,
-        org_id=org.id,
-        repo_paths=repo_paths,
-        full_rescan=body.full_rescan,
-        user_id=str(current_user.id),
-    )
-
-    return ScanResponse(scanId=scan_id, status="started")
-
-
-@router.get("/scan/{scan_id}/status", response_model=ScanStatus)
-async def get_scan_status(
-    scan_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> ScanStatus:
-    """Poll the status of a running or completed scan.
-
-    Falls back to the org's currently-active scan if the direct lookup
-    misses — so a browser tab switch that briefly drops the WS doesn't
-    surface a phantom 404 mid-scan.
-
-    Args:
-        scan_id: The scan ID returned by POST /scan.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        ScanStatus with progress percentage and results.
-    """
-    org = await OrganizationRepository(db).get_for_user(current_user)
-    scan_progress = await resolve_scan_progress(scan_id, str(org.id))
-    if scan_progress is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Scan not found: {scan_id}",
-        )
-    return await enrich_status_with_phases(db, org.id, scan_progress)
-
-
-@router.post(
-    "/scan/{scan_id}/cancel",
-    response_model=ScanStatus,
-    dependencies=[Depends(require_permissions("org:edit_settings"))],
-)
-async def cancel_scan_endpoint(
-    scan_id: str,
-    current_user: User = Depends(get_current_user),
-) -> ScanStatus:
-    """Cancel a running scan, marking it as failed.
-
-    Args:
-        scan_id: The scan ID to cancel.
-        current_user: The authenticated user.
-
-    Returns:
-        Updated ScanStatus with status='failed'.
-    """
-    from app.services.scan_progress import cancel_scan
-
-    result = await cancel_scan(scan_id)
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Scan not found: {scan_id}",
-        )
-    return result
 
 
 @router.get("/profiles", response_model=list[SkillProfileRead])

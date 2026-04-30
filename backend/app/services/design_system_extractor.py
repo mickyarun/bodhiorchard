@@ -209,39 +209,6 @@ def compute_hash(file_contents: dict[str, str]) -> str:
     return hashlib.sha256(combined.encode()).hexdigest()
 
 
-async def _get_gitnexus_context(repo_path: Path) -> str:
-    """Query GitNexus for a quick project structure overview.
-
-    Uses GitNexus CLI to find design-relevant files and framework info,
-    avoiding the need to glob/read everything ourselves.
-
-    Args:
-        repo_path: Repository root path.
-
-    Returns:
-        Summary string (may be empty if GitNexus unavailable).
-    """
-    from app.services.gitnexus_utils import find_npx, run_npx
-
-    npx = find_npx()
-    if not npx:
-        return ""
-
-    try:
-        stdout, _, rc = await run_npx(
-            npx,
-            ["query", "theme design system style colors typography"],
-            cwd=str(repo_path),
-            timeout=15,
-        )
-        if rc == 0 and stdout.strip():
-            return f"## GitNexus Context\n\n{stdout.strip()}\n"
-    except Exception:
-        logger.debug("gitnexus_context_unavailable", repo_path=str(repo_path))
-
-    return ""
-
-
 def _extraction_instructions(platform: Platform) -> str:
     """Build the LLM instructions block — platform-aware.
 
@@ -291,7 +258,7 @@ def _extraction_instructions(platform: Platform) -> str:
         "(spacing scale, radii, elevations, motion durations). Use the "
         "platform's native value types.\n\n"
         "**Budget discipline (important):**\n"
-        "- Cap tool calls at 4 file reads + 1 GitNexus query total. Do "
+        "- Cap tool calls at 4 file reads + 1 code_query call total. Do "
         "NOT walk every widget.\n"
         "- If the repo lacks a dedicated theme module, extract what you "
         "can from inline `Color(0x…)` / `TextStyle(…)` literals found "
@@ -311,8 +278,8 @@ async def _llm_extract(
     """Use Claude Code CLI to intelligently extract the design system.
 
     Sends discovered file paths (and small file contents inline) to the
-    LLM, which can read additional files from the repo via its tools.
-    Optionally includes GitNexus context for faster navigation.
+    LLM, which can read additional files from the repo via its tools
+    (the bodhi ``code_*`` MCP tools when registered, else ``Read``).
 
     Args:
         repo_path: Repository root (used as working_dir for CLI).
@@ -325,14 +292,11 @@ async def _llm_extract(
     """
     from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
 
-    # Get GitNexus context for faster file discovery
-    gitnexus_ctx = await _get_gitnexus_context(repo_path)
-
     # Inline design files up to 10KB each. The previous 20KB cap meant a
     # real Flutter app could easily ship 80KB of prompt, which combined
     # with the 15-turn exploration budget timed out at 10 minutes on
-    # large repos. Keep inlining lean and let the LLM navigate via
-    # GitNexus MCP (or Read tool) for anything bigger.
+    # large repos. Keep inlining lean and let the LLM navigate via the
+    # Read tool for anything bigger.
     inline_parts = []
     path_only_files = []
     for filename, content in file_contents.items():
@@ -352,21 +316,19 @@ async def _llm_extract(
     if platform.prompt_hint:
         prompt_parts.append(f"## Platform Context\n\n{platform.prompt_hint}\n")
 
-    if gitnexus_ctx:
-        prompt_parts.append(gitnexus_ctx)
-
-    # Navigation hint: when the repo is GitNexus-indexed, telling Claude
-    # to query the graph *first* is 5-10× faster than scanning files.
-    # A missing tool is harmless — the CLI just ignores the suggestion.
+    # Navigation hint: bodhi's own MCP exposes ``code_query`` /
+    # ``code_context`` against the per-repo cached call graph. When
+    # available these are 5-10× faster than reading individual files
+    # by name; when not registered the CLI just ignores the suggestion.
     prompt_parts.append(
         "## Navigation\n\n"
-        "If the `gitnexus` MCP server is connected, **prefer it over "
-        "filesystem scans**:\n"
-        "- `gitnexus_query` with query=\"theme color typography\" to "
+        "If the bodhi `code_*` MCP tools are connected, **prefer them "
+        "over filesystem scans**:\n"
+        '- `code_query` with query="theme color typography" to '
         "locate design-related symbols by name.\n"
-        "- `gitnexus_context` with a symbol name to get its definition "
+        "- `code_context` with a symbol name to get its definition "
         "+ callers without reading the whole file.\n"
-        "Fall back to `Read` only for files that GitNexus doesn't surface.\n"
+        "Fall back to `Read` only for files the indexer doesn't surface.\n"
     )
 
     prompt_parts.append(f"## Key Files (inlined)\n\n{file_context}\n")
@@ -380,8 +342,8 @@ async def _llm_extract(
 
     # 15 turns let Claude explore the whole repo; 8 was too tight for
     # Flutter repos without dedicated theme files (inline colours force
-    # several Read calls). 12 is the sweet spot: room for 1-2 GitNexus
-    # queries + 4-6 Read calls + 1-2 refinement passes, still bounded.
+    # several Read calls). 12 is the sweet spot: room for 1-2 code_query
+    # calls + 4-6 Read calls + 1-2 refinement passes, still bounded.
     result = await run_claude_code(
         prompt=prompt,
         working_dir=repo_path,

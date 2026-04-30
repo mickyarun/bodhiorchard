@@ -30,6 +30,21 @@ class RepoStatus(StrEnum):
     REMOVED = "removed"
 
 
+class SetupPrState(StrEnum):
+    """Lifecycle state of the Bodhiorchard MCP setup PR for a repo.
+
+    ``OPEN`` is written when the PR is created (or adopted from a
+    pre-existing branch). The webhook flips it to ``MERGED`` or
+    ``CLOSED`` on ``pull_request.closed``. ``None`` (column NULL) means
+    "no setup PR has been opened" — either the GitHub App isn't
+    configured (manual fallback) or the setup phase has not yet run.
+    """
+
+    OPEN = "open"
+    MERGED = "merged"
+    CLOSED = "closed"
+
+
 class TrackedRepository(BaseModel):
     """A git repository tracked by an organization."""
 
@@ -74,6 +89,27 @@ class TrackedRepository(BaseModel):
         String(255),
         nullable=True,
         index=True,
+    )
+
+    # MCP-setup PR tracking. ``setup_branch_pushed_at`` is written every
+    # time the per-repo setup phase successfully pushes the
+    # ``bodhiorchard/init-setup`` branch. ``setup_pr_*`` are written when
+    # the GitHub App opens (or adopts) the PR for that branch; null when
+    # the App isn't configured for the org and the user must open the PR
+    # manually. The webhook flips ``setup_pr_state`` on
+    # ``pull_request.closed``.
+    setup_branch_pushed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    setup_pr_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    setup_pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    setup_pr_state: Mapped[SetupPrState | None] = mapped_column(
+        Enum(
+            SetupPrState,
+            name="tracked_repo_setup_pr_state",
+            values_callable=lambda e: [x.value for x in e],
+        ),
+        nullable=True,
     )
 
     def __repr__(self) -> str:

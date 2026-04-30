@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from structlog.testing import capture_logs
 
-from app.services.scan_phases import make_scan_progress_logger
+from app.services.scan.progress_logger import make_scan_progress_logger
 
 
 def test_progress_logger_emits_event_per_tool_call() -> None:

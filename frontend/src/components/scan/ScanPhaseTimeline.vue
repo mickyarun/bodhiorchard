@@ -43,16 +43,6 @@
             <span v-if="row.errorCode" class="phase-error-code">{{ row.errorCode }}</span>
             <span>{{ row.errorMessage }}</span>
           </div>
-          <div v-if="row.status === 'failed'" class="phase-actions">
-            <v-btn
-              variant="flat"
-              color="primary"
-              size="small"
-              prepend-icon="mdi-refresh"
-              :loading="resuming || retrying === retryKey(row)"
-              @click="onRetry(row)"
-            >Resume from here</v-btn>
-          </div>
         </div>
       </v-timeline-item>
     </v-timeline>
@@ -60,40 +50,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-
 import type { PhaseStatus } from '@/composables/useScanSocket'
 
 interface Props {
   phases: PhaseStatus[]
-  resuming?: boolean
-}
-interface Emits {
-  (event: 'retry', row: PhaseStatus): void
 }
 
-withDefaults(defineProps<Props>(), { resuming: false })
-const emit = defineEmits<Emits>()
-
-// Tracks which row is currently mid-retry so its button shows a
-// spinner. Keyed by (phase, repoId, attempt) — same shape as the
-// v-for key so each row's state is independent.
-const retrying = ref<string | null>(null)
-
-function retryKey(row: PhaseStatus): string {
-  return `${row.phase}:${row.repoId ?? 'global'}:${row.attempt}`
-}
-
-async function onRetry(row: PhaseStatus): Promise<void> {
-  retrying.value = retryKey(row)
-  try {
-    emit('retry', row)
-  } finally {
-    // The parent swaps the active scanId on successful retry, which
-    // unmounts this component. On failure, we just reset the spinner.
-    retrying.value = null
-  }
-}
+defineProps<Props>()
 
 function phaseColor(row: PhaseStatus): string {
   if (row.shaReused) return 'info'
@@ -175,8 +138,5 @@ function phaseIcon(row: PhaseStatus): string {
   font-family: var(--font-mono, monospace);
   font-weight: 600;
   color: rgb(var(--v-theme-error));
-}
-.phase-actions {
-  padding-top: 4px;
 }
 </style>

@@ -4,6 +4,7 @@
 """Application configuration loaded from environment variables."""
 
 import os
+from pathlib import Path
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,10 +47,41 @@ class LLMConfig(BaseSettings):
     base_url: str = Field(default="http://localhost:11434")
     premium_provider: str = Field(default="ollama")
     premium_model: str = Field(default="llama3:70b")
-    merge_batch_size: int = Field(default=500, description="Max features per LLM merge call")
-    merge_model: str = Field(
-        default="claude-opus-4-6",
-        description="Model for cross-repo feature merge (critical accuracy step)",
+    merge_model_default: str = Field(
+        default="claude-sonnet-4-6",
+        description=(
+            "Model for cross-repo feature merge at typical scale. "
+            "Per-org override via org.config['llm']['merge_model_default']."
+        ),
+    )
+    merge_model_large: str = Field(
+        default="claude-opus-4-7",
+        description=(
+            "Escalation model for very large merge runs. "
+            "Per-org override via org.config['llm']['merge_model_large']."
+        ),
+    )
+    merge_safe_feature_budget: int = Field(
+        default=16000,
+        description=(
+            "Active feature count above which the merge phase falls back "
+            "to embedding-blocked clusters (Phase 4). At 1M-token context, "
+            "16K features in a two-section prompt fits comfortably."
+        ),
+    )
+    merge_sonnet_quality_budget: int = Field(
+        default=3000,
+        description=(
+            "Active feature count at or below which Sonnet 4.6 handles "
+            "the merge call; above this, Opus 4.7 is selected."
+        ),
+    )
+    merge_large_cluster_opus: int = Field(
+        default=200,
+        description=(
+            "Per-cluster feature count above which Opus 4.7 is selected "
+            "for that cluster (Phase 4)."
+        ),
     )
 
 
@@ -88,6 +120,57 @@ class WebSocketConfig(BaseSettings):
         default=32,
         description="Max queued events per event-bus subscriber before dropping.",
     )
+
+
+def _detect_default_data_dir() -> str:
+    """Pick the best ``data_dir`` default for the current host.
+
+    Docker images mount a writable volume at ``/data``; the host (Hybrid
+    mode) usually has a read-only ``/`` and no ``/data`` at all. We probe
+    in that order so each deployment "just works" without requiring an
+    env var:
+
+    1. If ``/data`` exists and is writable → Docker volume is mounted.
+    2. Otherwise → ``<backend>/.data``, a per-checkout dir alongside the
+       Python package. Created on demand by the services that use it.
+    """
+    docker_path = Path("/data")
+    if docker_path.is_dir() and os.access(docker_path, os.W_OK):
+        return str(docker_path)
+    backend_root = Path(__file__).resolve().parent.parent
+    return str(backend_root / ".data")
+
+
+class StorageConfig(BaseSettings):
+    """Filesystem layout for cloned repos, SSH keys, and other persistent state.
+
+    A single ``data_dir`` env var controls the root; downstream services
+    (``ssh_keys.py``, ``repo_cloner.py``, …) derive their subdirectories
+    from it. This replaces the previously hardcoded ``/data`` paths that
+    made Hybrid (host) mode crash with ``Read-only file system: '/data'``.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
+
+    data_dir: str = Field(
+        default_factory=_detect_default_data_dir,
+        alias="BODHIORCHARD_DATA_DIR",
+        description=(
+            "Root for cloned repos and SSH keys. Defaults to /data when running "
+            "in the Docker image (writable volume mount) and to <backend>/.data "
+            "on the host so Hybrid mode works without manual setup."
+        ),
+    )
+
+    @property
+    def ssh_dir(self) -> Path:
+        """Per-installation SSH deploy keypair directory (mode 0700)."""
+        return Path(self.data_dir) / "ssh"
+
+    @property
+    def repos_dir(self) -> Path:
+        """Per-org cloned-repository root (``<data_dir>/repos/<org_slug>/...``)."""
+        return Path(self.data_dir) / "repos"
 
 
 class IntegrationConfig(BaseSettings):
@@ -164,6 +247,7 @@ class Settings(BaseSettings):
     embedding: EmbeddingConfig = EmbeddingConfig()
     redis: RedisConfig = RedisConfig()
     integrations: IntegrationConfig = IntegrationConfig()
+    storage: StorageConfig = StorageConfig()
     ws: WebSocketConfig = WebSocketConfig()
     colyseus: ColyseusConfig = ColyseusConfig()
 

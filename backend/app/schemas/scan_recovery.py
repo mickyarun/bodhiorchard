@@ -100,20 +100,3 @@ class RetryPhaseResponse(BaseModel):
     phase: str
     repo_id: uuid.UUID | None = Field(None, alias="repoId")
     copied_checkpoints: int = Field(..., alias="copiedCheckpoints")
-
-
-class ResetIndexResponse(BaseModel):
-    """Response for ``POST /scan/reset``.
-
-    Counts are informational — the UI surfaces them in a toast so the
-    admin sees what was actually wiped. The new scan_id is the fresh
-    full-rescan the reset auto-kicks off.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    new_scan_id: uuid.UUID = Field(..., alias="newScanId")
-    features_deleted: int = Field(..., alias="featuresDeleted")
-    skill_profiles_deleted: int = Field(..., alias="skillProfilesDeleted")
-    synth_features_superseded: int = Field(..., alias="synthFeaturesSuperseded")
-    repos_reset: int = Field(..., alias="reposReset")

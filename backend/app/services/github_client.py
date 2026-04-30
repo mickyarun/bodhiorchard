@@ -85,6 +85,92 @@ class GitHubClient:
                         pass
                 return None
 
+    async def list_pull_requests(
+        self,
+        owner_repo: str,
+        *,
+        head: str | None = None,
+        state: str = "open",
+    ) -> list[dict[str, object]]:
+        """List pull requests on a repository.
+
+        Used by ``create_setup_pr`` to detect a pre-existing open PR for the
+        ``bodhiorchard/init-setup`` head before opening a new one — keeps the
+        flow idempotent against repos that already have a setup branch + PR
+        from prior testing.
+
+        Args:
+            owner_repo: ``"owner/repo"`` string.
+            head: Optional ``"owner:branch"`` filter. GitHub only honours the
+                full ``owner:branch`` shape, not a bare branch name.
+            state: ``open``, ``closed``, or ``all``.
+
+        Returns:
+            List of PR dicts (each with at least ``number``, ``html_url``,
+            ``state``). Empty list on HTTP error.
+        """
+        url = f"{_BASE_URL}/repos/{owner_repo}/pulls"
+        params: dict[str, str] = {"state": state, "per_page": "100"}
+        if head:
+            params["head"] = head
+        async with AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.get(url, headers=self._headers, params=params)
+                resp.raise_for_status()
+            except HTTPStatusError:
+                logger.error(
+                    "github_list_prs_failed",
+                    status=resp.status_code,
+                    owner_repo=owner_repo,
+                    head=head,
+                )
+                return []
+            payload = resp.json()
+        if not isinstance(payload, list):
+            return []
+        return [item for item in payload if isinstance(item, dict)]
+
+    async def create_pull_request(
+        self,
+        owner_repo: str,
+        *,
+        title: str,
+        body: str,
+        head: str,
+        base: str,
+    ) -> dict[str, object] | None:
+        """Open a pull request via the GitHub REST API.
+
+        On ``422 "A pull request already exists"`` GitHub returns the
+        conflicting PR's URL inside ``errors[0].message``; rather than
+        re-derive it we let the caller fall back to ``list_pull_requests``
+        and adopt whatever's already there.
+
+        Returns:
+            Response dict (``number``, ``html_url``, ``state``, ...) on
+            success, or ``None`` on any error.
+        """
+        url = f"{_BASE_URL}/repos/{owner_repo}/pulls"
+        body_payload = {"title": title, "body": body, "head": head, "base": base}
+        async with AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.post(url, json=body_payload, headers=self._headers)
+                resp.raise_for_status()
+            except HTTPStatusError:
+                logger.warning(
+                    "github_create_pr_failed",
+                    status=resp.status_code,
+                    response_body=resp.text[:500],
+                    owner_repo=owner_repo,
+                    head=head,
+                    base=base,
+                )
+                return None
+            data = resp.json()
+        if not isinstance(data, dict):
+            return None
+        return data
+
     async def get_review_comments(
         self,
         owner_repo: str,

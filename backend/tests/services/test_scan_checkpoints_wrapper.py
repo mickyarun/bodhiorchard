@@ -166,7 +166,7 @@ async def test_run_skips_when_already_done(_fake_repo: _FakeRepo) -> None:
         _FakeCheckpoint(
             scan_id=scan_id,
             repo_id=repo_id,
-            phase=ScanPhase.GITNEXUS_INDEX,
+            phase=ScanPhase.CODE_INDEX,
             status=CheckpointStatus.DONE,
             payload={"clusters": ["auth", "billing"]},
         )
@@ -182,7 +182,7 @@ async def test_run_skips_when_already_done(_fake_repo: _FakeRepo) -> None:
         db=None,  # type: ignore[arg-type] - fake repo ignores db
         scan_id=scan_id,
         org_id=org_id,
-        phase=ScanPhase.GITNEXUS_INDEX,
+        phase=ScanPhase.CODE_INDEX,
         phase_fn=phase_fn,
         repo_id=repo_id,
     )
@@ -195,7 +195,7 @@ async def test_run_skips_when_already_done(_fake_repo: _FakeRepo) -> None:
 async def test_run_reuses_across_scans_on_sha_match(_fake_repo: _FakeRepo) -> None:
     """Prior DONE checkpoint with same SHA → wrapper copies payload, skips body.
 
-    Uses ``SKILL_EXTRACTION`` because ``GITNEXUS_INDEX`` is no longer
+    Uses ``SKILL_EXTRACTION`` because ``CODE_INDEX`` is no longer
     in ``SHA_REUSABLE_PHASES`` (it has a closure side-channel that
     cross-scan reuse silently breaks — see scan_phase.py docstring).
     """

@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Clone GitHub repositories into the Docker ``/data/repos`` volume.
+"""Clone GitHub repositories into ``settings.storage.repos_dir``.
 
 This is the Full Docker complement to local-path repos: when the backend
 runs inside a container it can't reach a Mac/Windows host path, so we clone
-the target repo into a persistent volume and hand the container-local path
-to the rest of the scan pipeline.
+the target repo into ``settings.storage.repos_dir`` (a persistent Docker
+volume at ``/data/repos`` in Full Docker mode, or ``<backend>/.data/repos``
+on Hybrid host installs) and hand that container-local path to the rest
+of the scan pipeline.
 
 Three auth shapes are supported:
 
@@ -33,15 +35,24 @@ from urllib.parse import quote, urlparse
 
 import structlog
 
+from app.config import settings
 from app.services.ssh_keys import ssh_env
 
 logger = structlog.get_logger(__name__)
 
-CLONE_ROOT = Path("/data/repos")
+
+def _clone_root() -> Path:
+    """Resolve the clone-root from settings on each call.
+
+    Reading at call time (not module import) lets tests or admins
+    override ``BODHIORCHARD_DATA_DIR`` without reloading this module.
+    """
+    return settings.storage.repos_dir
+
 
 # Conservative GitHub repo-slug shape: letters, digits, hyphens, underscores,
-# dots. Everything we match here becomes a directory name under CLONE_ROOT,
-# so the pattern also rejects path traversal.
+# dots. Everything we match here becomes a directory name under the clone
+# root, so the pattern also rejects path traversal.
 _SAFE_SEG = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # Matches an HTTPS-with-credentials URL in any form git might echo back,
@@ -53,7 +64,7 @@ _URL_CRED_RE = re.compile(r"https://[^@\s/]+:[^@\s]+@")
 
 @dataclass
 class CloneResult:
-    """Outcome of a clone (or refresh) against ``CLONE_ROOT``."""
+    """Outcome of a clone (or refresh) against the configured clone root."""
 
     success: bool
     path: str | None = None
@@ -140,7 +151,7 @@ async def clone_or_update(
     org_slug: str,
     pat: str | None = None,
 ) -> CloneResult:
-    """Clone ``url`` into ``/data/repos/<org_slug>/<repo>``, or fetch if present.
+    """Clone ``url`` into ``<repos_dir>/<org_slug>/<repo>``, or fetch if present.
 
     Args:
         url: GitHub HTTPS or SSH URL.
@@ -151,11 +162,11 @@ async def clone_or_update(
     Returns:
         ``CloneResult`` with the absolute clone path on success.
     """
-    if not CLONE_ROOT.exists():
-        return CloneResult(
-            success=False,
-            error=f"Clone root {CLONE_ROOT} is missing (volume not mounted?)",
-        )
+    clone_root = _clone_root()
+    # Auto-create the clone root if it's missing. In Docker the volume
+    # mount creates ``/data`` for us; on the host Hybrid install we own
+    # the directory and creating it on first use is the right behaviour.
+    clone_root.mkdir(parents=True, exist_ok=True)
 
     parsed = _parse_github_url(url)
     if not parsed:
@@ -170,7 +181,7 @@ async def clone_or_update(
     if not _SAFE_SEG.match(owner) or not _SAFE_SEG.match(repo) or not _SAFE_SEG.match(org_slug):
         return CloneResult(success=False, error="Invalid characters in owner, repo, or org slug.")
 
-    dest = CLONE_ROOT / org_slug / repo
+    dest = clone_root / org_slug / repo
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     env: dict[str, str] | None = None

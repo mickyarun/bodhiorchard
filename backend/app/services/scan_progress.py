@@ -26,8 +26,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan import Scan
 from app.repositories.scan import ScanRepository
+from app.repositories.scan_run import ScanRunRepository
 from app.schemas.skills import PhaseStatus, ScanStatus, phase_label
 from app.services.event_bus import publish
+from app.services.scan.runner import cancel_background_task
 
 logger = structlog.get_logger(__name__)
 
@@ -279,11 +281,56 @@ async def get_active_scan_for_org(org_id: str) -> ScanStatus | None:
 
 
 async def cancel_scan(scan_id: str) -> ScanStatus | None:
-    """Explicit cancel — flip to ``failed`` with a human-readable error."""
+    """Cancel a running scan — flip the aggregate row to ``failed``,
+    cancel the in-flight asyncio task, and cascade-fail every
+    non-terminal ``ScanRepoRun`` / ``ScanRepoStep`` for the scan so the
+    per-repo timeline UI clears alongside the aggregate banner.
+
+    Idempotent: when the scan is already terminal, returns the existing
+    row without re-publishing the WS event so idle browser tabs don't
+    surface a spurious "scan failed" toast.
+    """
+    from app.database import AsyncSessionLocal
+
+    try:
+        scan_uuid = uuid.UUID(scan_id)
+    except (ValueError, TypeError):
+        return None
+
+    error_msg = "Scan cancelled by request."
+    async with AsyncSessionLocal() as db:
+        existing = await db.get(Scan, scan_uuid)
+        if existing is None:
+            return None
+        already_terminal = existing.status in {"completed", "failed"}
+        # Always run the cascade — even on a terminal aggregate. A
+        # backend restart can flip the ``scans`` row to ``failed`` via
+        # ``reconcile_orphan_scans`` while leaving per-repo runs /
+        # steps stuck in ``running``; this is the only path the user
+        # has to clean those up. ``terminalize_subtree`` filters on
+        # non-terminal rows so it's a no-op when nothing is stuck.
+        runs_flipped, steps_flipped = await ScanRunRepository(
+            db, org_id=existing.org_id
+        ).terminalize_subtree(scan_id=scan_uuid, error=error_msg)
+        await db.commit()
+
+    cancel_background_task(scan_uuid)
+    logger.info(
+        "scan_cancelled",
+        scan_id=scan_id,
+        runs_flipped=runs_flipped,
+        steps_flipped=steps_flipped,
+        already_terminal=already_terminal,
+    )
+    if already_terminal:
+        # Aggregate is already terminal; don't republish the WS event
+        # (keeps idle browser tabs from surfacing a duplicate "scan
+        # failed" toast). Return the existing status.
+        return _scan_to_status(existing)
     return await update_scan_progress(
         scan_id,
         status="failed",
-        error="Scan cancelled by request.",
+        error=error_msg,
     )
 
 
@@ -310,11 +357,12 @@ async def reconcile_orphan_scans(*, min_age_seconds: int = 60) -> int:
     """
     from datetime import timedelta
 
-    from sqlalchemy import select
-    from sqlalchemy import update as sql_update
-
     from app.database import AsyncSessionLocal
-    from app.repositories.scan import _active_status_values  # noqa: PLC2701
+    from app.repositories.scan import (
+        bulk_mark_failed,
+        find_orphan_active_scans,
+        get_by_id_unscoped,
+    )
 
     cutoff = datetime.now(UTC) - timedelta(seconds=min_age_seconds)
     error_msg = (
@@ -323,36 +371,35 @@ async def reconcile_orphan_scans(*, min_age_seconds: int = 60) -> int:
     )
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            sql_update(Scan)
-            .where(
-                Scan.status.in_(_active_status_values()),
-                Scan.updated_at < cutoff,
+        # Capture ``(scan_id, org_id)`` before the UPDATE so the cascade
+        # below can scope per-repo terminalization to each owning org.
+        orphans = await find_orphan_active_scans(db, cutoff=cutoff)
+        if not orphans:
+            return 0
+
+        await bulk_mark_failed(db, scan_ids=[scan_id for scan_id, _ in orphans], error=error_msg)
+        # Cascade-fail every non-terminal ScanRepoRun + RUNNING
+        # ScanRepoStep so the per-repo timeline UI doesn't display a
+        # stuck row after the aggregate banner clears.
+        for scan_id, org_id in orphans:
+            await ScanRunRepository(db, org_id=org_id).terminalize_subtree(
+                scan_id=scan_id, error=error_msg
             )
-            .values(
-                status="failed",
-                error=error_msg,
-                updated_at=datetime.now(UTC),
-            )
-            .returning(Scan.id)
+        await db.commit()
+
+        logger.warning(
+            "scan_orphans_reconciled",
+            count=len(orphans),
+            scan_ids=[str(scan_id) for scan_id, _ in orphans],
         )
-        orphan_ids = list(result.scalars().all())
-        if orphan_ids:
-            await db.commit()
-            logger.warning(
-                "scan_orphans_reconciled",
-                count=len(orphan_ids),
-                scan_ids=[str(s) for s in orphan_ids],
-            )
-            # Also push a final "failed" WS event so any already-open
-            # browser tab flips out of its polling loop immediately
-            # instead of waiting for its next /scan/latest poll.
-            for scan_id in orphan_ids:
-                select_stmt = select(Scan).where(Scan.id == scan_id)
-                row = (await db.execute(select_stmt)).scalar_one_or_none()
-                if row is not None:
-                    _publish(str(scan_id), _scan_to_status(row))
-        return len(orphan_ids)
+        # Push a final "failed" WS event so any already-open browser tab
+        # flips out of its polling loop immediately instead of waiting
+        # for its next /scan/latest poll.
+        for scan_id, _ in orphans:
+            row = await get_by_id_unscoped(db, scan_id)
+            if row is not None:
+                _publish(str(scan_id), _scan_to_status(row))
+        return len(orphans)
 
 
 async def enrich_status_with_phases(

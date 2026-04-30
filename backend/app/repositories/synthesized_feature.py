@@ -133,6 +133,8 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
         capabilities: dict[str, Any],
         cluster_names: list[str],
         code_locations: dict[str, Any],
+        tags: list[str] | None = None,
+        embedding: list[float] | None = None,
         knowledge_item_id: uuid.UUID | None = None,
     ) -> SynthesizedFeature:
         """Insert one immutable pre-merge feature row.
@@ -143,6 +145,10 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
         could not resolve ``repo_name`` to a ``TrackedRepository`` —
         which is by design, the silent-orphan symptom that §18.12
         describes.
+
+        ``embedding`` is computed at synthesis write-time so the merge
+        phase can cluster likely-duplicates without re-embedding. NULL
+        is acceptable for legacy callers; the merge phase will lazy-fill.
         """
         assert self._org_id is not None, "org_id required for writes"
         row = SynthesizedFeature(
@@ -153,7 +159,9 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
             description=description,
             capabilities=capabilities,
             cluster_names=cluster_names,
+            tags=list(tags or []),
             code_locations=code_locations,
+            embedding=embedding,
             knowledge_item_id=knowledge_item_id,
             merge_outcome=None,
             synthesized_at=datetime.now(UTC),
@@ -163,6 +171,27 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
         await self._db.refresh(row)
         return row
 
+    async def set_embedding(
+        self,
+        synth_feature_id: uuid.UUID,
+        embedding: list[float],
+    ) -> None:
+        """Lazy-fill ``embedding`` on a synth row that pre-dates the column.
+
+        Used by the merge phase's bulk back-fill pass for legacy rows
+        whose ``embedding IS NULL`` because they were inserted before
+        the column existed. After one sweep, all rows have embeddings
+        cached.
+        """
+        await self._db.execute(
+            sql_update(SynthesizedFeature)
+            .where(
+                SynthesizedFeature.org_id == self._org_id,
+                SynthesizedFeature.id == synth_feature_id,
+            )
+            .values(embedding=embedding)
+        )
+
     async def mark_merge_outcome(
         self,
         synth_feature_id: uuid.UUID,
@@ -170,14 +199,16 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
         *,
         merged_into_id: uuid.UUID | None = None,
     ) -> None:
-        """Set ``merge_outcome`` (and ``merged_into_id`` when MERGED_INTO).
+        """Set ``merge_outcome`` (and optionally ``merged_into_id``).
 
-        Invariant enforced in code: ``merged_into_id`` is non-NULL iff
-        ``outcome is MergeOutcome.MERGED_INTO``. The DB accepts either
-        combination, so this method is the one place that guards it.
+        Invariant: ``merged_into_id`` MUST be NULL for any outcome other
+        than ``MERGED_INTO``. For ``MERGED_INTO`` it MAY be NULL — the
+        absorbed-into target is sometimes a pre-synth_features
+        ``knowledge_item`` (manually entered, or older than this audit
+        table) for which no synth row exists. In that case the
+        ``knowledge_item_id`` back-fill is the link to the canonical;
+        ``merged_into_id`` simply has no synth ancestor to point at.
         """
-        if outcome is MergeOutcome.MERGED_INTO and merged_into_id is None:
-            raise ValueError("merged_into_id is required when outcome is MERGED_INTO")
         if outcome is not MergeOutcome.MERGED_INTO and merged_into_id is not None:
             raise ValueError(f"merged_into_id must be None for outcome={outcome.value!r}")
 
@@ -190,24 +221,95 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
             .values(merge_outcome=outcome, merged_into_id=merged_into_id)
         )
 
-    async def mark_all_superseded(self) -> int:
-        """Supersede every current row for this org.
+    async def list_active_grouped_by_repo_for_scan(
+        self, scan_id: uuid.UUID
+    ) -> dict[uuid.UUID, list[SynthesizedFeature]]:
+        """Active (non-superseded) features produced in this scan, keyed by repo id.
 
-        Called by ``POST /scan/reset`` so a subsequent scan sees an
-        empty "current pre-merge view" and rebuilds from clean slate.
-        The old rows remain in the table for audit — they're just no
-        longer returned by ``list_current_for_*``.
+        Used by the timeline serializer to attach feature lists to the
+        FEATURE_SYNTHESIS / FEATURE_MERGE chip popovers. Sorted by title
+        within each repo for stable rendering.
         """
-        now = datetime.now(UTC)
         result = await self._db.execute(
+            self._scoped(
+                select(SynthesizedFeature).where(
+                    SynthesizedFeature.scan_id == scan_id,
+                    SynthesizedFeature.superseded_at.is_(None),
+                )
+            ).order_by(SynthesizedFeature.repo_id, SynthesizedFeature.feature_title)
+        )
+        grouped: dict[uuid.UUID, list[SynthesizedFeature]] = {}
+        for row in result.scalars().all():
+            grouped.setdefault(row.repo_id, []).append(row)
+        return grouped
+
+    async def list_unmerged_for_scan(self, scan_id: uuid.UUID) -> list[SynthesizedFeature]:
+        """List current synth rows for this scan still awaiting a merge outcome.
+
+        Filters: ``scan_id == scan_id``, ``superseded_at IS NULL``,
+        ``merge_outcome IS NULL``. Used by the per-scan **audit** check
+        (``_audit_strict``) to verify every NEW row this scan produced
+        was stamped — a per-scan responsibility.
+
+        For merge **processing**, prefer :meth:`list_unmerged_org_wide`:
+        the merge phase is a cross-scan dedup operation by design and
+        must pick up stragglers from cancelled / partially-completed
+        prior scans, not just this scan's rows.
+        """
+        result = await self._db.execute(
+            self._scoped(
+                select(SynthesizedFeature).where(
+                    SynthesizedFeature.scan_id == scan_id,
+                    SynthesizedFeature.superseded_at.is_(None),
+                    SynthesizedFeature.merge_outcome.is_(None),
+                )
+            ).order_by(SynthesizedFeature.synthesized_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def list_unmerged_org_wide(self) -> list[SynthesizedFeature]:
+        """List every current synth row in the org awaiting a merge outcome.
+
+        The merge phase processes the org's full unmerged set in one pass
+        so stragglers from cancelled or partially-completed prior scans
+        don't accumulate forever. Filters: ``superseded_at IS NULL``,
+        ``merge_outcome IS NULL``.
+
+        Ordered by ``synthesized_at`` ascending so the merge prompt sees
+        rows in the order they were produced — older scans first, then
+        the current scan's output. This keeps the prompt's NEW section
+        stable across re-runs of a scan-test workflow.
+        """
+        result = await self._db.execute(
+            self._scoped(
+                select(SynthesizedFeature).where(
+                    SynthesizedFeature.superseded_at.is_(None),
+                    SynthesizedFeature.merge_outcome.is_(None),
+                )
+            ).order_by(SynthesizedFeature.synthesized_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def back_fill_knowledge_item_id(
+        self,
+        synth_feature_id: uuid.UUID,
+        knowledge_item_id: uuid.UUID,
+    ) -> None:
+        """Set ``knowledge_item_id`` on a synth row after merge promotes it.
+
+        In the staging-then-merge model, synth rows are inserted during
+        B2 with ``knowledge_item_id=NULL``; the merge phase creates the
+        canonical KI and back-fills this FK so downstream queries
+        (e.g. ``find_current_by_knowledge_item_ids``) keep working.
+        """
+        await self._db.execute(
             sql_update(SynthesizedFeature)
             .where(
                 SynthesizedFeature.org_id == self._org_id,
-                SynthesizedFeature.superseded_at.is_(None),
+                SynthesizedFeature.id == synth_feature_id,
             )
-            .values(superseded_at=now)
+            .values(knowledge_item_id=knowledge_item_id)
         )
-        return result.rowcount
 
     async def mark_canonical_for_active_kis(self) -> int:
         """First half of the post-merge audit: NULL outcome + active KI → CANONICAL.
@@ -377,7 +479,7 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
     async def cluster_names_for_repo(self, repo_id: uuid.UUID) -> set[str]:
         """Return the flat set of cluster names already synthesised for a repo.
 
-        Powers the B2 queue self-heal: diff the GitNexus cluster list
+        Powers the B2 queue self-heal: diff the cluster list
         against this set to get the pending subset that Claude still
         needs to process.
         """

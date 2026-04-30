@@ -179,9 +179,9 @@ def test_qt_rejects_non_theme_qml(tmp_path: Path) -> None:
 
 def test_blazor_rejects_program_cs_and_shared_components(tmp_path: Path) -> None:
     (tmp_path / "app.csproj").write_text(
-        '<Project><ItemGroup>'
+        "<Project><ItemGroup>"
         '<PackageReference Include="Microsoft.AspNetCore.Components.Web"/>'
-        '</ItemGroup></Project>',
+        "</ItemGroup></Project>",
     )
     (tmp_path / "App.razor").write_text("<Router/>")
     shared = tmp_path / "Shared"

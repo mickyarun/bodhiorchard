@@ -30,7 +30,7 @@ Generate standalone HTML wireframes using Vuetify CDN and the organization's des
 
 1. **Read BUD**: Use `get_bud_context` to fetch the approved BUD requirements
 2. **Fetch Design System**: Call `list_design_systems` to discover available design systems, then `get_design_system` with the relevant `repo_id` to get colors, typography, CDN boilerplate, and component defaults
-3. **Find Matching Screens**: Search for similar Vue components via `gitnexus_query` or `Glob`. Read 2–3 results to match existing visual style and layout patterns.
+3. **Find Matching Screens**: Search for similar Vue components via `code_query` or `Glob`. Read 2–3 results to match existing visual style and layout patterns.
 4. **Generate Wireframe**: Create a standalone HTML file with:
    - Vuetify CDN + Vue 3 (from the CDN boilerplate template)
    - Project theme colors applied to Vuetify's theme config
