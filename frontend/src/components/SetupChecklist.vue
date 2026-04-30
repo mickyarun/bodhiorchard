@@ -174,7 +174,7 @@ const items = computed<ChecklistItem[]>(() => {
       label: 'Scan repository',
       done: c.scanComplete,
       inProgress: scanInProgress,
-      progressText: scanInProgress ? `${progress}%` : undefined,
+      progressText: scanInProgress ? `${Math.round(progress)}%` : undefined,
     },
     { key: 'branches', label: 'Map branch strategy', done: c.branchesMapped, route: '/settings' },
     { key: 'github', label: 'Connect GitHub', done: c.githubConnected, route: '/settings', optional: true },

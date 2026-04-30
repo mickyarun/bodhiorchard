@@ -76,19 +76,24 @@ function phaseColor(row: PhaseStatus): string {
 }
 
 function phaseIcon(row: PhaseStatus): string {
+  // Use solid glyphs without the ``-circle`` suffix — Vuetify already
+  // renders the dot, and stacking a circle-glyph on top of the dot
+  // creates a hollow-ring artifact that reads as "black hole in the
+  // middle" against our dark surface. Plain ``mdi-check`` etc. paint
+  // cleanly with the dot as the background.
   if (row.shaReused) return 'mdi-cached'
   switch (row.status) {
     case 'done':
-      return 'mdi-check-circle'
+      return 'mdi-check'
     case 'failed':
-      return 'mdi-alert-circle'
+      return 'mdi-alert'
     case 'running':
       return 'mdi-loading mdi-spin'
     case 'skipped':
-      return 'mdi-minus-circle-outline'
+      return 'mdi-minus'
     case 'pending':
     default:
-      return 'mdi-circle-outline'
+      return 'mdi-circle-small'
   }
 }
 </script>
