@@ -26,6 +26,7 @@ cluster-to-cluster edges by looking up each endpoint's cluster.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections import Counter
 from collections.abc import Iterable
@@ -262,9 +263,12 @@ def _collapse_to_meta(
     for comm in communities:
         meta_id = assignments.get(comm.label)
         if meta_id is None:
-            # Isolated node — give it its own bucket keyed by label hash
-            # to avoid collisions with Louvain's integer ids.
-            meta_id = -hash(comm.label)
+            # Isolated node — give it its own bucket keyed by a stable
+            # hash of the label. ``hash()`` is randomised across Python
+            # processes (PYTHONHASHSEED), so we use a sha256 prefix to
+            # keep meta_ids reproducible across container restarts.
+            digest = hashlib.sha256(comm.label.encode("utf-8")).digest()
+            meta_id = -int.from_bytes(digest[:4], "big")
         grouped.setdefault(meta_id, []).append(comm)
 
     metas: list[Community] = []
