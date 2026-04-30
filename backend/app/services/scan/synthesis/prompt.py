@@ -174,11 +174,19 @@ inside that domain.
 - If two ``cluster_ids`` share the same label, the feature title must
   name that shared domain — not one endpoint, route, or controller
   file that happens to live inside it.
-- A controller, service, or repository file is part of a domain — it is
-  not the domain itself. Title features after the domain.
 - If you cannot name a single domain that covers the cluster files, the
   cluster is composite — split it into multiple features rather than
   picking a misleading single title.
+
+**Worked example.** A meta has ``cluster_ids: ["c22", "c39"]``, both
+labelled ``ais``, with files like ``src/controllers/api/ais/AisSdk.ts``,
+``src/services/ais/AisService.ts``. The recurring path-segment is ``ais``.
+
+- BAD: ``"App Config Controller"`` — picks one file (``AppConfigController``)
+  that happens to live next door; ignores the dominant ``ais`` segment.
+- BAD: ``"AIS Controller"`` — names the layer (controller), not the domain.
+- GOOD: ``"AIS / Account Information Services"`` — names the domain
+  carried by both clusters.
 
 ## Process
 1. Use the Read tool to inspect a handful of files for any cluster you're
@@ -186,9 +194,7 @@ inside that domain.
 2. Group composites where appropriate (high source_count + low cohesion);
    split them where they cover distinct capabilities.
 3. For each feature, call ``write_synthesis_feature`` with:
-   - ``name``: human-readable **domain** name derived from the dominant
-     ``cluster_ids`` (see *Naming discipline* above) — never the name of
-     one endpoint, controller, or service file inside the domain.
+   - ``name``: human-readable name (see *Naming discipline* above).
    - ``description``: 1-2 sentence business description
    - ``source_community_ids``: array of **``cluster_ids``** values (the
      ``c<N>`` ids from the ``cluster_ids`` field of the metas you used).

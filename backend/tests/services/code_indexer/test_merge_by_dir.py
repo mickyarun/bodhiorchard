@@ -143,8 +143,8 @@ def test_layer_dir_recurses_into_per_domain_buckets() -> None:
     ]
     partition: dict[int, list[str]] = {0: []}
     nodes: dict[str, str] = {}
-    # Two files per domain so each sub-bucket is "meaningful" (≥ 2). Total 16
-    # files — bumped above ``_RECURSE_MIN_FILES`` (30) by the loop below.
+    # 8 domains × 4 suffixes = 32 files — above ``_RECURSE_MIN_FILES`` (30).
+    # 4 files per domain so each sub-bucket is "meaningful" (≥ 2 each).
     counter = 0
     for d in domains:
         for suffix in ("Controller.ts", "Controller.spec.ts", "Routes.ts", "Routes.spec.ts"):
@@ -190,6 +190,33 @@ def test_domain_dir_with_few_subfolders_does_not_recurse() -> None:
         partition[0].append(f"b{i}")
     out = merge_clusters_by_directory(partition, nodes)
     assert len(out) == 1
+
+
+def test_recurse_min_files_kwarg_lets_smaller_layer_dirs_split() -> None:
+    """A 25-file ``controllers/api/`` across 6 domains stays mega-clustered
+    at the default ``recurse_min_files=30`` — but lowering the kwarg
+    triggers the per-domain split. Lets callers tune for repos whose
+    layer dirs are smaller than ATOACore's.
+    """
+    partition: dict[int, list[str]] = {0: []}
+    nodes: dict[str, str] = {}
+    # 24 files: 6 domains × 4 files. Each domain has ≥ 2 files (meets
+    # the meaningful-subbucket bar) but the *bucket* total is below 30.
+    counter = 0
+    for d in ["a", "b", "c", "d", "e", "f"]:
+        for i in range(4):
+            nid = f"n{counter}"
+            counter += 1
+            nodes[nid] = f"src/controllers/api/{d}/Foo{i}.ts"
+            partition[0].append(nid)
+
+    out_default = merge_clusters_by_directory(partition, nodes)
+    # Default thresholds → mega-cluster (one bucket of 24 at depth=3).
+    assert len(out_default) == 1
+
+    out_tuned = merge_clusters_by_directory(partition, nodes, recurse_min_files=20)
+    # Tuned threshold lowered → recursion triggers, each domain its own bucket.
+    assert len(out_tuned) == 6
 
 
 def test_recursion_capped_at_max_depth() -> None:

@@ -103,6 +103,22 @@ class SynthesizedFeatureRepository(BaseRepository[SynthesizedFeature]):
         result = await self._db.execute(stmt)
         return [(row.knowledge_item_id, row.cluster_names) for row in result.all()]
 
+    async def count_for_scan(self, scan_id: uuid.UUID) -> int:
+        """Return total non-superseded synth rows produced by one scan.
+
+        Used by the merge phase to compute the orphan-promote ratio —
+        comparing leftover unmerged rows against the scan's full output
+        decides whether the fallback masks a real Claude failure or
+        recovers a small subprocess hiccup.
+        """
+        stmt = self._scoped(
+            select(func.count(SynthesizedFeature.id)).where(
+                SynthesizedFeature.scan_id == scan_id,
+                SynthesizedFeature.superseded_at.is_(None),
+            )
+        )
+        return int((await self._db.execute(stmt)).scalar_one() or 0)
+
     async def count_active_per_repo(self) -> dict[uuid.UUID, int]:
         """Per-repo counts of non-superseded synthesized features for the org.
 
