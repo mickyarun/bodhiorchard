@@ -429,8 +429,13 @@ async def phase_b3_merge(
 
     # Surface a high-orphan ratio as a hard failure so it shows up in the
     # FEATURE_MERGE step row + scan status, not just a warning log line.
-    # We commit first so the promotes already done survive the raise —
-    # ``with_session`` would otherwise rollback the orphan rescue work.
+    # The ``await db.commit()`` below captures *everything* the phase has
+    # flushed since the last commit — orphan promotes, plus anything
+    # ``_audit_strict`` may grow in the future. ``_audit_strict`` is
+    # read-only today so this is moot, but the next caller adding a
+    # write between the orphan promote and this gate must verify that
+    # write should survive the raise (intent of this commit), or the
+    # write must be deferred until after the gate.
     if scan_total > 0 and orphan_count / scan_total >= _ORPHAN_FAILURE_RATIO:
         await db.commit()
         raise MergeIncompleteError(
