@@ -271,9 +271,13 @@ async def _load_scan_cfg(*, org_id: uuid.UUID) -> dict[str, int]:
 async def _collect_global_counts(*, org_id: uuid.UUID) -> dict[str, int]:
     """Snapshot the current active-feature + skill-profile counts.
 
-    Used to gate the merge LLM (legacy ``phase_b3_merge`` skips when
-    ``total_features_synthesized < 2``) and to populate the persist
-    snapshot with realistic numbers instead of zeros.
+    Threaded into ``config["total_features_synthesized"]`` /
+    ``["total_profiles"]`` so ``persist_results`` stamps realistic
+    numbers on the org config snapshot instead of zeros. The merge
+    phase itself runs unconditionally and gates Claude per-cluster
+    based on cluster shape (singletons skip Claude; multi-member or
+    EXISTING-attached clusters call Claude); it does *not* read these
+    counts.
     """
     from app.repositories.knowledge_item import KnowledgeItemRepository
     from app.repositories.skill_profile import SkillProfileRepository
