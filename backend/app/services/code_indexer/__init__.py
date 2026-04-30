@@ -42,7 +42,7 @@ from graphify.cluster import cohesion_score
 from graphify.extract import collect_files as gx_collect_files
 from graphify.extract import extract as gx_extract
 
-from app.services.code_indexer.labeling import label_cluster
+from app.services.code_indexer.labeling import build_corpus_tokens, label_cluster
 from app.services.code_indexer.merge_by_dir import merge_clusters_by_directory
 from app.services.code_indexer.seed import order_partition
 from app.services.code_indexer.skip_lists import filter_paths
@@ -190,8 +190,11 @@ async def index_repo(
 
     ordered = order_partition(partition, head_sha=head_sha)
 
-    # Build the FILE-level "all corpus paths" set once for IDF.
+    # Build the FILE-level "all corpus paths" set once, then pre-compute
+    # the corpus-token Counter so every per-cluster ``label_cluster`` call
+    # reuses the same tokenisation (saves O(N·C) on large repos).
     corpus_files: list[str] = list(_iter_files_from_graph(graph))
+    corpus_tokens_counter = build_corpus_tokens(corpus_files) if corpus_files else None
 
     entries: list[ClusterEntry] = []
     for cluster_id, member_node_ids in ordered:
@@ -201,7 +204,7 @@ async def index_repo(
             continue
         label = label_cluster(
             files_in_cluster or [n for n in member_node_ids],
-            corpus_files=corpus_files or None,
+            corpus_tokens=corpus_tokens_counter,
         )
         try:
             cohesion = cohesion_score(graph, member_node_ids)

@@ -100,37 +100,52 @@ _BLOCKED_TOKENS = frozenset(
 _TOKEN_SPLIT = re.compile(r"[/\\._\-]+|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
+def build_corpus_tokens(corpus_files: Iterable[str]) -> Counter[str]:
+    """Pre-compute the corpus-wide token Counter once per scan.
+
+    Callers tokenising every cluster against the same corpus should
+    build this once and pass it to ``label_cluster`` via the
+    ``corpus_tokens`` keyword. Re-tokenising thousands of paths per
+    cluster is O(N·C) and shows up on real-repo profiles.
+    """
+    return _count_tokens(corpus_files)
+
+
 def label_cluster(
     member_files: Iterable[str],
     *,
     corpus_files: Iterable[str] | None = None,
+    corpus_tokens: Counter[str] | None = None,
     fallback: str = "cluster",
 ) -> str:
     """Return a deterministic, human-readable label for the cluster.
 
     Args:
         member_files: Repo-relative path strings of files in this cluster.
-        corpus_files: Optional. All files across all clusters in the same
-            repo, used for IDF normalisation. Without it the label degrades
-            to most-frequent-token-in-cluster — still deterministic but
+        corpus_files: All files across all clusters in the same repo,
+            used for IDF normalisation. Mutually exclusive with
+            ``corpus_tokens``. Without either, the label degrades to
+            most-frequent-token-in-cluster — still deterministic but
             less domain-specific.
+        corpus_tokens: Pre-computed Counter from
+            :func:`build_corpus_tokens`. Use this in hot loops to avoid
+            re-tokenising the corpus once per cluster.
         fallback: Returned when no usable token can be extracted.
 
     Returns:
         Lowercase kebab-case token, e.g. ``"ais"`` or ``"payments"``.
-        The current implementation always returns a single
-        camelCase-split token, never a multi-word kebab compound — see
-        the bigram-scoring TODO in the unit test for the upgrade path.
     """
     cluster_tokens = _count_tokens(member_files)
     if not cluster_tokens:
         return fallback
 
-    if corpus_files is None:
+    if corpus_tokens is None and corpus_files is None:
         winner, _ = cluster_tokens.most_common(1)[0]
         return _kebab(winner)
 
-    corpus_tokens = _count_tokens(corpus_files)
+    if corpus_tokens is None:
+        # Caller passed corpus_files only — compute once.
+        corpus_tokens = _count_tokens(corpus_files or [])
     corpus_size = max(1, sum(corpus_tokens.values()))
     cluster_size = sum(cluster_tokens.values())
 

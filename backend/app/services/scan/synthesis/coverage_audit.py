@@ -26,8 +26,10 @@ human-curated feature. Two guards keep the audit from creating noise:
    files are under ``…/ais/…``; the tiny utility module that happened
    to share the name doesn't get promoted.
 2. **Minimum file count**: a label-group must contribute at least
-   ``MIN_AUDIT_FILES`` (3) unreferenced files across its clusters. One-
-   file orphans get logged but not promoted — they really are noise.
+   ``MIN_AUDIT_FILES`` (5) unreferenced files across its clusters.
+   Smaller orphan groups don't make for a meaningful feature row;
+   raising the threshold from 3 to 5 dramatically reduces false-
+   positive promotions on real codebases.
 
 The synthetic feature is tagged ``coverage:auto`` so the merge phase
 and UI can distinguish "Claude wrote this" from "the audit filled in".

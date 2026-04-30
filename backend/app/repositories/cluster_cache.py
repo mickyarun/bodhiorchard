@@ -23,6 +23,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.cluster_cache import ClusterCache
@@ -79,33 +80,60 @@ class ClusterCacheRepository(BaseRepository[ClusterCache]):
         ``rows`` items must contain ``cluster_id``, ``label``,
         ``heuristic_label``, ``symbol_count``, ``cohesion``, ``files``,
         and may optionally contain ``symbols``. Returns the number of
-        inserted rows.
+        upserted rows.
+
+        **Concurrency.** Two concurrent scans for the same
+        ``(org_id, repo_id, head_sha)`` could both attempt this
+        operation. We use ``INSERT … ON CONFLICT DO UPDATE`` instead
+        of delete-then-insert so a colliding writer is "last write
+        wins" rather than tripping the unique constraint.
+
+        Stale rows for *removed* clusters (cluster_id present in the
+        old set but absent in ``rows``) are pruned by an explicit DELETE
+        before the upserts, scoped to cluster_ids not in the new set.
         """
         assert self._org_id is not None, "org_id required for writes"
-        await self._db.execute(
-            delete(ClusterCache).where(
-                ClusterCache.org_id == self._org_id,
-                ClusterCache.repo_id == repo_id,
-                ClusterCache.head_sha == head_sha,
-            )
-        )
+        new_cluster_ids = {row["cluster_id"] for row in rows}
+
+        # Prune cluster_ids that are no longer present.
+        stale_filter = [
+            ClusterCache.org_id == self._org_id,
+            ClusterCache.repo_id == repo_id,
+            ClusterCache.head_sha == head_sha,
+        ]
+        if new_cluster_ids:
+            stale_filter.append(ClusterCache.cluster_id.notin_(new_cluster_ids))
+        await self._db.execute(delete(ClusterCache).where(*stale_filter))
+
         if not rows:
             await self._db.flush()
             return 0
+
+        # Upsert each surviving row by the unique key.
         for row in rows:
-            self._db.add(
-                ClusterCache(
-                    org_id=self._org_id,
-                    repo_id=repo_id,
-                    head_sha=head_sha,
-                    cluster_id=row["cluster_id"],
-                    label=row["label"],
-                    heuristic_label=row.get("heuristic_label"),
-                    symbol_count=int(row.get("symbol_count") or 0),
-                    cohesion=row.get("cohesion"),
-                    files=list(row.get("files") or []),
-                    symbols=list(row.get("symbols") or []),
-                )
+            stmt = pg_insert(ClusterCache).values(
+                org_id=self._org_id,
+                repo_id=repo_id,
+                head_sha=head_sha,
+                cluster_id=row["cluster_id"],
+                label=row["label"],
+                heuristic_label=row.get("heuristic_label"),
+                symbol_count=int(row.get("symbol_count") or 0),
+                cohesion=row.get("cohesion"),
+                files=list(row.get("files") or []),
+                symbols=list(row.get("symbols") or []),
             )
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_cc_repo_sha_cluster",
+                set_={
+                    "label": stmt.excluded.label,
+                    "heuristic_label": stmt.excluded.heuristic_label,
+                    "symbol_count": stmt.excluded.symbol_count,
+                    "cohesion": stmt.excluded.cohesion,
+                    "files": stmt.excluded.files,
+                    "symbols": stmt.excluded.symbols,
+                },
+            )
+            await self._db.execute(stmt)
         await self._db.flush()
         return len(rows)
