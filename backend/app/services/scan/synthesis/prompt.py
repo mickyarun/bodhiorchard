@@ -83,14 +83,30 @@ def _payload_for_communities(
     communities: list[Community],
     files_per_community: int,
 ) -> list[dict[str, Any]]:
-    """Trim ``Community`` objects to the JSON shape Claude consumes."""
+    """Trim ``Community`` objects to the JSON shape Claude consumes.
+
+    The ``cluster_ids`` field surfaces the meta's constituent
+    ``source_community_ids`` — the actual ``cluster_cache`` row keys
+    (e.g. ``c22``, ``c39``). Claude is asked to echo these back in
+    every ``write_synthesis_feature`` call so the server-side handler
+    can expand ``code_locations`` with every file from every chosen
+    cluster, closing the gap where Claude lists only a few
+    representative files per feature.
+    """
     payload: list[dict[str, Any]] = []
     for c in communities:
         if c.drop_reason:
             continue
+        cluster_ids: list[str] = list(c.source_community_ids or [])
+        if c.community_id and c.community_id not in cluster_ids:
+            # Raw clusters that didn't go through hierarchical merge
+            # have ``community_id`` set but ``source_community_ids``
+            # empty. Surface the id so the auto-expand still works.
+            cluster_ids = [c.community_id, *cluster_ids]
         payload.append(
             {
                 "community_id": c.community_id or "",
+                "cluster_ids": cluster_ids,
                 "label": c.label,
                 "symbol_count": c.symbol_count,
                 "source_count": max(1, len(c.source_community_ids)),
@@ -123,13 +139,17 @@ Reduced meta-communities (JSON):
 
 ## How to read each community
 - ``label`` — composite name like "Payments + Links + Invoice". A "+" means
-  several Leiden fragments were merged; the label captures the top three.
+  several fragments were merged; the label captures the top three.
+- ``cluster_ids`` — the underlying cluster_cache row ids (e.g. ``["c22",
+  "c39"]``). **Pass these back verbatim** in ``source_community_ids`` so
+  the server can expand ``code_locations`` with every file in those
+  clusters automatically — you don't need to enumerate file paths.
 - ``symbol_count`` — total symbols across the merged fragments.
-- ``source_count`` — how many original Leiden fragments were merged. Higher
+- ``source_count`` — how many original fragments were merged. Higher
   numbers signal a broad domain that may map to multiple features.
 - ``cohesion`` — symbol-weighted average of the merged fragments' cohesion.
-  ``null`` means GitNexus had no cohesion data.
-- ``files`` — up to 15 representative file paths.
+  ``null`` means cohesion data was unavailable.
+- ``files`` — up to 15 representative file paths (sample).
 
 ## Heuristics
 - ``source_count > 5`` AND ``cohesion < 0.3`` → composite cluster. Likely
@@ -150,12 +170,18 @@ Reduced meta-communities (JSON):
 3. For each feature, call ``write_synthesis_feature`` with:
    - ``name``: human-readable name e.g. "Card Payments"
    - ``description``: 1-2 sentence business description
-   - ``source_community_ids``: array of ``community_id`` values (the ids you
-     just received) that fed this feature
-   - ``dropped_community_ids``: array of ``community_id`` values you decided
-     not to use (because they're noise/utility)
+   - ``source_community_ids``: array of **``cluster_ids``** values (the
+     ``c<N>`` ids from the ``cluster_ids`` field of the metas you used).
+     The server expands ``code_locations`` from these — passing them
+     accurately is what makes file coverage complete. If you used a
+     meta with ``cluster_ids: ["c22", "c39"]``, list both.
+   - ``dropped_community_ids``: array of ``cluster_id`` values you decided
+     not to use (because they're noise/utility).
    - ``code_locations``: object mapping layer to file paths,
-     e.g. {{"backend": ["src/services/payments/..."]}}
+     e.g. {{"backend": ["src/services/payments/..."]}}. **Server-side,
+     this gets unioned with every file from each cluster you listed in
+     ``source_community_ids`` — you only need to add files the cluster
+     samples didn't already show.**
    - ``repo_name``: "{repo_name}"
    - ``scan_id`` and ``repo_id`` from the *Scan context* block above (when
      provided). These bind the persisted feature to this exact scan run.

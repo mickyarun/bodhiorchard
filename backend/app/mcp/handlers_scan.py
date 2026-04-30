@@ -19,7 +19,9 @@ written by synthesis".
 
 from __future__ import annotations
 
+import re
 import uuid
+from collections import defaultdict
 from typing import Any
 
 import structlog
@@ -28,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.mcp.handler_utils import require_non_empty
 from app.mcp.synth_feature_writer import persist_synth_feature
 from app.models.organization import Organization
+from app.repositories.cluster_cache import ClusterCacheRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 
 logger = structlog.get_logger(__name__)
@@ -78,6 +81,22 @@ async def handle_write_synthesis_feature(
         repo_id = await _resolve_repo_id(db, org_id=org.id, repo_name=repo_name)
     if repo_id is None:
         return _unknown_repo_error(repo_name)
+
+    # Auto-expand ``code_locations`` with every file from every cluster
+    # the LLM listed in ``source_community_ids``. The synthesis prompt
+    # passes back the underlying ``cluster_ids`` (e.g. ``c22``, ``c39``)
+    # so we can look them up in ``cluster_cache`` and union the files.
+    # This closes the gap where Claude lists only a handful of
+    # representative files per feature, leaving the rest of the
+    # cluster's files unreferenced and surfaced as "uncovered" by the
+    # post-synthesis audit.
+    code_locations = await _expand_code_locations(
+        db,
+        org_id=org.id,
+        repo_id=repo_id,
+        source_ids=source_ids,
+        existing=code_locations,
+    )
 
     # Stage-only: write the immutable per-scan audit row with
     # ``knowledge_item_id=None``. The merge phase (B3) reads these rows,
@@ -135,6 +154,100 @@ async def handle_write_synthesis_feature(
 
 
 # --- helpers --------------------------------------------------------
+
+
+_CLUSTER_ID_RE = re.compile(r"^c\d+$")
+"""Cluster id format emitted by ``code_indexer.seed.stable_cluster_id``."""
+
+# Path heuristics for layer assignment when expanded files land outside
+# Claude's existing layer buckets. Same regexes as ``coverage_audit``.
+_FRONTEND_EXT_RE = re.compile(r"\.(vue|svelte|astro|tsx|jsx)$")
+_FRONTEND_DIRS_RE = re.compile(r"/(views|pages|components|composables|stores|layouts)/")
+_BATCH_DIRS_RE = re.compile(r"/(cron|jobs?|workers|batch|queue|tasks?|schedule)/")
+
+
+async def _expand_code_locations(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    repo_id: uuid.UUID,
+    source_ids: list[str],
+    existing: Any,
+) -> dict[str, list[str]]:
+    """Union files from every cluster in ``source_ids`` into ``existing``.
+
+    The prompt instructs the LLM to put cluster_cache row ids
+    (``c<N>``) in ``source_community_ids``. We look those up, fetch
+    their full file lists, and merge into ``existing`` keyed by layer.
+
+    Strings that don't match the ``c<N>`` pattern are ignored — they're
+    likely composite labels (``"merchant + payments + invoice"``) from
+    older synthesis prompts. Mixed input is handled gracefully:
+    cluster_ids get expanded, labels get ignored, and the existing
+    ``code_locations`` is returned untouched if no cluster_ids are
+    found.
+    """
+    base: dict[str, list[str]] = {}
+    if isinstance(existing, dict):
+        for layer, files in existing.items():
+            if not isinstance(layer, str) or not isinstance(files, list):
+                continue
+            base[layer] = [f for f in files if isinstance(f, str)]
+
+    candidate_ids = [s for s in source_ids if isinstance(s, str) and _CLUSTER_ID_RE.match(s)]
+    if not candidate_ids:
+        return base
+
+    head_sha = await _latest_head_sha(db, org_id=org_id, repo_id=repo_id)
+    if not head_sha:
+        return base
+
+    cc_repo = ClusterCacheRepository(db, org_id=org_id)
+    cached_rows = await cc_repo.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
+    by_id = {row.cluster_id: row for row in cached_rows}
+
+    seen: set[str] = {f for layer_files in base.values() for f in layer_files}
+    layered: dict[str, list[str]] = defaultdict(list, {k: list(v) for k, v in base.items()})
+
+    for cid in candidate_ids:
+        cluster = by_id.get(cid)
+        if cluster is None:
+            continue
+        for f in cluster.files or []:
+            if not isinstance(f, str) or f in seen:
+                continue
+            seen.add(f)
+            layered[_classify_layer(f)].append(f)
+
+    return dict(layered)
+
+
+def _classify_layer(path: str) -> str:
+    """Map a file path to ``frontend`` / ``batch`` / ``backend`` by heuristic."""
+    if _FRONTEND_EXT_RE.search(path) or _FRONTEND_DIRS_RE.search(path):
+        return "frontend"
+    if _BATCH_DIRS_RE.search(path):
+        return "batch"
+    return "backend"
+
+
+async def _latest_head_sha(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    repo_id: uuid.UUID,
+) -> str | None:
+    """Resolve the head_sha for cluster_cache lookup.
+
+    Reads from ``tracked_repositories.head_sha`` first (set by the
+    persist phase at scan completion); falls back to whatever's most
+    recent in ``cluster_cache`` so mid-scan synthesis writes still
+    auto-expand against the current scan's cache rows.
+    """
+    tracked = await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id)
+    if tracked is not None and tracked.head_sha:
+        return tracked.head_sha
+    return await ClusterCacheRepository(db, org_id=org_id).latest_head_sha(repo_id=repo_id)
 
 
 async def _resolve_repo_id(
