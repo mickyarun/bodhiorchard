@@ -135,7 +135,7 @@ async def _collect_feature_dicts(
 async def _find_repos_without_features(
     db: AsyncSession,
     org_id: uuid.UUID,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Find tracked repos that have no features linked to them.
 
     Returns their name + top-level file listing so the merge prompt
@@ -147,7 +147,7 @@ async def _find_repos_without_features(
     ki_repo = KnowledgeItemRepository(db, org_id=org_id)
     linked_repo_ids = await ki_repo.get_linked_repo_ids()
 
-    result: list[dict] = []
+    result: list[dict[str, Any]] = []
     for repo in all_repos:
         if repo.id not in linked_repo_ids:
             rp = Path(repo.path)
