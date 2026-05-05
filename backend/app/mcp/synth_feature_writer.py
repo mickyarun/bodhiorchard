@@ -47,21 +47,15 @@ async def persist_synth_feature(
     """Insert a ``features`` row + PRIMARY ``feature_to_repo`` junction row.
 
     Features are repo-scoped, not scan-scoped — the ``Feature`` row
-    carries no scan binding. The synthesise pass re-uses an existing
-    feature for the same ``(repo, title)`` by superseding the prior row
-    in this same transaction, so the partial "latest" index
-    (``superseded_at IS NULL``) always returns exactly one row per
-    feature title per repo.
+    carries no scan binding. The synthesise stage wholesale-wipes the
+    repo's features at the start of each not-skip pass, so the table
+    arrives empty for ``repo_id`` and a fresh insert is always safe. The
+    partial unique index ``ux_ftr_primary_title (repo_id, feature_title)
+    WHERE role='primary'`` guards against a regression in the synthesis
+    prompt that emits the same title twice in one run.
     """
     feature_repo = FeatureRepository(db, org_id=org.id)
 
-    # Mark any earlier row for this (repo, title) as superseded BEFORE
-    # inserting the new one — the partial-unique invariant the downstream
-    # queue self-heal depends on is one current row per (repo, title).
-    await feature_repo.supersede_prior_by_title(
-        repo_id=repo_id,
-        feature_title=feature_title,
-    )
     # Compute the embedding once at write-time. Persisting the vector
     # here saves recomputing it on every downstream pass and keeps the
     # row immutable. ``try_embed`` is fail-soft — returns None on any
