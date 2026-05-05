@@ -76,3 +76,10 @@ class ClusterCache(BaseModel):
     symbols: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    # SHA-256 of the cluster's canonical (sorted) member node-ID list.
+    # Computed by the indexer (``code_indexer.seed.cluster_signature``)
+    # and propagated through the synthesis pipeline so reconciler rows
+    # can match by structural identity instead of LLM-generated title.
+    signature: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default=text("''")
+    )

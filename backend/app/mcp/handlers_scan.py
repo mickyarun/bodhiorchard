@@ -4,21 +4,22 @@
 """MCP handlers exclusive to the v2 scan pipeline.
 
 The single tool is ``write_synthesis_feature`` — Claude calls it once
-per feature it produces during the synthesize stage. The handler is
-**staging-only**: it appends an immutable row to ``synthesized_features``
-and nothing else. The merge phase (Stage B3) is the sole writer of
-canonical ``knowledge_items`` rows.
+per feature it produces during the synthesize stage. The handler
+appends a ``FeatureWrite`` to the per-repo accumulator; the
+synthesise stage drains the accumulator at end-of-batch and feeds it
+to :mod:`app.services.feature_reconciler` which performs all DB
+writes.
 
-This mirrors the legacy ``write_feature_registry`` refactor — keeping
-the responsibility split clean: synthesis stages new features, merge
-promotes them. With both v1 and v2 staging-only, the merge phase sees
-unmerged synth rows on one side and existing canonicals from prior
-scans on the other, instead of duplicate inputs from "feature already
-written by synthesis".
+The handler also derives a stable ``cluster_signature`` for the
+emitted feature by combining the underlying clusters' signatures
+from ``cluster_cache``. That gives the reconciler a structural
+identity key independent of LLM-generated titles or per-scan
+``cluster_id`` numbering.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from collections import defaultdict
@@ -41,16 +42,21 @@ async def handle_write_synthesis_feature(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Stage one v2-synthesised feature into ``synthesized_features``.
+    """Stage one v2-synthesised feature for end-of-batch reconciliation.
 
     Required params: ``name``, ``description``, ``source_community_ids``
     (non-empty list of community_id strings — the ids you saw in the
     prompt's JSON payload), ``repo_name``.
 
-    Optional: ``dropped_community_ids``, ``capabilities``, ``code_locations``,
-    ``tags``, ``repo_id``. ``repo_id`` comes from the synthesis prompt's
-    *Scan context* block; when supplied it survives renames mid-scan and
-    saves a name-resolution round-trip.
+    Optional: ``dropped_community_ids``, ``capabilities``,
+    ``code_locations``, ``tags``, ``repo_id``. ``repo_id`` comes from
+    the synthesis prompt's *Scan context* block; when supplied it
+    survives renames mid-scan and saves a name-resolution round-trip.
+
+    The handler derives a stable ``cluster_signature`` for the
+    feature by combining the per-cluster signatures from
+    ``cluster_cache``. The reconciler uses that as its primary
+    identity key on the next reconcile pass.
     """
     error = require_non_empty(params, "name", "description", "source_community_ids", "repo_name")
     if error:
@@ -88,7 +94,7 @@ async def handle_write_synthesis_feature(
     # representative files per feature, leaving the rest of the
     # cluster's files unreferenced and surfaced as "uncovered" by the
     # post-synthesis audit.
-    code_locations = await _expand_code_locations(
+    code_locations, cluster_signature = await _expand_and_signature(
         db,
         org_id=org.id,
         repo_id=repo_id,
@@ -96,11 +102,7 @@ async def handle_write_synthesis_feature(
         existing=code_locations,
     )
 
-    # Stage-only: write the immutable per-scan audit row with
-    # ``knowledge_item_id=None``. The merge phase (B3) reads these rows,
-    # creates the canonical KI, and back-fills ``knowledge_item_id`` on
-    # the synth row in the same transaction.
-    synth_row = await persist_synth_feature(
+    queued = await persist_synth_feature(
         db=db,
         org=org,
         repo_id=repo_id,
@@ -108,13 +110,10 @@ async def handle_write_synthesis_feature(
         description=description,
         capabilities=capabilities,
         cluster_names=source_ids,
+        cluster_signature=cluster_signature,
         code_locations=code_locations,
         tags=tags,
     )
-
-    # Flush so NOT-NULL / FK violations on the synth row surface before
-    # the dispatcher's auto-commit instead of getting swallowed.
-    await db.flush()
 
     logger.info(
         "scan_write_synthesis_feature",
@@ -123,15 +122,15 @@ async def handle_write_synthesis_feature(
         title=title,
         source_count=len(source_ids),
         dropped_count=len(dropped_ids),
-        synth_row_id=str(synth_row.id),
+        cluster_signature=cluster_signature[:12],
+        queued_in_batch=queued,
     )
     return {
         "success": True,
         "title": title,
         "source_count": len(source_ids),
         "dropped_count": len(dropped_ids),
-        "synth_row_id": str(synth_row.id) if synth_row else None,
-        "synth_persisted": synth_row is not None,
+        "queued_in_batch": queued,
     }
 
 
@@ -148,26 +147,27 @@ _FRONTEND_DIRS_RE = re.compile(r"/(views|pages|components|composables|stores|lay
 _BATCH_DIRS_RE = re.compile(r"/(cron|jobs?|workers|batch|queue|tasks?|schedule)/")
 
 
-async def _expand_code_locations(
+async def _expand_and_signature(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
     repo_id: uuid.UUID,
     source_ids: list[str],
     existing: Any,
-) -> dict[str, list[str]]:
-    """Union files from every cluster in ``source_ids`` into ``existing``.
+) -> tuple[dict[str, list[str]], str]:
+    """Expand ``code_locations`` AND derive a stable ``cluster_signature``.
 
-    The prompt instructs the LLM to put cluster_cache row ids
-    (``c<N>``) in ``source_community_ids``. We look those up, fetch
-    their full file lists, and merge into ``existing`` keyed by layer.
+    Looks up every ``c<N>`` cluster id in ``source_community_ids``
+    against ``cluster_cache`` for the repo's current head SHA, unions
+    their files into ``existing`` keyed by layer (auto-classifying
+    paths the LLM didn't bucket itself), and combines their
+    individual signatures into one structural identity for the
+    feature: ``sha256(sorted([sig1, sig2, ...]))``.
 
-    Strings that don't match the ``c<N>`` pattern are ignored — they're
-    likely composite labels (``"merchant + payments + invoice"``) from
-    older synthesis prompts. Mixed input is handled gracefully:
-    cluster_ids get expanded, labels get ignored, and the existing
-    ``code_locations`` is returned untouched if no cluster_ids are
-    found.
+    When no source_ids resolve (older prompts that emit composite
+    labels, or a cache miss), falls back to a label-derived
+    signature so the writer never produces an empty-string signature
+    that would collide across unrelated features.
     """
     base: dict[str, list[str]] = {}
     if isinstance(existing, dict):
@@ -177,31 +177,48 @@ async def _expand_code_locations(
             base[layer] = [f for f in files if isinstance(f, str)]
 
     candidate_ids = [s for s in source_ids if isinstance(s, str) and _CLUSTER_ID_RE.match(s)]
-    if not candidate_ids:
-        return base
 
     head_sha = await _latest_head_sha(db, org_id=org_id, repo_id=repo_id)
-    if not head_sha:
-        return base
 
-    cc_repo = ClusterCacheRepository(db, org_id=org_id)
-    cached_rows = await cc_repo.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
-    by_id = {row.cluster_id: row for row in cached_rows}
+    constituent_signatures: list[str] = []
+    if candidate_ids and head_sha:
+        cc_repo = ClusterCacheRepository(db, org_id=org_id)
+        cached_rows = await cc_repo.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
+        by_id = {row.cluster_id: row for row in cached_rows}
 
-    seen: set[str] = {f for layer_files in base.values() for f in layer_files}
-    layered: dict[str, list[str]] = defaultdict(list, {k: list(v) for k, v in base.items()})
+        seen: set[str] = {f for layer_files in base.values() for f in layer_files}
+        layered: dict[str, list[str]] = defaultdict(list, {k: list(v) for k, v in base.items()})
 
-    for cid in candidate_ids:
-        cluster = by_id.get(cid)
-        if cluster is None:
-            continue
-        for f in cluster.files or []:
-            if not isinstance(f, str) or f in seen:
+        for cid in candidate_ids:
+            cluster = by_id.get(cid)
+            if cluster is None:
                 continue
-            seen.add(f)
-            layered[_classify_layer(f)].append(f)
+            if cluster.signature:
+                constituent_signatures.append(cluster.signature)
+            for f in cluster.files or []:
+                if not isinstance(f, str) or f in seen:
+                    continue
+                seen.add(f)
+                layered[_classify_layer(f)].append(f)
 
-    return dict(layered)
+        merged_locations = dict(layered)
+    else:
+        merged_locations = base
+
+    signature = _combine_signatures(constituent_signatures, fallback=str(source_ids))
+    return merged_locations, signature
+
+
+def _combine_signatures(individual: list[str], *, fallback: str) -> str:
+    """SHA-256 of the sorted list of constituent cluster signatures.
+
+    Stable across re-scans whenever the underlying cluster set is
+    unchanged. ``fallback`` is hashed when the lookup produced no
+    cluster signatures (older prompts, cache miss) so we never
+    return an empty string that would collide across features.
+    """
+    canonical = "\n".join(sorted(individual)) if individual else f"fallback:{fallback}"
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _classify_layer(path: str) -> str:

@@ -30,7 +30,6 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
-    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -57,17 +56,6 @@ class FeatureToRepo(Base):
         Index("ix_ftr_feature_id", "feature_id"),
         Index("ix_ftr_repo_id", "repo_id"),
         Index("ix_ftr_feature_role", "feature_id", "role"),
-        # Per-repo unique on PRIMARY rows. Denormalised ``feature_title``
-        # makes this expressible at the DB level (Postgres unique indexes
-        # can't reference another table). Cross-repo title reuse stays
-        # legal — only the (repo, title) PRIMARY combination is unique.
-        Index(
-            "ux_ftr_primary_title",
-            "repo_id",
-            "feature_title",
-            unique=True,
-            postgresql_where=text("role = 'primary'"),
-        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

@@ -41,6 +41,23 @@ def head_sha_seed(head_sha: str | None) -> int:
     return int.from_bytes(digest[:4], "big")
 
 
+def cluster_signature(files: list[str], symbols: list[str]) -> str:
+    """SHA-256 hex of a cluster's canonical node-ID list.
+
+    Stable structural identity for incremental feature reconciliation:
+    re-clustering the same code under a different head SHA produces the
+    same signature when the member set is unchanged. graphify's
+    extraction is already deterministic, so the same input graph always
+    yields the same files + symbols here.
+
+    Used by :mod:`app.services.feature_reconciler` as the primary
+    identity key for matching synthesised features to existing rows.
+    LLM-generated titles drift between scans; the signature does not.
+    """
+    canonical = "\n".join(sorted(files) + sorted(symbols))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def order_partition(
     partition: dict[int, list[str]],
     *,

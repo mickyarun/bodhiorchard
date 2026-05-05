@@ -79,8 +79,8 @@ class ClusterCacheRepository(BaseRepository[ClusterCache]):
 
         ``rows`` items must contain ``cluster_id``, ``label``,
         ``heuristic_label``, ``symbol_count``, ``cohesion``, ``files``,
-        and may optionally contain ``symbols``. Returns the number of
-        upserted rows.
+        ``signature``, and may optionally contain ``symbols``. Returns
+        the number of upserted rows.
 
         **Concurrency.** Two concurrent scans for the same
         ``(org_id, repo_id, head_sha)`` could both attempt this
@@ -122,6 +122,7 @@ class ClusterCacheRepository(BaseRepository[ClusterCache]):
                 cohesion=row.get("cohesion"),
                 files=list(row.get("files") or []),
                 symbols=list(row.get("symbols") or []),
+                signature=row.get("signature") or "",
             )
             stmt = stmt.on_conflict_do_update(
                 constraint="uq_cc_repo_sha_cluster",
@@ -132,6 +133,7 @@ class ClusterCacheRepository(BaseRepository[ClusterCache]):
                     "cohesion": stmt.excluded.cohesion,
                     "files": stmt.excluded.files,
                     "symbols": stmt.excluded.symbols,
+                    "signature": stmt.excluded.signature,
                 },
             )
             await self._db.execute(stmt)

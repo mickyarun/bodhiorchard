@@ -6,8 +6,8 @@
 Phases that run during a scan already raise typed exceptions for the
 failure modes they own:
 
-- ``feature_synthesis`` raises ``OrphanFeaturesError`` when
-  ``verify_repo_links`` finds knowledge_items missing a repo link.
+- ``feature_synthesis`` reconciles each repo's batch; the reconciler's
+  per-step structured logs cover correctness inside one repo.
 - The per-repo skill-extraction body raises ``UnmatchedAuthorsError``
   when ``auto_create_members=false`` and the git log has authors not
   in the user table.
@@ -18,17 +18,23 @@ the in-phase guards can't see: cross-phase consistency checks that need
 the full picture once every phase has committed.
 
 The flagship example is the "Bug A early-warning":
-    Code indexer found N>0 clusters for a repo, but zero
-    synthesized_features rows landed for it. Either (a) Claude rationally
-    skipped every cluster as infrastructure (legitimate) or (b) something
-    silently swallowed the synthesis output (the parallel-session bug).
-    The in-phase audits can't tell these apart at synthesis time;
-    end-of-pipeline can, by checking against the code_index payload.
+    Code indexer found N>0 clusters for a repo, but zero active
+    ``features`` rows landed for it. Either (a) Claude rationally
+    skipped every cluster as infrastructure (legitimate) or (b)
+    something silently swallowed the synthesis output. The in-phase
+    audits can't tell these apart at synthesis time; end-of-pipeline
+    can, by checking against the code_index payload.
 
-The audit is **read-only**. The orchestrator decides what to do with the
-report — log a warning, raise a typed exception, surface to the timeline.
-That separation lets the same audit serve a healthcheck endpoint or an
-admin "recheck this scan" button without re-running phases.
+The orphan-feature audit is the integrity gate under incremental CRUD:
+every active feature must own exactly one PRIMARY ``feature_to_repo``
+junction row. A crashed reconcile or a race could drop one; this
+sweep surfaces offenders so an admin tool can soft-delete them.
+
+The audit is **read-only**. The orchestrator decides what to do with
+the report — log a warning, raise a typed exception, surface to the
+timeline. That separation lets the same audit serve a healthcheck
+endpoint or an admin "recheck this scan" button without re-running
+phases.
 """
 
 from __future__ import annotations
@@ -41,7 +47,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan_phase import ScanPhase
 from app.repositories.feature import FeatureRepository
-from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.scan_phase_checkpoint import ScanPhaseCheckpointRepository
 from app.scan.context import ScanContext
 from app.scan.session import with_session
@@ -174,12 +179,12 @@ async def _find_orphan_features(
     session: AsyncSession,
     ctx: ScanContext,
 ) -> list[uuid.UUID]:
-    """Active feature_registry KIs with no ``knowledge_to_repo`` link.
+    """Active features with no PRIMARY ``feature_to_repo`` row.
 
-    The per-repo ``verify_repo_links`` audit already auto-repairs and
-    raises on unfixable orphans during synthesis. This is the
-    end-of-pipeline check against drift introduced after synthesis —
-    e.g. a merge that consolidated two features and accidentally
-    detached their links. Empty list is the healthy state.
+    Data-integrity invariant under incremental CRUD: every active
+    feature must own exactly one PRIMARY junction. A crashed
+    reconcile, a partial transaction commit, or a manual DB edit can
+    drop one — this sweep surfaces offenders. Empty list is the
+    healthy state.
     """
-    return await KnowledgeItemRepository(session, org_id=ctx.org_id).find_orphan_feature_ids()
+    return await FeatureRepository(session, org_id=ctx.org_id).find_orphan_active_feature_ids()

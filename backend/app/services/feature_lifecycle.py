@@ -3,9 +3,20 @@
 
 """Feature lifecycle service — bridges BUDs to the feature registry.
 
-Creates PLANNED feature_registry entries when BUDs are written,
-transitions them through in_progress → implemented as work progresses,
-and deactivates them when BUDs are wilted or deleted.
+Creates PLANNED features when BUDs are written, transitions them
+through in_progress → implemented as work progresses, and
+soft-deletes them when BUDs are wilted or deleted.
+
+BUD-authored features live in the same ``features`` table as
+scan-authored ones but are tagged ``source='bud'`` and intentionally
+have no PRIMARY ``feature_to_repo`` junction (they describe planned
+work, not synthesised code). The reconciler scopes its sweep to
+``source='scan'`` so BUD-authored rows are never inactivated by a
+scan run; the orphan-feature audit is similarly scan-scoped.
+
+Identity for BUD-authored rows uses ``cluster_signature='bud:<ref>'``
+so a future scan that picks up the same source_ref doesn't collide
+on the structural-identity index.
 """
 
 import re
@@ -16,8 +27,8 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDStatus
-from app.models.knowledge_item import KnowledgeItem
-from app.repositories.knowledge_item import KnowledgeItemRepository
+from app.models.feature import Feature
+from app.repositories.feature import FeatureRepository
 from app.services.embedding_service import embedding_service
 
 logger = structlog.get_logger(__name__)
@@ -176,67 +187,73 @@ async def create_planned_feature(
     bud_number: int,
     title: str,
     requirements_md: str,
-) -> KnowledgeItem:
-    """Create a PLANNED feature_registry entry from a BUD.
+) -> Feature:
+    """Create or refresh a PLANNED ``Feature`` row from a BUD.
 
-    Upserts by source_ref to handle re-creation of BUDs with same number.
-    Embeds the item inline for immediate semantic searchability.
-
-    Args:
-        db: The async database session.
-        org_id: The organization UUID.
-        bud_number: The BUD number for source_ref linking.
-        title: The BUD title.
-        requirements_md: The BUD markdown content.
-
-    Returns:
-        The created or updated KnowledgeItem.
+    Upserts by ``source_ref`` (``BUD-XXX``) to handle re-creation of
+    BUDs with the same number. Embeds inline so the row is immediately
+    semantic-searchable. No PRIMARY junction is created — BUD-authored
+    rows are repo-agnostic by design.
     """
     summary = extract_feature_from_bud(title, requirements_md)
     bud_ref = f"BUD-{bud_number:03d}"
     content = _format_planned_content(summary, bud_ref)
     feature_title = f"Feature: {summary.name}"
 
-    # Upsert by source_ref
-    ki_repo = KnowledgeItemRepository(db, org_id=org_id)
-    item = await ki_repo.get_by_source_ref_and_category(bud_ref, "feature_registry")
+    feat_repo = FeatureRepository(db, org_id=org_id)
+    existing = await feat_repo.get_by_source_ref(bud_ref, source="bud")
 
-    if item:
-        item.title = feature_title
-        item.content = content
-        item.tags = summary.tags
-        item.feature_status = "planned"
-        item.is_active = True
-    else:
-        item = KnowledgeItem(
-            org_id=org_id,
-            category="feature_registry",
-            title=feature_title,
-            content=content,
-            source="bud",
-            source_ref=bud_ref,
-            tags=summary.tags,
-            feature_status="planned",
-            is_active=True,
-        )
-        await ki_repo.add(item)
-
-    await db.flush()
-
-    # Embed inline — failure is non-fatal
+    embedding: list[float] | None = None
     try:
-        text = f"{item.title}\n{item.content or ''}"[:2000]
-        item.embedding = await embedding_service.embed(text)
+        text = f"{feature_title}\n{content}"[:2000]
+        embedding = await embedding_service.embed(text)
     except Exception:
         logger.warning("planned_feature_embed_failed", bud_ref=bud_ref)
 
+    if existing is not None:
+        await feat_repo.update_in_place(
+            existing.id,
+            feature_title=feature_title,
+            description=content,
+            capabilities={"capabilities": list(summary.capabilities)},
+            cluster_names=[],
+            cluster_signature=existing.cluster_signature,
+            tags=list(summary.tags),
+            embedding=embedding,
+            last_seen_sha=existing.last_seen_sha,
+            feature_status="planned",
+        )
+        if not existing.is_active:
+            await feat_repo.revive(existing.id, last_seen_sha=existing.last_seen_sha)
+        await db.flush()
+        await db.refresh(existing)
+        logger.info(
+            "planned_feature_updated",
+            org_id=str(org_id),
+            bud_ref=bud_ref,
+            feature_title=feature_title,
+        )
+        return existing
+
+    feature = await feat_repo.insert(
+        feature_title=feature_title,
+        description=content,
+        capabilities={"capabilities": list(summary.capabilities)},
+        cluster_names=[],
+        cluster_signature=f"bud:{bud_ref}",
+        tags=list(summary.tags),
+        embedding=embedding,
+        source="bud",
+        source_ref=bud_ref,
+        feature_status="planned",
+    )
     logger.info(
         "planned_feature_created",
         org_id=str(org_id),
         bud_ref=bud_ref,
         feature_title=feature_title,
     )
-    return item
+    return feature
 
 
 async def transition_feature_for_bud(
@@ -245,34 +262,39 @@ async def transition_feature_for_bud(
     bud_number: int,
     new_status: str | BUDStatus,
 ) -> None:
-    """Transition a feature_registry item based on BUD status change.
-
-    Args:
-        db: The async database session.
-        org_id: The organization UUID.
-        bud_number: The BUD number to look up.
-        new_status: The new BUD status (string or BUDStatus enum).
-    """
+    """Transition a BUD-authored feature based on BUD status change."""
     bud_ref = f"BUD-{bud_number:03d}"
     new_status_str = str(new_status)
 
-    ki_repo = KnowledgeItemRepository(db, org_id=org_id)
-    item = await ki_repo.get_by_source_ref_and_category(bud_ref, "feature_registry")
-    if item is None:
+    feat_repo = FeatureRepository(db, org_id=org_id)
+    feature = await feat_repo.get_by_source_ref(bud_ref, source="bud")
+    if feature is None:
         logger.debug("transition_feature_no_item", bud_ref=bud_ref)
         return
 
     if new_status_str == BUDStatus.DISCARDED:
-        item.is_active = False
-        item.embedding = None
+        await feat_repo.mark_inactive([feature.id])
         logger.info("feature_deactivated", bud_ref=bud_ref)
-    elif new_status_str in (BUDStatus.TECH_ARCH, BUDStatus.DESIGN):
-        # Still pre-development — keep as planned
-        pass
-    elif new_status_str == BUDStatus.DEVELOPMENT and item.feature_status == "planned":
-        item.feature_status = "in_progress"
+        return
+    if new_status_str in (BUDStatus.TECH_ARCH, BUDStatus.DESIGN):
+        # Still pre-development — keep as planned.
+        return
+    if new_status_str == BUDStatus.DEVELOPMENT and feature.feature_status == "planned":
+        await feat_repo.update_in_place(
+            feature.id,
+            feature_title=feature.feature_title,
+            description=feature.description,
+            capabilities=feature.capabilities or {},
+            cluster_names=list(feature.cluster_names or []),
+            cluster_signature=feature.cluster_signature,
+            tags=list(feature.tags or []),
+            embedding=list(feature.embedding) if feature.embedding is not None else None,
+            last_seen_sha=feature.last_seen_sha,
+            feature_status="in_progress",
+        )
         logger.info("feature_in_progress", bud_ref=bud_ref)
-    elif new_status_str in (BUDStatus.PROD, BUDStatus.CLOSED):
+        return
+    if new_status_str in (BUDStatus.PROD, BUDStatus.CLOSED):
         await _record_feature_learning(db, org_id, bud_number, bud_ref)
     # Other statuses: no change (scan pipeline handles "implemented")
 

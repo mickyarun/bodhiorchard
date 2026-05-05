@@ -279,14 +279,12 @@ async def _collect_global_counts(*, org_id: uuid.UUID) -> dict[str, int]:
     ``["total_profiles"]`` so ``persist_results`` stamps realistic
     numbers on the org config snapshot instead of zeros.
     """
-    from app.repositories.knowledge_item import KnowledgeItemRepository
+    from app.repositories.feature import FeatureRepository
     from app.repositories.skill_profile import SkillProfileRepository
 
     try:
         async with with_session(org_id) as db:
-            features = await KnowledgeItemRepository(db, org_id=org_id).count_active(
-                category="feature_registry"
-            )
+            features = await FeatureRepository(db, org_id=org_id).count_active_for_org()
             profiles = await SkillProfileRepository(db, org_id=org_id).count_profiles()
     except Exception:
         logger.exception("scan_global_counts_failed", org_id=str(org_id))

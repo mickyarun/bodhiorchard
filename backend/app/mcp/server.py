@@ -4,7 +4,7 @@
 """MCP (Model Context Protocol) server for Bodhiorchard.
 
 Exposes tools that Claude Code can call to read/write Bodhiorchard data:
-BUDs, knowledge base, bugs, task status, team context.
+BUDs, features, bugs, task status, team context.
 
 Mounted at /mcp/ on the main FastAPI app.
 """
@@ -31,14 +31,14 @@ from app.mcp.handlers_code_graph import (
     handle_code_query,
     handle_code_stats,
 )
-from app.mcp.handlers_hooks import handle_dev_activity
-from app.mcp.handlers_knowledge import (
+from app.mcp.handlers_features import (
     handle_check_feature_exists,
-    handle_get_knowledge,
+    handle_get_features,
     handle_get_pending_features,
     handle_search_bugs,
     handle_write_feature_registry,
 )
+from app.mcp.handlers_hooks import handle_dev_activity
 from app.mcp.handlers_scan import handle_write_synthesis_feature
 from app.mcp.handlers_team import (
     handle_get_design_system,
@@ -123,17 +123,13 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         },
     ),
     MCPToolDefinition(
-        name="get_knowledge",
-        description="Query the organization knowledge base via semantic search",
+        name="get_features",
+        description="Search the organization's active features via semantic search",
         input_schema={
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query"},
                 "limit": {"type": "integer", "default": 10},
-                "category": {
-                    "type": "string",
-                    "description": "Category filter: feature_registry",
-                },
             },
             "required": ["query"],
         },
@@ -159,7 +155,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="write_feature_registry",
         description=(
-            "Save a synthesized feature description to the knowledge base. "
+            "Stage a synthesised feature for end-of-batch reconciliation. "
             "Also marks the source clusters as processed in the tracker. "
             "After calling this, call get_pending_features for the next batch."
         ),
@@ -195,6 +191,30 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "items": {"type": "string"},
                     "description": "Cluster names this feature was synthesized from",
                 },
+                "cluster_signature": {
+                    "type": "string",
+                    "description": (
+                        "Stable structural identity (SHA-256 hex of the cluster's"
+                        " canonical node-ID list). Looked up from cluster_cache"
+                        " by the synthesise stage and echoed back in the prompt"
+                        " context — pass it through verbatim."
+                    ),
+                },
+                "head_sha": {
+                    "type": "string",
+                    "description": (
+                        "Optional: current scan's HEAD SHA. Stamped on the row"
+                        " as ``last_seen_sha`` so the audit can tell stale rows"
+                        " apart. Omit if not surfaced in the prompt."
+                    ),
+                },
+                "source_ref": {
+                    "type": "string",
+                    "description": (
+                        "Optional free-form provenance reference (e.g. PR"
+                        " number, BUD-XXX, commit SHA) for traceability."
+                    ),
+                },
                 "repo_name": {
                     "type": "string",
                     "description": "Repository name (links feature to tracked repo)",
@@ -206,6 +226,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 "capabilities",
                 "code_locations",
                 "tags",
+                "cluster_signature",
                 "repo_name",
             ],
         },
@@ -630,7 +651,7 @@ async def call_tool(
 TOOL_HANDLERS: dict[str, Any] = {
     "get_bud_context": handle_get_bud_context,
     "write_bud": handle_write_bud,
-    "get_knowledge": handle_get_knowledge,
+    "get_features": handle_get_features,
     "search_bugs": handle_search_bugs,
     "post_slack_message": handle_post_slack_message,
     "get_team_context": handle_get_team_context,

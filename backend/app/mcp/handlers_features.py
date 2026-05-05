@@ -1,14 +1,23 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""MCP handlers for knowledge base, feature registry, and bug search.
+"""MCP handlers for the unified ``features`` table + bug search.
 
-Covers: get_knowledge, search_bugs, get_pending_features,
-write_feature_registry, check_feature_exists, and code-location merge logic.
+Replaces ``handlers_knowledge`` after the legacy ``knowledge_items``
+table was retired in favour of ``features`` + ``feature_to_repo``.
+
+Tools exposed (registered in :mod:`app.mcp.server`):
+
+* ``get_features``           — semantic search across active features.
+* ``check_feature_exists``   — duplicate-feature heuristic for the LLM.
+* ``search_bugs``            — bug semantic search (unchanged).
+* ``get_pending_features``   — synthesis queue head (unchanged).
+* ``write_feature_registry`` — accumulate one synthesised feature for
+  the reconciler (unchanged signature plus a required
+  ``cluster_signature`` field).
 
 Feature-content formatting and inline embedding live in
-``app/services/feature_content.py`` so the merge writer service can
-share them without importing from the MCP layer.
+``app/services/feature_content.py`` so non-MCP callers can share them.
 """
 
 from typing import Any
@@ -17,27 +26,30 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.handler_utils import require_non_empty
+from app.mcp.synth_feature_writer import persist_synth_feature
+from app.mcp.synthesis_queue import get_queue_remaining, remove_from_queue
 from app.models.organization import Organization
-from app.repositories.knowledge_item import KnowledgeItemRepository
+from app.repositories.bug import BugRepository
+from app.repositories.feature_reads import FeatureReadRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.embedding_service import embedding_service
 from app.services.feature_content import format_feature_content
 from app.services.feature_content import try_embed as _try_embed
 
 logger = structlog.get_logger(__name__)
 
-# Re-export for legacy callers (handlers_scan imports these names).
+# Re-export for legacy callers (``handlers_scan`` imports these names).
 __all__ = ["format_feature_content", "_try_embed"]
 
 
-async def handle_get_knowledge(
+async def handle_get_features(
     db: AsyncSession,
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Query knowledge base via semantic search (pgvector)."""
+    """Query active features via semantic search (pgvector cosine)."""
     query = params.get("query", "")
     limit = min(params.get("limit", 10), 50)
-    category = params.get("category")
 
     if not query:
         return {"results": [], "error": "query is required"}
@@ -45,22 +57,25 @@ async def handle_get_knowledge(
     try:
         vector = await embedding_service.embed(query)
     except Exception:
-        logger.exception("mcp_get_knowledge_embed_failed", query=query[:100])
+        logger.exception("mcp_get_features_embed_failed", query=query[:100])
         return {"results": [], "error": "Embedding service unavailable"}
 
-    ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-    rows = await ki_repo.semantic_search(vector, category=category, limit=limit)
+    reads = FeatureReadRepository(db, org_id=org.id)
+    rows = await reads.semantic_search(vector, limit=limit, only_active=True)
 
     return {
         "results": [
             {
-                "title": item.title,
-                "content": item.content or "",
-                "category": item.category,
+                "title": feature.feature_title,
+                "description": feature.description,
+                "capabilities": list((feature.capabilities or {}).get("capabilities", [])),
+                "tags": list(feature.tags or []),
                 "score": round(1.0 - distance, 4),
-                "source_ref": item.source_ref,
+                "source": feature.source,
+                "source_ref": feature.source_ref,
+                "feature_status": feature.feature_status or "implemented",
             }
-            for item, distance in rows
+            for feature, distance in rows
         ],
     }
 
@@ -71,8 +86,6 @@ async def handle_search_bugs(
     params: dict[str, Any],
 ) -> dict[str, Any]:
     """Search bugs by description using semantic search."""
-    from app.repositories.bug import BugRepository
-
     query = params.get("query", "")
     bug_status = params.get("status", "open")
     limit = min(params.get("limit", 10), 50)
@@ -97,13 +110,11 @@ async def handle_search_bugs(
 
 
 async def handle_get_pending_features(
-    db: AsyncSession,
+    db: AsyncSession,  # noqa: ARG001 — uses the in-memory queue
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
     """Return the next batch of clusters awaiting feature synthesis."""
-    from app.mcp.synthesis_queue import get_queue_remaining
-
     batch_size = min(params.get("batch_size", 5), 10)
     remaining = get_queue_remaining(str(org.id))
     batch = remaining[:batch_size]
@@ -120,23 +131,25 @@ async def handle_write_feature_registry(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Stage one synthesized feature into ``synthesized_features``.
+    """Accumulate one synthesised feature for end-of-batch reconciliation.
 
-    Per-repo synthesis is staging-only: this handler appends an
-    immutable pre-merge row and dequeues the cluster, but does NOT
-    touch ``knowledge_items`` or ``knowledge_to_repo``. The merge phase
-    (B3) is the sole writer of canonical KIs.
+    Per-LLM-tool-call invocation: the writer appends a ``FeatureWrite``
+    to the per-repo accumulator; the synthesise scan stage drains it
+    at end-of-batch and reconciles against the existing active set
+    (signature → Jaccard → cosine match).
+
+    ``cluster_signature`` is required — it is the reconciler's
+    primary identity key. The synthesise stage looks up each
+    cluster's signature from ``cluster_cache`` before invoking the
+    LLM, so the model does not have to compute it itself.
     """
-    from app.mcp.synth_feature_writer import persist_synth_feature
-    from app.mcp.synthesis_queue import get_queue_remaining, remove_from_queue
-    from app.repositories.tracked_repository import TrackedRepoRepository
-
     error = require_non_empty(
         params,
         "feature_name",
         "description",
         "capabilities",
         "tags",
+        "cluster_signature",
     )
     if error:
         return error
@@ -166,7 +179,7 @@ async def handle_write_feature_registry(
         }
     repo_id = tracked.id
 
-    await persist_synth_feature(
+    queued = await persist_synth_feature(
         db=db,
         org=org,
         repo_id=repo_id,
@@ -174,8 +187,11 @@ async def handle_write_feature_registry(
         description=params["description"],
         capabilities=params["capabilities"],
         cluster_names=source_clusters,
+        cluster_signature=params["cluster_signature"],
         code_locations=params.get("code_locations"),
         tags=list(params.get("tags") or []),
+        head_sha=params.get("head_sha"),
+        source_ref=params.get("source_ref"),
     )
 
     if source_clusters:
@@ -187,9 +203,15 @@ async def handle_write_feature_registry(
         org_id=str(org.id),
         title=title,
         repo=repo_name,
+        queued_in_batch=queued,
         remaining=remaining,
     )
-    return {"success": True, "title": title, "remaining_clusters": remaining}
+    return {
+        "success": True,
+        "title": title,
+        "queued_in_batch": queued,
+        "remaining_clusters": remaining,
+    }
 
 
 async def handle_check_feature_exists(
@@ -197,7 +219,7 @@ async def handle_check_feature_exists(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Check if a feature exists via semantic search over feature_registry items."""
+    """Check if a similar feature already exists via semantic search."""
     query = params["feature_description"]
     threshold = params.get("threshold", 0.6)
 
@@ -207,22 +229,22 @@ async def handle_check_feature_exists(
         logger.exception("check_feature_embed_failed", query=query[:100])
         return {"exists": False, "feature_count": 0, "features": [], "error": "Embedding failed"}
 
-    ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-    rows = await ki_repo.semantic_search(vector, category="feature_registry", limit=5)
+    reads = FeatureReadRepository(db, org_id=org.id)
+    rows = await reads.semantic_search(vector, limit=5, only_active=True)
 
-    features = []
-    for item, distance in rows:
+    features: list[dict[str, Any]] = []
+    for feature, distance in rows:
         score = round(1.0 - distance, 4)
         if score < threshold:
             continue
         features.append(
             {
-                "title": item.title,
-                "content": item.content,
+                "title": feature.feature_title,
+                "description": feature.description,
                 "score": score,
                 "match_strength": "strong" if score >= 0.85 else "partial",
-                "feature_status": item.feature_status or "implemented",
-                "source_ref": item.source_ref,
+                "feature_status": feature.feature_status or "implemented",
+                "source_ref": feature.source_ref,
             }
         )
 

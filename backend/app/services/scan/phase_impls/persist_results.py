@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories.knowledge_item import KnowledgeItemRepository
+from app.repositories.feature import FeatureRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -38,7 +38,7 @@ async def phase_g_persist(
     total_profiles: int,
     all_unmatched: list[str],
     overall_mode: str,
-    ki_repo: KnowledgeItemRepository,
+    feature_repo: FeatureRepository,
 ) -> int:
     """Phase G: Save last commit SHAs + scan results to org config.
 
@@ -51,26 +51,28 @@ async def phase_g_persist(
         total_profiles: Total skill profiles found.
         all_unmatched: List of unmatched author emails.
         overall_mode: Scan mode ('full' or 'incremental').
-        ki_repo: Knowledge item repository instance.
+        feature_repo: Feature repository instance.
 
     Returns:
-        Authoritative feature count from DB.
+        Authoritative active feature count from DB.
     """
     from app.repositories.organization import OrganizationRepository
     from app.repositories.tracked_repository import TrackedRepoRepository
 
     tracked_repo_repo = TrackedRepoRepository(db, org_id=org_id)
 
-    # Update tracked_repositories with new SHAs and counts
+    # Update tracked_repositories with new SHAs and counts. Under the
+    # unified Feature model there's only one count per repo (the
+    # legacy ``knowledge_count`` and ``feature_count`` columns now
+    # carry the same value).
     for rp, sha in new_shas.items():
         tracked = await tracked_repo_repo.get_by_path(rp)
         if tracked:
-            k_count = await ki_repo.count_by_repo_id(tracked.id)
-            f_count = await ki_repo.count_by_repo_id(tracked.id, category="feature_registry")
-            await tracked_repo_repo.update_after_scan(rp, sha, k_count, f_count)
+            count = await feature_repo.count_active_for_repo(tracked.id)
+            await tracked_repo_repo.update_after_scan(rp, sha, count, count)
 
-    # Authoritative feature count from DB
-    actual_features = await ki_repo.count_active(category="feature_registry")
+    # Authoritative org-wide active feature count from DB
+    actual_features = await feature_repo.count_active_for_org()
 
     # Legacy config compat
     config.setdefault("knowledge", {})

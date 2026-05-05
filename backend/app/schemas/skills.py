@@ -162,26 +162,3 @@ class SkillProfileRead(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class KnowledgeItemRead(BaseModel):
-    """Knowledge item for API response."""
-
-    id: uuid.UUID
-    title: str
-    content: str | None
-    category: str
-    tags: list[str] | None = None
-    source: str | None = None
-    source_ref: str | None = Field(None, alias="sourceRef")
-    feature_status: str | None = Field(None, alias="featureStatus")
-    repo_ids: list[uuid.UUID] = Field(default_factory=list, alias="repoIds")
-
-    model_config = {"populate_by_name": True, "from_attributes": True}
-
-
-class KnowledgeItemPage(BaseModel):
-    """Paginated response for the knowledge list endpoint."""
-
-    items: list[KnowledgeItemRead]
-    total: int
-
-    model_config = {"populate_by_name": True}
