@@ -49,9 +49,11 @@ StageFn = Callable[[StageContext, list[Community], dict[str, Any]], Awaitable[St
 def _build_registry() -> dict[str, StageFn]:
     from app.services.scan.stages import (
         audit,
+        backend_link,
+        classify_repo,
         design_system,
         extract,
-        feature_merge,
+        extract_routes,
         filter_infra,
         hierarchical,
         ingest,
@@ -68,6 +70,7 @@ def _build_registry() -> dict[str, StageFn]:
     return {
         "repo_setup": repo_setup.run,
         "ingest": ingest.run,
+        "classify_repo": classify_repo.run,
         "extract": extract.run,
         "merge_labels": merge_labels.run,
         "filter_infra": filter_infra.run,
@@ -75,10 +78,14 @@ def _build_registry() -> dict[str, StageFn]:
         "size_floor": size_floor.run,
         "top_n": top_n.run,
         "synthesize": synthesize.run,
+        "extract_routes": extract_routes.run,
         "skill_extraction": skill_extraction.run,
         "design_system": design_system.run,
         "skill_remap": skill_remap.run,
-        "feature_merge": feature_merge.run,
+        # ``backend_link`` is the GLOBAL stage; it's not in the per-repo
+        # workflow (see ``DEFAULT_PER_REPO_STAGES`` in app/schemas/scan.py)
+        # but is dispatched from ``GLOBAL_PHASE_ORDER``.
+        "backend_link": backend_link.run,
         "persist_results": persist_results.run,
         "audit": audit.run,
     }

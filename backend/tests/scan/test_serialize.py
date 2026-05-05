@@ -85,20 +85,21 @@ def test_compute_progress_partial_under_100() -> None:
 
 
 def test_compute_progress_all_done_caps_at_100() -> None:
-    """All 8 per-repo + 3 global terminals → exactly 100%."""
+    """All 8 per-repo + 4 global terminals → exactly 100%."""
     run = _run(RepoRunStatus.DONE)
     steps_by_run = {
         run.id: [
             _step(ScanPhase.MODE_DETECTION, StepStatus.DONE),
             _step(ScanPhase.REPO_SETUP, StepStatus.DONE),
-            _step(ScanPhase.GITNEXUS_INDEX, StepStatus.DONE),
+            _step(ScanPhase.CODE_INDEX, StepStatus.DONE),
             _step(ScanPhase.STALE_CLEANUP, StepStatus.DONE),
             _step(ScanPhase.SKILL_EXTRACTION, StepStatus.DONE),
             _step(ScanPhase.DESIGN_SYSTEM_EXTRACT, StepStatus.DONE),
             _step(ScanPhase.FEATURE_SYNTHESIS, StepStatus.DONE),
-            _step(ScanPhase.EMBEDDING_BACKFILL, StepStatus.DONE),
+            _step(ScanPhase.EXTRACT_ROUTES, StepStatus.DONE),
             _step(ScanPhase.SKILL_REMAP, StepStatus.DONE),
-            _step(ScanPhase.FEATURE_MERGE, StepStatus.DONE),
+            _step(ScanPhase.BACKEND_LINK, StepStatus.DONE),
+            _step(ScanPhase.EMBEDDING_BACKFILL, StepStatus.DONE),
             _step(ScanPhase.PERSIST_RESULTS, StepStatus.DONE),
         ]
     }
@@ -130,7 +131,7 @@ def test_compute_progress_resume_does_not_double_count_phase() -> None:
 def test_compute_progress_skipped_cache_counts_as_terminal() -> None:
     """SKIPPED_CACHE is a valid terminal — the work was reused, not skipped over."""
     run = _run()
-    steps_by_run = {run.id: [_step(ScanPhase.GITNEXUS_INDEX, StepStatus.SKIPPED_CACHE)]}
+    steps_by_run = {run.id: [_step(ScanPhase.CODE_INDEX, StepStatus.SKIPPED_CACHE)]}
     assert _compute_progress([run], steps_by_run) > 0.0
 
 
@@ -145,14 +146,15 @@ def test_phase_labels_cover_every_pipeline_phase() -> None:
     """
     pipeline_phases = {
         ScanPhase.MODE_DETECTION,
-        ScanPhase.GITNEXUS_INDEX,
+        ScanPhase.CODE_INDEX,
         ScanPhase.REPO_SETUP,
         ScanPhase.STALE_CLEANUP,
         ScanPhase.SKILL_EXTRACTION,
         ScanPhase.DESIGN_SYSTEM_EXTRACT,
         ScanPhase.FEATURE_SYNTHESIS,
+        ScanPhase.EXTRACT_ROUTES,
         ScanPhase.SKILL_REMAP,
-        ScanPhase.FEATURE_MERGE,
+        ScanPhase.BACKEND_LINK,
         ScanPhase.EMBEDDING_BACKFILL,
         ScanPhase.PERSIST_RESULTS,
     }
@@ -183,7 +185,7 @@ def test_collect_warnings_emits_one_per_failed_run() -> None:
     repo_name_by_id = {failed_run.repo_id: "broken-repo", healthy_run.repo_id: "ok-repo"}
     steps_by_run = {
         failed_run.id: [
-            _step(ScanPhase.GITNEXUS_INDEX, StepStatus.DONE),
+            _step(ScanPhase.CODE_INDEX, StepStatus.DONE),
             _step(ScanPhase.SKILL_EXTRACTION, StepStatus.FAILED),
         ],
         healthy_run.id: [_step(ScanPhase.PERSIST_RESULTS, StepStatus.DONE)],
@@ -211,28 +213,28 @@ def test_collect_warnings_falls_back_when_no_failed_step() -> None:
 
 
 def test_render_phase_rows_marks_global_phases() -> None:
-    """SKILL_REMAP / FEATURE_MERGE / PERSIST_RESULTS are global scope."""
+    """SKILL_REMAP / BACKEND_LINK / PERSIST_RESULTS are global scope."""
     run = _run()
     repo_name_by_id = {run.repo_id: "repo-x"}
     steps_by_run = {
         run.id: [
             _step(ScanPhase.REPO_SETUP, StepStatus.DONE),
-            _step(ScanPhase.FEATURE_MERGE, StepStatus.DONE),
+            _step(ScanPhase.BACKEND_LINK, StepStatus.DONE),
         ]
     }
     rows = _render_phase_rows([run], steps_by_run, repo_name_by_id)
     by_phase = {row.phase: row for row in rows}
     assert by_phase[ScanPhase.REPO_SETUP.value].scope == "per_repo"
     assert by_phase[ScanPhase.REPO_SETUP.value].repo_name == "repo-x"
-    assert by_phase[ScanPhase.FEATURE_MERGE.value].scope == "global"
+    assert by_phase[ScanPhase.BACKEND_LINK.value].scope == "global"
     # Global rows don't carry repo_id / repo_name.
-    assert by_phase[ScanPhase.FEATURE_MERGE.value].repo_id is None
+    assert by_phase[ScanPhase.BACKEND_LINK.value].repo_id is None
 
 
 def test_render_phase_rows_uses_humanised_label() -> None:
     """The label visible in the UI banner comes from _PHASE_LABELS."""
     run = _run()
-    steps_by_run = {run.id: [_step(ScanPhase.GITNEXUS_INDEX, StepStatus.RUNNING)]}
+    steps_by_run = {run.id: [_step(ScanPhase.CODE_INDEX, StepStatus.RUNNING)]}
     rows = _render_phase_rows([run], steps_by_run, {run.repo_id: "r"})
     assert rows[0].phase_label == "Indexing code"
 
@@ -240,14 +242,14 @@ def test_render_phase_rows_uses_humanised_label() -> None:
 def test_render_phase_rows_marks_sha_reused_for_skipped_cache() -> None:
     """SKIPPED_CACHE → ``sha_reused=True`` so the chip can render the ``cached`` badge."""
     run = _run()
-    steps_by_run = {run.id: [_step(ScanPhase.GITNEXUS_INDEX, StepStatus.SKIPPED_CACHE)]}
+    steps_by_run = {run.id: [_step(ScanPhase.CODE_INDEX, StepStatus.SKIPPED_CACHE)]}
     rows = _render_phase_rows([run], steps_by_run, {run.repo_id: "r"})
     assert rows[0].sha_reused is True
 
 
 def test_render_phase_rows_no_sha_reused_for_running() -> None:
     run = _run()
-    steps_by_run = {run.id: [_step(ScanPhase.GITNEXUS_INDEX, StepStatus.RUNNING)]}
+    steps_by_run = {run.id: [_step(ScanPhase.CODE_INDEX, StepStatus.RUNNING)]}
     rows = _render_phase_rows([run], steps_by_run, {run.repo_id: "r"})
     assert rows[0].sha_reused is False
 

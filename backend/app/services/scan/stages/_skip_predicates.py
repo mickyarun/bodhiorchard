@@ -40,10 +40,10 @@ from app.models.scan_phase import ScanPhase
 from app.models.scan_run_enums import StepStatus
 from app.repositories.cluster_cache import ClusterCacheRepository
 from app.repositories.design_system import DesignSystemRefRepository
+from app.repositories.feature import FeatureRepository
 from app.repositories.scan_step_status import (
     find_latest_step_status_for_repo_phase,
 )
-from app.repositories.synthesized_feature import SynthesizedFeatureRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.git_analyzer import get_head_sha
 
@@ -233,15 +233,13 @@ async def should_skip_feature_synthesis(
     repo_path: str,
     full_rescan: bool,
 ) -> SkipDecision:
-    """Skip when ≥1 current ``synthesized_features`` row exists for the repo
+    """Skip when ≥1 current ``features`` row exists for the repo
     AND ``tracked.head_sha == HEAD``.
 
-    B2 is the writer of ``synthesized_features`` (staging-only); the merge
-    phase later promotes those rows into ``knowledge_items``. The right
-    cache marker for "B2 already produced output for this SHA" is therefore
-    a current (non-superseded) synth row for the repo, not the post-merge
-    KI count — wiping KIs (e.g. for a merge re-test) must NOT force B2 to
-    re-synthesise unchanged repos.
+    B2 is the writer of ``features`` (staging-only). The right cache
+    marker for "B2 already produced output for this SHA" is a current
+    (non-superseded) feature row whose PRIMARY junction points at this
+    repo — wiping KIs must NOT force B2 to re-synthesise unchanged repos.
     """
     if full_rescan:
         return SkipDecision(skip=False, reason="full_rescan set")
@@ -251,7 +249,7 @@ async def should_skip_feature_synthesis(
         )
         if not match or head is None:
             return SkipDecision(skip=False)
-        synth_repo = SynthesizedFeatureRepository(db, org_id=org_id)
+        synth_repo = FeatureRepository(db, org_id=org_id)
         per_repo_counts = await synth_repo.count_active_per_repo()
         synth_count = per_repo_counts.get(repo_id, 0)
         if synth_count == 0:

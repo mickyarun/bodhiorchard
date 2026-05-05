@@ -176,7 +176,6 @@ async def handle_write_feature_registry(
         cluster_names=source_clusters,
         code_locations=params.get("code_locations"),
         tags=list(params.get("tags") or []),
-        knowledge_item_id=None,
     )
 
     if source_clusters:

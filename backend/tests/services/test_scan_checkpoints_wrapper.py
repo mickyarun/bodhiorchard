@@ -343,18 +343,21 @@ async def test_failure_path_uses_separate_checkpoint_tx_block(
 ) -> None:
     """Regression for the production durability bug.
 
-    Production scenario (scan ``5fc39c5c-…``): ``feature_merge`` body
-    raised ``MergeIncompleteError``; the checkpoint stayed RUNNING
-    because the FAILED ``UPDATE`` was flushed into the same session as
-    the phase body and rolled back together with it.
+    Production scenario (scan ``5fc39c5c-…``): a phase body raised a
+    typed ``ScanPhaseError`` and the checkpoint stayed RUNNING because
+    the FAILED ``UPDATE`` was flushed into the same session as the
+    phase body and rolled back together with it.
 
     The fix is structural: ``run_checkpointed_phase`` enters
     ``_checkpoint_tx`` *separately* for the start, the FAILED finalize,
     and the DONE finalize — every write commits in its own session. The
     test counts how many distinct ``_checkpoint_tx`` contexts the
-    failure path opens. Two means start + finalize, which is what the
-    fix delivers; one would mean the writes share a transaction (the
-    bug) and zero would mean we never reached either branch.
+    failure path opens. Three means skip-lookup + start + FAILED
+    finalize, which is what the fix delivers; fewer would mean writes
+    are sharing a transaction (the bug). ``OrphanFeaturesError`` stands
+    in for the original ``MergeIncompleteError`` since the merge phase
+    has been removed — the structural guarantee is the same regardless
+    of which typed error fires.
     """
     fake = _FakeRepo()
     enter_count = 0
@@ -368,24 +371,22 @@ async def test_failure_path_uses_separate_checkpoint_tx_block(
     monkeypatch.setattr(sc, "_checkpoint_tx", counting_tx)
 
     async def phase_fn() -> dict[str, Any]:
-        raise sc.MergeIncompleteError("9 unvisited features")
+        raise sc.OrphanFeaturesError("3 orphan features")
 
-    with pytest.raises(sc.MergeIncompleteError):
+    with pytest.raises(sc.OrphanFeaturesError):
         await sc.run_checkpointed_phase(
             db=None,  # type: ignore[arg-type]
             scan_id=uuid.uuid4(),
             org_id=uuid.uuid4(),
-            phase=ScanPhase.FEATURE_MERGE,
+            phase=ScanPhase.FEATURE_SYNTHESIS,
             phase_fn=phase_fn,
         )
 
-    # 1. start (RUNNING insert), 2. FAILED finalize. The skip-if-done
-    # lookup short-circuits because no prior row exists for this scan
-    # — confirmed by the row count below.
+    # 1. skip lookup, 2. start (RUNNING insert), 3. FAILED finalize.
     assert enter_count == 3, (
         f"Expected 3 _checkpoint_tx contexts (skip lookup, start, FAILED finalize); "
         f"got {enter_count}. Fewer means writes are sharing a transaction."
     )
     assert len(fake.rows) == 1
     assert fake.rows[0].status is CheckpointStatus.FAILED
-    assert fake.rows[0].error_code == ScanErrorCode.MERGE_INCOMPLETE.value
+    assert fake.rows[0].error_code == ScanErrorCode.ORPHAN_FEATURE.value

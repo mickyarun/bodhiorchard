@@ -48,10 +48,9 @@ async def handle_write_synthesis_feature(
     prompt's JSON payload), ``repo_name``.
 
     Optional: ``dropped_community_ids``, ``capabilities``, ``code_locations``,
-    ``tags``, ``scan_id``, ``repo_id``. ``scan_id`` and ``repo_id`` come
-    from the synthesis prompt's *Scan context* block — when supplied,
-    they bind the persisted feature to that exact scan run instead of
-    relying on a server-side active-scan lookup.
+    ``tags``, ``repo_id``. ``repo_id`` comes from the synthesis prompt's
+    *Scan context* block; when supplied it survives renames mid-scan and
+    saves a name-resolution round-trip.
     """
     error = require_non_empty(params, "name", "description", "source_community_ids", "repo_name")
     if error:
@@ -67,7 +66,6 @@ async def handle_write_synthesis_feature(
     tags: list[str] = list(params.get("tags") or [])
     code_locations = params.get("code_locations")
 
-    explicit_scan_id = _parse_uuid_or_log(params.get("scan_id"), field="scan_id")
     explicit_repo_id = _parse_uuid_or_log(params.get("repo_id"), field="repo_id")
 
     # Prefer the explicit repo_id from the prompt over the name lookup —
@@ -112,26 +110,11 @@ async def handle_write_synthesis_feature(
         cluster_names=source_ids,
         code_locations=code_locations,
         tags=tags,
-        knowledge_item_id=None,
-        scan_id=explicit_scan_id,
     )
 
     # Flush so NOT-NULL / FK violations on the synth row surface before
     # the dispatcher's auto-commit instead of getting swallowed.
     await db.flush()
-
-    if synth_row is None:
-        logger.error(
-            "scan_synth_feature_not_persisted",
-            org_id=str(org.id),
-            repo=repo_name,
-            title=title,
-            hint=(
-                "persist_synth_feature returned None — likely no active Scan "
-                "row for this org. Check the most-recent log line "
-                "'synth_feature_skipped_no_active_scan' for context."
-            ),
-        )
 
     logger.info(
         "scan_write_synthesis_feature",
@@ -140,8 +123,7 @@ async def handle_write_synthesis_feature(
         title=title,
         source_count=len(source_ids),
         dropped_count=len(dropped_ids),
-        synth_row_id=str(synth_row.id) if synth_row else None,
-        synth_persisted=synth_row is not None,
+        synth_row_id=str(synth_row.id),
     )
     return {
         "success": True,

@@ -20,12 +20,12 @@ from app.schemas.scan import Community
 # without helping Claude name features.
 README_CHAR_CAP = 2000
 
-# Files-per-community cap inside the synthesis payload. Smaller than
-# the reduction-stage cap (which fed filter_infra) because Claude
-# triages from labels + symbol_count and only needs a few files to
-# disambiguate. 15 keeps the payload around 9-15 K tokens for a
-# 100-community repo.
-DEFAULT_FILES_PER_COMMUNITY = 15
+# Files-per-community cap inside the synthesis payload. The path-segment
+# vocabulary in these files is what Claude has to lean on when writing
+# descriptions — too few files and 3-5 sentence descriptions become
+# guesswork. 25 keeps the payload around 15-22 K tokens for a 100-
+# community repo, still well inside the prompt-cache budget.
+DEFAULT_FILES_PER_COMMUNITY = 25
 
 
 def build_synthesis_prompt(
@@ -34,7 +34,6 @@ def build_synthesis_prompt(
     readme: str,
     communities: list[Community],
     files_per_community: int = DEFAULT_FILES_PER_COMMUNITY,
-    scan_id: str | None = None,
     repo_id: str | None = None,
 ) -> str:
     """Render the synthesis prompt as a string.
@@ -46,16 +45,16 @@ def build_synthesis_prompt(
       pipeline never gave Claude
     * tells Claude to call ``write_synthesis_feature`` per feature
 
-    When ``scan_id`` and ``repo_id`` are provided, the prompt instructs
-    Claude to pass them back in every ``write_synthesis_feature`` call —
-    that way persistence binds to the exact scan + repo this run owns,
-    instead of inferring it from a global active-scan lookup that can
-    race or evict mid-run. Omitted only for sandbox/dry-run callers.
+    When ``repo_id`` is provided, the prompt instructs Claude to echo it
+    back in every ``write_synthesis_feature`` call — that way the
+    backend handler doesn't have to re-resolve the repo by name and the
+    binding survives renames mid-scan. Omitted only for sandbox/dry-run
+    callers.
     """
     payload = _payload_for_communities(communities, files_per_community)
     payload_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     readme_excerpt = readme[:README_CHAR_CAP] if readme else "(no readme available)"
-    scan_context = _scan_context_block(scan_id=scan_id, repo_id=repo_id)
+    scan_context = _scan_context_block(repo_id=repo_id)
     return _PROMPT_TEMPLATE.format(
         repo_name=repo_name,
         readme=readme_excerpt,
@@ -65,17 +64,16 @@ def build_synthesis_prompt(
     )
 
 
-def _scan_context_block(*, scan_id: str | None, repo_id: str | None) -> str:
-    """Render the scan-context preamble. Empty when ids weren't threaded."""
-    if not scan_id or not repo_id:
+def _scan_context_block(*, repo_id: str | None) -> str:
+    """Render the scan-context preamble. Empty when no ``repo_id`` was threaded."""
+    if not repo_id:
         return ""
     return (
-        "\n## Scan context (pass these back verbatim)\n"
-        f"- ``scan_id``: {scan_id}\n"
+        "\n## Scan context (pass this back verbatim)\n"
         f"- ``repo_id``: {repo_id}\n"
-        "Include both fields in **every** ``write_synthesis_feature`` call so "
-        "the backend persists each feature against this exact scan and repo. "
-        "Do not invent or alter these values.\n"
+        "Include this field in **every** ``write_synthesis_feature`` call so "
+        "the backend binds each feature to this exact repo. Do not invent "
+        "or alter the value.\n"
     )
 
 
@@ -149,7 +147,9 @@ Reduced meta-communities (JSON):
   numbers signal a broad domain that may map to multiple features.
 - ``cohesion`` — symbol-weighted average of the merged fragments' cohesion.
   ``null`` means cohesion data was unavailable.
-- ``files`` — up to 15 representative file paths (sample).
+- ``files`` — up to 25 representative file paths (sample). The recurring
+  path-segments across these files are the strongest signal for the
+  feature's domain noun.
 
 ## Heuristics
 - ``source_count > 5`` AND ``cohesion < 0.3`` → composite cluster. Likely
@@ -195,7 +195,15 @@ labelled ``ais``, with files like ``src/controllers/api/ais/AisSdk.ts``,
    split them where they cover distinct capabilities.
 3. For each feature, call ``write_synthesis_feature`` with:
    - ``name``: human-readable name (see *Naming discipline* above).
-   - ``description``: 1-2 sentence business description
+   - ``description``: 3-5 sentence business description covering: (a) what
+     the feature does in user/business terms; (b) who or what triggers it
+     (user action, scheduled job, inbound webhook, sibling service call);
+     (c) the data it consumes and produces; (d) any sibling layers or
+     services it interacts with. Use the canonical domain noun for the
+     capability — the same noun that appears in UI labels, API route
+     segments, and storage table names — because that shared vocabulary
+     is what lets cross-repository merging recognise the same capability
+     across layers.
    - ``source_community_ids``: array of **``cluster_ids``** values (the
      ``c<N>`` ids from the ``cluster_ids`` field of the metas you used).
      The server expands ``code_locations`` from these — passing them
@@ -209,8 +217,9 @@ labelled ``ais``, with files like ``src/controllers/api/ais/AisSdk.ts``,
      ``source_community_ids`` — you only need to add files the cluster
      samples didn't already show.**
    - ``repo_name``: "{repo_name}"
-   - ``scan_id`` and ``repo_id`` from the *Scan context* block above (when
-     provided). These bind the persisted feature to this exact scan run.
+   - ``repo_id`` from the *Scan context* block above (when provided).
+     This binds the persisted feature to this exact repo and skips a
+     name-resolution round-trip.
 4. Stop when every community is either in ``source_community_ids`` of some
    feature OR in ``dropped_community_ids`` of some feature. Completeness
    matters: do not leave real capabilities unassigned.

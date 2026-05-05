@@ -28,20 +28,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TYPE scan_phase RENAME VALUE 'gitnexus_index' TO 'code_index'"
-    )
-    op.execute(
-        "UPDATE scans SET status = 'setting_up_index' "
-        "WHERE status = 'setting_up_gitnexus'"
-    )
+    op.execute("ALTER TYPE scan_phase RENAME VALUE 'gitnexus_index' TO 'code_index'")
+    op.execute("UPDATE scans SET status = 'setting_up_index' WHERE status = 'setting_up_gitnexus'")
 
 
 def downgrade() -> None:
-    op.execute(
-        "UPDATE scans SET status = 'setting_up_gitnexus' "
-        "WHERE status = 'setting_up_index'"
-    )
-    op.execute(
-        "ALTER TYPE scan_phase RENAME VALUE 'code_index' TO 'gitnexus_index'"
-    )
+    op.execute("UPDATE scans SET status = 'setting_up_gitnexus' WHERE status = 'setting_up_index'")
+    op.execute("ALTER TYPE scan_phase RENAME VALUE 'code_index' TO 'gitnexus_index'")

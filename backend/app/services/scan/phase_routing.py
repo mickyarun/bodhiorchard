@@ -25,6 +25,10 @@ from app.services.scan.phase_accumulator import PhaseAccumulator
 STAGE_TO_PHASE: dict[str, ScanPhase] = {
     "repo_setup": ScanPhase.REPO_SETUP,
     "ingest": ScanPhase.CODE_INDEX,
+    # ``classify_repo`` runs between ingest and extract; rolls up under
+    # CODE_INDEX so the lightweight metadata write doesn't bloat the
+    # phase ribbon with a single-stage chip.
+    "classify_repo": ScanPhase.CODE_INDEX,
     "extract": ScanPhase.CODE_INDEX,
     "merge_labels": ScanPhase.CODE_INDEX,
     "filter_infra": ScanPhase.CODE_INDEX,
@@ -32,10 +36,18 @@ STAGE_TO_PHASE: dict[str, ScanPhase] = {
     "size_floor": ScanPhase.CODE_INDEX,
     "top_n": ScanPhase.CODE_INDEX,
     "synthesize": ScanPhase.FEATURE_SYNTHESIS,
+    # ``extract_routes`` is the per-repo half of the cross-layer linker.
+    # Backend repos extract their HTTP routes into ``backend_route_cache``;
+    # frontend / processor / batch / shared repos no-op. Its own chip so
+    # users can see when route extraction skipped vs ran.
+    "extract_routes": ScanPhase.EXTRACT_ROUTES,
     "skill_extraction": ScanPhase.SKILL_EXTRACTION,
     "design_system": ScanPhase.DESIGN_SYSTEM_EXTRACT,
     "skill_remap": ScanPhase.SKILL_REMAP,
-    "feature_merge": ScanPhase.FEATURE_MERGE,
+    # ``backend_link`` is GLOBAL (runs once per scan in
+    # ``GLOBAL_PHASE_ORDER``), not per-repo — but the workflow consults
+    # this map when emitting step rows for the global dispatch loop.
+    "backend_link": ScanPhase.BACKEND_LINK,
     "persist_results": ScanPhase.PERSIST_RESULTS,
 }
 

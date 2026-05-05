@@ -31,9 +31,16 @@ import ScanChipPopover from './ScanChipPopover.vue'
 import type { RepoRunRow, ScanPhase, StepRow } from '@/stores/reposcanv2Scans'
 
 // When adding a new phase, classify it here and in ScanRowTrack.vue.
+// ``feature_merge`` is retained as an enum value but the Claude-driven
+// merge global phase has been removed from the pipeline; the chip stays
+// in the strip so historical scans render their archived merge step
+// without breaking, but new scans never produce a row for it.
+// ``backend_link`` is the new global phase that materialises the
+// frontend↔backend cross-layer junction after every per-repo workflow.
 const GLOBAL_PHASES: ScanPhase[] = [
-  'feature_merge',
   'skill_remap',
+  'feature_merge',
+  'backend_link',
   'embedding_backfill',
   'persist_results',
 ]

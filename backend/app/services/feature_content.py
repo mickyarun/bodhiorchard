@@ -65,7 +65,7 @@ def format_feature_content(
 async def try_embed(title: str, content: str) -> list[float] | None:
     """Attempt to embed a feature inline. Returns None on failure."""
     try:
-        return await embedding_service.embed(f"{title}\n{content}"[:2000])
+        return await embedding_service.embed(f"{title}\n{content}"[:4000])
     except Exception as exc:
         logger.warning("inline_embed_failed", title=title, error=str(exc))
         return None

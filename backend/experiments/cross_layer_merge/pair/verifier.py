@@ -14,6 +14,8 @@ For each PENDING ``XLMPairPlan`` row:
 6. Mark the pair DONE with ``merged_count``; FAILED on uncaught error.
 """
 
+import asyncio
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -48,21 +50,35 @@ from experiments.cross_layer_merge.schema import (
 
 log = structlog.get_logger(__name__)
 
+# Each source feature within a pair gets one Claude call. Cap parallel calls
+# so we don't hammer the CLI with 60+ concurrent subprocesses.
+_VERIFIER_CONCURRENCY = int(os.environ.get("XLM_VERIFIER_CONCURRENCY", "8"))
+
 
 async def verify_all_pending() -> dict[str, int]:
-    """Run the verifier on every PENDING pair. Returns count summary."""
-    summary = {"pairs_processed": 0, "merges_applied": 0, "errors": 0}
+    """Run the verifier on every PENDING pair concurrently. Returns count summary."""
     pairs = await list_pending_pairs()
-    for pair in pairs:
-        try:
-            merged_count = await _verify_one_pair(pair.id)
-            summary["pairs_processed"] += 1
-            summary["merges_applied"] += merged_count
-        except Exception as exc:
-            log.exception("verifier.pair_failed", pair_id=str(pair.id))
-            await _set_pair_status(pair.id, XLMPairStatus.FAILED, error=str(exc))
-            summary["errors"] += 1
-    return summary
+    sem = asyncio.Semaphore(_VERIFIER_CONCURRENCY)
+
+    async def _run_one(pair_id: uuid.UUID) -> tuple[int, int]:
+        """Returns (merges_applied, error_count)."""
+        async with sem:
+            try:
+                merged = await _verify_one_pair(pair_id)
+                return merged, 0
+            except Exception:
+                log.exception("verifier.pair_failed", pair_id=str(pair_id))
+                await _set_pair_status(pair_id, XLMPairStatus.FAILED)
+                return 0, 1
+
+    results = await asyncio.gather(*(_run_one(p.id) for p in pairs))
+    merges = sum(r[0] for r in results)
+    errors = sum(r[1] for r in results)
+    return {
+        "pairs_processed": len(pairs) - errors,
+        "merges_applied": merges,
+        "errors": errors,
+    }
 
 
 async def _verify_one_pair(pair_id: uuid.UUID) -> int:
@@ -110,21 +126,22 @@ async def _verify_one_pair(pair_id: uuid.UUID) -> int:
         await _set_pair_status(pair_id, XLMPairStatus.DONE, merged_count=0)
         return 0
 
-    merged_count = 0
-    for source in source_features:
+    src_sem = asyncio.Semaphore(_VERIFIER_CONCURRENCY)
+
+    async def _verify_source(source: SourceWithSynth) -> int:
+        """Ask Claude for one source feature. Returns 1 if merged, else 0."""
         candidates = prefilter_candidates(source, candidate_features)
         if not candidates:
-            continue
-
+            return 0
         prompt = build_prompt(
             source_repo=source_repo_view,
             source_feature=source.view,
             target_repo=target_repo_view,
             candidates=[c.view for c in candidates],
         )
-        response_text = await ask_claude(prompt)
+        async with src_sem:
+            response_text = await ask_claude(prompt)
         verdict = parse_verdict(response_text)
-
         await _record_log(
             pair_id=pair_id,
             source=source,
@@ -133,14 +150,22 @@ async def _verify_one_pair(pair_id: uuid.UUID) -> int:
             response=response_text,
             verdict=verdict,
         )
+        if verdict["action"] != "merge":
+            return 0
+        # repo_a is always frontend (enforced by planner). Force the frontend
+        # source as canonical so the frontend KI survives and the backend KI
+        # is deactivated + repointed — never the reverse.
+        verdict_canonical = uuid.UUID(verdict["canonical_synth_id"])
+        verdict_absorbs = {uuid.UUID(s) for s in verdict["absorb_synth_ids"]}
+        absorb_ids = list((verdict_absorbs | {verdict_canonical}) - {source.synth.id})
+        if not absorb_ids:
+            log.warning("verifier.no_absorbs_after_frontend_force", source=str(source.synth.id))
+            return 0
+        await apply_merge(canonical_synth_id=source.synth.id, absorb_synth_ids=absorb_ids)
+        return 1
 
-        if verdict["action"] == "merge":
-            await apply_merge(
-                canonical_synth_id=uuid.UUID(verdict["canonical_synth_id"]),
-                absorb_synth_ids=[uuid.UUID(s) for s in verdict["absorb_synth_ids"]],
-            )
-            merged_count += 1
-
+    results = await asyncio.gather(*(_verify_source(s) for s in source_features))
+    merged_count = sum(results)
     await _set_pair_status(pair_id, XLMPairStatus.DONE, merged_count=merged_count)
     return merged_count
 

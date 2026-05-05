@@ -19,28 +19,68 @@ from typing import Any
 
 DECISION_RULES = """
 DECISION RULES
-1. SAME-CAPABILITY = the two features cover the same end-user goal
-   across layers (e.g. frontend "Magic Link sign-in form" + backend
-   "Magic link token verification" → same goal: sign-in via magic link).
-   These should be MERGED into one canonical feature.
 
-2. RELATED-BUT-DIFFERENT = the features compose into the same flow but
-   are independently useful or could be replaced separately
-   (e.g. "Send magic-link email" vs "Verify magic-link token" — both
-   parts of magic-link auth, but distinct technical capabilities that
-   could be implemented by different services). DO NOT merge.
+The purpose of merging is **impact analysis**: when a developer is
+about to make a change, knowing which repos will be touched. So the
+test is not "are these features the same?" but "would a typical
+change to one require coordinated changes to the other?"
 
-3. DIFFERENT = no shared end-user goal. DO NOT merge.
+1. IMPACT-COUPLED → MERGE. Two features are impact-coupled when a
+   typical change to one would likely require coordinated changes to
+   the other. Strong signals:
+   - One sends a message / payload / event that the other receives or
+     consumes (e.g. backend FCM sender + frontend service worker
+     receiver — changing payload format breaks both).
+   - One exposes an HTTP endpoint that the other calls (UI form +
+     backend handler — changing request schema breaks both).
+   - One writes to a queue/topic that the other reads.
+   - They share a contract: schema, event format, routing key, error
+     code set, retry semantics.
+   - They implement the **same product capability across layers**
+     (e.g. "OTP request UI" + "OTP generation/validation backend" →
+     same product feature: consumer authentication).
 
-When in doubt, prefer NOT to merge — false merges are harder to
-recover from than missed merges.
+2. SHARED INFRASTRUCTURE WITHOUT PRODUCT COUPLING → DO NOT merge.
+   Generic utilities that happen to be referenced by both but where
+   neither implements a specific feature behaviour (logging, error
+   handling, base classes, generic helpers).
 
-Cross-layer signal hierarchy (strongest → weakest):
-- An HTTP route on the frontend hitting an endpoint that the backend
-  candidate handles → very strong evidence of SAME-CAPABILITY.
-- Tags overlap (e.g. both have "auth", "payments") → moderate.
-- Title or description string-overlap → weak (vocabulary differs across
-  layers; do not rely on it alone).
+3. DIFFERENT PRODUCT FEATURES → DO NOT merge. No shared product
+   capability and no payload/contract coupling.
+
+Important reframings:
+
+- "Independently useful" or "could be replaced separately" is NOT a
+  reason to keep features apart. A frontend button and the backend
+  endpoint it POSTs to are also "independently replaceable" with
+  stubs — but they are still impact-coupled. The right test is
+  whether a typical change requires coordinated work, not whether
+  they could in principle be swapped.
+
+- "Send" and "receive" of the same message are NOT separate
+  features. They share a payload contract — changing the payload
+  schema breaks both. That's the textbook impact-coupling case.
+  MERGE them.
+
+- Cross-layer pairs (frontend ↔ backend ↔ processor) implementing
+  the same product feature are the highest-value merge targets. The
+  whole point is to surface "this BUD touches both layers" without
+  the developer guessing.
+
+When in doubt, prefer to MERGE. For impact analysis, a missed merge
+silently hides risk (the developer doesn't know to update the other
+repo). A wrong merge is visible and easy to split later. The cost
+asymmetry favours merging.
+
+Signals (strongest → weakest):
+- Explicit contract overlap (HTTP route hits endpoint, FCM sender ↔
+  receiver of same topic, queue producer ↔ consumer) → STRONGEST.
+- Tags overlap (both "auth", both "payments", both "notifications")
+  → strong.
+- Title overlap with shared product noun ("OTP", "Magic Link",
+  "Push Notifications") → strong, especially across layers.
+- Description string overlap → moderate (vocabulary often differs
+  across layers but real same-capability pairs share noun phrases).
 """
 
 RESPONSE_FORMAT = """
@@ -141,3 +181,60 @@ def build_prompt(
             RESPONSE_FORMAT.strip(),
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# Cluster-merge prompt — used by ``merge.runner`` when a cosine cluster has
+# 2+ members. Claude sees the canonical (first member) plus N candidate
+# siblings drawn from possibly N different repos / layers, plus optionally
+# a small set of pre-existing canonicals to attach to.
+# ---------------------------------------------------------------------------
+
+
+def build_cluster_prompt(
+    *,
+    canonical_repo: RepoView,
+    canonical_feature: FeatureView,
+    candidates: list[tuple[RepoView, FeatureView]],
+    related_existing: list[tuple[str, str]] | None = None,
+) -> str:
+    """Compose the full prompt for a multi-member cluster decision.
+
+    ``candidates`` carries (repo, feature) tuples because cluster members
+    may come from any combination of layers — we surface each member's
+    repo + layer inline so Claude can apply the cross-layer reasoning
+    rules. ``related_existing`` is an optional list of (ki_id, title)
+    pairs to attach to; pass an empty list when the cluster has no
+    pre-existing canonicals.
+    """
+    if not candidates:
+        raise ValueError("build_cluster_prompt requires at least one candidate")
+
+    intro = (
+        "You are deciding which features in a cosine-similar CLUSTER describe "
+        "the SAME end-user capability and should consolidate into one canonical "
+        "feature. The cluster's first member is the proposed CANONICAL; the rest "
+        "are candidate siblings that may or may not belong with it. Cluster "
+        "members may come from different repos and different layers (frontend, "
+        "backend, processor)."
+    )
+
+    canonical_block = _format_feature("CANONICAL", canonical_repo, canonical_feature)
+    candidate_blocks = [
+        _format_feature(f"CANDIDATE {i + 1}", repo, feat)
+        for i, (repo, feat) in enumerate(candidates)
+    ]
+
+    sections = [
+        intro,
+        canonical_block,
+        "CANDIDATES:\n" + "\n".join(candidate_blocks),
+    ]
+    if related_existing:
+        existing_lines = [f"  - id={kid} title={title}" for kid, title in related_existing]
+        sections.append(
+            "RELATED EXISTING CANONICALS (consider folding the cluster into one of these):\n"
+            + "\n".join(existing_lines)
+        )
+    sections.extend([DECISION_RULES.strip(), RESPONSE_FORMAT.strip()])
+    return "\n\n".join(sections)

@@ -8,8 +8,6 @@ failure modes they own:
 
 - ``feature_synthesis`` raises ``OrphanFeaturesError`` when
   ``verify_repo_links`` finds knowledge_items missing a repo link.
-- ``feature_merge`` raises ``MergeIncompleteError`` when synth rows
-  with inactive KIs survived the canonical pass.
 - The per-repo skill-extraction body raises ``UnmatchedAuthorsError``
   when ``auto_create_members=false`` and the git log has authors not
   in the user table.
@@ -42,9 +40,9 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan_phase import ScanPhase
+from app.repositories.feature import FeatureRepository
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.scan_phase_checkpoint import ScanPhaseCheckpointRepository
-from app.repositories.synthesized_feature import SynthesizedFeatureRepository
 from app.scan.context import ScanContext
 from app.scan.session import with_session
 
@@ -143,7 +141,7 @@ async def _find_repos_with_clusters_but_no_synth(
     not "this is wrong".
     """
     # Per-repo synth counts in one query.
-    synth_repo = SynthesizedFeatureRepository(session, org_id=ctx.org_id)
+    synth_repo = FeatureRepository(session, org_id=ctx.org_id)
     synth_by_repo = await synth_repo.count_active_per_repo()
 
     # cluster counts for this scan, joined to the active repo.

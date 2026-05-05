@@ -29,8 +29,10 @@ class ScanPhase(StrEnum):
     SKILL_EXTRACTION = "skill_extraction"  # was E
     DESIGN_SYSTEM_EXTRACT = "design_system_extract"  # was E1b
     FEATURE_SYNTHESIS = "feature_synthesis"  # was B2
+    EXTRACT_ROUTES = "extract_routes"  # backend repo HTTP-route cache writer
     SKILL_REMAP = "skill_remap"  # was E2
-    FEATURE_MERGE = "feature_merge"  # was B3
+    FEATURE_MERGE = "feature_merge"  # was B3 (legacy; phase removed)
+    BACKEND_LINK = "backend_link"  # cross-layer frontend↔backend link writer
     EMBEDDING_BACKFILL = "embedding_backfill"  # was F
     PERSIST_RESULTS = "persist_results"  # was G
 
@@ -52,20 +54,6 @@ class CheckpointStatus(StrEnum):
     SKIPPED = "skipped"
 
 
-class MergeOutcome(StrEnum):
-    """Per-feature outcome of a ``FEATURE_MERGE`` pass.
-
-    Set on ``synthesized_features.merge_outcome`` by the MCP
-    ``apply_feature_merge_plan`` handler and the post-merge audit
-    sweep. The companion ``merged_into_id`` FK (non-NULL only when
-    outcome is ``MERGED_INTO``) points at the surviving canonical row.
-    """
-
-    CANONICAL = "canonical"
-    MERGED_INTO = "merged_into"
-    UNVISITED = "unvisited"
-
-
 class ScanErrorCode(StrEnum):
     """Classified failure reasons set on a failed checkpoint.
 
@@ -79,7 +67,6 @@ class ScanErrorCode(StrEnum):
     MCP_ERROR = "mcp_error"
     TIMEOUT = "timeout"
     ORPHAN_FEATURE = "orphan_feature"
-    MERGE_INCOMPLETE = "merge_incomplete"
     UNMATCHED_AUTHORS = "unmatched_authors"
     EXCEPTION = "exception"
 
@@ -92,8 +79,10 @@ PHASE_SCOPE: dict[ScanPhase, PhaseScope] = {
     ScanPhase.SKILL_EXTRACTION: PhaseScope.PER_REPO,
     ScanPhase.DESIGN_SYSTEM_EXTRACT: PhaseScope.PER_REPO,
     ScanPhase.FEATURE_SYNTHESIS: PhaseScope.PER_REPO,
+    ScanPhase.EXTRACT_ROUTES: PhaseScope.PER_REPO,
     ScanPhase.SKILL_REMAP: PhaseScope.GLOBAL,
     ScanPhase.FEATURE_MERGE: PhaseScope.GLOBAL,
+    ScanPhase.BACKEND_LINK: PhaseScope.GLOBAL,
     ScanPhase.EMBEDDING_BACKFILL: PhaseScope.GLOBAL,
     ScanPhase.PERSIST_RESULTS: PhaseScope.GLOBAL,
 }

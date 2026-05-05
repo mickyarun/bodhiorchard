@@ -83,6 +83,8 @@
         </template>
       </div>
 
+      <RepoClassificationChips :repo="repo" />
+
       <div
         v-if="!run && lastScan"
         class="d-flex align-center ga-2 mt-1 last-scan-summary"
@@ -128,6 +130,7 @@
 import { computed } from 'vue'
 
 import BranchChip from './BranchChip.vue'
+import RepoClassificationChips from './RepoClassificationChips.vue'
 import RepoRowMenu, { type RepoRowMenuId } from './RepoRowMenu.vue'
 import RepoSetupStatusChip from './RepoSetupStatusChip.vue'
 import ScanRowTrack from './ScanRowTrack.vue'

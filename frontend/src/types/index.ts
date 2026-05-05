@@ -455,7 +455,17 @@ export interface RepoInfo {
   lastScanStartedAt?: string | null
   lastScanFeatureCount?: number | null
   lastScanId?: string | null
+  /** Architectural classification produced by the ``classify_repo``
+   *  scan stage. ``null`` until the first scan touches the repo (or
+   *  the user hits the manual classify endpoint). */
+  repoLayer?: RepoLayer | null
+  techStack?: string | null
+  dbFlavor?: string | null
 }
+
+/** Mirrors `app.models.repo_layer.RepoLayer`. */
+export type RepoLayer
+  = | 'frontend' | 'backend' | 'processor' | 'batch' | 'db' | 'shared'
 
 export interface RepoBranchList {
   branches: string[]

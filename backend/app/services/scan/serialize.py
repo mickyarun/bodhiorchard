@@ -14,14 +14,14 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.feature import Feature
 from app.models.scan import Scan, ScanAggregateStatus
 from app.models.scan_phase import ScanPhase
 from app.models.scan_repo_run import ScanRepoRun
 from app.models.scan_repo_step import ScanRepoStep
 from app.models.scan_run_enums import RepoRunStatus, StepStatus
-from app.models.synthesized_feature import SynthesizedFeature
+from app.repositories.feature import FeatureRepository
 from app.repositories.scan_run import ScanRunRepository
-from app.repositories.synthesized_feature import SynthesizedFeatureRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.scan import (
     LegacyScanStatusResponse,
@@ -31,10 +31,10 @@ from app.schemas.scan import (
     StepRow,
 )
 
-# Phases whose review-able artifact is the synthesized-feature list.
-# FEATURE_SYNTHESIS produced the rows; FEATURE_MERGE updated their
-# merge_outcome — both want the same list rendered with merge state.
-_FEATURE_ARTIFACT_PHASES = frozenset({ScanPhase.FEATURE_SYNTHESIS, ScanPhase.FEATURE_MERGE})
+# Phases whose review-able artifact is the feature list. FEATURE_SYNTHESIS
+# is the writer; the legacy FEATURE_MERGE chip is no longer rendered as
+# the merge phase has been removed from the pipeline.
+_FEATURE_ARTIFACT_PHASES = frozenset({ScanPhase.FEATURE_SYNTHESIS})
 
 
 async def build_repo_run_rows(
@@ -58,9 +58,9 @@ async def build_repo_run_rows(
         [r.repo_id for r in runs]
     )
     steps_by_run = await run_repo.find_steps_grouped_by_run(run_ids=[r.id for r in runs])
-    features_by_repo = await SynthesizedFeatureRepository(
-        db, org_id=org_id
-    ).list_active_grouped_by_repo_for_scan(scan_id)
+    features_by_repo = await FeatureRepository(db, org_id=org_id).list_active_grouped_by_repos(
+        [r.repo_id for r in runs]
+    )
 
     return [_render_repo_run(run, repo_name_by_id, steps_by_run, features_by_repo) for run in runs]
 
@@ -69,7 +69,7 @@ def _render_repo_run(
     run: ScanRepoRun,
     repo_name_by_id: dict[uuid.UUID, str],
     steps_by_run: dict[uuid.UUID, list[ScanRepoStep]],
-    features_by_repo: dict[uuid.UUID, list[SynthesizedFeature]],
+    features_by_repo: dict[uuid.UUID, list[Feature]],
 ) -> RepoRunRow:
     """Convert one run + its steps to the API shape."""
     repo_features = features_by_repo.get(run.repo_id, [])
@@ -88,7 +88,7 @@ def _render_repo_run(
 
 def _render_step(
     step: ScanRepoStep,
-    repo_features: list[SynthesizedFeature],
+    repo_features: list[Feature],
 ) -> StepRow:
     """Convert one ScanRepoStep ORM row to its API shape.
 
@@ -102,7 +102,6 @@ def _render_step(
             {
                 "title": f.feature_title,
                 "description": f.description,
-                "merge_outcome": f.merge_outcome.value if f.merge_outcome else None,
             }
             for f in repo_features
         ]
@@ -136,8 +135,9 @@ _PHASE_LABELS: dict[ScanPhase, str] = {
     ScanPhase.SKILL_EXTRACTION: "Analysing skills",
     ScanPhase.DESIGN_SYSTEM_EXTRACT: "Extracting design system",
     ScanPhase.FEATURE_SYNTHESIS: "Synthesising features",
+    ScanPhase.EXTRACT_ROUTES: "Extracting backend routes",
     ScanPhase.SKILL_REMAP: "Remapping skills",
-    ScanPhase.FEATURE_MERGE: "Merging features",
+    ScanPhase.BACKEND_LINK: "Linking backend routes",
     ScanPhase.EMBEDDING_BACKFILL: "Generating embeddings",
     ScanPhase.PERSIST_RESULTS: "Saving results",
 }
@@ -146,7 +146,7 @@ _PHASE_LABELS: dict[ScanPhase, str] = {
 # Phases that run once across the whole scan after every per-repo
 # workflow has finished. Anything else in ``_PHASE_LABELS`` is per-repo.
 _GLOBAL_PHASES = frozenset(
-    {ScanPhase.SKILL_REMAP, ScanPhase.FEATURE_MERGE, ScanPhase.PERSIST_RESULTS}
+    {ScanPhase.SKILL_REMAP, ScanPhase.BACKEND_LINK, ScanPhase.PERSIST_RESULTS}
 )
 
 
