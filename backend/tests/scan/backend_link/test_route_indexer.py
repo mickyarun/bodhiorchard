@@ -98,3 +98,189 @@ def test_unrelated_dotted_filename_not_picked_up(tmp_path: Path) -> None:
     )
     records = list(iter_route_records(tmp_path))
     assert records == [], records
+
+
+def test_spring_controller_with_class_prefix(tmp_path: Path) -> None:
+    """Spring ``@RequestMapping("/users")`` class prefix joins with method routes.
+
+    ``@RequestMapping`` is the dual-purpose annotation: at class level
+    it's a prefix; at method level it could also be a route. We treat
+    the FIRST occurrence in the file as the class prefix (Java
+    convention puts it on the class declaration above any methods)
+    and use only the verb-specific annotations (``@GetMapping``, etc.)
+    as method-level routes. This keeps the class annotation from being
+    double-counted as both prefix and route.
+    """
+    _write(
+        tmp_path / "src" / "main" / "java" / "com" / "x" / "UserController.java",
+        "@RestController\n"
+        '@RequestMapping("/users")\n'
+        "public class UserController {\n"
+        '  @GetMapping("/{id}")\n'
+        "  public User get(@PathVariable Long id) { return null; }\n"
+        "  @PostMapping\n"
+        "  public User create() { return null; }\n"
+        '  @DeleteMapping("/{id}")\n'
+        "  public void delete(@PathVariable Long id) {}\n"
+        "}\n",
+    )
+    records = list(iter_route_records(tmp_path))
+    paths = sorted(r.normalised_path for r in records)
+    # ``@PostMapping`` without a path argument doesn't match — Spring
+    # treats it as the bare class prefix, but our regex requires a
+    # string literal. That's an accepted limitation of the v1 pattern.
+    assert "/users/:param" in paths, f"GetMapping path: {paths}"
+    assert "/users/:param" in paths, f"DeleteMapping path: {paths}"
+    methods = {r.http_method for r in records}
+    assert "get" in methods and "delete" in methods, methods
+
+
+def test_spring_value_named_arg(tmp_path: Path) -> None:
+    """``@GetMapping(value="/foo")`` named-arg form resolves identically."""
+    _write(
+        tmp_path / "src" / "ApiController.java",
+        "public class ApiController {\n"
+        '  @GetMapping(value="/items")\n'
+        "  public List<Item> list() { return null; }\n"
+        "}\n",
+    )
+    records = list(iter_route_records(tmp_path))
+    assert any(r.normalised_path == "/items" for r in records), records
+
+
+def test_flask_route_decorator_in_routes_py(tmp_path: Path) -> None:
+    """Flask ``@app.route("/users")`` in a top-level ``routes.py``.
+
+    The filename match catches the canonical Flask ``routes.py`` /
+    ``router.py`` even when the file isn't under a ``routes/``
+    directory — relevant for flat-layout Flask apps.
+    """
+    _write(
+        tmp_path / "src" / "routes.py",
+        "from flask import Blueprint\n"
+        'bp = Blueprint("api", __name__)\n'
+        "\n"
+        '@bp.route("/users", methods=["GET"])\n'
+        "def list_users(): pass\n"
+        "\n"
+        '@bp.route("/users/<int:id>", methods=["GET"])\n'
+        "def get_user(id): pass\n",
+    )
+    records = list(iter_route_records(tmp_path))
+    paths = sorted(r.normalised_path for r in records)
+    # ``<int:id>`` is the Flask path-converter syntax which the
+    # template-param normaliser collapses to ``:param``.
+    assert paths == ["/users", "/users/:param"], records
+
+
+def test_fastapi_router_prefix_prepended(tmp_path: Path) -> None:
+    """FastAPI ``APIRouter(prefix="/api/v1/users")`` joins with ``@router.get``.
+
+    The prefix detector recognises the construction-time named arg and
+    prepends it to every method-level decorator in the same file.
+    Flat-layout FastAPI apps (single ``routers/users.py``) need this
+    to produce paths that match what the frontend actually calls.
+    """
+    _write(
+        tmp_path / "app" / "routers" / "users.py",
+        "from fastapi import APIRouter\n"
+        'router = APIRouter(prefix="/api/v1/users")\n'
+        "\n"
+        '@router.get("/")\n'
+        "def list(): pass\n"
+        "\n"
+        '@router.post("/")\n'
+        "def create(): pass\n"
+        "\n"
+        '@router.get("/{user_id}")\n'
+        "def get(user_id: int): pass\n",
+    )
+    records = list(iter_route_records(tmp_path))
+    paths = sorted(r.normalised_path for r in records)
+    assert paths == [
+        "/api/v1/users",
+        "/api/v1/users",
+        "/api/v1/users/:param",
+    ], records
+
+
+def test_python_routes_filename_with_underscore_suffix(tmp_path: Path) -> None:
+    """``user_routes.py`` naming convention (split-by-domain) is recognised.
+
+    The filename pattern accepts ``routes.py`` / ``router.py`` plus an
+    optional ``_<suffix>`` for projects that split routes by feature
+    rather than directory.
+    """
+    _write(
+        tmp_path / "user_routes.py",
+        '@app.get("/users")\ndef list(): pass\n',
+    )
+    records = list(iter_route_records(tmp_path))
+    assert any(r.normalised_path == "/users" for r in records), records
+
+
+def test_spring_legacy_request_mapping_method_named_arg(tmp_path: Path) -> None:
+    """``@RequestMapping(value="/foo", method=RequestMethod.POST)`` still resolves.
+
+    Legacy Spring (pre-4.3) and codebases that haven't migrated to the
+    verb-specific annotations use this verbose form. Disambiguated
+    from the class-level prefix by the presence of ``method=``.
+    """
+    _write(
+        tmp_path / "src" / "OrderController.java",
+        "@RestController\n"
+        '@RequestMapping("/orders")\n'
+        "public class OrderController {\n"
+        '  @RequestMapping(value="/", method=RequestMethod.POST)\n'
+        "  public Order create() { return null; }\n"
+        '  @RequestMapping(value="/{id}", method=RequestMethod.PUT)\n'
+        "  public Order update(@PathVariable Long id) { return null; }\n"
+        "}\n",
+    )
+    records = list(iter_route_records(tmp_path))
+    paths = sorted(r.normalised_path for r in records)
+    assert "/orders/:param" in paths, records
+    methods = {r.http_method for r in records}
+    # Method names appear lower-cased; ``RequestMethod.POST`` → ``post``.
+    assert "post" in methods, methods
+    assert "put" in methods, methods
+
+
+def test_fastapi_router_prefix_after_depends_arg(tmp_path: Path) -> None:
+    """``APIRouter(dependencies=[Depends(...)], prefix="/x")`` finds the prefix.
+
+    Real FastAPI apps configure auth / DB dependencies before the
+    prefix kwarg. The prefix detector must not stop at the inner
+    ``)`` of ``Depends(get_db)`` — it has to scan past nested
+    parentheses to land on ``prefix=``.
+    """
+    _write(
+        tmp_path / "app" / "routers" / "users.py",
+        "from fastapi import APIRouter, Depends\n"
+        "from .auth import get_current_user, get_db\n"
+        "router = APIRouter(\n"
+        "    dependencies=[Depends(get_db), Depends(get_current_user)],\n"
+        '    prefix="/api/v1/users",\n'
+        '    tags=["users"],\n'
+        ")\n"
+        "\n"
+        '@router.get("/{id}")\n'
+        "def get(id: int): pass\n",
+    )
+    records = list(iter_route_records(tmp_path))
+    assert any(r.normalised_path == "/api/v1/users/:param" for r in records), records
+
+
+def test_python_router_with_unrelated_prefix_filename_not_walked(tmp_path: Path) -> None:
+    """``routerSnapshot.py`` should NOT be walked.
+
+    The previous broad regex would have matched any file starting with
+    ``router``; the tightened pattern requires the basename to be
+    exactly ``router.py`` or ``router_<suffix>.py``.
+    """
+    _write(
+        tmp_path / "scripts" / "routerSnapshot.py",
+        '@app.get("/should-not-be-picked-up")\ndef _(): pass\n',
+    )
+    records = list(iter_route_records(tmp_path))
+    assert records == [], records
