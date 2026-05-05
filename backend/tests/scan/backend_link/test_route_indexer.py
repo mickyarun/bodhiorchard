@@ -271,6 +271,64 @@ def test_fastapi_router_prefix_after_depends_arg(tmp_path: Path) -> None:
     assert any(r.normalised_path == "/api/v1/users/:param" for r in records), records
 
 
+def test_spring_postmapping_no_path_inherits_class_prefix(tmp_path: Path) -> None:
+    """``@PostMapping`` (no path) on a class with ``@RequestMapping("/x")``.
+
+    Real Spring controllers use the bare verb annotation for "create"
+    methods that map to the class prefix unchanged. Without this
+    pattern the endpoint is silently dropped — the linker would then
+    miss the frontend ``POST /users`` call to that endpoint.
+
+    Three idioms covered:
+      1. Bare annotation (no parens at all).
+      2. Empty parens.
+      3. Parens with non-path metadata only (``produces=...``).
+    """
+    _write(
+        tmp_path / "src" / "UserController.java",
+        '@RequestMapping("/users")\n'
+        "public class UserController {\n"
+        "  @PostMapping\n"
+        "  public User create() { return null; }\n"
+        "  @GetMapping()\n"
+        "  public List<User> list() { return null; }\n"
+        '  @DeleteMapping(produces = "application/json")\n'
+        "  public void deleteAll() {}\n"
+        "}\n",
+    )
+    records = list(iter_route_records(tmp_path))
+    paths = sorted(r.normalised_path for r in records)
+    methods = sorted({r.http_method for r in records})
+    # Three records, all on the bare class-prefix ``/users`` because
+    # the path captures collapse to "" and ``_join_route`` returns the
+    # prefix only.
+    assert paths == ["/users", "/users", "/users"], records
+    assert methods == ["delete", "get", "post"], methods
+
+
+def test_spring_postmapping_with_path_not_double_counted(tmp_path: Path) -> None:
+    """``@PostMapping("/foo")`` must NOT match the no-path pattern too.
+
+    Pattern 5 (no-path) uses a negative lookahead to skip decorators
+    where a path string follows the open paren. This regression test
+    pins that — a single ``@PostMapping("/foo")`` should produce
+    exactly one record, not one with the path and one with the empty
+    string.
+    """
+    _write(
+        tmp_path / "src" / "ItemController.java",
+        '@RequestMapping("/items")\n'
+        "public class ItemController {\n"
+        '  @PostMapping("/bulk")\n'
+        "  public void bulkCreate() {}\n"
+        "}\n",
+    )
+    records = list(iter_route_records(tmp_path))
+    assert len(records) == 1, records
+    assert records[0].normalised_path == "/items/bulk"
+    assert records[0].http_method == "post"
+
+
 def test_python_router_with_unrelated_prefix_filename_not_walked(tmp_path: Path) -> None:
     """``routerSnapshot.py`` should NOT be walked.
 
