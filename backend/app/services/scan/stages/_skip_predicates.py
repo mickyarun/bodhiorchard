@@ -43,6 +43,7 @@ from app.repositories.design_system import DesignSystemRefRepository
 from app.repositories.feature import FeatureRepository
 from app.repositories.scan_step_status import (
     find_latest_step_status_for_repo_phase,
+    has_done_step_for_scan,
 )
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.git_analyzer import get_head_sha
@@ -269,6 +270,57 @@ async def should_skip_feature_synthesis(
         return SkipDecision(skip=False, reason="predicate_error: feature_synthesis")
 
 
+# --- Global-phase predicates ------------------------------------------------
+
+
+async def should_skip_backend_link(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    scan_id: uuid.UUID,
+) -> SkipDecision:
+    """Skip the global ``backend_link`` phase when no input changed this scan.
+
+    The linker reads two inputs:
+
+    * Every backend repo's ``backend_route_cache`` rows (written by
+      ``EXTRACT_ROUTES``).
+    * Every frontend repo's feature set + PRIMARY ``code_locations``
+      (written by ``FEATURE_SYNTHESIS``).
+
+    If neither phase reached ``DONE`` for ANY repo in this scan — i.e.
+    every per-repo step row is ``SKIPPED_CACHE``, ``QUEUED``, or absent —
+    then the linker would re-emit byte-identical output. Skip and return
+    the cached counters via ``stage_output_for_skip``.
+
+    Fail-safe: any DB error returns ``skip=False``. Doing nothing is the
+    correct fall-back because the linker is idempotent — re-running it
+    when nothing changed is wasteful but never incorrect.
+    """
+    try:
+        any_input_changed = await has_done_step_for_scan(
+            db,
+            org_id=org_id,
+            scan_id=scan_id,
+            phases=[ScanPhase.FEATURE_SYNTHESIS, ScanPhase.EXTRACT_ROUTES],
+        )
+        if any_input_changed:
+            return SkipDecision(
+                skip=False,
+                reason="at least one FEATURE_SYNTHESIS or EXTRACT_ROUTES step DONE",
+            )
+        return SkipDecision(
+            skip=True,
+            reason=(
+                "no per-repo FEATURE_SYNTHESIS or EXTRACT_ROUTES step "
+                "reached DONE this scan — linker inputs unchanged"
+            ),
+        )
+    except Exception:
+        logger.exception("scan_skip_predicate_error", stage="backend_link")
+        return SkipDecision(skip=False, reason="predicate_error: backend_link")
+
+
 # --- Shared building blocks ------------------------------------------------
 
 
@@ -298,6 +350,7 @@ async def _head_sha_matches_tracked(
 
 __all__ = [
     "SkipDecision",
+    "should_skip_backend_link",
     "should_skip_design_system",
     "should_skip_feature_synthesis",
     "should_skip_indexing",

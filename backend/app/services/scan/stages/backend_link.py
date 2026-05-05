@@ -19,9 +19,12 @@ from typing import Any
 
 import structlog
 
+from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.phase_impls.backend_link import run_backend_link
 from app.services.scan.stages import StageContext, StageOutput
+from app.services.scan.stages._skip import stage_output_for_skip
+from app.services.scan.stages._skip_predicates import should_skip_backend_link
 from app.services.scan.stages._v2_context import resolve_v2_context, skipped_v2_output
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +39,15 @@ async def run(
     v2 = resolve_v2_context(config)
     if v2 is None:
         return StageOutput(communities=communities, dropped=[], extras=skipped_v2_output())
+
+    # Skip when no per-repo input changed this scan. The linker's output
+    # is a pure function of the route cache + frontend feature sets, so
+    # if nothing wrote to either since the last linker run, re-emitting
+    # the same junction rows is wasted I/O.
+    async with with_session(v2.org_id) as db:
+        decision = await should_skip_backend_link(db, org_id=v2.org_id, scan_id=v2.scan_id)
+    if decision.skip:
+        return stage_output_for_skip(decision, io_label="features → backend-linked")
 
     counters = await run_backend_link(org_id=v2.org_id, scan_id=v2.scan_id)
     extras: dict[str, Any] = {

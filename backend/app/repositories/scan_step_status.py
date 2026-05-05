@@ -155,6 +155,44 @@ async def find_latest_step_status_for_repo_phase(
     return result.scalar_one_or_none()
 
 
+async def has_done_step_for_scan(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    scan_id: uuid.UUID,
+    phases: list[ScanPhase],
+) -> bool:
+    """``True`` iff any per-repo step in ``phases`` reached ``DONE`` this scan.
+
+    Powers ``should_skip_backend_link``: the global linker's inputs (the
+    ``backend_route_cache`` rows + the per-frontend feature sets) only
+    change when at least one repo's ``EXTRACT_ROUTES`` or
+    ``FEATURE_SYNTHESIS`` step actually ran. If every such step in this
+    scan is ``SKIPPED_CACHE`` (or absent), the linker would re-emit
+    byte-identical output and can be skipped.
+
+    Limited to the *terminal-success* state ``DONE``: a ``RUNNING`` row
+    means the gather hasn't completed yet (the linker shouldn't run yet),
+    and ``FAILED`` means the inputs are degraded (re-running the linker
+    can't help). Both should fail the gate, so we only check ``DONE``.
+    """
+    if not phases:
+        return False
+    stmt = (
+        select(ScanRepoStep.id)
+        .join(ScanRepoRun, ScanRepoRun.id == ScanRepoStep.scan_repo_run_id)
+        .where(
+            ScanRepoRun.org_id == org_id,
+            ScanRepoRun.scan_id == scan_id,
+            ScanRepoStep.phase.in_(phases),
+            ScanRepoStep.status == StepStatus.DONE,
+        )
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.first() is not None
+
+
 async def reset_steps_for_runs(
     db: AsyncSession,
     *,
