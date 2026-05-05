@@ -188,7 +188,6 @@ async def outbound_link_counts(
         )
         .where(
             Feature.org_id == org_id,
-            Feature.superseded_at.is_(None),
             primary.c.role == FeatureToRepoRole.PRIMARY,
             backend.c.role == FeatureToRepoRole.BACKEND,
         )
@@ -216,7 +215,6 @@ async def inbound_link_counts(
         .select_from(FeatureToRepo.__table__.join(Feature, Feature.id == FeatureToRepo.feature_id))
         .where(
             Feature.org_id == org_id,
-            Feature.superseded_at.is_(None),
             FeatureToRepo.role == FeatureToRepoRole.BACKEND,
         )
         .group_by(FeatureToRepo.repo_id)

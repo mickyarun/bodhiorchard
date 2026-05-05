@@ -18,8 +18,9 @@ Both rows can co-exist for the same (feature, repo) pair only via the
 a repo that is *both* the synthesis source and the route backend ends up
 with one PRIMARY row whose ``api_paths`` is populated.
 
-Superseded rows are still marked with ``superseded_at`` rather than
-hard-deleted; the historical audit trail is unchanged.
+Re-synthesis wholesale-replaces the repo's feature set: the synthesise
+stage calls ``FeatureRepository.delete_for_primary_repo`` before each
+not-skip pass, so the table never carries historical "superseded" rows.
 """
 
 import uuid
@@ -49,19 +50,12 @@ class Feature(BaseModel):
     Features are repo-scoped, not scan-scoped — the cross-layer scan
     pipeline writes a feature once and re-uses it across re-scans of
     the same source repo via the ``feature_to_repo`` PRIMARY junction.
-    The ``superseded_at`` column captures supersession history when a
-    later synthesis pass replaces the row.
+    Re-synthesis wholesale-replaces the repo's feature set, so a row's
+    presence implies it is current; there is no soft-delete column.
     """
 
     __tablename__ = "features"
-    __table_args__ = (
-        Index("ix_feature_org_title", "org_id", "feature_title"),
-        Index(
-            "ix_feature_latest",
-            "org_id",
-            postgresql_where=text("superseded_at IS NULL"),
-        ),
-    )
+    __table_args__ = (Index("ix_feature_org_title", "org_id", "feature_title"),)
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
@@ -90,7 +84,6 @@ class Feature(BaseModel):
     synthesized_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     repo_links: Mapped[list[FeatureToRepo]] = relationship(
         back_populates="feature",

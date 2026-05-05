@@ -239,7 +239,7 @@ async def should_skip_feature_synthesis(
 
     B2 is the writer of ``features`` (staging-only). The right cache
     marker for "B2 already produced output for this SHA" is a current
-    (non-superseded) feature row whose PRIMARY junction points at this
+    feature row whose PRIMARY junction points at this
     repo — wiping KIs must NOT force B2 to re-synthesise unchanged repos.
     """
     if full_rescan:

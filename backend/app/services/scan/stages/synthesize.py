@@ -94,8 +94,8 @@ async def run(
         # Not-skip path means the repo's SHA changed (or this is a forced
         # rescan / first scan / prior failure). Wipe the existing feature
         # set for this repo before synthesis so each run produces a clean
-        # function of (current SHA, current backend route cache) instead
-        # of layering new rows on top of stale ``superseded_at`` ones.
+        # function of (current SHA, current backend route cache) — no
+        # historical rows survive across re-scans.
         # CASCADE on ``feature_to_repo.feature_id`` removes both PRIMARY
         # and BACKEND junctions in the same statement.
         await _wipe_features_for_repo(org_id=v2.org_id, repo_id=repo_id)
@@ -262,9 +262,9 @@ async def _wipe_features_for_repo(*, org_id: uuid.UUID, repo_id: uuid.UUID) -> N
     """Drop every feature whose PRIMARY junction points at ``repo_id``.
 
     Keeps the synthesise stage idempotent across SHA-changing re-scans:
-    instead of evolving feature rows through ``superseded_at`` markers
-    (the legacy merge-phase mechanism), each run starts from a clean
-    slate. Failure to wipe is logged and re-raised — synthesis depends
+    each run starts from a clean slate rather than layering new rows
+    on top of historical state. Failure to wipe is logged and re-raised
+    — synthesis depends
     on the post-condition ``zero pre-existing rows for this repo``, so
     silently skipping the wipe would let the partial unique index trip
     unpredictably mid-run.
