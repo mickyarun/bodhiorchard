@@ -27,7 +27,7 @@ from app.repositories.agent_activity import AgentActivityLogRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_agent_task import BUDAgentTaskRepository
 from app.repositories.bug import BugRepository
-from app.repositories.knowledge_item import KnowledgeItemRepository
+from app.repositories.feature_reads import FeatureReadRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.skill_profile import SkillProfileRepository
 from app.repositories.user import UserRepository
@@ -105,12 +105,10 @@ async def collect_features(
 ) -> None:
     """Collect features from the feature registry with BUD linkage.
 
-    JOINs knowledge_to_repo -> tracked_repositories to resolve the repo(s)
-    each feature belongs to, then maps repo_path -> first branch for placement.
-
-    A feature linked to multiple repos via knowledge_to_repo is emitted once
-    per linked repo so it appears under each repo in the graph. Features with
-    no repo link are still emitted with repo_name=None.
+    JOINs PRIMARY ``feature_to_repo`` rows -> tracked_repositories to
+    resolve the source repo for each feature, then maps repo_path ->
+    first branch for placement. Features with no PRIMARY junction
+    (BUD-authored) are emitted once with repo_name=None.
 
     Args:
         db: Async database session.
@@ -118,7 +116,7 @@ async def collect_features(
         tree: Mutable tree accumulator (appends to ``tree.features``).
         file_branch_map: File-to-branch mapping from repo_structure.
     """
-    rows = await KnowledgeItemRepository(db, org_id=org_id).list_features_with_repo_paths()
+    rows = await FeatureReadRepository(db, org_id=org_id).list_features_with_repo_paths()
 
     features_by_id: dict[uuid.UUID, _FeatureGroup] = {}
     for ki_id, title, source_ref, feature_status, code_locs, repo_path in rows:

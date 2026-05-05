@@ -36,10 +36,12 @@ from typing import Any
 
 import structlog
 
+from app.mcp.synthesis_accumulator import drain, reset_for_org
 from app.repositories.feature import FeatureRepository
 from app.repositories.organization import OrganizationRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
+from app.services.feature_reconciler import reconcile_features_for_repo
 from app.services.scan.stages import StageContext, StageOutput
 from app.services.scan.stages._skip import stage_output_for_skip
 from app.services.scan.stages._skip_predicates import should_skip_feature_synthesis
@@ -92,13 +94,13 @@ async def run(
         if decision.skip:
             return stage_output_for_skip(decision, io_label="communities → features")
         # Not-skip path means the repo's SHA changed (or this is a forced
-        # rescan / first scan / prior failure). Wipe the existing feature
-        # set for this repo before synthesis so each run produces a clean
-        # function of (current SHA, current backend route cache) — no
-        # historical rows survive across re-scans.
-        # CASCADE on ``feature_to_repo.feature_id`` removes both PRIMARY
-        # and BACKEND junctions in the same statement.
-        await _wipe_features_for_repo(org_id=v2.org_id, repo_id=repo_id)
+        # rescan / first scan / prior failure). Under the incremental-CRUD
+        # model we no longer wipe — the synthesise stage stages new
+        # writes via the accumulator and the reconciler at end-of-batch
+        # decides per-row whether each existing feature is updated,
+        # revived, inactivated, or kept. See
+        # :mod:`app.services.feature_reconciler` for the matching
+        # strategy and the soft-delete invariants it preserves.
     if not communities:
         return StageOutput(
             communities=[],
@@ -158,7 +160,7 @@ async def run(
     # Skip cleanly when MCP credentials weren't threaded by the caller.
     # Raising here would mark the whole repo run FAILED for what is
     # really a "synthesis not yet wired" scenario; the v2 page already
-    # has features from prior scans persisted in knowledge_items.
+    # has features from prior scans in the ``features`` table.
     if not config.get("mcp_backend_url") or not config.get("mcp_token"):
         extras["skipped_cache"] = True
         extras["reason"] = "mcp_credentials_missing"
@@ -196,8 +198,20 @@ async def run(
     if outcome.error:
         extras["error"] = outcome.error[:1000]
 
-    # Replace the placeholder kept_count with the live row count Claude
-    # actually persisted via the MCP write handler. Logged for ops too.
+    # Drain the per-repo accumulator the LLM filled via
+    # ``write_synthesis_feature`` and reconcile against the existing
+    # active set. The reconciler is the SOLE writer under
+    # incremental-CRUD: it INSERTs new rows, UPDATEs matched-by-signature
+    # rows in place, REVIVEs rows whose cluster came back, and marks
+    # any active rows that nothing matched as inactive. Only runs on
+    # success — a failed LLM run leaves the accumulator stale and
+    # we'll retry from scratch on next scan.
+    if outcome.success:
+        reconcile_summary = await _reconcile_synthesised_batch(config, repo_id=repo_id)
+        extras.update(reconcile_summary)
+
+    # Replace the placeholder kept_count with the live row count
+    # actually persisted via the reconciler. Logged for ops too.
     feature_count = await _count_synthesized_features(config)
     extras["kept_count"] = feature_count
     extras["features_synthesized"] = feature_count
@@ -221,6 +235,13 @@ async def run(
         coverage_audit_features=audit_count,
     )
     if not outcome.success:
+        # Drop any half-staged FeatureWrite entries the LLM produced
+        # before crashing — leaving them in the in-memory accumulator
+        # would let the NEXT scan reconcile a mix of stale + fresh
+        # writes against current DB state, potentially reviving
+        # features the user explicitly removed in the interim.
+        if v2 is not None:
+            reset_for_org(str(v2.org_id))
         raise RuntimeError(f"synthesis failed: {outcome.error}")
     return StageOutput(communities=communities, dropped=[], extras=extras)
 
@@ -258,31 +279,44 @@ async def _run_coverage_audit(config: dict[str, Any]) -> int:
         return 0
 
 
-async def _wipe_features_for_repo(*, org_id: uuid.UUID, repo_id: uuid.UUID) -> None:
-    """Drop every feature whose PRIMARY junction points at ``repo_id``.
+async def _reconcile_synthesised_batch(
+    config: dict[str, Any], *, repo_id: uuid.UUID
+) -> dict[str, Any]:
+    """Drain the synthesis accumulator + reconcile against existing rows.
 
-    Keeps the synthesise stage idempotent across SHA-changing re-scans:
-    each run starts from a clean slate rather than layering new rows
-    on top of historical state. Failure to wipe is logged and re-raised
-    — synthesis depends
-    on the post-condition ``zero pre-existing rows for this repo``, so
-    silently skipping the wipe would let the partial unique index trip
-    unpredictably mid-run.
+    Returns ``extras`` keys carrying the reconcile summary so the
+    chip popover can show "+N added · M revived · K removed" without a
+    second DB read.
     """
+    v2 = resolve_v2_context(config)
+    if v2 is None:
+        return {}
+    head_sha = str(config.get("ingest_head_sha") or "").strip()
+    synthesised = drain(str(v2.org_id), str(repo_id))
+    if not synthesised and not head_sha:
+        return {"reconcile_skipped": "no_head_sha_or_writes"}
     try:
-        async with with_session(org_id) as db:
-            repo = FeatureRepository(db, org_id=org_id)
-            deleted = await repo.delete_for_primary_repo(repo_id)
+        async with with_session(v2.org_id) as db:
+            summary = await reconcile_features_for_repo(
+                db=db,
+                org_id=v2.org_id,
+                repo_id=repo_id,
+                head_sha=head_sha,
+                synthesised=synthesised,
+            )
             await db.commit()
-        logger.info(
-            "scan_synthesize_wipe",
-            repo_id=str(repo_id),
-            deleted_count=deleted,
-        )
+        return {
+            "reconcile_inserted": summary.inserted,
+            "reconcile_updated": summary.updated,
+            "reconcile_revived": summary.revived,
+            "reconcile_inactivated": summary.inactivated,
+            "reconcile_match_strategies": dict(summary.matches_by_strategy),
+        }
     except Exception:
         logger.exception(
-            "scan_synthesize_wipe_failed",
+            "scan_synthesize_reconcile_failed",
             repo_id=str(repo_id),
+            queued=len(synthesised),
         )
         raise
 

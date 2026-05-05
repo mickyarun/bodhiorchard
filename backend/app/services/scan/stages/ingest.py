@@ -241,6 +241,7 @@ async def _persist_index_result(
                     "cohesion": entry.cohesion,
                     "files": entry.files,
                     "symbols": entry.symbols,
+                    "signature": entry.signature,
                 }
                 for entry in result.clusters
             ]

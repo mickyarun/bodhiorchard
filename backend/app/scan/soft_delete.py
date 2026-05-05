@@ -3,30 +3,26 @@
 
 """Soft-delete + rollback helpers for the scan pipeline's destructive prelude.
 
-A full-rescan flips every active scan-sourced feature to ``is_active=False``
-so synthesis can rewrite a clean set. The IDs are stashed so that, if any
-phase crashes before the rewrite finishes, ``rollback_soft_deleted_features``
-can restore the original feature set rather than leaving the org with an
-empty knowledge base.
+Two complementary paths under the incremental-CRUD model:
 
-Two functions:
+1. ``soft_delete_for_changed_repos`` — at scan start, pick the repos
+   whose HEAD SHA actually moved (or every repo on a forced full rescan)
+   and flip their scan-sourced features to ``is_active=False``. Stashed
+   IDs feed the failure-rollback. The reconciler at end-of-synthesis
+   revives any soft-deleted row whose cluster reappears (signature →
+   Jaccard → cosine match), so legitimate continuity is preserved
+   automatically; rows that nothing matched simply stay inactive.
 
-- ``soft_delete_for_changed_repos`` — at scan start, pick the repos whose
-  HEAD SHA actually moved (or every repo on a forced full rescan) and
-  flip their feature_registry rows to ``is_active=False``. Returns the
-  list of IDs the rollback needs.
+2. ``rollback_soft_deleted_features`` — on pipeline failure before the
+   reconciler can finish, reactivate the stashed IDs in a fresh
+   session so the org doesn't lose features to a crashed scan. No
+   collision guard is needed (unlike the legacy KI version): the new
+   schema has no partial-unique-index on title, so a re-activate is
+   always safe.
 
-- ``rollback_soft_deleted_features`` — on pipeline failure, reactivate
-  those IDs in a **fresh session** (the pipeline's session may be
-  poisoned). Includes a collision guard for the case where synthesis
-  already re-created a feature with the same title as a soft-deleted
-  row — those soft-deleted rows are superseded by the new ones, so
-  hard-delete them instead of reactivating (and tripping the partial
-  unique index ``uq_ki_org_title_feature_active``).
-
-Lives in ``app.scan`` rather than ``app.services`` because both pieces
-are called only from the orchestrator and exist purely to serve the
-scan pipeline's transactional contract.
+Lives in ``app.scan`` rather than ``app.services`` because both
+pieces are called only from the orchestrator and exist purely to
+serve the scan pipeline's transactional contract.
 """
 
 from __future__ import annotations
@@ -37,8 +33,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from app.database import AsyncSessionLocal
-from app.repositories.knowledge_item import KnowledgeItemRepository
-from app.repositories.knowledge_item_scan import KnowledgeItemScanRepository
+from app.repositories.feature_scan import FeatureScanRepository
 from app.services.git_analyzer import get_head_sha
 
 if TYPE_CHECKING:
@@ -61,8 +56,8 @@ async def soft_delete_for_changed_repos(
 
     Compares each active repo's current HEAD SHA against the SHA we
     stored on ``tracked_repositories.head_sha`` the last time a scan
-    succeeded. Repos where the SHA matches skip deactivation entirely —
-    their feature set is already consistent with the code state.
+    succeeded. Repos where the SHA matches skip deactivation entirely
+    — their feature set is already consistent with the code state.
 
     When ``full_rescan`` is True, every active repo counts as changed
     regardless of SHA: the user explicitly asked for a full rebuild.
@@ -88,8 +83,8 @@ async def soft_delete_for_changed_repos(
     if not changed_repo_ids:
         return []
 
-    ki_scan = KnowledgeItemScanRepository(db, org_id=org_id)
-    return await ki_scan.soft_delete_by_repo_ids(changed_repo_ids)
+    feat_scan = FeatureScanRepository(db, org_id=org_id)
+    return await feat_scan.soft_delete_by_repo_ids(changed_repo_ids)
 
 
 async def rollback_soft_deleted_features(
@@ -97,63 +92,33 @@ async def rollback_soft_deleted_features(
     scan_id: str,
     deactivated_ids: list[uuid.UUID],
 ) -> None:
-    """Reactivate the features soft-deleted by this scan run — with collision guard.
+    """Reactivate the features soft-deleted by this scan run.
 
-    Uses a fresh DB session since the original session may be in a bad state.
-
-    **Why the collision guard matters.** If synthesis ran before the
-    failure, it may have re-created a feature with the same title as one
-    we soft-deleted at scan start. The partial unique index
-    ``uq_ki_org_title_feature_active`` (``category='feature_registry'
-    AND is_active=true``) treats both rows as duplicates on
-    reactivation, raising ``UniqueViolationError``. We therefore:
-
-    1. Look up which soft-deleted rows have a title already taken by an
-       active row — those are **superseded**; we hard-delete them
-       instead of reactivating (the new row is the correct data).
-    2. Reactivate only the remaining set — rows whose title no longer
-       has any active sibling.
+    Uses a fresh DB session since the original session may be in a
+    bad state. No collision guard needed under the new schema — the
+    partial unique index that tripped on KI revival doesn't exist on
+    ``features`` (identity now lives on ``cluster_signature``, not
+    title), so a re-activate is always safe even if synthesis already
+    revived some of the same rows mid-flight.
 
     Args:
         org_id: Organization UUID.
         scan_id: Scan identifier for logging.
-        deactivated_ids: IDs of items soft-deleted at scan start.
+        deactivated_ids: IDs of features soft-deleted at scan start.
     """
     if not deactivated_ids:
         return
 
     try:
         async with AsyncSessionLocal() as recovery_db:
-            ki_recovery = KnowledgeItemRepository(recovery_db, org_id=org_id)
-
-            # Pull the (id, title) pairs for the soft-deleted candidates.
-            candidates = await ki_recovery.get_id_title_pairs_by_ids(deactivated_ids)
-            if not candidates:
-                return
-
-            # Find titles that are currently held by an ACTIVE
-            # feature_registry row — these slots are taken.
-            taken_titles = await ki_recovery.get_active_feature_titles_in(
-                {title for _, title in candidates}
-            )
-
-            superseded_ids = [cid for cid, title in candidates if title in taken_titles]
-            restorable_ids = [cid for cid, title in candidates if title not in taken_titles]
-
-            purged = 0
-            restored = 0
-            if superseded_ids:
-                # Their title now belongs to a newer active row — drop them.
-                purged = await ki_recovery.delete_inactive_by_ids(superseded_ids)
-            if restorable_ids:
-                restored = await ki_recovery.reactivate_by_ids(restorable_ids)
+            feat_scan = FeatureScanRepository(recovery_db, org_id=org_id)
+            restored = await feat_scan.reactivate_by_ids(deactivated_ids)
             await recovery_db.commit()
-            if restored or purged:
+            if restored:
                 logger.info(
                     "scan_rollback_restored_features",
                     scan_id=scan_id,
                     restored=restored,
-                    purged_superseded=purged,
                 )
     except Exception:
         logger.exception("scan_rollback_failed", scan_id=scan_id)

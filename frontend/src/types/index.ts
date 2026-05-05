@@ -380,22 +380,52 @@ export const BUD_STATUS_LABELS: Record<BUDStatus, string> = {
   'discarded': 'Discarded',
 }
 
-// Knowledge / Features types
-export interface KnowledgeItem {
-  id: string
-  title: string
-  content: string | null
-  category: string
-  tags: string[] | null
-  source: string | null
-  sourceRef: string | null
-  featureStatus: string | null
-  repoIds: string[]
+// Feature types — match backend app/schemas/feature.py response shape.
+export interface PrimaryLink {
+  repoId: string
+  repoName: string
+  codeLocations: Record<string, string[]> | null
 }
 
-export interface KnowledgeItemPage {
-  items: KnowledgeItem[]
+export interface BackendLink {
+  repoId: string
+  repoName: string
+  apiPaths: string[]
+  codeLocations: Record<string, string[]> | null
+}
+
+export interface Feature {
+  id: string
+  featureTitle: string
+  description: string
+  capabilities: Record<string, unknown>
+  clusterNames: string[]
+  tags: string[]
+  featureStatus: string | null
+  source: string | null
+  sourceRef: string | null
+  synthesizedAt: string
+  primary: PrimaryLink
+  backendLinks: BackendLink[]
+}
+
+export interface FeaturePage {
+  items: Feature[]
   total: number
+}
+
+export interface FeaturesByRepo {
+  repoId: string
+  repoName: string
+  featureCount: number
+  features: Feature[]
+}
+
+export interface RepoContributor {
+  userId: string | null
+  actorName: string
+  commitCount: number
+  filesChanged: number
 }
 
 export const FEATURE_STATUS_COLORS: Record<string, string> = {

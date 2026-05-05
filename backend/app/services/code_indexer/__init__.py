@@ -44,7 +44,7 @@ from graphify.extract import extract as gx_extract
 
 from app.services.code_indexer.labeling import build_corpus_tokens, label_cluster
 from app.services.code_indexer.merge_by_dir import merge_clusters_by_directory
-from app.services.code_indexer.seed import order_partition
+from app.services.code_indexer.seed import cluster_signature, order_partition
 from app.services.code_indexer.skip_lists import filter_paths
 
 logger = structlog.get_logger(__name__)
@@ -99,13 +99,19 @@ def _collect_repo_files(repo: Path) -> list[Path]:
 
 @dataclass(frozen=True, slots=True)
 class ClusterEntry:
-    """One community produced by the indexer."""
+    """One community produced by the indexer.
+
+    ``signature`` is the SHA-256 of the canonical (sorted) member node
+    ID list — stable across SHAs when the cluster's contents are
+    unchanged. Used downstream as the reconciler's primary identity key.
+    """
 
     cluster_id: str
     label: str
     files: list[str]
     symbols: list[str]
     symbol_count: int
+    signature: str
     cohesion: float | None = None
 
 
@@ -257,13 +263,16 @@ async def index_repo(
             cohesion = cohesion_score(graph, member_node_ids)
         except Exception:  # noqa: BLE001 — graphify cohesion is best-effort
             cohesion = None
+        files_sorted = sorted(set(files_in_cluster))
+        symbols_sorted = sorted(set(symbols_in_cluster))
         entries.append(
             ClusterEntry(
                 cluster_id=cluster_id,
                 label=label,
-                files=sorted(set(files_in_cluster)),
-                symbols=sorted(set(symbols_in_cluster)),
+                files=files_sorted,
+                symbols=symbols_sorted,
                 symbol_count=len(member_node_ids),
+                signature=cluster_signature(files_sorted, symbols_sorted),
                 cohesion=cohesion,
             )
         )

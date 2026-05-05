@@ -3,10 +3,9 @@
 
 """Shared helpers for formatting feature content + inline embedding.
 
-Used by both the synthesis MCP handler (legacy) and the merge writer
-that promotes synth rows to ``knowledge_items``. Lifted out of
-``app/mcp/handlers_knowledge.py`` so the merge writer (a service) does
-not import from the MCP layer.
+Used by both the synthesis MCP handler and the BUD-authored
+``feature_lifecycle`` writer. Lifted out of the MCP module so
+non-MCP callers don't have to import handler code.
 """
 
 from __future__ import annotations

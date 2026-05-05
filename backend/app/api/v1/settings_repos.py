@@ -25,7 +25,7 @@ from app.models.tracked_repository import RepoStatus
 from app.models.user import User
 from app.repositories.backend_route_cache import BackendRouteCacheRepository
 from app.repositories.design_system import DesignSystemRefRepository
-from app.repositories.knowledge_item import KnowledgeItemRepository
+from app.repositories.feature_scan import FeatureScanRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.scan_run import ScanRunRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
@@ -225,14 +225,15 @@ async def remove_repo(
 
     await repo_repo.set_status(repo.id, RepoStatus.REMOVED)
 
-    ki_repo = KnowledgeItemRepository(db, org_id=org.id)
-    prefix = f"[{repo.name}]"
-    deactivated = await ki_repo.bulk_deactivate_by_titles(
-        await ki_repo.list_titles_with_prefix(f"{prefix}%"),
-        category="feature_registry",
-    )
+    # Soft-delete every feature whose PRIMARY junction points at this
+    # repo. The junction rows themselves stay (they cascade out only
+    # if the tracked_repository row is hard-deleted), so a future
+    # un-remove + re-scan will revive matching features via the
+    # reconciler.
+    feat_scan = FeatureScanRepository(db, org_id=org.id)
+    deactivated_ids = await feat_scan.soft_delete_by_repo_ids([repo.id])
 
-    return {"removed": body.path, "deactivated": deactivated}
+    return {"removed": body.path, "deactivated": len(deactivated_ids)}
 
 
 @router.patch("/repos/{repo_id}/status", response_model=RepoInfo)

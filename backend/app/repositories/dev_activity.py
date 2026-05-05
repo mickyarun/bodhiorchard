@@ -42,6 +42,23 @@ class UntrackedRepoSummary:
     commit_count: int
 
 
+@dataclass
+class RepoContributor:
+    """One row of a repo's all-time top-contributors panel.
+
+    ``user_id`` is NULL when the activity rows are anonymous (webhook
+    events that pre-date user attribution). ``actor_name`` is the
+    git committer name written by the hook; we group by it as a
+    fallback identity when ``user_id`` is NULL so anonymous commits
+    still aggregate per-author instead of collapsing to one bucket.
+    """
+
+    user_id: uuid.UUID | None
+    actor_name: str
+    commit_count: int
+    files_changed: int
+
+
 def _apply_role_filter(
     stmt: Any,
     role: str | None,
@@ -157,6 +174,62 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
         )
         result = await self._db.execute(stmt)
         return {(row.user_id, row.event_type): row.cnt for row in result.all()}
+
+    async def top_contributors_for_repo(
+        self,
+        repo_id: uuid.UUID,
+        *,
+        limit: int = 5,
+    ) -> list[RepoContributor]:
+        """All-time top contributors for one tracked repo.
+
+        Aggregates commit events scoped by ``repo_id``: counts distinct
+        commit SHAs per ``(user_id, actor_name)`` pair and sums the
+        per-row file-change counts (``files_changed`` is a
+        comma-separated path list — we count via Postgres
+        ``array_length(string_to_array(…))``).
+
+        Grouped by both ``user_id`` and ``actor_name`` so anonymous
+        rows (NULL user_id, before user attribution rolled out) bucket
+        per author instead of collapsing into a single anonymous row.
+        Returns the top ``limit`` rows ordered by commit count
+        descending.
+        """
+        DAL = DevActivityLog  # noqa: N806
+        files_count = func.coalesce(
+            func.array_length(
+                func.string_to_array(func.coalesce(DAL.files_changed, ""), ","),
+                1,
+            ),
+            0,
+        )
+        stmt = self._scoped(
+            select(
+                DAL.user_id,
+                DAL.actor_name,
+                func.count(func.distinct(DAL.commit_sha)).label("commit_count"),
+                func.coalesce(func.sum(files_count), 0).label("files_changed"),
+            )
+            .where(
+                DAL.repo_id == repo_id,
+                DAL.event_type == "commit",
+                DAL.commit_sha.is_not(None),
+                DAL.actor_name.is_not(None),
+            )
+            .group_by(DAL.user_id, DAL.actor_name)
+            .order_by(func.count(func.distinct(DAL.commit_sha)).desc())
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return [
+            RepoContributor(
+                user_id=row.user_id,
+                actor_name=row.actor_name or "Unknown",
+                commit_count=int(row.commit_count or 0),
+                files_changed=int(row.files_changed or 0),
+            )
+            for row in result.all()
+        ]
 
     async def commit_sha_exists(self, commit_sha: str) -> bool:
         """Return True if a commit event with this SHA is already recorded."""

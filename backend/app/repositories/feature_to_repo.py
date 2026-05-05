@@ -197,6 +197,37 @@ async def outbound_link_counts(
     return {row.repo_id: int(row.linked) for row in result.all()}
 
 
+async def list_backend_links_grouped(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    feature_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, list[FeatureToRepo]]:
+    """``{feature_id: [backend_link, …]}`` for a batch of features.
+
+    The Features-tab API loads features in pages, then needs every
+    BACKEND junction row for each so the inline expand panel can
+    render "depends on backend". Doing one IN-list query per page
+    avoids the N+1 selectin pattern.
+    """
+    if not feature_ids:
+        return {}
+    result = await db.execute(
+        select(FeatureToRepo)
+        .join(Feature, Feature.id == FeatureToRepo.feature_id)
+        .where(
+            Feature.org_id == org_id,
+            FeatureToRepo.feature_id.in_(feature_ids),
+            FeatureToRepo.role == FeatureToRepoRole.BACKEND,
+        )
+        .order_by(FeatureToRepo.feature_id, FeatureToRepo.created_at)
+    )
+    grouped: dict[uuid.UUID, list[FeatureToRepo]] = {}
+    for row in result.scalars().all():
+        grouped.setdefault(row.feature_id, []).append(row)
+    return grouped
+
+
 async def inbound_link_counts(
     db: AsyncSession,
     *,

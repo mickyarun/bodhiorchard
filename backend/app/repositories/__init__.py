@@ -11,7 +11,8 @@ from app.repositories.bud_agent_task import BUDAgentTaskRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.bug import BugRepository
 from app.repositories.design_system import DesignSystemRefRepository
-from app.repositories.knowledge_item import KnowledgeItemRepository
+from app.repositories.feature import FeatureRepository
+from app.repositories.feature_reads import FeatureReadRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.permission import PermissionRepository
 from app.repositories.role import RoleRepository
@@ -31,7 +32,8 @@ __all__ = [
     "BUDTimelineRepository",
     "DesignSystemRefRepository",
     "BugRepository",
-    "KnowledgeItemRepository",
+    "FeatureReadRepository",
+    "FeatureRepository",
     "OrganizationRepository",
     "PermissionRepository",
     "RoleRepository",

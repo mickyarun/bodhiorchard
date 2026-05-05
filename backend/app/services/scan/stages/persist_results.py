@@ -47,13 +47,13 @@ async def run(
 
     new_shas = await collect_head_shas(repo_paths)
 
-    from app.repositories.knowledge_item import KnowledgeItemRepository
+    from app.repositories.feature import FeatureRepository
     from app.services.scan.phase_impls.persist_results import phase_g_persist
 
     try:
         async with with_session(v2.org_id) as db:
             org_config = await load_org_config(db, org_id=v2.org_id)
-            ki_repo = KnowledgeItemRepository(db, org_id=v2.org_id)
+            feature_repo = FeatureRepository(db, org_id=v2.org_id)
             feature_count = await phase_g_persist(
                 db=db,
                 org_id=v2.org_id,
@@ -63,7 +63,7 @@ async def run(
                 total_profiles=total_profiles,
                 all_unmatched=all_unmatched,
                 overall_mode=overall_mode,
-                ki_repo=ki_repo,
+                feature_repo=feature_repo,
             )
             # phase_g_persist commits internally; no second commit here.
     except Exception as exc:

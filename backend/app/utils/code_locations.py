@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Pure helpers for ``code_locations`` dicts on KnowledgeItem features.
+"""Pure helpers for the ``code_locations`` JSON shape used on
+``feature_to_repo`` PRIMARY junction rows.
 
-Lives in ``app.utils`` to avoid an import cycle between
-``app.repositories.knowledge_item`` and ``app.services.scan_helpers``.
+Lives in ``app.utils`` so any layer (repositories, services, MCP)
+can use the shape without circular imports.
 """
 
 
