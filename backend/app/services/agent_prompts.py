@@ -473,9 +473,9 @@ def _build_repo_context(repo_pairs: list[tuple[str, str]]) -> str:
         '- `code_query({query: "concept", repo_id})` — find code by concept\n'
         '- `code_context({symbol: "name", repo_id})` — 360° view of a symbol\n'
         '- `code_impact({target: "symbol", direction: "upstream", repo_id})` — blast radius\n'
-        '- `code_community({cluster_id, repo_id})` — list files/symbols in a domain cluster\n'
-        '- `code_god_nodes({repo_id})` — high-degree hubs / refactoring candidates\n'
-        '- `code_stats({repo_id})` — overall graph stats\n\n'
+        "- `code_community({cluster_id, repo_id})` — list files/symbols in a domain cluster\n"
+        "- `code_god_nodes({repo_id})` — high-degree hubs / refactoring candidates\n"
+        "- `code_stats({repo_id})` — overall graph stats\n\n"
         "Start with `code_stats` for an overview, then `code_query` for the area "
         "you care about, then drill down with `code_context` and `code_impact`.\n"
     )

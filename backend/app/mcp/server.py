@@ -31,7 +31,6 @@ from app.mcp.handlers_code_graph import (
     handle_code_query,
     handle_code_stats,
 )
-from app.mcp.handlers_feature_merge import handle_apply_feature_merge_plan
 from app.mcp.handlers_hooks import handle_dev_activity
 from app.mcp.handlers_knowledge import (
     handle_check_feature_exists,
@@ -319,94 +318,6 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 },
             },
             "required": ["feature_description"],
-        },
-    ),
-    MCPToolDefinition(
-        name="apply_feature_merge_plan",
-        description=(
-            "Apply a structured batch of merge ops. Each op picks a "
-            "canonical feature and optionally absorbs others into it. "
-            "Canonical id types are XOR — set EXACTLY ONE of "
-            "`canonical_synth_id` (a NEW synthesized_features row from "
-            "this scan, prefix `synth:` in the prompt) OR "
-            "`canonical_knowledge_id` (an EXISTING knowledge_items row "
-            "from a prior scan, prefix `ki:` in the prompt). Likewise, "
-            "absorb ids split into `absorb_synth_ids` (NEW rows being "
-            "absorbed) and `absorb_knowledge_ids` (EXISTING rows being "
-            "absorbed; rare). All ops in one call commit together or "
-            "roll back as a unit."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "ops": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "action": {
-                                "type": "string",
-                                "enum": ["merge", "link", "create"],
-                                "description": (
-                                    "merge = absorb the absorb_* ids into the "
-                                    "canonical; link = attach repo_ids to the "
-                                    "canonical without absorbing; create = "
-                                    "stamp the canonical's synth row as "
-                                    "CANONICAL with no merge or extra links"
-                                ),
-                            },
-                            "canonical_synth_id": {
-                                "type": "string",
-                                "description": (
-                                    "UUID of a synthesized_features row when the "
-                                    "canonical is NEW (this scan, prefix `synth:`). "
-                                    "XOR with canonical_knowledge_id."
-                                ),
-                            },
-                            "canonical_knowledge_id": {
-                                "type": "string",
-                                "description": (
-                                    "UUID of a knowledge_items row when the "
-                                    "canonical is EXISTING (prior scan, prefix "
-                                    "`ki:`). XOR with canonical_synth_id."
-                                ),
-                            },
-                            "absorb_synth_ids": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "default": [],
-                                "description": (
-                                    "UUIDs of synthesized_features rows to absorb "
-                                    "into the canonical (the common merge case)"
-                                ),
-                            },
-                            "absorb_knowledge_ids": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "default": [],
-                                "description": (
-                                    "UUIDs of knowledge_items to absorb (rare; "
-                                    "use only when an EXISTING canonical is "
-                                    "being absorbed by a NEW one)"
-                                ),
-                            },
-                            "repo_ids": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "default": [],
-                                "description": (
-                                    "Tracked repository UUIDs to attach to the "
-                                    "canonical (extra repos beyond any inherited "
-                                    "from absorbed rows)"
-                                ),
-                            },
-                        },
-                        "required": ["action"],
-                    },
-                },
-            },
-            "required": ["ops"],
         },
     ),
     MCPToolDefinition(
@@ -727,7 +638,6 @@ TOOL_HANDLERS: dict[str, Any] = {
     "write_feature_registry": handle_write_feature_registry,
     "write_synthesis_feature": handle_write_synthesis_feature,
     "check_feature_exists": handle_check_feature_exists,
-    "apply_feature_merge_plan": handle_apply_feature_merge_plan,
     "list_design_systems": handle_list_design_systems,
     "get_design_system": handle_get_design_system,
     "code_impact": handle_code_impact,

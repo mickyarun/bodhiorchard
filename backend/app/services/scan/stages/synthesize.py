@@ -36,6 +36,8 @@ from typing import Any
 
 import structlog
 
+from app.repositories.feature import FeatureRepository
+from app.repositories.organization import OrganizationRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.stages import StageContext, StageOutput
@@ -67,6 +69,16 @@ async def run(
     """Drive Claude through one synthesis pass over the reduced communities."""
     v2 = resolve_v2_context(config)
     repo_id_raw = config.get("v2_repo_id")
+    if v2 is not None and repo_id_raw is None:
+        # Half-configured v2 context — org/scan threaded but no repo_id.
+        # Falling through would skip both the SHA-cache check AND the
+        # wipe, so the partial unique index ``ux_ftr_primary_title``
+        # would trip mid-run on the second scan with no clear cause.
+        # Refuse loudly so the misconfiguration surfaces at boot.
+        raise RuntimeError(
+            "synthesize stage: v2 context present but v2_repo_id missing — "
+            "callers must thread the repo id alongside org/scan."
+        )
     if v2 is not None and repo_id_raw is not None:
         repo_id = uuid.UUID(str(repo_id_raw))
         async with with_session(v2.org_id) as db:
@@ -79,6 +91,14 @@ async def run(
             )
         if decision.skip:
             return stage_output_for_skip(decision, io_label="communities → features")
+        # Not-skip path means the repo's SHA changed (or this is a forced
+        # rescan / first scan / prior failure). Wipe the existing feature
+        # set for this repo before synthesis so each run produces a clean
+        # function of (current SHA, current backend route cache) instead
+        # of layering new rows on top of stale ``superseded_at`` ones.
+        # CASCADE on ``feature_to_repo.feature_id`` removes both PRIMARY
+        # and BACKEND junctions in the same statement.
+        await _wipe_features_for_repo(org_id=v2.org_id, repo_id=repo_id)
     if not communities:
         return StageOutput(
             communities=[],
@@ -93,18 +113,15 @@ async def run(
     readme = str(config.get("readme", ""))
     dry_run = bool(config.get("dry_run", False))
 
-    # Thread the v2 scan + repo ids into the prompt so Claude echoes them
-    # back in every ``write_synthesis_feature`` call. This replaces the
-    # backend-side ``get_active_scan_for_org`` heuristic with explicit
-    # binding — no race against late MCP calls or stale-eviction edges.
-    scan_id_str = config.get("v2_scan_id")
+    # Thread the v2 repo id into the prompt so Claude echoes it back in
+    # every ``write_synthesis_feature`` call — survives renames mid-scan
+    # and saves a name-resolution round-trip in the MCP handler.
     repo_id_str = config.get("v2_repo_id")
     prompt = build_synthesis_prompt(
         repo_name=ctx.repo_name,
         readme=readme,
         communities=communities,
         files_per_community=files_per,
-        scan_id=str(scan_id_str) if scan_id_str else None,
         repo_id=str(repo_id_str) if repo_id_str else None,
     )
     extras: dict[str, Any] = {
@@ -218,16 +235,13 @@ async def _run_coverage_audit(config: dict[str, Any]) -> int:
     """
     v2 = resolve_v2_context(config)
     repo_id_raw = config.get("v2_repo_id")
-    scan_id_raw = config.get("v2_scan_id")
     head_sha = str(config.get("ingest_head_sha") or "").strip()
 
-    if v2 is None or repo_id_raw is None or scan_id_raw is None or not head_sha:
+    if v2 is None or repo_id_raw is None or not head_sha:
         return 0
 
     try:
         async with with_session(v2.org_id) as db:
-            from app.repositories.organization import OrganizationRepository
-
             org = await OrganizationRepository(db).get_by_id(v2.org_id)
             if org is None:
                 return 0
@@ -235,7 +249,6 @@ async def _run_coverage_audit(config: dict[str, Any]) -> int:
                 db,
                 org=org,
                 repo_id=uuid.UUID(str(repo_id_raw)),
-                scan_id=uuid.UUID(str(scan_id_raw)),
                 head_sha=head_sha,
             )
             await db.commit()
@@ -245,45 +258,56 @@ async def _run_coverage_audit(config: dict[str, Any]) -> int:
         return 0
 
 
+async def _wipe_features_for_repo(*, org_id: uuid.UUID, repo_id: uuid.UUID) -> None:
+    """Drop every feature whose PRIMARY junction points at ``repo_id``.
+
+    Keeps the synthesise stage idempotent across SHA-changing re-scans:
+    instead of evolving feature rows through ``superseded_at`` markers
+    (the legacy merge-phase mechanism), each run starts from a clean
+    slate. Failure to wipe is logged and re-raised — synthesis depends
+    on the post-condition ``zero pre-existing rows for this repo``, so
+    silently skipping the wipe would let the partial unique index trip
+    unpredictably mid-run.
+    """
+    try:
+        async with with_session(org_id) as db:
+            repo = FeatureRepository(db, org_id=org_id)
+            deleted = await repo.delete_for_primary_repo(repo_id)
+            await db.commit()
+        logger.info(
+            "scan_synthesize_wipe",
+            repo_id=str(repo_id),
+            deleted_count=deleted,
+        )
+    except Exception:
+        logger.exception(
+            "scan_synthesize_wipe_failed",
+            repo_id=str(repo_id),
+        )
+        raise
+
+
 async def _count_synthesized_features(config: dict[str, Any]) -> int:
-    """Count rows this scan wrote to ``synthesized_features`` for this repo.
+    """Active feature count for this repo's PRIMARY junction.
 
     Returns 0 when the v2 context isn't threaded (manual sandbox runs)
     or the count query fails — the chip still reads sensibly because the
     rest of extras still describes what synthesis attempted.
     """
     org_id_str = config.get("v2_org_id")
-    scan_id_str = config.get("v2_scan_id")
     repo_id_str = config.get("v2_repo_id")
-    if not org_id_str or not scan_id_str or not repo_id_str:
+    if not org_id_str or not repo_id_str:
         return 0
-
-    from sqlalchemy import func, select
-
-    from app.models.synthesized_feature import SynthesizedFeature
-    from app.scan.session import with_session
 
     try:
         org_id = uuid.UUID(str(org_id_str))
-        scan_id = uuid.UUID(str(scan_id_str))
         repo_id = uuid.UUID(str(repo_id_str))
     except ValueError:
         return 0
 
     try:
         async with with_session(org_id) as db:
-            stmt = (
-                select(func.count())
-                .select_from(SynthesizedFeature)
-                .where(
-                    SynthesizedFeature.org_id == org_id,
-                    SynthesizedFeature.scan_id == scan_id,
-                    SynthesizedFeature.repo_id == repo_id,
-                    SynthesizedFeature.superseded_at.is_(None),
-                )
-            )
-            result = await db.execute(stmt)
-            return int(result.scalar_one() or 0)
+            return await FeatureRepository(db, org_id=org_id).count_active_for_repo(repo_id)
     except Exception:
         logger.exception("scan_synthesize_feature_count_failed")
         return 0

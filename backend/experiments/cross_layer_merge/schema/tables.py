@@ -36,11 +36,19 @@ class XLMBase(DeclarativeBase):
 
 
 class XLMRepoLayer(StrEnum):
-    """Classification result for a tracked repo."""
+    """Classification result for a tracked repo.
+
+    ``BATCH`` is for periodic / cron / queue-driven workers that run server-
+    side but aren't user-request-handlers (distinct from ``PROCESSOR`` which
+    historically meant "tooling around the API"). Knowing which repos are
+    batch matters for cross-layer linking: a frontend feature can't depend on
+    a batch job's endpoints because batch jobs don't expose HTTP routes.
+    """
 
     FRONTEND = "frontend"
     BACKEND = "backend"
     PROCESSOR = "processor"
+    BATCH = "batch"
     DB = "db"
     SHARED = "shared"
 
@@ -125,6 +133,18 @@ class XLMSynthesizedFeature(XLMBase):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Populated only for frontend rows by the ``backend_link`` stage.
+    # Each backend_repo_id is a UUID from xlm_tracked_repo whose code declares
+    # at least one endpoint that this frontend feature calls.
+    backend_repo_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=False, default=list
+    )
+    # The actual ``${baseURL}`` paths from this feature's frontend code, e.g.
+    # ``/payments/get-payment-details``. Cross-referenced against the backend
+    # route declarations to populate ``backend_repo_ids``.
+    backend_api_paths: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False, default=list
+    )
 
 
 class XLMKnowledgeItem(XLMBase):
@@ -192,6 +212,41 @@ class XLMPairPlan(XLMBase):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     merged_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class XLMMergeLog(XLMBase):
+    """Audit row per Claude cluster-merge decision.
+
+    Sandbox-only mirror of what the production merge phase would log
+    if it kept a per-cluster trail. Recorded inside the runner after
+    every ``ask_claude`` call so prompt iteration has data — without
+    this, "Claude said no_match" looks identical to "Claude timed out"
+    in the run summary.
+    """
+
+    __tablename__ = "xlm_merge_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    canonical_synth_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    canonical_ki_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    cluster_member_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=False, default=list
+    )
+    related_existing_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=False, default=list
+    )
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # One of: ``merge`` / ``no_match`` / ``error`` / NULL when Claude was never asked.
+    action: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    absorbed_synth_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=False, default=list
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class XLMPairLog(XLMBase):

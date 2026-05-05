@@ -30,12 +30,15 @@ log = structlog.get_logger(__name__)
 # Suffix/substring → (layer, tech_stack). First match wins, evaluated in order.
 # Refine this table when sandbox results show misclassifications.
 NAME_HINTS: list[tuple[str, XLMRepoLayer, str | None]] = [
-    ("MerchantDashboard", XLMRepoLayer.FRONTEND, "vue3"),
-    ("ConsumerWeb", XLMRepoLayer.FRONTEND, "vue3"),
     ("Dashboard", XLMRepoLayer.FRONTEND, "vue3"),
     ("Web", XLMRepoLayer.FRONTEND, "vue3"),
     ("Frontend", XLMRepoLayer.FRONTEND, "vue3"),
     ("Mobile", XLMRepoLayer.FRONTEND, "react-native"),
+    # Batch needs to come before "Worker"/"Processor" so a "BatchWorker"
+    # repo classifies as batch rather than processor.
+    ("Batch", XLMRepoLayer.BATCH, "node"),
+    ("Cron", XLMRepoLayer.BATCH, "node"),
+    ("Scheduler", XLMRepoLayer.BATCH, "node"),
     ("Processor", XLMRepoLayer.PROCESSOR, "node"),
     ("Worker", XLMRepoLayer.PROCESSOR, "node"),
     ("Core", XLMRepoLayer.BACKEND, "fastapi"),
@@ -95,7 +98,11 @@ def classify_from_worktree(path: Path) -> Classification | None:
         return None
 
     if pyproject.exists() or requirements.exists():
-        text = (pyproject if pyproject.exists() else requirements).read_text().lower()
+        manifest = pyproject if pyproject.exists() else requirements
+        try:
+            text = manifest.read_text(encoding="utf-8", errors="replace").lower()
+        except OSError:
+            return None
         if "fastapi" in text or "django" in text or "flask" in text:
             return Classification(
                 layer=XLMRepoLayer.BACKEND,
@@ -184,15 +191,29 @@ def _detect_db(path: Path) -> str | None:
     return None
 
 
+_BATCH_NAME_RE = ("batch", "cron", "scheduler")
+
+
 def classify(name: str, path: str | None) -> Classification:
     """Combined classifier. Worktree first, name-hint second.
 
-    Defaults to ``XLMRepoLayer.SHARED`` if both fail — flagged in logs
+    For batch-style names, override the worktree's PROCESSOR/BACKEND verdict
+    with BATCH while keeping the worktree-detected ``tech_stack`` and
+    ``db_flavor`` — name signals layer better than dependencies for cron /
+    queue-driven workers, but the manifest still tells us the language.
+
+    Defaults to ``XLMRepoLayer.SHARED`` if both stages fail — flagged in logs
     so the user knows to add a NAME_HINTS rule.
     """
     if path:
         from_disk = classify_from_worktree(Path(path))
         if from_disk:
+            if any(needle in name.lower() for needle in _BATCH_NAME_RE):
+                return Classification(
+                    layer=XLMRepoLayer.BATCH,
+                    tech_stack=from_disk.tech_stack,
+                    db_flavor=from_disk.db_flavor,
+                )
             return from_disk
 
     from_name = classify_from_name(name)

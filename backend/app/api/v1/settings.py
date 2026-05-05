@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.v1.settings_claude import router as claude_router
+from app.api.v1.settings_github_members import router as gh_members_router
 from app.api.v1.settings_repos import router as repos_router
 from app.api.v1.settings_slack import router as slack_router
 from app.core.deps import get_current_user, get_db, require_permissions
@@ -48,6 +49,7 @@ router = APIRouter(tags=["settings"])
 router.include_router(repos_router)
 router.include_router(slack_router)
 router.include_router(claude_router)
+router.include_router(gh_members_router)
 
 
 @router.get(

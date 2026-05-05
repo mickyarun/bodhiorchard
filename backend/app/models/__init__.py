@@ -10,6 +10,7 @@ auto-generation of migration scripts.
 from app.models.agent_activity import AgentActivityLog
 from app.models.agent_skill import AgentSkill
 from app.models.agent_skill_bud_stage import AgentSkillBudStage
+from app.models.backend_route_cache import BackendRouteCache
 from app.models.base import Base, BaseModel
 from app.models.bud import (
     BUDChatMessage,
@@ -29,7 +30,9 @@ from app.models.design_system import DesignSystemRef
 from app.models.dev_activity import DevActivityLog
 from app.models.developer_xp import DeveloperXP, RewardEvent, RewardType
 from app.models.enterprise_rule import EnterpriseRule
+from app.models.feature import Feature
 from app.models.feature_learning import FeatureLearning
+from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
 from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
@@ -46,13 +49,13 @@ from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.qa_test_evidence import QATestEvidence
 from app.models.race_result import RaceResult
 from app.models.repo_graph_cache import RepoGraphCache
+from app.models.repo_layer import RepoLayer
 from app.models.scan import ACTIVE_SCAN_STATUSES, Scan, ScanAggregateStatus
 from app.models.scan_phase import (
     PHASE_SCOPE,
     SHA_REUSABLE_PHASES,
     TERMINAL_CHECKPOINT_STATUSES,
     CheckpointStatus,
-    MergeOutcome,
     PhaseScope,
     ScanErrorCode,
     ScanPhase,
@@ -68,7 +71,6 @@ from app.models.scan_run_enums import (
 )
 from app.models.skill_profile import SkillProfile
 from app.models.standup import StandupReport
-from app.models.synthesized_feature import SynthesizedFeature
 from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
@@ -79,6 +81,7 @@ __all__ = [
     "AgentSkill",
     "AgentSkillBudStage",
     "AgentTaskStatus",
+    "BackendRouteCache",
     "BUDAgentTask",
     "Base",
     "BaseModel",
@@ -135,7 +138,6 @@ __all__ = [
     "ScanRepoStep",
     "ScanPhase",
     "ScanErrorCode",
-    "MergeOutcome",
     "PhaseScope",
     "CheckpointStatus",
     "PHASE_SCOPE",
@@ -144,7 +146,10 @@ __all__ = [
     "is_per_repo",
     "SkillProfile",
     "StandupReport",
-    "SynthesizedFeature",
+    "Feature",
+    "FeatureToRepo",
+    "FeatureToRepoRole",
+    "RepoLayer",
     "TrackedRepository",
     "TriageSession",
     "TriageStatus",

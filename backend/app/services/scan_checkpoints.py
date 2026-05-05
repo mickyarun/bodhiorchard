@@ -93,12 +93,6 @@ class OrphanFeaturesError(ScanPhaseError):
     code = ScanErrorCode.ORPHAN_FEATURE
 
 
-class MergeIncompleteError(ScanPhaseError):
-    """Post-merge audit found rows with ``merge_outcome = 'unvisited'``."""
-
-    code = ScanErrorCode.MERGE_INCOMPLETE
-
-
 class UnmatchedAuthorsError(ScanPhaseError):
     """``SKILL_EXTRACTION`` left git authors without a matching User row.
 

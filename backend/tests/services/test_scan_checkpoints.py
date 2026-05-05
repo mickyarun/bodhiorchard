@@ -32,10 +32,6 @@ from app.services import scan_checkpoints as sc
         (lambda: sc.MCPError("write_feature_registry failed"), ScanErrorCode.MCP_ERROR),
         (lambda: sc.PhaseTimeoutError("deadline exceeded"), ScanErrorCode.TIMEOUT),
         (lambda: sc.OrphanFeaturesError("3 orphans"), ScanErrorCode.ORPHAN_FEATURE),
-        (
-            lambda: sc.MergeIncompleteError("2 unvisited"),
-            ScanErrorCode.MERGE_INCOMPLETE,
-        ),
         (lambda: TimeoutError("socket"), ScanErrorCode.TIMEOUT),
         (lambda: ValueError("boom"), ScanErrorCode.EXCEPTION),
     ],

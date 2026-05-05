@@ -152,6 +152,36 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function classifyRepo(repoId: string): Promise<boolean> {
+    // Manual one-off classify trigger — runs the same classify helper
+    // the per-repo ``classify_repo`` scan stage uses, so it stays in
+    // lockstep without spinning up a full scan. The Settings → Code UI
+    // doesn't expose a button today; classification populates from the
+    // scan stage instead. Kept available for ops use.
+    try {
+      await api.post(`/v1/settings/repos/${repoId}/classify`)
+      await fetchRepos()
+      return true
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to classify repository.')
+      return false
+    }
+  }
+
+  async function extractRoutes(repoId: string): Promise<boolean> {
+    // Manual re-extraction of a backend repo's HTTP route cache, sharing
+    // the same iterator the per-repo ``extract_routes`` scan stage uses.
+    // Backend rejects with 400 for non-backend repos.
+    try {
+      await api.post(`/v1/settings/repos/${repoId}/extract-routes`)
+      await fetchRepos()
+      return true
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to extract routes.')
+      return false
+    }
+  }
+
   async function addRepo(path: string): Promise<boolean> {
     try {
       await api.post('/v1/settings/repos', { path })
@@ -260,6 +290,8 @@ export const useSettingsStore = defineStore('settings', () => {
     setRepoStatus,
     fetchRepoBranches,
     updateRepoBranches,
+    classifyRepo,
+    extractRoutes,
     allReposMapped,
   }
 })

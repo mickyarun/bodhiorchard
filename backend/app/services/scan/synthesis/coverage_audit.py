@@ -54,10 +54,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.synth_feature_writer import persist_synth_feature
 from app.models.cluster_cache import ClusterCache
+from app.models.feature import Feature
 from app.models.organization import Organization
-from app.models.synthesized_feature import SynthesizedFeature
 from app.repositories.cluster_cache import ClusterCacheRepository
-from app.repositories.synthesized_feature import SynthesizedFeatureRepository
+from app.repositories.feature import FeatureRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -186,7 +186,6 @@ async def audit_uncovered_clusters(
     *,
     org: Organization,
     repo_id: uuid.UUID,
-    scan_id: uuid.UUID,
     head_sha: str,
 ) -> int:
     """Emit a synthetic feature for each label-group of unreferenced clusters.
@@ -199,7 +198,7 @@ async def audit_uncovered_clusters(
         return 0
 
     cc_repo = ClusterCacheRepository(db, org_id=org.id)
-    synth_repo = SynthesizedFeatureRepository(db, org_id=org.id)
+    synth_repo = FeatureRepository(db, org_id=org.id)
 
     cached_clusters = await cc_repo.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
     if not cached_clusters:
@@ -240,7 +239,6 @@ async def audit_uncovered_clusters(
             db=db,
             org=org,
             repo_id=repo_id,
-            scan_id=scan_id,
             label=label,
             clusters=clusters,
             files=capped,
@@ -264,30 +262,34 @@ async def audit_uncovered_clusters(
 # ── Internals ──────────────────────────────────────────────────────
 
 
-def _collect_referenced_files(rows: Iterable[SynthesizedFeature]) -> set[str]:
-    """Union of files referenced by ANY current synth row.
+def _collect_referenced_files(rows: Iterable[Feature]) -> set[str]:
+    """Union of files referenced by ANY current feature row.
 
-    Each ``code_locations`` blob is ``{layer: [paths]}``.
+    Reads ``code_locations`` off every PRIMARY ``feature_to_repo``
+    junction row attached to the feature; each blob is ``{layer:
+    [paths]}``. ``selectin`` loading on ``Feature.repo_links`` keeps
+    this from triggering N+1 queries.
     """
     referenced: set[str] = set()
     for row in rows:
-        loc = row.code_locations
-        if isinstance(loc, str):
-            try:
-                loc = json.loads(loc)
-            except json.JSONDecodeError:
+        for link in row.repo_links:
+            loc = link.code_locations
+            if isinstance(loc, str):
+                try:
+                    loc = json.loads(loc)
+                except json.JSONDecodeError:
+                    continue
+            if not isinstance(loc, dict):
                 continue
-        if not isinstance(loc, dict):
-            continue
-        for files in loc.values():
-            if isinstance(files, list):
-                for f in files:
-                    if isinstance(f, str) and f:
-                        referenced.add(f)
+            for files in loc.values():
+                if isinstance(files, list):
+                    for f in files:
+                        if isinstance(f, str) and f:
+                            referenced.add(f)
     return referenced
 
 
-def _labels_covered_by_features(rows: Iterable[SynthesizedFeature]) -> set[str]:
+def _labels_covered_by_features(rows: Iterable[Feature]) -> set[str]:
     """Tokens that appear in any current feature's title or cluster names.
 
     The audit treats a label as 'covered' when it shows up in a feature
@@ -381,7 +383,6 @@ async def _emit_one_feature(
     db: AsyncSession,
     org: Organization,
     repo_id: uuid.UUID,
-    scan_id: uuid.UUID,
     label: str,
     clusters: list[ClusterCache],
     files: list[str],
@@ -409,8 +410,6 @@ async def _emit_one_feature(
         cluster_names=source_ids,
         code_locations=loc,
         tags=[AUDIT_TAG],
-        knowledge_item_id=None,
-        scan_id=scan_id,
     )
     await db.flush()
 

@@ -34,7 +34,8 @@ export type StepStatus
 export type ScanPhase
   = | 'mode_detection' | 'code_index' | 'repo_setup' | 'stale_cleanup'
     | 'skill_extraction' | 'design_system_extract' | 'feature_synthesis'
-    | 'skill_remap' | 'feature_merge' | 'embedding_backfill' | 'persist_results'
+    | 'extract_routes' | 'skill_remap' | 'feature_merge' | 'backend_link'
+    | 'embedding_backfill' | 'persist_results'
 
 /** Mirrors `app.models.tracked_repository.RepoStatus`. */
 export type RepoStatus = 'active' | 'inactive' | 'archived'

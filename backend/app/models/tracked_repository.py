@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
+from app.models.repo_layer import RepoLayer
 
 
 class RepoStatus(StrEnum):
@@ -111,6 +112,24 @@ class TrackedRepository(BaseModel):
         ),
         nullable=True,
     )
+
+    # Architectural classification produced by the ``classify_repo`` stage
+    # (see ``app/services/scan/repo_classify``). Null until the first
+    # post-ingest classify run. ``backend_link`` reads ``repo_layer`` to
+    # decide whether a repo participates as an index target (BACKEND) or
+    # a frontend whose features should be linked (FRONTEND); other layers
+    # are ignored.
+    repo_layer: Mapped[RepoLayer | None] = mapped_column(
+        Enum(
+            RepoLayer,
+            name="repo_layer",
+            values_callable=lambda e: [x.value for x in e],
+        ),
+        nullable=True,
+        index=True,
+    )
+    tech_stack: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    db_flavor: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     def __repr__(self) -> str:
         return f"<TrackedRepository(name={self.name!r}, status={self.status})>"

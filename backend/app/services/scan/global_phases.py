@@ -30,15 +30,21 @@ logger = structlog.get_logger(__name__)
 
 
 # Order matters:
-# * ``feature_merge`` consolidates duplicate features across repos.
 # * ``skill_remap`` rebuilds skill profiles using feature names.
+# * ``backend_link`` reads ``backend_route_cache`` rows produced by every
+#   per-repo ``extract_routes`` run and writes the cross-layer
+#   frontend↔backend ``feature_to_repo`` BACKEND junction rows. Must run
+#   AFTER every per-repo workflow (so all backends have extracted) and
+#   BEFORE ``persist_results`` (which stamps the org config snapshot).
 # * ``persist_results`` writes head_sha + last_scanned_at + the org
-#   config snapshot. Must run after merge/remap so what we persist is
-#   the canonical post-merge state.
+#   config snapshot.
 # * ``audit`` runs last — it reads from committed checkpoints.
+#
+# The legacy Claude-driven ``feature_merge`` global phase was removed
+# entirely; cross-repo feature dedup is no longer part of the pipeline.
 GLOBAL_PHASE_ORDER: tuple[str, ...] = (
-    "feature_merge",
     "skill_remap",
+    "backend_link",
     "persist_results",
     "audit",
 )
@@ -60,19 +66,17 @@ async def run_global_phases(
     if not repo_paths:
         return
     counts = await _collect_global_counts(org_id=org_id)
-    # Pull the org's Scan-tuning settings (Settings → Code → Scan tuning)
-    # so feature_merge passes the user's ``merge_timeout_seconds`` /
-    # ``max_turns`` to the Claude subprocess. Without this the global
-    # merge stage falls back to the legacy 300s default and times out
-    # on big org-wide merges.
+    # Pull the org's Scan-tuning settings (Settings → Code → Scan tuning).
+    # Used downstream by stages that respect per-org timeouts; the legacy
+    # merge-specific keys (``merge_timeout_seconds`` etc.) remain in the
+    # config payload for backwards compatibility but are unused.
     scan_cfg = await _load_scan_cfg(org_id=org_id)
     config: dict[str, Any] = {
         "v2_org_id": str(org_id),
         "v2_scan_id": str(scan_id),
         "v2_repo_paths": repo_paths,
         # Threaded through so persist_results stamps realistic numbers on
-        # the org config snapshot. feature_merge derives its own gate from
-        # the org-wide distinct-repo count via the knowledge_item repo.
+        # the org config snapshot.
         "total_features_synthesized": counts["features"],
         "total_profiles": counts["profiles"],
         "unmatched_authors": [],
@@ -88,8 +92,8 @@ async def run_global_phases(
     )
     # Stage name → ScanPhase enum so we can write step rows.
     stage_to_phase: dict[str, ScanPhase] = {
-        "feature_merge": ScanPhase.FEATURE_MERGE,
         "skill_remap": ScanPhase.SKILL_REMAP,
+        "backend_link": ScanPhase.BACKEND_LINK,
         "persist_results": ScanPhase.PERSIST_RESULTS,
         # Audit doesn't have a dedicated phase enum value — log only.
     }
@@ -249,8 +253,8 @@ async def _load_scan_cfg(*, org_id: uuid.UUID) -> dict[str, int]:
     Mirror of ``scan_runner._load_scan_cfg`` — kept here as a separate
     helper because ``run_global_phases`` is invoked outside the
     per-repo fanout that already loaded scan_cfg into ``runtime_overrides``.
-    Returns the keys ``feature_merge.run`` reads off
-    ``config["scan_cfg"]``: ``merge_timeout_seconds`` and ``max_turns``.
+    The legacy ``merge_timeout_seconds`` key is preserved in the return
+    value for backwards compatibility with consumers that still read it.
     """
     from app.repositories.organization import OrganizationRepository
 
@@ -273,11 +277,7 @@ async def _collect_global_counts(*, org_id: uuid.UUID) -> dict[str, int]:
 
     Threaded into ``config["total_features_synthesized"]`` /
     ``["total_profiles"]`` so ``persist_results`` stamps realistic
-    numbers on the org config snapshot instead of zeros. The merge
-    phase itself runs unconditionally and gates Claude per-cluster
-    based on cluster shape (singletons skip Claude; multi-member or
-    EXISTING-attached clusters call Claude); it does *not* read these
-    counts.
+    numbers on the org config snapshot instead of zeros.
     """
     from app.repositories.knowledge_item import KnowledgeItemRepository
     from app.repositories.skill_profile import SkillProfileRepository

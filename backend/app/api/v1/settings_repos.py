@@ -1,26 +1,34 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Repository management endpoints (CRUD, branches, GitHub org members)."""
+"""Repository management endpoints (CRUD, branches, classify, route extraction).
 
-import asyncio
+The GitHub-organisation members endpoint moved to
+:mod:`settings_github_members` so this file stays focused on tracked-repo
+state. Every endpoint that returns a ``RepoInfo`` row delegates to
+:func:`build_repo_info` — schema additions only need to land in one
+place.
+"""
+
 import uuid
 from pathlib import Path
 
-import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1._repo_info_builder import build_repo_info
 from app.core.deps import get_current_user, get_db
+from app.models.repo_layer import RepoLayer
 from app.models.tracked_repository import RepoStatus
 from app.models.user import User
+from app.repositories.backend_route_cache import BackendRouteCacheRepository
+from app.repositories.design_system import DesignSystemRefRepository
 from app.repositories.knowledge_item import KnowledgeItemRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.scan_run import ScanRunRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
-from app.repositories.user import UserRepository
 from app.schemas.settings import (
     AddRepoRequest,
     RepoBranchList,
@@ -28,6 +36,7 @@ from app.schemas.settings import (
     RepoInfo,
     RepoStatusRequest,
 )
+from app.services.git_operations import get_github_repo_full_name
 from app.services.repo_cloner import clone_or_update
 from app.services.repo_scanner import (
     _detect_develop_branch,
@@ -35,6 +44,8 @@ from app.services.repo_scanner import (
     detect_uncommitted_changes,
     list_remote_branches,
 )
+from app.services.scan.backend_link import iter_route_records
+from app.services.scan.repo_classify import classify
 from app.services.ssh_keys import get_public_key
 
 logger = structlog.get_logger(__name__)
@@ -42,70 +53,16 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["settings-repos"])
 
 
-def _detect_design_system_status(repo_id: str, ds_repo_ids: set[str]) -> str:
-    """Check if a design system exists or is being extracted.
-
-    Returns: 'ready' | 'extracting' | 'none'
-    """
-    if repo_id in ds_repo_ids:
-        return "ready"
-    from app.services.job_queue import JOB_DESIGN_EXTRACT, is_job_active
-
-    if is_job_active(JOB_DESIGN_EXTRACT, {"repo_id": repo_id}):
-        return "extracting"
-    return "none"
-
-
-def _detect_setup_status(repo_path: str) -> str:
-    """Check if Bodhiorchard MCP + hooks are set up in a repo.
-
-    Returns: 'merged' | 'not_setup'
-    """
-    mcp_config = Path(repo_path) / ".claude" / "settings.json"
-    hooks_dir = Path(repo_path) / ".githooks" / "post-commit"
-    if mcp_config.exists() and hooks_dir.exists():
-        return "merged"
-    return "not_setup"
-
-
-def _setup_compare_url(github_repo_full_name: str | None, main_branch: str | None) -> str | None:
-    """Return the GitHub compare URL for the setup branch, or ``None``.
-
-    Used by the row chip to deep-link to GitHub's "open a PR" page when
-    the setup branch was pushed but the GitHub App isn't configured to
-    open the PR automatically. Kept server-side so the URL shape lives
-    next to ``github_repo_full_name`` ownership.
-    """
-    if not github_repo_full_name or "/" not in github_repo_full_name:
-        return None
-    base = main_branch or "main"
-    return (
-        f"https://github.com/{github_repo_full_name}/compare/"
-        f"{base}...bodhiorchard/init-setup?quick_pull=1"
-    )
-
-
 @router.get("/repos", response_model=list[RepoInfo])
 async def list_repos(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[RepoInfo]:
-    """List tracked repositories from the database.
-
-    Args:
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        List of RepoInfo (active and ignored repos).
-    """
+    """List tracked repositories with last-scan summaries + classification chips."""
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     repo_repo = TrackedRepoRepository(db, org_id=org.id)
     repos = await repo_repo.list_visible()
-
-    # Batch-fetch design system repo IDs for status check
-    from app.repositories.design_system import DesignSystemRefRepository
 
     ds_repo = DesignSystemRefRepository(db, org_id=org.id)
     all_ds = await ds_repo.list_all()
@@ -118,51 +75,9 @@ async def list_repos(
         repo_ids=[r.id for r in repos]
     )
 
-    cards: list[RepoInfo] = []
-    for r in repos:
-        last_run = latest_runs.get(r.id)
-        cards.append(
-            RepoInfo(
-                id=str(r.id),
-                path=r.path,
-                name=r.name,
-                status=r.status.value,
-                lastScanned=(r.last_scanned_at.isoformat() if r.last_scanned_at else None),
-                sha=r.head_sha,
-                knowledgeCount=r.knowledge_count,
-                featureCount=r.feature_count,
-                mainBranch=r.main_branch,
-                developBranch=r.develop_branch,
-                uatBranch=r.uat_branch,
-                hasUncommittedChanges=False,
-                githubRepo=r.github_repo_full_name,
-                setupStatus=_detect_setup_status(r.path),
-                setupBranchPushedAt=(
-                    r.setup_branch_pushed_at.isoformat()
-                    if r.setup_branch_pushed_at is not None
-                    else None
-                ),
-                setupPrUrl=r.setup_pr_url,
-                setupPrNumber=r.setup_pr_number,
-                setupPrState=(r.setup_pr_state.value if r.setup_pr_state is not None else None),
-                setupCompareUrl=_setup_compare_url(r.github_repo_full_name, r.main_branch),
-                designSystemStatus=_detect_design_system_status(str(r.id), ds_repo_ids),
-                lastScanStatus=(last_run.status.value if last_run is not None else None),
-                lastScanFinishedAt=(
-                    last_run.finished_at.isoformat()
-                    if last_run is not None and last_run.finished_at is not None
-                    else None
-                ),
-                lastScanStartedAt=(
-                    last_run.started_at.isoformat()
-                    if last_run is not None and last_run.started_at is not None
-                    else None
-                ),
-                lastScanFeatureCount=(last_run.feature_count if last_run is not None else None),
-                lastScanId=(str(last_run.scan_id) if last_run is not None else None),
-            )
-        )
-    return cards
+    return [
+        build_repo_info(r, last_run=latest_runs.get(r.id), ds_repo_ids=ds_repo_ids) for r in repos
+    ]
 
 
 @router.post("/repos", response_model=RepoInfo)
@@ -171,16 +86,7 @@ async def add_repo(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RepoInfo:
-    """Add a repository path. Any valid git repo path is accepted.
-
-    Args:
-        body: Request with the absolute path.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        RepoInfo for the newly added repo.
-    """
+    """Add a repository by absolute path. Any valid git checkout is accepted."""
     repo_path = Path(body.path).resolve()
     if not repo_path.exists():
         raise HTTPException(
@@ -198,7 +104,6 @@ async def add_repo(
     repo_repo = TrackedRepoRepository(db, org_id=org.id)
     repo = await repo_repo.upsert(str(repo_path), repo_path.name)
 
-    # Auto-detect branches and dirty state on add
     detected_main = await _detect_main_branch(str(repo_path))
     detected_dev = await _detect_develop_branch(str(repo_path))
     has_dirty = await detect_uncommitted_changes(str(repo_path))
@@ -208,31 +113,13 @@ async def add_repo(
     if detected_dev:
         repo.develop_branch = detected_dev
 
-    # Auto-populate GitHub repo name from git remote origin
     if not repo.github_repo_full_name:
-        from app.services.git_operations import get_github_repo_full_name
-
         github_name = await get_github_repo_full_name(str(repo_path))
         if github_name:
             repo.github_repo_full_name = github_name
 
     await db.flush()
-
-    return RepoInfo(
-        id=str(repo.id),
-        path=repo.path,
-        name=repo.name,
-        status=repo.status.value,
-        lastScanned=None,
-        sha=repo.head_sha,
-        knowledgeCount=repo.knowledge_count,
-        featureCount=repo.feature_count,
-        mainBranch=repo.main_branch,
-        developBranch=repo.develop_branch,
-        uatBranch=repo.uat_branch,
-        hasUncommittedChanges=has_dirty,
-        githubRepo=repo.github_repo_full_name,
-    )
+    return build_repo_info(repo, has_dirty=has_dirty)
 
 
 class CloneRepoBody(BaseModel):
@@ -253,9 +140,9 @@ async def clone_and_add_repo(
 ) -> RepoInfo:
     """Clone a GitHub repo into the backend volume and register it on this org.
 
-    Combines ``repo_cloner.clone_or_update`` (which writes to ``/data/repos``)
-    with the same "add by local path" flow as ``POST /repos`` above — so from
-    the rest of the pipeline's perspective a cloned repo is indistinguishable
+    Combines :func:`clone_or_update` (which writes to ``/data/repos``) with
+    the same "add by local path" flow as ``POST /repos`` above, so from the
+    rest of the pipeline's perspective a cloned repo is indistinguishable
     from a pre-existing local one.
     """
     org_repo = OrganizationRepository(db)
@@ -282,8 +169,6 @@ async def clone_and_add_repo(
         repo.develop_branch = detected_dev
 
     if not repo.github_repo_full_name:
-        from app.services.git_operations import get_github_repo_full_name
-
         github_name = await get_github_repo_full_name(str(repo_path))
         if github_name:
             repo.github_repo_full_name = github_name
@@ -299,22 +184,7 @@ async def clone_and_add_repo(
         pat_used=body.pat is not None,
     )
 
-    return RepoInfo(
-        id=str(repo.id),
-        path=repo.path,
-        name=repo.name,
-        status=repo.status.value,
-        lastScanned=None,
-        sha=repo.head_sha,
-        knowledgeCount=repo.knowledge_count,
-        featureCount=repo.feature_count,
-        mainBranch=repo.main_branch,
-        developBranch=repo.develop_branch,
-        uatBranch=repo.uat_branch,
-        hasUncommittedChanges=has_dirty,
-        githubRepo=repo.github_repo_full_name,
-        setupCompareUrl=_setup_compare_url(repo.github_repo_full_name, repo.main_branch),
-    )
+    return build_repo_info(repo, has_dirty=has_dirty, include_setup_compare=True)
 
 
 @router.get("/repos/deploy-key")
@@ -324,14 +194,10 @@ async def get_repos_deploy_key(
     """Return the backend SSH public key for the GitHub-clone flow.
 
     The setup wizard exposes the same key at ``GET /api/setup/deploy-key``
-    only while setup is incomplete (gated by ``_require_setup_incomplete``).
-    Post-setup the Settings → Code "Add repositories" dialog needs the same
-    key so the user can paste it into GitHub before queuing SSH URLs.
-
-    The setup-side docstring already promises that "the authenticated
-    ``/v1/settings/repos/clone`` flow exposes its own deploy-key helper
-    for ongoing use" — this is that helper. The public key is harmless to
-    share but we still gate it behind a session.
+    only while setup is incomplete. Post-setup the Settings → Code "Add
+    repositories" dialog needs the same key so the user can paste it into
+    GitHub before queuing SSH URLs. The public key is harmless to share
+    but we still gate it behind a session.
     """
     _ = current_user
     return {
@@ -345,17 +211,8 @@ async def remove_repo(
     body: AddRepoRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Remove a tracked repository (soft delete) and deactivate its knowledge.
-
-    Args:
-        body: Request with the path to remove.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        Dict with removed path and deactivated count.
-    """
+) -> dict[str, object]:
+    """Soft-delete a tracked repository and deactivate its knowledge rows."""
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     repo_repo = TrackedRepoRepository(db, org_id=org.id)
@@ -368,7 +225,6 @@ async def remove_repo(
 
     await repo_repo.set_status(repo.id, RepoStatus.REMOVED)
 
-    # Deactivate knowledge items for this repo
     ki_repo = KnowledgeItemRepository(db, org_id=org.id)
     prefix = f"[{repo.name}]"
     deactivated = await ki_repo.bulk_deactivate_by_titles(
@@ -386,17 +242,7 @@ async def update_repo_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RepoInfo:
-    """Change a repo's status (active/ignored).
-
-    Args:
-        repo_id: The tracked repository UUID.
-        body: New status.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        Updated RepoInfo.
-    """
+    """Toggle a repo between ``active`` and ``ignored``."""
     if body.status not in ("active", "ignored"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -412,22 +258,7 @@ async def update_repo_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found.",
         )
-
-    return RepoInfo(
-        id=str(repo.id),
-        path=repo.path,
-        name=repo.name,
-        status=repo.status.value,
-        lastScanned=(repo.last_scanned_at.isoformat() if repo.last_scanned_at else None),
-        sha=repo.head_sha,
-        knowledgeCount=repo.knowledge_count,
-        featureCount=repo.feature_count,
-        mainBranch=repo.main_branch,
-        developBranch=repo.develop_branch,
-        uatBranch=repo.uat_branch,
-        hasUncommittedChanges=False,
-        githubRepo=repo.github_repo_full_name,
-    )
+    return build_repo_info(repo)
 
 
 @router.get("/repos/{repo_id}/branches", response_model=RepoBranchList)
@@ -436,16 +267,7 @@ async def get_repo_branches(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RepoBranchList:
-    """List all remote branches for a tracked repository.
-
-    Args:
-        repo_id: The tracked repository UUID.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        RepoBranchList with available branches and current mappings.
-    """
+    """List all remote branches for a tracked repository."""
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     repo_repo = TrackedRepoRepository(db, org_id=org.id)
@@ -458,13 +280,87 @@ async def get_repo_branches(
         )
 
     branches = await list_remote_branches(repo.path)
-
     return RepoBranchList(
         branches=branches,
         currentMain=repo.main_branch,
         currentDevelop=repo.develop_branch,
         currentUat=repo.uat_branch,
     )
+
+
+@router.post("/repos/{repo_id}/classify", response_model=RepoInfo)
+async def classify_repo_endpoint(
+    repo_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RepoInfo:
+    """Detect ``repo_layer`` / ``tech_stack`` / ``db_flavor`` for one repo.
+
+    Cheap (file-glob inspection of ``package.json`` / ``pyproject.toml``)
+    and idempotent — runs without spinning up a full scan. Today the
+    Settings → Code page doesn't surface a button for this; the
+    classification chips are populated by the per-repo ``classify_repo``
+    scan stage. The endpoint stays available as the manual escape hatch
+    (curl / future ops tooling) and shares the same :func:`classify`
+    helper as the stage so behaviour stays in lockstep.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    repo = await repo_repo.get_by_id(repo_id)
+    if repo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
+
+    classification = classify(repo.name, repo.path)
+    await repo_repo.set_classification(
+        repo_id,
+        layer=classification.layer,
+        tech_stack=classification.tech_stack,
+        db_flavor=classification.db_flavor,
+    )
+    await db.commit()
+    repo = await repo_repo.get_by_id(repo_id)
+    assert repo is not None  # Just persisted; cannot be missing.
+
+    return build_repo_info(repo, include_classification=True)
+
+
+@router.post("/repos/{repo_id}/extract-routes", response_model=RepoInfo)
+async def extract_routes_endpoint(
+    repo_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RepoInfo:
+    """Walk a backend repo's worktree and refresh its ``backend_route_cache``.
+
+    Like the classify endpoint above, this is a manual escape hatch. The
+    per-repo ``extract_routes`` scan stage does the same work; the
+    endpoint exists for ops without a full scan. Returns 400 when the
+    repo isn't classified BACKEND or has no ``head_sha`` yet.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    repo_repo = TrackedRepoRepository(db, org_id=org.id)
+    repo = await repo_repo.get_by_id(repo_id)
+    if repo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
+    if repo.repo_layer is not RepoLayer.BACKEND:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Route extraction only applies to repos classified as BACKEND.",
+        )
+    if not repo.head_sha:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Repository has no head_sha yet — run a scan first.",
+        )
+
+    records = list(iter_route_records(Path(repo.path)))
+    cache_repo = BackendRouteCacheRepository(db, org_id=org.id)
+    await cache_repo.replace_for_repo_sha(repo_id=repo_id, head_sha=repo.head_sha, records=records)
+    await db.commit()
+
+    return build_repo_info(repo, include_classification=True)
 
 
 @router.patch("/repos/{repo_id}/branches", response_model=RepoInfo)
@@ -474,17 +370,7 @@ async def update_repo_branches(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RepoInfo:
-    """Update branch mapping for a tracked repository.
-
-    Args:
-        repo_id: The tracked repository UUID.
-        body: Branch mapping update.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        Updated RepoInfo.
-    """
+    """Update the main / develop / UAT branch mapping for a tracked repo."""
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     repo_repo = TrackedRepoRepository(db, org_id=org.id)
@@ -501,146 +387,7 @@ async def update_repo_branches(
     if body.develop_branch is not None:
         repo.develop_branch = body.develop_branch
     if body.uat_branch is not None:
-        # Empty string \u2192 explicit clear; non-empty \u2192 set.
+        # Empty string → explicit clear; non-empty → set.
         repo.uat_branch = body.uat_branch or None
     await db.flush()
-
-    return RepoInfo(
-        id=str(repo.id),
-        path=repo.path,
-        name=repo.name,
-        status=repo.status.value,
-        lastScanned=(repo.last_scanned_at.isoformat() if repo.last_scanned_at else None),
-        sha=repo.head_sha,
-        knowledgeCount=repo.knowledge_count,
-        featureCount=repo.feature_count,
-        mainBranch=repo.main_branch,
-        developBranch=repo.develop_branch,
-        uatBranch=repo.uat_branch,
-        hasUncommittedChanges=False,
-        githubRepo=repo.github_repo_full_name,
-    )
-
-
-@router.get("/github/org-members")
-async def list_github_org_members(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> list[dict]:
-    """List members of the configured GitHub organization.
-
-    Args:
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        List of GitHub org member dicts (login, name, avatar_url, email).
-    """
-    org_repo = OrganizationRepository(db)
-    org = await org_repo.get_for_user(current_user)
-
-    from app.services.github_app_auth import get_installation_token
-
-    token = await get_installation_token(org)
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GitHub App is not configured. Set up a GitHub App in Settings.",
-        )
-
-    config = org.config or {}
-    github_cfg = config.get("integrations", {}).get("github", {})
-    github_org = github_cfg.get("org", "")
-    if not github_org:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GitHub organization name is not configured in Settings.",
-        )
-
-    # Fetch org members using installation token
-    gh_headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"https://api.github.com/orgs/{github_org}/members",
-            params={"per_page": 100},
-            headers=gh_headers,
-            timeout=15,
-        )
-
-        if resp.status_code == 401:
-            gh_msg = resp.json().get("message", "") if resp.text else ""
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=(
-                    f"GitHub PAT is unauthorized: {gh_msg}. "
-                    "Ensure the token has 'Members: Read' under "
-                    "Organization permissions."
-                ),
-            )
-        if resp.status_code == 403:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "GitHub PAT lacks required permissions. Go to GitHub → Settings → "
-                    "Developer settings → Fine-grained tokens → edit your token and "
-                    "add 'Members: Read' under Organization permissions."
-                ),
-            )
-        if resp.status_code == 404:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"GitHub organization '{github_org}' not found. "
-                "Check the org name in Settings.",
-            )
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"GitHub API error ({resp.status_code}): {resp.text[:200]}",
-            )
-        members = resp.json()
-
-    # Fetch real profile data (name + public email) for each member
-    async def _fetch_profile(client: httpx.AsyncClient, login: str) -> dict[str, str | None]:
-        try:
-            r = await client.get(
-                f"https://api.github.com/users/{login}",
-                headers=gh_headers,
-                timeout=10,
-            )
-            if r.status_code == 200:
-                data = r.json()
-                return {
-                    "name": data.get("name") or login,
-                    "email": data.get("email"),
-                }
-        except Exception:
-            pass
-        return {"name": login, "email": None}
-
-    async with httpx.AsyncClient() as profile_client:
-        profiles = await asyncio.gather(
-            *[_fetch_profile(profile_client, m.get("login", "")) for m in members]
-        )
-
-    # Filter out members already added to Bodhiorchard
-    user_repo = UserRepository(db, org_id=org.id)
-    existing_users = await user_repo.list_by_org(org.id)
-    existing_github = {u.github_username.lower() for u in existing_users if u.github_username}
-
-    results = []
-    for m, profile in zip(members, profiles, strict=True):
-        login = m.get("login", "")
-        results.append(
-            {
-                "login": login,
-                "name": profile["name"],
-                "avatar_url": m.get("avatar_url", ""),
-                "email": profile["email"],
-                "already_added": login.lower() in existing_github,
-            }
-        )
-    return results
+    return build_repo_info(repo)

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.repo_layer import RepoLayer
 from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.repositories.base import BaseRepository
 
@@ -159,6 +160,50 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
             await self._db.flush()
             return repo
         return None
+
+    async def set_classification(
+        self,
+        repo_id: uuid.UUID,
+        *,
+        layer: RepoLayer,
+        tech_stack: str | None,
+        db_flavor: str | None,
+    ) -> None:
+        """Persist the per-repo classification produced by ``classify_repo``.
+
+        Idempotent — overwrites whatever was there. The classifier is
+        cheap to re-run on every scan so we don't need a "first write
+        wins" guard. ``org_id`` scope is enforced via the ``WHERE``
+        clause to avoid cross-org writes.
+        """
+        await self._db.execute(
+            update(TrackedRepository)
+            .where(
+                TrackedRepository.org_id == self._org_id,
+                TrackedRepository.id == repo_id,
+            )
+            .values(
+                repo_layer=layer,
+                tech_stack=tech_stack,
+                db_flavor=db_flavor,
+            )
+        )
+
+    async def list_by_layer(self, layer: RepoLayer) -> list[TrackedRepository]:
+        """All active repos in the org with the given ``repo_layer``.
+
+        Used by ``backend_link`` to find every BACKEND repo whose worktree
+        should be indexed for route extraction.
+        """
+        result = await self._db.execute(
+            self._scoped(
+                select(TrackedRepository).where(
+                    TrackedRepository.repo_layer == layer,
+                    TrackedRepository.status == RepoStatus.ACTIVE,
+                )
+            ).order_by(TrackedRepository.name)
+        )
+        return list(result.scalars().all())
 
     async def update_after_scan(
         self,

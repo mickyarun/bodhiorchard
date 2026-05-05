@@ -25,14 +25,13 @@ from experiments.cross_layer_merge.schema import (
 log = structlog.get_logger(__name__)
 
 
-# Pairs we WILL evaluate. Frozensets so order doesn't matter on lookup.
+# Only frontend → backend cross-layer verification.
+# Backend-to-backend and processor pairs are handled within the cluster-merge
+# stage; the pair stage is reserved for surfacing frontend↔backend twins that
+# the embedding threshold missed.
 ALLOWED_PAIRS: frozenset[frozenset[XLMRepoLayer]] = frozenset(
     {
         frozenset({XLMRepoLayer.FRONTEND, XLMRepoLayer.BACKEND}),
-        frozenset({XLMRepoLayer.FRONTEND, XLMRepoLayer.PROCESSOR}),
-        frozenset({XLMRepoLayer.BACKEND, XLMRepoLayer.PROCESSOR}),
-        # Microservices share features internally.
-        frozenset({XLMRepoLayer.BACKEND}),
     }
 )
 
@@ -75,11 +74,21 @@ async def plan_pairs() -> int:
             assert repo_b.repo_layer is not None
             if not _is_allowed(repo_a.repo_layer, repo_b.repo_layer):
                 continue
+            # For frontend×backend pairs, guarantee repo_a is always frontend so
+            # the verifier can use repo_a as the canonical anchor without
+            # inspecting layer values.
+            source, target = (
+                (repo_a, repo_b)
+                if repo_a.repo_layer == XLMRepoLayer.FRONTEND
+                else (repo_b, repo_a)
+            )
+            assert source.repo_layer is not None
+            assert target.repo_layer is not None
             rows.append(
                 XLMPairPlan(
-                    repo_a_id=repo_a.id,
-                    repo_b_id=repo_b.id,
-                    pair_kind=_pair_kind(repo_a.repo_layer, repo_b.repo_layer),
+                    repo_a_id=source.id,
+                    repo_b_id=target.id,
+                    pair_kind=_pair_kind(source.repo_layer, target.repo_layer),
                     status=XLMPairStatus.PENDING,
                 )
             )

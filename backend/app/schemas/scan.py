@@ -78,6 +78,7 @@ class StageResult(BaseModel):
 DEFAULT_PER_REPO_STAGES: tuple[str, ...] = (
     "repo_setup",
     "ingest",
+    "classify_repo",
     "extract",
     "merge_labels",
     "filter_infra",
@@ -85,6 +86,10 @@ DEFAULT_PER_REPO_STAGES: tuple[str, ...] = (
     "size_floor",
     "top_n",
     "synthesize",
+    # ``extract_routes`` writes the per-backend ``backend_route_cache``;
+    # the actual cross-layer linking is the global ``backend_link``
+    # phase that runs after every per-repo workflow finishes.
+    "extract_routes",
     "skill_extraction",
     "design_system",
 )

@@ -274,6 +274,12 @@ class RepoInfo(BaseModel):
     last_scan_started_at: str | None = Field(None, alias="lastScanStartedAt")
     last_scan_feature_count: int | None = Field(None, alias="lastScanFeatureCount")
     last_scan_id: str | None = Field(None, alias="lastScanId")
+    # Per-repo classification + cross-layer link counts. Populated by the
+    # ``classify_repo`` per-repo stage and the global ``backend_link``
+    # phase. Optional so unscanned repos render a neutral row.
+    repo_layer: str | None = Field(None, alias="repoLayer")
+    tech_stack: str | None = Field(None, alias="techStack")
+    db_flavor: str | None = Field(None, alias="dbFlavor")
 
     model_config = {"populate_by_name": True}
 

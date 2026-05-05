@@ -9,12 +9,18 @@ Run from the ``backend/`` directory using the project's venv:
 
 Commands:
 
-    load      — create xlm_* tables, truncate, INSERT seed_data.json
-    classify  — populate repo_layer/tech_stack/db_flavor on xlm_tracked_repo
-    pair      — emit cross-layer pairs into xlm_pair_plan
-    verify    — run Claude on each pending pair, apply merges
-    report    — print before/after stats and merge log
-    reset     — alias for ``load`` (re-truncates and re-inserts the seed)
+    load           — create xlm_* tables, truncate, INSERT seed_data.json
+    copy-from-prod — refresh xlm_* from current prod ``tracked_repositories`` +
+                     ``synthesized_features`` (resets merge_outcome / KI ids to NULL)
+    classify       — populate repo_layer/tech_stack/db_flavor on xlm_tracked_repo
+    backend-link   — for every frontend synth feature, grep its frontend files
+                     for API endpoints, find which backend repos declare them,
+                     and write backend_repo_ids[] + backend_api_paths[] back
+    merge          — cluster + promote + Claude-merge unmerged synth rows (sandbox B3)
+    pair           — emit cross-layer pairs into xlm_pair_plan
+    verify         — run Claude on each pending pair, apply merges
+    report         — print before/after stats and merge log
+    reset          — alias for ``load`` (re-truncates and re-inserts the seed)
 """
 
 import argparse
@@ -24,11 +30,14 @@ from pathlib import Path
 
 import structlog
 
+from experiments.cross_layer_merge.backend_link import run_backend_link
 from experiments.cross_layer_merge.classify.mode_detection import classify_all_repos
+from experiments.cross_layer_merge.merge.runner import run_merge
 from experiments.cross_layer_merge.pair.planner import plan_pairs
 from experiments.cross_layer_merge.pair.verifier import verify_all_pending
 from experiments.cross_layer_merge.report.compare import render_report
 from experiments.cross_layer_merge.report.render_html import render as render_html
+from experiments.cross_layer_merge.seed.copy_from_prod import copy_from_prod
 from experiments.cross_layer_merge.seed.load_seed import reset_and_load
 
 REPORT_HTML_PATH = Path(__file__).parent / "report" / "report.html"
@@ -43,6 +52,13 @@ async def _cmd_load() -> None:
         print(f"  {name:30s} {count}")
 
 
+async def _cmd_copy_from_prod() -> None:
+    counts = await copy_from_prod()
+    print("Copied from prod:")
+    for name, count in counts.items():
+        print(f"  {name:30s} {count}")
+
+
 async def _cmd_classify() -> None:
     results = await classify_all_repos()
     print("Classified:")
@@ -50,6 +66,20 @@ async def _cmd_classify() -> None:
         tech = c.tech_stack or "-"
         db = c.db_flavor or "-"
         print(f"  {name:35s} layer={c.layer.value:10s} tech={tech:10s} db={db}")
+
+
+async def _cmd_backend_link() -> None:
+    summary = await run_backend_link()
+    print("Backend-link summary:")
+    for key, value in summary.__dict__.items():
+        print(f"  {key:30s} {value}")
+
+
+async def _cmd_merge() -> None:
+    summary = await run_merge()
+    print("Merge summary:")
+    for key, value in summary.__dict__.items():
+        print(f"  {key:25s} {value}")
 
 
 async def _cmd_pair() -> None:
@@ -78,7 +108,10 @@ async def _cmd_report_html() -> None:
 COMMANDS = {
     "load": _cmd_load,
     "reset": _cmd_load,  # alias — same operation
+    "copy-from-prod": _cmd_copy_from_prod,
     "classify": _cmd_classify,
+    "backend-link": _cmd_backend_link,
+    "merge": _cmd_merge,
     "pair": _cmd_pair,
     "verify": _cmd_verify,
     "report": _cmd_report,

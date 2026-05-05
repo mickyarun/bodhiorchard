@@ -40,6 +40,10 @@ const PER_REPO_PHASES: ScanPhase[] = [
   'skill_extraction',
   'design_system_extract',
   'feature_synthesis',
+  // ``extract_routes`` runs after synthesis; only does work on backend
+  // repos but emits a chip for every repo so the popover surfaces the
+  // skipped-cache reason on non-backend / unchanged-SHA runs.
+  'extract_routes',
 ]
 
 const props = defineProps<{ run: RepoRunRow }>()
