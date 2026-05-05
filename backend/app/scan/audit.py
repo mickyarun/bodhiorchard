@@ -70,6 +70,21 @@ class RepoAnomaly:
 
 
 @dataclass(frozen=True)
+class DuplicateSignatureFinding:
+    """One ``(repo_id, cluster_signature)`` pair owning multiple active features.
+
+    Indicates a crashed reconcile or race between the synthesise stage
+    and a PR-merge job: the reconciler matches signature-first and
+    UPDATEs in place, so a duplicate active row on the same signature
+    means the inactivation step never landed.
+    """
+
+    repo_id: uuid.UUID
+    cluster_signature: str
+    feature_ids: list[uuid.UUID]
+
+
+@dataclass(frozen=True)
 class ScanAuditReport:
     """Snapshot of cross-phase anomalies the orchestrator can act on.
 
@@ -80,11 +95,16 @@ class ScanAuditReport:
 
     missing_repo_synth: list[RepoAnomaly] = field(default_factory=list)
     orphan_features: list[uuid.UUID] = field(default_factory=list)
+    duplicate_signatures: list[DuplicateSignatureFinding] = field(default_factory=list)
 
     @property
     def is_clean(self) -> bool:
         """True when no anomaly category surfaced anything."""
-        return not self.missing_repo_synth and not self.orphan_features
+        return (
+            not self.missing_repo_synth
+            and not self.orphan_features
+            and not self.duplicate_signatures
+        )
 
 
 async def audit_scan(ctx: ScanContext) -> ScanAuditReport:
@@ -106,10 +126,12 @@ async def audit_scan(ctx: ScanContext) -> ScanAuditReport:
     async with with_session(ctx.org_id) as session:
         missing = await _find_repos_with_clusters_but_no_synth(session, ctx)
         orphans = await _find_orphan_features(session, ctx)
+        duplicates = await _find_duplicate_signatures(session, ctx)
 
     report = ScanAuditReport(
         missing_repo_synth=missing,
         orphan_features=orphans,
+        duplicate_signatures=duplicates,
     )
     if report.is_clean:
         logger.info("scan_audit_clean", scan_id=str(ctx.scan_id))
@@ -119,6 +141,7 @@ async def audit_scan(ctx: ScanContext) -> ScanAuditReport:
             scan_id=str(ctx.scan_id),
             missing_repo_synth=len(missing),
             orphan_features=len(orphans),
+            duplicate_signatures=len(duplicates),
         )
     return report
 
@@ -188,3 +211,27 @@ async def _find_orphan_features(
     healthy state.
     """
     return await FeatureRepository(session, org_id=ctx.org_id).find_orphan_active_feature_ids()
+
+
+async def _find_duplicate_signatures(
+    session: AsyncSession,
+    ctx: ScanContext,
+) -> list[DuplicateSignatureFinding]:
+    """Active features sharing a ``cluster_signature`` per repo, org-wide.
+
+    Companion to the orphan-feature check: under incremental CRUD the
+    reconciler should keep at most one active feature per
+    ``(repo_id, cluster_signature)``. Multiple active rows mean a
+    crashed reconcile or a race between the scan path and the PR-merge
+    webhook job left the inactivation step unfinished. Empty list is
+    the healthy state.
+    """
+    rows = await FeatureRepository(session, org_id=ctx.org_id).find_duplicate_signatures_for_org()
+    return [
+        DuplicateSignatureFinding(
+            repo_id=repo_id,
+            cluster_signature=signature,
+            feature_ids=ids,
+        )
+        for repo_id, signature, ids in rows
+    ]

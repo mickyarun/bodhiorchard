@@ -31,6 +31,7 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.feature_match_log import FeatureMatchLog
 from app.repositories.feature import FeatureRepository
 from app.repositories.feature_reads import FeatureReadRepository, ReconcilerCandidate
 from app.repositories.feature_to_repo import upsert_primary
@@ -63,6 +64,7 @@ class ReconcileResult:
     revived: int = 0
     inactivated: int = 0
     matches_by_strategy: dict[str, int] = field(default_factory=dict)
+    match_log_rows: list[FeatureMatchLog] = field(default_factory=list)
 
 
 # Default thresholds — keep aligned with the plan. Override at call site
@@ -113,6 +115,7 @@ async def reconcile_features_for_repo(
             jaccard_threshold=jaccard_threshold,
             cosine_threshold=cosine_threshold,
         )
+        decision: str
         if match is None:
             await _insert_new(
                 feat_repo,
@@ -122,9 +125,11 @@ async def reconcile_features_for_repo(
                 write=write,
             )
             result.inserted += 1
+            decision = "inserted"
         else:
             matched_ids.add(match.feature_id)
-            if not match.is_active:
+            was_inactive = not match.is_active
+            if was_inactive:
                 await feat_repo.revive(match.feature_id, last_seen_sha=head_sha)
                 result.revived += 1
             await _update_existing(
@@ -136,8 +141,21 @@ async def reconcile_features_for_repo(
                 write=write,
             )
             result.updated += 1
+            decision = "revived" if was_inactive else "updated"
         result.matches_by_strategy[match_via] = (
             result.matches_by_strategy.get(match_via, 0) + 1
+        )
+        result.match_log_rows.append(
+            FeatureMatchLog(
+                org_id=org_id,
+                repo_id=repo_id,
+                head_sha=head_sha,
+                match_via=match_via,
+                score=round(score, 4),
+                feature_title=write.feature_title[:500],
+                matched_feature_id=match.feature_id if match else None,
+                decision=decision,
+            )
         )
         logger.info(
             "reconcile_match",
@@ -148,6 +166,7 @@ async def reconcile_features_for_repo(
             score=round(score, 4),
             feature_title=write.feature_title,
             matched_id=str(match.feature_id) if match else None,
+            decision=decision,
         )
 
     unmatched_active = [
@@ -209,6 +228,8 @@ async def _update_existing(
     write: FeatureWrite,
 ) -> None:
     """Refresh feature fields + PRIMARY junction code_locations."""
+    # Latest write's cluster_names wins; surfaces during threshold tuning
+    # if it masks missed clusters.
     await feat_repo.update_in_place(
         feature_id,
         feature_title=write.feature_title,
@@ -230,6 +251,7 @@ async def _update_existing(
     )
 
 
+# O(n*m) — fine at hundreds; revisit at 5k+ features per repo.
 def _match_strategy(
     write: FeatureWrite,
     candidates: list[ReconcilerCandidate],

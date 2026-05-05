@@ -38,6 +38,7 @@ import structlog
 
 from app.mcp.synthesis_accumulator import drain, reset_for_org
 from app.repositories.feature import FeatureRepository
+from app.repositories.feature_match_log import FeatureMatchLogRepository
 from app.repositories.organization import OrganizationRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
@@ -304,6 +305,9 @@ async def _reconcile_synthesised_batch(
                 head_sha=head_sha,
                 synthesised=synthesised,
             )
+            if summary.match_log_rows:
+                match_log_repo = FeatureMatchLogRepository(db, org_id=v2.org_id)
+                await match_log_repo.bulk_insert(summary.match_log_rows)
             await db.commit()
         return {
             "reconcile_inserted": summary.inserted,

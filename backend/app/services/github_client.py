@@ -257,3 +257,62 @@ class GitHubClient:
                     fetched=len(all_commits),
                 )
         return all_commits
+
+    async def list_pr_files(
+        self,
+        owner_repo: str,
+        pr_number: int,
+    ) -> list[str]:
+        """Return the changed file paths for a pull request.
+
+        Used by the PR-merge feature-reconcile job to intersect the PR's
+        touched files against cached cluster file sets so untouched
+        clusters can be skipped before any LLM cost is incurred. Paginates
+        at 100 per page; caps at 30 pages (3000 files) — the same sanity
+        ceiling :meth:`get_pr_commits` uses.
+        """
+        url = f"{_BASE_URL}/repos/{owner_repo}/pulls/{pr_number}/files"
+        out: list[str] = []
+        page = 1
+        async with AsyncClient(timeout=30) as client:
+            while page <= 30:
+                try:
+                    resp = await client.get(
+                        url,
+                        headers=self._headers,
+                        params={"per_page": 100, "page": page},
+                    )
+                    resp.raise_for_status()
+                except HTTPStatusError:
+                    logger.error(
+                        "github_list_pr_files_failed",
+                        status=resp.status_code,
+                        owner_repo=owner_repo,
+                        pr_number=pr_number,
+                        page=page,
+                    )
+                    return out
+                except Exception:
+                    logger.error(
+                        "github_list_pr_files_connection_error",
+                        owner_repo=owner_repo,
+                        pr_number=pr_number,
+                        page=page,
+                        exc_info=True,
+                    )
+                    return out
+                batch = resp.json()
+                if not batch:
+                    break
+                out.extend(item["filename"] for item in batch if "filename" in item)
+                if len(batch) < 100:
+                    break
+                page += 1
+            else:
+                logger.warning(
+                    "github_list_pr_files_pagination_cap_hit",
+                    owner_repo=owner_repo,
+                    pr_number=pr_number,
+                    fetched=len(out),
+                )
+        return out

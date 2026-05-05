@@ -32,6 +32,7 @@ from app.models.developer_xp import DeveloperXP, RewardEvent, RewardType
 from app.models.enterprise_rule import EnterpriseRule
 from app.models.feature import Feature
 from app.models.feature_learning import FeatureLearning
+from app.models.feature_match_log import FeatureMatchLog
 from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
@@ -74,6 +75,7 @@ from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
 from app.models.user_mcp_token import UserMCPToken
+from app.models.webhook_log import WebhookLog
 
 __all__ = [
     "AgentActivityLog",
@@ -103,6 +105,7 @@ __all__ = [
     "DeveloperXP",
     "EnterpriseRule",
     "FeatureLearning",
+    "FeatureMatchLog",
     "RepoGraphCache",
     "RepoRunStatus",
     "ScanKind",
@@ -154,6 +157,7 @@ __all__ = [
     "UserEmailAlias",
     "UserMCPToken",
     "UserRole",
+    "WebhookLog",
     "RewardEvent",
     "RewardType",
 ]
