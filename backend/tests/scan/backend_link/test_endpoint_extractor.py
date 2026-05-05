@@ -93,3 +93,72 @@ def test_distance_one_only_includes_direct_imports(tmp_path: Path) -> None:
     paths = extract_api_paths([seed], constants_map={}, repo_root=tmp_path)
     assert "/api/direct" in paths
     assert "/api/transitive" not in paths
+
+
+def test_chained_replace_resolves_underlying_constant(tmp_path: Path) -> None:
+    """``api_urls.GET_FOO.replace("$id", id)`` resolves to GET_FOO's path.
+
+    Real-world idiom: parameterised URLs are templated via chained
+    ``.replace()`` calls. The leaf identifier the call-site regex
+    captures is ``replace`` (not in any constants map). The resolver
+    must walk the dotted chain right-to-left and pick the first
+    identifier whose value IS in the map — which is the URL constant
+    sitting between the namespace (``api_urls``) and the chained
+    ``replace`` method.
+
+    Regression: this scenario silently returned ``[]`` for every feature
+    in the ATOAConsumerWebNew codebase that used ``api_urls.X.replace()``
+    + ``this.http.makeRequest({url: ...})`` (Dentally, PointOne,
+    Merchant Hosted Payment Pages, several others).
+    """
+    consts = tmp_path / "src" / "consts.ts"
+    _write(
+        consts,
+        "export const api_urls = {\n"
+        '  GET_BOOKING: "/integration/booking/$merchantId/status",\n'
+        "};\n",
+    )
+    seed = tmp_path / "src" / "service.ts"
+    _write(
+        seed,
+        'import { api_urls } from "./consts";\n'
+        "this.http.makeRequest({\n"
+        '  url: api_urls.GET_BOOKING.replace("$merchantId", id),\n'
+        "});\n",
+    )
+    cmap = build_url_constants_map(tmp_path)
+    assert "GET_BOOKING" in cmap, "constants map sanity check"
+
+    paths = extract_api_paths([seed], constants_map=cmap, repo_root=tmp_path)
+    assert paths == ["/integration/booking/:param/status"], (
+        f"expected GET_BOOKING to resolve through chained .replace(); got {paths}"
+    )
+
+
+def test_double_chained_replace_still_resolves(tmp_path: Path) -> None:
+    """``api_urls.X.replace(a, b).replace(c, d)`` still picks X.
+
+    Two chained replace calls is the more common form (one per path
+    parameter). The right-to-left walk must skip over both leaf-side
+    ``replace`` tokens before landing on the constant.
+    """
+    consts = tmp_path / "src" / "consts.ts"
+    _write(
+        consts,
+        "export const api_urls = {\n"
+        '  GET_APPT: "/integration/dentally/$merchantId/appointment/$id/status",\n'
+        "};\n",
+    )
+    seed = tmp_path / "src" / "service.ts"
+    _write(
+        seed,
+        'import { api_urls } from "./consts";\n'
+        "this.http.makeRequest({\n"
+        "  url: api_urls.GET_APPT"
+        '.replace("$merchantId", mid)'
+        '.replace("$id", aid),\n'
+        "});\n",
+    )
+    cmap = build_url_constants_map(tmp_path)
+    paths = extract_api_paths([seed], constants_map=cmap, repo_root=tmp_path)
+    assert paths == ["/integration/dentally/:param/appointment/:param/status"], paths

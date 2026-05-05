@@ -526,8 +526,18 @@ def _resolve_argument(arg: str, constants_map: dict[str, str]) -> str | None:
     """Translate a raw call-site argument into a URL path or ``None``.
 
     Tries (a) string-literal-with-leading-slash extraction, then (b) member-
-    access lookup against ``constants_map`` for the leaf identifier. Drops
-    paths that look like filesystem paths or static assets.
+    access lookup against ``constants_map`` for any identifier in the
+    captured chain. Drops paths that look like filesystem paths or
+    static assets.
+
+    The chain walk handles a real-world idiom: when a URL constant is
+    parameterised via chained ``.replace("$x", val)`` calls
+    (``api_urls.GET_FOO.replace("$id", id).replace(...)``), the
+    expression captured by the call-site regex ends with the chained
+    method name. Picking the *last* identifier would resolve to
+    ``replace`` (not in any constants map). Walking right-to-left and
+    returning the first identifier that IS in the map skips past the
+    chained methods and lands on the URL constant itself.
     """
     arg = arg.strip()
     direct = _first_path_in_string(arg)
@@ -536,10 +546,11 @@ def _resolve_argument(arg: str, constants_map: dict[str, str]) -> str | None:
     m = _IDENT_REF_RE.match(arg)
     if not m:
         return None
-    leaf = next((g for g in reversed(m.groups()) if g), None)
-    if leaf and leaf not in _PROPERTY_NAME_STOPLIST and leaf in constants_map:
-        candidate = constants_map[leaf]
-        if _looks_like_api_path(candidate):
+    for cand in reversed(m.groups()):
+        if not cand or cand in _PROPERTY_NAME_STOPLIST:
+            continue
+        candidate = constants_map.get(cand)
+        if candidate and _looks_like_api_path(candidate):
             return candidate
     return None
 
