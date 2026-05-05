@@ -101,3 +101,19 @@ class RepoContributorRead(BaseModel):
     files_changed: int = Field(alias="filesChanged")
 
     model_config = _BASE_CONFIG
+
+
+class FeatureMatchLogRead(BaseModel):
+    """One reconciler match decision — borderline-tuning surface."""
+
+    id: uuid.UUID
+    repo_id: uuid.UUID = Field(alias="repoId")
+    head_sha: str = Field(alias="headSha")
+    match_via: str = Field(alias="matchVia")
+    score: float
+    feature_title: str = Field(alias="featureTitle")
+    matched_feature_id: uuid.UUID | None = Field(default=None, alias="matchedFeatureId")
+    decision: str
+    created_at: datetime = Field(alias="createdAt")
+
+    model_config = _BASE_CONFIG

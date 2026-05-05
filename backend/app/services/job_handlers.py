@@ -28,9 +28,11 @@ from app.services.job_queue import (
     JOB_JIRA_DISCOVERY,
     JOB_JIRA_ENRICH,
     JOB_JIRA_IMPORT,
+    JOB_PR_MERGE_UPDATE,
     JOB_TRIAGE,
     register_job_type,
 )
+from app.services.scan.pr_merge_update import handle_pr_merge_update
 
 # Re-export all handlers so existing imports continue to work
 __all__ = [
@@ -66,3 +68,6 @@ def setup_job_handlers() -> None:
     register_job_type(JOB_JIRA_DISCOVERY, handle_discovery_job, worker_count=1)
     register_job_type(JOB_JIRA_IMPORT, handle_import_job, worker_count=1)
     register_job_type(JOB_JIRA_ENRICH, handle_enrich_job, worker_count=1)
+
+    # PR-merge feature reconcile (GitHub webhook trigger)
+    register_job_type(JOB_PR_MERGE_UPDATE, handle_pr_merge_update, worker_count=2)

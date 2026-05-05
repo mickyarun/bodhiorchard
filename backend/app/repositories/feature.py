@@ -359,6 +359,79 @@ class FeatureRepository(BaseRepository[Feature]):
         )
         return [row[0] for row in result.all()]
 
+    async def find_duplicate_signatures(
+        self, repo_id: uuid.UUID
+    ) -> list[tuple[str, list[uuid.UUID]]]:
+        """Active features sharing a ``cluster_signature`` within one repo.
+
+        Data-integrity invariant under incremental CRUD: each
+        ``cluster_signature`` should resolve to at most one active
+        feature per repo (the reconciler matches signature-first and
+        UPDATEs in place). Two active rows on the same signature
+        indicate drift — usually a crashed reconcile that inserted a
+        new row before inactivating the old one.
+
+        Returns ``(signature, [feature_id, ...])`` pairs for every
+        signature with more than one active feature whose PRIMARY
+        junction points at ``repo_id``. Empty list = healthy.
+        """
+        primary_subq = (
+            select(FeatureToRepo.feature_id)
+            .where(
+                FeatureToRepo.role == FeatureToRepoRole.PRIMARY,
+                FeatureToRepo.repo_id == repo_id,
+            )
+            .scalar_subquery()
+        )
+        stmt = (
+            select(
+                Feature.cluster_signature,
+                func.array_agg(Feature.id).label("ids"),
+            )
+            .where(
+                Feature.org_id == self._org_id,
+                Feature.is_active.is_(True),
+                Feature.id.in_(primary_subq),
+            )
+            .group_by(Feature.cluster_signature)
+            .having(func.count(Feature.id) > 1)
+        )
+        result = await self._db.execute(stmt)
+        return [(row[0], list(row[1])) for row in result.all()]
+
+    async def find_duplicate_signatures_for_org(
+        self,
+    ) -> list[tuple[uuid.UUID, str, list[uuid.UUID]]]:
+        """Active features sharing a ``cluster_signature`` per repo, org-wide.
+
+        Org-wide variant of :meth:`find_duplicate_signatures`. Used by
+        :func:`app.scan.audit.audit_scan` to surface drift across every
+        tracked repo, not just the ones that ran in the current scan —
+        a duplicate seeded by a crashed PR-merge reconcile in repo X
+        won't appear in repo X's next scan unless its SHA also changed.
+
+        Returns ``(repo_id, signature, [feature_id, ...])`` triples for
+        every PRIMARY-junction repo where one signature has more than
+        one active feature. Empty list = healthy.
+        """
+        stmt = (
+            select(
+                FeatureToRepo.repo_id,
+                Feature.cluster_signature,
+                func.array_agg(Feature.id).label("ids"),
+            )
+            .join(FeatureToRepo, FeatureToRepo.feature_id == Feature.id)
+            .where(
+                Feature.org_id == self._org_id,
+                Feature.is_active.is_(True),
+                FeatureToRepo.role == FeatureToRepoRole.PRIMARY,
+            )
+            .group_by(FeatureToRepo.repo_id, Feature.cluster_signature)
+            .having(func.count(Feature.id) > 1)
+        )
+        result = await self._db.execute(stmt)
+        return [(row[0], row[1], list(row[2])) for row in result.all()]
+
     async def list_current_for_repo(self, repo_id: uuid.UUID) -> list[Feature]:
         """Active rows whose PRIMARY junction points at ``repo_id``."""
         result = await self._db.execute(

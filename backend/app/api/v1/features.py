@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from datetime import datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -25,11 +26,13 @@ from app.models.feature import Feature
 from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.user import User
 from app.repositories.dev_activity import DevActivityLogRepository
+from app.repositories.feature_match_log import FeatureMatchLogRepository
 from app.repositories.feature_reads import FeatureReadRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.feature import (
     BackendLinkRead,
+    FeatureMatchLogRead,
     FeaturePage,
     FeatureRead,
     FeaturesByRepoRead,
@@ -188,6 +191,56 @@ async def top_contributors(
             actorName=row.actor_name,
             commitCount=row.commit_count,
             filesChanged=row.files_changed,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/match-debug", response_model=list[FeatureMatchLogRead])
+async def list_match_debug(
+    repo_id: uuid.UUID | None = Query(default=None, alias="repoId"),
+    since: datetime | None = Query(default=None),
+    match_via: str | None = Query(default=None, alias="matchVia"),
+    score_min: float | None = Query(default=None, alias="scoreMin", ge=0.0, le=1.0),
+    score_max: float | None = Query(default=None, alias="scoreMax", ge=0.0, le=1.0),
+    limit: int = Query(default=200, ge=1, le=1000),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[FeatureMatchLogRead]:
+    """Recent reconciler match decisions for borderline-threshold tuning.
+
+    Default surface for tuning the 0.7 (Jaccard) and 0.85 (cosine)
+    cutoffs: filter by ``matchVia=jaccard&scoreMin=0.6&scoreMax=0.79``
+    or ``matchVia=cosine&scoreMin=0.78&scoreMax=0.86`` to inspect
+    recent borderline decisions and judge whether the threshold should
+    move. Newest first, capped at 1000 rows.
+    """
+    if match_via is not None and match_via not in {"signature", "jaccard", "cosine", "insert"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="matchVia must be one of: signature, jaccard, cosine, insert.",
+        )
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    repo = FeatureMatchLogRepository(db, org_id=org.id)
+    rows = await repo.list_for_repo(
+        repo_id=repo_id,
+        since=since,
+        match_via=match_via,
+        score_min=score_min,
+        score_max=score_max,
+        limit=limit,
+    )
+    return [
+        FeatureMatchLogRead(
+            id=row.id,
+            repoId=row.repo_id,
+            headSha=row.head_sha,
+            matchVia=row.match_via,
+            score=row.score,
+            featureTitle=row.feature_title,
+            matchedFeatureId=row.matched_feature_id,
+            decision=row.decision,
+            createdAt=row.created_at,
         )
         for row in rows
     ]
