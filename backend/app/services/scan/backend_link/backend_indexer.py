@@ -63,6 +63,22 @@ _PREFIX_PATTERNS: tuple[re.Pattern[str], ...] = (
 _ROUTE_DIR_RE = re.compile(
     r"/(controllers?|routes?|router|api|handlers?|endpoints?)/", re.IGNORECASE
 )
+# NestJS scatters controllers across domain folders
+# (``otp/otp.controller.ts``, ``review-question/review-question.controller.ts``)
+# instead of a top-level ``controllers/`` directory — the convention is
+# enforced by filename suffix, not by parent directory. Match files whose
+# basename ends in ``.controller.{ts,js,mjs}`` so domain-layout NestJS
+# projects don't silently produce zero routes.
+#
+# This is the canonical NestJS convention (the framework's own CLI
+# generates this exact suffix), not project-specific. Other frameworks
+# (Spring's ``*Controller.java``, Flask/FastAPI's ``router*.py``) use
+# different filename conventions; each one needs both a filename match
+# AND a matching pattern in ``_ROUTE_PATTERNS`` to extract its routes —
+# adding a filename match alone would just walk files and find nothing.
+_ROUTE_FILE_RE = re.compile(
+    r"(?:^|/)[A-Za-z0-9_-]+\.controller\.(?:ts|js|mjs)$",
+)
 _SKIP_RE = re.compile(r"(test|spec|__test__|\.d\.ts$|node_modules|migration|http-clients?)")
 _TEMPLATE_PARAM_RE = re.compile(rf":({_IDENT})|<{_IDENT}>|\{{{_IDENT}\}}")
 
@@ -139,7 +155,15 @@ def iter_route_records(repo_root: Path) -> Iterator[RouteRecord]:
         if not fp.is_file():
             continue
         rel = fp.relative_to(repo_root).as_posix()
-        if not _ROUTE_DIR_RE.search("/" + rel) or _SKIP_RE.search(rel):
+        if _SKIP_RE.search(rel):
+            continue
+        # File qualifies if EITHER (a) it lives under a route-y directory
+        # (Express / FastAPI / NestJS-with-controllers-folder layouts) OR
+        # (b) its filename matches a per-framework controller convention
+        # (NestJS scattered ``*.controller.ts``, Spring ``*Controller.java``).
+        in_route_dir = bool(_ROUTE_DIR_RE.search("/" + rel))
+        is_controller_file = bool(_ROUTE_FILE_RE.search(rel))
+        if not (in_route_dir or is_controller_file):
             continue
         if fp.suffix not in (".ts", ".js", ".mjs", ".py"):
             continue
