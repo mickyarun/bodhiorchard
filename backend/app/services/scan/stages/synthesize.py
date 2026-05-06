@@ -37,6 +37,15 @@ from typing import Any
 import structlog
 
 from app.mcp.synthesis_accumulator import drain, reset_for_org
+from app.mcp.synthesis_progress import (
+    record as record_tool_progress,
+)
+from app.mcp.synthesis_progress import (
+    reset as reset_tool_progress,
+)
+from app.mcp.synthesis_progress import (
+    reset_for_org as reset_tool_progress_for_org,
+)
 from app.repositories.feature import FeatureRepository
 from app.repositories.feature_match_log import FeatureMatchLogRepository
 from app.repositories.organization import OrganizationRepository
@@ -178,10 +187,16 @@ async def run(
 
     engine = _resolve_engine(config)
     progress_callback = (
-        _make_progress_callback(scan_id=runtime.scan_id, repo_id=repo_id)
+        _make_progress_callback(org_id=runtime.org_id, scan_id=runtime.scan_id, repo_id=repo_id)
         if runtime is not None and repo_id is not None
         else None
     )
+    # Wipe any progress counters from a prior run on this repo so the
+    # popover starts at zero. The accumulator already gets reset by
+    # the scan runner; doing the same for tool-call counts keeps the
+    # two surfaces in lockstep.
+    if runtime is not None and repo_id is not None:
+        reset_tool_progress(str(runtime.org_id), str(repo_id))
     request = _build_request(
         ctx=ctx,
         prompt=prompt,
@@ -252,6 +267,7 @@ async def run(
         # features the user explicitly removed in the interim.
         if runtime is not None:
             reset_for_org(str(runtime.org_id))
+            reset_tool_progress_for_org(str(runtime.org_id))
         raise RuntimeError(f"synthesis failed: {outcome.error}")
     return StageOutput(communities=communities, dropped=[], extras=extras)
 
@@ -404,7 +420,9 @@ def _build_request(
     )
 
 
-def _make_progress_callback(*, scan_id: uuid.UUID, repo_id: uuid.UUID) -> ProgressCallback:
+def _make_progress_callback(
+    *, org_id: uuid.UUID, scan_id: uuid.UUID, repo_id: uuid.UUID
+) -> ProgressCallback:
     """Build a sync per-tool-use observer that fans out via the event bus.
 
     ``claude_runner._find_tool_uses`` invokes the callback synchronously
@@ -417,12 +435,17 @@ def _make_progress_callback(*, scan_id: uuid.UUID, repo_id: uuid.UUID) -> Progre
     ``scan:{scan_id}`` because that channel carries deduped status
     snapshots — high-frequency tool events would defeat the dedup.
     """
+    org_id_str = str(org_id)
     scan_id_str = str(scan_id)
     repo_id_str = str(repo_id)
     topic = f"scan_synthesis_tool:{scan_id_str}"
 
     def _on_tool_use(tool_name: str, _input: dict[str, Any]) -> None:
         try:
+            # Two surfaces. Counter feeds the chip popover via the
+            # status-poll serializer; bus event is for any external
+            # transport (dashboard WS, future Slack hook).
+            record_tool_progress(org_id_str, repo_id_str, tool_name)
             event_bus.publish(
                 topic,
                 {
