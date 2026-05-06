@@ -4,6 +4,7 @@
 """Pydantic schemas for the settings endpoints."""
 
 import zoneinfo
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -18,6 +19,27 @@ class SourceCodeSettings(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class GitHubAppStatus(StrEnum):
+    """Lifecycle of an org's GitHub App configuration.
+
+    The bulk-import flow gates on this enum:
+
+    - ``NOT_CONFIGURED``: no App ID and/or no private key — show the
+      credentials form.
+    - ``AWAITING_INSTALL``: credentials saved, but no installation_id
+      yet — show the "Install on GitHub" CTA.
+    - ``READY``: credentials + installation_id present — show the
+      bulk-repo picker.
+
+    The boolean ``GitHubSettings.connected`` is kept for back-compat
+    and equals ``status != NOT_CONFIGURED``.
+    """
+
+    NOT_CONFIGURED = "not_configured"
+    AWAITING_INSTALL = "awaiting_install"
+    READY = "ready"
+
+
 class GitHubSettings(BaseModel):
     """GitHub App integration settings (read response)."""
 
@@ -27,6 +49,9 @@ class GitHubSettings(BaseModel):
     has_private_key: bool = Field(False, alias="hasPrivateKey")
     installation_id: int | None = Field(None, alias="installationId")
     webhook_configured: bool = Field(False, alias="webhookConfigured")
+    status: GitHubAppStatus = GitHubAppStatus.NOT_CONFIGURED
+    slug: str | None = None
+    install_url: str | None = Field(default=None, alias="installUrl")
 
     model_config = {"populate_by_name": True}
 

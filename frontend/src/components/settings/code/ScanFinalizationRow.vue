@@ -30,19 +30,15 @@
 import ScanChipPopover from './ScanChipPopover.vue'
 import type { RepoRunRow, ScanPhase, StepRow } from '@/stores/reposcanv2Scans'
 
-// When adding a new phase, classify it here and in ScanRowTrack.vue.
-// ``feature_merge`` is retained as an enum value but the Claude-driven
-// merge global phase has been removed from the pipeline; the chip stays
-// in the strip so historical scans render their archived merge step
-// without breaking, but new scans never produce a row for it.
-// ``backend_link`` is the new global phase that materialises the
-// frontend↔backend cross-layer junction after every per-repo workflow.
+// User-facing finalization strip — only phases that meaningfully change
+// what the user sees in the UI. ``feature_merge`` is retired (no longer
+// emitted by the runtime). ``embedding_backfill`` and ``persist_results``
+// are internal plumbing that always succeeds when the prior phases did,
+// so showing them adds noise without information. Add a new phase here
+// only if its outcome is something the user can act on.
 const GLOBAL_PHASES: ScanPhase[] = [
   'skill_remap',
-  'feature_merge',
   'backend_link',
-  'embedding_backfill',
-  'persist_results',
 ]
 
 const props = defineProps<{ runs: RepoRunRow[] }>()

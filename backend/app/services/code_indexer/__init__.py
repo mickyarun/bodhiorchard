@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -46,6 +47,7 @@ from app.services.code_indexer.labeling import build_corpus_tokens, label_cluste
 from app.services.code_indexer.merge_by_dir import merge_clusters_by_directory
 from app.services.code_indexer.seed import cluster_signature, order_partition
 from app.services.code_indexer.skip_lists import filter_paths
+from app.services.scan._async_compute import to_thread_with_metric
 
 logger = structlog.get_logger(__name__)
 
@@ -249,11 +251,45 @@ async def index_repo(
     corpus_files: list[str] = list(_iter_files_from_graph(graph))
     corpus_tokens_counter = build_corpus_tokens(corpus_files) if corpus_files else None
 
+    entries = await to_thread_with_metric(
+        "code_indexer.build_cluster_entries",
+        _build_cluster_entries,
+        graph,
+        ordered,
+        corpus_tokens_counter,
+    )
+
+    result.clusters = entries
+    result.success = True
+    result.elapsed_s = round(time.monotonic() - t0, 2)
+    logger.info(
+        "code_indexer_done",
+        repo=str(repo),
+        head_sha=(head_sha or "")[:8],
+        files=result.file_count,
+        nodes=graph.number_of_nodes(),
+        edges=graph.number_of_edges(),
+        clusters=len(entries),
+        elapsed_s=result.elapsed_s,
+    )
+    return result
+
+
+def _build_cluster_entries(
+    graph: nx.Graph,
+    ordered: list[tuple[str, list[str]]],
+    corpus_tokens_counter: Counter[str] | None,
+) -> list[ClusterEntry]:
+    """Walk every cluster, score cohesion, and emit ``ClusterEntry`` rows.
+
+    Pure-Python; runs inside ``asyncio.to_thread`` so the per-cluster
+    NetworkX traversal (``cohesion_score``, ``label_cluster``) doesn't
+    pin the event loop on multi-thousand-node graphs.
+    """
     entries: list[ClusterEntry] = []
     for cluster_id, member_node_ids in ordered:
         files_in_cluster, symbols_in_cluster = _partition_files_and_symbols(graph, member_node_ids)
         if not files_in_cluster and not symbols_in_cluster:
-            # Empty cluster (shouldn't happen) — skip rather than emit junk.
             continue
         label = label_cluster(
             files_in_cluster or [n for n in member_node_ids],
@@ -276,21 +312,7 @@ async def index_repo(
                 cohesion=cohesion,
             )
         )
-
-    result.clusters = entries
-    result.success = True
-    result.elapsed_s = round(time.monotonic() - t0, 2)
-    logger.info(
-        "code_indexer_done",
-        repo=str(repo),
-        head_sha=(head_sha or "")[:8],
-        files=result.file_count,
-        nodes=graph.number_of_nodes(),
-        edges=graph.number_of_edges(),
-        clusters=len(entries),
-        elapsed_s=result.elapsed_s,
-    )
-    return result
+    return entries
 
 
 def _iter_files_from_graph(graph: nx.Graph) -> list[str]:

@@ -2706,6 +2706,8 @@ skill_agent = SkillAgent()
 
 ### 5.1 GitHub PR Merge → Status Update Flow
 
+> **Current implementation note.** §5.1 below describes the original PRD-status-update concept. The shipped backend uses the same `pull_request closed merged=true` event but routes it through `app/services/github_webhook_handler.py:_handle_pr_closed` (PR record updates, BUD events, XP/SP awards, release-stage detection) and now ALSO fans out to a **feature-reconcile job** (`JOB_PR_MERGE_UPDATE`) that does a cluster-scoped early-skip diff and triggers a regular scan when the PR touches indexed code. See **§18.5 (Repository Scan Pipeline → PR-merge webhook flow)** for the canonical flow.
+
 ```
 GitHub Event: pull_request (action: closed, merged: true)
      │
@@ -8419,266 +8421,169 @@ Total: 17 features, 11 agents
 
 ### 18.1 Overview
 
-A **full repository scan** is the operation behind `POST /api/v1/skills/scan`. It is a **sequential, non-resumable waterfall of 11 phases** that analyzes every active `TrackedRepository` in an org, synthesizes features via a Claude subprocess backed by MCP, and persists results into `knowledge_items` + `skill_profiles`. End-to-end latency is typically 5–30 minutes depending on repo count and cluster volume.
+The scan pipeline drives an **incremental-CRUD reconciler model**: synthesised features are matched to existing rows by `cluster_signature` (with Jaccard / cosine fallbacks), then UPDATEd / REVIVEd / INSERTed in place. A second trigger path fires the same reconciler off GitHub PR-merge webhooks so features stay live without waiting for the next scheduled scan.
 
-The pipeline has two stripes:
+### 18.2 Tables
 
-```
-Per-repo (run once per repo, sequential within a repo)
-    A   Scan Mode Detection       (incremental vs full)
-    B   Code Indexing             (graphify → code clusters extracted)
-    B1  Repo Setup                (worktrees, hooks, CLAUDE.md, setup PR)
-    D   Stale Cleanup             (incremental only)
-    E   Git Skill Analysis        (directory-level skill profiles)
-    E1b Design System Extraction  (async job if UI platform detected)
+| Table | Migration | Role |
+|-------|-----------|------|
+| `features` | `zo_synthesized_features` (creation), `zag_features_lifecycle_columns` (renamed + lifecycle cols) | One row per synthesised feature. Carries `cluster_signature`, `is_active`, `deactivated_at`, `last_seen_sha`, `feature_status`, `source` (`'scan'` / `'bud'` / `'mcp'`), `source_ref`, embedding (pgvector 384d). |
+| `feature_to_repo` | `zy_features_join_table` | Many-to-many between features and tracked repos. `role='primary'` rows carry `code_locations` (the repo where synthesis happened). `role='backend'` rows carry `api_paths` (backend repos whose declared routes the frontend feature calls). |
+| `webhook_logs` | `zaj_webhook_logs_and_match_log` | Inbound-delivery dedupe ledger keyed on the GitHub `X-GitHub-Delivery` header. Defense-in-depth idempotency for *all* webhook handlers, not just the new one. |
+| `feature_match_log` | `zaj_webhook_logs_and_match_log` | Append-only audit trail recording every reconciler match decision: `match_via` (`signature` / `jaccard` / `cosine` / `insert`), `score`, `decision` (`inserted` / `updated` / `revived`), `matched_feature_id`. Drives the borderline-tuning workflow for the 0.7 (Jaccard) / 0.85 (cosine) thresholds. |
 
-Global (run once after all repos finish their per-repo stripe)
-    B2  Feature Synthesis         (Claude subprocess + MCP, parallel per repo)
-    E2  Skill Remap               (conditional: re-run E using feature modules)
-    B3  Cross-Repo Merge          (workspace mode, ≥2 features)
-    F   Embedding Backfill        (embed items missing embeddings)
-    G   Persist                   (write head_sha, counts, org config — last step)
-```
+`knowledge_items` and `knowledge_to_repo` were dropped wholesale in `zah_drop_knowledge_tables`; the partial unique index `ux_ftr_primary_title` was dropped in `zai_drop_partial_title_index` because the reconciler's signature-based identity makes title-uniqueness a hazard rather than a guard.
 
-Scan state is tracked in **Redis** (progress) plus the **`tracked_repositories` table** (final, commit-only). There is **no per-phase checkpoint anywhere**, which is why any mid-scan failure forces the entire pipeline to restart from Phase A on the next run.
+### 18.3 The reconciler — sole incremental writer
 
-### 18.2 Entry Point & Trigger
+`backend/app/services/feature_reconciler.py::reconcile_features_for_repo` is the *only* path that mutates active feature rows under the new model. It applies a synthesised batch (`list[FeatureWrite]`) to a repo via a layered identity strategy:
 
-| Aspect | Detail |
-|--------|--------|
-| Trigger | `POST /api/v1/skills/scan` — `backend/app/api/v1/skills.py:37-124`, function `trigger_scan()` |
-| Body | `{ "fullRescan": bool }` |
-| Response | `{ "scanId": "<uuid>", "status": "started" }` (fire-and-forget via `BackgroundTasks`) |
-| Preconditions | Embedding service healthy; every active repo has `main_branch` + `develop_branch`; all repo paths exist on disk with `.git` |
-| Status poll | `GET /api/v1/skills/scan/{scan_id}/status` — `skills.py:127-154` (resolves via `resolve_scan_progress()`) |
-| Cancel | `POST /api/v1/skills/scan/{scan_id}/cancel` — `skills.py:157+` |
-| Background dispatch | `run_scan_pipeline()` in `backend/app/services/scan_pipeline.py:356-841` |
-| Auth | Requires `org:edit_settings` permission |
+1. **Exact `cluster_signature` match** — score `1.0`. The cluster signature is a SHA-256 of the cluster's canonical sorted node-ID list, computed by the indexer and persisted on every `features` row.
+2. **Code-locations Jaccard ≥ 0.7** — when the cluster's nodes drift slightly (a file added or removed) the signature won't match. Jaccard over the file-path set in `feature_to_repo.code_locations` (PRIMARY) catches this.
+3. **Embedding cosine ≥ 0.85** — when file paths shift wholesale (a refactor renames a directory) Jaccard collapses. Cosine similarity over the description embedding catches the rename case.
+4. **No match → INSERT** new feature + PRIMARY junction.
 
-### 18.3 The 11 Phases
+The match decision is captured both as a structlog event and as a `FeatureMatchLog` row appended to `ReconcileResult.match_log_rows`. The synthesise stage (and the PR-merge job) bulk-inserts the match log in the *same transaction* as the reconcile commits, so the audit trail can never claim a match that didn't actually persist.
 
-| # | Phase | Scope | Source | What happens | Persisted to | Resumable on rerun? |
-|---|-------|-------|--------|--------------|--------------|---------------------|
-| A | Scan Mode Detection | per-repo | `scan_pipeline.py:478-508` | Compare `head_sha` with current HEAD. If <30% of files changed → `incremental`; else `full`. Forces `full` if no scan-sourced features exist. | in-memory flag only | ❌ |
-| B | Code Indexing | per-repo | `app/services/scan/stages/ingest.py` | Run `code_indexer.index_repo` (graphify under the hood); persist clusters to `cluster_cache` and the call graph to `repo_graph_cache`. | `cluster_cache`, `repo_graph_cache` | ✅ DB-backed |
-| B1 | Repo Setup | per-repo | `scan_pipeline.py:544-560` | Install worktrees, hooks, `.gitignore`, CLAUDE.md; commit + push + open setup PR if branch pushed. | Git remote (setup PR) | ⚠️ |
-| D | Stale Cleanup (incremental only) | per-repo | `scan_pipeline.py:620-632` | Delete `knowledge_items` whose `code_locations` reference deleted files. | `knowledge_items`, `knowledge_to_repo` | ✅ DB-backed |
-| E | Git Skill Analysis | per-repo | `scan_pipeline.py:634-658` → `git_analyzer.py:analyze_repo_skills()` | Walk git log → compute per-author-per-module touch counts, language stats, recency score → upsert `SkillProfile`. Optional auto-create `User` rows (gated by `scan.auto_create_members`). | `skill_profiles` | ✅ DB-backed |
-| E1b | Design System Extraction | per-repo | `scan_pipeline.py:660-681` | Detect UI platform (Flutter, iOS, Tauri…), hash source files, enqueue async design-extraction job if hash changed. | `job_queue` (async) | ✅ async, independent |
-| B2 | Feature Synthesis | **global, parallel per repo** | `scan_phases.py:314-470`, dispatched from `scan_pipeline.py:696-707` | For each repo, start one Claude subprocess. Prompt = `build_synthesis_prompt()` for clustered repos or `build_direct_scan_prompt()` if no clusters. Claude calls MCP `get_pending_features` → `write_feature_registry` in a loop. | `knowledge_items` (category=`feature_registry`) | ⚠️ PARTIAL — features already written survive, un-synthesized clusters are lost with the process |
-| E2 | Skill Remap | global (gated) | `scan_pipeline.py:726-738` | Only runs if **new feature count ≥ 70% of previous feature count**. Wipes existing profiles and re-runs skill analysis using feature names (not directory paths) as the `module` dimension. | `skill_profiles` (destructive replace) | ⚠️ destructive |
-| B3 | Cross-Repo Merge | global (workspace mode only, ≥2 features) | `scan_phases.py:670-800` | Second Claude subprocess with `merge_features` MCP. Embed any items missing embeddings. `dedup_merged_features()` handles concurrent-MCP-retry fallout. Auto-link orphaned features. | `knowledge_items` (`is_active` flips), `knowledge_to_repo` | ⚠️ |
-| F | Embedding Backfill | global | called from inside B3 path | Embed any `knowledge_item` still missing a vector. | `knowledge_items.embedding` | ✅ DB-backed |
-| G | Persist | global, **last** | `scan_pipeline.py:748-841` | Update `tracked_repositories.head_sha`, `knowledge_count`, `feature_count`. Write `org.config.knowledge.repo_shas` + `last_scan`. | `tracked_repositories`, `organizations.config` | ✅ final commit |
-
-### 18.4 The Single Backing "Scan State" Table
-
-The only row-level persisted answer to *"where did the last scan get to?"* lives in **`tracked_repositories`** (`backend/app/models/tracked_repository.py:33-81`).
-
-Scan-relevant columns:
-
-| Column | Role |
-|--------|------|
-| `head_sha` | SHA of the last **successfully completed** scan. **Written only in Phase G.** |
-| `last_scanned_at` | Timestamp, also written only in Phase G. |
-| `knowledge_count`, `feature_count` | Denormalized counters, written in Phase G. |
-| `status` | `ACTIVE` / `IGNORED` / `REMOVED` — lifecycle, not scan state. |
-| `main_branch`, `develop_branch`, `uat_branch` | Branch mapping (Phase 0 gate). |
-| `github_repo_full_name` | Auto-populated during B1. |
-
-**There is no column, and no separate table, that records per-phase completion.** A scan that dies anywhere between Phase A and Phase G leaves `head_sha` untouched, which is precisely why the orchestrator has no choice but to re-run every phase from A on the next attempt.
-
-Actual scan results live in two supporting stores — **`knowledge_items`** (+ `knowledge_to_repo` junction, for `code_locations`) and **`skill_profiles`** — which **do** survive partial failures. The orchestrator simply has no signal of the form "Phase E already finished for repo X", so it redoes those phases anyway. That wasted work is the core pain point motivating future splitting.
-
-### 18.5 Progress & Error Tracking (Redis)
-
-| Aspect | Detail |
-|--------|--------|
-| Module | `backend/app/services/scan_progress.py` |
-| Store | Redis hash `scan:{scan_id}` (TTL 2h); in-memory fallback when Redis down |
-| Active-scan pointer | `scan_active:{org_id}` → current `scan_id` |
-| Monotonicity | `progress_pct` is `max(existing, new)` and clamped to `[0, 100]` |
-| Stale detection | No update for 2h → auto-fail (matches Redis TTL) |
-| Event bus | Every update publishes to topic `scan:{scan_id}` → frontend `useScanSocket` |
-
-Tracked fields (see `schemas/skills.py:62-86`): `status`, `scan_mode`, `progress_pct`, `features_indexed`, `features_skipped`, `profiles_found`, `stale_cleaned`, `unmatched_authors`, `synthesis_warning`, `setup_pr_message`, `repo_warnings[]`, `error`.
-
-**Granularity ceiling.** `repo_warnings` is per-repo-per-phase:
-
-```json
-{"repo": "bodhiorchard", "phase": "synthesis", "summary": "...", "hint": "..."}
-```
-
-Everything that happens *inside* Phase B2 — individual cluster failures, individual MCP call errors, Claude turn exhaustion — collapses into a single `synthesis_warning` string plus the `features_skipped` counter. There is no per-cluster, per-MCP-call, or per-turn record. This is the reason the user-visible failure log `claude_run_failed, returncode: 1` carries essentially no actionable signal.
-
-### 18.6 Claude Subprocess & MCP Tools
-
-**Runner.** `backend/app/services/claude_runner.py:88-320`.
-
-Command shape (`claude_runner.py:375-432`):
+Existing active rows that nothing matched are flipped `is_active=False` with `deactivated_at` stamped. They are eligible for revival (step 1, 2, or 3 hits an inactive row → set `is_active=True`, clear `deactivated_at`) so a removed-then-reintroduced feature reuses its `id`, keeping bug links and BUD references attached. Soft-delete state is rolled back on reconcile failure via `scan/soft_delete.py`.
 
 ```
-claude -p <prompt> \
-    --output-format stream-json \
-    --dangerously-skip-permissions \
-    --settings '{"outputStyle":"default"}' \
-    --verbose \
-    --max-turns <N> \
-    --mcp-config <tmpfile>
+synthesised batch of FeatureWrite
+        │
+        ▼
+  bulk_load_for_reconcile (existing active + inactive features for repo)
+        │
+        ▼
+  for each write:
+        ├─ signature match?  → UPDATE (or REVIVE if inactive)
+        ├─ jaccard ≥ 0.7?    → UPDATE (or REVIVE) + log score
+        ├─ cosine ≥ 0.85?    → UPDATE (or REVIVE) + log score
+        └─ no match          → INSERT + PRIMARY junction
+        │
+        ▼
+  unmatched active rows  → is_active=False, deactivated_at=NOW()
+        │
+        ▼
+  bulk-insert FeatureMatchLog rows  (atomic with the reconcile)
 ```
 
-Notes:
-- `--settings '{"outputStyle":"default"}'` is **mandatory** — without it, learning/explanatory output styles leak `★ Insight` blocks into skill output and corrupt the stream-JSON parser.
-- Output is consumed line-by-line looking for `{"type":"result", ...}` as the terminal event. `is_error: true` on any event surfaces as `claude_run_failed` in the log.
-- Default `--max-turns` is 40; default `timeout_seconds` is 300 for B2 and longer for B3 (both override-able via `org.config.scan.max_turns` / `.timeout_seconds`).
-- Stderr is drained concurrently in a separate task to prevent the OS pipe buffer from filling and deadlocking the subprocess.
+### 18.4 Two triggers, one reconciler
 
-**MCP handlers invoked from inside the subprocess:**
+| Trigger | Entry point | When |
+|---------|-------------|------|
+| Scheduled scan | `app/services/scan/stages/synthesize.py:run` | Per-repo SHA change detected by `cluster_cache` lookup. Runs full LLM synthesis pass. |
+| PR-merge webhook | `app/services/scan/pr_merge_update.py:handle_pr_merge_update` | A GitHub `pull_request` event with `action=closed` and `merged=true`. Triggered as a fan-out from the existing PR webhook flow without affecting release detection / BUD-progression / XP-SP awards. |
 
-| Tool | Handler | Behavior |
-|------|---------|----------|
-| `get_pending_features` | `handlers_knowledge.py:145` | Returns next ≤10 queued clusters from in-memory queue in `mcp/synthesis_queue.py`. Queue keyed by `org_id` or `org_id:repo_name` (parallel-per-repo). |
-| `write_feature_registry` | `handlers_knowledge.py:164` | Upserts `KnowledgeItem` (category=`feature_registry`, source=`scan`) + links via `KnowledgeRepoLink`. **If `repo_name` cannot be resolved to a `TrackedRepository`, insertion continues with `repo_id=None`** — the feature is persisted but orphaned. This is the "fails to fetch skill properly lib" symptom: the DB write succeeds but the repo-link side is silently dropped, and downstream readers (merge, UI) treat the feature as unlinked. |
-| `merge_features` | `handlers_knowledge.py` (referenced in B3) | Deactivates duplicate titles and consolidates `code_locations` across repos. |
+### 18.5 PR-merge webhook flow
 
-### 18.7 Soft-Delete Rollback Pattern
+```
+GitHub: pull_request closed (merged=true)
+        │
+        ▼
+POST /api/v1/webhooks/github       ← app/api/v1/github_webhook.py
+   1. Verify HMAC-SHA256 (existing org-level secret in organizations.github_webhook_secret)
+   2. Reject 400 if X-GitHub-Delivery header missing (loud failure, never silent skip)
+   3. webhook_logs.record_delivery(delivery_id, event_type, org_id, payload_summary)
+        ─ INSERT ... ON CONFLICT DO NOTHING RETURNING delivery_id
+        ─ if duplicate → 200 {"status": "duplicate"}, no dispatch
+   4. Dispatch via handle_github_event(...) → existing _handle_pr_closed
+        │
+        ▼
+_handle_pr_closed                  ← app/services/github_webhook_handler.py
+   • Existing logic UNCHANGED:
+        ─ PR row state → MERGED, merge_commit_sha capture
+        ─ setup-PR state flip
+        ─ BUD pr_merged event + check_all_prs_merged
+        ─ XP/SP awards for the merging author
+        ─ Release-stage detection (uat/prod promotion events)
+   • NEW tail call (after db.commit, after event-bus publish):
+        ─ if is_merged and pr_data.merge_commit_sha:
+              create_job(JOB_PR_MERGE_UPDATE, payload={...})
+        ─ Wrapped in try/except so a queue push failure NEVER breaks the existing flow.
+        │
+        ▼
+JOB_PR_MERGE_UPDATE worker          ← app/services/scan/pr_merge_update.py
+   1. Resolve TrackedRepository + Organization by repo_id.
+   2. Fetch PR file list:
+        GitHubClient.list_pr_files(full_name, pr_number)
+        ─ paginated GET /repos/{owner}/{repo}/pulls/{n}/files (capped at 30 pages).
+   3. Cluster diff via cluster_cache (signature-keyed):
+        base_rows = list_for_repo_sha(repo_id, base_sha)
+        head_rows = list_for_repo_sha(repo_id, head_sha)
+        ─ if either is empty (cache miss) → fall through to a full scan, never silent skip.
+        added    = signatures present in head but not base
+        modified = signatures surviving in both AND whose member files ∩ changed_paths ≠ ∅
+        affected = added ∪ modified
+   4. If affected is empty → COMPLETED no-op, no LLM cost.
+        (the common case for PRs touching only docs / configs / tests)
+   5. If affected is non-empty:
+        await start_v2_scan(org_id=..., repo_ids=[repo_id])
+        ─ ScanAlreadyActiveError is treated as success — the in-flight scan
+          will pick up the merged commits via its own SHA-gating.
+   6. The triggered scan runs the synthesise stage which calls the same
+      reconciler — match log + decision audit fire normally.
+```
 
-`scan_pipeline.py:~421-431` soft-deletes (`is_active = false`) every existing scan-sourced `KnowledgeItem` for the org **at the start of Phase B2**, tracking their IDs in `soft_deleted_ids`. Phase B2 then re-creates / reactivates each feature as MCP `write_feature_registry` calls land.
+The LLM cost-saving comes from **early-skip filtering**, not from narrowing the scope inside the synthesise stage. PRs that only touch un-clustered files (markdown, configs, tests, top-level metadata) skip the full pipeline entirely. PRs that touch clustered files trigger a regular SHA-gated scan, which reuses the unchanged earlier stages and lets the reconciler do its incremental CRUD on the affected repo.
 
-The implication: **if the scan dies before Phase G**, the org is left with its entire scan-sourced feature set soft-deleted. This is why an aborted scan can make features *temporarily vanish* from the UI even though no data was actually destroyed — they will reappear the next time a scan succeeds. There is currently no catch-block that reactivates `soft_deleted_ids` on failure.
+### 18.6 Match-debug telemetry surface
 
-### 18.8 Frontend Wiring
+```
+GET /api/v1/features/match-debug           ← app/api/v1/features.py:list_match_debug
+    Query params:
+        repoId       — uuid (optional)
+        since        — ISO-8601 datetime (optional)
+        matchVia     — signature | jaccard | cosine | insert (optional)
+        scoreMin     — float in [0.0, 1.0]
+        scoreMax     — float in [0.0, 1.0]
+        limit        — 1..1000, default 200
+    Auth: org-scoped via JWT (existing get_current_user dependency).
+    Returns: list[FeatureMatchLogRead] newest-first.
+```
 
-| Aspect | Detail |
-|--------|--------|
-| Trigger UI | `frontend/src/components/SetupChecklist.vue:~138-166` — "Scan Repository" button |
-| Composable | `frontend/src/composables/useScanSocket.ts:39-65` — wraps `useRealtimeTracker` with `topicPrefix: "scan"` |
-| Transport | WebSocket on `scan:{scan_id}` topic, with 2000 ms HTTP polling alongside (`pollAlongsideWs: true`) to catch missed events |
-| Terminal signals | `status === "completed"` or `"failed"` — stops the poller |
-| Client-side timeout | **None** (by design — scans can legitimately exceed an hour) |
-| Status labels | `STATUS_LABELS` map in the composable (e.g. `"synthesizing_features"` → "Synthesizing features") |
-| Warning rendering | `SetupChecklist.vue:~74-95` — lists each `repoWarning` with phase + summary + hint |
+Default tuning queries:
+- Borderline Jaccard: `?matchVia=jaccard&scoreMin=0.6&scoreMax=0.79` (just-below the threshold).
+- Borderline cosine: `?matchVia=cosine&scoreMin=0.78&scoreMax=0.86` (just-below the threshold).
+- Recent inserts: `?matchVia=insert` to spot features that should have been matched but weren't.
 
-### 18.9 Known Failure Modes (observed)
+### 18.7 Audit invariants
 
-Concrete symptoms driving this documentation pass:
+`app/scan/audit.py:audit_scan` (still single-pass, end-of-pipeline) now reports two integrity invariants in addition to the original "Bug-A" missing-synth detector:
 
-- **`error_max_turns` from the synthesis subprocess** — e.g. `num_turns: 41, max_turns: 40`. The orchestrator records only a generic `synthesis_warning`; there is no record of how far through the cluster queue Claude got, so every un-synthesized cluster is lost with the process.
-- **MCP `write_feature_registry` with unresolvable `repo_name`** — feature persisted without `repo_id`, orphaned from its repo. Downstream merge and UI display logic then treats it as unlinked ("fails to fetch skill properly lib").
-- **B3 merge concurrency** — under concurrent MCP retries, `merge_features` calls can collide; `dedup_merged_features()` cleans most of it up but mis-merges are still possible.
-- **Phase B1 setup-PR push failure** — captured as `setup_pr_message` and surfaced to the UI but **does not abort the scan**. A repo can complete a scan without its CLAUDE.md / hooks being present on the remote.
-- **Soft-delete visibility gap** — any mid-scan failure between Phase B2 start and Phase G success leaves scan-sourced features soft-deleted until the next successful scan.
+| Finding | Repository helper | Invariant |
+|---------|-------------------|-----------|
+| `orphan_features` | `FeatureRepository.find_orphan_active_feature_ids()` | Every active scan-sourced feature must own exactly one PRIMARY junction row. A crashed reconcile or a race could drop one. |
+| `duplicate_signatures` | `FeatureRepository.find_duplicate_signatures_for_org()` | Each `(repo_id, cluster_signature)` should resolve to at most one active feature. Multiple active rows on the same signature mean the inactivation step never landed — typically a race between a scheduled scan and a PR-merge webhook job. |
 
-### 18.10 Why It Is Not Resumable Today
+`ScanAuditReport.is_clean` now requires all three lists (`missing_repo_synth`, `orphan_features`, `duplicate_signatures`) to be empty.
 
-Three concrete blockers, any one of which alone would force a full restart:
+### 18.8 Concurrency and idempotency model
 
-1. **No per-phase checkpoint column.** The only durable "where did we get to" signal is `tracked_repositories.head_sha`, and that is written last (Phase G). Earlier phases produce real DB state in `knowledge_items` and `skill_profiles`, but there is no index telling the orchestrator which `(repo_id, phase)` pairs already succeeded.
-2. **In-memory synthesis queue.** `mcp/synthesis_queue.py` holds the per-repo cluster list in a Python module-level dict (`_synthesis_queue`). If the backend process dies, the queue dies with it — there is no recovery path that knows which clusters still need synthesis.
-3. **Single `scan_id`, overwriting progress record.** The Redis `scan:{scan_id}` hash is overwritten on each update, not appended to. By the time Phase B2 is running, the progress record no longer contains Phase A/B/E success signals — so even a hypothetical "resume from last known good phase" check has nothing to read.
+| Concern | Mitigation |
+|---------|------------|
+| GitHub at-least-once delivery | `webhook_logs.delivery_id` PK + `INSERT ... ON CONFLICT DO NOTHING` returns False on duplicate → caller short-circuits with `200 {"status": "duplicate"}`. Duplicates do **not** poison the SQLAlchemy session (no `IntegrityError` to catch). |
+| Two reconcilers for one repo | The existing per-org scan serialisation (one active scan at a time) prevents concurrent scheduled-scan reconcilers; `start_v2_scan` raises `ScanAlreadyActiveError` which the PR-merge job treats as success. The PR-merge job itself is also a queue-managed worker, so two PR-merge jobs for the same repo serialise via `start_v2_scan`'s gate. |
+| PR-merge job failure | Exceptions in the handler call `update_job(state=FAILED, error=...)` and the dedup row commits/rolls back atomically with the dispatching transaction in the webhook entry point — so on retry, GitHub sees a fresh delivery and re-attempts. |
+| Webhook-secret rotation | Single-secret model only (`organizations.github_webhook_secret`). In-flight retries signed with the old secret WILL fail HMAC and surface as 401; the operator confirms a rotation by replaying a fresh delivery. No dual-secret rolling-window machinery. |
 
-Addressing any of these without addressing the other two still leaves the pipeline effectively all-or-nothing. The follow-up design work (not in scope for this section) needs to pick a minimum-viable checkpoint granularity — most likely `(repo_id, phase)` — and durably persist both the completion signal and the synthesis-queue position.
+### 18.9 Critical file map
 
-### 18.11 Key File Map
-
-| Layer | File | Key symbol(s) |
-|-------|------|---------------|
-| API trigger | `backend/app/api/v1/skills.py:37-154` | `trigger_scan`, `get_scan_status` |
-| Orchestrator | `backend/app/services/scan_pipeline.py:356-841` | `run_scan_pipeline`, `build_synthesis_prompt`, `build_direct_scan_prompt` |
-| Phase implementations | `backend/app/services/scan_phases.py:314-800` | `phase_b2_synthesis`, `phase_b3_merge` |
-| Claude runner | `backend/app/services/claude_runner.py:88-432` | `run_claude_code`, `_run_with_streaming` |
-| Progress tracking | `backend/app/services/scan_progress.py` | `create_scan_progress`, `update_scan_progress`, `resolve_scan_progress` |
-| MCP knowledge handlers | `backend/app/mcp/handlers_knowledge.py:145+` | `handle_get_pending_features`, `handle_write_feature_registry` |
-| MCP synthesis queue | `backend/app/mcp/synthesis_queue.py` | `set_synthesis_queue`, `get_queue_remaining`, `remove_from_queue` |
-| Skill extraction | `backend/app/services/git_analyzer.py` | `analyze_repo_skills` |
-| Results model | `backend/app/models/knowledge_item.py:42-80` | `KnowledgeItem`, `KnowledgeRepoLink` |
-| Skill model | `backend/app/models/skill_profile.py:24-54` | `SkillProfile` |
-| Scan-state model | `backend/app/models/tracked_repository.py:33-81` | `TrackedRepository` |
-| Progress schema | `backend/app/schemas/skills.py:11-86` | `ScanRequest`, `ScanResponse`, `ScanStatus`, `RepoScanWarning` |
-| Frontend composable | `frontend/src/composables/useScanSocket.ts:39-65` | `useScanSocket` |
-| Frontend trigger | `frontend/src/components/SetupChecklist.vue` | Scan checklist item |
-
-### 18.12 How Skills Are Computed
-
-Developer "skills" aren't inferred from anywhere fancy — they're a direct function of the git log. Two passes run during a scan:
-
-**Pass 1 — `SKILL_EXTRACTION` (per-repo, directory-based).** Source: `backend/app/services/git_analyzer.py:115-219`. Steps:
-
-1. Enumerate commits via `git log --format=%H|%ae|%an|%aI --no-merges --since=6.months.ago` (window is `DEFAULT_SINCE` at `git_analyzer.py:22`). Merge commits excluded so reviewers don't inherit author credit.
-2. For each commit, pull the changed file list (`git show --name-only`).
-3. Map every file to a **module**. Default: the top-level directory (`backend/…` → `backend`). Paths under `_SKIP_SKILL_PATHS` (`.claude`, `.githooks`, `.bodhiorchard`, `.gitnexus`, `.github`, `.vscode`, `.idea`) are dropped as tooling, not code.
-4. Accumulate per `(email, module)` a `ModuleStats`: `touch_count`, `languages` (derived from extension via `LANG_MAP`), `last_touch`.
-5. Compute `skill_score = min(1.0, touch_count / 50.0) * recency_weight`. The `/ 50.0` saturates at 50 touches so an outlier 500-touch author doesn't pin the curve; `recency_weight` exponentially decays from `last_touch` to "now".
-6. Upsert into `skill_profiles` keyed on `(user_id, org_id, module)`. Authors whose email doesn't resolve to a `User` surface as `unmatched_authors` in the `ScanStatus` payload; the scan is never blocked by them.
-
-**Pass 2 — `SKILL_REMAP` (global, feature-based).** Source: `backend/app/services/scan_phases.py::phase_e2_skill_remap` and the `upsert_skill_profiles` helper at `scan_helpers.py:55-108`. Runs only when synthesis produced enough features — gated by `new_count >= 0.7 * old_count` (constant `_E2_SPARSE_THRESHOLD`). When it fires:
-
-1. Build a `feature_map` from `knowledge_to_repo.code_locations`: one entry per feature with its path prefixes (longest-prefix-wins).
-2. Re-run `analyze_repo_skills` per repo with that map — files matching a feature prefix land under the feature name instead of the directory.
-3. In a single DB **SAVEPOINT** (`async with db.begin_nested()`): DELETE all scan-sourced rows, then INSERT the feature-keyed profiles. A crash between delete and insert rolls the savepoint back, leaving the old rows intact — the "empty skills table until next scan" window is closed.
-
-When the 70% gate doesn't fire (sparse feature map), E2 does a partial upsert without wiping — a tiny feature set never nukes established directory profiles.
-
-### 18.13 Resumability
-
-Shipped in P1–P13 of the "Scan Repo Waterfall — Resumable Pipeline Design" plan at `.claude/plans/scan-repo-for-big-elegant-waterfall.md`. This subsection summarises what landed.
-
-**Two new tables + typed enum.** `backend/app/models/scan_phase.py` defines the `ScanPhase`, `PhaseScope`, `CheckpointStatus`, `MergeOutcome`, and `ScanErrorCode` StrEnums (legacy A..G codes preserved in comments for grep). The 11 phases:
-
-| Enum value | Was | Scope |
-|------------|-----|-------|
-| `mode_detection` | A | per-repo |
-| `code_index` | B | per-repo |
-| `repo_setup` | B1 | per-repo |
-| `stale_cleanup` | D | per-repo (incremental only) |
-| `skill_extraction` | E | per-repo |
-| `design_system_extract` | E1b | per-repo |
-| `feature_synthesis` | B2 | per-repo (runs under the global stripe, parallel per repo) |
-| `skill_remap` | E2 | global |
-| `feature_merge` | B3 | global |
-| `embedding_backfill` | F | global |
-| `persist_results` | G | global |
-
-`SHA_REUSABLE_PHASES = {CODE_INDEX, SKILL_EXTRACTION, DESIGN_SYSTEM_EXTRACT}` — these three phases copy their payload from an earlier DONE row when the repo HEAD SHA matches, so a full-rescan of an unchanged repo costs nothing beyond the lookup.
-
-**`scan_phase_checkpoints`** (migration `zn_scan_phase_checkpoints.py`). One row per `(scan_id, repo_id, phase, attempt)`. Stores lifecycle (`pending` / `running` / `done` / `failed` / `skipped`), `sha_at_run`, `error_code`, `error_message`, JSONB `payload`, and `parent_scan_id` for resume lineage. Indexed on `(scan_id, phase)`, `(org_id, phase, sha_at_run)` for cross-scan reuse lookups, and `(org_id, status)` for admin listings.
-
-**`synthesized_features`** (migration `zo_synthesized_features.py`). Immutable, append-only record written by the MCP `write_feature_registry` handler during `FEATURE_SYNTHESIS`. `repo_id` is NOT NULL — unresolvable `repo_name` now hard-fails in the MCP handler instead of silently creating an orphan. `merge_outcome` is an enum (`canonical` / `merged_into` / `unvisited`) with a self-FK `merged_into_id` pointing at the surviving canonical row. Superseded rows get `superseded_at` set but are never hard-deleted — the partial index `ix_synth_feat_latest WHERE superseded_at IS NULL` keeps "current view" queries fast.
-
-**Checkpoint wrapper.** `backend/app/services/scan_checkpoints.py::run_checkpointed_phase` handles all three axes of skip logic in one place:
-
-1. Within-scan skip — if the current scan already has a DONE / SKIPPED checkpoint for this phase, return its payload.
-2. Cross-scan SHA reuse — for phases in `SHA_REUSABLE_PHASES` with a matching `sha_at_run` row in any prior scan, copy the payload and stamp a new DONE row with `started_at == finished_at` (the "cached" signal the frontend renders).
-3. Run + classify — otherwise execute the phase body, classify any exception via `classify_scan_error`, stamp the checkpoint accordingly, and re-raise.
-
-The typed `ScanPhaseError` hierarchy (`MaxTurnsError`, `ClaudeSubprocessError`, `MCPError`, `PhaseTimeoutError`, `OrphanFeaturesError`, `MergeIncompleteError`) lets the scan body raise a specific failure mode and have the UI render an actionable hint without string-matching.
-
-**Per-repo stripe.** `backend/app/services/scan_repo_loop.py::process_one_repo` replaces the inline per-repo loop body that used to live in `run_scan_pipeline`. Each of the six per-repo phases runs through a local `_ckpt(phase, phase_fn)` wrapper that forwards to `run_checkpointed_phase` with the captured SHA. Sibling modules `scan_design_system.py` and `scan_synthesis_queue.py` hold two helpers (`maybe_extract_design_system`, `build_pending_synthesis`) extracted to keep the loop module under 400 lines.
-
-**B2 self-heal + audit.** `phase_b2_synthesis` now queries `synthesized_features.cluster_names_for_repo` before launching the Claude subprocess and rewrites the in-memory queue to the pending subset — resume always picks up exactly where the previous attempt left off, without any durable queue. After the subprocess exits successfully, `KnowledgeItemScanRepository.find_items_missing_repo_link` runs as a belt-and-braces audit; auto-repair inserts missing links, and anything unfixable surfaces as `OrphanFeaturesError` → `error_code='orphan_feature'` on the checkpoint.
-
-**B3 post-merge audit.** `phase_b3_merge` ends with `SynthesizedFeatureRepository.mark_unvisited_for_scan(scan_id)`. Any synth row still NULL has not been mentioned by the merge subprocess — it's flagged `unvisited` and the phase raises `MergeIncompleteError`. The retry endpoint can then re-run merge with only the unvisited subset as input.
-
-**Durable checkpoint sessions.** Every checkpoint write — RUNNING insert, DONE finalize, FAILED finalize, SHA-reuse copy-forward — runs inside a dedicated `_checkpoint_tx(org_id)` async context (`scan_checkpoints.py`) that opens its own `AsyncSessionLocal()`, commits on clean exit, rolls back and re-raises on exception. The pipeline's outer `db` session is *never* used for checkpoint I/O. This decouples the WAL of phase transitions from the phase body's transaction: when a phase raises and the pipeline session rolls back its work, the FAILED checkpoint is already committed independently and stays durable. Repository writers (`start`, `finalize_by_id`, `insert_reused`) return primitive types (`uuid.UUID` / `None`) rather than ORM rows, so callers can't accidentally hold a detached instance after the helper closes its session. `run_checkpointed_phase` carries the checkpoint id between the start and the finalize as a UUID — the FAILED `UPDATE` then targets a primary key in a fresh session, no identity-map dependency. Cancellation (`asyncio.CancelledError`) is the one exception path that intentionally leaves the row in RUNNING — `reconcile_orphan_scans` flips it to FAILED on next boot.
-
-**Soft-delete scope.** `run_scan_pipeline` now computes `changed_repos` upfront by comparing each active repo's `git rev-parse HEAD` against `tracked_repositories.head_sha`. Only those repos' feature rows are soft-deleted at scan start (via `KnowledgeItemScanRepository.soft_delete_by_repo_ids`). Unchanged repos keep their rows live for the whole scan — the "features temporarily vanish during a full rescan of a mostly-unchanged workspace" UX gap is closed.
-
-**HTTP surface.** Under `/api/v1/skills`:
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/scan` | Unchanged. Fresh scan. |
-| `POST` | `/scan/{scan_id}/resume` | Mint a child scan that inherits parent's DONE / SKIPPED checkpoints; re-run the rest. |
-| `POST` | `/scan/{scan_id}/phases/{phase}/retry?repo_id=…` | Same as resume, but the child scan omits the specified phase (optionally one repo) so it runs fresh. |
-| `GET`  | `/scan/{scan_id}/checkpoints` | Full checkpoint list powering the frontend timeline. |
-| `POST` | `/scan/recover/feature/{synth_feature_id}` | Bad-merge recovery — re-insert a feature from its immutable pre-merge synth row into `knowledge_items` + `knowledge_to_repo`. |
-| `GET`  | `/scan/{scan_id}/status` | Now enriched with `phases[]` and `parentScanId` via `enrich_status_with_phases`. |
-
-All require `org:edit_settings`, matching `trigger_scan`.
-
-**WebSocket delivery.** Stays on the existing `scan:{scan_id}` topic — no sub-topic, no wildcard subscription (`event_bus` doesn't support them). `_publish` in `scan_progress.py` routes through `publish_scan_status` which hashes the payload and silently drops no-op republishes. Non-UUID `scan_id` sentinels used in older tests fall through to the raw publish path unchanged.
-
-**Frontend wiring.** `frontend/src/composables/useScanSocket.ts` `ScanStatusData` grew `phases: PhaseStatus[]` and `parentScanId`. A new `frontend/src/stores/scan.ts` Pinia store centralises scan state and exposes `resume()` / `retryPhase()` actions. `frontend/src/components/scan/ScanPhaseTimeline.vue` renders the per-phase timeline with per-row retry buttons. `SetupChecklist.vue` swaps in the timeline when `phases.length > 0` and falls back to the legacy progress bar when it's empty (pre-migration scans).
+| Layer | File | Symbol |
+|-------|------|--------|
+| Reconciler | `backend/app/services/feature_reconciler.py` | `reconcile_features_for_repo`, `FeatureWrite`, `ReconcileResult.match_log_rows` |
+| Synthesise driver | `backend/app/services/scan/stages/synthesize.py` | `run`, `_reconcile_synthesised_batch` (now bulk-inserts match log) |
+| PR-merge job | `backend/app/services/scan/pr_merge_update.py` | `handle_pr_merge_update`, `_find_affected_clusters` |
+| Webhook entry | `backend/app/api/v1/github_webhook.py` | `github_webhook` (dedupe + dispatch) |
+| Webhook dispatcher | `backend/app/services/github_webhook_handler.py` | `_handle_pr_closed`, `_enqueue_pr_merge_feature_reconcile` |
+| Webhook dedupe repo | `backend/app/repositories/webhook_log.py` | `WebhookLogRepository.record_delivery` |
+| Match-log repo | `backend/app/repositories/feature_match_log.py` | `FeatureMatchLogRepository.bulk_insert`, `list_for_repo` |
+| Match-debug endpoint | `backend/app/api/v1/features.py` | `list_match_debug` |
+| Match-debug schema | `backend/app/schemas/feature.py` | `FeatureMatchLogRead` |
+| Audit hook | `backend/app/scan/audit.py` | `audit_scan`, `_find_duplicate_signatures` |
+| Feature repo audit helpers | `backend/app/repositories/feature.py` | `find_duplicate_signatures`, `find_duplicate_signatures_for_org`, `find_orphan_active_feature_ids` |
+| Job registry | `backend/app/services/job_handlers.py` | `setup_job_handlers` registers `JOB_PR_MERGE_UPDATE` |
+| GitHub PR-files client | `backend/app/services/github_client.py` | `GitHubClient.list_pr_files` |
+| Migrations | `backend/alembic/versions/zaj_webhook_logs_and_match_log.py` | `webhook_logs`, `feature_match_log` table creation |
 
 ---
 

@@ -3,7 +3,9 @@
 
 """Pydantic schemas for the first-time setup endpoint."""
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+
+from app.schemas.repo_install import BulkOnboardItem
 
 
 class SetupOrganization(BaseModel):
@@ -119,6 +121,72 @@ class BrowseDirectoriesResponse(BaseModel):
     current_path: str
     parent_path: str | None = None
     directories: list[DirectoryEntry] = []
+
+
+class InitOrgRequest(BaseModel):
+    """Stage-1 wizard payload — provision the org + admin user only.
+
+    Mirrors the org/admin/scan/claude sub-trees of :class:`SetupRequest`
+    so existing wizard state can flow into this endpoint without a
+    re-shape; just omit the ``sourceCode`` field. Repos are added in a
+    separate stage via :class:`FinalizeWithReposRequest`.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    organization: SetupOrganization
+    admin: SetupAdmin
+    scan: SetupScan = Field(default_factory=SetupScan)
+    claude: SetupClaude = Field(default_factory=SetupClaude)
+
+
+class InitOrgResponse(BaseModel):
+    """Stage-1 wizard response — JWT to drive the rest of the flow."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    organization_id: str = Field(alias="organizationId")
+    user_id: str = Field(alias="userId")
+    org_slug: str = Field(alias="orgSlug")
+    access_token: str = Field(alias="accessToken")
+    token_type: str = "bearer"
+    mcp_token: str | None = Field(default=None, alias="mcpToken")
+    is_setup_complete: bool = Field(default=False, alias="isSetupComplete")
+
+
+class FinalizeWithReposRequest(BaseModel):
+    """Stage-2 wizard payload — add repos via ONE OF two paths.
+
+    - ``installable_items``: GitHub-App bulk-onboard path (async job).
+    - ``source_code``: legacy paste-URL / local-path payload (sync scan).
+
+    Exactly one of the two must be provided; the model validator below
+    enforces the XOR.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    installable_items: list[BulkOnboardItem] | None = Field(default=None, alias="installableItems")
+    source_code: SetupSourceCode | None = Field(default=None, alias="sourceCode")
+
+    @model_validator(mode="after")
+    def _require_exactly_one_path(self) -> "FinalizeWithReposRequest":
+        has_app = self.installable_items is not None and len(self.installable_items) > 0
+        has_legacy = self.source_code is not None and len(self.source_code.repos) > 0
+        if has_app == has_legacy:
+            raise ValueError("Exactly one of 'installableItems' or 'sourceCode' must be provided.")
+        return self
+
+
+class FinalizeWithReposResponse(BaseModel):
+    """Stage-2 wizard response — either a sync scan_id or an async job_id."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    scan_id: str | None = Field(default=None, alias="scanId")
+    job_id: str | None = Field(default=None, alias="jobId")
+    is_setup_complete: bool = Field(default=True, alias="isSetupComplete")
+    embedding_warning: str | None = Field(default=None, alias="embeddingWarning")
 
 
 class SetupStatusResponse(BaseModel):

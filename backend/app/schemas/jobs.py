@@ -3,10 +3,11 @@
 
 """Pydantic schemas for the async job queue system."""
 
+import uuid
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobState(StrEnum):
@@ -131,6 +132,49 @@ class DesignExtractJobPayload(BaseModel):
     # cross-platform default and silently classifying a Flutter repo as
     # web_js is exactly the bug this field exists to prevent.
     platform: str
+
+
+class BulkOnboardItemState(StrEnum):
+    """Per-item lifecycle states reported through job progress."""
+
+    PENDING = "pending"
+    CLONING = "cloning"
+    DONE = "done"
+    ERROR = "error"
+
+
+class BulkOnboardItemProgress(BaseModel):
+    """Per-item progress + outcome row carried inside the job payload.
+
+    The same shape is used both as the persistent payload (so the
+    handler can look up branches per item) and as the per-item progress
+    snapshot the frontend reads via ``useJobSocket``.
+    """
+
+    full_name: str = Field(alias="fullName")
+    main_branch: str = Field(alias="mainBranch")
+    develop_branch: str | None = Field(default=None, alias="developBranch")
+    uat_branch: str | None = Field(default=None, alias="uatBranch")
+    status: BulkOnboardItemState = BulkOnboardItemState.PENDING
+    repo_id: uuid.UUID | None = Field(default=None, alias="repoId")
+    error: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BulkOnboardJobPayload(BaseModel):
+    """Payload for the bulk-onboard async job.
+
+    The list of ``items`` is mutated in place by the handler — each
+    child coroutine flips its row's ``status`` (and ``repo_id`` /
+    ``error`` on terminal states) and the whole list is republished
+    through ``update_job(result=...)`` for the websocket client.
+    """
+
+    org_id: uuid.UUID = Field(alias="orgId")
+    items: list[BulkOnboardItemProgress]
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class BUDAgentTaskPayload(BaseModel):

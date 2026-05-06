@@ -57,7 +57,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     await websocket.accept()
     user_id = payload.get("sub", "unknown")
-    logger.debug("ws_connected", user_id=user_id)
+    org_id = payload.get("org_id")
+    logger.debug("ws_connected", user_id=user_id, org_id=org_id)
 
     # ── State per connection ──────────────────────────────
     # topic → (event_bus queue, reader task)
@@ -100,6 +101,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     if topic.startswith("xp:") and topic != f"xp:{user_id}":
                         await websocket.send_json({"error": "forbidden", "topic": topic})
                         continue
+                    # Org-scoped topics: ``org:{org_id}:{channel}`` — the
+                    # second segment must match the JWT's ``org_id`` claim.
+                    if topic.startswith("org:"):
+                        parts = topic.split(":", 2)
+                        if len(parts) < 3 or not org_id or parts[1] != org_id:
+                            await websocket.send_json({"error": "forbidden", "topic": topic})
+                            continue
 
                     if topic not in subscriptions:
                         bus_queue = subscribe(topic)

@@ -8,17 +8,6 @@
 -->
 <template>
   <div>
-    <v-alert
-      type="warning"
-      variant="tonal"
-      density="compact"
-      icon="mdi-source-branch-sync"
-      class="mb-3"
-    >
-      Scanning a local repo will temporarily stash uncommitted changes and
-      check out the main branch. Commit or back up your work first.
-    </v-alert>
-
     <div class="d-flex align-center ga-3 mb-3">
       <div class="flex-grow-1 min-w-0">
         <div class="text-body-2 font-weight-medium">Pick folders on this machine</div>

@@ -17,6 +17,7 @@
       prepend-inner-icon="mdi-account-outline"
       class="mb-4"
       :rules="[rules.required]"
+      :readonly="setupStore.orgInitDone"
     />
 
     <v-text-field
@@ -27,7 +28,19 @@
       type="email"
       class="mb-4"
       :rules="[rules.required, rules.email]"
+      :readonly="setupStore.orgInitDone"
     />
+
+    <v-alert
+      v-if="setupStore.orgInitDone"
+      type="info"
+      variant="tonal"
+      density="compact"
+      icon="mdi-lock-outline"
+      class="mb-4"
+    >
+      Locked after Continue — the admin account has already been created.
+    </v-alert>
 
     <v-text-field
       v-model="setupStore.state.admin.password"
@@ -38,6 +51,7 @@
       :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
       class="mb-1"
       :rules="[rules.required, rules.minLength]"
+      :readonly="setupStore.orgInitDone"
       @click:append-inner="showPassword = !showPassword"
     />
 
@@ -60,6 +74,7 @@
       :type="showConfirmPassword ? 'text' : 'password'"
       :append-inner-icon="showConfirmPassword ? 'mdi-eye-off' : 'mdi-eye'"
       :rules="[rules.required, rules.passwordMatch]"
+      :readonly="setupStore.orgInitDone"
       @click:append-inner="showConfirmPassword = !showConfirmPassword"
     />
   </v-card>

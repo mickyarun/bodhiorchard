@@ -160,5 +160,3 @@ class SkillProfileRead(BaseModel):
     modules: list[ModuleSkill] = []
 
     model_config = {"populate_by_name": True}
-
-

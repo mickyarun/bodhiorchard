@@ -36,6 +36,7 @@ from app.services.scan.runner_fanout import (
     await_background_task,
     cancel_background_task,
     spawn_background_scan,
+    wait_for_scan_task,
 )
 from app.services.scan.setup import (
     RepoDescriptor,
@@ -52,6 +53,7 @@ __all__ = [
     "cancel_v2_scan",
     "resume_v2_scan",
     "start_v2_scan",
+    "wait_for_scan_task",
 ]
 
 logger = structlog.get_logger(__name__)

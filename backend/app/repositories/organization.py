@@ -5,7 +5,7 @@
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
@@ -91,6 +91,24 @@ class OrganizationRepository(BaseRepository[Organization]):
         )
         return result.scalar_one_or_none()
 
+    async def get_by_github_app_id(self, app_id: int) -> Organization | None:
+        """Fetch an organization by its configured GitHub App ID.
+
+        Used by the install webhook to resolve the target org from
+        ``installation`` / ``installation_repositories`` events that have
+        no ``repository`` field but always carry ``installation.app_id``.
+
+        Args:
+            app_id: Numeric GitHub App ID.
+
+        Returns:
+            The matching Organization or None.
+        """
+        result = await self._db.execute(
+            select(Organization).where(Organization.github_app_id == app_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_slack_team_id(self, team_id: str) -> Organization | None:
         """Fetch an organization by its Slack workspace team_id.
 
@@ -115,6 +133,21 @@ class OrganizationRepository(BaseRepository[Organization]):
             select(Organization).where(Organization.mcp_token_hash.is_not(None))
         )
         return list(result.scalars().all())
+
+    async def update_app_slug(self, org_id: uuid.UUID, slug: str) -> None:
+        """Persist the GitHub App ``slug`` (lowercase identifier) for an org.
+
+        The slug is back-filled from a one-shot ``GET /app`` call the first
+        time we have credentials but no slug. Stored plain text — it
+        appears in public install URLs and is not a secret.
+
+        Args:
+            org_id: Target organization id.
+            slug: Lowercase slug from the GitHub ``/app`` response.
+        """
+        await self._db.execute(
+            update(Organization).where(Organization.id == org_id).values(github_app_slug=slug)
+        )
 
     async def check_setup_exists(self) -> Organization | None:
         """Check if any organization exists (for first-time setup detection).

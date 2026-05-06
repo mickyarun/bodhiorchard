@@ -99,9 +99,7 @@ class Feature(BaseModel):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
-    deactivated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Latest head SHA at which the reconciler confirmed this feature is
     # still present. Drives the "still alive?" audit without a join.
     last_seen_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
