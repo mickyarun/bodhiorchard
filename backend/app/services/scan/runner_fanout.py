@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Background fanout for the v2 scan pipeline.
+"""Background fanout for the scan pipeline.
 
 Holds the strong-reference table for in-flight scan tasks, schedules
 the per-repo workflow loop bounded by ``gather_repos``, and runs the
 global phases once every per-repo workflow has completed. Public
-surface (``start_v2_scan`` / ``resume_v2_scan`` / ``cancel_v2_scan``)
+surface (``start_scan`` / ``resume_scan`` / ``cancel_scan``)
 lives in ``runner.py``; this module is the implementation detail those
 entry points dispatch into.
 """
@@ -171,19 +171,26 @@ async def _execute_scan(
     async def _run_one(descriptor: RepoDescriptor) -> None:
         observer = DBTimelineObserver(org_id=org_id, scan_id=scan_id, repo_id=descriptor.repo_id)
         # Per-stage skip predicates own the "is this work already
-        # current?" decision. The runner only threads ``v2_full_rescan``
+        # current?" decision. The runner only threads ``full_rescan``
         # so the bypassable predicates can flip themselves off when the
         # user requests a Reset / Full Rescan.
         runtime_overrides: dict[str, Any] = {
-            "v2_org_id": str(org_id),
-            "v2_scan_id": str(scan_id),
-            "v2_repo_id": str(descriptor.repo_id),
-            "v2_repo_paths": repo_paths,
-            "v2_full_rescan": bool(config.full_rescan),
+            "org_id": str(org_id),
+            "scan_id": str(scan_id),
+            "repo_id": str(descriptor.repo_id),
+            "repo_paths": repo_paths,
+            "full_rescan": bool(config.full_rescan),
             "scan_cfg": scan_cfg_overrides,
             **scan_cfg_overrides,
             **mcp_credentials,
         }
+        if descriptor.main_branch:
+            # ingest reads ``config.get("main_branch")`` first; threading
+            # the wizard-selected branch here keeps the stage off the
+            # ``origin/HEAD`` autodetect path, which silently picks a
+            # feature branch when GitHub's default isn't ``main`` /
+            # ``master``.
+            runtime_overrides["main_branch"] = descriptor.main_branch
         try:
             # ``await_completion=True`` is critical: the scan must not
             # advance to ``run_global_phases`` / mark the Scan terminal

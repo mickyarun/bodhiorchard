@@ -80,7 +80,11 @@ async def process_one_item(
     """
     clone_url = compose_app_clone_url(token, item.full_name)
     try:
-        result = await clone_or_update(url=clone_url, org_slug=org_slug)
+        result = await clone_or_update(
+            url=clone_url,
+            org_slug=org_slug,
+            branch=item.main_branch,
+        )
     except Exception as exc:
         item.status = BulkOnboardItemState.ERROR
         item.error = _sanitize(str(exc), token)
