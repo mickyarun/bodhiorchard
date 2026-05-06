@@ -97,6 +97,16 @@ def classify_from_worktree(path: Path) -> Classification | None:
         # name-hint table (curated for this org) make the decision.
         return None
 
+    pubspec = path / "pubspec.yaml"
+    if pubspec.exists():
+        try:
+            text = pubspec.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        if "\nflutter:" in f"\n{text}" or "  flutter:" in text:
+            return Classification(layer=RepoLayer.FRONTEND, tech_stack="flutter", db_flavor=None)
+        return None
+
     if pyproject.exists() or requirements.exists():
         manifest = pyproject if pyproject.exists() else requirements
         try:

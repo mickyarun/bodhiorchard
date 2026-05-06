@@ -151,6 +151,34 @@ def test_python_with_pymysql_classifies_as_mysql(tmp_path: Path) -> None:
     assert c.db_flavor == "mysql"
 
 
+def test_flutter_pubspec_detected_as_frontend(tmp_path: Path) -> None:
+    """A ``pubspec.yaml`` with a ``flutter:`` section is FRONTEND/flutter.
+
+    Regression: ``atoa_pax`` is a Flutter app but was falling through to
+    ``RepoLayer.SHARED`` because the classifier only inspected
+    ``package.json`` / ``pyproject.toml`` / ``requirements.txt``.
+    """
+    (tmp_path / "pubspec.yaml").write_text(
+        "name: atoa_pax\n"
+        "dependencies:\n"
+        "  flutter:\n"
+        "    sdk: flutter\n"
+        "flutter:\n"
+        "  uses-material-design: true\n"
+    )
+    c = classify_from_worktree(tmp_path)
+    assert c is not None
+    assert c.layer is RepoLayer.FRONTEND
+    assert c.tech_stack == "flutter"
+
+
+def test_pure_dart_pubspec_returns_none(tmp_path: Path) -> None:
+    """A Dart-only ``pubspec.yaml`` (no ``flutter:`` marker) defers to name hints."""
+    (tmp_path / "pubspec.yaml").write_text("name: dart_cli_tool\ndependencies:\n  args: ^2.0.0\n")
+    c = classify_from_worktree(tmp_path)
+    assert c is None
+
+
 def test_orm_only_without_driver_returns_no_flavor(tmp_path: Path) -> None:
     """A bare ORM (``sqlalchemy``) without a driver hint shouldn't guess.
 
