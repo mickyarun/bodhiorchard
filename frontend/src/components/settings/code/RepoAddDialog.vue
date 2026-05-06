@@ -186,10 +186,14 @@ watch(modeReady, (ready) => {
 
 async function onBulkOnboarded(_result: BulkOnboardJobTerminalResult): Promise<void> {
   // Bulk onboard runs the full clone+scan path server-side. Once it
-  // terminates we close the dialog and refresh the repo list to surface
-  // the newly tracked repos.
+  // terminates we close the dialog and refresh both connection state
+  // (install metadata) and the repo list — the latter is what surfaces
+  // the newly tracked repos in RepoList without a page reload.
   emit('update:modelValue', false)
-  await settingsStore.fetchConnections()
+  await Promise.all([
+    settingsStore.fetchConnections(),
+    settingsStore.fetchRepos(),
+  ])
 }
 
 // Pending counts feed both the footer hint + the submit label so we
