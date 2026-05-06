@@ -234,7 +234,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="write_synthesis_feature",
         description=(
-            "v2 scan pipeline: persist a feature with full meta-community "
+            "scan pipeline: persist a feature with full meta-community "
             "linkage. Pass the community_id values you received in the "
             "synthesis prompt — both the ones merged into this feature "
             "(``source_community_ids``) and the ones you decided to skip "
@@ -296,7 +296,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "description": (
                         "UUID of the active scan, copied verbatim from the "
                         "prompt's *Scan context* block. Binds this feature "
-                        "to the exact scan run. Required during v2 scans; "
+                        "to the exact scan run. Required during scans; "
                         "omit only for legacy ad-hoc calls."
                     ),
                 },

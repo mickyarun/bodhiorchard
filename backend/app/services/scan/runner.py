@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Public lifecycle surface for the v2 scan pipeline.
+"""Public lifecycle surface for the scan pipeline.
 
 Three entry points the API layer dispatches into:
 
-* :func:`start_v2_scan` — POST /scans handler. Creates the Scan row,
+* :func:`start_scan` — POST /scans handler. Creates the Scan row,
   one ScanRepoRun per repo, kicks off the background fanout, returns
   the scan id immediately.
-* :func:`resume_v2_scan` — POST /scans/{id}/resume handler. Looks at
+* :func:`resume_scan` — POST /scans/{id}/resume handler. Looks at
   existing repo runs, retries the failed/incomplete ones.
-* :func:`cancel_v2_scan` — POST /scans/{id}/cancel handler. Stops the
+* :func:`cancel_scan` — POST /scans/{id}/cancel handler. Stops the
   in-flight task and flips any non-terminal repo runs to FAILED.
 
 All three are no-throw at the orchestration layer: per-repo
@@ -44,15 +44,12 @@ from app.services.scan.setup import (
     load_repo_descriptor,
 )
 
-# Re-export so existing callers that imported from ``runner`` keep
-# working without a churn-heavy rename across api/v1/scans.py and the
-# scan_progress orphan reconciler.
 __all__ = [
     "ScanAlreadyActiveError",
     "cancel_background_task",
-    "cancel_v2_scan",
-    "resume_v2_scan",
-    "start_v2_scan",
+    "cancel_scan",
+    "resume_scan",
+    "start_scan",
     "wait_for_scan_task",
 ]
 
@@ -79,13 +76,13 @@ class ScanAlreadyActiveError(Exception):
         super().__init__(f"Scan {scan_id} is already active (status={status})")
 
 
-async def start_v2_scan(
+async def start_scan(
     *,
     org_id: uuid.UUID,
     repo_ids: list[uuid.UUID],
     config: RunConfig | None = None,
 ) -> uuid.UUID:
-    """Create a v2 scan + per-repo runs, kick off the background fanout.
+    """Create a scan + per-repo runs, kick off the background fanout.
 
     Returns the new scan id immediately. Per-repo workflows run in
     parallel under ``gather_repos`` so they cooperatively share the
@@ -102,7 +99,7 @@ async def start_v2_scan(
         if existing is not None:
             raise ScanAlreadyActiveError(scan_id=existing.id, status=existing.status)
 
-    # ``RunConfig.stages`` defaults to the full v2 stage list
+    # ``RunConfig.stages`` defaults to the full stage list
     # (``DEFAULT_PER_REPO_STAGES`` in ``app.schemas.scan``); callers that
     # want a subset pass ``config`` explicitly.
     config = config or RunConfig()
@@ -116,7 +113,7 @@ async def start_v2_scan(
     return scan_id
 
 
-async def resume_v2_scan(
+async def resume_scan(
     *,
     org_id: uuid.UUID,
     scan_id: uuid.UUID,
@@ -162,12 +159,12 @@ async def resume_v2_scan(
     return len(pending)
 
 
-async def cancel_v2_scan(
+async def cancel_scan(
     *,
     org_id: uuid.UUID,
     scan_id: uuid.UUID,
 ) -> bool:
-    """Cancel an in-flight v2 scan: stop the task + flip subtree to FAILED.
+    """Cancel an in-flight scan: stop the task + flip subtree to FAILED.
 
     Returns True iff the Scan row exists and belonged to ``org_id``. The
     background task may already be done (e.g. a stuck scan after a

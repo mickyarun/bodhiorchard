@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""ScanRepoRun — per-repo unit of work inside one v2 scan.
+"""ScanRepoRun — per-repo unit of work inside one scan.
 
-A v2 scan can target N repositories. We store one row here per
+A scan can target N repositories. We store one row here per
 (scan, repo) so the timeline UI knows which repos are queued/running/
 done/failed/skipped, and so the resume path can find the unfinished
 ones in O(1) per scan.
@@ -30,7 +30,7 @@ from app.models.scan_run_enums import RepoRunStatus
 
 
 class ScanRepoRun(BaseModel):
-    """One repo's slice of a v2 scan."""
+    """One repo's slice of a scan."""
 
     __tablename__ = "scan_repo_runs"
     __table_args__ = (

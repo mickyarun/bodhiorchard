@@ -38,12 +38,12 @@ from app.schemas.scan import Community
 from app.services.code_indexer import IndexResult, index_repo
 from app.services.git_operations import _detect_main_branch, run_git
 from app.services.scan.stages import StageContext, StageOutput
+from app.services.scan.stages._runtime_context import resolve_runtime_context
 from app.services.scan.stages._skip import stage_output_for_skip
 from app.services.scan.stages._skip_predicates import (
     should_skip_feature_synthesis,
     should_skip_indexing,
 )
-from app.services.scan.stages._v2_context import resolve_v2_context
 from app.services.scan.stages.ingest_worktree import ensure_scan_test_worktree
 
 logger = structlog.get_logger(__name__)
@@ -86,15 +86,15 @@ async def run(
         if rc == 0:
             head_sha = stdout.strip()
 
-    v2 = resolve_v2_context(config)
-    repo_id_raw = config.get("v2_repo_id")
+    runtime = resolve_runtime_context(config)
+    repo_id_raw = config.get("repo_id")
 
-    if v2 is not None and repo_id_raw is not None:
+    if runtime is not None and repo_id_raw is not None:
         repo_id = uuid.UUID(str(repo_id_raw))
-        async with with_session(v2.org_id) as db:
+        async with with_session(runtime.org_id) as db:
             decision = await should_skip_indexing(
                 db,
-                org_id=v2.org_id,
+                org_id=runtime.org_id,
                 repo_id=repo_id,
                 head_sha=head_sha,
                 force_reindex=bool(config.get("force_reindex", False)),
@@ -103,10 +103,10 @@ async def run(
             if decision.skip:
                 synth_decision = await should_skip_feature_synthesis(
                     db,
-                    org_id=v2.org_id,
+                    org_id=runtime.org_id,
                     repo_id=repo_id,
                     repo_path=ctx.repo_path,
-                    full_rescan=bool(config.get("v2_full_rescan", False)),
+                    full_rescan=bool(config.get("full_rescan", False)),
                 )
                 propagate_skip = synth_decision.skip
         if decision.skip:
@@ -150,12 +150,12 @@ async def run(
         # error, etc.). Surface as a stage error so the scan stops.
         raise RuntimeError(f"code_indexer failed for {ctx.repo_name!r}: {result.error}")
 
-    # Persist results to both caches when we have a v2 context.
+    # Persist results to both caches when we have a context.
     cache_written = 0
     graph_written = False
     cluster_cache_error: str | None = None
     graph_cache_error: str | None = None
-    if v2 is not None and repo_id_raw is not None and head_sha:
+    if runtime is not None and repo_id_raw is not None and head_sha:
         repo_id = uuid.UUID(str(repo_id_raw))
         (
             cache_written,
@@ -163,7 +163,7 @@ async def run(
             cluster_cache_error,
             graph_cache_error,
         ) = await _persist_index_result(
-            org_id=v2.org_id,
+            org_id=runtime.org_id,
             repo_id=repo_id,
             head_sha=head_sha,
             result=result,

@@ -119,9 +119,9 @@ def _make_ctx(tmp_path: Path) -> StageContext:
 
 def _make_config(repo_id: uuid.UUID, head_sha: str | None) -> dict[str, Any]:
     cfg: dict[str, Any] = {
-        "v2_org_id": uuid.uuid4(),
-        "v2_scan_id": uuid.uuid4(),
-        "v2_repo_id": repo_id,
+        "org_id": uuid.uuid4(),
+        "scan_id": uuid.uuid4(),
+        "repo_id": repo_id,
     }
     if head_sha is not None:
         cfg["ingest_head_sha"] = head_sha
@@ -253,8 +253,10 @@ async def test_missing_head_sha_skips_persistence(
     assert cache.replace_calls == []
 
 
-async def test_v2_context_missing_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Sandbox runs (no ``v2_org_id`` / ``v2_scan_id``) no-op cleanly."""
+async def test_runtime_context_missing_skips(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sandbox runs (no ``org_id`` / ``scan_id``) no-op cleanly."""
     _patch_session(monkeypatch)
     out = await extract_routes.run(_make_ctx(tmp_path), [], {})
     assert out.communities == []

@@ -3,7 +3,7 @@
 
 """Persist + WS-broadcast a race invitation.
 
-The race-v2 invite flow is triggered by the Colyseus multiplayer bridge
+The race-invite flow is triggered by the Colyseus multiplayer bridge
 calling `POST /internal/colyseus/race-invite` once per invitee. This
 service handles input validation, DB write, and WS publish in a single
 awaitable so the endpoint handler can commit atomically.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Per-scan configuration helpers for the v2 orchestrator.
+"""Per-scan configuration helpers for the orchestrator.
 
 Loads org-level Scan-tuning settings + mints the MCP credentials each
 synthesis subprocess needs. Pulled out of ``runner.py`` so the public

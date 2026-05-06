@@ -4,7 +4,7 @@
 """Workflow observer protocol — pluggable transition callbacks.
 
 The workflow body in ``workflow.py`` runs every stage and emits status
-transitions. Sandbox runs persist via JSON-on-disk only; v2 multi-repo
+transitions. Sandbox runs persist via JSON-on-disk only; multi-repo
 scans want the same transitions written into ``scan_repo_runs`` +
 ``scan_repo_steps`` so the timeline UI can read them in real time.
 
@@ -12,7 +12,7 @@ Two implementations:
 
 * :class:`NoopObserver` — does nothing. Used by the legacy single-repo
   sandbox runs to preserve existing behaviour.
-* :class:`DBTimelineObserver` — writes every transition into the v2
+* :class:`DBTimelineObserver` — writes every transition into the
   scan_repo_runs / scan_repo_steps tables. Lives in the sibling
   ``db_timeline_observer`` module to keep this file under the
   per-file LOC budget.

@@ -3,7 +3,7 @@
 
 """Repository for ``scan_repo_runs`` and ``scan_repo_steps``.
 
-Used by the v2 workflow to:
+Used by the scan workflow to:
 * create one ``ScanRepoRun`` per (scan, repo) at scan start
 * upsert a ``ScanRepoStep`` row at every status transition
 * publish event-bus updates for the timeline UI

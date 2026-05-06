@@ -36,9 +36,13 @@ from app.schemas.scan import (
 )
 from app.services.scan.runner import (
     ScanAlreadyActiveError,
-    cancel_v2_scan,
-    resume_v2_scan,
-    start_v2_scan,
+    start_scan,
+)
+from app.services.scan.runner import (
+    cancel_scan as cancel_scan_runner,
+)
+from app.services.scan.runner import (
+    resume_scan as resume_scan_runner,
 )
 from app.services.scan.serialize import build_legacy_status, build_repo_run_rows
 from app.services.scan.synthesis.runner import (
@@ -58,7 +62,7 @@ router = APIRouter(tags=["scans"])
 
 @router.get("/config", response_model=V2ConfigResponse)
 async def get_config() -> V2ConfigResponse:
-    """Return the v2 defaults the frontend needs at page load."""
+    """Return the defaults the frontend needs at page load."""
     return V2ConfigResponse(
         default_model=DEFAULT_MODEL,
         default_max_turns=DEFAULT_MAX_TURNS,
@@ -76,7 +80,7 @@ async def list_repos(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[TrackedRepoCard]:
-    """Tracked repos for the v2 scan-page selection grid."""
+    """Tracked repos for the scan-page selection grid."""
     org_id = await _resolve_org_id(current_user, db)
     rows = await TrackedRepoRepository(db, org_id=org_id).list_all_ordered_by_name()
     # One join across all repos: for each repo, attach its most-recent
@@ -126,7 +130,7 @@ async def create_scan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StartScanResponse:
-    """Queue a v2 scan across the selected repositories."""
+    """Queue a scan across the selected repositories."""
     if not body.repo_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -134,7 +138,7 @@ async def create_scan(
         )
     org_id = await _resolve_org_id(current_user, db)
     try:
-        scan_id = await start_v2_scan(org_id=org_id, repo_ids=body.repo_ids, config=body.config)
+        scan_id = await start_scan(org_id=org_id, repo_ids=body.repo_ids, config=body.config)
     except ScanAlreadyActiveError as exc:
         # 409 carries the in-flight scan_id so the frontend can switch
         # the timeline view to it instead of starting a duplicate.
@@ -169,7 +173,7 @@ async def resume_scan(
     """Re-queue any non-DONE repo runs in this scan."""
     org_id = await _resolve_org_id(current_user, db)
     try:
-        requeued = await resume_v2_scan(org_id=org_id, scan_id=scan_id)
+        requeued = await resume_scan_runner(org_id=org_id, scan_id=scan_id)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     logger.info(
@@ -192,7 +196,7 @@ async def cancel_scan(
 ) -> dict[str, str]:
     """Cancel an in-flight scan: stop the task and flip the subtree to FAILED."""
     org_id = await _resolve_org_id(current_user, db)
-    found = await cancel_v2_scan(org_id=org_id, scan_id=scan_id)
+    found = await cancel_scan_runner(org_id=org_id, scan_id=scan_id)
     if not found:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

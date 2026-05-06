@@ -19,7 +19,7 @@ Implement backend features, API endpoints, and services following the existing F
 
 1. Async everywhere — all DB operations, HTTP calls, and LLM calls are async
 2. Use SQLAlchemy 2.0 style: `Mapped[]`, `mapped_column()`, never old-style `Column()`
-3. Use Pydantic v2 BaseModel for all request/response schemas
+3. Use Pydantic BaseModel for all request/response schemas
 4. All tables must have `org_id` FK for multi-tenancy
 5. Use `structlog.get_logger()` for logging, never `print()`
 6. Type hints on all parameters and return values
@@ -38,5 +38,5 @@ Implement backend features, API endpoints, and services following the existing F
 - FastAPI for HTTP API
 - SQLAlchemy 2.0 (async) with asyncpg
 - PostgreSQL 16 with pgvector
-- Pydantic v2 for DTOs
+- Pydantic for DTOs
 - structlog for structured logging

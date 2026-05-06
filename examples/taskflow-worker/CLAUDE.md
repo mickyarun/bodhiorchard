@@ -30,6 +30,17 @@ Before starting any BUD work, verify Bodhiorchard MCP is connected:
 | `get_bud_context` | Fetch BUD requirements, tech spec, and designs |
 | `get_knowledge` | Search the organization's knowledge base |
 | `get_design_system` | Fetch design tokens (colors, typography, components) |
+| `code_impact` | Blast-radius check before editing any function/class |
+| `code_query` | Find candidate symbols by name across the call graph |
+| `code_context` | 360° view of one symbol — callers + callees + attrs |
+
+### Code Intelligence
+
+This repo is indexed by bodhiorchard's own code-graph indexer (graphify
+under the hood). **Always run `code_impact` before editing any function,
+class, or method.** It returns the upstream callers + downstream callees
+so you can see the blast radius of a change. Pair with `code_context`
+when you need attribute / file-location details on a single symbol.
 
 ### TODO Workflow (STRICT — follow exactly)
 

@@ -15,12 +15,12 @@ regular scan pipeline:
 3. If no clusters are affected (very common: PRs touching only
    ``README.md`` / configs / tests fall here), log the skip and return.
    No LLM cost is incurred.
-4. Otherwise enqueue a regular scan via :func:`start_v2_scan`. The scan
+4. Otherwise enqueue a regular scan via :func:`start_scan`. The scan
    pipeline is SHA-gated, so unchanged stages are reused; the synthesise
    stage runs LLM only against the affected clusters' communities and
    the reconciler applies incremental CRUD as designed.
 
-Concurrency: ``start_v2_scan`` raises :class:`ScanAlreadyActiveError`
+Concurrency: ``start_scan`` raises :class:`ScanAlreadyActiveError`
 when an org-level scan is in flight. That's an expected branch — the
 in-flight scan will pick up the merged changes, so we log and return
 without enqueuing a duplicate.
@@ -48,7 +48,7 @@ from app.schemas.jobs import JobState
 from app.services.github_app_auth import get_installation_token
 from app.services.github_client import GitHubClient
 from app.services.job_queue import update_job
-from app.services.scan.runner import ScanAlreadyActiveError, start_v2_scan
+from app.services.scan.runner import ScanAlreadyActiveError, start_scan
 
 logger = structlog.get_logger(__name__)
 
@@ -232,7 +232,7 @@ async def _trigger_repo_scan(
 ) -> None:
     """Enqueue a regular scan, swallowing the already-active branch."""
     try:
-        scan_id = await start_v2_scan(org_id=org_id, repo_ids=[repo_id])
+        scan_id = await start_scan(org_id=org_id, repo_ids=[repo_id])
     except ScanAlreadyActiveError as exc:
         logger.info(
             "pr_merge_update_scan_already_active",

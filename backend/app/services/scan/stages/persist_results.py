@@ -22,7 +22,10 @@ import structlog
 from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.stages import StageContext, StageOutput
-from app.services.scan.stages._v2_context import resolve_v2_context, skipped_v2_output
+from app.services.scan.stages._runtime_context import (
+    resolve_runtime_context,
+    skipped_runtime_output,
+)
 from app.services.scan.stages.persist_helpers import collect_head_shas, load_org_config
 
 logger = structlog.get_logger(__name__)
@@ -34,11 +37,11 @@ async def run(
     config: dict[str, Any],
 ) -> StageOutput:
     """Stamp tracked_repositories + org config after the scan succeeds."""
-    v2 = resolve_v2_context(config)
-    if v2 is None:
-        return StageOutput(communities=communities, dropped=[], extras=skipped_v2_output())
+    runtime = resolve_runtime_context(config)
+    if runtime is None:
+        return StageOutput(communities=communities, dropped=[], extras=skipped_runtime_output())
 
-    repo_paths_raw = config.get("v2_repo_paths") or [ctx.repo_path]
+    repo_paths_raw = config.get("repo_paths") or [ctx.repo_path]
     repo_paths = list(repo_paths_raw) if isinstance(repo_paths_raw, list) else [ctx.repo_path]
     overall_mode = str(config.get("scan_mode", "full"))
     total_profiles = int(config.get("total_profiles", 0))
@@ -51,12 +54,12 @@ async def run(
     from app.services.scan.phase_impls.persist_results import phase_g_persist
 
     try:
-        async with with_session(v2.org_id) as db:
-            org_config = await load_org_config(db, org_id=v2.org_id)
-            feature_repo = FeatureRepository(db, org_id=v2.org_id)
+        async with with_session(runtime.org_id) as db:
+            org_config = await load_org_config(db, org_id=runtime.org_id)
+            feature_repo = FeatureRepository(db, org_id=runtime.org_id)
             feature_count = await phase_g_persist(
                 db=db,
-                org_id=v2.org_id,
+                org_id=runtime.org_id,
                 repo_paths=repo_paths,
                 new_shas=new_shas,
                 config=org_config,
@@ -69,7 +72,7 @@ async def run(
     except Exception as exc:
         logger.exception(
             "scan_persist_results_failed",
-            scan_id=str(v2.scan_id),
+            scan_id=str(runtime.scan_id),
             repo_count=len(repo_paths),
         )
         return StageOutput(
@@ -99,7 +102,7 @@ async def run(
     }
     logger.info(
         "scan_persist_results_done",
-        scan_id=str(v2.scan_id),
+        scan_id=str(runtime.scan_id),
         feature_count=feature_count,
         repos_persisted=len(new_shas),
         missing_shas=extras["missing_shas"],

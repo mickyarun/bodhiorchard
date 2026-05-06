@@ -3,7 +3,7 @@
 
 """ScanRepoStep — one phase execution inside one repo run.
 
-This is the row that drives the v2 timeline UI: each repo lane shows
+This is the row that drives the scan timeline UI: each repo lane shows
 11 step chips, status-coloured, with hover tooltips populated from
 ``input_count`` / ``kept_count`` / ``dropped_count`` / ``extras``.
 

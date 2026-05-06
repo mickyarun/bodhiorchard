@@ -70,7 +70,7 @@ async def start_run(
 
     ``runtime_overrides`` is a dict of values merged into every stage's
     config at execution time. ``scan_runner`` uses this to thread
-    ``v2_org_id`` / ``v2_scan_id`` / ``v2_repo_id`` etc. into wrapper
+    ``org_id`` / ``scan_id`` / ``repo_id`` etc. into wrapper
     stages that need a DB session, without rewriting ``RunConfig``.
 
     ``await_completion=True`` blocks until the run finishes — required

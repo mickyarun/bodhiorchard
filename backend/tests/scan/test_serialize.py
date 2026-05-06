@@ -4,7 +4,7 @@
 """Unit tests for the legacy ScanStatusData adapter.
 
 Exercises the pure-function helpers in ``services/scan/serialize.py``
-that derive the legacy progress / phase shape from v2 ORM rows. The
+that derive the legacy progress / phase shape from scan ORM rows. The
 ``build_legacy_status`` integration is exercised indirectly via
 ``test_feature_merge.py`` and the e2e SetupChecklist polling — these
 tests guard the maths and the enum-coverage invariants.
