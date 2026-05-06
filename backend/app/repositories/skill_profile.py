@@ -27,16 +27,20 @@ class SkillProfileRepository(BaseRepository[SkillProfile]):
         super().__init__(SkillProfile, db, org_id=org_id)
 
     async def list_with_users(self) -> list[tuple[SkillProfile, User]]:
-        """List skill profiles with their associated users, ordered by score.
+        """List feature-mapped skill profiles with their users, ordered by score.
 
-        Returns:
-            List of (SkillProfile, User) tuples sorted by skill_score descending.
-                User may be None for orphaned profiles.
+        Phase E seeds rows keyed by directory (``src``, ``kube``, …) with
+        ``feature_id`` NULL; Phase E2 sets ``feature_id`` only on rows whose
+        files matched a feature's ``code_locations``. The Skills UI and the
+        ``get_team_context`` MCP tool both surface "developer-skill-as-feature",
+        so unmapped rows are excluded here. Routing / estimation / admin
+        paths use different repo methods and intentionally see all rows.
         """
         result = await self._db.execute(
             select(SkillProfile, User)
             .outerjoin(User, SkillProfile.user_id == User.id)
             .where(SkillProfile.org_id == self._org_id)
+            .where(SkillProfile.feature_id.is_not(None))
             .order_by(SkillProfile.skill_score.desc())
         )
         return list(result.all())
