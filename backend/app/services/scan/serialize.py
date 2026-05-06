@@ -15,6 +15,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.synthesis_accumulator import peek_titles
+from app.mcp.synthesis_progress import peek as peek_tool_progress
 from app.models.feature import Feature
 from app.models.scan import Scan, ScanAggregateStatus
 from app.models.scan_phase import ScanPhase
@@ -84,6 +85,10 @@ def _render_repo_run(
     # accumulator so the running chip's popover shows progress instead
     # of an empty "0 → 0/0" frame.
     pending_titles = peek_titles(str(org_id), str(run.repo_id)) if not repo_features else []
+    # Tool-call counter — surfaces "model has called Read 3× / write 1×"
+    # in the chip popover *before* the first feature lands. Returns None
+    # when synthesis hasn't started yet so the row stays clean.
+    tool_progress = peek_tool_progress(str(org_id), str(run.repo_id))
     return RepoRunRow(
         repo_id=run.repo_id,
         repo_name=repo_name_by_id.get(run.repo_id, "(unknown)"),
@@ -94,7 +99,12 @@ def _render_repo_run(
         feature_count=run.feature_count,
         error=run.error,
         steps=[
-            _render_step(step, repo_features, pending_titles=pending_titles)
+            _render_step(
+                step,
+                repo_features,
+                pending_titles=pending_titles,
+                tool_progress=tool_progress,
+            )
             for step in steps_by_run.get(run.id, [])
         ],
     )
@@ -105,6 +115,7 @@ def _render_step(
     repo_features: list[Feature],
     *,
     pending_titles: list[dict[str, str]],
+    tool_progress: dict[str, object] | None,
 ) -> StepRow:
     """Convert one ScanRepoStep ORM row to its API shape.
 
@@ -114,6 +125,12 @@ def _render_step(
     ``feature_synthesis`` is still ``running``, the DB is empty (the
     reconciler drains the accumulator only at end-of-batch) so we
     render the in-memory ``pending_titles`` instead.
+
+    For the running ``feature_synthesis`` step we also surface the
+    tool-use counter (Reads / writes / etc.) so the popover shows
+    activity *before* the first feature is accumulated — otherwise
+    the user sees an empty "0 → 0/0" panel for ~3-4 minutes while
+    the model is genuinely thinking.
     """
     extras = dict(step.extras) if step.extras else {}
     if step.phase in _FEATURE_ARTIFACT_PHASES:
@@ -127,6 +144,8 @@ def _render_step(
             ]
         elif step.status == StepStatus.RUNNING and pending_titles:
             extras["produced_features"] = list(pending_titles)
+        if step.status == StepStatus.RUNNING and tool_progress is not None:
+            extras["tool_progress"] = tool_progress
     return StepRow(
         phase=step.phase,
         status=step.status,

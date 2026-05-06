@@ -62,6 +62,22 @@
           <strong>error:</strong> {{ step.error }}
         </p>
 
+        <section v-if="toolProgress" class="tool-progress">
+          <h4 class="tool-progress__title">Live model activity</h4>
+          <p class="tool-progress__line">
+            {{ toolProgress.total }} tool {{ toolProgress.total === 1 ? 'call' : 'calls' }}
+            <template v-if="toolProgress.lastTool">
+              · last: <code>{{ toolProgress.lastTool }}</code>
+            </template>
+          </p>
+          <ul v-if="toolProgress.byTool.length" class="tool-progress__list">
+            <li v-for="entry in toolProgress.byTool" :key="entry.name">
+              <code>{{ entry.name }}</code>
+              <span class="tool-progress__count">×{{ entry.count }}</span>
+            </li>
+          </ul>
+        </section>
+
         <ScanSubStageTrail v-if="subStages.length > 1" :stages="subStages" />
 
         <ScanFeatureList v-if="features.length" :features="features" />
@@ -120,6 +136,10 @@ const PROMOTED_KEYS: ReadonlySet<string> = new Set([
   'sub_stages',
   'io_label',
   'skipped_reason',
+  // ``tool_progress`` is rendered as its own section above; suppress
+  // the auto-flattened entry that would otherwise dump the whole
+  // counter object into the metadata grid.
+  'tool_progress',
   // ``input_count`` / ``kept_count`` / ``dropped_count`` may live in
   // extras when a stage promotes its counts there; the workflow has
   // already lifted them onto the step row so the grid would just
@@ -140,6 +160,34 @@ const subStages = computed<SubStage[]>(() => {
 const ioLabel = computed<string>(() => {
   const raw = props.step?.extras?.io_label
   return typeof raw === 'string' && raw.length > 0 ? raw : 'in → kept / dropped'
+})
+
+interface ToolProgressView {
+  total: number
+  lastTool: string | null
+  byTool: { name: string; count: number }[]
+}
+
+// Surfaces the in-memory tool-use counter (set server-side from the
+// stream-json progress callback) for the running feature_synthesis
+// chip. Returns null when the run hasn't started or no tool has been
+// invoked yet — in which case the popover stays unchanged.
+const toolProgress = computed<ToolProgressView | null>(() => {
+  const raw = props.step?.extras?.tool_progress
+  if (!raw || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  const total = typeof obj.total === 'number' ? obj.total : 0
+  if (total === 0) return null
+  const lastTool = typeof obj.last_tool === 'string' ? obj.last_tool : null
+  const byToolRaw = obj.by_tool
+  const byTool: { name: string; count: number }[] = []
+  if (byToolRaw && typeof byToolRaw === 'object') {
+    for (const [name, count] of Object.entries(byToolRaw)) {
+      if (typeof count === 'number') byTool.push({ name, count })
+    }
+    byTool.sort((a, b) => b.count - a.count)
+  }
+  return { total, lastTool, byTool }
 })
 
 const reductionLine = computed<string>(() => {
@@ -271,6 +319,55 @@ function formatDuration(ms: number | null): string {
   color: rgb(var(--v-theme-info));
   font-size: 0.76rem;
   line-height: 1.3;
+}
+
+.tool-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px dashed rgba(var(--v-theme-on-surface), 0.08);
+  padding-top: 8px;
+}
+.tool-progress__title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgb(var(--v-theme-on-surface));
+  opacity: 0.7;
+  margin: 0;
+}
+.tool-progress__line {
+  font-size: 12px;
+  margin: 0;
+  color: rgb(var(--v-theme-on-surface));
+  opacity: 0.85;
+}
+.tool-progress__line code,
+.tool-progress__list code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.tool-progress__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.tool-progress__list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+.tool-progress__count {
+  color: rgb(var(--v-theme-on-surface));
+  opacity: 0.6;
 }
 
 .meta { display: flex; flex-direction: column; gap: 6px; }
