@@ -145,6 +145,7 @@ import RepoOnboardBulkTab from './onboard/RepoOnboardBulkTab.vue'
 import { useAddRepoSubmit } from '@/composables/useAddRepoSubmit'
 import { useDeploymentMode } from '@/composables/useDeploymentMode'
 import { useRepoImport } from '@/composables/useRepoImport'
+import { useReposcanV2ScansStore } from '@/stores/reposcanv2Scans'
 import { useSettingsStore } from '@/stores/settings'
 import type { useRepoBranches } from '@/composables/useRepoBranches'
 import type { BulkOnboardJobTerminalResult } from '@/types/repoOnboard'
@@ -173,6 +174,7 @@ const imp = useRepoImport()
 const submitter = useAddRepoSubmit()
 const { mode: deploymentMode } = useDeploymentMode()
 const settingsStore = useSettingsStore()
+const scanStore = useReposcanV2ScansStore()
 const cloneFormRef = ref<InstanceType<typeof RepoCloneForm> | null>(null)
 
 const modeReady = computed(() => deploymentMode.value !== null)
@@ -184,16 +186,24 @@ watch(modeReady, (ready) => {
   tab.value = canPickLocal.value ? TAB_LOCAL : TAB_CLONE
 }, { immediate: true })
 
-async function onBulkOnboarded(_result: BulkOnboardJobTerminalResult): Promise<void> {
+async function onBulkOnboarded(result: BulkOnboardJobTerminalResult): Promise<void> {
   // Bulk onboard runs the full clone+scan path server-side. Once it
-  // terminates we close the dialog and refresh both connection state
-  // (install metadata) and the repo list — the latter is what surfaces
-  // the newly tracked repos in RepoList without a page reload.
+  // terminates we close the dialog and refresh:
+  //   * connection state (install metadata)
+  //   * the repo list (surfaces the newly tracked repos)
+  //   * the scan store with the kicked-off scan id, so the per-repo
+  //     chip track starts polling immediately. Without this last call
+  //     ``scanStore.currentScan`` stays null until the user manually
+  //     refreshes — the rows render but their phase chips don't.
   emit('update:modelValue', false)
-  await Promise.all([
+  const refreshes: Promise<void>[] = [
     settingsStore.fetchConnections(),
     settingsStore.fetchRepos(),
-  ])
+  ]
+  if (result.scan_id) {
+    refreshes.push(scanStore.fetchScan(result.scan_id))
+  }
+  await Promise.all(refreshes)
 }
 
 // Pending counts feed both the footer hint + the submit label so we

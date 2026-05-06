@@ -9,7 +9,7 @@ and lets Claude call the new ``write_synthesis_feature`` MCP tool
 inline as it produces each feature. This stage is purely an orchestrator
 — the persistence happens server-side via that MCP handler.
 
-After Claude returns, the stage queries the v2 persistence layer to
+After Claude returns, the stage queries the persistence layer to
 count how many features landed for this repo+sha and reports counts
 back in ``extras``.
 
@@ -42,11 +42,13 @@ from app.repositories.feature_match_log import FeatureMatchLogRepository
 from app.repositories.organization import OrganizationRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
+from app.services import event_bus
+from app.services.claude_runner import ProgressCallback
 from app.services.feature_reconciler import reconcile_features_for_repo
 from app.services.scan.stages import StageContext, StageOutput
+from app.services.scan.stages._runtime_context import resolve_runtime_context
 from app.services.scan.stages._skip import stage_output_for_skip
 from app.services.scan.stages._skip_predicates import should_skip_feature_synthesis
-from app.services.scan.stages._v2_context import resolve_v2_context
 from app.services.scan.synthesis.coverage_audit import audit_uncovered_clusters
 from app.services.scan.synthesis.prompt import (
     DEFAULT_FILES_PER_COMMUNITY,
@@ -70,27 +72,28 @@ async def run(
     config: dict[str, Any],
 ) -> StageOutput:
     """Drive Claude through one synthesis pass over the reduced communities."""
-    v2 = resolve_v2_context(config)
-    repo_id_raw = config.get("v2_repo_id")
-    if v2 is not None and repo_id_raw is None:
-        # Half-configured v2 context — org/scan threaded but no repo_id.
+    runtime = resolve_runtime_context(config)
+    repo_id_raw = config.get("repo_id")
+    if runtime is not None and repo_id_raw is None:
+        # Half-configured context — org/scan threaded but no repo_id.
         # Falling through would skip both the SHA-cache check AND the
         # wipe, so the partial unique index ``ux_ftr_primary_title``
         # would trip mid-run on the second scan with no clear cause.
         # Refuse loudly so the misconfiguration surfaces at boot.
         raise RuntimeError(
-            "synthesize stage: v2 context present but v2_repo_id missing — "
+            "synthesize stage: context present but repo_id missing — "
             "callers must thread the repo id alongside org/scan."
         )
-    if v2 is not None and repo_id_raw is not None:
+    repo_id: uuid.UUID | None = None
+    if runtime is not None and repo_id_raw is not None:
         repo_id = uuid.UUID(str(repo_id_raw))
-        async with with_session(v2.org_id) as db:
+        async with with_session(runtime.org_id) as db:
             decision = await should_skip_feature_synthesis(
                 db,
-                org_id=v2.org_id,
+                org_id=runtime.org_id,
                 repo_id=repo_id,
                 repo_path=ctx.repo_path,
-                full_rescan=bool(config.get("v2_full_rescan", False)),
+                full_rescan=bool(config.get("full_rescan", False)),
             )
         if decision.skip:
             return stage_output_for_skip(decision, io_label="communities → features")
@@ -116,10 +119,10 @@ async def run(
     readme = str(config.get("readme", ""))
     dry_run = bool(config.get("dry_run", False))
 
-    # Thread the v2 repo id into the prompt so Claude echoes it back in
+    # Thread the repo id into the prompt so Claude echoes it back in
     # every ``write_synthesis_feature`` call — survives renames mid-scan
     # and saves a name-resolution round-trip in the MCP handler.
-    repo_id_str = config.get("v2_repo_id")
+    repo_id_str = config.get("repo_id")
     prompt = build_synthesis_prompt(
         repo_name=ctx.repo_name,
         readme=readme,
@@ -160,7 +163,7 @@ async def run(
 
     # Skip cleanly when MCP credentials weren't threaded by the caller.
     # Raising here would mark the whole repo run FAILED for what is
-    # really a "synthesis not yet wired" scenario; the v2 page already
+    # really a "synthesis not yet wired" scenario; the page already
     # has features from prior scans in the ``features`` table.
     if not config.get("mcp_backend_url") or not config.get("mcp_token"):
         extras["skipped_cache"] = True
@@ -174,6 +177,11 @@ async def run(
         return StageOutput(communities=communities, dropped=[], extras=extras)
 
     engine = _resolve_engine(config)
+    progress_callback = (
+        _make_progress_callback(scan_id=runtime.scan_id, repo_id=repo_id)
+        if runtime is not None and repo_id is not None
+        else None
+    )
     request = _build_request(
         ctx=ctx,
         prompt=prompt,
@@ -181,6 +189,7 @@ async def run(
         model=model,
         max_turns=max_turns,
         timeout_seconds=timeout_seconds,
+        progress_callback=progress_callback,
     )
 
     t0 = time.perf_counter()
@@ -241,8 +250,8 @@ async def run(
         # would let the NEXT scan reconcile a mix of stale + fresh
         # writes against current DB state, potentially reviving
         # features the user explicitly removed in the interim.
-        if v2 is not None:
-            reset_for_org(str(v2.org_id))
+        if runtime is not None:
+            reset_for_org(str(runtime.org_id))
         raise RuntimeError(f"synthesis failed: {outcome.error}")
     return StageOutput(communities=communities, dropped=[], extras=extras)
 
@@ -250,21 +259,21 @@ async def run(
 async def _run_coverage_audit(config: dict[str, Any]) -> int:
     """Invoke the post-synthesis coverage audit. Returns synthetic feature count.
 
-    Resolves org/repo/scan/head_sha from the v2 stage context and calls
+    Resolves org/repo/scan/head_sha from the stage context and calls
     ``audit_uncovered_clusters``. Cache-write style failure handling:
     any exception is swallowed and reported as 0 — the audit is a
     safety net, not a correctness gate.
     """
-    v2 = resolve_v2_context(config)
-    repo_id_raw = config.get("v2_repo_id")
+    runtime = resolve_runtime_context(config)
+    repo_id_raw = config.get("repo_id")
     head_sha = str(config.get("ingest_head_sha") or "").strip()
 
-    if v2 is None or repo_id_raw is None or not head_sha:
+    if runtime is None or repo_id_raw is None or not head_sha:
         return 0
 
     try:
-        async with with_session(v2.org_id) as db:
-            org = await OrganizationRepository(db).get_by_id(v2.org_id)
+        async with with_session(runtime.org_id) as db:
+            org = await OrganizationRepository(db).get_by_id(runtime.org_id)
             if org is None:
                 return 0
             written = await audit_uncovered_clusters(
@@ -289,24 +298,24 @@ async def _reconcile_synthesised_batch(
     chip popover can show "+N added · M revived · K removed" without a
     second DB read.
     """
-    v2 = resolve_v2_context(config)
-    if v2 is None:
+    runtime = resolve_runtime_context(config)
+    if runtime is None:
         return {}
     head_sha = str(config.get("ingest_head_sha") or "").strip()
-    synthesised = drain(str(v2.org_id), str(repo_id))
+    synthesised = drain(str(runtime.org_id), str(repo_id))
     if not synthesised and not head_sha:
         return {"reconcile_skipped": "no_head_sha_or_writes"}
     try:
-        async with with_session(v2.org_id) as db:
+        async with with_session(runtime.org_id) as db:
             summary = await reconcile_features_for_repo(
                 db=db,
-                org_id=v2.org_id,
+                org_id=runtime.org_id,
                 repo_id=repo_id,
                 head_sha=head_sha,
                 synthesised=synthesised,
             )
             if summary.match_log_rows:
-                match_log_repo = FeatureMatchLogRepository(db, org_id=v2.org_id)
+                match_log_repo = FeatureMatchLogRepository(db, org_id=runtime.org_id)
                 await match_log_repo.bulk_insert(summary.match_log_rows)
             await db.commit()
         return {
@@ -328,12 +337,12 @@ async def _reconcile_synthesised_batch(
 async def _count_synthesized_features(config: dict[str, Any]) -> int:
     """Active feature count for this repo's PRIMARY junction.
 
-    Returns 0 when the v2 context isn't threaded (manual sandbox runs)
+    Returns 0 when the context isn't threaded (manual sandbox runs)
     or the count query fails — the chip still reads sensibly because the
     rest of extras still describes what synthesis attempted.
     """
-    org_id_str = config.get("v2_org_id")
-    repo_id_str = config.get("v2_repo_id")
+    org_id_str = config.get("org_id")
+    repo_id_str = config.get("repo_id")
     if not org_id_str or not repo_id_str:
         return 0
 
@@ -372,6 +381,7 @@ def _build_request(
     model: str,
     max_turns: int,
     timeout_seconds: int,
+    progress_callback: ProgressCallback | None,
 ) -> SynthesisRequest:
     """Assemble the engine request, raising if MCP details are missing."""
     mcp_backend_url = config.get("mcp_backend_url")
@@ -390,4 +400,38 @@ def _build_request(
         model=model,
         max_turns=max_turns,
         timeout_seconds=timeout_seconds,
+        progress_callback=progress_callback,
     )
+
+
+def _make_progress_callback(*, scan_id: uuid.UUID, repo_id: uuid.UUID) -> ProgressCallback:
+    """Build a sync per-tool-use observer that fans out via the event bus.
+
+    ``claude_runner._find_tool_uses`` invokes the callback synchronously
+    on every parsed tool_use block. We must never raise — an exception
+    here would crash the stdout reader and stall the run until timeout.
+
+    Topic shape ``scan_synthesis_tool:{scan_id}`` follows the existing
+    ``scan:{scan_id}`` / ``agent_activity:{org_id}`` naming convention so
+    websocket subscribers can scope to one scan. Distinct from
+    ``scan:{scan_id}`` because that channel carries deduped status
+    snapshots — high-frequency tool events would defeat the dedup.
+    """
+    scan_id_str = str(scan_id)
+    repo_id_str = str(repo_id)
+    topic = f"scan_synthesis_tool:{scan_id_str}"
+
+    def _on_tool_use(tool_name: str, _input: dict[str, Any]) -> None:
+        try:
+            event_bus.publish(
+                topic,
+                {
+                    "scan_id": scan_id_str,
+                    "repo_id": repo_id_str,
+                    "tool": tool_name,
+                },
+            )
+        except Exception:  # noqa: BLE001 — never break the stream reader
+            logger.exception("synthesis_progress_publish_failed", tool=tool_name)
+
+    return _on_tool_use

@@ -109,8 +109,14 @@ function chipColorFor(status: BulkOnboardItemState): string {
 
 onMounted(() => {
   tracker.startTracking(props.jobId, {
-    onComplete: (result) => {
-      const parsed = extractProgress(result) as BulkOnboardJobTerminalResult | null
+    onComplete: (status) => {
+      // ``status`` is the full ``JobStatusRead`` envelope; the per-job
+      // payload (``items``, ``scan_id`` …) lives on ``status.result``.
+      // Passing the envelope itself would cast to a ``scan_id``-less
+      // shape and silently break every consumer that needs that id —
+      // notably the "View scan" CTA in RepoOnboardBulkTab and the
+      // dialog's scan-store kick-off after the job completes.
+      const parsed = extractProgress(status.result) as BulkOnboardJobTerminalResult | null
       if (parsed) {
         terminal.value = parsed
         emit('complete', parsed)

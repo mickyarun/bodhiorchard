@@ -22,12 +22,13 @@ import structlog
 from app.services.claude_runner import (
     ClaudeRunnerConfig,
     MCPServerConfig,
+    ProgressCallback,
     run_claude_code,
 )
 
 logger = structlog.get_logger(__name__)
 
-# Default model for v2 synthesis. Single source of truth — the API
+# Default model for synthesis. Single source of truth — the API
 # config endpoint reads this so the frontend doesn't duplicate the literal.
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_TURNS = 40
@@ -46,6 +47,11 @@ class SynthesisRequest:
     model: str = DEFAULT_MODEL
     max_turns: int = DEFAULT_MAX_TURNS
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+    # Optional per-tool-use observer. When provided, ``run_claude_code``
+    # auto-switches to ``stream-json`` so tool calls surface in real
+    # time instead of being buffered until subprocess exit. Sync
+    # signature — see ``claude_runner._find_tool_uses``.
+    progress_callback: ProgressCallback | None = None
 
 
 @dataclass(slots=True)
@@ -101,6 +107,7 @@ class ClaudeCodeEngine:
             prompt=request.prompt,
             working_dir=request.working_dir,
             config=config,
+            progress_callback=request.progress_callback,
         )
         return SynthesisOutcome(
             success=bool(result.success),
