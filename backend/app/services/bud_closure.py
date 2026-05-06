@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bud import BUDDocument
 from app.models.dev_activity import DevActivityLog
 from app.models.pull_request import PullRequest
-from app.services.scan.runner import ScanAlreadyActiveError, start_v2_scan
+from app.services.scan.runner import ScanAlreadyActiveError, start_scan
 
 logger = structlog.get_logger(__name__)
 
@@ -181,7 +181,7 @@ async def _bg_scan(
     repo_ids: list[str],
     bud_number: int,
 ) -> None:
-    """Background task: kick off a v2 scan for the impacted repos."""
+    """Background task: kick off a scan for the impacted repos."""
     try:
         repo_uuids: list[uuid.UUID] = []
         for rid in repo_ids:
@@ -192,7 +192,7 @@ async def _bg_scan(
         if not repo_uuids:
             return
 
-        scan_id = await start_v2_scan(org_id=org_id, repo_ids=repo_uuids)
+        scan_id = await start_scan(org_id=org_id, repo_ids=repo_uuids)
         logger.info(
             "bud_closure_scan_started",
             bud_number=bud_number,

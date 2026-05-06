@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Legacy (paste-URL / local-path) arm of the wizard's stage-2 finalize.
+"""Local-path arm of the wizard's stage-2 finalize.
 
 Pulled into its own module so :mod:`setup_finalize` stays well under
-the project's 200-line ceiling. The behaviour is identical to the
-inline loop the original single-shot ``/setup/initialize`` ran: each
-configured local path is upserted as a tracked repo, its branch
-mapping is applied, and the synchronous ``start_v2_scan`` helper is
-kicked once at the end with the surviving repo IDs.
+the project's 200-line ceiling. Each configured local path is
+upserted as a tracked repo, its branch mapping is applied, and the
+shared :func:`kick_off_onboard_scan` helper is invoked once with the
+surviving repo IDs — the same seam used by the GitHub-App bulk
+onboard.
 """
 
 from __future__ import annotations
@@ -22,10 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
 from app.repositories.tracked_repository import TrackedRepoRepository
-from app.schemas.scan import RunConfig
 from app.schemas.setup import SetupSourceCode
-from app.services.embedding_service import embedding_service
-from app.services.scan.runner import start_v2_scan
+from app.services.scan_kickoff import kick_off_onboard_scan
 
 logger = structlog.get_logger(__name__)
 
@@ -44,7 +42,7 @@ async def finalize_legacy_source_code(
     source_code: SetupSourceCode,
     db: AsyncSession,
 ) -> LegacyFinalizeResult:
-    """Register pre-cloned repos and synchronously trigger a v2 scan.
+    """Register pre-cloned repos and synchronously trigger a scan.
 
     Returns the new scan_id (or ``None`` if the embedding service is
     down — in which case a warning is surfaced for the wizard to
@@ -70,31 +68,19 @@ async def finalize_legacy_source_code(
             tracked.develop_branch = repo_cfg.develop_branch
 
     await db.flush()
-    # Commit before kicking off the scan: ``start_v2_scan`` opens its
-    # own AsyncSessionLocal and reads these freshly-created rows.
+    # Commit before kicking off the scan: the kickoff opens its own
+    # AsyncSessionLocal and reads these freshly-created rows.
     await db.commit()
 
-    if not valid_repo_ids:
-        return LegacyFinalizeResult(scan_id=None, embedding_warning=None)
-
-    embed_ok, embed_err = await embedding_service.check()
-    if not embed_ok:
-        warning = (
-            f"Embedding service unavailable ({embed_err}). "
-            "Scan skipped — trigger it manually from Settings after fixing."
-        )
-        logger.warning("setup_embedding_check_failed", error=embed_err)
-        return LegacyFinalizeResult(scan_id=None, embedding_warning=warning)
-
-    new_scan_id = await start_v2_scan(
+    new_scan_id, embedding_warning = await kick_off_onboard_scan(
         org_id=org.id,
         repo_ids=valid_repo_ids,
-        config=RunConfig(full_rescan=True),
     )
-    scan_id = str(new_scan_id)
-    logger.info(
-        "setup_finalize_legacy_scan_triggered",
-        scan_id=scan_id,
-        repos=len(valid_repo_ids),
-    )
-    return LegacyFinalizeResult(scan_id=scan_id, embedding_warning=None)
+    scan_id_str = str(new_scan_id) if new_scan_id is not None else None
+    if scan_id_str is not None:
+        logger.info(
+            "setup_finalize_legacy_scan_triggered",
+            scan_id=scan_id_str,
+            repos=len(valid_repo_ids),
+        )
+    return LegacyFinalizeResult(scan_id=scan_id_str, embedding_warning=embedding_warning)

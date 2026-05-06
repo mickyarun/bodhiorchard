@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Enums for the v2 scan pipeline tables.
+"""Enums for the scan pipeline tables.
 
-Kept in their own module so the v2 ORM models can import them without
+Kept in their own module so the scan ORM models can import them without
 pulling in the legacy scan internals. Bound to PostgreSQL enum types
 in the Alembic migration that creates ``scan_repo_runs`` and
 ``scan_repo_steps``.
@@ -19,7 +19,7 @@ from enum import StrEnum
 class RepoRunStatus(StrEnum):
     """Lifecycle state of a single ``scan_repo_runs`` row.
 
-    A repo run is the per-repo unit of work in a v2 scan: ingest →
+    A repo run is the per-repo unit of work in a scan: ingest →
     extract → ... → synthesize for one repository within one scan.
     """
 
@@ -49,7 +49,7 @@ class StepStatus(StrEnum):
 
 
 class ScanKind(StrEnum):
-    """Top-level shape of a v2 scan.
+    """Top-level shape of a scan.
 
     ``FULL`` scans every selected repo's pipeline end-to-end.
     ``INCREMENTAL`` reuses cached steps when the HEAD sha is unchanged.

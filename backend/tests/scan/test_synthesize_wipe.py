@@ -52,15 +52,15 @@ def _patch_session(monkeypatch: pytest.MonkeyPatch, session: _FakeSession) -> No
     monkeypatch.setattr(stage, "with_session", _cm)
 
 
-def _patch_v2_context(monkeypatch: pytest.MonkeyPatch, org_id: uuid.UUID) -> None:
-    """Make ``resolve_v2_context`` return a populated context (no real session)."""
+def _patch_runtime_context(monkeypatch: pytest.MonkeyPatch, org_id: uuid.UUID) -> None:
+    """Make ``resolve_runtime_context`` return a populated context (no real session)."""
 
     class _V2:
         def __init__(self, oid: uuid.UUID) -> None:
             self.org_id = oid
             self.scan_id = uuid.uuid4()
 
-    monkeypatch.setattr(stage, "resolve_v2_context", lambda _config: _V2(org_id))
+    monkeypatch.setattr(stage, "resolve_runtime_context", lambda _config: _V2(org_id))
 
 
 async def test_wipe_runs_when_skip_predicate_returns_no_skip(
@@ -77,7 +77,7 @@ async def test_wipe_runs_when_skip_predicate_returns_no_skip(
     fake_repo = _FakeRepo()
     fake_session = _FakeSession()
 
-    _patch_v2_context(monkeypatch, org_id)
+    _patch_runtime_context(monkeypatch, org_id)
     _patch_session(monkeypatch, fake_session)
     monkeypatch.setattr(
         stage,
@@ -92,7 +92,7 @@ async def test_wipe_runs_when_skip_predicate_returns_no_skip(
 
     # mcp_credentials_missing branch returns early with skipped_cache=True;
     # the wipe MUST already have happened at that point.
-    config = {"v2_repo_id": str(repo_id)}
+    config = {"repo_id": str(repo_id)}
     out = await stage.run(StageContext(run_id="r", repo_path="/x", repo_name="r"), [], config)
 
     assert fake_repo.deleted == [repo_id]
@@ -111,7 +111,7 @@ async def test_wipe_skipped_when_skip_predicate_returns_skip(
     fake_repo = _FakeRepo()
     fake_session = _FakeSession()
 
-    _patch_v2_context(monkeypatch, org_id)
+    _patch_runtime_context(monkeypatch, org_id)
     _patch_session(monkeypatch, fake_session)
     monkeypatch.setattr(
         stage,
@@ -124,7 +124,7 @@ async def test_wipe_skipped_when_skip_predicate_returns_skip(
 
     monkeypatch.setattr(stage, "should_skip_feature_synthesis", _skip)
 
-    config = {"v2_repo_id": str(repo_id)}
+    config = {"repo_id": str(repo_id)}
     out = await stage.run(StageContext(run_id="r", repo_path="/x", repo_name="r"), [], config)
 
     assert fake_repo.deleted == []
@@ -143,7 +143,7 @@ async def test_wipe_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
     repo_id = uuid.uuid4()
     fake_session = _FakeSession()
 
-    _patch_v2_context(monkeypatch, org_id)
+    _patch_runtime_context(monkeypatch, org_id)
     _patch_session(monkeypatch, fake_session)
 
     class _BoomRepo:
@@ -161,7 +161,7 @@ async def test_wipe_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(stage, "should_skip_feature_synthesis", _no_skip)
 
-    config = {"v2_repo_id": str(repo_id)}
+    config = {"repo_id": str(repo_id)}
     with pytest.raises(RuntimeError, match="simulated DB outage"):
         await stage.run(
             StageContext(run_id="r", repo_path="/x", repo_name="r"),

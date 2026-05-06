@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""MCP handlers exclusive to the v2 scan pipeline.
+"""MCP handlers exclusive to the scan pipeline.
 
 The single tool is ``write_synthesis_feature`` — Claude calls it once
 per feature it produces during the synthesize stage. The handler
@@ -42,7 +42,7 @@ async def handle_write_synthesis_feature(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Stage one v2-synthesised feature for end-of-batch reconciliation.
+    """Stage one synthesised feature for end-of-batch reconciliation.
 
     Required params: ``name``, ``description``, ``source_community_ids``
     (non-empty list of community_id strings — the ids you saw in the

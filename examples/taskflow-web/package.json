@@ -3,8 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "prepare": "git config core.hooksPath .githooks"
+    "build": "vite build"
   },
   "dependencies": {
     "vue": "^3.4.0",

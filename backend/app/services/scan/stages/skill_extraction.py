@@ -4,11 +4,11 @@
 """Stage E — Skill extraction (per-repo).
 
 Wraps the legacy ``app.services.scan.phase_impls.skill_extraction.phase_e_skills``
-in the v2 stage signature without touching the original. Runs git-log
+in the stage signature without touching the original. Runs git-log
 analysis against the worktree, optionally auto-creates members, and
 upserts ``skill_profiles`` rows.
 
-Only fires inside a real v2 scan (org_id + scan_id supplied via config);
+Only fires inside a real scan (org_id + scan_id supplied via config);
 sandbox runs no-op.
 """
 
@@ -22,9 +22,12 @@ import structlog
 from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.stages import StageContext, StageOutput
+from app.services.scan.stages._runtime_context import (
+    resolve_runtime_context,
+    skipped_runtime_output,
+)
 from app.services.scan.stages._skip import stage_output_for_skip
 from app.services.scan.stages._skip_predicates import should_skip_skill_extraction
-from app.services.scan.stages._v2_context import resolve_v2_context, skipped_v2_output
 
 logger = structlog.get_logger(__name__)
 
@@ -40,20 +43,20 @@ async def run(
     config: dict[str, Any],
 ) -> StageOutput:
     """Run git-log skill extraction; pass ``communities`` through unchanged."""
-    v2 = resolve_v2_context(config)
-    if v2 is None:
-        return StageOutput(communities=communities, dropped=[], extras=skipped_v2_output())
+    runtime = resolve_runtime_context(config)
+    if runtime is None:
+        return StageOutput(communities=communities, dropped=[], extras=skipped_runtime_output())
 
-    repo_id_raw = config.get("v2_repo_id")
+    repo_id_raw = config.get("repo_id")
     if repo_id_raw is not None:
         repo_id = uuid.UUID(str(repo_id_raw))
-        async with with_session(v2.org_id) as db:
+        async with with_session(runtime.org_id) as db:
             decision = await should_skip_skill_extraction(
                 db,
-                org_id=v2.org_id,
+                org_id=runtime.org_id,
                 repo_id=repo_id,
                 repo_path=ctx.repo_path,
-                full_rescan=bool(config.get("v2_full_rescan", False)),
+                full_rescan=bool(config.get("full_rescan", False)),
             )
         if decision.skip:
             extras = stage_output_for_skip(
@@ -84,12 +87,12 @@ async def run(
             },
         )
 
-    async with with_session(v2.org_id) as db:
-        email_to_user = await UserRepository(db).get_email_map(v2.org_id)
+    async with with_session(runtime.org_id) as db:
+        email_to_user = await UserRepository(db).get_email_map(runtime.org_id)
         scan_cfg = config.get("scan_cfg", {}) or {}
         profiles_added, unmatched = await phase_e_skills(
             db=db,
-            org_id=v2.org_id,
+            org_id=runtime.org_id,
             repo_path=ctx.repo_path,
             skill_entries=skill_entries,
             email_to_user=email_to_user,

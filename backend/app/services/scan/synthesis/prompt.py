@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Synthesis prompt builder for the v2 pipeline.
+"""Synthesis prompt builder for the pipeline.
 
 Direct-payload approach: the prompt embeds the full reduced
 meta-community list as JSON so Claude doesn't need an MCP queue

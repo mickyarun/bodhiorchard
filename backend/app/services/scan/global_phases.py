@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Global (run-once-per-scan) phase orchestration for the v2 pipeline.
+"""Global (run-once-per-scan) phase orchestration for the pipeline.
 
-After every per-repo workflow has finished, the v2 ``scan_runner``
+After every per-repo workflow has finished, the ``scan_runner``
 calls into here to run the cross-repo phases that *can't* be sharded
 per-repo: feature merge, skill remap (rebuilds skills with feature
 names as modules), persist results, and audit.
 
 Each phase is best-effort: a failure logs and the next phase still
-runs. The legacy v1 pipeline calls these same functions in the same
-order; we route through the v2 stage registry so each one is uniformly
-gated by ``resolve_v2_context``.
+runs. (historical: an earlier pipeline iteration called these same functions
+order; we route through the stage registry so each one is uniformly
+gated by ``resolve_runtime_context``.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ GLOBAL_PHASE_ORDER: tuple[str, ...] = (
 )
 
 # Placeholder repo_name on the global StageContext — phase wrappers
-# read ``v2_repo_paths`` for the actual repo set; this string surfaces
+# read ``repo_paths`` for the actual repo set; this string surfaces
 # in log lines and is grep-able.
 _GLOBAL_REPO_NAME = "global"
 
@@ -72,9 +72,9 @@ async def run_global_phases(
     # config payload for backwards compatibility but are unused.
     scan_cfg = await _load_scan_cfg(org_id=org_id)
     config: dict[str, Any] = {
-        "v2_org_id": str(org_id),
-        "v2_scan_id": str(scan_id),
-        "v2_repo_paths": repo_paths,
+        "org_id": str(org_id),
+        "scan_id": str(scan_id),
+        "repo_paths": repo_paths,
         # Threaded through so persist_results stamps realistic numbers on
         # the org config snapshot.
         "total_features_synthesized": counts["features"],
@@ -84,7 +84,7 @@ async def run_global_phases(
         "scan_cfg": scan_cfg,
     }
     # The first repo path is just used to satisfy the StageContext;
-    # global stages walk the full ``v2_repo_paths`` list internally.
+    # global stages walk the full ``repo_paths`` list internally.
     ctx = StageContext(
         run_id=str(scan_id),
         repo_path=repo_paths[0],

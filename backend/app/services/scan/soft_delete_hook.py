@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Soft-delete pre/post hooks for v2 scans.
+"""Soft-delete pre/post hooks for scans.
 
 Wraps ``app.scan.soft_delete.soft_delete_for_changed_repos`` and
-``rollback_soft_deleted_features`` so the v2 ``scan_runner`` can
+``rollback_soft_deleted_features`` so the ``scan_runner`` can
 preserve the same data-safety invariants the legacy pipeline has:
 
 * Before the per-repo workflows fan out, soft-delete every active

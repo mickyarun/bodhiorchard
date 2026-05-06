@@ -29,7 +29,7 @@ from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.backend_link import iter_route_records
 from app.services.scan.stages import StageContext, StageOutput
-from app.services.scan.stages._v2_context import resolve_v2_context
+from app.services.scan.stages._runtime_context import resolve_runtime_context
 
 logger = structlog.get_logger(__name__)
 
@@ -45,16 +45,16 @@ async def run(
     cluster reduction chain. Counts are reported via ``extras`` so the
     chip popover can show "47 routes cached" / "skipped (cache hit)".
     """
-    v2 = resolve_v2_context(config)
-    repo_id_raw = config.get("v2_repo_id")
-    if v2 is None or repo_id_raw is None:
+    runtime = resolve_runtime_context(config)
+    repo_id_raw = config.get("repo_id")
+    if runtime is None or repo_id_raw is None:
         return StageOutput(communities=[], dropped=[], extras={"skipped": True})
 
     repo_id = uuid.UUID(str(repo_id_raw))
     head_sha = str(config.get("ingest_head_sha") or "").strip()
 
-    async with with_session(v2.org_id) as db:
-        tracked = await TrackedRepoRepository(db, org_id=v2.org_id).get_by_id(repo_id)
+    async with with_session(runtime.org_id) as db:
+        tracked = await TrackedRepoRepository(db, org_id=runtime.org_id).get_by_id(repo_id)
     if tracked is None or tracked.repo_layer is not RepoLayer.BACKEND:
         logger.info(
             "scan_extract_routes_skipped_non_backend",
@@ -94,8 +94,8 @@ async def run(
             },
         )
 
-    async with with_session(v2.org_id) as db:
-        cache_repo = BackendRouteCacheRepository(db, org_id=v2.org_id)
+    async with with_session(runtime.org_id) as db:
+        cache_repo = BackendRouteCacheRepository(db, org_id=runtime.org_id)
         if await cache_repo.has_rows_for_sha(repo_id=repo_id, head_sha=head_sha):
             logger.info(
                 "scan_extract_routes_cache_hit",
@@ -120,8 +120,8 @@ async def run(
     repo_root = Path(str(worktree_path))
     records = list(iter_route_records(repo_root))
 
-    async with with_session(v2.org_id) as db:
-        cache_repo = BackendRouteCacheRepository(db, org_id=v2.org_id)
+    async with with_session(runtime.org_id) as db:
+        cache_repo = BackendRouteCacheRepository(db, org_id=runtime.org_id)
         written = await cache_repo.replace_for_repo_sha(
             repo_id=repo_id, head_sha=head_sha, records=records
         )

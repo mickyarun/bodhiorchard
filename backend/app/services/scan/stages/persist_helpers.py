@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Side helpers for the v2 ``persist_results`` stage.
+"""Side helpers for the ``persist_results`` stage.
 
 * :func:`collect_head_shas` — runs ``git rev-parse HEAD`` across every
   scanned worktree and returns ``{repo_path: sha}``.

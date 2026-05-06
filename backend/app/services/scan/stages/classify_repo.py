@@ -29,7 +29,7 @@ from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.repo_classify import classify
 from app.services.scan.stages import StageContext, StageOutput
-from app.services.scan.stages._v2_context import resolve_v2_context
+from app.services.scan.stages._runtime_context import resolve_runtime_context
 
 logger = structlog.get_logger(__name__)
 
@@ -45,10 +45,10 @@ async def run(
     surface it; ``communities`` and ``dropped`` stay empty since this
     stage is not part of the cluster reduction chain.
     """
-    v2 = resolve_v2_context(config)
-    repo_id_raw = config.get("v2_repo_id")
-    if v2 is None or repo_id_raw is None:
-        logger.info("scan_classify_repo_skipped_no_v2_context", repo=ctx.repo_name)
+    runtime = resolve_runtime_context(config)
+    repo_id_raw = config.get("repo_id")
+    if runtime is None or repo_id_raw is None:
+        logger.info("scan_classify_repo_skipped_no_runtime_context", repo=ctx.repo_name)
         return StageOutput(communities=[], dropped=[], extras={"skipped": True})
 
     repo_id = uuid.UUID(str(repo_id_raw))
@@ -57,8 +57,8 @@ async def run(
     worktree_path = config.get("v2_worktree_path") or ctx.repo_path
     classification = classify(ctx.repo_name, str(worktree_path))
 
-    async with with_session(v2.org_id) as db:
-        await TrackedRepoRepository(db, org_id=v2.org_id).set_classification(
+    async with with_session(runtime.org_id) as db:
+        await TrackedRepoRepository(db, org_id=runtime.org_id).set_classification(
             repo_id,
             layer=classification.layer,
             tech_stack=classification.tech_stack,

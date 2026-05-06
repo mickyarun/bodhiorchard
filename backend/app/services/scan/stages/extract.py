@@ -11,7 +11,7 @@ size_floor, top_n, hierarchical, …).
 
 Two cost layers, in order of preference:
 
-1. **Postgres cache hit** — when the v2 context provides
+1. **Postgres cache hit** — when the context provides
    ``(repo_id, head_sha)`` and ``cluster_cache`` has rows for that
    pair, hydrate from Postgres in one query. ~50ms.
 2. **Cache miss** — log a warning and return an empty list. The new
@@ -35,8 +35,8 @@ from app.repositories.cluster_cache import ClusterCacheRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.stages import StageContext, StageOutput
+from app.services.scan.stages._runtime_context import resolve_runtime_context
 from app.services.scan.stages._skip import maybe_skipped_for_ingest
-from app.services.scan.stages._v2_context import resolve_v2_context
 
 logger = structlog.get_logger(__name__)
 
@@ -57,18 +57,18 @@ async def run(
 
     files_per = int(config.get("files_per_community", 15))
 
-    v2 = resolve_v2_context(config)
-    repo_id_raw = config.get("v2_repo_id")
+    runtime = resolve_runtime_context(config)
+    repo_id_raw = config.get("repo_id")
     head_sha = str(config.get("ingest_head_sha") or "").strip()
 
-    if v2 is None or repo_id_raw is None or not head_sha:
-        # Without a v2 context there is no cache to hit; the legacy v1
+    if runtime is None or repo_id_raw is None or not head_sha:
+        # Without a context there is no cache to hit; the prior
         # path is gone with GitNexus. Return an empty stage output and
         # let downstream stages handle the no-input case.
         logger.info(
-            "scan_extract_no_v2_context",
+            "scan_extract_no_runtime_context",
             repo=ctx.repo_name,
-            has_v2=v2 is not None,
+            has_runtime=runtime is not None,
             has_repo_id=repo_id_raw is not None,
             has_head_sha=bool(head_sha),
         )
@@ -80,12 +80,14 @@ async def run(
                 "files_per_community": files_per,
                 "io_label": "indexer → communities",
                 "cache_hit": False,
-                "reason": "no v2 context",
+                "reason": "no context",
             },
         )
 
     repo_id = uuid.UUID(str(repo_id_raw))
-    cached = await _load_cached_communities(org_id=v2.org_id, repo_id=repo_id, head_sha=head_sha)
+    cached = await _load_cached_communities(
+        org_id=runtime.org_id, repo_id=repo_id, head_sha=head_sha
+    )
 
     if cached is None:
         logger.warning(

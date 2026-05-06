@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Per-stage skip predicates for the v2 per-repo scan pipeline.
+"""Per-stage skip predicates for the per-repo scan pipeline.
 
 Each predicate answers a single question: "is this stage's output already
 current for the repo's HEAD commit?" — and is the only place in the codebase

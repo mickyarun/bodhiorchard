@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Step-level status transitions for v2 scan runs.
+"""Step-level status transitions for scan runs.
 
 Pulled out of ``scan_run.py`` to keep that module focused on repo-run
 CRUD; the four ``mark_step_*`` helpers all delegate to ``upsert_step``
@@ -200,7 +200,7 @@ async def reset_steps_for_runs(
 ) -> int:
     """Reset every step row under the given runs back to QUEUED.
 
-    Used by ``resume_v2_scan`` so the popover doesn't render skill counts
+    Used by ``resume_scan`` so the popover doesn't render skill counts
     or error messages from the failed prior attempt while the new walk
     is in flight. Idempotent — matches zero rows when there are no
     pre-existing steps.

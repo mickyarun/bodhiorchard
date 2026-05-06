@@ -3,7 +3,7 @@
 
 """Cache table for code-graph cluster → file mappings keyed on (repo, SHA).
 
-The v2 ``extract`` stage feeds ``Community`` rows from the upstream code
+The ``extract`` stage feeds ``Community`` rows from the upstream code
 indexer (``app.services.code_indexer`` — graphify-based) into reduction
 stages. Persisting the post-cluster rows here, keyed on
 ``(repo_id, head_sha)``, lets a re-run on the same SHA hydrate the stage

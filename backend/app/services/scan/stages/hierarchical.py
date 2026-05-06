@@ -40,8 +40,8 @@ from app.repositories.repo_graph_cache import RepoGraphCacheRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.stages import StageContext, StageOutput
+from app.services.scan.stages._runtime_context import resolve_runtime_context
 from app.services.scan.stages._skip import maybe_skipped_for_ingest
-from app.services.scan.stages._v2_context import resolve_v2_context
 
 logger = structlog.get_logger(__name__)
 
@@ -72,26 +72,26 @@ async def run(
     resolution = float(config.get("resolution", 1.0))
     files_per_meta = int(config.get("files_per_meta", 30))
 
-    v2 = resolve_v2_context(config)
-    repo_id_raw = config.get("v2_repo_id")
+    runtime = resolve_runtime_context(config)
+    repo_id_raw = config.get("repo_id")
     head_sha = str(config.get("ingest_head_sha") or "").strip()
 
-    if v2 is None or repo_id_raw is None or not head_sha:
-        # Without v2 context the graph cache cannot be loaded — return
+    if runtime is None or repo_id_raw is None or not head_sha:
+        # Without context the graph cache cannot be loaded — return
         # the input untouched so reduction still proceeds.
         logger.info(
-            "scan_hierarchical_no_v2_context",
+            "scan_hierarchical_no_runtime_context",
             repo=ctx.repo_name,
         )
         return StageOutput(
             communities=communities,
             dropped=[],
-            extras={"reason": "no v2 context", "io_label": "communities → meta-communities"},
+            extras={"reason": "no context", "io_label": "communities → meta-communities"},
         )
 
     repo_id = uuid.UUID(str(repo_id_raw))
     edges = await _fetch_call_edges_from_cache(
-        org_id=v2.org_id,
+        org_id=runtime.org_id,
         repo_id=repo_id,
         head_sha=head_sha,
         communities=communities,

@@ -70,7 +70,7 @@ class StageResult(BaseModel):
     error: str | None = None
 
 
-# Canonical per-repo stage list a v2 scan walks by default. Order
+# Canonical per-repo stage list a scan walks by default. Order
 # matters: each stage threads its kept communities into the next.
 # Lives here (next to ``RunConfig``) so the schema's default_factory
 # stays the single source of truth — orchestrators read this name
@@ -131,7 +131,7 @@ class TestRun(BaseModel):
 
 
 class TrackedRepoCard(BaseModel):
-    """Repo tile rendered in the new scan-v2 selection grid.
+    """Repo tile rendered in the scan selection grid.
 
     The ``last_scan_*`` fields summarise the most recent ``ScanRepoRun``
     for this repo across every scan (not just the in-flight one). The
@@ -177,7 +177,7 @@ class ResumeScanResponse(BaseModel):
 
 
 class StepRow(BaseModel):
-    """One row of the v2 timeline UI."""
+    """One row of the scan timeline UI."""
 
     phase: ScanPhase
     status: StepStatus
@@ -265,7 +265,7 @@ class PhaseStatusRow(BaseModel):
 class LegacyScanStatusResponse(BaseModel):
     """``GET /scans/{id}/status`` — legacy ``ScanStatusData`` shape.
 
-    Renders v2 ``Scan`` + ``ScanRepoRun`` + ``ScanRepoStep`` rows back
+    Renders ``Scan`` + ``ScanRepoRun`` + ``ScanRepoStep`` rows back
     into the flat shape the SetupChecklist component still expects.
     """
 

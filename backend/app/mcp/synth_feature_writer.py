@@ -3,7 +3,7 @@
 
 """MCP-side helper for staging synthesised features for reconciliation.
 
-Called by ``write_feature_registry`` (legacy) and the v2 synthesis
+Called by ``write_feature_registry`` (legacy) and the synthesis
 prompt's ``write_synthesis_feature`` MCP tool. Each call appends a
 ``FeatureWrite`` to the per-repo
 :mod:`app.mcp.synthesis_accumulator` buffer; the synthesise scan
