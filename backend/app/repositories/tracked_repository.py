@@ -142,6 +142,34 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         await self._db.flush()
         return repo
 
+    async def upsert_for_github_repo(
+        self,
+        *,
+        github_full_name: str,
+        path: str,
+        name: str,
+    ) -> TrackedRepository:
+        """Upsert keyed on ``github_repo_full_name`` first, then on ``path``.
+
+        The same GitHub repo can be onboarded twice for an org — once via
+        "Local folder" pointing at the user's working checkout, once via
+        the GitHub-App bulk-import which clones into ``repoclone/...``.
+        Different paths, same logical repo. Path-keyed :meth:`upsert`
+        treats them as distinct rows and the scan pipeline ends up running
+        synthesis once per row. This adoption helper claims the existing
+        row when the GitHub full name already matches an active/ignored
+        entry in the org and updates its path to the freshly-cloned tree.
+        Falls back to path-keyed upsert when the full name is new.
+        """
+        existing = await self.get_by_github_full_name(github_full_name)
+        if existing is not None and existing.status != RepoStatus.REMOVED:
+            existing.path = path
+            existing.name = name
+            existing.status = RepoStatus.ACTIVE
+            await self._db.flush()
+            return existing
+        return await self.upsert(path, name)
+
     async def set_onboard_metadata(
         self,
         repo: TrackedRepository,
@@ -350,12 +378,15 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         """Return the set of non-null ``github_repo_full_name`` values for the org.
 
         Used by the bulk-import picker to mark which installable repos are
-        already tracked. Filters out null values at the DB layer so the
-        caller gets a clean ``set[str]`` (no Optional handling).
+        already tracked. Excludes ``REMOVED`` rows so a soft-deleted repo
+        appears re-importable on the picker — without this filter, the
+        checkbox stays disabled with an "already tracked" badge after a
+        delete and the user can never re-add the repo.
         """
         stmt = self._scoped(
             select(TrackedRepository.github_repo_full_name).where(
-                TrackedRepository.github_repo_full_name.isnot(None)
+                TrackedRepository.github_repo_full_name.isnot(None),
+                TrackedRepository.status != RepoStatus.REMOVED,
             )
         )
         result = await self._db.execute(stmt)

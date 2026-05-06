@@ -8,8 +8,9 @@ chosen branches), this handler:
 
 1. Loads the org and fetches a single GitHub-App installation token.
 2. Fans out per-item clone+upsert work under a small semaphore.
-3. After every item settles, kicks off a single v2 scan covering
-   the successful repos.
+3. After every item settles, hands the successful repo IDs to the
+   shared :func:`kick_off_onboard_scan` helper — the same seam used
+   by the wizard's local-path arm.
 
 Per-item progress is streamed through ``update_job`` so the frontend's
 ``useJobSocket`` consumer can render live status — every flip in
@@ -42,7 +43,6 @@ from app.schemas.jobs import (
     BulkOnboardJobPayload,
     JobState,
 )
-from app.schemas.scan import RunConfig
 from app.services.github_app_auth import get_installation_token
 from app.services.job_queue import update_job
 from app.services.job_repo_bulk_clone_helpers import (
@@ -51,8 +51,10 @@ from app.services.job_repo_bulk_clone_helpers import (
     run_with_progress,
     summarise,
 )
-from app.services.repo_cloner import _sanitize
-from app.services.scan.runner import start_v2_scan, wait_for_scan_task
+from app.services.redis_cache import INSTALLABLE_REPOS_KEY_TEMPLATE, delete_key
+from app.services.repo_cloner import _sanitize, purge_repo_clones
+from app.services.scan.runner import ScanAlreadyActiveError
+from app.services.scan_kickoff import kick_off_onboard_scan
 
 logger = structlog.get_logger(__name__)
 
@@ -60,15 +62,12 @@ logger = structlog.get_logger(__name__)
 BULK_ONBOARD_CONCURRENCY = 4
 JOB_PROGRESS_FINAL_PCT = 100
 
-# When a bulk-onboard run produces many newly-cloned repos, kicking
-# off a single ``start_v2_scan`` for all of them lets every scan stage
-# (gitnexus indexer, classifier, embedding extraction, …) fan out
-# across the whole set in parallel. On a 20-repo onboard that pinned
-# CPU and starved unrelated HTTP requests of DB connections. We
-# instead chunk the repo_ids into batches and run one scan per batch
-# sequentially — each batch's scan task is awaited via
-# ``wait_for_scan_task`` before the next batch starts.
-BULK_SCAN_BATCH_SIZE = 4
+# Friendly user-facing message when the kickoff finds another scan
+# already active. Stack traces are unhelpful in the wizard UI; the
+# user just needs to know to wait or cancel the running scan.
+_ACTIVE_SCAN_MSG = (
+    "Another scan is already running for this org; finish or cancel it before re-running setup."
+)
 
 
 async def handle_bulk_onboard_job(
@@ -121,6 +120,27 @@ async def handle_bulk_onboard_job(
         )
         return
 
+    # Wipe cached clones for the specific repos being re-onboarded so a
+    # half-finished prior attempt (interrupted setup, merge conflict,
+    # corrupted worktree) can't carry stale state forward. Scoped to the
+    # current payload — sibling clones belonging to in-flight scans on
+    # OTHER repos are left alone, since wiping them mid-scan rips the
+    # working tree out and produces "no source files found" failures.
+    update_job(
+        job_id,
+        status_message="Clearing previous clones...",
+        progress_pct=JOB_PROGRESS_BASE_PCT,
+        result=payload.model_dump(by_alias=True, mode="json"),
+    )
+    repo_names = [item.full_name.split("/", 1)[-1] for item in payload.items]
+    removed = await asyncio.to_thread(purge_repo_clones, org.slug, repo_names)
+    logger.info(
+        "bulk_onboard_clones_purged",
+        org_slug=org.slug,
+        requested=len(repo_names),
+        removed=removed,
+    )
+
     semaphore = asyncio.Semaphore(BULK_ONBOARD_CONCURRENCY)
     counter: dict[str, int] = {"done": 0}
     tasks: list[Awaitable[None]] = [
@@ -145,13 +165,33 @@ async def handle_bulk_onboard_job(
         if item.status is BulkOnboardItemState.DONE and item.repo_id is not None
     ]
 
-    scan_ids: list[uuid.UUID] = []
+    # Invalidate the picker's installable-repos cache so freshly-onboarded
+    # repos show as ``already_tracked`` immediately on the next page load
+    # instead of waiting up to 60s for the TTL.
+    if successful_repo_ids:
+        await delete_key(INSTALLABLE_REPOS_KEY_TEMPLATE.format(org_id=str(payload.org_id)))
+
+    scan_id: uuid.UUID | None = None
+    embedding_warning: str | None = None
     if successful_repo_ids:
         try:
-            scan_ids = await _run_batched_scans(
+            scan_id, embedding_warning = await kick_off_onboard_scan(
                 org_id=payload.org_id,
                 repo_ids=successful_repo_ids,
             )
+        except ScanAlreadyActiveError:
+            logger.warning(
+                "bulk_onboard_scan_kickoff_skipped_active",
+                org_id=str(payload.org_id),
+            )
+            update_job(
+                job_id,
+                state=JobState.FAILED,
+                error=_ACTIVE_SCAN_MSG,
+                status_message="Scan kickoff skipped",
+                result=summarise(payload, scan_id=None),
+            )
+            return
         except Exception as exc:
             logger.exception("bulk_onboard_scan_kickoff_failed")
             update_job(
@@ -163,12 +203,12 @@ async def handle_bulk_onboard_job(
             )
             return
 
-    first_scan_id = scan_ids[0] if scan_ids else None
-    result = summarise(payload, scan_id=first_scan_id, scan_ids=scan_ids)
+    result = summarise(payload, scan_id=scan_id)
+    completion_message = embedding_warning or "Done"
     update_job(
         job_id,
         state=JobState.COMPLETED,
-        status_message="Done",
+        status_message=completion_message,
         progress_pct=JOB_PROGRESS_FINAL_PCT,
         result=result,
     )
@@ -178,43 +218,5 @@ async def handle_bulk_onboard_job(
         succeeded=len(result["succeeded"]),
         failed=len(result["failed"]),
         scan_id=result["scan_id"],
-        scan_ids=result["scan_ids"],
+        embedding_warning=embedding_warning,
     )
-
-
-def _chunk_repo_ids(
-    repo_ids: list[uuid.UUID],
-    batch_size: int,
-) -> list[list[uuid.UUID]]:
-    """Split ``repo_ids`` into contiguous chunks of at most ``batch_size``."""
-    if batch_size <= 0:
-        raise ValueError("batch_size must be a positive integer")
-    return [repo_ids[i : i + batch_size] for i in range(0, len(repo_ids), batch_size)]
-
-
-async def _run_batched_scans(
-    *,
-    org_id: uuid.UUID,
-    repo_ids: list[uuid.UUID],
-) -> list[uuid.UUID]:
-    """Kick off one scan per ``BULK_SCAN_BATCH_SIZE``-chunk of repos, in series.
-
-    Each batch's scan task is awaited to natural completion via
-    :func:`wait_for_scan_task` before the next batch starts. This caps
-    the number of repos any scan stage runs concurrently at
-    ``BULK_SCAN_BATCH_SIZE`` without requiring a sweeping change inside
-    the scan runner.
-    """
-    scan_ids: list[uuid.UUID] = []
-    for batch in _chunk_repo_ids(repo_ids, BULK_SCAN_BATCH_SIZE):
-        scan_id = await start_v2_scan(
-            org_id=org_id,
-            repo_ids=batch,
-            config=RunConfig(),
-        )
-        scan_ids.append(scan_id)
-        # Block until this batch's background task finishes before the
-        # next batch is scheduled. ``start_v2_scan`` is fire-and-forget,
-        # so without this wait we'd be back to fully-concurrent fanout.
-        await wait_for_scan_task(scan_id)
-    return scan_ids

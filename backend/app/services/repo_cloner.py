@@ -195,22 +195,22 @@ async def clone_or_update(
 
     if already_cloned:
         logger.info("repo_clone_update_start", dest=str(dest), owner=owner, repo=repo)
+        # Rewrite ``origin`` with the current credentials before fetching so
+        # an expired GitHub-App installation token (or a rotated PAT) baked
+        # into a prior clone doesn't dictate today's auth outcome.
+        await _run_git(["-C", str(dest), "remote", "set-url", "origin", effective_url], env=env)
         rc, _, stderr = await _run_git(
             ["-C", str(dest), "fetch", "--all", "--prune"],
             env=env,
         )
         if rc != 0:
-            # The clone is usable; we just couldn't refresh. Return success
-            # with a warning rather than a hard 400 so the caller can still
-            # register the existing repo on this org.
+            # Hard-fail rather than returning the stale tree as success.
+            # A silent fetch failure here cascades through the scan
+            # pipeline (Stage 0 ingest, route extraction, feature synth)
+            # against checkouts whose head_sha may be hours or days
+            # behind, producing empty graphs that the audit greenlit.
             logger.warning("repo_clone_fetch_failed", rc=rc, stderr=stderr[:300])
-            default_branch = await _detect_default_branch(dest, env)
-            return CloneResult(
-                success=True,
-                path=str(dest),
-                default_branch=default_branch,
-                error=f"Refresh skipped: {_sanitize(stderr, pat)}",
-            )
+            return CloneResult(success=False, error=_sanitize(stderr, pat))
     else:
         logger.info(
             "repo_clone_start",
@@ -236,6 +236,70 @@ async def clone_or_update(
 
     logger.info("repo_clone_ok", path=str(dest), default_branch=default_branch)
     return CloneResult(success=True, path=str(dest), default_branch=default_branch)
+
+
+def purge_org_clones(org_slug: str) -> int:
+    """Remove every cached clone under ``<repos_dir>/<org_slug>/``.
+
+    Used only by the init-org flow — a fresh init means the DB has no
+    rows referencing any prior clones, so a leftover ``repoclone/<slug>/``
+    tree from a previous deployment is by definition orphaned and safe
+    to wipe. Do **not** call this from the bulk-onboard path: that runs
+    on a populated DB where sibling repos may belong to other in-flight
+    scans, and a whole-org purge would yank their working trees out.
+    Use :func:`purge_repo_clones` (per-payload) there.
+
+    Returns the number of repo directories removed.
+    """
+    if not _SAFE_SEG.match(org_slug):
+        raise ValueError(f"Invalid org slug: {org_slug!r}")
+    org_dir = _clone_root() / org_slug
+    if not org_dir.exists():
+        return 0
+    removed = sum(1 for entry in org_dir.iterdir() if entry.is_dir())
+    shutil.rmtree(org_dir, ignore_errors=True)
+    logger.info("repo_clones_purged_init", org_slug=org_slug, removed=removed)
+    return removed
+
+
+def purge_repo_clones(org_slug: str, repo_names: list[str]) -> int:
+    """Remove cached clones for the named repos under ``<repos_dir>/<org_slug>/``.
+
+    Scoped to the *specific* repos being re-onboarded so sibling clones
+    that other in-flight scans may still be reading from aren't wiped —
+    a whole-org purge previously broke concurrent scans by yanking the
+    working tree out from under them mid-extraction.
+
+    The original wipe defended against stale ``origin`` URLs in the
+    cloner's ``already_cloned`` branch. That defense moved into
+    :func:`clone_or_update` itself (it now rewrites ``origin`` with
+    fresh credentials before fetching and hard-fails on fetch errors),
+    so this helper only needs to clean the specific repos a fresh
+    onboard explicitly asked for.
+
+    Returns the number of repo directories actually removed.
+    """
+    if not _SAFE_SEG.match(org_slug):
+        raise ValueError(f"Invalid org slug: {org_slug!r}")
+    org_dir = _clone_root() / org_slug
+    if not org_dir.exists():
+        return 0
+
+    removed = 0
+    for name in repo_names:
+        if not _SAFE_SEG.match(name):
+            raise ValueError(f"Invalid repo name: {name!r}")
+        target = org_dir / name
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+            removed += 1
+    logger.info(
+        "repo_clones_purged",
+        org_slug=org_slug,
+        requested=len(repo_names),
+        removed=removed,
+    )
+    return removed
 
 
 def _sanitize(msg: str, pat: str | None) -> str:

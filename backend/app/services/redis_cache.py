@@ -26,6 +26,13 @@ from app.services.redis_client import get_redis
 logger = structlog.get_logger(__name__)
 
 
+# Cache-key templates used by more than one module. Centralised here so a
+# rename in one place doesn't silently drift from its mate; both the
+# settings endpoint that writes the cache and the bulk-onboard / remove
+# paths that invalidate it derive their key from this template.
+INSTALLABLE_REPOS_KEY_TEMPLATE = "installable_repos:{org_id}"
+
+
 async def get_or_set_json(
     key: str,
     *,
@@ -63,3 +70,19 @@ async def get_or_set_json(
         except Exception:
             logger.warning("redis_cache_set_failed", key=key)
     return value
+
+
+async def delete_key(key: str) -> None:
+    """Delete one cache key. No-op if Redis is down or the key is absent.
+
+    Used by mutating endpoints to invalidate cached views before the next
+    read — without this, a 60s ``get_or_set_json`` TTL would leave stale
+    "already_tracked" flags on the bulk-import picker after a remove.
+    """
+    redis = await get_redis()
+    if redis is None:
+        return
+    try:
+        await redis.delete(key)
+    except Exception:
+        logger.warning("redis_cache_delete_failed", key=key)

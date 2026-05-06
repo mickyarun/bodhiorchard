@@ -105,7 +105,11 @@ async def process_one_item(
     try:
         async with db_factory() as db:
             repo_repo = TrackedRepoRepository(db, org_id=org_id)
-            repo = await repo_repo.upsert(str(repo_path), repo_path.name)
+            repo = await repo_repo.upsert_for_github_repo(
+                github_full_name=item.full_name,
+                path=str(repo_path),
+                name=repo_path.name,
+            )
             await repo_repo.set_onboard_metadata(
                 repo,
                 github_full_name=item.full_name,

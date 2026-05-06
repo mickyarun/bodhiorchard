@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 
-from app.scan.audit import RepoAnomaly, ScanAuditReport
+from app.scan.audit import EmptyIngestAnomaly, RepoAnomaly, ScanAuditReport
 
 
 def test_empty_report_is_clean() -> None:
@@ -46,6 +46,20 @@ def test_orphan_features_flips_is_clean() -> None:
     """Any UUID in orphan_features flips is_clean to False."""
     report = ScanAuditReport(orphan_features=[uuid.uuid4()])
     assert report.is_clean is False
+
+
+def test_empty_ingest_flips_is_clean() -> None:
+    """Any EmptyIngestAnomaly flips is_clean to False.
+
+    Ingest landing a checkpoint with zero clusters means the indexer's
+    hard-fail was bypassed or a freak partition collapse occurred —
+    either way every downstream stage runs on an empty input and the
+    scan completes producing nothing. The audit must surface this.
+    """
+    anomaly = EmptyIngestAnomaly(repo_id=uuid.uuid4(), repo_name="ATOACore")
+    report = ScanAuditReport(empty_ingest=[anomaly])
+    assert report.is_clean is False
+    assert report.empty_ingest[0].repo_name == "ATOACore"
 
 
 def test_repo_anomaly_carries_orchestrator_log_fields() -> None:

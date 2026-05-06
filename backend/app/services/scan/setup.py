@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Helpers that prepare a v2 scan before the per-repo workflow fires.
+"""Helpers that prepare a scan before the per-repo workflow fires.
 
 Pulled out of ``scan_runner.py`` so that file stays under the size
 budget and only owns the orchestration loop. This module covers:
@@ -24,7 +24,7 @@ from typing import Any
 import structlog
 
 from app.models.scan import Scan, ScanAggregateStatus
-from app.models.tracked_repository import TrackedRepository
+from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.repositories.scan_run import ScanRunRepository
 from app.scan.session import with_session
 from app.services.git_operations import run_git
@@ -52,9 +52,15 @@ class RepoDescriptor:
 
 
 async def load_repo_descriptor(db: Any, repo_id: uuid.UUID) -> RepoDescriptor | None:
-    """Resolve `(name, path, head_sha)` for one tracked repo."""
+    """Resolve `(name, path, head_sha)` for one tracked repo.
+
+    Returns ``None`` for unknown ids and for soft-deleted (``REMOVED``)
+    rows. The caller's loop logs ``scan_skip_unknown_repo`` and continues,
+    so a stale ``repo_id`` left over from a frontend cache won't drag a
+    removed repo back into the scan.
+    """
     tracked = await db.get(TrackedRepository, repo_id)
-    if tracked is None:
+    if tracked is None or tracked.status == RepoStatus.REMOVED:
         return None
     head_sha = await read_head_sha(tracked.path)
     return RepoDescriptor(

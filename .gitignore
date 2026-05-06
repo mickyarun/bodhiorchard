@@ -58,5 +58,8 @@ logs.txt
 backend/reposcanv2_runs/
 
 # Hybrid-host data dir (cloned repos + SSH deploy keypair). Default location
-# when BODHIORCHARD_DATA_DIR is unset and /data isn't writable.
-backend/.data/
+# when BODHIORCHARD_DATA_DIR is unset and /data isn't writable. Lives at the
+# repo root (not under ``backend/``) so writes don't sit inside uvicorn's CWD
+# and trigger reload-watcher cascades during scans. Non-dot name so graphify's
+# collect_files walker doesn't drop every indexed file.
+repoclone/
