@@ -85,6 +85,24 @@ class DuplicateSignatureFinding:
 
 
 @dataclass(frozen=True)
+class EmptyIngestAnomaly:
+    """One repo whose ingest checkpoint reported zero clusters.
+
+    Companion to :class:`RepoAnomaly`. That one fires when ingest *did*
+    produce clusters but synthesis dropped them all. This one fires
+    when ingest itself landed a checkpoint with ``cluster_count == 0``,
+    which under healthy operation should be impossible because the
+    indexer hard-fails on empty file lists / empty graphs. Reaching
+    audit with zero clusters means the indexer's hard-fail was
+    bypassed, the checkpoint payload is malformed, or a freak
+    partition collapse produced no communities — all worth surfacing.
+    """
+
+    repo_id: uuid.UUID
+    repo_name: str
+
+
+@dataclass(frozen=True)
 class ScanAuditReport:
     """Snapshot of cross-phase anomalies the orchestrator can act on.
 
@@ -96,6 +114,7 @@ class ScanAuditReport:
     missing_repo_synth: list[RepoAnomaly] = field(default_factory=list)
     orphan_features: list[uuid.UUID] = field(default_factory=list)
     duplicate_signatures: list[DuplicateSignatureFinding] = field(default_factory=list)
+    empty_ingest: list[EmptyIngestAnomaly] = field(default_factory=list)
 
     @property
     def is_clean(self) -> bool:
@@ -104,6 +123,7 @@ class ScanAuditReport:
             not self.missing_repo_synth
             and not self.orphan_features
             and not self.duplicate_signatures
+            and not self.empty_ingest
         )
 
 
@@ -127,11 +147,13 @@ async def audit_scan(ctx: ScanContext) -> ScanAuditReport:
         missing = await _find_repos_with_clusters_but_no_synth(session, ctx)
         orphans = await _find_orphan_features(session, ctx)
         duplicates = await _find_duplicate_signatures(session, ctx)
+        empty_ingest = await _find_repos_with_empty_ingest(session, ctx)
 
     report = ScanAuditReport(
         missing_repo_synth=missing,
         orphan_features=orphans,
         duplicate_signatures=duplicates,
+        empty_ingest=empty_ingest,
     )
     if report.is_clean:
         logger.info("scan_audit_clean", scan_id=str(ctx.scan_id))
@@ -142,6 +164,7 @@ async def audit_scan(ctx: ScanContext) -> ScanAuditReport:
             missing_repo_synth=len(missing),
             orphan_features=len(orphans),
             duplicate_signatures=len(duplicates),
+            empty_ingest=len(empty_ingest),
         )
     return report
 
@@ -234,4 +257,28 @@ async def _find_duplicate_signatures(
             feature_ids=ids,
         )
         for repo_id, signature, ids in rows
+    ]
+
+
+async def _find_repos_with_empty_ingest(
+    session: AsyncSession,
+    ctx: ScanContext,
+) -> list[EmptyIngestAnomaly]:
+    """Active repos whose ingest checkpoint reports zero clusters.
+
+    The indexer hard-fails on empty file lists and empty graphs (so an
+    ingest checkpoint with ``cluster_count == 0`` shouldn't reach this
+    audit under healthy operation). When it does, every downstream
+    stage runs against an empty input set and the scan completes
+    looking successful with no features produced — exactly the
+    failure mode this audit aims to surface.
+    """
+    checkpoint_repo = ScanPhaseCheckpointRepository(session, org_id=ctx.org_id)
+    cluster_rows = await checkpoint_repo.list_active_repo_cluster_counts(
+        ctx.scan_id, ScanPhase.CODE_INDEX
+    )
+    return [
+        EmptyIngestAnomaly(repo_id=repo_id, repo_name=repo_name)
+        for repo_id, repo_name, cluster_count in cluster_rows
+        if not cluster_count
     ]

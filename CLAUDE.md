@@ -54,7 +54,7 @@ All development is orchestrated from the repo root via npm workspaces. Backend P
 | `npm run setup`                                            | One-time: creates `backend/.venv`, installs Python deps, copies `.env` files, starts infra, runs Alembic migrations   |
 | `npm run dev`                                              | Starts postgres+redis, waits for Postgres, then runs backend/frontend/multiplayer concurrently with colour-coded logs |
 | `npm run dev:infra` / `npm run stop`                       | Start/stop the infra-only containers (postgres, redis)                                                                |
-| `npm run dev:backend` / `dev:frontend` / `dev:multiplayer` | Run a single process if `npm run dev` is too noisy                                                                    |
+| `npm run dev:backend` / `dev:frontend` / `dev:multiplayer` | Run a single process if `npm run dev` is too noisy.                                                                   |
 | `docker compose up`                                        | **Full Docker** mode — whole stack incl. backend in containers (see README for Hybrid vs Full Docker trade-off)       |
 
 ### Backend (`backend/`)

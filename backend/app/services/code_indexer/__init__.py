@@ -184,8 +184,14 @@ async def index_repo(
 
     result.file_count = len(files)
     if not files:
-        result.error = "no source files found"
-        result.success = True  # not a failure — just empty
+        # Hard-fail: an empty file list almost always means a broken
+        # walker (graphify's dot-component filter, a misrouted worktree
+        # path, or a fetch that never landed any tree contents) — not a
+        # repo that legitimately contains no source. Surface it so the
+        # ingest stage raises and the scan stops, instead of letting
+        # downstream stages quietly produce empty caches.
+        result.error = "no source files found in repo"
+        result.success = False
         result.elapsed_s = round(time.monotonic() - t0, 2)
         return result
 
@@ -220,7 +226,11 @@ async def index_repo(
     result.graph = graph
 
     if graph.number_of_nodes() == 0:
-        result.success = True
+        # Files were collected but graphify produced an empty graph —
+        # typically a tree-sitter parse failure across the whole repo.
+        # Hard-fail for the same reason as the empty-files branch above.
+        result.error = f"call graph empty after extraction (collected {len(files)} files)"
+        result.success = False
         result.elapsed_s = round(time.monotonic() - t0, 2)
         return result
 

@@ -131,14 +131,25 @@ def _detect_default_data_dir() -> str:
     env var:
 
     1. If ``/data`` exists and is writable → Docker volume is mounted.
-    2. Otherwise → ``<backend>/.data``, a per-checkout dir alongside the
-       Python package. Created on demand by the services that use it.
+    2. Otherwise → ``<repo-root>/repoclone``, a per-checkout dir at the
+       repo root (one level above ``backend/``).
+
+    Two constraints on the host-mode name:
+
+    * Must live *outside* ``backend/`` — uvicorn's reload watcher
+      unconditionally adds CWD to its watch list, so a data dir under
+      ``backend/`` would trigger a reload on every clone or worktree
+      pull and kill in-flight scans.
+    * Must *not* start with ``.`` — graphify's ``collect_files`` walker
+      drops any path whose absolute components include a dot-prefixed
+      segment. A parent like ``.data`` would silently strip every
+      source file from the indexer's input and produce empty graphs.
     """
     docker_path = Path("/data")
     if docker_path.is_dir() and os.access(docker_path, os.W_OK):
         return str(docker_path)
-    backend_root = Path(__file__).resolve().parent.parent
-    return str(backend_root / ".data")
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    return str(repo_root / "repoclone")
 
 
 class StorageConfig(BaseSettings):

@@ -58,7 +58,11 @@ from app.services.github_install_repos import (
     resolve_app_install_state,
 )
 from app.services.job_queue import JOB_REPO_BULK_ONBOARD, create_job
-from app.services.redis_cache import get_or_set_json
+from app.services.redis_cache import (
+    INSTALLABLE_REPOS_KEY_TEMPLATE,
+    delete_key,
+    get_or_set_json,
+)
 from app.services.repo_cloner import clone_or_update
 from app.services.repo_scanner import (
     _detect_develop_branch,
@@ -71,7 +75,7 @@ from app.services.scan.repo_classify import classify
 from app.services.ssh_keys import get_public_key
 
 INSTALLABLE_CACHE_TTL_SECONDS = 60
-INSTALLABLE_CACHE_KEY_TEMPLATE = "installable_repos:{org_id}"
+INSTALLABLE_CACHE_KEY_TEMPLATE = INSTALLABLE_REPOS_KEY_TEMPLATE
 
 logger = structlog.get_logger(__name__)
 
@@ -257,6 +261,11 @@ async def remove_repo(
     # reconciler.
     feat_scan = FeatureScanRepository(db, org_id=org.id)
     deactivated_ids = await feat_scan.soft_delete_by_repo_ids([repo.id])
+
+    # Invalidate the bulk-import picker's cache so the removed repo
+    # immediately becomes re-importable instead of waiting up to 60s
+    # for the TTL to lapse.
+    await delete_key(INSTALLABLE_CACHE_KEY_TEMPLATE.format(org_id=str(org.id)))
 
     return {"removed": body.path, "deactivated": len(deactivated_ids)}
 

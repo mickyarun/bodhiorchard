@@ -31,7 +31,30 @@ import uuid
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings as app_settings
+from app.models.organization import Organization
 from app.models.tracked_repository import TrackedRepository
+from app.services.git_operations import (
+    _detect_develop_branch,
+    _detect_main_branch,
+    get_github_repo_full_name,
+    run_git,
+)
+from app.services.repo_setup import (
+    SetupPrStatus,
+    add_bodhiorchard_gitignore,
+    add_prepare_script,
+    append_bodhiorchard_claude_instructions,
+    commit_and_push_setup_worktree,
+    create_setup_pr,
+    ensure_repo_worktrees,
+    init_bodhiorchard_mcp_in_repo,
+    install_claude_hooks,
+    install_hooks,
+    mark_setup_branch_pushed,
+    prepare_setup_worktree,
+)
+from app.services.scan_progress import update_scan_progress
 
 logger = structlog.get_logger(__name__)
 
@@ -61,28 +84,6 @@ async def phase_b1_repo_setup(
     Returns:
         Setup PR message string if a PR was created without a URL, else None.
     """
-    from app.config import settings as app_settings
-    from app.models.organization import Organization
-    from app.services.git_operations import (
-        _detect_develop_branch,
-        _detect_main_branch,
-        get_github_repo_full_name,
-    )
-    from app.services.repo_setup import (
-        SetupPrStatus,
-        add_bodhiorchard_gitignore,
-        add_prepare_script,
-        append_bodhiorchard_claude_instructions,
-        commit_and_push_bodhiorchard_setup,
-        create_setup_pr,
-        ensure_repo_worktrees,
-        init_bodhiorchard_mcp_in_repo,
-        install_claude_hooks,
-        install_hooks,
-        mark_setup_branch_pushed,
-    )
-    from app.services.scan_progress import update_scan_progress
-
     setup_pr_message: str | None = None
 
     try:
@@ -118,6 +119,25 @@ async def phase_b1_repo_setup(
                         full_name=detected_full_name,
                     )
 
+        # All setup-file writes target a clean worktree at
+        # ``<repo>/.bodhiorchard/setup-work`` checked out from
+        # ``origin/<base>`` and switched onto ``bodhiorchard/init-setup``.
+        # Doing the work here (rather than the cloned repo's main
+        # checkout) keeps the user's working tree untouched and avoids
+        # the stash/merge dance — which previously left repos with
+        # non-``main`` defaults in a half-merged state and broke ingest
+        # downstream.
+        base = tracked_repo.main_branch if tracked_repo and tracked_repo.main_branch else "main"
+        work_path = await prepare_setup_worktree(repo_path, base)
+        if work_path is None:
+            logger.warning(
+                "scan_repo_setup_worktree_unavailable",
+                scan_id=scan_id,
+                repo=repo_name,
+                base=base,
+            )
+            return setup_pr_message
+
         # Init Bodhiorchard MCP in repo (skips if already configured)
         await update_scan_progress(
             scan_id,
@@ -125,7 +145,7 @@ async def phase_b1_repo_setup(
             progress_pct=base_pct + 22,
         )
         mcp_changed = await init_bodhiorchard_mcp_in_repo(
-            repo_path,
+            work_path,
             app_settings.public_url,
         )
 
@@ -135,27 +155,25 @@ async def phase_b1_repo_setup(
             status="installing_hooks",
             progress_pct=base_pct + 25,
         )
-        hooks_changed = await install_hooks(repo_path, app_settings.public_url, str(org_id))
+        hooks_changed = await install_hooks(work_path, app_settings.public_url, str(org_id))
 
         # Install Claude Code hooks (.claude/hooks/ + settings.json)
         claude_hooks_changed = await install_claude_hooks(
-            repo_path,
+            work_path,
             app_settings.public_url,
         )
 
         # Ensure hooks are active regardless of commit/push status
-        from app.services.git_operations import run_git
-
-        await run_git(["config", "core.hooksPath", ".githooks"], cwd=repo_path)
+        await run_git(["config", "core.hooksPath", ".githooks"], cwd=work_path)
 
         # Add .bodhiorchard/ to .gitignore
-        gitignore_changed = add_bodhiorchard_gitignore(repo_path)
+        gitignore_changed = add_bodhiorchard_gitignore(work_path)
 
         # Add prepare script to package.json
-        prepare_changed = add_prepare_script(repo_path)
+        prepare_changed = add_prepare_script(work_path)
 
         # Add Bodhiorchard workflow instructions to CLAUDE.md
-        claude_md_changed = append_bodhiorchard_claude_instructions(repo_path)
+        claude_md_changed = append_bodhiorchard_claude_instructions(work_path)
 
         # Branch, commit, push setup files, and create PR
         any_changed = (
@@ -166,7 +184,6 @@ async def phase_b1_repo_setup(
             or prepare_changed
             or claude_md_changed
         )
-        base = tracked_repo.main_branch if tracked_repo and tracked_repo.main_branch else "main"
         pushed_branch: str | None = None
         if any_changed:
             await update_scan_progress(
@@ -174,7 +191,7 @@ async def phase_b1_repo_setup(
                 status="pushing_setup",
                 progress_pct=base_pct + 28,
             )
-            pushed_branch = await commit_and_push_bodhiorchard_setup(repo_path, base)
+            pushed_branch = await commit_and_push_setup_worktree(work_path)
             if pushed_branch and tracked_repo is not None:
                 # Stamp branch-pushed even when the App isn't configured —
                 # this is what powers the amber "Open PR on GitHub" chip on

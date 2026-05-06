@@ -211,6 +211,158 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
 # ── Worktree management ───────────────────────────────────────────
 
 
+_SETUP_WORK_DIR = ".bodhiorchard/setup-work"
+
+
+async def prepare_setup_worktree(repo_path: str, base_branch: str) -> str | None:
+    """Create a clean worktree at ``<repo>/.bodhiorchard/setup-work``.
+
+    The setup phase writes hooks, MCP config, ``CLAUDE.md`` additions,
+    skills, and ``package.json`` ``prepare`` scripts that need to land
+    on a PR against ``base_branch``. Doing that work in the cloned
+    repo's main checkout means we have to stash whatever the clone's
+    default-branch happened to be (which can be ``feature/foo`` for
+    repos with non-``main`` defaults), switch branches, and merge —
+    a dance that fails in the empty-merge / conflict edge cases.
+
+    Instead, we materialise an isolated worktree from
+    ``origin/<base_branch>`` (falling back to the local ``<base_branch>``
+    ref when there's no remote), checked out directly on the
+    ``bodhiorchard/init-setup`` branch. All install steps then write
+    into this clean tree and the commit + push runs in one shot — no
+    stash, no checkout-after-the-fact, no risk of leaving the user's
+    cloned repo in a half-merged state.
+
+    Idempotent: a stale worktree from a prior attempt is force-removed
+    and rebuilt, so a crashed setup never carries dirty index state
+    into the next scan.
+
+    Returns the worktree path on success, or ``None`` when the base
+    branch can't be resolved (caller should treat this as a setup
+    pre-condition failure and surface it instead of cascading into
+    ingest).
+    """
+    repo = Path(repo_path)
+    work_path = repo / _SETUP_WORK_DIR
+    work_str = str(work_path)
+
+    if work_path.exists():
+        await run_git(["worktree", "remove", work_str, "--force"], cwd=repo_path)
+        if work_path.exists():
+            shutil.rmtree(work_path, ignore_errors=True)
+    await run_git(["worktree", "prune"], cwd=repo_path)
+
+    has_origin = await _has_origin_remote(repo_path)
+    if has_origin:
+        await run_git(["fetch", "origin", base_branch, "--prune"], cwd=repo_path)
+        base_ref = f"origin/{base_branch}"
+    else:
+        base_ref = base_branch
+
+    _, stderr, rc = await run_git(
+        ["worktree", "add", "-B", _SETUP_BRANCH, work_str, base_ref],
+        cwd=repo_path,
+    )
+    if rc != 0:
+        logger.warning(
+            "bodhiorchard_setup_worktree_failed",
+            repo=repo_path,
+            base_branch=base_branch,
+            error=stderr[:200],
+        )
+        return None
+
+    logger.info(
+        "bodhiorchard_setup_worktree_ready",
+        repo=repo_path,
+        work_path=work_str,
+        base_branch=base_branch,
+    )
+    return work_str
+
+
+async def commit_and_push_setup_worktree(work_path: str) -> str | None:
+    """Stage + commit + push the setup files from a prepared worktree.
+
+    Assumes ``work_path`` was returned by :func:`prepare_setup_worktree`
+    so it's already on ``bodhiorchard/init-setup``. No stash dance, no
+    branch switching — the worktree is already on the right branch with
+    a clean tree at entry; the caller's prior install steps populated it
+    with the files we need to commit.
+
+    Returns the pushed branch name on success, ``None`` when there's
+    nothing to commit or the push fails.
+    """
+    staged_any = False
+    for filepath in _SETUP_FILES:
+        full = Path(work_path) / filepath
+        if not full.exists():
+            continue
+        _, _, ls_rc = await run_git(["ls-files", "--error-unmatch", filepath], cwd=work_path)
+        is_untracked = ls_rc != 0
+        _, _, diff_rc = await run_git(["diff", "--quiet", "--", filepath], cwd=work_path)
+        is_modified = diff_rc != 0
+        if is_modified or is_untracked:
+            await run_git(["add", filepath], cwd=work_path)
+            staged_any = True
+
+    if not staged_any:
+        logger.debug("bodhiorchard_setup_nothing_to_commit", work_path=work_path)
+        return None
+
+    _, stderr, rc = await run_git(
+        [
+            "commit",
+            "-m",
+            "chore(bodhiorchard): add MCP tools, git hooks, and config\n\n"
+            "Auto-committed by Bodhiorchard scan pipeline.\n"
+            "- .claude/settings.json: Bodhiorchard MCP server config\n"
+            "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
+            "- package.json: prepare script sets core.hooksPath on npm install\n"
+            "- .gitignore: exclude .bodhiorchard/ worktrees\n"
+            "- CLAUDE.md: bodhi code-intelligence MCP guidance\n"
+            "- .claude/skills/: bodhi agent skill definitions",
+        ],
+        cwd=work_path,
+    )
+    if rc != 0:
+        logger.warning("bodhiorchard_setup_commit_failed", error=stderr[:200])
+        return None
+
+    has_origin = await _has_origin_remote(work_path)
+    if not has_origin:
+        logger.info(
+            "bodhiorchard_setup_committed_no_remote",
+            work_path=work_path,
+            branch=_SETUP_BRANCH,
+        )
+        return _SETUP_BRANCH
+
+    stdout, _, _ = await run_git(["ls-remote", "--heads", "origin", _SETUP_BRANCH], cwd=work_path)
+    branch_exists_remote = _SETUP_BRANCH in stdout
+    push_cmd = ["push", "-u", "origin", _SETUP_BRANCH]
+    if branch_exists_remote:
+        push_cmd = ["push", "--force-with-lease", "-u", "origin", _SETUP_BRANCH]
+
+    _, stderr, rc = await run_git(push_cmd, cwd=work_path)
+    if rc != 0:
+        logger.warning(
+            "bodhiorchard_setup_push_failed",
+            work_path=work_path,
+            error=stderr[:200],
+        )
+        return None
+
+    logger.info("bodhiorchard_setup_pushed", work_path=work_path, branch=_SETUP_BRANCH)
+    return _SETUP_BRANCH
+
+
+async def _has_origin_remote(cwd: str) -> bool:
+    """Return True iff the repo (or worktree) has an ``origin`` remote."""
+    _, _, rc = await run_git(["remote", "get-url", "origin"], cwd=cwd)
+    return rc == 0
+
+
 async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]:
     """Create or adopt main + develop worktrees for a repo.
 
@@ -256,25 +408,44 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
     # Start with a prune so any registrations whose worktree dirs got
     # rm -rf'd out from under git don't block the adoption check below.
     await run_git(["worktree", "prune"], cwd=repo_path)
+
+    # Tear down any leftover ``.bodhiorchard/main`` worktree from a
+    # previous deployment. We no longer create it (see comment below),
+    # and leaving it around would block ``ingest``'s ``scan-test/main``
+    # worktree from being added (git refuses two worktrees on the same
+    # branch).
+    stale_main = worktree_dir / "main"
+    if stale_main.exists():
+        await run_git(["worktree", "remove", str(stale_main), "--force"], cwd=repo_path)
+        await run_git(["worktree", "prune"], cwd=repo_path)
+
     registered = await _list_registered_worktrees(repo_path)
 
+    # ``main`` is intentionally NOT materialised here. It used to back the
+    # old setup-and-merge flow that wrote setup files into a main-branch
+    # worktree and merged them locally — that flow is gone (replaced by
+    # ``prepare_setup_worktree``), and keeping ``.bodhiorchard/main``
+    # around now collides with the ``ingest`` stage's ``scan-test/main``
+    # worktree (git refuses two worktrees on the same branch). ``main_wt``
+    # in the return tuple stays for callers that destructure it, but
+    # always resolves to the cloned root when current HEAD is on
+    # ``main``, otherwise None.
     results: list[str | None] = [None, None]
-    for idx, (branch, dirname) in enumerate([(main_branch, "main"), (develop_branch, "develop")]):
-        if branch is None:
-            continue
-        if branch == current_branch:
-            results[idx] = repo_path
-            continue
-
-        wt_path = worktree_dir / dirname
-        path = await _adopt_or_create_worktree(
-            repo_path=repo_path,
-            wt_path=wt_path,
-            branch=branch,
-            registered=registered,
-        )
-        if path is not None:
-            results[idx] = path
+    if main_branch is not None and main_branch == current_branch:
+        results[0] = repo_path
+    if develop_branch is not None:
+        if develop_branch == current_branch:
+            results[1] = repo_path
+        else:
+            wt_path = worktree_dir / "develop"
+            path = await _adopt_or_create_worktree(
+                repo_path=repo_path,
+                wt_path=wt_path,
+                branch=develop_branch,
+                registered=registered,
+            )
+            if path is not None:
+                results[1] = path
 
     logger.info(
         "worktrees_ensured",

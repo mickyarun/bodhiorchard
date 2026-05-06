@@ -14,6 +14,7 @@ its existing contract.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from dataclasses import dataclass
 
@@ -36,6 +37,7 @@ from app.services.claude_env import (
 )
 from app.services.permission_seeder import seed_permissions
 from app.services.redis_setup_status import set_setup_complete
+from app.services.repo_cloner import purge_org_clones
 from app.services.skill_loader import seed_skills_for_org
 
 logger = structlog.get_logger(__name__)
@@ -160,12 +162,19 @@ async def setup_init_org(req: InitOrgRequest, db: AsyncSession) -> InitOrgResult
 
     # Commit before returning so a follow-up stage-2 call (separate
     # request, separate session) sees the new rows. Stage-2 also opens
-    # its own session for ``start_v2_scan``.
+    # its own session for ``start_scan``.
     await db.commit()
 
     # Warm the Redis fast-path so the wizard's repeated polling of
     # ``/v1/setup/status`` doesn't grab DB connections.
     await set_setup_complete(org.slug)
+
+    # Wipe any leftover clones from a prior deployment of this slug. The
+    # DB has just been seeded with a fresh org row, so anything sitting
+    # under ``repoclone/<slug>/`` is orphaned (no TrackedRepository points
+    # at it) and would otherwise be picked up by the cloner's
+    # ``already_cloned`` branch on the next bulk-onboard.
+    await asyncio.to_thread(purge_org_clones, org.slug)
 
     token = create_access_token(data={"sub": str(user.id), "org_id": str(org.id)})
 
