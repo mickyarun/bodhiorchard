@@ -142,6 +142,30 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         await self._db.flush()
         return repo
 
+    async def set_onboard_metadata(
+        self,
+        repo: TrackedRepository,
+        *,
+        github_full_name: str,
+        main_branch: str,
+        develop_branch: str | None,
+        uat_branch: str | None,
+    ) -> TrackedRepository:
+        """Persist the GitHub full name + chosen branches on a freshly upserted repo.
+
+        Used by the bulk-onboard job after :meth:`upsert` so the handler
+        never has to mutate ORM attributes itself. Idempotent — overwrites
+        whatever was stored. Flushes + refreshes so subsequent attribute
+        reads stay inside the async greenlet.
+        """
+        repo.github_repo_full_name = github_full_name
+        repo.main_branch = main_branch
+        repo.develop_branch = develop_branch
+        repo.uat_branch = uat_branch or None
+        await self._db.flush()
+        await self._db.refresh(repo)
+        return repo
+
     async def set_status(
         self, repo_id: uuid.UUID, new_status: RepoStatus
     ) -> TrackedRepository | None:
@@ -321,6 +345,21 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         stmt = self._scoped(select(TrackedRepository.name).where(TrackedRepository.id == repo_id))
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_full_names_by_org(self) -> set[str]:
+        """Return the set of non-null ``github_repo_full_name`` values for the org.
+
+        Used by the bulk-import picker to mark which installable repos are
+        already tracked. Filters out null values at the DB layer so the
+        caller gets a clean ``set[str]`` (no Optional handling).
+        """
+        stmt = self._scoped(
+            select(TrackedRepository.github_repo_full_name).where(
+                TrackedRepository.github_repo_full_name.isnot(None)
+            )
+        )
+        result = await self._db.execute(stmt)
+        return {row for row in result.scalars().all() if row is not None}
 
     async def get_by_github_full_name(
         self,

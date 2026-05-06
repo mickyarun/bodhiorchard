@@ -21,7 +21,10 @@ export interface User {
   name: string
   role: UserRoleName
   permissions: string[]
-  organizationId: string
+  // Wire field is snake_case (UserRead.org_id in backend/app/schemas/user.py)
+  // and there's no axios snake→camel transformer, so this MUST stay
+  // ``org_id`` to be readable at runtime.
+  org_id: string
   character_model: string | null
 }
 

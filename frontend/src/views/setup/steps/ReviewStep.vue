@@ -78,6 +78,11 @@
       </v-table>
     </v-card>
 
+    <!--
+      Cloning + scan run as background jobs after Continue. Progress is
+      surfaced by the dashboard's setup popup once the user lands there,
+      so the wizard doesn't render its own drawer.
+    -->
     <v-alert
       type="info"
       variant="tonal"
@@ -85,9 +90,9 @@
       icon="mdi-information-outline"
       class="mb-6"
     >
-      After launch, a scan will start automatically. This usually takes
-      15–30 minutes depending on repo size. You can configure GitHub, Slack,
-      and other integrations from the Settings page while it runs.
+      Cloning and the initial scan run in the background. You'll see live
+      progress on the dashboard. You can configure GitHub, Slack, and
+      other integrations from Settings while it runs.
     </v-alert>
 
     <div class="d-flex justify-center">

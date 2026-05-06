@@ -80,6 +80,4 @@ class ClusterCache(BaseModel):
     # Computed by the indexer (``code_indexer.seed.cluster_signature``)
     # and propagated through the synthesis pipeline so reconciler rows
     # can match by structural identity instead of LLM-generated title.
-    signature: Mapped[str] = mapped_column(
-        String(64), nullable=False, server_default=text("''")
-    )
+    signature: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("''"))

@@ -59,9 +59,7 @@ class FeatureRepository(BaseRepository[Feature]):
         could meaningfully see in the Features tab plus any planned
         BUD work that hasn't been scanned yet.
         """
-        stmt = self._scoped(
-            select(func.count(Feature.id)).where(Feature.is_active.is_(True))
-        )
+        stmt = self._scoped(select(func.count(Feature.id)).where(Feature.is_active.is_(True)))
         return int((await self._db.execute(stmt)).scalar_one() or 0)
 
     async def count_active_for_repo(self, repo_id: uuid.UUID) -> int:

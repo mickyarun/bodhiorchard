@@ -57,6 +57,29 @@ def cancel_background_task(scan_id: uuid.UUID) -> bool:
     return True
 
 
+async def wait_for_scan_task(scan_id: uuid.UUID) -> None:
+    """Block until the in-flight scan task for ``scan_id`` finishes.
+
+    Unlike :func:`await_background_task`, this helper does NOT cancel
+    and does NOT impose a timeout — callers (e.g. the bulk-onboard
+    batch driver) need to wait for natural completion before kicking
+    the next batch. No-op if no task is registered or it's already
+    done. Exceptions inside the task are intentionally swallowed: the
+    fanout body already records per-repo failure into the DB; any
+    bubble-up here would block the next batch on a transient hiccup.
+    """
+    task = _BACKGROUND_SCANS.get(scan_id)
+    if task is None or task.done():
+        return
+    try:
+        await asyncio.shield(task)
+    except (asyncio.CancelledError, Exception):
+        # Task-internal errors are reported to the DB by the fanout
+        # body; we just need the await to unblock so the caller can
+        # progress to the next batch.
+        return
+
+
 async def await_background_task(scan_id: uuid.UUID, *, timeout: float) -> None:
     """Block until the in-flight task for ``scan_id`` finishes (or timeout).
 

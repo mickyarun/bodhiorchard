@@ -52,10 +52,7 @@ def upgrade() -> None:
     if "skill_profiles" in inspector.get_table_names():
         fks = inspector.get_foreign_keys("skill_profiles")
         for fk in fks:
-            if (
-                fk.get("referred_table") == _KI
-                and fk.get("constrained_columns") == ["feature_id"]
-            ):
+            if fk.get("referred_table") == _KI and fk.get("constrained_columns") == ["feature_id"]:
                 op.drop_constraint(fk["name"], "skill_profiles", type_="foreignkey")
         # NULL out feature_ids that don't exist in features (data is
         # unrecoverable; preserves NULLability and FK integrity).

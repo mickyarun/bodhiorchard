@@ -33,8 +33,9 @@ type ScanPhaseCode =
   | 'skill_extraction'
   | 'design_system_extract'
   | 'feature_synthesis'
+  | 'extract_routes'
   | 'skill_remap'
-  | 'feature_merge'
+  | 'backend_link'
   | 'embedding_backfill'
   | 'persist_results'
 

@@ -26,6 +26,7 @@ from typing import Any
 import structlog
 
 from app.schemas.scan import Community
+from app.services.scan._async_compute import to_thread_with_metric
 from app.services.scan.stages import StageContext, StageOutput
 from app.services.scan.stages._skip import maybe_skipped_for_ingest
 
@@ -84,25 +85,14 @@ async def run(
     label_res = _compile_patterns(label_patterns)
     file_res = _compile_patterns(file_path_patterns)
 
-    kept: list[Community] = []
-    dropped: list[Community] = []
-
-    for comm in communities:
-        reasons: list[str] = []
-
-        if comm.heuristic_label and any(p.search(comm.heuristic_label) for p in label_res):
-            reasons.append("label-match")
-
-        if comm.files:
-            test_hits = sum(1 for f in comm.files if any(p.search(f) for p in file_res))
-            ratio = test_hits / len(comm.files)
-            if ratio >= threshold:
-                reasons.append(f"file-path-match ({ratio:.0%} of {len(comm.files)} files)")
-
-        if reasons:
-            dropped.append(comm.model_copy(update={"drop_reason": "; ".join(reasons)}))
-        else:
-            kept.append(comm)
+    kept, dropped = await to_thread_with_metric(
+        "scan.filter_infra.classify",
+        _classify_communities,
+        communities,
+        label_res,
+        file_res,
+        threshold,
+    )
 
     extras: dict[str, Any] = {
         "input_count": len(communities),
@@ -119,6 +109,36 @@ async def run(
         dropped=len(dropped),
     )
     return StageOutput(communities=kept, dropped=dropped, extras=extras)
+
+
+def _classify_communities(
+    communities: list[Community],
+    label_res: list[re.Pattern[str]],
+    file_res: list[re.Pattern[str]],
+    threshold: float,
+) -> tuple[list[Community], list[Community]]:
+    """Apply label + file-path regex passes to every community.
+
+    Pure-Python; runs inside ``asyncio.to_thread`` because the matrix
+    is O(communities × files × patterns) and dominates the stage on
+    large repos.
+    """
+    kept: list[Community] = []
+    dropped: list[Community] = []
+    for comm in communities:
+        reasons: list[str] = []
+        if comm.heuristic_label and any(p.search(comm.heuristic_label) for p in label_res):
+            reasons.append("label-match")
+        if comm.files:
+            test_hits = sum(1 for f in comm.files if any(p.search(f) for p in file_res))
+            ratio = test_hits / len(comm.files)
+            if ratio >= threshold:
+                reasons.append(f"file-path-match ({ratio:.0%} of {len(comm.files)} files)")
+        if reasons:
+            dropped.append(comm.model_copy(update={"drop_reason": "; ".join(reasons)}))
+        else:
+            kept.append(comm)
+    return kept, dropped
 
 
 def _compile_patterns(patterns: list[str]) -> list[re.Pattern[str]]:

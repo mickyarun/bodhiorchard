@@ -5,52 +5,42 @@
 
 import asyncio
 import contextlib
-import secrets
-import uuid
 from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.core.deps import get_current_user, get_db
-from app.core.encryption import encrypt_secret
-from app.core.security import create_access_token, hash_password
-from app.models.organization import Organization
-from app.models.user import OrgToUser, User, UserRole
+from app.models.user import User
 from app.repositories.organization import OrganizationRepository
-from app.repositories.role import RoleRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.repositories.user import UserRepository
-from app.schemas.scan import RunConfig
 from app.schemas.setup import (
     BrowseDirectoriesResponse,
     ClaudeCheckRequest,
     DirectoryEntry,
+    FinalizeWithReposRequest,
+    FinalizeWithReposResponse,
+    InitOrgRequest,
+    InitOrgResponse,
     SetupRequest,
     SetupResponse,
+    SetupSourceCode,
     SetupStatusResponse,
 )
-from app.services.bud_stage_seeder import seed_stage_mappings_for_org
 from app.services.claude_env import (
-    AUTH_MODE_API_KEY,
     AUTH_MODE_HOST,
     VALID_AUTH_MODES,
-    apply_claude_auth_to_env,
 )
 from app.services.claude_runner import test_claude_connection
 from app.services.deployment_info import deployment_info
-from app.services.embedding_service import embedding_service
 from app.services.git_operations import list_remote_branches
-from app.services.permission_seeder import seed_permissions
-from app.services.repo_cloner import clone_or_update
+from app.services.redis_setup_status import get_setup_complete, set_setup_complete
 from app.services.repo_scanner import _detect_develop_branch, _detect_main_branch
-from app.services.scan.runner import start_v2_scan
 from app.services.scan_progress import get_active_scan_for_org
-from app.services.skill_loader import seed_skills_for_org
-from app.services.ssh_keys import get_public_key
+from app.services.setup_finalize import setup_finalize_with_repos
+from app.services.setup_init import setup_init_org
 
 logger = structlog.get_logger(__name__)
 
@@ -61,13 +51,26 @@ router = APIRouter(tags=["setup"])
 async def setup_status(db: AsyncSession = Depends(get_db)) -> dict:
     """Check whether initial setup has been completed.
 
+    Reads a Redis fast-path flag first so the wizard's polling
+    doesn't grab a DB connection per request. Falls back to the
+    canonical ``OrganizationRepository.check_setup_exists`` query
+    when the flag is unset (e.g. older orgs initialised before this
+    fast-path landed, or after a Redis flush) and re-warms the cache
+    on a successful DB hit.
+
     Returns:
-        A dict with `is_setup_complete` boolean.
+        A dict with ``is_setup_complete`` and ``org_slug``.
     """
+    cached_slug = await get_setup_complete()
+    if cached_slug is not None:
+        return {"is_setup_complete": True, "org_slug": cached_slug}
+
     org_repo = OrganizationRepository(db)
     org = await org_repo.check_setup_exists()
     if org is None:
         return {"is_setup_complete": False, "org_slug": None}
+    # Warm the Redis cache so the next poll skips the DB.
+    await set_setup_complete(org.slug)
     return {"is_setup_complete": True, "org_slug": org.slug}
 
 
@@ -204,79 +207,16 @@ async def get_deployment_info() -> dict:
     return deployment_info()
 
 
-@router.get("/deploy-key")
-async def get_deploy_key(db: AsyncSession = Depends(get_db)) -> dict:
-    """Return the backend's SSH public key, generating it on first call.
-
-    The setup wizard shows this to the user so they can paste it into a
-    private repo's **Settings → Deploy keys** on GitHub, granting the
-    Bodhiorchard backend read access to that repo. Gated post-setup — the
-    authenticated ``/v1/settings/repos/clone`` flow exposes its own
-    deploy-key helper for ongoing use.
-    """
-    await _require_setup_incomplete(db)
-    return {
-        "public_key": get_public_key(),
-        "fingerprint_algo": "ssh-ed25519",
-    }
-
-
-class CloneRepoRequest(BaseModel):
-    """Body for ``POST /api/setup/clone-repo``."""
-
-    url: str = Field(..., description="GitHub HTTPS or SSH URL.")
-    org_slug: str = Field(
-        ...,
-        alias="orgSlug",
-        min_length=2,
-        max_length=100,
-        # Mirror SetupOrganization.slug so the path segment under
-        # /data/repos can't contain surprises even before the org exists.
-        pattern=r"^[a-z0-9][a-z0-9-]*[a-z0-9]$",
-    )
-    pat: str | None = Field(
-        default=None,
-        description="Optional GitHub personal-access token for HTTPS private repos.",
-    )
-
-    model_config = {"populate_by_name": True}
-
-
-@router.post("/clone-repo")
-async def clone_repo(
-    body: CloneRepoRequest,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Clone a GitHub repo into the backend's ``/data/repos`` volume.
-
-    Unauthenticated because this is part of the setup wizard, which runs
-    before any org/user exists. The returned ``path`` is container-local
-    and is the value the wizard passes back in ``/setup/initialize`` so the
-    scan pipeline finds the clone. Refuses once setup is complete — the
-    authenticated ``/v1/settings/repos/clone`` covers post-setup cloning.
-    """
-    await _require_setup_incomplete(db)
-    result = await clone_or_update(body.url, org_slug=body.org_slug, pat=body.pat)
-    if not result.success:
-        return {
-            "success": False,
-            "error": result.error,
-            "path": result.path,
-        }
-    # Surface the list of branches for the UI to offer as main/develop options.
-
-    branches: list[str] = []
-    try:
-        branches = await list_remote_branches(result.path or "")
-    except Exception:  # noqa: BLE001
-        logger.warning("clone_branch_list_failed", path=result.path)
-    return {
-        "success": True,
-        "path": result.path,
-        "default_branch": result.default_branch,
-        "branches": branches,
-        "clone_root": str(settings.storage.repos_dir),
-    }
+# Removed: GET /setup/deploy-key, POST /setup/clone-repo.
+# Both ran post-init (after the wizard's init-org step minted a JWT), so
+# they're now served by their authenticated equivalents in
+# settings_repos.py:
+#   GET  /v1/settings/repos/deploy-key   — same {public_key} shape.
+#   POST /v1/settings/repos/clone        — derives org from JWT; failures
+#                                          surface as 4xx instead of a
+#                                          {success: false} envelope.
+# The legacy POST /setup/initialize below still uses _require_setup_incomplete
+# because it runs the whole wizard in one unauthenticated shot.
 
 
 @router.get("/check-claude")
@@ -328,179 +268,124 @@ async def check_claude_with_credentials(
     return await test_claude_connection(env_extra={"ANTHROPIC_API_KEY": api_key})
 
 
+@router.post("/init-org", response_model=InitOrgResponse, status_code=status.HTTP_201_CREATED)
+async def init_org(
+    body: InitOrgRequest,
+    db: AsyncSession = Depends(get_db),
+) -> InitOrgResponse:
+    """Stage-1 of the wizard — create the organization + admin user.
+
+    The returned JWT must be sent on the follow-up call to
+    ``POST /setup/finalize-with-repos`` (which is authenticated like
+    every other Settings endpoint). Until that second call lands the
+    org has zero tracked repos and ``is_setup_complete`` reports
+    ``False`` from the wizard's perspective even though
+    ``GET /setup/status`` will start returning ``True`` (an org now
+    exists).
+    """
+    await _require_setup_incomplete(db)
+    result = await setup_init_org(body, db)
+    return InitOrgResponse(
+        organization_id=str(result.org.id),
+        user_id=str(result.user.id),
+        org_slug=result.org.slug,
+        access_token=result.access_token,
+        mcp_token=result.mcp_token,
+        is_setup_complete=False,
+    )
+
+
+@router.post(
+    "/finalize-with-repos",
+    response_model=FinalizeWithReposResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def finalize_with_repos(
+    body: FinalizeWithReposRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FinalizeWithReposResponse:
+    """Stage-2 of the wizard — register repos and kick off scanning.
+
+    Authenticated via the JWT minted by ``init-org``; the caller's
+    org membership is enforced through
+    :meth:`OrganizationRepository.get_for_user`. The two payload arms
+    are XOR-validated by the schema's ``model_validator``.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    return await setup_finalize_with_repos(
+        org=org,
+        user=current_user,
+        req=body,
+        db=db,
+    )
+
+
+# Removed: GET /setup/installable.
+# Pre-init had no JWT, so this returned an empty NO_CREDENTIALS payload —
+# but the wizard now only fetches the installable list AFTER init-org,
+# which means the authenticated GET /v1/settings/repos/installable is the
+# only path the frontend hits. Dropping the unauth mirror reduces the
+# surface area gated by _require_setup_incomplete.
+
+
+# DEPRECATED — kept for back-compat with the existing single-shot setup flow;
+# new wizards should use POST /setup/init-org then POST /setup/finalize-with-repos.
 @router.post("/initialize", response_model=SetupResponse, status_code=status.HTTP_201_CREATED)
 async def initialize_setup(
     body: SetupRequest,
     db: AsyncSession = Depends(get_db),
 ) -> SetupResponse:
-    """Run first-time platform setup.
+    """Legacy single-shot wizard endpoint — composes init-org + finalize.
 
-    Creates the organization, admin user, auto-adds the repo, and
-    triggers a background scan. Integrations (GitHub, Slack) are
-    configured later via Settings.
-
-    Args:
-        body: Setup payload with org, admin, and repo path.
-        db: The async database session.
-
-    Returns:
-        SetupResponse with org ID, user ID, JWT, and scan ID.
-
-    Raises:
-        HTTPException 409: If the organization slug is already taken.
+    Internally calls :func:`setup_init_org` followed by
+    :func:`setup_finalize_with_repos` with the legacy ``sourceCode``
+    payload, preserving the original response shape (``scan_id``,
+    ``mcp_token``, ``access_token``, ``embedding_warning``) so existing
+    frontend callers don't break before Phase H lands.
     """
+    await _require_setup_incomplete(db)
+
+    init_req = InitOrgRequest(
+        organization=body.organization,
+        admin=body.admin,
+        scan=body.scan,
+        claude=body.claude,
+    )
+    init_result = await setup_init_org(init_req, db)
+
+    finalize_req = FinalizeWithReposRequest(
+        installable_items=None,
+        source_code=SetupSourceCode(repos=body.source_code.repos),
+    )
     org_repo = OrganizationRepository(db)
-    if await org_repo.get_by_slug(body.organization.slug) is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Organization slug already exists. Setup may have been completed already.",
-        )
-
-    # Build org config — repos are tracked in tracked_repositories table
-    org_config: dict = {
-        "llm": {"preset": "claude-code"},
-        "integrations": {
-            "github": {"enabled": False},
-            "slack": {"enabled": False},
-        },
-        "scan": {
-            "timeout_seconds": body.scan.timeout_seconds,
-            "max_turns": body.scan.max_turns,
-            "auto_create_members": True,
-        },
-    }
-
-    # Generate MCP token for Claude Code integration
-    mcp_token = secrets.token_urlsafe(32)
-
-    # Resolve Claude auth choice from the wizard.
-    claude_auth_mode = body.claude.auth_mode
-    if claude_auth_mode not in VALID_AUTH_MODES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"claude.auth_mode must be one of {sorted(VALID_AUTH_MODES)}",
-        )
-    encrypted_key: str | None = None
-    if claude_auth_mode == AUTH_MODE_API_KEY:
-        key = (body.claude.api_key or "").strip()
-        if not key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="claude.api_key is required when auth_mode is 'api_key'",
-            )
-        encrypted_key = encrypt_secret(key)
-
-    org = Organization(
-        name=body.organization.name,
-        slug=body.organization.slug,
-        config=org_config,
-        mcp_token_hash=hash_password(mcp_token),
-        claude_auth_mode=claude_auth_mode,
-        claude_api_key_encrypted=encrypted_key,
+    # Reload the org through the repo so subsequent queries see the
+    # committed row from stage-1 in this same request session.
+    org = await org_repo.get_by_slug(body.organization.slug)
+    assert org is not None  # Just created in setup_init_org above.
+    finalize_result = await setup_finalize_with_repos(
+        org=org,
+        user=init_result.user,
+        req=finalize_req,
+        db=db,
     )
-    db.add(org)
-    await db.flush()
-
-    # Push the newly-chosen Claude auth into the backend process env so the
-    # auto-scan triggered below can reach Claude without a backend restart.
-    apply_claude_auth_to_env(org)
-
-    # Create admin user
-    user = User(
-        email=body.admin.email,
-        name=body.admin.name,
-        password_hash=hash_password(body.admin.password),
-    )
-    db.add(user)
-    await db.flush()
-
-    # Seed permissions, agent skills, and stage mappings
-    await seed_permissions(db)
-
-    await seed_skills_for_org(org.id, db)
-    await seed_stage_mappings_for_org(org.id, db)
-    role_repo = RoleRepository(db)
-    owner_role = await role_repo.get_by_name_system("org_owner")
-
-    membership = OrgToUser(
-        user_id=user.id,
-        org_id=org.id,
-        role=UserRole.ORG_OWNER,
-        role_id=owner_role.id if owner_role else None,
-    )
-    db.add(membership)
-    await db.flush()
-
-    # Auto-add repos from source_code with branch mappings
-    scan_id: str | None = None
-    repo_repo = TrackedRepoRepository(db, org_id=org.id)
-    valid_repo_ids: list[uuid.UUID] = []
-
-    for repo_cfg in body.source_code.repos:
-        repo_path = Path(repo_cfg.path).resolve()
-        if not repo_path.exists() or not (repo_path / ".git").exists():
-            logger.warning("setup_skip_invalid_repo", path=str(repo_path))
-            continue
-
-        tracked = await repo_repo.upsert(str(repo_path), repo_path.name)
-        valid_repo_ids.append(tracked.id)
-
-        # Use branch mappings from setup (user-selected)
-        if repo_cfg.main_branch:
-            tracked.main_branch = repo_cfg.main_branch
-        if repo_cfg.develop_branch:
-            tracked.develop_branch = repo_cfg.develop_branch
-
-    await db.flush()
-
-    # Commit BEFORE kicking off the scan. ``start_v2_scan`` opens its
-    # own AsyncSessionLocal and reads the just-created TrackedRepository
-    # rows; if we relied on the request's teardown commit it would see
-    # an empty DB and crash.
-    await db.commit()
-
-    # Auto-trigger scan only if embedding service is healthy
-    embedding_warning: str | None = None
-    if valid_repo_ids:
-        embed_ok, embed_err = await embedding_service.check()
-        if embed_ok:
-            new_scan_id = await start_v2_scan(
-                org_id=org.id,
-                repo_ids=valid_repo_ids,
-                config=RunConfig(full_rescan=True),
-            )
-            scan_id = str(new_scan_id)
-
-            logger.info(
-                "setup_auto_scan_triggered",
-                scan_id=scan_id,
-                repos=len(valid_repo_ids),
-            )
-        else:
-            embedding_warning = (
-                f"Embedding service unavailable ({embed_err}). "
-                "Scan skipped — trigger it manually from Settings after fixing."
-            )
-            logger.warning("setup_embedding_check_failed", error=embed_err)
-
-    # Issue JWT token
-    token = create_access_token(data={"sub": str(user.id), "org_id": str(org.id)})
 
     logger.info(
         "setup_complete",
-        org_id=str(org.id),
-        org_slug=org.slug,
-        admin_email=user.email,
-        scan_id=scan_id,
+        org_id=str(init_result.org.id),
+        org_slug=init_result.org.slug,
+        admin_email=init_result.user.email,
+        scan_id=finalize_result.scan_id,
     )
 
     return SetupResponse(
-        organization_id=str(org.id),
-        user_id=str(user.id),
-        access_token=token,
-        mcp_token=mcp_token,
-        scanId=scan_id,
-        embeddingWarning=embedding_warning,
+        organization_id=str(init_result.org.id),
+        user_id=str(init_result.user.id),
+        access_token=init_result.access_token,
+        mcp_token=init_result.mcp_token,
+        scanId=finalize_result.scan_id,
+        embeddingWarning=finalize_result.embedding_warning,
     )
 
 

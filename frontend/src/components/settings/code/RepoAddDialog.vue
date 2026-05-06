@@ -34,14 +34,14 @@
         <v-icon icon="mdi-source-repository-multiple" size="18" class="text-medium-emphasis" />
         <span class="text-body-1 font-weight-medium ml-2">Add repositories</span>
         <v-chip
-          v-if="mode"
-          :color="mode === 'docker' ? 'info' : 'success'"
+          v-if="deploymentMode"
+          :color="deploymentMode === 'docker' ? 'info' : 'success'"
           variant="tonal"
           size="x-small"
           class="ml-2"
-          :prepend-icon="mode === 'docker' ? 'mdi-docker' : 'mdi-laptop'"
+          :prepend-icon="deploymentMode === 'docker' ? 'mdi-docker' : 'mdi-laptop'"
         >
-          {{ mode === 'docker' ? 'Full Docker' : 'Hybrid' }}
+          {{ deploymentMode === 'docker' ? 'Full Docker' : 'Hybrid' }}
         </v-chip>
         <v-spacer />
         <v-btn
@@ -59,8 +59,8 @@
             v-if="canPickLocal"
             type="button"
             class="add-tab"
-            :class="{ 'is-active': tab === 'local' }"
-            @click="tab = 'local'"
+            :class="{ 'is-active': tab === TAB_LOCAL }"
+            @click="tab = TAB_LOCAL"
           >
             <v-icon icon="mdi-folder-open-outline" size="16" />
             <span>Local folder</span>
@@ -68,23 +68,37 @@
           <button
             type="button"
             class="add-tab"
-            :class="{ 'is-active': tab === 'clone' }"
-            @click="tab = 'clone'"
+            :class="{ 'is-active': tab === TAB_CLONE }"
+            @click="tab = TAB_CLONE"
           >
             <v-icon icon="mdi-github" size="16" />
             <span>GitHub clone</span>
           </button>
+          <button
+            v-if="mode !== 'setup'"
+            type="button"
+            class="add-tab"
+            :class="{ 'is-active': tab === TAB_BULK }"
+            @click="tab = TAB_BULK"
+          >
+            <v-icon icon="mdi-source-repository-multiple" size="16" />
+            <span>Bulk import</span>
+          </button>
         </div>
 
         <div class="add-body px-4 py-4">
+          <RepoOnboardBulkTab
+            v-if="tab === TAB_BULK"
+            @onboarded="onBulkOnboarded"
+          />
           <RepoLocalPickForm
-            v-if="canPickLocal && tab === 'local'"
+            v-else-if="canPickLocal && tab === TAB_LOCAL"
             :imp="imp"
           />
           <RepoCloneForm v-else ref="cloneFormRef" :imp="imp" />
         </div>
 
-        <footer class="add-foot px-4 py-3">
+        <footer v-if="tab !== TAB_BULK" class="add-foot px-4 py-3">
           <v-checkbox
             v-model="submitter.scanAfterAdd.value"
             label="Scan after adding"
@@ -127,18 +141,29 @@
 import { computed, ref, watch } from 'vue'
 import RepoLocalPickForm from './RepoLocalPickForm.vue'
 import RepoCloneForm from './RepoCloneForm.vue'
+import RepoOnboardBulkTab from './onboard/RepoOnboardBulkTab.vue'
 import { useAddRepoSubmit } from '@/composables/useAddRepoSubmit'
 import { useDeploymentMode } from '@/composables/useDeploymentMode'
 import { useRepoImport } from '@/composables/useRepoImport'
+import { useSettingsStore } from '@/stores/settings'
 import type { useRepoBranches } from '@/composables/useRepoBranches'
+import type { BulkOnboardJobTerminalResult } from '@/types/repoOnboard'
 
-const props = defineProps<{
+const TAB_LOCAL = 'local'
+const TAB_CLONE = 'clone'
+const TAB_BULK = 'bulk'
+type AddTab = typeof TAB_LOCAL | typeof TAB_CLONE | typeof TAB_BULK
+
+// Bulk import requires a live org+JWT (Settings → Code path). Hidden during first-time setup.
+const props = withDefaults(defineProps<{
   modelValue: boolean
   /** Page-level branch composable, forwarded so the post-clone
    *  walkthrough drives the same dialog instance the page already
    *  hosts — avoids a second RepoBranchMappingDialog under this dialog. */
   branches: ReturnType<typeof useRepoBranches>
-}>()
+  /** Surface mode — "setup" hides the Bulk Import tab (no live org yet). */
+  mode?: 'setup' | 'settings'
+}>(), { mode: 'settings' })
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
@@ -146,17 +171,26 @@ const emit = defineEmits<{
 
 const imp = useRepoImport()
 const submitter = useAddRepoSubmit()
-const { mode } = useDeploymentMode()
+const { mode: deploymentMode } = useDeploymentMode()
+const settingsStore = useSettingsStore()
 const cloneFormRef = ref<InstanceType<typeof RepoCloneForm> | null>(null)
 
-const modeReady = computed(() => mode.value !== null)
-const canPickLocal = computed(() => mode.value === 'host')
-const tab = ref<'local' | 'clone'>('clone')
+const modeReady = computed(() => deploymentMode.value !== null)
+const canPickLocal = computed(() => deploymentMode.value === 'host')
+const tab = ref<AddTab>(TAB_CLONE)
 
 watch(modeReady, (ready) => {
   if (!ready) return
-  tab.value = canPickLocal.value ? 'local' : 'clone'
+  tab.value = canPickLocal.value ? TAB_LOCAL : TAB_CLONE
 }, { immediate: true })
+
+async function onBulkOnboarded(_result: BulkOnboardJobTerminalResult): Promise<void> {
+  // Bulk onboard runs the full clone+scan path server-side. Once it
+  // terminates we close the dialog and refresh the repo list to surface
+  // the newly tracked repos.
+  emit('update:modelValue', false)
+  await settingsStore.fetchConnections()
+}
 
 // Pending counts feed both the footer hint + the submit label so we
 // don't recompute the same logic in two places.
@@ -177,20 +211,21 @@ const httpsCloneNeedsPat = computed(() => {
 
 const canSubmit = computed(() => {
   if (imp.running.value) return false
-  if (tab.value === 'local') return pendingLocal.value > 0
-  return pendingClone.value > 0 && !httpsCloneNeedsPat.value
+  if (tab.value === TAB_LOCAL) return pendingLocal.value > 0
+  if (tab.value === TAB_CLONE) return pendingClone.value > 0 && !httpsCloneNeedsPat.value
+  return false
 })
 
 const submitLabel = computed(() => {
-  if (imp.running.value) return tab.value === 'local' ? 'Adding…' : 'Cloning…'
-  const n = tab.value === 'local' ? pendingLocal.value : pendingClone.value
-  const verb = tab.value === 'local' ? 'Add' : 'Clone'
+  if (imp.running.value) return tab.value === TAB_LOCAL ? 'Adding…' : 'Cloning…'
+  const n = tab.value === TAB_LOCAL ? pendingLocal.value : pendingClone.value
+  const verb = tab.value === TAB_LOCAL ? 'Add' : 'Clone'
   if (n === 0) return `${verb} repositories`
   return n === 1 ? `${verb} 1 repository` : `${verb} ${n} repositories`
 })
 
 const footHint = computed(() => {
-  if (tab.value === 'local') {
+  if (tab.value === TAB_LOCAL) {
     if (pendingLocal.value === 0) return 'Pick folders to stage them.'
     return `${pendingLocal.value} ready to add`
   }
@@ -205,7 +240,8 @@ function close(): void {
 }
 
 async function onSubmit(): Promise<void> {
-  if (tab.value === 'clone') {
+  if (tab.value !== TAB_LOCAL && tab.value !== TAB_CLONE) return
+  if (tab.value === TAB_CLONE) {
     cloneFormRef.value?.flushPendingInput()
   }
   const { allDone, newlyAdded } = await submitter.submit(tab.value, imp)

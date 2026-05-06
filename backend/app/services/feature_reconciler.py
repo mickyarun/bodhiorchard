@@ -142,9 +142,7 @@ async def reconcile_features_for_repo(
             )
             result.updated += 1
             decision = "revived" if was_inactive else "updated"
-        result.matches_by_strategy[match_via] = (
-            result.matches_by_strategy.get(match_via, 0) + 1
-        )
+        result.matches_by_strategy[match_via] = result.matches_by_strategy.get(match_via, 0) + 1
         result.match_log_rows.append(
             FeatureMatchLog(
                 org_id=org_id,

@@ -101,9 +101,7 @@ class FeatureReadRepository:
         only_active: bool = True,
     ) -> int:
         """Total row count matching the same filters as ``list_with_links``."""
-        stmt = select(func.count(func.distinct(Feature.id))).where(
-            Feature.org_id == self._org_id
-        )
+        stmt = select(func.count(func.distinct(Feature.id))).where(Feature.org_id == self._org_id)
         if only_active:
             stmt = stmt.where(Feature.is_active.is_(True))
         if repo_id is not None:

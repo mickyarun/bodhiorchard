@@ -15,6 +15,7 @@ iOS), desktop, static-site and token-only repos work in the same pipeline
 as web apps.
 """
 
+import asyncio
 import hashlib
 import json
 import re
@@ -45,6 +46,23 @@ _MAX_FILE_SIZE = 50_000
 _MAX_TOTAL_CONTENT = 200_000
 
 
+def _discover_read_hash(
+    repo_path: Path, platform: Platform
+) -> tuple[list[Path], dict[str, str], str]:
+    """Sync filesystem walk + file reads + hash, packaged for ``to_thread``.
+
+    The recursive ``Path.glob`` over ``platform.design_globs`` and the
+    per-file ``read_text`` calls are blocking I/O. Done on the event loop
+    they freeze every other coroutine (including ``/setup/checklist-status``
+    polling) for the duration of the walk on large repos.
+    """
+    discovered = discover_design_files(repo_path, platform)
+    if not discovered:
+        return [], {}, ""
+    file_contents = read_discovered_files(discovered)
+    return discovered, file_contents, compute_hash(file_contents)
+
+
 async def extract_design_system(repo_path: Path, platform: Platform) -> ExtractionResult:
     """Extract design system from a repository using the LLM.
 
@@ -62,8 +80,9 @@ async def extract_design_system(repo_path: Path, platform: Platform) -> Extracti
     Returns:
         ExtractionResult with content, hash, method used, and any non-fatal error.
     """
-    # 1. Discover design-related files
-    discovered = discover_design_files(repo_path, platform)
+    discovered, file_contents, source_hash = await asyncio.to_thread(
+        _discover_read_hash, repo_path, platform
+    )
     if not discovered:
         logger.warning(
             "no_design_files_found",
@@ -76,10 +95,6 @@ async def extract_design_system(repo_path: Path, platform: Platform) -> Extracti
             source_hash=source_hash,
             method="minimal",
         )
-
-    # 2. Read file contents
-    file_contents = read_discovered_files(discovered)
-    source_hash = compute_hash(file_contents)
 
     # 3. Try LLM-powered extraction
     from app.services.claude_runner import is_claude_cli_available

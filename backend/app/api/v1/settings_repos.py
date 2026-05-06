@@ -29,6 +29,21 @@ from app.repositories.feature_scan import FeatureScanRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.scan_run import ScanRunRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
+from app.schemas.jobs import (
+    BulkOnboardItemProgress,
+    BulkOnboardItemState,
+    BulkOnboardJobPayload,
+    JobCreatedResponse,
+)
+from app.schemas.repo_install import (
+    AppInstallState,
+    BulkOnboardRequest,
+    InstallableListResponse,
+    InstallableRepo,
+)
+from app.schemas.repo_install import (
+    RepoBranchList as InstallableRepoBranchList,
+)
 from app.schemas.settings import (
     AddRepoRequest,
     RepoBranchList,
@@ -37,6 +52,13 @@ from app.schemas.settings import (
     RepoStatusRequest,
 )
 from app.services.git_operations import get_github_repo_full_name
+from app.services.github_install_repos import (
+    list_installation_repos,
+    list_remote_branches_via_api,
+    resolve_app_install_state,
+)
+from app.services.job_queue import JOB_REPO_BULK_ONBOARD, create_job
+from app.services.redis_cache import get_or_set_json
 from app.services.repo_cloner import clone_or_update
 from app.services.repo_scanner import (
     _detect_develop_branch,
@@ -47,6 +69,9 @@ from app.services.repo_scanner import (
 from app.services.scan.backend_link import iter_route_records
 from app.services.scan.repo_classify import classify
 from app.services.ssh_keys import get_public_key
+
+INSTALLABLE_CACHE_TTL_SECONDS = 60
+INSTALLABLE_CACHE_KEY_TEMPLATE = "installable_repos:{org_id}"
 
 logger = structlog.get_logger(__name__)
 
@@ -392,3 +417,150 @@ async def update_repo_branches(
         repo.uat_branch = body.uat_branch or None
     await db.flush()
     return build_repo_info(repo)
+
+
+@router.get("/repos/installable", response_model=InstallableListResponse)
+async def list_installable_repos(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> InstallableListResponse:
+    """List every repo visible to the org's GitHub-App installation.
+
+    The picker uses this to render its multi-select. When the App isn't
+    fully installed yet we short-circuit with an empty repo list so the
+    frontend can render the install CTA from ``app_install_state`` /
+    ``install_url`` without a second round-trip.
+
+    Cached in Redis for 60s per org to soften GitHub rate limits — the
+    list almost never changes, and a stale entry only delays a brand
+    new install showing up by a minute.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+
+    state, install_url = resolve_app_install_state(org)
+    if state is not AppInstallState.READY:
+        return InstallableListResponse(
+            app_install_state=state,
+            install_url=install_url,
+            repos=[],
+        )
+
+    cache_key = INSTALLABLE_CACHE_KEY_TEMPLATE.format(org_id=str(org.id))
+
+    async def _load() -> list[dict[str, object]]:
+        repos = await list_installation_repos(org, db)
+        # Serialize to plain dicts so the cache layer can JSON-encode.
+        return [r.model_dump(by_alias=False) for r in repos]
+
+    raw = await get_or_set_json(cache_key, ttl=INSTALLABLE_CACHE_TTL_SECONDS, loader=_load)
+    repos = [InstallableRepo.model_validate(item) for item in raw]
+    return InstallableListResponse(
+        app_install_state=state,
+        install_url=install_url,
+        repos=repos,
+    )
+
+
+@router.get(
+    "/repos/installable/{owner}/{repo}/branches",
+    response_model=InstallableRepoBranchList,
+)
+async def list_installable_repo_branches(
+    owner: str,
+    repo: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> InstallableRepoBranchList:
+    """Return the remote branch list for one installable repo.
+
+    Validates that ``{owner}/{repo}`` is in the org's current
+    installation set before calling GitHub — prevents the endpoint
+    from being abused as a generic "list any repo's branches" oracle
+    via someone else's installation token.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+
+    state, _ = resolve_app_install_state(org)
+    if state is not AppInstallState.READY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub App installation is not ready.",
+        )
+
+    full_name = f"{owner}/{repo}"
+    installable = await list_installation_repos(org, db)
+    if not any(item.full_name == full_name for item in installable):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository is not in the installation set.",
+        )
+
+    branches = await list_remote_branches_via_api(org, full_name)
+    return InstallableRepoBranchList(branches=branches)
+
+
+@router.post(
+    "/repos/bulk-onboard",
+    response_model=JobCreatedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def bulk_onboard_repos(
+    body: BulkOnboardRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JobCreatedResponse:
+    """Enqueue an async job that clones, registers, and scans a list of repos.
+
+    Each ``full_name`` must currently be visible to the org's GitHub App
+    installation — otherwise we 400 with the offending names so the
+    caller can refresh its picker. The job itself runs under
+    :func:`app.services.job_repo_bulk_clone.handle_bulk_onboard_job`
+    and emits per-item progress through ``useJobSocket``.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+
+    state, _ = resolve_app_install_state(org)
+    if state is not AppInstallState.READY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub App installation is not ready.",
+        )
+
+    installable = await list_installation_repos(org, db)
+    installable_names = {item.full_name for item in installable}
+    unknown = [item.full_name for item in body.items if item.full_name not in installable_names]
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Repos not in installation set: {', '.join(unknown)}",
+        )
+
+    payload = BulkOnboardJobPayload(
+        org_id=org.id,
+        items=[
+            BulkOnboardItemProgress(
+                full_name=item.full_name,
+                main_branch=item.main_branch,
+                develop_branch=item.develop_branch,
+                uat_branch=item.uat_branch,
+                status=BulkOnboardItemState.PENDING,
+            )
+            for item in body.items
+        ],
+    )
+
+    job = create_job(
+        JOB_REPO_BULK_ONBOARD,
+        payload=payload.model_dump(mode="json"),
+        user_id=str(current_user.id),
+    )
+    logger.info(
+        "bulk_onboard_job_enqueued",
+        job_id=job.job_id,
+        org_id=str(org.id),
+        item_count=len(payload.items),
+    )
+    return JobCreatedResponse(job_id=job.job_id)

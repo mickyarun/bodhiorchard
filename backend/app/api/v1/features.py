@@ -100,9 +100,7 @@ def _build_feature_read(
     )
 
 
-async def _repo_name_lookup(
-    db: AsyncSession, *, org_id: uuid.UUID
-) -> dict[uuid.UUID, str]:
+async def _repo_name_lookup(db: AsyncSession, *, org_id: uuid.UUID) -> dict[uuid.UUID, str]:
     """Return a ``{repo_id: name}`` dict for every active tracked repo."""
     tr_repo = TrackedRepoRepository(db, org_id=org_id)
     repos = await tr_repo.list_active()
@@ -154,9 +152,7 @@ async def list_features_by_repo(
     title_query = q.strip() if q and q.strip() else None
     # Fetch all matching active features; the page-level cap is plenty
     # for the grouped view (the UI doesn't need pagination here).
-    features = await reads.list_with_links(
-        repo_id=repo_id, q=title_query, limit=500, offset=0
-    )
+    features = await reads.list_with_links(repo_id=repo_id, q=title_query, limit=500, offset=0)
     repo_names = await _repo_name_lookup(db, org_id=org.id)
     grouped: dict[uuid.UUID, list[FeatureRead]] = defaultdict(list)
     for f in features:
