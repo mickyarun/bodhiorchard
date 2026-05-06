@@ -61,6 +61,11 @@ JobHandler = Callable[[str, dict[str, Any]], Awaitable[None]]
 _registry: dict[str, tuple[JobHandler, int, asyncio.Queue[tuple[str, dict[str, Any]]]]] = {}
 _workers: list[asyncio.Task[None]] = []
 
+# Set once stop_workers() begins. Closes create_job() so jobs enqueued
+# during the uvicorn-reload / shutdown window don't get accepted into
+# queues that are about to be torn down.
+_shutting_down: bool = False
+
 
 # ── Public API ─────────────────────────────────────────────────────
 
@@ -106,8 +111,11 @@ def create_job(
 
     Raises:
         ValueError: If job_type is not registered.
+        RuntimeError: If the app is shutting down.
         asyncio.QueueFull: If the queue has hit backpressure limit.
     """
+    if _shutting_down:
+        raise RuntimeError("Job queue is shutting down; not accepting new jobs")
     if job_type not in _registry:
         raise ValueError(f"Unknown job type: {job_type}")
 
@@ -290,9 +298,16 @@ async def _worker(
             finally:
                 _running_tasks.pop(job_id, None)
         except asyncio.CancelledError:
-            # User-initiated cancel via cancel_job(job_id). The handler
-            # is responsible for its own DB/subprocess cleanup on
-            # CancelledError; we just emit the terminal WS event.
+            # Distinguish "this job was cancelled" from "the worker itself
+            # is being cancelled" (shutdown). cancelling() > 0 means a
+            # cancel is pending against *this* (outer worker) task — let
+            # it propagate so stop_workers() can complete.
+            current = asyncio.current_task()
+            if current is not None and current.cancelling() > 0:
+                raise
+            # Otherwise: cancel_job(job_id) cancelled the inner handler.
+            # The handler is responsible for its own DB/subprocess cleanup;
+            # we just emit the terminal WS event and keep the worker alive.
             entry = _job_store.get(job_id)
             reason = (entry.status.status_message if entry else None) or "Cancelled by user"
             update_job(
@@ -331,6 +346,8 @@ async def start_workers() -> None:
 
 async def stop_workers() -> None:
     """Cancel all worker tasks. Called from app lifespan shutdown."""
+    global _shutting_down
+    _shutting_down = True
     count = len(_workers)
     for task in _workers:
         task.cancel()
