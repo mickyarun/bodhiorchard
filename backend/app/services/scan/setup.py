@@ -35,7 +35,7 @@ logger = structlog.get_logger(__name__)
 class RepoDescriptor:
     """Frozen snapshot of repo state captured at scan start."""
 
-    __slots__ = ("repo_id", "repo_name", "repo_path", "head_sha")
+    __slots__ = ("repo_id", "repo_name", "repo_path", "head_sha", "main_branch")
 
     def __init__(
         self,
@@ -44,11 +44,17 @@ class RepoDescriptor:
         repo_name: str,
         repo_path: str,
         head_sha: str | None,
+        main_branch: str | None,
     ) -> None:
         self.repo_id = repo_id
         self.repo_name = repo_name
         self.repo_path = repo_path
         self.head_sha = head_sha
+        # User-selected primary branch, captured by the wizard and stored
+        # on ``TrackedRepository``. Threaded into the ingest stage's
+        # config so it doesn't fall back to detecting ``origin/HEAD``,
+        # which can point at a feature branch on imported GitHub repos.
+        self.main_branch = main_branch
 
 
 async def load_repo_descriptor(db: Any, repo_id: uuid.UUID) -> RepoDescriptor | None:
@@ -68,6 +74,7 @@ async def load_repo_descriptor(db: Any, repo_id: uuid.UUID) -> RepoDescriptor | 
         repo_name=tracked.name,
         repo_path=tracked.path,
         head_sha=head_sha,
+        main_branch=tracked.main_branch,
     )
 
 

@@ -150,6 +150,7 @@ async def clone_or_update(
     *,
     org_slug: str,
     pat: str | None = None,
+    branch: str | None = None,
 ) -> CloneResult:
     """Clone ``url`` into ``<repos_dir>/<org_slug>/<repo>``, or fetch if present.
 
@@ -158,6 +159,11 @@ async def clone_or_update(
         org_slug: Bodhiorchard org slug — used as the first path segment so
             clones from different orgs never collide.
         pat: Optional GitHub personal-access token for HTTPS private repos.
+        branch: Branch the wizard onboarded the repo on. When set, ``git
+            clone -b`` lands HEAD here directly (and on the update path
+            we ``checkout`` + ``reset --hard`` to it) so every downstream
+            stage sees the user-selected ref instead of GitHub's
+            ``origin/HEAD``, which can be a feature branch.
 
     Returns:
         ``CloneResult`` with the absolute clone path on success.
@@ -211,6 +217,18 @@ async def clone_or_update(
             # behind, producing empty graphs that the audit greenlit.
             logger.warning("repo_clone_fetch_failed", rc=rc, stderr=stderr[:300])
             return CloneResult(success=False, error=_sanitize(stderr, pat))
+        if branch:
+            # Force HEAD onto the user-selected branch even if a previous
+            # clone left it on the remote default. ``-B`` upserts the
+            # local branch ref against ``origin/<branch>`` so a re-onboard
+            # always converges, regardless of prior state.
+            rc, _, stderr = await _run_git(
+                ["-C", str(dest), "checkout", "-B", branch, f"origin/{branch}"],
+                env=env,
+            )
+            if rc != 0:
+                logger.warning("repo_clone_checkout_failed", branch=branch, stderr=stderr[:300])
+                return CloneResult(success=False, error=_sanitize(stderr, pat))
     else:
         logger.info(
             "repo_clone_start",
@@ -218,11 +236,15 @@ async def clone_or_update(
             owner=owner,
             repo=repo,
             ssh=_is_ssh_url(url),
+            branch=branch,
         )
-        rc, _, stderr = await _run_git(
-            ["clone", "--no-single-branch", effective_url, str(dest)],
-            env=env,
-        )
+        clone_args = ["clone", "--no-single-branch"]
+        if branch:
+            # ``-b`` works with ``--no-single-branch``: all refs still
+            # fetched, but HEAD lands on the user-selected branch.
+            clone_args += ["-b", branch]
+        clone_args += [effective_url, str(dest)]
+        rc, _, stderr = await _run_git(clone_args, env=env)
         if rc != 0:
             # Only remove the destination if git created it during this
             # failed clone — avoid nuking a pre-existing directory we

@@ -4,7 +4,7 @@
 """Tests for :mod:`app.services.job_repo_bulk_clone`.
 
 The handler does three things — fan out clones, persist tracked repos,
-kick off a v2 scan — and these tests exercise each branch with the DB
+kick off a scan — and these tests exercise each branch with the DB
 + git + GitHub layers stubbed out. Real Postgres / git / network
 calls would all turn this into an integration test, which is out of
 scope for this unit; the matching DB-integration coverage lives with
@@ -180,15 +180,39 @@ def _make_payload(*full_names: str) -> dict[str, Any]:
 # ── Tests ──────────────────────────────────────────────────────────
 
 
+def _patch_kickoff(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    scan_id: uuid.UUID | None = None,
+    warning: str | None = None,
+    raises: BaseException | None = None,
+    capture: list[dict[str, Any]] | None = None,
+) -> None:
+    """Replace ``kick_off_onboard_scan`` in the bulk-onboard module.
+
+    Either returns ``(scan_id, warning)`` or raises ``raises``. When
+    ``capture`` is provided, every invocation's kwargs are appended to it.
+    """
+
+    async def _fake(**kwargs: Any) -> tuple[uuid.UUID | None, str | None]:
+        if capture is not None:
+            capture.append(kwargs)
+        if raises is not None:
+            raise raises
+        return scan_id, warning
+
+    monkeypatch.setattr(job_repo_bulk_clone, "kick_off_onboard_scan", _fake)
+
+
 @pytest.mark.asyncio
 async def test_bulk_onboard_three_repos_one_fails(
     monkeypatch: pytest.MonkeyPatch,
     update_recorder: _UpdateRecorder,
     patched_handler: None,
 ) -> None:
-    """Two repos clone, one fails. Only the two succeeders feed start_v2_scan."""
+    """Two repos clone, one fails. Only the two succeeders reach the kickoff."""
 
-    async def _fake_clone(*, url: str, org_slug: str) -> CloneResult:
+    async def _fake_clone(*, url: str, org_slug: str, branch: str | None = None) -> CloneResult:
         assert "x-access-token:ghs_TEST_TOKEN_VALUE@github.com" in url
         assert org_slug == "acme"
         if "broken" in url:
@@ -201,26 +225,18 @@ async def test_bulk_onboard_three_repos_one_fails(
             default_branch="main",
         )
 
-    scan_calls: list[dict[str, Any]] = []
-
-    async def _fake_scan(**kwargs: Any) -> uuid.UUID:
-        scan_calls.append(kwargs)
-        return uuid.uuid4()
-
-    async def _fake_wait(_scan_id: uuid.UUID) -> None:
-        return None
-
+    kickoff_calls: list[dict[str, Any]] = []
+    expected_scan = uuid.uuid4()
     monkeypatch.setattr(job_repo_bulk_clone_helpers, "clone_or_update", _fake_clone)
-    monkeypatch.setattr(job_repo_bulk_clone, "start_v2_scan", _fake_scan)
-    monkeypatch.setattr(job_repo_bulk_clone, "wait_for_scan_task", _fake_wait)
     monkeypatch.setattr(job_repo_bulk_clone, "AsyncSessionLocal", _fake_session_factory)
+    _patch_kickoff(monkeypatch, scan_id=expected_scan, capture=kickoff_calls)
 
     payload = _make_payload("acme/widgets", "acme/broken", "acme/gizmos")
     await handle_bulk_onboard_job("job-123", payload)
 
-    # start_v2_scan called exactly once with the two surviving repo_ids.
-    assert len(scan_calls) == 1
-    assert len(scan_calls[0]["repo_ids"]) == 2
+    # Kickoff called exactly once with the two surviving repo_ids.
+    assert len(kickoff_calls) == 1
+    assert len(kickoff_calls[0]["repo_ids"]) == 2
 
     # Final update marks the job complete and contains the summary lists.
     completed = [c for c in update_recorder.calls if c.get("state") is JobState.COMPLETED]
@@ -228,7 +244,7 @@ async def test_bulk_onboard_three_repos_one_fails(
     final_result = completed[0]["result"]
     assert sorted(final_result["succeeded"]) == ["acme/gizmos", "acme/widgets"]
     assert [f["full_name"] for f in final_result["failed"]] == ["acme/broken"]
-    assert final_result["scan_id"] is not None
+    assert final_result["scan_id"] == str(expected_scan)
 
     # Per-item progress crossed every state.
     statuses_seen: set[str] = set()
@@ -246,30 +262,21 @@ async def test_bulk_onboard_all_fail_no_scan(
     update_recorder: _UpdateRecorder,
     patched_handler: None,
 ) -> None:
-    """If every clone fails, ``start_v2_scan`` is never called."""
+    """If every clone fails, the kickoff is never invoked."""
 
-    async def _fake_clone(*, url: str, org_slug: str) -> CloneResult:
+    async def _fake_clone(*, url: str, org_slug: str, branch: str | None = None) -> CloneResult:
         _ = url, org_slug
         return CloneResult(success=False, error="Permission denied")
 
-    scan_calls: list[dict[str, Any]] = []
-
-    async def _fake_scan(**kwargs: Any) -> uuid.UUID:
-        scan_calls.append(kwargs)
-        return uuid.uuid4()
-
-    async def _fake_wait(_scan_id: uuid.UUID) -> None:
-        return None
-
+    kickoff_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(job_repo_bulk_clone_helpers, "clone_or_update", _fake_clone)
-    monkeypatch.setattr(job_repo_bulk_clone, "start_v2_scan", _fake_scan)
-    monkeypatch.setattr(job_repo_bulk_clone, "wait_for_scan_task", _fake_wait)
     monkeypatch.setattr(job_repo_bulk_clone, "AsyncSessionLocal", _fake_session_factory)
+    _patch_kickoff(monkeypatch, scan_id=uuid.uuid4(), capture=kickoff_calls)
 
     payload = _make_payload("acme/a", "acme/b")
     await handle_bulk_onboard_job("job-456", payload)
 
-    assert scan_calls == []
+    assert kickoff_calls == []
     completed = [c for c in update_recorder.calls if c.get("state") is JobState.COMPLETED]
     assert len(completed) == 1
     final_result = completed[0]["result"]
@@ -294,20 +301,13 @@ async def test_bulk_onboard_token_never_logged(
 
     structlog.configure(processors=[_capture])
 
-    async def _fake_clone(*, url: str, org_slug: str) -> CloneResult:
+    async def _fake_clone(*, url: str, org_slug: str, branch: str | None = None) -> CloneResult:
         # Simulate git echoing the auth URL (worst case for token leak).
         return CloneResult(success=False, error=f"fatal: cannot fetch {url}")
 
-    async def _fake_scan(**_kwargs: Any) -> uuid.UUID:
-        return uuid.uuid4()
-
-    async def _fake_wait(_scan_id: uuid.UUID) -> None:
-        return None
-
     monkeypatch.setattr(job_repo_bulk_clone_helpers, "clone_or_update", _fake_clone)
-    monkeypatch.setattr(job_repo_bulk_clone, "start_v2_scan", _fake_scan)
-    monkeypatch.setattr(job_repo_bulk_clone, "wait_for_scan_task", _fake_wait)
     monkeypatch.setattr(job_repo_bulk_clone, "AsyncSessionLocal", _fake_session_factory)
+    _patch_kickoff(monkeypatch, scan_id=uuid.uuid4())
 
     payload = _make_payload("acme/secrets")
     await handle_bulk_onboard_job("job-789", payload)
@@ -325,14 +325,14 @@ async def test_bulk_onboard_token_never_logged(
 
 
 @pytest.mark.asyncio
-async def test_bulk_onboard_batches_scans_by_four(
+async def test_bulk_onboard_kicks_one_scan(
     monkeypatch: pytest.MonkeyPatch,
     update_recorder: _UpdateRecorder,
     patched_handler: None,
 ) -> None:
-    """12 successful repos → 3 sequential scan batches of [4, 4, 4]."""
+    """N successful clones produce a single kickoff call covering every repo_id."""
 
-    async def _fake_clone(*, url: str, org_slug: str) -> CloneResult:
+    async def _fake_clone(*, url: str, org_slug: str, branch: str | None = None) -> CloneResult:
         _ = org_slug
         repo_name = url.rstrip(".git").rsplit("/", 1)[-1]
         return CloneResult(
@@ -341,54 +341,85 @@ async def test_bulk_onboard_batches_scans_by_four(
             default_branch="main",
         )
 
-    scan_calls: list[dict[str, Any]] = []
-    wait_calls: list[uuid.UUID] = []
-
-    async def _fake_scan(**kwargs: Any) -> uuid.UUID:
-        # Each call must see the previous batch already awaited so the
-        # call order is strictly start → wait → start → wait → start → wait.
-        assert len(wait_calls) == len(scan_calls), (
-            "start_v2_scan invoked before previous batch's wait_for_scan_task"
-        )
-        sid = uuid.uuid4()
-        scan_calls.append({**kwargs, "_scan_id": sid})
-        return sid
-
-    async def _fake_wait(scan_id: uuid.UUID) -> None:
-        wait_calls.append(scan_id)
-
+    expected_scan = uuid.uuid4()
+    kickoff_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(job_repo_bulk_clone_helpers, "clone_or_update", _fake_clone)
-    monkeypatch.setattr(job_repo_bulk_clone, "start_v2_scan", _fake_scan)
-    monkeypatch.setattr(job_repo_bulk_clone, "wait_for_scan_task", _fake_wait)
     monkeypatch.setattr(job_repo_bulk_clone, "AsyncSessionLocal", _fake_session_factory)
+    _patch_kickoff(monkeypatch, scan_id=expected_scan, capture=kickoff_calls)
 
     payload = _make_payload(*[f"acme/repo-{i:02d}" for i in range(12)])
     await handle_bulk_onboard_job("job-batch", payload)
 
-    # Three batches expected: [4, 4, 4].
-    assert [len(c["repo_ids"]) for c in scan_calls] == [4, 4, 4]
-    # Every scan was awaited exactly once before completion.
-    assert len(wait_calls) == 3
-    assert wait_calls == [c["_scan_id"] for c in scan_calls]
+    # Exactly one kickoff, all 12 repo_ids in a single call — no chunking.
+    assert len(kickoff_calls) == 1
+    assert len(kickoff_calls[0]["repo_ids"]) == 12
 
     completed = [c for c in update_recorder.calls if c.get("state") is JobState.COMPLETED]
     assert len(completed) == 1
     final_result = completed[0]["result"]
-    # Back-compat: ``scan_id`` (singular) is the FIRST batch's id.
-    assert final_result["scan_id"] == str(scan_calls[0]["_scan_id"])
-    assert final_result["scan_ids"] == [str(c["_scan_id"]) for c in scan_calls]
+    assert final_result["scan_id"] == str(expected_scan)
 
 
-def test_chunk_repo_ids_splits_evenly() -> None:
-    """``_chunk_repo_ids`` produces sequential, non-overlapping batches."""
-    ids = [uuid.uuid4() for _ in range(12)]
-    chunks = job_repo_bulk_clone._chunk_repo_ids(ids, job_repo_bulk_clone.BULK_SCAN_BATCH_SIZE)
-    assert [len(c) for c in chunks] == [4, 4, 4]
-    flattened: list[uuid.UUID] = [rid for chunk in chunks for rid in chunk]
-    assert flattened == ids
+@pytest.mark.asyncio
+async def test_bulk_onboard_active_scan_fails_job(
+    monkeypatch: pytest.MonkeyPatch,
+    update_recorder: _UpdateRecorder,
+    patched_handler: None,
+) -> None:
+    """ScanAlreadyActiveError → job FAILED with a friendly message, no traceback."""
+    from app.services.scan.runner import ScanAlreadyActiveError
+
+    async def _fake_clone(*, url: str, org_slug: str, branch: str | None = None) -> CloneResult:
+        _ = org_slug
+        repo_name = url.rstrip(".git").rsplit("/", 1)[-1]
+        return CloneResult(
+            success=True,
+            path=f"/tmp/repos/acme/{repo_name}",
+            default_branch="main",
+        )
+
+    monkeypatch.setattr(job_repo_bulk_clone_helpers, "clone_or_update", _fake_clone)
+    monkeypatch.setattr(job_repo_bulk_clone, "AsyncSessionLocal", _fake_session_factory)
+    _patch_kickoff(
+        monkeypatch,
+        raises=ScanAlreadyActiveError(scan_id=uuid.uuid4(), status="pushing_setup"),
+    )
+
+    payload = _make_payload("acme/one", "acme/two")
+    await handle_bulk_onboard_job("job-active", payload)
+
+    failed = [c for c in update_recorder.calls if c.get("state") is JobState.FAILED]
+    assert len(failed) == 1
+    # User-friendly message, not a stack trace.
+    assert "Another scan is already running" in (failed[0].get("error") or "")
+    assert "Traceback" not in (failed[0].get("error") or "")
 
 
-def test_chunk_repo_ids_rejects_zero_batch() -> None:
-    """Guard rail: zero / negative batch sizes raise rather than loop forever."""
-    with pytest.raises(ValueError):
-        job_repo_bulk_clone._chunk_repo_ids([uuid.uuid4()], 0)
+@pytest.mark.asyncio
+async def test_bulk_onboard_embedding_warning_completes_job(
+    monkeypatch: pytest.MonkeyPatch,
+    update_recorder: _UpdateRecorder,
+    patched_handler: None,
+) -> None:
+    """Embedding-down warning surfaces in status_message, job still COMPLETED."""
+
+    async def _fake_clone(*, url: str, org_slug: str, branch: str | None = None) -> CloneResult:
+        _ = org_slug
+        repo_name = url.rstrip(".git").rsplit("/", 1)[-1]
+        return CloneResult(
+            success=True,
+            path=f"/tmp/repos/acme/{repo_name}",
+            default_branch="main",
+        )
+
+    monkeypatch.setattr(job_repo_bulk_clone_helpers, "clone_or_update", _fake_clone)
+    monkeypatch.setattr(job_repo_bulk_clone, "AsyncSessionLocal", _fake_session_factory)
+    _patch_kickoff(monkeypatch, scan_id=None, warning="Embedding service unavailable.")
+
+    payload = _make_payload("acme/widgets")
+    await handle_bulk_onboard_job("job-embed", payload)
+
+    completed = [c for c in update_recorder.calls if c.get("state") is JobState.COMPLETED]
+    assert len(completed) == 1
+    assert "Embedding service unavailable" in (completed[0].get("status_message") or "")
+    assert completed[0]["result"]["scan_id"] is None
