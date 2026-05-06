@@ -37,7 +37,7 @@ def _key(org_id: str, *, repo_id: str) -> str:
     """Build the accumulator key. Uses repo_id (UUID string) for stability.
 
     Repo names can change mid-scan (rename); UUIDs cannot. The synthesise
-    stage threads ``v2_repo_id`` into the prompt so the MCP writer
+    stage threads ``repo_id`` into the prompt so the MCP writer
     receives it verbatim.
     """
     return f"{org_id}:{repo_id}"
@@ -66,6 +66,20 @@ def drain(org_id: str, repo_id: str) -> list[FeatureWrite]:
 def peek_count(org_id: str, repo_id: str) -> int:
     """Buffer length without consuming. For diagnostic logs."""
     return len(_pending.get(_key(org_id, repo_id=repo_id), []))
+
+
+def peek_titles(org_id: str, repo_id: str) -> list[dict[str, str]]:
+    """Snapshot the accumulator as ``[{title, description}, …]`` without draining.
+
+    Used by the scan-status serializer to surface "features written so
+    far" in the running ``feature_synthesis`` chip popover. The reconciler
+    only writes to ``features`` at end-of-batch, so the DB is empty
+    mid-synthesis — without this peek the popover shows nothing.
+    """
+    return [
+        {"title": w.feature_title, "description": w.description}
+        for w in _pending.get(_key(org_id, repo_id=repo_id), [])
+    ]
 
 
 def reset_for_org(org_id: str) -> None:

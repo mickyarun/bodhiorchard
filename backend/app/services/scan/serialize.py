@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Helpers that turn raw v2 ORM rows into API response shapes.
+"""Helpers that turn raw scan ORM rows into API response shapes.
 
 Pulled out of ``scans_api.py`` so the route file stays focused on
 HTTP concerns. Each helper takes a session + scoped ids and returns
@@ -14,6 +14,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mcp.synthesis_accumulator import peek_titles
 from app.models.feature import Feature
 from app.models.scan import Scan, ScanAggregateStatus
 from app.models.scan_phase import ScanPhase
@@ -62,7 +63,10 @@ async def build_repo_run_rows(
         [r.repo_id for r in runs]
     )
 
-    return [_render_repo_run(run, repo_name_by_id, steps_by_run, features_by_repo) for run in runs]
+    return [
+        _render_repo_run(run, repo_name_by_id, steps_by_run, features_by_repo, org_id=org_id)
+        for run in runs
+    ]
 
 
 def _render_repo_run(
@@ -70,9 +74,16 @@ def _render_repo_run(
     repo_name_by_id: dict[uuid.UUID, str],
     steps_by_run: dict[uuid.UUID, list[ScanRepoStep]],
     features_by_repo: dict[uuid.UUID, list[Feature]],
+    *,
+    org_id: uuid.UUID,
 ) -> RepoRunRow:
     """Convert one run + its steps to the API shape."""
     repo_features = features_by_repo.get(run.repo_id, [])
+    # Mid-synthesis the reconciler hasn't drained yet, so the DB has no
+    # rows for this repo. Read titles directly from the in-memory MCP
+    # accumulator so the running chip's popover shows progress instead
+    # of an empty "0 → 0/0" frame.
+    pending_titles = peek_titles(str(org_id), str(run.repo_id)) if not repo_features else []
     return RepoRunRow(
         repo_id=run.repo_id,
         repo_name=repo_name_by_id.get(run.repo_id, "(unknown)"),
@@ -82,29 +93,40 @@ def _render_repo_run(
         finished_at=run.finished_at.isoformat() if run.finished_at else None,
         feature_count=run.feature_count,
         error=run.error,
-        steps=[_render_step(step, repo_features) for step in steps_by_run.get(run.id, [])],
+        steps=[
+            _render_step(step, repo_features, pending_titles=pending_titles)
+            for step in steps_by_run.get(run.id, [])
+        ],
     )
 
 
 def _render_step(
     step: ScanRepoStep,
     repo_features: list[Feature],
+    *,
+    pending_titles: list[dict[str, str]],
 ) -> StepRow:
     """Convert one ScanRepoStep ORM row to its API shape.
 
     For artifact-producing phases we attach the human-readable items
     onto ``extras`` so the popover can render review-able lists
-    (titles, descriptions) instead of just stage metadata.
+    (titles, descriptions) instead of just stage metadata. While
+    ``feature_synthesis`` is still ``running``, the DB is empty (the
+    reconciler drains the accumulator only at end-of-batch) so we
+    render the in-memory ``pending_titles`` instead.
     """
     extras = dict(step.extras) if step.extras else {}
-    if step.phase in _FEATURE_ARTIFACT_PHASES and repo_features:
-        extras["produced_features"] = [
-            {
-                "title": f.feature_title,
-                "description": f.description,
-            }
-            for f in repo_features
-        ]
+    if step.phase in _FEATURE_ARTIFACT_PHASES:
+        if repo_features:
+            extras["produced_features"] = [
+                {
+                    "title": f.feature_title,
+                    "description": f.description,
+                }
+                for f in repo_features
+            ]
+        elif step.status == StepStatus.RUNNING and pending_titles:
+            extras["produced_features"] = list(pending_titles)
     return StepRow(
         phase=step.phase,
         status=step.status,
@@ -121,7 +143,7 @@ def _render_step(
 
 # ── Legacy ScanStatusData adapter ──────────────────────────────────
 # SetupChecklist + ScanPhaseTimeline still consume the old flat shape;
-# rather than rewrite those components, we render the v2 ORM rows back
+# rather than rewrite those components, we render the scan ORM rows back
 # into the legacy shape on demand.
 
 _TERMINAL_STEP_STATUSES = frozenset({StepStatus.DONE, StepStatus.FAILED, StepStatus.SKIPPED_CACHE})
@@ -165,7 +187,7 @@ async def build_legacy_status(
     org_id: uuid.UUID,
     scan: Scan,
 ) -> LegacyScanStatusResponse:
-    """Render v2 scan state back into the legacy ``ScanStatusData`` shape."""
+    """Render scan state back into the legacy ``ScanStatusData`` shape."""
     run_repo = ScanRunRepository(db, org_id=org_id)
     runs = await run_repo.find_for_scan(scan_id=scan.id)
     repo_name_by_id = await TrackedRepoRepository(db, org_id=org_id).get_names_by_ids(
@@ -186,7 +208,7 @@ async def build_legacy_status(
 
 
 def _legacy_status(status_str: str) -> str:
-    """Map the v2 enum string to the three buckets the frontend expects."""
+    """Map the enum string to the three buckets the frontend expects."""
     if status_str == ScanAggregateStatus.COMPLETED.value:
         return "completed"
     if status_str == ScanAggregateStatus.FAILED.value:
