@@ -203,18 +203,17 @@ async def phase_b1_repo_setup(
                     branch=pushed_branch,
                 )
 
-        # Attempt to open / adopt the setup PR when:
-        #   1. We just pushed (any_changed branch above), OR
-        #   2. A previous scan pushed the branch (setup_branch_pushed_at is
-        #      stamped) but no PR has been recorded yet (setup_pr_url is
-        #      null) — typical when the GitHub App was connected after
-        #      the first scan, or the installation_id wasn't yet
-        #      auto-detectable on the first attempt.
-        needs_pr_attempt = pushed_branch is not None or (
-            tracked_repo is not None
-            and tracked_repo.setup_branch_pushed_at is not None
-            and tracked_repo.setup_pr_url is None
-        )
+        # Attempt to open / adopt the setup PR whenever the row has not yet
+        # recorded one. Three paths feed in:
+        #   1. We just pushed this scan (``pushed_branch is not None``).
+        #   2. A previous scan pushed but the App couldn't open the PR
+        #      (``setup_branch_pushed_at`` stamped, ``setup_pr_url`` null).
+        #   3. The branch + PR already exist on the remote from another
+        #      environment (e.g. local test → prod redeploy with a fresh
+        #      DB) and prod has never recorded the PR. Listing open PRs
+        #      with ``head=<owner>:bodhiorchard/init-setup`` adopts it.
+        needs_pr_attempt = tracked_repo is not None and tracked_repo.setup_pr_url is None
+        pr_state_changed = False
         if needs_pr_attempt and tracked_repo is not None:
             org = await db.get(Organization, org_id)
             if org is not None:
@@ -224,6 +223,17 @@ async def phase_b1_repo_setup(
                     tracked_repo,
                     base,
                 )
+                # ``_persist_setup_pr`` flushes on its own when OPENED/ADOPTED,
+                # so ``setup_pr_url`` is durable before we read ``outcome.status``
+                # — stamping after that observation can't land without a
+                # verified PR url, even if a later step in this block raises.
+                # Path 3 (adopted without a fresh push this scan) still means
+                # the branch lives on the remote, so ``should_skip_repo_setup``
+                # should short-circuit next scan.
+                if outcome.status in (SetupPrStatus.OPENED, SetupPrStatus.ADOPTED):
+                    pr_state_changed = True
+                    if tracked_repo.setup_branch_pushed_at is None:
+                        mark_setup_branch_pushed(tracked_repo)
                 branch_label = pushed_branch or "bodhiorchard/init-setup"
                 if outcome.status == SetupPrStatus.MANUAL_REQUIRED:
                     compare_hint = outcome.compare_url or branch_label
@@ -241,7 +251,11 @@ async def phase_b1_repo_setup(
                         "re-run the scan."
                     )
 
-        if any_changed:
+        # Only flush when this scan actually mutated row state. Persistent
+        # MANUAL_REQUIRED / FAILED outcomes (App not installed) leave
+        # ``setup_pr_url`` null forever, so without this gate we'd dirty
+        # the session every scan for nothing.
+        if any_changed or pr_state_changed:
             await db.flush()
     except Exception:
         logger.exception(
