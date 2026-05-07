@@ -1703,6 +1703,22 @@ export class GardenEngine {
   }
 
   destroy(): void {
+    // Halt PlayCanvas rendering BEFORE any subsystem teardown. Without
+    // this, sceneManager.destroy() can free a Mesh's vertex buffer while
+    // the RAF still has one queued frame, which then calls
+    // `WebglGraphicsDevice.draw` on a buffer whose `.device` is now
+    // undefined — the recurring console spam the user reported.
+    //
+    // `autoRender = false` makes the per-frame loop a render no-op. We
+    // also detach our own `update` listener so per-frame logic
+    // (billboard rotation, takeover input) doesn't run on torn-down state.
+    // The full `app.destroy()` is still called at the end of this method
+    // to free the graphics device — this is just the "stop drawing" gate.
+    if (this.app?.app) {
+      this.app.app.autoRender = false
+      this.app.app.off('update')
+    }
+
     // Dispose the scene-build executor — aborts any in-flight rebuild via
     // its AbortSignal so SceneManager.build can exit early at its next
     // await checkpoint instead of touching nulled refs after destroy.

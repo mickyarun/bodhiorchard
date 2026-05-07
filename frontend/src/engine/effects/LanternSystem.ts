@@ -10,7 +10,7 @@
  * Performance: ~20 posts + 20 spheres, shared materials, no shadows.
  */
 import * as pc from 'playcanvas'
-import { evalRouteAt, type PathRoute } from '../world/PathSystem'
+import { evalRouteAt, type PathRoute } from '@shared/world/paths'
 
 const LANTERN_SPACING = 6      // world units between lanterns along each path
 const POLE_WIDTH = 0.06

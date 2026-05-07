@@ -13,39 +13,17 @@
  * required byte-for-byte copies of this function. Single implementation
  * eliminates that risk.
  *
+ * All numeric tuning lives in `shared/world/layoutScale.ts` (the
+ * `agentSlot` and `treeRingFormula` blocks) so this file is pure algorithm.
+ *
  * Layout:
- *   - ≤8 trees   : single 270° arc at 65% of orchard radius
- *   - >8 trees   : multi-ring spiral, rings growing outward from 30% radius
+ *   - ≤8 trees   : single 270° arc at `orchardRadius * arcRadiusFactor`
+ *   - >8 trees   : multi-ring spiral, rings growing outward from
+ *                  `orchardRadius * innerRingFactor`
  */
 
 import { ZONES, getZone, type Zone } from './zones'
-
-/**
- * Base radial distance from a tree at which an agent stands. Tuned to
- * approximate (tree-trunk radius + character half-width + a small gap)
- * so the robot visibly "stands at" the trunk without clipping it.
- */
-const AGENT_TREE_OFFSET = 1.8
-/**
- * Additional radial step per full ring. When a tree has more agents than
- * SLOTS_PER_RING can comfortably fan, the next ring sits one step outward.
- */
-const AGENT_RING_STEP = 1.2
-/**
- * Slots around the hub-facing hemisphere before pushing to the next ring.
- * 5 = [center, +step, -step, +2step, -2step] → ±80° spread from inward.
- */
-const SLOTS_PER_RING = 5
-/** Angular step between adjacent slots on an arc. ~40° keeps ≥1 unit gap. */
-const SLOT_ANGLE_STEP_RAD = (40 * Math.PI) / 180
-/**
- * Offset from orchard center for the repo-free fallback slot. Must stay
- * strictly greater than the hub's MOUND_RADIUS (4.0 in frontend/src/
- * engine/world/HubAnchor.ts) + character half-width (~0.4), otherwise
- * the robot spawns inside the mound collider. 4.8 parks it just beyond
- * the platform rim with a small visual breath.
- */
-const FALLBACK_HUB_OFFSET = 4.8
+import { getActiveScale } from './layoutScale'
 
 /** Resolve the orchard zone or fail loudly — missing zone is a config bug. */
 function requireOrchard(): Zone {
@@ -59,9 +37,9 @@ function requireOrchard(): Zone {
  *
  * Layout: arc on the hub-facing side of the tree. Slot 0 is the inward
  * radial (between tree and orchard center); additional slots fan
- * symmetrically ±SLOT_ANGLE_STEP_RAD, wrapping to a second ring at
- * AGENT_RING_STEP further out once SLOTS_PER_RING is reached. Scales
- * to N agents per tree without overflowing into path space.
+ * symmetrically ±slotAngleStepRad, wrapping to a second ring at ringStep
+ * further out once slotsPerRing is reached. Scales to N agents per tree
+ * without overflowing into path space.
  *
  * Used by:
  *   - `multiplayer/src/sim/AgentActivitySim.ts` — authoritative placement
@@ -75,6 +53,7 @@ export function getAgentSlotAtTree(
   tree: { x: number; z: number },
   stackIndex = 0,
 ): { x: number; z: number } {
+  const { agentSlot } = getActiveScale()
   const orchard = requireOrchard()
   const dx = orchard.x - tree.x
   const dz = orchard.z - tree.z
@@ -86,13 +65,13 @@ export function getAgentSlotAtTree(
   const rz = dz / dist
 
   // Map stackIndex → (ring, angle). Slots alternate ±: 0, +1, -1, +2, -2 …
-  const ring = Math.floor(stackIndex / SLOTS_PER_RING)
-  const slotInRing = stackIndex % SLOTS_PER_RING
+  const ring = Math.floor(stackIndex / agentSlot.slotsPerRing)
+  const slotInRing = stackIndex % agentSlot.slotsPerRing
   const sign = slotInRing === 0 ? 0 : slotInRing % 2 === 1 ? 1 : -1
   const magnitude = Math.ceil(slotInRing / 2)
-  const angle = sign * magnitude * SLOT_ANGLE_STEP_RAD
+  const angle = sign * magnitude * agentSlot.slotAngleStepRad
 
-  const radius = AGENT_TREE_OFFSET + ring * AGENT_RING_STEP
+  const radius = agentSlot.treeOffset + ring * agentSlot.ringStep
   const cos = Math.cos(angle)
   const sin = Math.sin(angle)
   const ax = rx * cos - rz * sin
@@ -127,41 +106,50 @@ function openDirectionFromOrchard(orchard: Zone): { rx: number; rz: number } {
 /**
  * Slot for an agent whose event carried no resolvable repo name.
  *
- * Anchored near the bodhi tree at the orchard center — a small offset
- * in the direction *away from* activity-zone clusters so the agent
- * reads as "standing at the bodhi tree" without overlapping its trunk.
+ * Anchored near the bodhi tree at the orchard center — a small offset in
+ * the direction *away from* activity-zone clusters so the agent reads as
+ * "standing at the bodhi tree" without overlapping its trunk.
+ *
+ * Offset = `moundRadius + fallbackClearance` so the agent always parks
+ * just beyond the mound collider's rim. The clearance is sized to exceed
+ * a character's half-width so the robot never spawns inside the platform.
  */
 export function getAgentFallbackSlot(): { x: number; z: number } {
+  const { hub } = getActiveScale()
   const orchard = requireOrchard()
   const { rx, rz } = openDirectionFromOrchard(orchard)
+  const offset = hub.moundRadius + hub.fallbackClearance
   return {
-    x: orchard.x + rx * FALLBACK_HUB_OFFSET,
-    z: orchard.z + rz * FALLBACK_HUB_OFFSET,
+    x: orchard.x + rx * offset,
+    z: orchard.z + rz * offset,
   }
 }
 
 /** Compute positions for N repo trees inside the orchard zone. */
 export function getTreePositions(count: number): Array<{ x: number; z: number }> {
+  const { treeRingFormula: f } = getActiveScale()
   const orchard = requireOrchard()
   const positions: Array<{ x: number; z: number }> = []
 
   if (count <= 8) {
-    const arcRadius = orchard.radius * 0.65
+    const arcRadius = orchard.radius * f.arcRadiusFactor
     for (let i = 0; i < count; i++) {
-      const angle = (i / Math.max(count - 1, 1)) * Math.PI * 1.5 - Math.PI * 0.75
+      const angle = (i / Math.max(count - 1, 1)) * f.arcSpanRad + f.arcStartRad
       positions.push({
         x: orchard.x + Math.cos(angle) * arcRadius,
         z: orchard.z + Math.sin(angle) * arcRadius,
       })
     }
   } else {
-    const rings = Math.ceil(count / 6)
+    const rings = Math.ceil(count / f.ringsDivisor)
     let placed = 0
     for (let ring = 0; ring < rings && placed < count; ring++) {
-      const ringRadius = orchard.radius * 0.3 + (ring * orchard.radius * 0.65) / rings
-      const perRing = Math.min(6 + ring * 2, count - placed)
+      const ringRadius =
+        orchard.radius * f.innerRingFactor +
+        (ring * orchard.radius * f.outerRingFactor) / rings
+      const perRing = Math.min(f.perRingBase + ring * f.perRingGrowth, count - placed)
       for (let i = 0; i < perRing && placed < count; i++) {
-        const angle = (i / perRing) * Math.PI * 2 + ring * 0.5
+        const angle = (i / perRing) * Math.PI * 2 + ring * f.ringRotationOffsetRad
         positions.push({
           x: orchard.x + Math.cos(angle) * ringRadius,
           z: orchard.z + Math.sin(angle) * ringRadius,

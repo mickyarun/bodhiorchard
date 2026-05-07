@@ -27,8 +27,18 @@ import {
   DESK_SEAT_Y,
 } from "../../../shared/world/HouseTiers"
 
-export { ZONES, getZone, type Zone } from "../../../shared/world/zones"
+export { ZONES, getZone, requireZone, type Zone } from "../../../shared/world/zones"
 import { getZone, type Zone } from "../../../shared/world/zones"
+import {
+  BASELINE_REPO_COUNT,
+  computeLayoutScale,
+  setActiveScale,
+} from "../../../shared/world/layoutScale"
+
+// Boot-wire the shared layout-scale cache so any consumer reading getZone /
+// getTreePositions / agent-slot helpers sees baseline geometry. Phase 2 will
+// pass the per-org repoCount through OrgRoom.onCreate.
+setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
 
 // ─── Layout memoisation ─────────────────────────
 //
