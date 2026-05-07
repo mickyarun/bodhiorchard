@@ -43,6 +43,16 @@ _HOOK_MARKER = "# installed-by-bodhiorchard"
 _PREPARE_CMD = "git config core.hooksPath .githooks"
 
 _SETUP_BRANCH = "bodhiorchard/init-setup"
+
+# Author identity stamped on the setup commit. Passed via ``-c`` flags
+# rather than written to global git config so it stays scoped to this
+# one commit — production runs inside Docker as ``appuser`` with no
+# configured ``user.email`` / ``user.name``, and ``git commit`` refuses
+# without an identity. The ``@users.noreply.github.com`` form keeps any
+# real email out of the commit history. Keep this in sync with the
+# bot account that owns the GitHub App installation token.
+_SETUP_COMMIT_AUTHOR_NAME = "Bodhigroove"
+_SETUP_COMMIT_AUTHOR_EMAIL = "bodhigroove@users.noreply.github.com"
 _BG_START = "<!-- bodhiorchard:start -->"
 _BG_END = "<!-- bodhiorchard:end -->"
 
@@ -326,8 +336,17 @@ async def commit_and_push_setup_worktree(work_path: str) -> PushResult:
         logger.debug("bodhiorchard_setup_nothing_to_commit", work_path=work_path)
         return PushResult(branch=None, error="nothing to commit (setup files unchanged)")
 
+    # ``-c user.email`` / ``-c user.name`` are required because the prod
+    # backend runs as ``appuser`` inside a container with no configured
+    # git identity — without them ``git commit`` aborts with "Author
+    # identity unknown". Passed inline so the bot identity stays scoped
+    # to this commit rather than polluting global container git config.
     _, stderr, rc = await run_git(
         [
+            "-c",
+            f"user.email={_SETUP_COMMIT_AUTHOR_EMAIL}",
+            "-c",
+            f"user.name={_SETUP_COMMIT_AUTHOR_NAME}",
             "commit",
             "-m",
             "chore(bodhiorchard): add MCP tools, git hooks, and config\n\n"
