@@ -479,10 +479,6 @@ export interface RepoInfo {
   setupPrNumber?: number | null
   setupPrState?: 'open' | 'merged' | 'closed' | null
   setupCompareUrl?: string | null
-  /** DEBUG: stderr from the most recent failed setup-branch push. Shown
-   *  in the row chip tooltip so prod operators can diagnose stuck rows
-   *  without backend log access. Will be removed when setup-PR is stable. */
-  setupLastError?: string | null
   designSystemStatus: 'none' | 'extracting' | 'ready'
   /** Status of the most recent ScanRepoRun for this repo across all
    *  scans. `null` when never scanned. Drives the recency pill on the

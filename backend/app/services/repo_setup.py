@@ -291,23 +291,7 @@ async def prepare_setup_worktree(repo_path: str, base_branch: str) -> str | None
     return work_str
 
 
-@dataclass
-class PushResult:
-    """Outcome of ``commit_and_push_setup_worktree``.
-
-    ``branch`` is the pushed branch name on success, ``None`` when nothing
-    was committed or the push failed. ``error`` carries a short, operator-
-    readable description of the failure (git stderr or our own reason
-    string) when ``branch is None``; it's surfaced to the frontend chip
-    tooltip via ``tracked_repo.setup_last_error`` so prod operators don't
-    have to grep backend logs.
-    """
-
-    branch: str | None
-    error: str | None = None
-
-
-async def commit_and_push_setup_worktree(work_path: str) -> PushResult:
+async def commit_and_push_setup_worktree(work_path: str) -> str | None:
     """Stage + commit + push the setup files from a prepared worktree.
 
     Assumes ``work_path`` was returned by :func:`prepare_setup_worktree`
@@ -316,8 +300,8 @@ async def commit_and_push_setup_worktree(work_path: str) -> PushResult:
     a clean tree at entry; the caller's prior install steps populated it
     with the files we need to commit.
 
-    Returns ``PushResult.branch`` set on success, with ``error`` carrying
-    git's stderr (truncated) or a short reason on any failure.
+    Returns the pushed branch name on success, ``None`` when there's
+    nothing to commit or the push fails.
     """
     staged_any = False
     for filepath in _SETUP_FILES:
@@ -334,7 +318,7 @@ async def commit_and_push_setup_worktree(work_path: str) -> PushResult:
 
     if not staged_any:
         logger.debug("bodhiorchard_setup_nothing_to_commit", work_path=work_path)
-        return PushResult(branch=None, error="nothing to commit (setup files unchanged)")
+        return None
 
     # ``-c user.email`` / ``-c user.name`` are required because the prod
     # backend runs as ``appuser`` inside a container with no configured
@@ -362,7 +346,7 @@ async def commit_and_push_setup_worktree(work_path: str) -> PushResult:
     )
     if rc != 0:
         logger.warning("bodhiorchard_setup_commit_failed", error=stderr[:200])
-        return PushResult(branch=None, error=f"git commit failed: {stderr[:500]}")
+        return None
 
     has_origin = await _has_origin_remote(work_path)
     if not has_origin:
@@ -371,7 +355,7 @@ async def commit_and_push_setup_worktree(work_path: str) -> PushResult:
             work_path=work_path,
             branch=_SETUP_BRANCH,
         )
-        return PushResult(branch=_SETUP_BRANCH)
+        return _SETUP_BRANCH
 
     # The setup branch is server-managed: only Bodhiorchard scans write to
     # it. Plain ``--force`` is intentional — a redeployment that recomputes
@@ -390,10 +374,10 @@ async def commit_and_push_setup_worktree(work_path: str) -> PushResult:
             work_path=work_path,
             error=stderr[:200],
         )
-        return PushResult(branch=None, error=f"git push failed: {stderr[:500]}")
+        return None
 
     logger.info("bodhiorchard_setup_pushed", work_path=work_path, branch=_SETUP_BRANCH)
-    return PushResult(branch=_SETUP_BRANCH)
+    return _SETUP_BRANCH
 
 
 async def _has_origin_remote(cwd: str) -> bool:
