@@ -147,15 +147,25 @@ export class Tree3DSystem {
 
   /**
    * Begin growing a new tree.
+   *
+   * The tree grows at LOCAL origin (0,0,0) inside `treeRoot`; world
+   * placement is owned by `treeRoot.setLocalPosition(worldX, 0, worldZ)`
+   * applied in `resetGrowthState`. Keeping growth local means baked
+   * caches store local-space branch coords and can be re-positioned at
+   * any future world location simply by moving `treeRoot` — see
+   * `loadFromCache`. Without this separation the cache would bake in
+   * absolute coords and a tree restored at a new orchard scale would
+   * render at its old position.
+   *
    * @param rootColor - trunk color (0-255 RGB)
-   * @param worldX/Y/Z - world-space position of the root (default 0,0,0 for standalone demo)
+   * @param worldX/Y/Z - world-space position of the tree's base
    */
   startTree(rootColor: Color3 = DEFAULT_ROOT_COLOR, worldX = 0, worldY = 0, worldZ = 0): void {
-    this.resetGrowthState(rootColor, worldX, worldZ)
+    this.resetGrowthState(rootColor, worldX, worldY, worldZ)
 
     const rootSize = this.scaleRulesForFeatureCount(this.featureData.length)
 
-    this.tree = TreeBranch.createRoot(worldX, worldY, worldZ, rootSize, rootColor)
+    this.tree = TreeBranch.createRoot(0, 0, 0, rootSize, rootColor)
     this.activeBranches.push(this.tree)
     this.createEntity(this.tree)
     this.growing = true
@@ -414,7 +424,9 @@ export class Tree3DSystem {
     // Disabling here matches LeafSystem's approach — biggest single performance saving.
     entity.render!.castShadows   = false
     entity.render!.receiveShadows = false
-    entity.setPosition(branch.root.x, branch.root.y, branch.root.z)
+    // Local coords inside treeRoot — branch.root values are tree-local because
+    // startTree() grows from origin (0,0,0). World placement is owned by treeRoot.
+    entity.setLocalPosition(branch.root.x, branch.root.y, branch.root.z)
     entity.setLocalScale(0.001, 0.001, 0.001)
     this.treeRoot.addChild(entity)
     this.entityMap.set(branch, entity)
@@ -432,7 +444,7 @@ export class Tree3DSystem {
 
     const thickness = Math.max(branch.size / THICKNESS_DIVISOR, MIN_THICKNESS)
     entity.setLocalScale(thickness * 2, dirLen, thickness * 2)
-    entity.setPosition(
+    entity.setLocalPosition(
       branch.root.x + growTip.x / 2,
       branch.root.y + growTip.y / 2,
       branch.root.z + growTip.z / 2,
@@ -539,7 +551,7 @@ export class Tree3DSystem {
     worldX: number,
     worldZ: number,
   ): void {
-    this.resetGrowthState(rootColor, worldX, worldZ)
+    this.resetGrowthState(rootColor, worldX, 0, worldZ)
     // Cache hit means the tree is already fully grown — enable wind immediately
     // instead of waiting for buildWindEntries() after a growth-complete event.
     this.windReady = true
@@ -558,7 +570,8 @@ export class Tree3DSystem {
     // position + tag, not rendered.
     for (const p of exported.primaries) {
       const entity = new pc.Entity('PrimaryProxy')
-      entity.setPosition(p.midpoint[0], p.midpoint[1], p.midpoint[2])
+      // Cached midpoints are local (v2 schema) — world placement comes from treeRoot.
+      entity.setLocalPosition(p.midpoint[0], p.midpoint[1], p.midpoint[2])
       this.treeRoot.addChild(entity)
       this.featureEntityMap.set(entity, { title: p.title, status: p.status })
     }
@@ -567,7 +580,14 @@ export class Tree3DSystem {
   // Shared full reset used by startTree() (before growth) and loadFromCache()
   // (before restoring a baked tree). Both paths must start from a clean slate
   // for idempotence when the same Tree3DSystem is reused across runs.
-  private resetGrowthState(rootColor: Color3, worldX: number, worldZ: number): void {
+  //
+  // World placement is applied to `treeRoot` here — the rest of the tree
+  // (branch entities, primary pick proxies, instanced cylinders) lives in
+  // local space under treeRoot, so a single setLocalPosition call moves the
+  // entire tree as one unit. This keeps the cache format world-position-
+  // independent: a tree baked at one orchard scale can be restored at any
+  // other scale by setting a different treeRoot position.
+  private resetGrowthState(rootColor: Color3, worldX: number, worldY: number, worldZ: number): void {
     this.clearEntities()
     this.destroyMaterials()
     this.activeBranches = []
@@ -582,6 +602,7 @@ export class Tree3DSystem {
     this.rootColor  = rootColor
     this.treeWorldX = worldX
     this.treeWorldZ = worldZ
+    this.treeRoot.setLocalPosition(worldX, worldY, worldZ)
     this.treeRoot.setRotation(new pc.Quat())
 
     // Rules must be re-defaulted so a subsequent startTree() doesn't inherit
@@ -631,7 +652,8 @@ export class Tree3DSystem {
         const mx = (root.x + tip.x) * 0.5
         const my = (root.y + tip.y) * 0.5
         const mz = (root.z + tip.z) * 0.5
-        entity.setPosition(mx, my, mz)
+        // Local coords (treeRoot owns world position); cache stores these as-is.
+        entity.setLocalPosition(mx, my, mz)
         out.push({ title: meta.title, status: meta.status, midpoint: [mx, my, mz] })
       } else {
         entity.destroy()
@@ -675,8 +697,11 @@ export class Tree3DSystem {
     for (const baby of branch.babies) this.writeBranchMatrices(baby, buffers, depth + 1)
   }
 
-  // Write a single branch's world matrix into the flat buffer at byte offset.
-  // Uses static scratch Mat4/Vec3/Quat — zero allocation across the entire bake.
+  // Write a single branch's tree-local matrix into the flat buffer at byte
+  // offset. Local because branches grow from origin (0,0,0); world placement
+  // is applied at render time via treeRoot's transform on the instanced
+  // entity. Uses static scratch Mat4/Vec3/Quat — zero allocation across the
+  // entire bake.
   private writeBranchMatrixAt(branch: TreeBranch, out: Float32Array, offset: number): void {
     const dir = Tree3DSystem._bakeDir
     branch.getGrowTipInto(dir)

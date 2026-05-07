@@ -22,7 +22,22 @@
 
 const DB_NAME = 'bodhiorchard-tree-cache'
 const STORE = 'trees'
-const SCHEMA_VERSION = 1
+// Schema history (newest at the bottom — read top-down to follow the timeline):
+//
+// v1: original — branches and leaves baked with absolute world coords.
+//
+// v2: tree branches grow at LOCAL origin (treeRoot owns world position).
+//     v1 caches stored absolute world coords and would render at the
+//     pre-Phase-2 baseline orchard position regardless of current scale,
+//     so v1 entries must be invalidated.
+//
+// v3: leaf bake matrices switched from world transforms to local transforms
+//     (leafRoot is parented under treeRoot, so the renderer applies
+//     treeRoot.world × instance_matrix at draw time — storing world matrices
+//     double-applied the tree offset and drifted leaves to 2× the tree
+//     position). v2 caches written between the v1→v2 schema bump and this
+//     fix contain bad world-space leaf matrices and must be invalidated.
+export const SCHEMA_VERSION = 3
 const DEFAULT_MAX_ENTRIES = 50
 
 // ─── Cached data shape ───────────────────────────────────────────────────────

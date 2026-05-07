@@ -155,11 +155,15 @@ export class LeafSystem {
     if (this.leaves.length === 0 || !this.treeColor) return null
 
     // All leaves in a tree share a single material today, so one group is
-    // sufficient. Pack every leaf's world transform into a single Float32Array.
+    // sufficient. Pack every leaf's tree-LOCAL transform into a single
+    // Float32Array. Local because leafRoot is parented to the tree's
+    // treeRoot — the renderer applies treeRoot.world × matrix at draw time,
+    // so storing world matrices here would double-apply the tree's world
+    // position and leaves would drift to 2× the tree's offset from origin.
     const flat = new Float32Array(this.leaves.length * 16)
     for (let i = 0; i < this.leaves.length; i++) {
-      const wt = this.leaves[i].entity.getWorldTransform()
-      flat.set(wt.data, i * 16)
+      const lt = this.leaves[i].entity.getLocalTransform()
+      flat.set(lt.data, i * 16)
     }
 
     this.createInstancedLeafEntity(flat, this.leaves.length, this.treeColor)
@@ -239,7 +243,10 @@ export class LeafSystem {
     const roll  = (Math.random() - 0.5) * 30
 
     const scatter = branchSize * 0.65
-    entity.setPosition(
+    // Local coords — leafRoot is parented to the tree's world-positioned
+    // treeRoot in ProceduralTreeSystem, so leaves inherit the tree's
+    // world transform via the scene graph rather than baking world coords here.
+    entity.setLocalPosition(
       pos.x + (Math.random() - 0.5) * scatter,
       pos.y + (Math.random() - 0.5) * scatter,
       pos.z + (Math.random() - 0.5) * scatter,
