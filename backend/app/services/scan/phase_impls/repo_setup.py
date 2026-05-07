@@ -213,6 +213,7 @@ async def phase_b1_repo_setup(
         #      DB) and prod has never recorded the PR. Listing open PRs
         #      with ``head=<owner>:bodhiorchard/init-setup`` adopts it.
         needs_pr_attempt = tracked_repo is not None and tracked_repo.setup_pr_url is None
+        pr_state_changed = False
         if needs_pr_attempt and tracked_repo is not None:
             org = await db.get(Organization, org_id)
             if org is not None:
@@ -222,14 +223,17 @@ async def phase_b1_repo_setup(
                     tracked_repo,
                     base,
                 )
-                # Adoption without a fresh push (path 3) still means the
-                # branch lives on the remote — stamp ``setup_branch_pushed_at``
-                # so ``should_skip_repo_setup`` short-circuits next scan.
-                if (
-                    outcome.status in (SetupPrStatus.OPENED, SetupPrStatus.ADOPTED)
-                    and tracked_repo.setup_branch_pushed_at is None
-                ):
-                    mark_setup_branch_pushed(tracked_repo)
+                # ``_persist_setup_pr`` flushes on its own when OPENED/ADOPTED,
+                # so ``setup_pr_url`` is durable before we read ``outcome.status``
+                # — stamping after that observation can't land without a
+                # verified PR url, even if a later step in this block raises.
+                # Path 3 (adopted without a fresh push this scan) still means
+                # the branch lives on the remote, so ``should_skip_repo_setup``
+                # should short-circuit next scan.
+                if outcome.status in (SetupPrStatus.OPENED, SetupPrStatus.ADOPTED):
+                    pr_state_changed = True
+                    if tracked_repo.setup_branch_pushed_at is None:
+                        mark_setup_branch_pushed(tracked_repo)
                 branch_label = pushed_branch or "bodhiorchard/init-setup"
                 if outcome.status == SetupPrStatus.MANUAL_REQUIRED:
                     compare_hint = outcome.compare_url or branch_label
@@ -247,7 +251,11 @@ async def phase_b1_repo_setup(
                         "re-run the scan."
                     )
 
-        if any_changed or needs_pr_attempt:
+        # Only flush when this scan actually mutated row state. Persistent
+        # MANUAL_REQUIRED / FAILED outcomes (App not installed) leave
+        # ``setup_pr_url`` null forever, so without this gate we'd dirty
+        # the session every scan for nothing.
+        if any_changed or pr_state_changed:
             await db.flush()
     except Exception:
         logger.exception(
