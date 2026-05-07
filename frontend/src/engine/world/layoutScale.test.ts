@@ -133,8 +133,10 @@ describe('Phase 2 curve: computeLayoutScale scales orchard with repoCount', () =
 describe('active-scale cache', () => {
   beforeEach(() => resetActiveScale())
 
-  it('lazy-initialises to baseline when never set', () => {
-    expect(getActiveScale().orchardRadius).toBe(18)
+  it('throws in dev/test when read before any setActiveScale', () => {
+    expect(() => getActiveScale()).toThrow(
+      /getActiveScale\(\) called before setActiveScale/,
+    )
   })
 
   it('setActiveScale overrides what subsequent reads see', () => {
@@ -145,13 +147,13 @@ describe('active-scale cache', () => {
     expect(getActiveScale().orchardRadius).toBe(42)
   })
 
-  it('resetActiveScale clears the cache so the next read lazy-inits', () => {
+  it('resetActiveScale clears the cache so the next read throws again', () => {
     setActiveScale({
       ...computeLayoutScale(BASELINE_REPO_COUNT),
       orchardRadius: 42,
     })
     resetActiveScale()
-    expect(getActiveScale().orchardRadius).toBe(18)
+    expect(() => getActiveScale()).toThrow()
   })
 })
 
@@ -169,11 +171,11 @@ describe('onScaleChange listener hook', () => {
     off()
   })
 
-  it('fires the listener during the lazy-init triggered by getActiveScale', () => {
+  it('does not fire when getActiveScale throws on an unwired default key', () => {
     const seen: number[] = []
     const off = onScaleChange(scale => seen.push(scale.orchardRadius))
-    expect(getActiveScale().orchardRadius).toBe(18)
-    expect(seen).toEqual([18])
+    expect(() => getActiveScale()).toThrow()
+    expect(seen).toEqual([])
     off()
   })
 

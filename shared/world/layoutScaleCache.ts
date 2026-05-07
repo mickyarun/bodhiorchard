@@ -5,8 +5,11 @@
  * Active-scale cache + derived geometry helpers.
  *
  * Frontend and multiplayer read the live layout via `getActiveScale()`.
- * At boot each process calls `setActiveScale(computeLayoutScale(repoCount))`.
- * A lazy fallback to baseline keeps any read-before-boot path safe.
+ * Each process MUST call `setActiveScale(computeLayoutScale(repoCount))`
+ * at boot — an unwired read throws in dev/test and logs an error +
+ * baseline-fallback in prod (default key only). There is no silent
+ * lazy-init: a missing boot wire is a programmer mistake, not a recoverable
+ * runtime state.
  *
  * Listeners registered via `onScaleChange` keep dependent caches (e.g.
  * the resolved zone array exposed by `getZones()` in `shared/world/zones.ts`)
@@ -34,6 +37,26 @@ import {
 } from './layoutScale'
 
 /**
+ * True when the host process is running outside production. Used to escalate
+ * unwired-cache access into a hard throw in dev/test (so a missing boot wire
+ * surfaces at the earliest visible call), while still degrading to a baseline
+ * fallback in prod (so an end user does not get a white-screen crash).
+ *
+ * Works in both runtimes:
+ *   - Node (multiplayer): reads `process.env.NODE_ENV` directly.
+ *   - Browser (frontend, Vite-bundled): Vite replaces `process.env.NODE_ENV`
+ *     with the literal string at build time, so the same expression is safe.
+ *   - Vitest: sets `NODE_ENV=test`, which falls into the dev branch.
+ *
+ * The narrow `globalThis` cast keeps this file free of `@types/node` — the
+ * frontend tsconfig deliberately does not pull in Node typings.
+ */
+const IS_DEV = (() => {
+  const proc = (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process
+  return proc?.env?.NODE_ENV !== 'production'
+})()
+
+/**
  * Storage key used by every today-shipped call site. Frontend (one process,
  * one scale) and multiplayer's module-load boot wire (one process, one
  * shared baseline) both target this key.
@@ -47,13 +70,12 @@ const scaleChangeListeners = new Set<ScaleChangeListener>()
 
 /**
  * Subscribe to default-key scale changes. The listener fires every time
- * the default scale is installed — including the lazy init triggered by
- * the first `getActiveScale()` call before any explicit boot wire fires.
+ * `setActiveScale` installs a new default-key scale.
  *
  * Returns an unsubscribe function.
  *
  * Used by `shared/world/zones.ts` to rebuild its eagerly-resolved
- * resolved zone cache. Listeners MUST NOT call `setActiveScale`
+ * zone cache. Listeners MUST NOT call `setActiveScale`
  * themselves (would re-emit and recurse).
  *
  * Non-default room keys do NOT fire listeners today — those are
@@ -124,20 +146,31 @@ export function setActiveScale(
 /**
  * Read the active scale for `roomKey` (default key when omitted).
  *
- * The default-key path lazy-initialises to baseline on first read,
- * which also fires `onScaleChange` listeners — so any module registered
- * before the first read still receives the initial value.
+ * Both default and non-default keys require an explicit `setActiveScale`
+ * before they can be read — there is no silent baseline fallback that could
+ * mask a missing boot wire. In dev / test the unwired read throws so the
+ * mistake surfaces at the earliest visible call site; in production it
+ * logs an error and degrades to a baseline scale (default key only) to
+ * avoid a runtime crash on a misconfigured deploy.
  *
- * Non-default keys do NOT lazy-init; an unknown key throws so callers
- * can't silently render baseline geometry when their per-room boot
- * wire failed to run. (Phase 2 introduces this read path.)
+ * Non-default keys always throw on unwired access in every environment —
+ * a per-room scale that silently fell back to baseline would render the
+ * wrong world for that org and never surface in logs at the right place.
  */
 export function getActiveScale(roomKey: string = DEFAULT_ROOM_KEY): LayoutScale {
   const cached = scalesByRoom.get(roomKey)
   if (cached) return cached
   if (roomKey === DEFAULT_ROOM_KEY) {
-    setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
-    return scalesByRoom.get(DEFAULT_ROOM_KEY)!
+    const message =
+      `[layoutScaleCache] getActiveScale() called before setActiveScale ` +
+      `for the default key — every entrypoint must wire the active scale ` +
+      `at module load (see frontend WorldLayout.ts and multiplayer ` +
+      `sim/WorldLayout.ts for the canonical wires).`
+    if (IS_DEV) throw new Error(message)
+    console.error(message + ' Falling back to baseline.')
+    const fallback = computeLayoutScale(BASELINE_REPO_COUNT)
+    scalesByRoom.set(DEFAULT_ROOM_KEY, fallback)
+    return fallback
   }
   throw new Error(
     `[layoutScaleCache] getActiveScale('${roomKey}') called before ` +
@@ -151,8 +184,9 @@ export function getActiveScale(roomKey: string = DEFAULT_ROOM_KEY): LayoutScale 
  * - With no argument, clears every key (whole-process reset).
  * - With a key, clears that key only.
  *
- * After a default-key reset the next `getActiveScale()` re-runs the
- * lazy baseline init and re-fires listeners, simulating a fresh process.
+ * After a reset the next `getActiveScale()` for an unwired key throws
+ * (in dev / test) — tests that need a clean slate must call
+ * `setActiveScale(...)` explicitly before reading.
  */
 export function resetActiveScale(roomKey?: string): void {
   if (roomKey === undefined) {
