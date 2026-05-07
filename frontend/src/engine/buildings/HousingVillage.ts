@@ -27,6 +27,7 @@ import type { WorldLayout } from '../world/WorldLayout'
 import type { ExclusionZone } from '../utils/MathUtils'
 import { SandRoadBuilder } from '../world/SandRoadBuilder'
 import { RectangularFence } from '../world/RectangularFence'
+import { LabelRenderer } from '../rendering/LabelRenderer'
 import {
   computeVillageLayout,
   type FenceBounds,
@@ -65,16 +66,18 @@ export class HousingVillage {
 
   /** Stored context for live tier rebuilds. */
   private buildContext: {
+    app: Application
     villageRoot: pc.Entity
     zone: Zone
     members: EngineMember[]
     layout: VillageLayoutResult
     memberHouseMap: Map<string, HouseResult>
+    currentUserId: string | null
   } | null = null
 
   constructor(loader: AssetLoader) {
     const factory = new BuildingFactory(loader)
-    this.houseBuilder = new HouseBuilder(factory, loader.app.graphicsDevice)
+    this.houseBuilder = new HouseBuilder(factory)
     this.roads = new SandRoadBuilder(loader)
   }
 
@@ -82,6 +85,7 @@ export class HousingVillage {
     app: Application,
     members: EngineMember[],
     worldLayout: WorldLayout,
+    currentUserId: string | null,
     materials?: MaterialFactory,
   ): Promise<HousingVillageResult> {
     const zone = worldLayout.getZone('housing')
@@ -131,8 +135,9 @@ export class HousingVillage {
       const tier = member.house_level ?? 1
 
       const result = await this.houseBuilder.build(
-        member.user_id, member.name, member.character_model,
+        app, member.user_id, member.name, member.character_model,
         placement.x, placement.z, placement.layoutIndex, tier,
+        member.user_id === currentUserId,
       )
 
       this.wrapWithPivot(root, result, placement, zone, tier)
@@ -162,7 +167,7 @@ export class HousingVillage {
     const gateLocal = this.computeGateLocal(layout.fenceBounds, gateSide)
     const gatePosition = this.localToWorld(gateLocal.x, gateLocal.z, zone, layout.yawRad)
 
-    this.buildContext = { villageRoot: root, zone, members, layout, memberHouseMap }
+    this.buildContext = { app, villageRoot: root, zone, members, layout, memberHouseMap, currentUserId }
 
     return {
       entity: root,
@@ -279,7 +284,7 @@ export class HousingVillage {
 
   async rebuildByMemberId(memberId: string, newTier: number): Promise<void> {
     if (!this.buildContext) return
-    const { villageRoot, zone, members, layout, memberHouseMap } = this.buildContext
+    const { app, villageRoot, zone, members, layout, memberHouseMap, currentUserId } = this.buildContext
 
     const oldResult = memberHouseMap.get(memberId)
     if (!oldResult) return
@@ -290,12 +295,16 @@ export class HousingVillage {
     const member = members[placement.layoutIndex]
     member.house_level = newTier
 
-    // Destroy old pivot (which contains the house entity)
+    // Unregister the old nameplate billboard before destroying the pivot tree.
+    // PlayCanvas's recursive destroy frees the entity, but Application.billboards
+    // would otherwise hold a stale reference.
+    if (oldResult.nameLabel) LabelRenderer.cleanup(app, oldResult.nameLabel)
     oldResult.entity.destroy()
 
     const result = await this.houseBuilder.build(
-      member.user_id, member.name, member.character_model,
+      app, member.user_id, member.name, member.character_model,
       placement.x, placement.z, placement.layoutIndex, newTier,
+      member.user_id === currentUserId,
     )
 
     this.wrapWithPivot(villageRoot, result, placement, zone, newTier)
