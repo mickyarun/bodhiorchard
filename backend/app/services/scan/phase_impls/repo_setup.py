@@ -54,6 +54,7 @@ from app.services.repo_setup import (
     mark_setup_branch_pushed,
     prepare_setup_worktree,
 )
+from app.services.scan.stages._origin_auth import refresh_origin_auth
 from app.services.scan_progress import update_scan_progress
 
 logger = structlog.get_logger(__name__)
@@ -92,6 +93,16 @@ async def phase_b1_repo_setup(
             status="setting_up_worktrees",
             progress_pct=base_pct + 18,
         )
+        # Stage B1 runs *before* ``ingest`` (per ``DEFAULT_PER_REPO_STAGES``),
+        # so the App installation token baked into ``origin``'s URL by the
+        # last clone or scan may already be past its ~1h TTL. Refresh here
+        # so the worktree fetch + the setup-branch push both authenticate
+        # with a fresh token. Mirrors what ingest does for its own fetch
+        # (see ``services/scan/stages/_origin_auth.py``). The refresh
+        # rewrites ``origin``'s URL via ``git remote set-url``, which
+        # persists for every subsequent ``run_git`` call against this repo.
+        org = await db.get(Organization, org_id)
+        await refresh_origin_auth(repo_path, org)
         main_wt, develop_wt = await ensure_repo_worktrees(repo_path)
         del main_wt, develop_wt  # paths consumed by the worktree-aware tools below
 
@@ -214,42 +225,40 @@ async def phase_b1_repo_setup(
         #      with ``head=<owner>:bodhiorchard/init-setup`` adopts it.
         needs_pr_attempt = tracked_repo is not None and tracked_repo.setup_pr_url is None
         pr_state_changed = False
-        if needs_pr_attempt and tracked_repo is not None:
-            org = await db.get(Organization, org_id)
-            if org is not None:
-                outcome = await create_setup_pr(
-                    db,
-                    org,
-                    tracked_repo,
-                    base,
+        if needs_pr_attempt and tracked_repo is not None and org is not None:
+            outcome = await create_setup_pr(
+                db,
+                org,
+                tracked_repo,
+                base,
+            )
+            # ``_persist_setup_pr`` flushes on its own when OPENED/ADOPTED,
+            # so ``setup_pr_url`` is durable before we read ``outcome.status``
+            # — stamping after that observation can't land without a
+            # verified PR url, even if a later step in this block raises.
+            # Path 3 (adopted without a fresh push this scan) still means
+            # the branch lives on the remote, so ``should_skip_repo_setup``
+            # should short-circuit next scan.
+            if outcome.status in (SetupPrStatus.OPENED, SetupPrStatus.ADOPTED):
+                pr_state_changed = True
+                if tracked_repo.setup_branch_pushed_at is None:
+                    mark_setup_branch_pushed(tracked_repo)
+            branch_label = pushed_branch or "bodhiorchard/init-setup"
+            if outcome.status == SetupPrStatus.MANUAL_REQUIRED:
+                compare_hint = outcome.compare_url or branch_label
+                setup_pr_message = (
+                    f"Setup branch '{branch_label}' is on {repo_name}'s "
+                    "remote. GitHub App not connected (or not installed "
+                    "on this repo) — open the PR manually: "
+                    f"{compare_hint}"
                 )
-                # ``_persist_setup_pr`` flushes on its own when OPENED/ADOPTED,
-                # so ``setup_pr_url`` is durable before we read ``outcome.status``
-                # — stamping after that observation can't land without a
-                # verified PR url, even if a later step in this block raises.
-                # Path 3 (adopted without a fresh push this scan) still means
-                # the branch lives on the remote, so ``should_skip_repo_setup``
-                # should short-circuit next scan.
-                if outcome.status in (SetupPrStatus.OPENED, SetupPrStatus.ADOPTED):
-                    pr_state_changed = True
-                    if tracked_repo.setup_branch_pushed_at is None:
-                        mark_setup_branch_pushed(tracked_repo)
-                branch_label = pushed_branch or "bodhiorchard/init-setup"
-                if outcome.status == SetupPrStatus.MANUAL_REQUIRED:
-                    compare_hint = outcome.compare_url or branch_label
-                    setup_pr_message = (
-                        f"Setup branch '{branch_label}' is on {repo_name}'s "
-                        "remote. GitHub App not connected (or not installed "
-                        "on this repo) — open the PR manually: "
-                        f"{compare_hint}"
-                    )
-                elif outcome.status == SetupPrStatus.FAILED:
-                    setup_pr_message = (
-                        f"Setup branch '{branch_label}' is on {repo_name}'s "
-                        "remote, but the GitHub App could not open the PR. "
-                        "Check the App's installation permissions and "
-                        "re-run the scan."
-                    )
+            elif outcome.status == SetupPrStatus.FAILED:
+                setup_pr_message = (
+                    f"Setup branch '{branch_label}' is on {repo_name}'s "
+                    "remote, but the GitHub App could not open the PR. "
+                    "Check the App's installation permissions and "
+                    "re-run the scan."
+                )
 
         # Only flush when this scan actually mutated row state. Persistent
         # MANUAL_REQUIRED / FAILED outcomes (App not installed) leave
