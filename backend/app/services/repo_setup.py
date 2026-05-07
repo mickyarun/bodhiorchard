@@ -338,13 +338,17 @@ async def commit_and_push_setup_worktree(work_path: str) -> str | None:
         )
         return _SETUP_BRANCH
 
-    stdout, _, _ = await run_git(["ls-remote", "--heads", "origin", _SETUP_BRANCH], cwd=work_path)
-    branch_exists_remote = _SETUP_BRANCH in stdout
-    push_cmd = ["push", "-u", "origin", _SETUP_BRANCH]
-    if branch_exists_remote:
-        push_cmd = ["push", "--force-with-lease", "-u", "origin", _SETUP_BRANCH]
-
-    _, stderr, rc = await run_git(push_cmd, cwd=work_path)
+    # The setup branch is server-managed: only Bodhiorchard scans write to
+    # it. Plain ``--force`` is intentional — a redeployment that recomputes
+    # ``public_url`` (e.g. localhost → prod) must be able to claim the
+    # branch even when the prior environment force-pushed commits the new
+    # deployment never fetched. ``--force-with-lease`` would silently fail
+    # the lease check against a stale local remote-tracking ref and leave
+    # the row stuck in "Setup pending".
+    _, stderr, rc = await run_git(
+        ["push", "--force", "-u", "origin", _SETUP_BRANCH],
+        cwd=work_path,
+    )
     if rc != 0:
         logger.warning(
             "bodhiorchard_setup_push_failed",
