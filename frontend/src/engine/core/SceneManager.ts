@@ -122,6 +122,9 @@ export class SceneManager {
   /** Member lookup by user_id — includes character_model for identity preservation when visiting houses. */
   private _memberDataMap = new Map<string, { user_id: string; name: string; character_model: string | null }>()
 
+  /** Authenticated user — used by housing to mark "your home" with a distinct nameplate. */
+  private _currentUserId: string | null = null
+
   // Garden world root — toggled off during interior mode
   private _gardenRoot: pc.Entity | null = null
 
@@ -267,7 +270,9 @@ export class SceneManager {
     // Housing village (builds its own fence + roads + driveways)
     if (data.members.length > 0) {
       const village = new HousingVillage(this.loader)
-      const housingResult = await village.build(this.app, data.members, this.layout, this.materials)
+      const housingResult = await village.build(
+        this.app, data.members, this.layout, this._currentUserId, this.materials,
+      )
       if (checkCancelled()) return
       this.buildingEntities.push(housingResult.entity)
       this.layout.addExclusionZones([housingResult.exclusionZone])
@@ -492,6 +497,13 @@ export class SceneManager {
   getMember(userId: string): { user_id: string; name: string; character_model: string | null } | null {
     return this._memberDataMap.get(userId) ?? null
   }
+
+  /** Identify the local player so renderers can mark "your" content (e.g. the home nameplate). */
+  setCurrentUserId(userId: string | null): void {
+    this._currentUserId = userId
+  }
+
+  get currentUserId(): string | null { return this._currentUserId }
 
   /** All pickable entities: repo trees + feature branches + houses + agents.
    *  NOT cached — tree features are added asynchronously during growth animation,

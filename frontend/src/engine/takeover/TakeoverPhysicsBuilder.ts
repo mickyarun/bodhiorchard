@@ -121,20 +121,27 @@ export class TakeoverPhysicsBuilder {
       const halfW = house.exteriorHalfW ?? (tierDef.exteriorFootprint.w * s) / 2
       const halfD = house.exteriorHalfD ?? (tierDef.exteriorFootprint.d * s) / 2
 
-      // Wall collider centered on pivot (no local offset needed)
-      const boxHalf = rotateHalfSize(halfW, halfD, yawRad)
-      bodies.push(this.physics.addStaticBox(
+      // Wall collider — actual rotated box, NOT a conservative AABB.
+      // With HOUSING_YAW_DEG = -25, the AABB of an N×N square wall is ~33%
+      // wider than the real wall; the door at (halfD + 0.3) then sits
+      // INSIDE that inflated AABB and the player hits the wall first.
+      // Using addStaticBoxRotated keeps the wall flush with the visual house.
+      bodies.push(this.physics.addStaticBoxRotated(
         px, HOUSE_WALL_HEIGHT / 2, pz,
-        boxHalf.halfW, HOUSE_WALL_HEIGHT / 2, boxHalf.halfD,
+        halfW, HOUSE_WALL_HEIGHT / 2, halfD,
+        yawRad,
       ))
 
-      // Door at front edge: center-local (0, halfD + 0.3)
+      // Door at front edge: center-local (0, halfD + 0.3), rotated into world.
+      // The door box itself is also rotated so its thin face is parallel to
+      // the front wall — otherwise its AABB would re-introduce the same
+      // overlap-with-wall problem that the wall fix above eliminates.
       const doorLocal = rotatePointYaw(0, halfD + 0.3, yawRad)
-      const doorHalf = rotateHalfSize(HOUSE_DOOR_HALF_W, HOUSE_DOOR_HALF_D, yawRad)
-      bodies.push(this.physics.addDoor(
+      bodies.push(this.physics.addDoorRotated(
         memberId,
         px + doorLocal.x, HOUSE_WALL_HEIGHT / 2, pz + doorLocal.z,
-        doorHalf.halfW, HOUSE_WALL_HEIGHT / 2, doorHalf.halfD,
+        HOUSE_DOOR_HALF_W, HOUSE_WALL_HEIGHT / 2, HOUSE_DOOR_HALF_D,
+        yawRad,
       ))
     } else {
       // Kenney house: shift wall boxes from corner-local to center-local
@@ -151,15 +158,18 @@ export class TakeoverPhysicsBuilder {
         bodies.push(this.addRotatedWall(px, pz, yawRad, shifted, HOUSE_WALL_HEIGHT))
       }
 
-      // Door: shift from corner-local to center-local before rotation
+      // Door: shift from corner-local to center-local, rotate position AND
+      // orientation. Using a true rotated cuboid (not the AABB-inflated form)
+      // matches the rotated walls so the door trigger sits exactly in the
+      // gap rather than overlapping a neighbouring wall panel.
       const doorXLocal = ox + doorIdx + 0.5
       const doorZLocal = oz + tierDef.depth
       const doorWorld = rotatePointYaw(doorXLocal, doorZLocal, yawRad)
-      const doorHalf = rotateHalfSize(HOUSE_DOOR_HALF_W, HOUSE_DOOR_HALF_D, yawRad)
-      bodies.push(this.physics.addDoor(
+      bodies.push(this.physics.addDoorRotated(
         memberId,
         px + doorWorld.x, HOUSE_WALL_HEIGHT / 2, pz + doorWorld.z,
-        doorHalf.halfW, HOUSE_WALL_HEIGHT / 2, doorHalf.halfD,
+        HOUSE_DOOR_HALF_W, HOUSE_WALL_HEIGHT / 2, HOUSE_DOOR_HALF_D,
+        yawRad,
       ))
     }
 
@@ -429,18 +439,17 @@ export class TakeoverPhysicsBuilder {
       z: (localBox.minZ + localBox.maxZ) / 2,
     }
     const centerWorld = rotatePointYaw(centerLocal.x, centerLocal.z, yawRad)
-    const half = rotateHalfSize(
-      (localBox.maxX - localBox.minX) / 2,
-      (localBox.maxZ - localBox.minZ) / 2,
-      yawRad,
-    )
-    return this.physics.addStaticBox(
+    // True rotated box (NOT a conservative AABB). At non-zero village yaw,
+    // an axis-aligned bounding box of the rotated wall inflates by ~|sin|+|cos|
+    // and lets the door-gap partially overlap a neighbouring wall panel.
+    return this.physics.addStaticBoxRotated(
       rootX + centerWorld.x,
       wallHeight / 2,
       rootZ + centerWorld.z,
-      half.halfW,
+      (localBox.maxX - localBox.minX) / 2,
       wallHeight / 2,
-      half.halfD,
+      (localBox.maxZ - localBox.minZ) / 2,
+      yawRad,
     )
   }
 }
@@ -525,18 +534,3 @@ export function rotatePointYaw(x: number, z: number, yawRad: number): { x: numbe
   }
 }
 
-/**
- * Rotate half-extents of an axis-aligned box by yawRad.
- * For axis-aligned rotations (0°, 90°, 180°, 270°), half-extents swap W/D at 90°/270°.
- * For arbitrary angles, returns the AABB containing the rotated box (conservative).
- */
-export function rotateHalfSize(
-  halfW: number, halfD: number, yawRad: number,
-): { halfW: number; halfD: number } {
-  const c = Math.abs(Math.cos(yawRad))
-  const s = Math.abs(Math.sin(yawRad))
-  return {
-    halfW: halfW * c + halfD * s,
-    halfD: halfW * s + halfD * c,
-  }
-}
