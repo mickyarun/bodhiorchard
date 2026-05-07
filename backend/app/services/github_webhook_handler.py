@@ -153,21 +153,15 @@ async def _handle_pr_closed(
     db: AsyncSession,
 ) -> None:
     """Update PR state on close/merge. Check if all PRs merged."""
-    pr_repo = PullRequestRepository(db, org_id=org_id)
-    pr = await pr_repo.get_by_github_pr_id(pr_data.id)
-    if not pr:
-        return
-
     is_merged = pr_data.merged or False
-    pr.state = PRState.MERGED if is_merged else PRState.CLOSED
-    if is_merged and pr_data.merged_at:
-        from datetime import datetime
 
-        pr.merged_at = datetime.fromisoformat(pr_data.merged_at.replace("Z", "+00:00"))
-
-    # If this PR is the repo's MCP setup PR, flip the row's setup_pr_state
-    # so /settings/code can drop the "Setup PR open" chip without waiting
-    # for the next scan's filesystem check.
+    # Setup-PR state lives on ``tracked_repository``, not ``pull_requests``.
+    # Run this branch *before* the pull-requests lookup so adopted setup PRs
+    # — which may not have a ``pull_requests`` row when the App opened the
+    # PR from a different environment than the one currently receiving the
+    # webhook — still flip from "open" to "merged"/"closed" on close. The
+    # wider PR-tracking work below depends on a ``pull_requests`` row and
+    # stays correctly gated.
     if repo.setup_pr_number == pr_data.number:
         repo.setup_pr_state = SetupPrState.MERGED if is_merged else SetupPrState.CLOSED
         logger.info(
@@ -176,6 +170,21 @@ async def _handle_pr_closed(
             pr_number=pr_data.number,
             merged=is_merged,
         )
+
+    pr_repo = PullRequestRepository(db, org_id=org_id)
+    pr = await pr_repo.get_by_github_pr_id(pr_data.id)
+    if not pr:
+        # Persist the setup_pr_state flip before bailing on PR-tracking;
+        # the unified ``await db.commit()`` at the bottom of this function
+        # is unreachable on the early-return path.
+        await db.commit()
+        return
+
+    pr.state = PRState.MERGED if is_merged else PRState.CLOSED
+    if is_merged and pr_data.merged_at:
+        from datetime import datetime
+
+        pr.merged_at = datetime.fromisoformat(pr_data.merged_at.replace("Z", "+00:00"))
 
     # Capture the post-merge SHA so downstream release-stage detection
     # can match this BUD's commits to release PRs (e.g. develop \u2192 uat),
