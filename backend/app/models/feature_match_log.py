@@ -33,7 +33,7 @@ class FeatureMatchLog(Base):
 
     __tablename__ = "feature_match_log"
     __table_args__ = (
-        Index("ix_fml_org_repo_created", "org_id", "repo_id", "created_at"),
+        Index("ix_fml_org_repo_created", "org_id", "repo_id", text("created_at DESC")),
         Index("ix_fml_org_via_score", "org_id", "match_via", "score"),
     )
 

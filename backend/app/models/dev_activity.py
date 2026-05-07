@@ -9,7 +9,7 @@ file changes, tool errors, API errors, and activity summaries.
 
 import uuid
 
-from sqlalchemy import ForeignKey, Index, String, Text
+from sqlalchemy import ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +31,12 @@ class DevActivityLog(BaseModel):
         Index("ix_dev_activity_session_id", "session_id"),
         Index("ix_dev_activity_repo_id", "repo_id"),
         Index("ix_dev_activity_event_type", "event_type"),
+        Index(
+            "ix_dev_activity_commit_sha",
+            "org_id",
+            "commit_sha",
+            postgresql_where=text("commit_sha IS NOT NULL"),
+        ),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
