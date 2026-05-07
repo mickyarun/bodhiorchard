@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -112,6 +113,13 @@ class TrackedRepository(BaseModel):
         ),
         nullable=True,
     )
+    # DEBUG: stderr captured from the most recent failed setup-branch push,
+    # truncated to 1000 chars. Surfaced into the /repos response so the
+    # frontend chip tooltip can show *why* the row is stuck in "Setup
+    # pending". Cleared on the next successful push. Remove this column
+    # (model + migration + builder + RepoInfo + chip) once setup-push is
+    # stable in prod.
+    setup_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Architectural classification produced by the ``classify_repo`` stage
     # (see ``app/services/scan/repo_classify``). Null until the first
