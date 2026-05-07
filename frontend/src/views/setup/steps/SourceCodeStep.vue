@@ -160,7 +160,7 @@
                   class="mb-3"
                 >
                   <div class="text-body-2 font-weight-medium mb-1">
-                    Generate a fine-grained token (read-only)
+                    Generate a fine-grained token
                   </div>
                   <ol class="text-caption mb-2 pl-4">
                     <li>
@@ -179,7 +179,7 @@
                     <li>
                       <strong>Repository permissions</strong> → click
                       <em>Add permissions</em> → search for <strong>Contents</strong>
-                      → set to <strong>Read-only</strong>.
+                      → set to <strong>Read and Write</strong>.
                       <br>
                       <span class="text-medium-emphasis">
                         (<em>Metadata: Read-only</em> is auto-added — leave it alone.
