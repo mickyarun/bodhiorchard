@@ -63,6 +63,13 @@ class Feature(BaseModel):
         Index("ix_feature_org_active_fstatus", "org_id", "is_active", "feature_status"),
         Index("ix_feature_org_srcref", "org_id", "source_ref"),
         Index("ix_feature_org_cluster_sig", "org_id", "cluster_signature"),
+        Index(
+            "ix_synth_feat_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
