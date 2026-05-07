@@ -91,8 +91,7 @@ export class PathSystem {
    * crashing into the zone disc at each terminus.
    */
   private sampleRoute(route: PathRoute): Array<{ x: number; z: number }> {
-    const isCurved = route.controlX !== undefined && route.controlZ !== undefined
-    const segments = isCurved ? BEZIER_SEGMENTS : 1
+    const segments = route.curve === 'bezier' ? BEZIER_SEGMENTS : 1
     const tStart = END_TRIM
     const tEnd = 1 - END_TRIM
     const points: Array<{ x: number; z: number }> = []

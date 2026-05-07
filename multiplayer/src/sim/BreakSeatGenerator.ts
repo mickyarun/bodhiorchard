@@ -15,8 +15,8 @@
  * expose only as many seats as the frontend draws (count clamped to
  * breakSeatCount(layout)).
  *
- * Zone positions are imported from the shared ZONES array — the same
- * source of truth as the frontend's WorldLayout.
+ * Zone positions are read from the shared `getZones()` accessor — the
+ * same source of truth as the frontend's WorldLayout.
  */
 
 import { requireZone } from "./WorldLayout"
