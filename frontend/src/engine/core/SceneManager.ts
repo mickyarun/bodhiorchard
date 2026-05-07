@@ -427,13 +427,19 @@ export class SceneManager {
 
   }
 
-  /** Per-frame update for animated subsystems. */
-  update(dt: number): void {
+  /**
+   * Per-frame update for animated subsystems.
+   *
+   * `viewerPos` is plumbed through to `repoVis.update` so visualizations like
+   * ProceduralTreeSystem can run distance-LOD against a ground-level viewer
+   * (takeover mode). Other modes pass `null` and everything renders.
+   */
+  update(dt: number, viewerPos: pc.Vec3 | null = null): void {
     this.sky?.update(dt)
     this.clouds?.update(dt)
     this.forestLake?.update(dt)
     this.poolWater?.update(dt)
-    this.repoVis?.update?.(dt)
+    this.repoVis?.update?.(dt, viewerPos)
     this.gardenBirds?.update(dt)
     this.gardenAnimals?.update(dt)
     this.agentSystem?.update(dt)

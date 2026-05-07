@@ -72,38 +72,30 @@ export interface CacheKeyInput {
 }
 
 /**
- * TODO (you to implement): compute a stable, deterministic cache key for the
- * inputs above. The string it returns is used verbatim as the IndexedDB key,
- * so identical inputs MUST produce identical output across browser sessions
- * (no Math.random, no Date.now, no object-order dependence).
+ * Stable, deterministic cache key for a baked tree.
  *
- * DESIGN DECISION — what should invalidate the cache?
+ * Hashes only the inputs that actually shape the bake output:
+ *   - repoName + trunkColorIndex (drive branch + leaf colors)
+ *   - sorted feature titles (drive primary-branch identity + count)
+ *   - hasImplemented bool (gates leaf spawn — the only status-driven visual)
  *
- *   MORE invalidation (includes feature statuses in the hash)
- *     → any status change (planned → in_progress → implemented) re-grows
- *     → leaves re-appear the moment the first feature goes implemented
- *     → but most tree interactions trigger a full re-grow on reload
+ * Per-feature statuses are intentionally excluded: flips that don't cross the
+ * implemented threshold don't change bake output, so including them would
+ * re-grow on every status change for no visual difference.
  *
- *   LESS invalidation (excludes statuses, keeps only titles + hasImplemented)
- *     → re-grow only when features are added / renamed / removed
- *     → status changes within the set stay instant
- *     → leaves don't move between implemented / not-implemented on reload
- *
- * Today the bake output depends on:
- *   - Every branch color comes from the trunk palette (repo-level, NOT status).
- *   - Leaves spawn only when ≥1 feature has status === 'implemented'.
- *   - Leaf color is derived from the trunk color alone.
- * So the status only affects cache output via the leaf-spawn gate.
- *
- * A short non-cryptographic hash (FNV-1a / djb2 / equivalent) is fine — this
- * is a cache key, not a security primitive. Keep it synchronous so callers
- * don't need to await.
- *
- * Aim for ~5–10 lines. Return a string ≤ 64 chars.
+ * U+0001 separator avoids collisions if a title ever contains '|'.
+ * FNV-1a 32-bit — non-cryptographic but well-distributed for ASCII inputs.
  */
-export function computeCacheKey(_input: CacheKeyInput): string {
-  // Placeholder — always-miss until you implement. Safe default: never cache.
-  return `__unimplemented__${Math.random()}`
+export function computeCacheKey(input: CacheKeyInput): string {
+  const hasImpl = input.features.some(f => f.status === 'implemented') ? 1 : 0
+  const titles  = input.features.map(f => f.title).sort()
+  const canon   = `${input.repoName}|${input.trunkColorIndex}|${hasImpl}|${titles.join('')}`
+  let h = 0x811c9dc5
+  for (let i = 0; i < canon.length; i++) {
+    h ^= canon.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16).padStart(8, '0')
 }
 
 // ─── IndexedDB access ────────────────────────────────────────────────────────

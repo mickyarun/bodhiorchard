@@ -22,7 +22,7 @@ import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { Color3 } from './TreeRules'
 import type { WindSystem } from './WindSystem'
 import type { BakedLeafGroup } from './treeCache'
-import { createInstancedEntity } from './instancing'
+import { createInstancedEntity, computeInstanceAabb } from './instancing'
 
 const MAX_TIPS        = 160    // cap terminal tips — max entities = 160 * 10 = 1600
 const LEAVES_PER_TIP  = 10
@@ -31,6 +31,8 @@ const LEAF_WIDTH      = 0.70   // width/height ratio
 const WIND_FREQ_BASE  = 1.3    // Hz — fallback when no WindSystem connected
 const WIND_AMPLITUDE  = 10     // degrees — fallback amplitude
 const LEAF_SCALE_VARY = 0.50
+/** AABB inflation for baked leaf batches — covers leaf quad extent (~0.7 wide) plus wind sway slack. */
+const LEAF_AABB_MARGIN = 1.0
 
 interface LeafEntry {
   entity: pc.Entity
@@ -78,6 +80,10 @@ export class LeafSystem {
 
   /** Connect a WindSystem for coherent wind across branches and leaves. */
   setWindSystem(wind: WindSystem): void { this.windSystem = wind }
+
+  /** Root entity owning all live + baked leaf children — used by callers that
+   *  want to toggle the whole leaf subtree on/off (e.g. distance-LOD culling). */
+  getRoot(): pc.Entity { return this.leafRoot }
 
   /**
    * Spawn leaf clusters at terminal branch tip positions.
@@ -182,6 +188,7 @@ export class LeafSystem {
     treeColor: Color3,
   ): void {
     const mat = this.getLeafMaterial(treeColor)
+    const aabb = computeInstanceAabb(matrices, count, LEAF_AABB_MARGIN)
     const { entity, vb } = createInstancedEntity(
       this.app.graphicsDevice,
       this.getLeafMesh(),
@@ -189,6 +196,7 @@ export class LeafSystem {
       matrices,
       count,
       'BakedLeaves',
+      { aabb },
     )
     this.leafRoot.addChild(entity)
     this.bakedEntities.push(entity)
