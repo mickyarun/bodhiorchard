@@ -48,7 +48,10 @@ const EXPECTED: ExpectedZone[] = [
 ]
 
 describe('zones byte-identical regression at baseline', () => {
-  beforeEach(() => resetActiveScale())
+  beforeEach(() => {
+    resetActiveScale()
+    setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
+  })
 
   for (const expected of EXPECTED) {
     it(`${expected.name} resolves to its pre-refactor (x,z) within 1e-9`, () => {
@@ -85,7 +88,10 @@ describe('zones byte-identical regression at baseline', () => {
 })
 
 describe('runtime invariants on resolved zones', () => {
-  beforeEach(() => resetActiveScale())
+  beforeEach(() => {
+    resetActiveScale()
+    setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
+  })
 
   it('coffee_bar ↔ housing safety margin holds (≥ 4u, doc invariant from zones.ts:55-59)', () => {
     const cb = getZone('coffee_bar')!

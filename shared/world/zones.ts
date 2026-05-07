@@ -31,7 +31,8 @@
 
 import {
   BASELINE_ORCHARD_RADIUS,
-  getActiveScale,
+  BASELINE_REPO_COUNT,
+  computeLayoutScale,
   onScaleChange,
   type LayoutScale,
 } from './layoutScale'
@@ -145,8 +146,17 @@ export function buildZones(scale: LayoutScale): Zone[] {
  * sync iteration during the listener saw an empty array. Baseline-only
  * scale today made the bug invisible; Phase 2 scale changes would have
  * exposed it.
+ *
+ * Initial seed is built directly from baseline — *not* via the active-scale
+ * cache — so this module's load order does not depend on whether some
+ * other module has already wired the cache. The first `setActiveScale`
+ * call (frontend `WorldLayout` boot wire, multiplayer `sim/WorldLayout`
+ * boot wire, etc.) fires the listener below and atomically swaps in the
+ * resolved zone array for the live scale.
  */
-let currentZones: ReadonlyArray<Zone> = buildZones(getActiveScale())
+let currentZones: ReadonlyArray<Zone> = buildZones(
+  computeLayoutScale(BASELINE_REPO_COUNT),
+)
 
 onScaleChange(scale => {
   currentZones = buildZones(scale)

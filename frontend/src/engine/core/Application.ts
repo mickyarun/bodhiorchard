@@ -31,6 +31,15 @@ export class Application {
   private config: ApplicationConfig = {}
 
   /**
+   * Bound update handler held as a private ref so `stopUpdates()` can
+   * remove exactly this listener via `app.off('update', ref)` instead of
+   * the arg-less `app.off('update')` that strips every listener registered
+   * against the event name. Lets future subsystems register their own
+   * update listeners without our teardown sweeping them away.
+   */
+  private updateHandler: ((dt: number) => void) | null = null
+
+  /**
    * Billboard registry — O(1) add/remove, avoids O(n) findByTag every frame.
    * Subsystems call registerBillboard/unregisterBillboard when creating/destroying labels.
    */
@@ -127,8 +136,10 @@ export class Application {
     fillSky.setEulerAngles(-60, 45, 0)
     this.root.addChild(fillSky)
 
-    // Frame update loop
-    this.app.on('update', (dt: number) => {
+    // Frame update loop. Stored as `this.updateHandler` so `stopUpdates()`
+    // can detach exactly this listener at teardown without sweeping every
+    // other update listener registered against the PlayCanvas app.
+    this.updateHandler = (dt: number) => {
       this.clock.update(dt)
       this.config.onUpdate?.(dt, this.clock)
 
@@ -143,7 +154,8 @@ export class Application {
         label.lookAt(camPos)
         label.rotateLocal(90, 0, 0)
       }
-    })
+    }
+    this.app.on('update', this.updateHandler)
 
     this.app.start()
   }
@@ -285,6 +297,25 @@ export class Application {
     this.config = config
   }
 
+  /**
+   * Detach the per-frame update listener installed in `init()`. Idempotent.
+   *
+   * Used by `GardenEngine.destroy()` to halt our update logic *before* the
+   * full PlayCanvas teardown — the destroy sequence frees graphics buffers
+   * that the update path would otherwise touch on the next queued RAF tick,
+   * producing the recurring `device` undefined console spam.
+   *
+   * Removes ONLY this Application's listener. Any other update listeners a
+   * subsystem may have registered against `pc.Application` survive — the
+   * earlier `app.off('update')` form removed everything by event name.
+   */
+  stopUpdates(): void {
+    if (this.updateHandler) {
+      this.app.off('update', this.updateHandler)
+      this.updateHandler = null
+    }
+  }
+
   resize(width: number, height: number): void {
     this.app.resizeCanvas(width, height)
     this.events.emit('scene:resize', { width, height })
@@ -294,6 +325,7 @@ export class Application {
     this.events.emit('scene:destroy')
     this.events.clear()
     this.billboards.clear()
+    this.stopUpdates()
     this.app.destroy()
   }
 }
