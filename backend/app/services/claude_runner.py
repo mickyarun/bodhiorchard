@@ -20,8 +20,6 @@ from typing import Any
 
 import structlog
 
-from app.services.gitnexus_utils import find_npx as _find_npx
-
 logger = structlog.get_logger(__name__)
 
 ProgressCallback = Callable[[str, dict[str, Any]], None]  # (tool_name, tool_input)
@@ -67,6 +65,12 @@ class ClaudeRunnerConfig:
     model: str | None = None
     effort: str | None = None
     env_extra: dict[str, str] | None = None
+    # Restrict the subprocess to a specific tool allowlist. When non-empty,
+    # passes ``--allowedTools <comma list>`` to the Claude CLI so the
+    # subprocess can ONLY invoke those tools. Anything else (Bash, Read,
+    # Edit, ToolSearch, ...) is denied. Use for narrowly-scoped phases
+    # like the global merge that should only emit one MCP tool.
+    allowed_tools: list[str] = field(default_factory=list)
 
 
 def _find_tool_uses(obj: Any, callback: ProgressCallback) -> None:
@@ -398,6 +402,12 @@ async def run_claude_code(
         cmd.extend(["--model", config.model])
     if config.effort:
         cmd.extend(["--effort", config.effort])
+    if config.allowed_tools:
+        # Tighten the subprocess sandbox: only the listed tools can be
+        # invoked. Used by the merge phase to disallow Bash / Read /
+        # ToolSearch and force Claude to emit ``apply_feature_merge_plan``
+        # ops instead of exploring the codebase.
+        cmd.extend(["--allowedTools", ",".join(config.allowed_tools)])
 
     # Append system prompt files (e.g., design system reference)
     for spf in config.system_prompt_files:
@@ -596,56 +606,6 @@ async def run_claude_code(
     finally:
         if mcp_config_file is not None:
             mcp_config_file.unlink(missing_ok=True)
-
-
-async def ensure_gitnexus_mcp() -> None:
-    """Register GitNexus MCP server with Claude Code (idempotent).
-
-    Uses ``claude mcp add`` to register the GitNexus stdio MCP server
-    globally, so all subsequent Claude CLI runs can query indexed repos
-    for UI components, layouts, and code structure during design generation.
-    """
-    npx = _find_npx()
-    if not npx:
-        logger.debug("gitnexus_mcp_skip_no_npx")
-        return
-
-    # Check if already registered
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "claude",
-            "mcp",
-            "list",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-        if "gitnexus" in stdout.decode():
-            return
-    except (TimeoutError, FileNotFoundError, OSError):
-        return  # CLI not available — skip silently
-
-    # Register: claude mcp add gitnexus -s user -- npx --yes gitnexus mcp
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "claude",
-            "mcp",
-            "add",
-            "gitnexus",
-            "-s",
-            "user",
-            "--",
-            npx,
-            "--yes",
-            "gitnexus",
-            "mcp",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await asyncio.wait_for(proc.communicate(), timeout=15)
-        logger.info("gitnexus_mcp_registered", npx=npx)
-    except (TimeoutError, FileNotFoundError, OSError) as exc:
-        logger.warning("gitnexus_mcp_register_failed", error=str(exc))
 
 
 def _extract_event_error(event: dict) -> str | None:

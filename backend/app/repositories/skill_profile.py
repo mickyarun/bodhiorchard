@@ -27,16 +27,20 @@ class SkillProfileRepository(BaseRepository[SkillProfile]):
         super().__init__(SkillProfile, db, org_id=org_id)
 
     async def list_with_users(self) -> list[tuple[SkillProfile, User]]:
-        """List skill profiles with their associated users, ordered by score.
+        """List feature-mapped skill profiles with their users, ordered by score.
 
-        Returns:
-            List of (SkillProfile, User) tuples sorted by skill_score descending.
-                User may be None for orphaned profiles.
+        Phase E seeds rows keyed by directory (``src``, ``kube``, …) with
+        ``feature_id`` NULL; Phase E2 sets ``feature_id`` only on rows whose
+        files matched a feature's ``code_locations``. The Skills UI and the
+        ``get_team_context`` MCP tool both surface "developer-skill-as-feature",
+        so unmapped rows are excluded here. Routing / estimation / admin
+        paths use different repo methods and intentionally see all rows.
         """
         result = await self._db.execute(
             select(SkillProfile, User)
             .outerjoin(User, SkillProfile.user_id == User.id)
             .where(SkillProfile.org_id == self._org_id)
+            .where(SkillProfile.feature_id.is_not(None))
             .order_by(SkillProfile.skill_score.desc())
         )
         return list(result.all())
@@ -135,3 +139,58 @@ class SkillProfileRepository(BaseRepository[SkillProfile]):
             select(func.count(SkillProfile.id)).where(SkillProfile.org_id == self._org_id)
         )
         return result.scalar() or 0
+
+    async def list_modules_for_users(
+        self, user_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str, float]]:
+        """``(user_id, module, skill_score)`` rows for the given users in this org,
+        ordered by user then by score descending.
+        """
+        if not user_ids:
+            return []
+        stmt = self._scoped(
+            select(SkillProfile.user_id, SkillProfile.module, SkillProfile.skill_score)
+            .where(SkillProfile.user_id.in_(user_ids))
+            .order_by(SkillProfile.user_id, SkillProfile.skill_score.desc())
+        )
+        result = await self._db.execute(stmt)
+        return [(row.user_id, row.module, row.skill_score) for row in result.all()]
+
+    async def list_for_user(self, user_id: uuid.UUID) -> list[SkillProfile]:
+        """All skill profile rows for a user within the scoped org."""
+        stmt = self._scoped(select(SkillProfile).where(SkillProfile.user_id == user_id))
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_for_users(self, user_ids: list[uuid.UUID]) -> list[SkillProfile]:
+        """All skill profile rows for the given users in this org."""
+        if not user_ids:
+            return []
+        stmt = self._scoped(select(SkillProfile).where(SkillProfile.user_id.in_(user_ids)))
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_active_skill_devs(
+        self, *, min_skill_score: float = 0.1
+    ) -> list[tuple[str, uuid.UUID, float, uuid.UUID | None, str]]:
+        """``(module, user_id, skill_score, feature_id, dev_name)`` for active
+        skill rows whose score exceeds ``min_skill_score``, sorted by score desc.
+        """
+        stmt = self._scoped(
+            select(
+                SkillProfile.module,
+                SkillProfile.user_id,
+                SkillProfile.skill_score,
+                SkillProfile.feature_id,
+                User.name.label("dev_name"),
+            )
+            .join(User, User.id == SkillProfile.user_id)
+            .where(SkillProfile.skill_score > min_skill_score)
+            .where(User.is_active.is_(True))
+            .order_by(SkillProfile.skill_score.desc())
+        )
+        result = await self._db.execute(stmt)
+        return [
+            (row.module, row.user_id, row.skill_score, row.feature_id, row.dev_name)
+            for row in result.all()
+        ]

@@ -28,9 +28,13 @@ from app.services.job_queue import (
     JOB_JIRA_DISCOVERY,
     JOB_JIRA_ENRICH,
     JOB_JIRA_IMPORT,
+    JOB_PR_MERGE_UPDATE,
+    JOB_REPO_BULK_ONBOARD,
     JOB_TRIAGE,
     register_job_type,
 )
+from app.services.job_repo_bulk_clone import handle_bulk_onboard_job
+from app.services.scan.pr_merge_update import handle_pr_merge_update
 
 # Re-export all handlers so existing imports continue to work
 __all__ = [
@@ -45,6 +49,16 @@ __all__ = [
 ]
 
 
+def _design_extract_default_workers() -> int:
+    """Default JOB_DESIGN_EXTRACT worker count.
+
+    Each Claude CLI subprocess is ~600MB resident, so we serialize by
+    default. Operators can raise concurrency on beefy boxes via
+    ``JOB_DESIGN_EXTRACT_WORKERS``.
+    """
+    return 1
+
+
 def setup_job_handlers() -> None:
     """Register all job types with the queue system.
 
@@ -56,7 +70,15 @@ def setup_job_handlers() -> None:
     register_job_type(JOB_BUD_CHAT, handle_chat_job, worker_count=chat_workers)
     register_job_type(JOB_TRIAGE, handle_triage_job, worker_count=1)
     register_job_type(JOB_DESIGN_AGENT, handle_design_agent_job, worker_count=2)
-    register_job_type(JOB_DESIGN_EXTRACT, handle_design_extract_job, worker_count=1)
+    # Design-extract spawns ~600MB Claude CLI subprocesses; cap workers
+    # on small-RAM hosts via cpu_count proxy + ``JOB_DESIGN_EXTRACT_WORKERS``
+    # env override.
+    design_extract_workers = int(
+        os.environ.get("JOB_DESIGN_EXTRACT_WORKERS", _design_extract_default_workers())
+    )
+    register_job_type(
+        JOB_DESIGN_EXTRACT, handle_design_extract_job, worker_count=design_extract_workers
+    )
 
     # Unified BUD agent handler (PRD, tech arch, code review, testing)
     bud_agent_workers = int(os.environ.get("JOB_BUD_AGENT_WORKERS", "2"))
@@ -66,3 +88,9 @@ def setup_job_handlers() -> None:
     register_job_type(JOB_JIRA_DISCOVERY, handle_discovery_job, worker_count=1)
     register_job_type(JOB_JIRA_IMPORT, handle_import_job, worker_count=1)
     register_job_type(JOB_JIRA_ENRICH, handle_enrich_job, worker_count=1)
+
+    # PR-merge feature reconcile (GitHub webhook trigger)
+    register_job_type(JOB_PR_MERGE_UPDATE, handle_pr_merge_update, worker_count=2)
+
+    # Bulk GitHub-App repo onboard (Settings → Code "Bulk import" tab)
+    register_job_type(JOB_REPO_BULK_ONBOARD, handle_bulk_onboard_job, worker_count=1)

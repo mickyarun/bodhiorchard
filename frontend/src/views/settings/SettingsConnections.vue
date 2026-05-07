@@ -43,14 +43,6 @@
       </div>
 
       <template v-if="!settingsStore.loading">
-      <!-- ─── REPOSITORIES ───────────────────────────────────── -->
-      <div class="section-header mb-3">
-        <v-icon icon="mdi-source-repository-multiple" size="18" color="primary" />
-        <span class="text-body-2 font-weight-medium">Repositories</span>
-      </div>
-
-      <SettingsRepositories />
-
       <!-- ─── MCP INTEGRATION ─────────────────────────────────── -->
       <div class="section-header mb-3">
         <v-icon icon="mdi-api" size="18" color="primary" />
@@ -177,107 +169,7 @@
       <v-row class="mb-6">
         <!-- GitHub App -->
         <v-col cols="12" md="6">
-          <v-card
-            class="pa-5 settings-card"
-            :class="{ 'settings-card--active': settingsStore.connections.github.connected }"
-            color="surface"
-          >
-            <div class="d-flex align-center justify-space-between" :class="showGithubDetails ? 'mb-3' : ''">
-              <div class="d-flex align-center ga-3">
-                <v-avatar size="36" color="surface-variant" rounded="lg">
-                  <v-icon icon="mdi-github" size="22" />
-                </v-avatar>
-                <div>
-                  <div class="text-body-2 font-weight-medium">GitHub App</div>
-                  <div class="text-caption text-medium-emphasis">PR tracking, code review &amp; webhooks</div>
-                </div>
-              </div>
-              <div class="d-flex align-center ga-2">
-                <v-chip
-                  :color="settingsStore.connections.github.connected ? 'success' : 'grey'"
-                  size="x-small"
-                  variant="tonal"
-                >
-                  {{ settingsStore.connections.github.connected ? 'Connected' : 'Not set up' }}
-                </v-chip>
-                <v-btn
-                  v-if="settingsStore.connections.github.connected"
-                  :icon="showGithubDetails ? 'mdi-chevron-up' : 'mdi-pencil-outline'"
-                  size="x-small"
-                  variant="text"
-                  :title="showGithubDetails ? 'Collapse' : 'Edit settings'"
-                  @click="showGithubDetails = !showGithubDetails"
-                />
-              </div>
-            </div>
-
-            <v-expand-transition>
-              <div v-if="showGithubDetails">
-                <v-text-field
-                  v-model.number="githubAppId"
-                  label="App ID"
-                  placeholder="123456"
-                  prepend-inner-icon="mdi-identifier"
-                  density="compact"
-                  variant="outlined"
-                  class="mb-3"
-                  type="number"
-                />
-
-                <v-textarea
-                  v-model="githubPrivateKey"
-                  label="Private Key (.pem)"
-                  placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
-                  prepend-inner-icon="mdi-key-outline"
-                  density="compact"
-                  variant="outlined"
-                  rows="3"
-                  class="mb-3"
-                  :hint="settingsStore.connections.github.hasPrivateKey ? 'Key saved. Leave empty to keep existing.' : 'Paste the .pem file contents'"
-                  persistent-hint
-                />
-
-                <v-text-field
-                  v-model="githubWebhookSecret"
-                  label="Webhook Secret"
-                  placeholder="Set during GitHub App creation"
-                  prepend-inner-icon="mdi-shield-key-outline"
-                  density="compact"
-                  variant="outlined"
-                  class="mb-3"
-                  type="password"
-                />
-
-                <v-chip
-                  v-if="settingsStore.connections.github.installationId"
-                  size="x-small"
-                  variant="tonal"
-                  color="success"
-                  prepend-icon="mdi-check-circle-outline"
-                  class="mb-3"
-                >
-                  Installation #{{ settingsStore.connections.github.installationId }} (auto-detected)
-                </v-chip>
-
-                <div class="text-caption text-medium-emphasis setup-steps">
-                  <v-icon icon="mdi-help-circle-outline" size="14" class="mr-1" />
-                  <strong>How to set up:</strong>
-                  <ol class="pl-4 mt-1 mb-0" style="line-height: 1.8;">
-                    <li>Go to your GitHub <strong>org settings</strong> &rarr; Developer settings &rarr; GitHub Apps &rarr;
-                      <a href="https://github.com/settings/apps/new" target="_blank" rel="noopener" class="text-primary">New GitHub App</a>
-                    </li>
-                    <li>Set <strong>Webhook URL</strong> to <code>{{ backendUrl }}/api/v1/webhooks/github</code></li>
-                    <li>Set <strong>Webhook Secret</strong> &mdash; generate one with <code>openssl rand -hex 32</code> and paste it in both GitHub and here</li>
-                    <li>Under <strong>Repository permissions</strong>: set <em>Pull requests</em> to <strong>Read &amp; Write</strong>, <em>Contents</em> to <strong>Read</strong>, <em>Issues</em> to <strong>Read</strong></li>
-                    <li>Under <strong>Subscribe to events</strong>: check <em>Pull request</em>, <em>Pull request review</em>, <em>Pull request review comment</em>, <em>Pull request review thread</em>, <em>Issue comment</em>, and <em>Issues</em></li>
-                    <li>Click <strong>Create GitHub App</strong> &mdash; copy the <strong>App ID</strong> shown at the top and paste it above</li>
-                    <li>On the app page, scroll to <strong>Private keys</strong> &rarr; Generate a private key &mdash; paste the downloaded <code>.pem</code> contents above</li>
-                    <li>Go to <strong>Install App</strong> (left sidebar) &rarr; install on your org and grant access to your repos</li>
-                  </ol>
-                </div>
-              </div>
-            </v-expand-transition>
-          </v-card>
+          <GitHubAppConnectionCard ref="githubCardRef" />
         </v-col>
 
         <!-- Coming Soon -->
@@ -365,32 +257,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import api from '@/services/api'
-import SettingsRepositories from './SettingsRepositories.vue'
 import SettingsSlack from './SettingsSlack.vue'
 import SettingsAiConfig from './SettingsAiConfig.vue'
+import GitHubAppConnectionCard from '@/components/settings/connections/GitHubAppConnectionCard.vue'
 
 const settingsStore = useSettingsStore()
 
-// ─── GitHub App state ───────────────────────────
-const githubAppId = ref<number | null>(settingsStore.connections.github.appId)
-const githubPrivateKey = ref('')
-const githubWebhookSecret = ref('')
-const backendUrl = window.location.origin
-
-// Collapse the setup form when already connected so the card renders compactly.
-// Users can expand it again via the edit button to change credentials.
-const showGithubDetails = ref(!settingsStore.connections.github.connected)
-watch(
-  () => settingsStore.connections.github.connected,
-  (connected) => { showGithubDetails.value = !connected },
-)
-watch(
-  () => settingsStore.connections.github.appId,
-  (appId) => { githubAppId.value = appId },
-)
+// GitHub App card exposes flush/clear hooks for the page-level Save button
+const githubCardRef = ref<InstanceType<typeof GitHubAppConnectionCard> | null>(null)
 
 // MCP token state
 const mcpTokenSet = ref(false)
@@ -432,21 +309,10 @@ onMounted(async () => {
 
 async function save(): Promise<void> {
   // Inject GitHub App credentials into the payload before saving
-  if (githubAppId.value) {
-    (settingsStore.connections.github as Record<string, unknown>).appId = githubAppId.value
-  }
-  if (githubPrivateKey.value) {
-    (settingsStore.connections.github as Record<string, unknown>).privateKey = githubPrivateKey.value
-  }
-  if (githubWebhookSecret.value) {
-    (settingsStore.connections.github as Record<string, unknown>).webhookSecret = githubWebhookSecret.value
-  }
+  githubCardRef.value?.flushCredentials()
   await settingsStore.saveConnections()
   // Clear sensitive fields after save
-  githubPrivateKey.value = ''
-  githubWebhookSecret.value = ''
-  // Sync appId from response
-  githubAppId.value = settingsStore.connections.github.appId
+  githubCardRef.value?.clearSensitiveFields()
 }
 
 async function checkMcpTokenStatus(): Promise<void> {

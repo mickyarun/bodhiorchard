@@ -227,15 +227,7 @@ async def assign_role(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")
 
     # Update role on the OrgToUser membership
-    from sqlalchemy import select as sa_select
-
-    result = await db.execute(
-        sa_select(OrgToUser).where(
-            OrgToUser.user_id == user_id,
-            OrgToUser.org_id == org.id,
-        )
-    )
-    membership = result.scalar_one_or_none()
+    membership = await user_repo.get_membership(user_id, org.id)
     if membership is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found.")
     membership.role_id = body.role_id

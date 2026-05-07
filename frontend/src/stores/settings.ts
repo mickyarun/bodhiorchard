@@ -6,19 +6,43 @@ import { computed, ref } from 'vue'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
 import type { RepoBranchList, RepoInfo } from '@/types'
+import { GITHUB_APP_STATUS, isGitHubAppStatus, type GitHubAppStatus } from '@/types/connections'
 
 export interface ConnectionsState {
   sourceCode: {
     localPath: string
     type: 'workspace' | 'single-repo'
   }
-  github: { enabled: boolean; connected: boolean; appId: number | null; hasPrivateKey: boolean; installationId: number | null; webhookConfigured: boolean; org?: string | null }
+  github: {
+    enabled: boolean
+    connected: boolean
+    appId: number | null
+    hasPrivateKey: boolean
+    installationId: number | null
+    webhookConfigured: boolean
+    org?: string | null
+    // Phase F: lifecycle enum (mirrors backend GitHubAppStatus). The
+    // legacy `connected` boolean is kept alongside for back-compat.
+    status: GitHubAppStatus
+    slug: string | null
+    installUrl: string | null
+  }
   slack: { enabled: boolean; connected: boolean; botToken: string; signingSecret: string; teamId: string }
   aiConfig: {
     preset: string
+    // Per-org merge model overrides. ``null`` = use platform default
+    // (LLMConfig.merge_model_default / merge_model_large). UI surfaces
+    // this as a "Use platform default" selector.
+    mergeModelDefault: string | null
+    mergeModelLarge: string | null
   }
   scan: {
+    // Per-repo synthesis subprocess timeout. Each synthesize call gets its
+    // own budget; the cross-repo merge call uses ``mergeTimeoutSeconds``
+    // because it runs once over every active feature and routinely needs
+    // a longer ceiling than synth.
     timeoutSeconds: number
+    mergeTimeoutSeconds: number
     maxTurns: number
     autoCreateMembers: boolean
   }
@@ -52,13 +76,26 @@ export interface ConnectionsState {
 function emptyState(): ConnectionsState {
   return {
     sourceCode: { localPath: '', type: 'single-repo' },
-    github: { enabled: false, connected: false, appId: null, hasPrivateKey: false, installationId: null, webhookConfigured: false },
+    github: {
+      enabled: false,
+      connected: false,
+      appId: null,
+      hasPrivateKey: false,
+      installationId: null,
+      webhookConfigured: false,
+      status: GITHUB_APP_STATUS.NOT_CONFIGURED,
+      slug: null,
+      installUrl: null,
+    },
     slack: { enabled: false, connected: false, botToken: '', signingSecret: '', teamId: '' },
     aiConfig: {
       preset: 'claude-code',
+      mergeModelDefault: null,
+      mergeModelLarge: null,
     },
     scan: {
       timeoutSeconds: 300,
+      mergeTimeoutSeconds: 300,
       maxTurns: 40,
       autoCreateMembers: true,
     },
@@ -93,11 +130,35 @@ export const useSettingsStore = defineStore('settings', () => {
   const error = ref<string | null>(null)
   const saveSuccess = ref(false)
 
+  function normaliseGithubStatus(github: ConnectionsState['github']): GitHubAppStatus {
+    // Defensive: prefer the backend-supplied enum but fall back to deriving
+    // from `connected` + `installationId` so the UI doesn't break against
+    // a backend that hasn't shipped Phase A yet.
+    if (isGitHubAppStatus(github.status)) {
+      return github.status
+    }
+    if (!github.connected) {
+      return GITHUB_APP_STATUS.NOT_CONFIGURED
+    }
+    return github.installationId
+      ? GITHUB_APP_STATUS.READY
+      : GITHUB_APP_STATUS.AWAITING_INSTALL
+  }
+
   async function fetchConnections(): Promise<void> {
     loading.value = true
     error.value = null
     try {
       const { data } = await api.get('/v1/settings/connections')
+      // Backfill the Phase F fields if a stale backend omits them, so the
+      // store shape stays stable for consumers (the GitHub App card).
+      const github = data.github ?? {}
+      data.github = {
+        ...github,
+        status: normaliseGithubStatus(github),
+        slug: github.slug ?? null,
+        installUrl: github.installUrl ?? null,
+      }
       connections.value = data
     } catch (err) {
       error.value = extractApiError(err, 'Failed to load settings.')
@@ -136,6 +197,36 @@ export const useSettingsStore = defineStore('settings', () => {
       error.value = extractApiError(err, 'Failed to load repositories.')
     } finally {
       reposLoading.value = false
+    }
+  }
+
+  async function classifyRepo(repoId: string): Promise<boolean> {
+    // Manual one-off classify trigger — runs the same classify helper
+    // the per-repo ``classify_repo`` scan stage uses, so it stays in
+    // lockstep without spinning up a full scan. The Settings → Code UI
+    // doesn't expose a button today; classification populates from the
+    // scan stage instead. Kept available for ops use.
+    try {
+      await api.post(`/v1/settings/repos/${repoId}/classify`)
+      await fetchRepos()
+      return true
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to classify repository.')
+      return false
+    }
+  }
+
+  async function extractRoutes(repoId: string): Promise<boolean> {
+    // Manual re-extraction of a backend repo's HTTP route cache, sharing
+    // the same iterator the per-repo ``extract_routes`` scan stage uses.
+    // Backend rejects with 400 for non-backend repos.
+    try {
+      await api.post(`/v1/settings/repos/${repoId}/extract-routes`)
+      await fetchRepos()
+      return true
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to extract routes.')
+      return false
     }
   }
 
@@ -247,6 +338,8 @@ export const useSettingsStore = defineStore('settings', () => {
     setRepoStatus,
     fetchRepoBranches,
     updateRepoBranches,
+    classifyRepo,
+    extractRoutes,
     allReposMapped,
   }
 })

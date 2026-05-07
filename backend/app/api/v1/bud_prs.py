@@ -8,15 +8,12 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
-from app.models.bud import BUDTimelineEvent
-from app.models.pull_request import PRState, PullRequest
-from app.models.tracked_repository import TrackedRepository
 from app.models.user import User
 from app.repositories.bud import BUDRepository
+from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.pull_request import PullRequestRepository
 from app.schemas.bud_release import (
     BUDReleaseStage,
@@ -136,19 +133,9 @@ async def get_bud_release_stage(
     target_event_type = f"merged_to_{typed_stage}"
     next_event_type = "merged_to_prod" if typed_stage == "uat" else None
 
-    stmt = (
-        select(BUDTimelineEvent)
-        .where(
-            BUDTimelineEvent.org_id == current_user.org_id,
-            BUDTimelineEvent.bud_id == bud_id,
-            BUDTimelineEvent.event_type.in_(
-                [target_event_type, next_event_type] if next_event_type else [target_event_type]
-            ),
-        )
-        .order_by(BUDTimelineEvent.created_at.asc())
-    )
-    result = await db.execute(stmt)
-    all_events = list(result.scalars())
+    timeline_repo = BUDTimelineRepository(db, org_id=current_user.org_id)
+    event_types = [target_event_type, next_event_type] if next_event_type else [target_event_type]
+    all_events = await timeline_repo.list_for_bud_by_event_types(bud_id, event_types)
 
     stage_events = [e for e in all_events if e.event_type == target_event_type]
     next_events = [e for e in all_events if next_event_type and e.event_type == next_event_type]
@@ -224,23 +211,11 @@ async def get_bud_release_stage(
         if isinstance(r, dict) and r.get("repo_id")
     ]
 
-    from sqlalchemy import or_
-
-    open_pr_filters = [PullRequest.bud_id == bud_id]
-    if impacted_repo_ids:
-        open_pr_filters.append(PullRequest.repo_id.in_(impacted_repo_ids))
-
-    open_pr_stmt = (
-        select(PullRequest, TrackedRepository)
-        .join(TrackedRepository, PullRequest.repo_id == TrackedRepository.id, isouter=True)
-        .where(
-            PullRequest.org_id == current_user.org_id,
-            PullRequest.state == PRState.OPEN,
-            or_(*open_pr_filters),
-        )
+    pr_repo = PullRequestRepository(db, org_id=current_user.org_id)
+    open_pr_pairs = await pr_repo.list_open_for_bud_with_repo(
+        bud_id, impacted_repo_ids=impacted_repo_ids
     )
-    open_result = await db.execute(open_pr_stmt)
-    for pr, repo in open_result.all():
+    for pr, repo in open_pr_pairs:
         if pr.github_pr_id in seen_pr_ids:
             continue
         target_branch = (

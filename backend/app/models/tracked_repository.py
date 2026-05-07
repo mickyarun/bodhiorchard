@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
+from app.models.repo_layer import RepoLayer
 
 
 class RepoStatus(StrEnum):
@@ -28,6 +29,21 @@ class RepoStatus(StrEnum):
     ACTIVE = "active"
     IGNORED = "ignored"
     REMOVED = "removed"
+
+
+class SetupPrState(StrEnum):
+    """Lifecycle state of the Bodhiorchard MCP setup PR for a repo.
+
+    ``OPEN`` is written when the PR is created (or adopted from a
+    pre-existing branch). The webhook flips it to ``MERGED`` or
+    ``CLOSED`` on ``pull_request.closed``. ``None`` (column NULL) means
+    "no setup PR has been opened" — either the GitHub App isn't
+    configured (manual fallback) or the setup phase has not yet run.
+    """
+
+    OPEN = "open"
+    MERGED = "merged"
+    CLOSED = "closed"
 
 
 class TrackedRepository(BaseModel):
@@ -75,6 +91,45 @@ class TrackedRepository(BaseModel):
         nullable=True,
         index=True,
     )
+
+    # MCP-setup PR tracking. ``setup_branch_pushed_at`` is written every
+    # time the per-repo setup phase successfully pushes the
+    # ``bodhiorchard/init-setup`` branch. ``setup_pr_*`` are written when
+    # the GitHub App opens (or adopts) the PR for that branch; null when
+    # the App isn't configured for the org and the user must open the PR
+    # manually. The webhook flips ``setup_pr_state`` on
+    # ``pull_request.closed``.
+    setup_branch_pushed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    setup_pr_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    setup_pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    setup_pr_state: Mapped[SetupPrState | None] = mapped_column(
+        Enum(
+            SetupPrState,
+            name="tracked_repo_setup_pr_state",
+            values_callable=lambda e: [x.value for x in e],
+        ),
+        nullable=True,
+    )
+
+    # Architectural classification produced by the ``classify_repo`` stage
+    # (see ``app/services/scan/repo_classify``). Null until the first
+    # post-ingest classify run. ``backend_link`` reads ``repo_layer`` to
+    # decide whether a repo participates as an index target (BACKEND) or
+    # a frontend whose features should be linked (FRONTEND); other layers
+    # are ignored.
+    repo_layer: Mapped[RepoLayer | None] = mapped_column(
+        Enum(
+            RepoLayer,
+            name="repo_layer",
+            values_callable=lambda e: [x.value for x in e],
+        ),
+        nullable=True,
+        index=True,
+    )
+    tech_stack: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    db_flavor: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     def __repr__(self) -> str:
         return f"<TrackedRepository(name={self.name!r}, status={self.status})>"

@@ -7,9 +7,9 @@ import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, lazyload
 
-from app.models.bud import BUDChatMessage, BUDDesign, BUDDesignStatus, BUDDocument
+from app.models.bud import BUDChatMessage, BUDDesign, BUDDesignStatus, BUDDocument, BUDStatus
 from app.models.tracked_repository import TrackedRepository
 from app.repositories.base import BaseRepository
 
@@ -33,8 +33,6 @@ class BUDRepository(BaseRepository[BUDDocument]):
         Disables eager-loaded joins (e.g. assignee) since FOR UPDATE cannot
         be applied to the nullable side of an outer join.
         """
-        from sqlalchemy.orm import lazyload
-
         stmt = self._scoped(
             select(BUDDocument)
             .where(BUDDocument.id == entity_id)
@@ -93,6 +91,200 @@ class BUDRepository(BaseRepository[BUDDocument]):
         )
         return result.scalar_one() + 1
 
+    async def find_nearest_full_with_distance(
+        self, candidate_vector
+    ) -> tuple[BUDDocument, float] | None:
+        """Nearest full BUDDocument with its cosine distance, or ``None``."""
+        stmt = self._scoped(
+            select(
+                BUDDocument,
+                BUDDocument.embedding.cosine_distance(candidate_vector).label("distance"),
+            )
+            .where(BUDDocument.embedding.is_not(None))
+            .order_by("distance")
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        row = result.first()
+        return (row[0], row[1]) if row else None
+
+    async def find_nearest_neighbor(
+        self, candidate_vector, *, exclude_bud_ids: list[uuid.UUID] | None = None
+    ) -> tuple[uuid.UUID, int, float] | None:
+        """Nearest BUD by pgvector cosine distance.
+
+        Returns ``(bud_id, bud_number, distance)`` or ``None`` if no
+        BUDs in the org have an embedding.
+        """
+        stmt = self._scoped(
+            select(
+                BUDDocument.id,
+                BUDDocument.bud_number,
+                BUDDocument.embedding.cosine_distance(candidate_vector).label("distance"),
+            )
+            .where(BUDDocument.embedding.is_not(None))
+            .order_by("distance")
+            .limit(1)
+        )
+        if exclude_bud_ids:
+            stmt = stmt.where(BUDDocument.id.not_in(exclude_bud_ids))
+        result = await self._db.execute(stmt)
+        row = result.first()
+        return (row[0], row[1], row[2]) if row else None
+
+    async def count_active_loads_for_assignees(
+        self, assignee_ids: list[uuid.UUID], excluded_statuses: list[str]
+    ) -> dict[uuid.UUID, int]:
+        """Active-BUD count per assignee in ``assignee_ids``."""
+        if not assignee_ids:
+            return {}
+        stmt = self._scoped(
+            select(BUDDocument.assignee_id, func.count())
+            .where(
+                BUDDocument.assignee_id.in_(assignee_ids),
+                BUDDocument.status.notin_(excluded_statuses),
+            )
+            .group_by(BUDDocument.assignee_id)
+        )
+        result = await self._db.execute(stmt)
+        return {row[0]: row[1] for row in result.all()}
+
+    async def count_assignee_workload(
+        self,
+        assignee_id: uuid.UUID,
+        excluded_statuses: list[str],
+        *,
+        exclude_bud_id: uuid.UUID | None = None,
+    ) -> int:
+        """Count BUDs assigned to a user, excluding terminal statuses (and optionally
+        a specific BUD id).
+        """
+        stmt = self._scoped(
+            select(func.count())
+            .select_from(BUDDocument)
+            .where(
+                BUDDocument.assignee_id == assignee_id,
+                BUDDocument.status.notin_(excluded_statuses),
+            )
+        )
+        if exclude_bud_id is not None:
+            stmt = stmt.where(BUDDocument.id != exclude_bud_id)
+        result = await self._db.execute(stmt)
+        return result.scalar_one()
+
+    async def list_recent_completed(self, *, limit: int = 5) -> list[BUDDocument]:
+        """Most-recently-updated PROD/CLOSED BUDs that have ``estimated_dates`` set."""
+        stmt = self._scoped(
+            select(BUDDocument)
+            .where(
+                BUDDocument.status.in_([BUDStatus.PROD.value, BUDStatus.CLOSED.value]),
+                BUDDocument.estimated_dates.is_not(None),
+            )
+            .order_by(BUDDocument.updated_at.desc())
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_completed_in_complexity_range(
+        self, low: int, high: int, *, limit: int = 50
+    ) -> list[BUDDocument]:
+        """PROD/CLOSED BUDs whose complexity is in ``[low, high]``."""
+        stmt = self._scoped(
+            select(BUDDocument)
+            .where(
+                BUDDocument.status.in_([BUDStatus.PROD.value, BUDStatus.CLOSED.value]),
+                BUDDocument.complexity.between(low, high),
+                BUDDocument.created_at.is_not(None),
+            )
+            .order_by(BUDDocument.updated_at.desc())
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_by_status_grouped(self) -> dict[BUDStatus, int]:
+        """Count BUDs grouped by status for the org."""
+        stmt = self._scoped(select(BUDDocument.status, func.count())).group_by(BUDDocument.status)
+        result = await self._db.execute(stmt)
+        return {row[0]: row[1] for row in result.all()}
+
+    async def list_summaries_in_statuses(
+        self, statuses: list[str], *, limit: int = 50
+    ) -> list[tuple[int, str | None, BUDStatus]]:
+        """Return ``(bud_number, title, status)`` for BUDs in any of ``statuses``,
+        ordered by bud_number, capped at ``limit`` rows.
+        """
+        stmt = self._scoped(
+            select(BUDDocument.bud_number, BUDDocument.title, BUDDocument.status)
+            .where(BUDDocument.status.in_(statuses))
+            .order_by(BUDDocument.bud_number)
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return [(row.bud_number, row.title, row.status) for row in result.all()]
+
+    async def list_lagging_in_statuses(
+        self, statuses: list[BUDStatus]
+    ) -> list[tuple[int, str | None, BUDStatus]]:
+        """BUDs in any of the given statuses past ``current_phase_deadline``.
+
+        Returns ``(bud_number, title, status)`` tuples. Used by the
+        standup risk-flag detector.
+        """
+        stmt = self._scoped(
+            select(BUDDocument.bud_number, BUDDocument.title, BUDDocument.status).where(
+                BUDDocument.status.in_(statuses),
+                BUDDocument.current_phase_deadline.is_not(None),
+                BUDDocument.current_phase_deadline < func.now(),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row.bud_number, row.title, row.status) for row in result.all()]
+
+    async def get_impacted_repos(self, bud_id: uuid.UUID) -> list[dict] | None:
+        """Return only the ``impacted_repos`` JSONB column for a BUD.
+
+        Cheaper than fetching the full BUDDocument when only the impacted
+        repos list is needed (e.g. agent activity simulation).
+
+        Returns:
+            The raw list of impacted-repo dicts, ``[]`` for an empty list,
+            or ``None`` if the BUD does not exist in this org.
+        """
+        stmt = self._scoped(select(BUDDocument.impacted_repos).where(BUDDocument.id == bud_id))
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def exists_by_number(self, bud_number: int) -> bool:
+        """Check if a BUD with this number exists in the scoped org."""
+        stmt = self._scoped(
+            select(BUDDocument.id).where(BUDDocument.bud_number == bud_number).limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def get_minimal_info_by_ids(
+        self, bud_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[str, str | int]]:
+        """Batch-resolve BUD ids to ``{"number", "title"}`` dicts.
+
+        Args:
+            bud_ids: Set of BUD UUIDs to look up within the scoped org.
+
+        Returns:
+            Mapping of bud_id -> {"number": int, "title": str}. Missing IDs absent.
+        """
+        if not bud_ids:
+            return {}
+        stmt = self._scoped(
+            select(BUDDocument.id, BUDDocument.bud_number, BUDDocument.title).where(
+                BUDDocument.id.in_(bud_ids)
+            )
+        )
+        result = await self._db.execute(stmt)
+        return {row.id: {"number": row.bud_number, "title": row.title} for row in result.all()}
+
 
 class BUDDesignRepository(BaseRepository[BUDDesign]):
     """Repository for per-repo BUD design wireframes."""
@@ -145,8 +337,6 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         status: BUDDesignStatus,
     ) -> int:
         """Count designs for a BUD with a given status."""
-        from sqlalchemy import func
-
         stmt = self._scoped(
             select(func.count())
             .select_from(BUDDesign)

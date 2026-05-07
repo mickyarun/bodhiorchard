@@ -17,6 +17,9 @@
       prepend-inner-icon="mdi-office-building-outline"
       class="mb-4"
       :rules="[rules.required]"
+      :readonly="setupStore.orgInitDone"
+      :hint="setupStore.orgInitDone ? lockedHint : undefined"
+      :persistent-hint="setupStore.orgInitDone"
       @update:model-value="onNameChange"
     />
 
@@ -25,10 +28,11 @@
       label="Slug"
       placeholder="acme-inc"
       prepend-inner-icon="mdi-link-variant"
-      hint="Used in URLs. Lowercase letters, numbers, and hyphens only."
+      :hint="setupStore.orgInitDone ? lockedHint : 'Used in URLs. Lowercase letters, numbers, and hyphens only.'"
       persistent-hint
       class="mb-4"
       :rules="[rules.required, rules.slug]"
+      :readonly="setupStore.orgInitDone"
     />
 
     <v-alert
@@ -46,6 +50,12 @@
 import { useSetupStore } from '@/stores/setup'
 
 const setupStore = useSetupStore()
+
+// Phase J — once submitOrgInit succeeds, the org row exists in the
+// backend and these fields can no longer be changed (the wizard's
+// "create org" trigger has already fired). Reads cleanly as read-only
+// instead of throwing on the next attempt.
+const lockedHint = 'Locked after Continue — the org has been created.'
 
 const rules = {
   required: (v: string) => !!v?.trim() || 'This field is required',

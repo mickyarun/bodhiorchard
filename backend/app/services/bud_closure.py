@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bud import BUDDocument
 from app.models.dev_activity import DevActivityLog
 from app.models.pull_request import PullRequest
+from app.services.scan.runner import ScanAlreadyActiveError, start_scan
 
 logger = structlog.get_logger(__name__)
 
@@ -154,9 +155,25 @@ def _trigger_impacted_repo_scan(
         _bg_scan(org_id, repo_ids, bud.bud_number),
         name=f"bg_scan_bud_{bud.bud_number}",
     )
-    task.add_done_callback(
-        lambda t: t.result() if not t.cancelled() and not t.exception() else None,
-    )
+    # _bg_scan wraps its body in try/except, so success / known failures
+    # are already logged. The callback exists only to retrieve any
+    # exception that escapes _bg_scan itself (otherwise asyncio prints a
+    # warning about an unretrieved exception at GC time).
+    task.add_done_callback(_log_bg_scan_exception)
+
+
+def _log_bg_scan_exception(task: asyncio.Task[None]) -> None:
+    """Drain the task's exception (if any) and log it.
+
+    Calling ``task.exception()`` marks the exception as retrieved,
+    which prevents the asyncio "Task exception was never retrieved"
+    warning at GC time.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("bud_closure_bg_scan_unhandled", exc_info=exc)
 
 
 async def _bg_scan(
@@ -164,35 +181,29 @@ async def _bg_scan(
     repo_ids: list[str],
     bud_number: int,
 ) -> None:
-    """Background task: resolve repo paths and run scan pipeline."""
-    from app.database import AsyncSessionLocal
-    from app.repositories.tracked_repository import TrackedRepoRepository
-    from app.services.scan_pipeline import run_scan_pipeline
-    from app.services.scan_progress import create_scan_progress
-
+    """Background task: kick off a scan for the impacted repos."""
     try:
-        async with AsyncSessionLocal() as db:
-            repo_repo = TrackedRepoRepository(db, org_id=org_id)
-            all_repos = await repo_repo.get_active_id_path_name()
-            repo_id_set = set(repo_ids)
-            paths = [path for rid, path, _name in all_repos if str(rid) in repo_id_set]
-
-        if not paths:
+        repo_uuids: list[uuid.UUID] = []
+        for rid in repo_ids:
+            try:
+                repo_uuids.append(uuid.UUID(rid))
+            except ValueError:
+                logger.warning("bud_closure_invalid_repo_id", bud_number=bud_number, repo_id=rid)
+        if not repo_uuids:
             return
 
-        scan_id = f"bud-close-{bud_number}-{uuid.uuid4().hex[:8]}"
-        await create_scan_progress(scan_id, str(org_id))
-        await run_scan_pipeline(
-            scan_id=scan_id,
-            org_id=org_id,
-            repo_paths=paths,
-            full_rescan=False,
-        )
+        scan_id = await start_scan(org_id=org_id, repo_ids=repo_uuids)
         logger.info(
-            "bud_closure_scan_completed",
+            "bud_closure_scan_started",
             bud_number=bud_number,
-            repos_scanned=len(paths),
-            scan_id=scan_id,
+            repos_scanned=len(repo_uuids),
+            scan_id=str(scan_id),
+        )
+    except ScanAlreadyActiveError as exc:
+        logger.info(
+            "bud_closure_scan_skipped_already_active",
+            bud_number=bud_number,
+            active_scan_id=str(exc.scan_id),
         )
     except Exception:
         logger.warning(

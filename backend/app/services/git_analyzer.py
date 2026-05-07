@@ -27,7 +27,6 @@ _SKIP_SKILL_PATHS = frozenset(
         ".claude",
         ".githooks",
         ".bodhiorchard",
-        ".gitnexus",
         ".github",
         ".vscode",
         ".idea",
@@ -82,7 +81,7 @@ class DevSkillEntry:
     feature_id: uuid.UUID | None = None
 
 
-# (feature_name, path_prefixes, knowledge_item_id)
+# (feature_name, path_prefixes, feature_id)
 FeatureMapEntry = tuple[str, list[str], uuid.UUID]
 FeatureMap = list[FeatureMapEntry]
 

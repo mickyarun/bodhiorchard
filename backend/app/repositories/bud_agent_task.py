@@ -7,6 +7,7 @@ import uuid
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.repositories.base import BaseRepository
@@ -56,6 +57,21 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
             org_id: Organization UUID for scoping queries.
         """
         super().__init__(BUDAgentTask, db, org_id=org_id)
+
+    async def list_active_with_bud(self, *, limit: int = 20) -> list[BUDAgentTask]:
+        """Pending or running tasks with the linked BUD eager-loaded.
+
+        Used by the dashboard tree to render one robot per active task.
+        """
+        stmt = self._scoped(
+            select(BUDAgentTask)
+            .options(selectinload(BUDAgentTask.bud))
+            .where(BUDAgentTask.status.in_(["pending", "running"]))
+            .order_by(BUDAgentTask.created_at.desc())
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
 
     async def get_active_for_bud(self, bud_id: uuid.UUID) -> BUDAgentTask | None:
         """Get the most recent pending or running task for a BUD.

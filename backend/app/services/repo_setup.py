@@ -12,16 +12,26 @@ and committing + pushing the result as a PR-ready branch.
 import json
 import shutil
 import textwrap
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.organization import Organization
+from app.models.tracked_repository import SetupPrState, TrackedRepository
 from app.services.git_operations import (
     _detect_develop_branch,
     _detect_main_branch,
-    _run_shell_cmd,
     run_git,
 )
+from app.services.github_app_auth import (
+    discover_installation_id_for_repo,
+    get_installation_token,
+)
+from app.services.github_client import GitHubClient
 
 logger = structlog.get_logger(__name__)
 
@@ -69,6 +79,17 @@ Before starting any BUD work, verify Bodhiorchard MCP is connected:
 | `get_bud_context` | Fetch BUD requirements, tech spec, and designs |
 | `get_knowledge` | Search the organization's knowledge base |
 | `get_design_system` | Fetch design tokens (colors, typography, components) |
+| `code_impact` | Blast-radius check before editing any function/class |
+| `code_query` | Find candidate symbols by name across the call graph |
+| `code_context` | 360° view of one symbol — callers + callees + attrs |
+
+### Code Intelligence
+
+This repo is indexed by bodhiorchard's own code-graph indexer (graphify
+under the hood). **Always run `code_impact` before editing any function,
+class, or method.** It returns the upstream callers + downstream callees
+so you can see the blast radius of a change. Pair with `code_context`
+when you need attribute / file-location details on a single symbol.
 
 ### TODO Workflow (STRICT — follow exactly)
 
@@ -144,9 +165,10 @@ _SETUP_FILES = [
 def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
     """Append Bodhiorchard workflow instructions to CLAUDE.md.
 
-    Inserts after ``<!-- gitnexus:end -->`` if present, otherwise appends
-    at end of file. Uses ``<!-- bodhiorchard:start/end -->`` markers for
-    idempotent updates.
+    Idempotent updates via ``<!-- bodhiorchard:start/end -->`` markers:
+    on first run we append the section to the end of the file (or
+    create CLAUDE.md if it doesn't exist), on subsequent runs we
+    rewrite the marker-bounded block in place.
 
     Args:
         repo_path: Absolute path to the git repository.
@@ -180,14 +202,7 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
         # Replace existing section, avoid accumulating blank lines
         content = content[:start] + new_section + "\n" + content[end:].lstrip("\n")
     else:
-        # Insert after gitnexus:end or append at end
-        gitnexus_end = "<!-- gitnexus:end -->"
-        if gitnexus_end in content:
-            idx = content.index(gitnexus_end) + len(gitnexus_end)
-            section = _BODHIORCHARD_CLAUDE_SECTION.strip()
-            content = content[:idx] + "\n\n" + section + "\n" + content[idx:]
-        else:
-            content = content.rstrip() + "\n\n" + _BODHIORCHARD_CLAUDE_SECTION.strip() + "\n"
+        content = content.rstrip() + "\n\n" + _BODHIORCHARD_CLAUDE_SECTION.strip() + "\n"
 
     claude_md.write_text(content)
     return True
@@ -196,18 +211,186 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
 # ── Worktree management ───────────────────────────────────────────
 
 
-async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]:
-    """Create main + develop worktrees for a repo.
+_SETUP_WORK_DIR = ".bodhiorchard/setup-work"
 
-    Creates worktrees under ``<repo>/.bodhiorchard/main/`` and
-    ``<repo>/.bodhiorchard/develop/``. Pulls both to latest.
+
+async def prepare_setup_worktree(repo_path: str, base_branch: str) -> str | None:
+    """Create a clean worktree at ``<repo>/.bodhiorchard/setup-work``.
+
+    The setup phase writes hooks, MCP config, ``CLAUDE.md`` additions,
+    skills, and ``package.json`` ``prepare`` scripts that need to land
+    on a PR against ``base_branch``. Doing that work in the cloned
+    repo's main checkout means we have to stash whatever the clone's
+    default-branch happened to be (which can be ``feature/foo`` for
+    repos with non-``main`` defaults), switch branches, and merge —
+    a dance that fails in the empty-merge / conflict edge cases.
+
+    Instead, we materialise an isolated worktree from
+    ``origin/<base_branch>`` (falling back to the local ``<base_branch>``
+    ref when there's no remote), checked out directly on the
+    ``bodhiorchard/init-setup`` branch. All install steps then write
+    into this clean tree and the commit + push runs in one shot — no
+    stash, no checkout-after-the-fact, no risk of leaving the user's
+    cloned repo in a half-merged state.
+
+    Idempotent: a stale worktree from a prior attempt is force-removed
+    and rebuilt, so a crashed setup never carries dirty index state
+    into the next scan.
+
+    Returns the worktree path on success, or ``None`` when the base
+    branch can't be resolved (caller should treat this as a setup
+    pre-condition failure and surface it instead of cascading into
+    ingest).
+    """
+    repo = Path(repo_path)
+    work_path = repo / _SETUP_WORK_DIR
+    work_str = str(work_path)
+
+    if work_path.exists():
+        await run_git(["worktree", "remove", work_str, "--force"], cwd=repo_path)
+        if work_path.exists():
+            shutil.rmtree(work_path, ignore_errors=True)
+    await run_git(["worktree", "prune"], cwd=repo_path)
+
+    has_origin = await _has_origin_remote(repo_path)
+    if has_origin:
+        await run_git(["fetch", "origin", base_branch, "--prune"], cwd=repo_path)
+        base_ref = f"origin/{base_branch}"
+    else:
+        base_ref = base_branch
+
+    _, stderr, rc = await run_git(
+        ["worktree", "add", "-B", _SETUP_BRANCH, work_str, base_ref],
+        cwd=repo_path,
+    )
+    if rc != 0:
+        logger.warning(
+            "bodhiorchard_setup_worktree_failed",
+            repo=repo_path,
+            base_branch=base_branch,
+            error=stderr[:200],
+        )
+        return None
+
+    logger.info(
+        "bodhiorchard_setup_worktree_ready",
+        repo=repo_path,
+        work_path=work_str,
+        base_branch=base_branch,
+    )
+    return work_str
+
+
+async def commit_and_push_setup_worktree(work_path: str) -> str | None:
+    """Stage + commit + push the setup files from a prepared worktree.
+
+    Assumes ``work_path`` was returned by :func:`prepare_setup_worktree`
+    so it's already on ``bodhiorchard/init-setup``. No stash dance, no
+    branch switching — the worktree is already on the right branch with
+    a clean tree at entry; the caller's prior install steps populated it
+    with the files we need to commit.
+
+    Returns the pushed branch name on success, ``None`` when there's
+    nothing to commit or the push fails.
+    """
+    staged_any = False
+    for filepath in _SETUP_FILES:
+        full = Path(work_path) / filepath
+        if not full.exists():
+            continue
+        _, _, ls_rc = await run_git(["ls-files", "--error-unmatch", filepath], cwd=work_path)
+        is_untracked = ls_rc != 0
+        _, _, diff_rc = await run_git(["diff", "--quiet", "--", filepath], cwd=work_path)
+        is_modified = diff_rc != 0
+        if is_modified or is_untracked:
+            await run_git(["add", filepath], cwd=work_path)
+            staged_any = True
+
+    if not staged_any:
+        logger.debug("bodhiorchard_setup_nothing_to_commit", work_path=work_path)
+        return None
+
+    _, stderr, rc = await run_git(
+        [
+            "commit",
+            "-m",
+            "chore(bodhiorchard): add MCP tools, git hooks, and config\n\n"
+            "Auto-committed by Bodhiorchard scan pipeline.\n"
+            "- .claude/settings.json: Bodhiorchard MCP server config\n"
+            "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
+            "- package.json: prepare script sets core.hooksPath on npm install\n"
+            "- .gitignore: exclude .bodhiorchard/ worktrees\n"
+            "- CLAUDE.md: bodhi code-intelligence MCP guidance\n"
+            "- .claude/skills/: bodhi agent skill definitions",
+        ],
+        cwd=work_path,
+    )
+    if rc != 0:
+        logger.warning("bodhiorchard_setup_commit_failed", error=stderr[:200])
+        return None
+
+    has_origin = await _has_origin_remote(work_path)
+    if not has_origin:
+        logger.info(
+            "bodhiorchard_setup_committed_no_remote",
+            work_path=work_path,
+            branch=_SETUP_BRANCH,
+        )
+        return _SETUP_BRANCH
+
+    stdout, _, _ = await run_git(["ls-remote", "--heads", "origin", _SETUP_BRANCH], cwd=work_path)
+    branch_exists_remote = _SETUP_BRANCH in stdout
+    push_cmd = ["push", "-u", "origin", _SETUP_BRANCH]
+    if branch_exists_remote:
+        push_cmd = ["push", "--force-with-lease", "-u", "origin", _SETUP_BRANCH]
+
+    _, stderr, rc = await run_git(push_cmd, cwd=work_path)
+    if rc != 0:
+        logger.warning(
+            "bodhiorchard_setup_push_failed",
+            work_path=work_path,
+            error=stderr[:200],
+        )
+        return None
+
+    logger.info("bodhiorchard_setup_pushed", work_path=work_path, branch=_SETUP_BRANCH)
+    return _SETUP_BRANCH
+
+
+async def _has_origin_remote(cwd: str) -> bool:
+    """Return True iff the repo (or worktree) has an ``origin`` remote."""
+    _, _, rc = await run_git(["remote", "get-url", "origin"], cwd=cwd)
+    return rc == 0
+
+
+async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]:
+    """Create or adopt main + develop worktrees for a repo.
+
+    Idempotent: if a prior scan crashed and left ``git worktree`` state
+    behind, this function adopts the existing worktree instead of
+    letting ``git worktree add`` fail with
+    ``fatal: '<branch>' is already used by worktree at '...'``.
+
+    Resolution order for each (branch, dirname) pair:
+
+    1. Branch is already checked out in the bare repo → return the
+       repo path (nothing to do).
+    2. ``git worktree list`` has a registration for the branch pointing
+       at the expected path AND the path exists → adopt, pull latest.
+    3. Registration exists but at a different path, or the expected
+       path is missing → ``git worktree remove --force`` + prune, then
+       recreate.
+    4. Registration missing but the directory exists on disk (orphan) →
+       remove the orphan dir, then add.
+    5. Neither registered nor on disk → add cleanly.
 
     Args:
         repo_path: Absolute path to the git repository.
 
     Returns:
         Tuple of (main_worktree_path, develop_worktree_path).
-        Either may be None if the branch doesn't exist.
+        Either may be None if the branch doesn't exist or adoption
+        fails in a way that requires manual intervention.
     """
     repo = Path(repo_path)
     worktree_dir = repo / ".bodhiorchard"
@@ -216,41 +399,53 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
     main_branch = await _detect_main_branch(repo_path)
     develop_branch = await _detect_develop_branch(repo_path)
 
-    # Detect current branch to avoid worktree conflict
     current_branch, _, _ = await run_git(
         ["rev-parse", "--abbrev-ref", "HEAD"],
         cwd=repo_path,
     )
     current_branch = current_branch.strip()
 
+    # Start with a prune so any registrations whose worktree dirs got
+    # rm -rf'd out from under git don't block the adoption check below.
+    await run_git(["worktree", "prune"], cwd=repo_path)
+
+    # Tear down any leftover ``.bodhiorchard/main`` worktree from a
+    # previous deployment. We no longer create it (see comment below),
+    # and leaving it around would block ``ingest``'s ``scan-test/main``
+    # worktree from being added (git refuses two worktrees on the same
+    # branch).
+    stale_main = worktree_dir / "main"
+    if stale_main.exists():
+        await run_git(["worktree", "remove", str(stale_main), "--force"], cwd=repo_path)
+        await run_git(["worktree", "prune"], cwd=repo_path)
+
+    registered = await _list_registered_worktrees(repo_path)
+
+    # ``main`` is intentionally NOT materialised here. It used to back the
+    # old setup-and-merge flow that wrote setup files into a main-branch
+    # worktree and merged them locally — that flow is gone (replaced by
+    # ``prepare_setup_worktree``), and keeping ``.bodhiorchard/main``
+    # around now collides with the ``ingest`` stage's ``scan-test/main``
+    # worktree (git refuses two worktrees on the same branch). ``main_wt``
+    # in the return tuple stays for callers that destructure it, but
+    # always resolves to the cloned root when current HEAD is on
+    # ``main``, otherwise None.
     results: list[str | None] = [None, None]
-
-    for idx, (branch, dirname) in enumerate([(main_branch, "main"), (develop_branch, "develop")]):
-        if branch is None:
-            continue
-
-        # If this branch is already checked out, use repo path directly
-        if branch == current_branch:
-            results[idx] = repo_path
-            continue
-
-        wt_path = worktree_dir / dirname
-        if not wt_path.exists():
-            _, stderr, rc = await run_git(["worktree", "add", str(wt_path), branch], cwd=repo_path)
-            if rc != 0:
-                logger.warning(
-                    "worktree_add_failed",
-                    branch=branch,
-                    error=stderr[:200],
-                )
-                continue
+    if main_branch is not None and main_branch == current_branch:
+        results[0] = repo_path
+    if develop_branch is not None:
+        if develop_branch == current_branch:
+            results[1] = repo_path
         else:
-            # Pull latest
-            _, stderr, rc = await run_git(["pull"], cwd=str(wt_path))
-            if rc != 0:
-                logger.warning("worktree_pull_failed", branch=branch, error=stderr[:200])
-
-        results[idx] = str(wt_path)
+            wt_path = worktree_dir / "develop"
+            path = await _adopt_or_create_worktree(
+                repo_path=repo_path,
+                wt_path=wt_path,
+                branch=develop_branch,
+                registered=registered,
+            )
+            if path is not None:
+                results[1] = path
 
     logger.info(
         "worktrees_ensured",
@@ -259,6 +454,89 @@ async def ensure_repo_worktrees(repo_path: str) -> tuple[str | None, str | None]
         develop=results[1] is not None,
     )
     return results[0], results[1]
+
+
+async def _list_registered_worktrees(repo_path: str) -> dict[str, Path]:
+    """Parse ``git worktree list --porcelain`` into ``branch → path``.
+
+    Returns an empty dict on any git failure — the caller falls back
+    to treating every branch as "not registered", which is the safe
+    default (worst case: one extra ``worktree add`` attempt that
+    returns the same error we'd catch anyway).
+    """
+    out, _, rc = await run_git(["worktree", "list", "--porcelain"], cwd=repo_path)
+    if rc != 0:
+        return {}
+
+    registrations: dict[str, Path] = {}
+    current_path: Path | None = None
+    for raw in out.splitlines():
+        line = raw.strip()
+        if line.startswith("worktree "):
+            current_path = Path(line[len("worktree ") :])
+        elif line.startswith("branch ") and current_path is not None:
+            ref = line[len("branch ") :]
+            # Porcelain output is ``refs/heads/<branch>``.
+            branch = ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ref
+            registrations[branch] = current_path
+    return registrations
+
+
+async def _adopt_or_create_worktree(
+    *,
+    repo_path: str,
+    wt_path: Path,
+    branch: str,
+    registered: dict[str, Path],
+) -> str | None:
+    """Resolve the state for one (branch, path) pair — see cases in caller."""
+    existing = registered.get(branch)
+
+    if existing is not None and _same_path(existing, wt_path) and wt_path.exists():
+        _, stderr, rc = await run_git(["pull"], cwd=str(wt_path))
+        if rc != 0:
+            logger.warning("worktree_pull_failed", branch=branch, error=stderr[:200])
+        return str(wt_path)
+
+    if existing is not None:
+        # Registered at a different path, or expected path is gone.
+        # Force-remove and re-prune so the next ``add`` is unblocked.
+        _, stderr, rc = await run_git(
+            ["worktree", "remove", "--force", str(existing)],
+            cwd=repo_path,
+        )
+        if rc != 0:
+            logger.warning(
+                "worktree_force_remove_failed",
+                branch=branch,
+                path=str(existing),
+                error=stderr[:200],
+            )
+        await run_git(["worktree", "prune"], cwd=repo_path)
+
+    if wt_path.exists():
+        # Orphaned dir with no registration — shed it before add.
+        shutil.rmtree(wt_path, ignore_errors=True)
+
+    _, stderr, rc = await run_git(["worktree", "add", str(wt_path), branch], cwd=repo_path)
+    if rc != 0:
+        logger.warning("worktree_add_failed", branch=branch, error=stderr[:200])
+        return None
+    return str(wt_path)
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    """True when two paths resolve to the same inode-level target.
+
+    Uses ``resolve(strict=False)`` so a registered-but-missing
+    worktree path still compares meaningfully against the expected
+    one. Falls back to string comparison on resolve failure (e.g.
+    permission errors traversing a symlink).
+    """
+    try:
+        return a.resolve(strict=False) == b.resolve(strict=False)
+    except OSError:
+        return str(a) == str(b)
 
 
 # ── Bodhiorchard MCP server init ─────────────────────────────────────
@@ -1291,7 +1569,8 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
             )
 
     if branch_exists_remote:
-        # Fetch and check out existing branch to add any new files (e.g. GitNexus config)
+        # Fetch and check out existing branch to add any new files
+        # (e.g. updated bodhi MCP / hook configs).
         await run_git(["fetch", "origin", _SETUP_BRANCH], cwd=repo_path)
         _, stderr, rc = await run_git(["checkout", _SETUP_BRANCH], cwd=repo_path)
         if rc != 0:
@@ -1354,8 +1633,8 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
                 "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
                 "- package.json: prepare script sets core.hooksPath on npm install\n"
                 "- .gitignore: exclude .bodhiorchard/ worktrees\n"
-                "- CLAUDE.md: GitNexus code intelligence integration\n"
-                "- .claude/skills/: GitNexus agent skill definitions",
+                "- CLAUDE.md: bodhi code-intelligence MCP guidance\n"
+                "- .claude/skills/: bodhi agent skill definitions",
             ],
             cwd=repo_path,
         )
@@ -1414,76 +1693,259 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
         await run_git(["checkout", base_branch], cwd=repo_path)
 
 
-async def create_setup_pr(repo_path: str, base_branch: str, pushed_branch: str) -> str | None:
-    """Create a pull request for the Bodhiorchard setup branch via ``gh`` CLI.
+_SETUP_PR_TITLE = "chore: add Bodhiorchard MCP tools, git hooks, and config"
+_SETUP_PR_BODY = (
+    "## Summary\n\n"
+    "Auto-generated by Bodhiorchard scan pipeline.\n\n"
+    "- `.claude/settings.json` — Bodhiorchard MCP server config\n"
+    "- `.githooks/` — pre-commit (BUD validation) + post-commit (tracking)\n"
+    "- `package.json` — prepare script sets `core.hooksPath`\n"
+    "- `.gitignore` — exclude `.bodhiorchard/` worktrees\n"
+    "- `CLAUDE.md` — bodhi code-intelligence MCP guidance\n"
+    "- `.claude/skills/` — bodhi agent skill definitions\n"
+)
 
-    Falls back gracefully when ``gh`` is not installed or not authenticated.
 
-    Args:
-        repo_path: Absolute path to the git repository.
-        base_branch: Target branch for the PR (e.g. "main").
-        pushed_branch: Source branch that was pushed (e.g. "bodhiorchard/init-setup").
+class SetupPrStatus(StrEnum):
+    """Outcome category for ``create_setup_pr`` — drives logging and the
+    structured return so the scan-step record can render the correct
+    follow-up affordance in /settings/code without re-deriving state."""
 
-    Returns:
-        PR URL if created or already exists, None if ``gh`` is unavailable.
+    OPENED = "opened"  # Newly opened via the GitHub App API.
+    ADOPTED = "adopted"  # Pre-existing open PR found and persisted.
+    MANUAL_REQUIRED = "manual"  # App not configured; user must open the PR.
+    FAILED = "failed"  # App configured but API call did not succeed.
+
+
+@dataclass
+class SetupPrOutcome:
+    """Structured result of attempting to open the MCP setup PR."""
+
+    status: SetupPrStatus
+    pr_url: str | None = None
+    pr_number: int | None = None
+    compare_url: str | None = None
+
+
+def _build_compare_url(github_repo_full_name: str | None, base_branch: str) -> str | None:
+    """Return the GitHub "compare and create PR" URL for the setup branch,
+    or ``None`` if the repo isn't on GitHub. Used as the manual-fallback
+    deep link when the GitHub App isn't configured.
     """
-    if not shutil.which("gh"):
-        logger.info("gh_cli_not_found", repo=repo_path)
+    if not github_repo_full_name:
         return None
+    return (
+        f"https://github.com/{github_repo_full_name}/compare/"
+        f"{base_branch}...{_SETUP_BRANCH}?quick_pull=1"
+    )
 
-    # Check if PR already exists for this branch
-    try:
-        stdout, _, rc = await _run_shell_cmd(
-            ["gh", "pr", "view", pushed_branch, "--json", "url", "-q", ".url"],
-            cwd=repo_path,
-        )
-        if rc == 0 and stdout.strip():
-            logger.info(
-                "setup_pr_already_exists",
-                repo=repo_path,
-                url=stdout.strip(),
-            )
-            return stdout.strip()
-    except (TimeoutError, OSError):
-        pass
 
-    # Create the PR
-    try:
-        stdout, stderr, rc = await _run_shell_cmd(
-            [
-                "gh",
-                "pr",
-                "create",
-                "--base",
-                base_branch,
-                "--head",
-                pushed_branch,
-                "--title",
-                "chore: add Bodhiorchard MCP tools, git hooks, and config",
-                "--body",
-                "## Summary\n\n"
-                "Auto-generated by Bodhiorchard scan pipeline.\n\n"
-                "- `.claude/settings.json` — Bodhiorchard MCP server config\n"
-                "- `.githooks/` — pre-commit (BUD validation) + "
-                "post-commit (tracking)\n"
-                "- `package.json` — prepare script sets `core.hooksPath`\n"
-                "- `.gitignore` — exclude `.bodhiorchard/` worktrees\n"
-                "- `CLAUDE.md` — GitNexus code intelligence integration\n"
-                "- `.claude/skills/` — GitNexus agent skill definitions\n",
-            ],
-            cwd=repo_path,
-            timeout=30,
-        )
-        if rc == 0 and stdout.strip():
-            logger.info("setup_pr_created", repo=repo_path, url=stdout.strip())
-            return stdout.strip()
-        logger.warning(
-            "setup_pr_create_failed",
-            repo=repo_path,
-            rc=rc,
-            stderr=stderr[:300],
-        )
-    except (TimeoutError, OSError) as exc:
-        logger.warning("setup_pr_create_error", repo=repo_path, error=str(exc))
+def _split_full_name(github_repo_full_name: str | None) -> tuple[str, str, str] | None:
+    """Split ``"owner/repo"`` into ``(owner, repo, full_name)``, or ``None``.
 
+    Returning the full name as a third element saves the caller from
+    re-narrowing ``str | None`` after this guard succeeds.
+    """
+    if not github_repo_full_name or "/" not in github_repo_full_name:
+        return None
+    owner, _, repo = github_repo_full_name.partition("/")
+    if not owner or not repo:
+        return None
+    return owner, repo, github_repo_full_name
+
+
+def _coerce_pr_number(value: object) -> int | None:
+    """Best-effort cast of a GitHub PR ``number`` field — accepts int or str."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
     return None
+
+
+def _coerce_pr_url(value: object) -> str | None:
+    """Best-effort cast of a GitHub PR ``html_url`` field — accepts non-empty str."""
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+async def create_setup_pr(
+    db: AsyncSession,
+    org: Organization,
+    tracked_repo: TrackedRepository,
+    base_branch: str,
+) -> SetupPrOutcome:
+    """Open (or adopt) the Bodhiorchard MCP setup PR via the GitHub App.
+
+    Decision tree, after ``commit_and_push_bodhiorchard_setup`` succeeds:
+
+    1. **GitHub App not configured** → return ``MANUAL_REQUIRED`` with the
+       compare URL the row will deep-link to. No write to ``setup_pr_*``.
+    2. **App configured** → list open PRs filtered by
+       ``head=<owner>:bodhiorchard/init-setup``. If one exists, **adopt
+       it** (write number/URL/state=open). Handles repos that already
+       have a setup branch + PR from prior testing.
+    3. **App configured, no existing open PR** → POST a new PR via the
+       installation token. Persist number/URL/state=open. If the API call
+       returns an error (e.g. 422 race), retry path 2 to adopt whatever
+       landed; if still empty, return ``FAILED``.
+
+    The branch push itself (``commit_and_push_bodhiorchard_setup``) does
+    *not* need the GitHub App — it uses the org's clone credentials. Only
+    the PR-open step is gated by App configuration.
+    """
+    parts = _split_full_name(tracked_repo.github_repo_full_name)
+    compare_url = _build_compare_url(tracked_repo.github_repo_full_name, base_branch)
+
+    if parts is None:
+        # No GitHub remote on the tracked-repo row — usually means the
+        # repo was added via Local-pick and ``github_repo_full_name``
+        # was never populated. The setup phase back-fills it on the
+        # next scan; until then we can't open a PR.
+        logger.info(
+            "setup_pr_skipped_no_github_remote",
+            repo=tracked_repo.name,
+            github_repo_full_name=tracked_repo.github_repo_full_name,
+        )
+        return SetupPrOutcome(status=SetupPrStatus.MANUAL_REQUIRED, compare_url=None)
+
+    owner, _, full_name = parts
+    token = await get_installation_token(org)
+    if not token and org.github_app_id and org.github_app_private_key:
+        # The App is configured at the org level but no webhook has fired
+        # yet to auto-detect the installation id. Look it up via the App
+        # JWT against this specific repo, persist it, and retry.
+        discovered = await discover_installation_id_for_repo(org, full_name)
+        if discovered is not None:
+            org.github_app_installation_id = discovered
+            await db.flush()
+            logger.info(
+                "github_installation_id_discovered_via_repo",
+                org_id=str(org.id),
+                installation_id=discovered,
+                repo=full_name,
+            )
+            token = await get_installation_token(org)
+    if not token:
+        reason = (
+            "github_app_not_installed_on_repo"
+            if org.github_app_id and org.github_app_private_key
+            else "github_app_not_configured"
+        )
+        logger.info(
+            "setup_pr_manual_required",
+            repo=tracked_repo.name,
+            reason=reason,
+        )
+        return SetupPrOutcome(
+            status=SetupPrStatus.MANUAL_REQUIRED,
+            compare_url=compare_url,
+        )
+
+    client = GitHubClient(token)
+    head_filter = f"{owner}:{_SETUP_BRANCH}"
+
+    existing = await client.list_pull_requests(full_name, head=head_filter, state="open")
+    if existing:
+        adopted = existing[0]
+        await _persist_setup_pr(db, tracked_repo, adopted)
+        pr_number = _coerce_pr_number(adopted.get("number"))
+        pr_url = _coerce_pr_url(adopted.get("html_url"))
+        logger.info(
+            "setup_pr_adopted",
+            repo=tracked_repo.name,
+            pr_number=pr_number,
+            html_url=pr_url,
+        )
+        return SetupPrOutcome(
+            status=SetupPrStatus.ADOPTED,
+            pr_url=pr_url,
+            pr_number=pr_number,
+            compare_url=compare_url,
+        )
+
+    created = await client.create_pull_request(
+        full_name,
+        title=_SETUP_PR_TITLE,
+        body=_SETUP_PR_BODY,
+        head=_SETUP_BRANCH,
+        base=base_branch,
+    )
+    if created:
+        await _persist_setup_pr(db, tracked_repo, created)
+        pr_number = _coerce_pr_number(created.get("number"))
+        pr_url = _coerce_pr_url(created.get("html_url"))
+        logger.info(
+            "setup_pr_created",
+            repo=tracked_repo.name,
+            pr_number=pr_number,
+            html_url=pr_url,
+        )
+        return SetupPrOutcome(
+            status=SetupPrStatus.OPENED,
+            pr_url=pr_url,
+            pr_number=pr_number,
+            compare_url=compare_url,
+        )
+
+    # 422 "already exists" or transient failure — try adoption one more time
+    # so a racing scan in another worker doesn't leave us stuck.
+    fallback = await client.list_pull_requests(full_name, head=head_filter, state="open")
+    if fallback:
+        adopted = fallback[0]
+        await _persist_setup_pr(db, tracked_repo, adopted)
+        pr_number = _coerce_pr_number(adopted.get("number"))
+        pr_url = _coerce_pr_url(adopted.get("html_url"))
+        logger.info(
+            "setup_pr_adopted_after_create_failure",
+            repo=tracked_repo.name,
+            pr_number=pr_number,
+        )
+        return SetupPrOutcome(
+            status=SetupPrStatus.ADOPTED,
+            pr_url=pr_url,
+            pr_number=pr_number,
+            compare_url=compare_url,
+        )
+
+    logger.warning("setup_pr_create_failed", repo=tracked_repo.name)
+    return SetupPrOutcome(status=SetupPrStatus.FAILED, compare_url=compare_url)
+
+
+async def _persist_setup_pr(
+    db: AsyncSession,
+    tracked_repo: TrackedRepository,
+    pr_payload: dict[str, object],
+) -> None:
+    """Write a GitHub PR payload onto the tracked-repo row.
+
+    Maps the response shape from ``GET/POST /repos/{owner}/{repo}/pulls``
+    onto our three columns. Caller commits/flushes; this function only
+    mutates the in-session row.
+    """
+    raw_state_field = pr_payload.get("state")
+    raw_state = raw_state_field.lower() if isinstance(raw_state_field, str) else ""
+    is_merged = bool(pr_payload.get("merged"))
+    state: SetupPrState
+    if is_merged:
+        state = SetupPrState.MERGED
+    elif raw_state == "closed":
+        state = SetupPrState.CLOSED
+    else:
+        state = SetupPrState.OPEN
+    tracked_repo.setup_pr_number = _coerce_pr_number(pr_payload.get("number"))
+    tracked_repo.setup_pr_url = _coerce_pr_url(pr_payload.get("html_url"))
+    tracked_repo.setup_pr_state = state
+    await db.flush()
+
+
+def mark_setup_branch_pushed(tracked_repo: TrackedRepository) -> None:
+    """Stamp ``setup_branch_pushed_at`` to the current UTC instant.
+
+    Called from the per-repo setup phase right after
+    ``commit_and_push_bodhiorchard_setup`` returns a non-empty branch
+    name. Persists "the branch is on origin" independently of whether
+    the GitHub App is configured to also open a PR.
+    """
+    tracked_repo.setup_branch_pushed_at = datetime.now(UTC)

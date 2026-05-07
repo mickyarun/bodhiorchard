@@ -4,14 +4,30 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SetupState } from '@/types/setup'
-import api from '@/services/api'
-import { resetSetupCache } from '@/router'
+import {
+  submitOrgInit as submitOrgInitAction,
+  submitFinalize as submitFinalizeAction,
+  type FinalizeResult,
+  type OrgInitResult,
+} from './setupSubmit'
 
 export const useSetupStore = defineStore('setup', () => {
   const currentStep = ref(0)
   const isSubmitting = ref(false)
   const submitError = ref<string | null>(null)
   const scanId = ref<string | null>(null)
+  const jobId = ref<string | null>(null)
+  // Phase J — once submitOrgInit succeeds, the org+JWT are live and the
+  // wizard's earlier-step values become read-only. Used by the wizard to
+  // gate "Continue" on the AI Engine step (idempotent guard for
+  // Back/Forward navigation) and by Org/Admin/AI steps to grey out their
+  // fields once the org has been created.
+  const orgInitDone = ref(false)
+  // Phase O — true once submitFinalize succeeds. The wizard now fires
+  // finalize on Continue out of the Source Code step, so the Review
+  // step's Launch button must not re-POST. submitSetup short-circuits
+  // when this is already true.
+  const finalizeDone = ref(false)
 
   const state = ref<SetupState>({
     currentStep: 0,
@@ -34,9 +50,15 @@ export const useSetupStore = defineStore('setup', () => {
     claude: {
       authMode: 'host',
       apiKey: '',
+      initialized: false,
+      testPassed: false,
+      testedVersion: '',
     },
   })
 
+  // Step layout (Phase K — dedicated Connect-GitHub step retired; see
+  // SetupWizard.vue for matching constants):
+  //   0 Welcome | 1 Org | 2 Admin | 3 AI | 4 Source code | 5 Review
   const totalSteps = 6
 
   const isFirstStep = computed(() => currentStep.value === 0)
@@ -71,8 +93,16 @@ export const useSetupStore = defineStore('setup', () => {
   function validateSourceCode(): boolean {
     const repos = state.value.sourceCode.repos
     if (repos.length === 0) return false
-    // All repos must have branches mapped
-    return repos.every(r => r.mainBranch && r.developBranch)
+    // Local-path entries are the only ones that surface a manual branch
+    // picker (Phase P), so they're the only ones we strictly require both
+    // branches on. Bulk + github-clone auto-detect at add-time and the
+    // wizard doesn't render UI for the user to fix develop separately.
+    return repos.every((r) => {
+      if (!r.mainBranch) return false
+      const src = r.source ?? (r.gitHubFullName ? 'bulk' : 'github-clone')
+      if (src !== 'local-path') return true
+      return !!r.developBranch
+    })
   }
 
   function validateCurrentStep(): boolean {
@@ -110,52 +140,54 @@ export const useSetupStore = defineStore('setup', () => {
     }
   }
 
+  const submitCtx = { state, submitError, scanId, jobId }
+
+  /**
+   * Idempotent: subsequent calls return ``null`` once the org already
+   * exists for this session (the wizard re-enters the trigger on
+   * Back/Forward navigation). Callers that need to know whether an init
+   * actually ran should also check ``orgInitDone``.
+   */
+  async function submitOrgInit(): Promise<OrgInitResult | null> {
+    if (orgInitDone.value) return null
+    const result = await submitOrgInitAction(submitCtx)
+    if (result) {
+      orgInitDone.value = true
+    }
+    return result
+  }
+
+  async function submitFinalize(): Promise<FinalizeResult | null> {
+    if (finalizeDone.value) {
+      return {
+        jobId: jobId.value || undefined,
+        scanId: scanId.value || undefined,
+        isSetupComplete: true,
+      }
+    }
+    const result = await submitFinalizeAction(submitCtx)
+    if (result) finalizeDone.value = true
+    return result
+  }
+
+  /**
+   * DEPRECATED — kept for back-compat with single-shot wizards.
+   * New flow: submitOrgInit() then submitFinalize().
+   *
+   * Phase J: ``submitOrgInit`` is now idempotent (returns ``null`` once
+   * the org already exists this session). The shim treats that as a
+   * success and proceeds to finalize, so callers that have already
+   * invoked ``submitOrgInit`` separately keep working.
+   */
   async function submitSetup(): Promise<boolean> {
     isSubmitting.value = true
-    submitError.value = null
-
     try {
-      const payload = {
-        organization: state.value.organization,
-        admin: state.value.admin,
-        sourceCode: state.value.sourceCode,
-        scan: state.value.scan,
-        claude: {
-          authMode: state.value.claude.authMode,
-          // Only send the key when we actually have one to store.
-          apiKey: state.value.claude.authMode === 'api_key' && state.value.claude.apiKey
-            ? state.value.claude.apiKey
-            : null,
-        },
+      if (!orgInitDone.value) {
+        const init = await submitOrgInit()
+        if (!init) return false
       }
-
-      const { data } = await api.post('/setup/initialize', payload)
-      localStorage.setItem('bodhiorchard_setup_complete', 'true')
-      if (data.access_token) {
-        localStorage.setItem('bodhiorchard_token', data.access_token)
-      }
-      if (data.scanId) {
-        scanId.value = data.scanId
-        localStorage.setItem('bodhiorchard_scan_id', data.scanId)
-      }
-      resetSetupCache()
-      return true
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { status?: number; data?: { detail?: string; message?: string } } }
-        if (axiosErr.response?.status === 409) {
-          localStorage.setItem('bodhiorchard_setup_complete', 'true')
-          resetSetupCache()
-          return true
-        }
-        submitError.value =
-          axiosErr.response?.data?.detail
-          || axiosErr.response?.data?.message
-          || 'Setup failed. Please try again.'
-      } else {
-        submitError.value = 'Network error. Please check your connection.'
-      }
-      return false
+      const finalized = await submitFinalize()
+      return finalized !== null
     } finally {
       isSubmitting.value = false
     }
@@ -167,6 +199,9 @@ export const useSetupStore = defineStore('setup', () => {
     isSubmitting,
     submitError,
     scanId,
+    jobId,
+    orgInitDone,
+    finalizeDone,
     totalSteps,
     isFirstStep,
     isLastStep,
@@ -176,6 +211,8 @@ export const useSetupStore = defineStore('setup', () => {
     nextStep,
     prevStep,
     goToStep,
+    submitOrgInit,
+    submitFinalize,
     submitSetup,
   }
 })

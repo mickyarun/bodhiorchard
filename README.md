@@ -95,12 +95,15 @@ Submit features directly from Slack. The Triage Agent conducts a structured inte
 
 ### Multi-Repo Code Intelligence
 
-Powered by **GitNexus** code graph analysis:
+Powered by an in-tree code-graph indexer (`backend/app/services/code_indexer/`)
+built on the MIT-licensed [graphify](https://github.com/safishamsi/graphify)
+library — tree-sitter parsing → NetworkX graph → Leiden community detection:
 
-- Scan repositories to build a knowledge graph of code relationships
+- Scan repositories to build a per-repo knowledge graph of code relationships
 - Auto-synthesize feature descriptions from code clusters
 - Cross-repo feature deduplication and merging
 - Semantic search across all indexed code and documentation
+- Impact / blast-radius queries via the `code_*` MCP tool group
 
 ### Model Context Protocol (MCP) Integration
 

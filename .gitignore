@@ -41,6 +41,11 @@ Thumbs.db
 # Docker
 *.log
 
+# Backend log capture (rotating handler in app/core/logging.py writes here;
+# also covers any one-off `tee` output like logs.txt that may contain JWTs).
+backend/logs/
+logs.txt
+
 # Database
 *.sqlite3
 *.db
@@ -48,3 +53,17 @@ Thumbs.db
 
 # Colyseus dev mode state (may contain JWTs)
 .devmode.json
+
+# reposcanv2 sandbox runs (JSON-on-disk persistence)
+backend/reposcanv2_runs/
+
+# Hybrid-host data dir (cloned repos + SSH deploy keypair). Default location
+# when BODHIORCHARD_DATA_DIR is unset and /data isn't writable. Lives at the
+# repo root (not under ``backend/``) so writes don't sit inside uvicorn's CWD
+# and trigger reload-watcher cascades during scans. Non-dot name so graphify's
+# collect_files walker doesn't drop every indexed file.
+repoclone/
+
+# Graphify analyzer output dropped under example repos during scans —
+# build artifact, not source.
+examples/*/graphify-out/

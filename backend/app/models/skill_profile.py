@@ -39,7 +39,7 @@ class SkillProfile(BaseModel):
     module: Mapped[str] = mapped_column(String(255), nullable=False)
     feature_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("knowledge_items.id", ondelete="SET NULL"),
+        ForeignKey("features.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

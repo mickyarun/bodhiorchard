@@ -9,7 +9,7 @@ Provides tenant-scoped CRUD plus dedup-specific queries for
 
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
@@ -138,8 +138,6 @@ class JiraIssueBudMapRepository(BaseRepository[JiraIssueBudMap]):
         Only includes keys that have a linked BUD or Bug (not orphaned
         map entries from failed sessions). Used for bulk Layer 1 dedup.
         """
-        from sqlalchemy import or_
-
         stmt = self._scoped(
             select(JiraIssueBudMap.jira_issue_key).where(
                 JiraIssueBudMap.status.in_(
@@ -186,8 +184,6 @@ class JiraIssueBudMapRepository(BaseRepository[JiraIssueBudMap]):
         Returns:
             Dict like ``{"imported": 42, "skipped": 3, ...}``.
         """
-        from sqlalchemy import func
-
         stmt = self._scoped(
             select(JiraIssueBudMap.status, func.count(JiraIssueBudMap.id)).where(
                 JiraIssueBudMap.import_session_id == session_id
@@ -237,14 +233,61 @@ class JiraIssueBudMapRepository(BaseRepository[JiraIssueBudMap]):
         """Get items flagged for manual duplicate review."""
         return await self.list_for_session(session_id, status=MapStatus.REVIEW_NEEDED)
 
+    async def list_imported_bud_ids_for_session(self, session_id: uuid.UUID) -> list[uuid.UUID]:
+        """Distinct ``bud_id`` values for IMPORTED entries in a session."""
+        stmt = self._scoped(
+            select(JiraIssueBudMap.bud_id).where(
+                JiraIssueBudMap.import_session_id == session_id,
+                JiraIssueBudMap.status == MapStatus.IMPORTED,
+                JiraIssueBudMap.bud_id.is_not(None),
+            )
+        ).distinct()
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def delete_by_id(self, entry_id: uuid.UUID) -> None:
+        """Delete a single map entry by id (org-scoped)."""
+        stmt = delete(JiraIssueBudMap).where(
+            JiraIssueBudMap.id == entry_id,
+            JiraIssueBudMap.org_id == self._org_id,
+        )
+        await self._db.execute(stmt)
+        await self._db.flush()
+
+    async def delete_orphaned(self, *, valid_bud_ids_select, valid_bug_ids_select) -> int:
+        """Delete map entries whose bud/bug links no longer resolve.
+
+        Three passes (single tx):
+        - Entries pointing to a bud_id not in ``valid_bud_ids_select``
+        - Entries pointing to a bug_id not in ``valid_bug_ids_select``
+        - Entries with both ids null (stale from abandoned imports)
+        """
+        stmt1 = delete(JiraIssueBudMap).where(
+            JiraIssueBudMap.org_id == self._org_id,
+            JiraIssueBudMap.bud_id.is_not(None),
+            ~JiraIssueBudMap.bud_id.in_(valid_bud_ids_select),
+        )
+        r1 = await self._db.execute(stmt1)
+        stmt2 = delete(JiraIssueBudMap).where(
+            JiraIssueBudMap.org_id == self._org_id,
+            JiraIssueBudMap.bug_id.is_not(None),
+            ~JiraIssueBudMap.bug_id.in_(valid_bug_ids_select),
+        )
+        r2 = await self._db.execute(stmt2)
+        stmt3 = delete(JiraIssueBudMap).where(
+            JiraIssueBudMap.org_id == self._org_id,
+            JiraIssueBudMap.bud_id.is_(None),
+            JiraIssueBudMap.bug_id.is_(None),
+        )
+        r3 = await self._db.execute(stmt3)
+        return (r1.rowcount or 0) + (r2.rowcount or 0) + (r3.rowcount or 0)
+
     async def delete_pending_for_session(self, session_id: uuid.UUID) -> int:
         """Delete pending map entries from a session (cleanup before re-run).
 
         Only deletes entries with status ``pending`` — successfully imported
         entries are preserved.
         """
-        from sqlalchemy import delete
-
         stmt = (
             delete(JiraIssueBudMap)
             .where(JiraIssueBudMap.import_session_id == session_id)

@@ -4,6 +4,7 @@
 """Pydantic schemas for the settings endpoints."""
 
 import zoneinfo
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -18,6 +19,27 @@ class SourceCodeSettings(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class GitHubAppStatus(StrEnum):
+    """Lifecycle of an org's GitHub App configuration.
+
+    The bulk-import flow gates on this enum:
+
+    - ``NOT_CONFIGURED``: no App ID and/or no private key — show the
+      credentials form.
+    - ``AWAITING_INSTALL``: credentials saved, but no installation_id
+      yet — show the "Install on GitHub" CTA.
+    - ``READY``: credentials + installation_id present — show the
+      bulk-repo picker.
+
+    The boolean ``GitHubSettings.connected`` is kept for back-compat
+    and equals ``status != NOT_CONFIGURED``.
+    """
+
+    NOT_CONFIGURED = "not_configured"
+    AWAITING_INSTALL = "awaiting_install"
+    READY = "ready"
+
+
 class GitHubSettings(BaseModel):
     """GitHub App integration settings (read response)."""
 
@@ -27,6 +49,9 @@ class GitHubSettings(BaseModel):
     has_private_key: bool = Field(False, alias="hasPrivateKey")
     installation_id: int | None = Field(None, alias="installationId")
     webhook_configured: bool = Field(False, alias="webhookConfigured")
+    status: GitHubAppStatus = GitHubAppStatus.NOT_CONFIGURED
+    slug: str | None = None
+    install_url: str | None = Field(default=None, alias="installUrl")
 
     model_config = {"populate_by_name": True}
 
@@ -67,6 +92,22 @@ class AIConfigSettings(BaseModel):
     cloud_provider: str = Field(default="anthropic", alias="cloudProvider")
     cloud_api_key: str = Field(default="", alias="cloudApiKey")
     cloud_model: str = Field(default="claude-sonnet-4-5-20250514", alias="cloudModel")
+    merge_model_default: str | None = Field(
+        default=None,
+        alias="mergeModelDefault",
+        description=(
+            "Per-org override for the small-batch merge model. "
+            "None = use platform default from LLMConfig."
+        ),
+    )
+    merge_model_large: str | None = Field(
+        default=None,
+        alias="mergeModelLarge",
+        description=(
+            "Per-org override for the large-batch merge model. "
+            "None = use platform default from LLMConfig."
+        ),
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -74,7 +115,11 @@ class AIConfigSettings(BaseModel):
 class ScanSettings(BaseModel):
     """Scan pipeline tuning settings."""
 
+    # Synth and merge each get their own timeout because the merge phase runs
+    # one long Claude call over every active feature, while synth runs many
+    # short calls in parallel — sharing a single ceiling forces a bad trade.
     timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=60, le=3600)
+    merge_timeout_seconds: int = Field(default=300, alias="mergeTimeoutSeconds", ge=60, le=3600)
     max_turns: int = Field(default=40, alias="maxTurns", ge=0, le=100)
     auto_create_members: bool = Field(
         default=True,
@@ -215,7 +260,14 @@ class ConnectionsRead(BaseModel):
 
 
 class RepoInfo(BaseModel):
-    """Information about a tracked repository."""
+    """Information about a tracked repository.
+
+    The ``last_scan_*`` fields summarise the most recent ``ScanRepoRun``
+    for this repo (across all scans). The Settings → Code list uses
+    them to render a recency + status pill on rows that aren't part of
+    the live in-flight scan, so the user can see at a glance which
+    repos are stale, succeeded, or failed.
+    """
 
     id: str
     path: str
@@ -231,7 +283,28 @@ class RepoInfo(BaseModel):
     has_uncommitted_changes: bool = Field(False, alias="hasUncommittedChanges")
     github_repo: str | None = Field(None, alias="githubRepo")
     setup_status: str = Field("not_setup", alias="setupStatus")
+    # MCP setup-PR tracking. ``setup_pr_state`` is the authoritative
+    # "PR is open / merged / closed" signal; ``setup_branch_pushed_at``
+    # lets the UI distinguish "first scan never ran" from "branch on
+    # origin but no PR" (App not configured). ``setup_compare_url`` is
+    # derived server-side so the row component just needs an anchor.
+    setup_branch_pushed_at: str | None = Field(None, alias="setupBranchPushedAt")
+    setup_pr_url: str | None = Field(None, alias="setupPrUrl")
+    setup_pr_number: int | None = Field(None, alias="setupPrNumber")
+    setup_pr_state: Literal["open", "merged", "closed"] | None = Field(None, alias="setupPrState")
+    setup_compare_url: str | None = Field(None, alias="setupCompareUrl")
     design_system_status: str = Field("none", alias="designSystemStatus")
+    last_scan_status: str | None = Field(None, alias="lastScanStatus")
+    last_scan_finished_at: str | None = Field(None, alias="lastScanFinishedAt")
+    last_scan_started_at: str | None = Field(None, alias="lastScanStartedAt")
+    last_scan_feature_count: int | None = Field(None, alias="lastScanFeatureCount")
+    last_scan_id: str | None = Field(None, alias="lastScanId")
+    # Per-repo classification + cross-layer link counts. Populated by the
+    # ``classify_repo`` per-repo stage and the global ``backend_link``
+    # phase. Optional so unscanned repos render a neutral row.
+    repo_layer: str | None = Field(None, alias="repoLayer")
+    tech_stack: str | None = Field(None, alias="techStack")
+    db_flavor: str | None = Field(None, alias="dbFlavor")
 
     model_config = {"populate_by_name": True}
 

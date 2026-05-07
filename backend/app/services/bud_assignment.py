@@ -10,11 +10,12 @@ using least-loaded (round-robin) balancing across active members.
 import uuid
 
 import structlog
-from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.user import User, UserRole
+from app.repositories.bud import BUDRepository
+from app.repositories.user import UserRepository
 from app.services.bud_timeline import record_event
 
 logger = structlog.get_logger(__name__)
@@ -132,18 +133,7 @@ async def auto_assign_for_phase(
         # Fall through to round-robin if smart assignment returns None
 
     # Find active users with the target role
-    from app.models.user import OrgToUser
-
-    result = await db.execute(
-        select(User)
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .where(
-            OrgToUser.org_id == org_id,
-            OrgToUser.role == role_name,
-            User.is_active == true(),
-        )
-    )
-    candidates = list(result.scalars().all())
+    candidates = await UserRepository(db).list_active_with_role(org_id, role_name)
 
     if not candidates:
         logger.info(
@@ -157,16 +147,9 @@ async def auto_assign_for_phase(
     candidate_ids = [c.id for c in candidates]
 
     # Count active BUDs per candidate
-    load_result = await db.execute(
-        select(BUDDocument.assignee_id, func.count())
-        .where(
-            BUDDocument.org_id == org_id,
-            BUDDocument.assignee_id.in_(candidate_ids),
-            BUDDocument.status.notin_([s.value for s in _TERMINAL_STATUSES]),
-        )
-        .group_by(BUDDocument.assignee_id)
+    load_map = await BUDRepository(db, org_id=org_id).count_active_loads_for_assignees(
+        candidate_ids, [s.value for s in _TERMINAL_STATUSES]
     )
-    load_map: dict[uuid.UUID, int] = {row[0]: row[1] for row in load_result}
 
     # Pick lowest load; ties broken by earliest created_at
     candidates.sort(key=lambda u: (load_map.get(u.id, 0), u.created_at))

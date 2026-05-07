@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Clone GitHub repositories into the Docker ``/data/repos`` volume.
+"""Clone GitHub repositories into ``settings.storage.repos_dir``.
 
 This is the Full Docker complement to local-path repos: when the backend
 runs inside a container it can't reach a Mac/Windows host path, so we clone
-the target repo into a persistent volume and hand the container-local path
-to the rest of the scan pipeline.
+the target repo into ``settings.storage.repos_dir`` (a persistent Docker
+volume at ``/data/repos`` in Full Docker mode, or ``<backend>/.data/repos``
+on Hybrid host installs) and hand that container-local path to the rest
+of the scan pipeline.
 
 Three auth shapes are supported:
 
@@ -33,15 +35,24 @@ from urllib.parse import quote, urlparse
 
 import structlog
 
+from app.config import settings
 from app.services.ssh_keys import ssh_env
 
 logger = structlog.get_logger(__name__)
 
-CLONE_ROOT = Path("/data/repos")
+
+def _clone_root() -> Path:
+    """Resolve the clone-root from settings on each call.
+
+    Reading at call time (not module import) lets tests or admins
+    override ``BODHIORCHARD_DATA_DIR`` without reloading this module.
+    """
+    return settings.storage.repos_dir
+
 
 # Conservative GitHub repo-slug shape: letters, digits, hyphens, underscores,
-# dots. Everything we match here becomes a directory name under CLONE_ROOT,
-# so the pattern also rejects path traversal.
+# dots. Everything we match here becomes a directory name under the clone
+# root, so the pattern also rejects path traversal.
 _SAFE_SEG = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # Matches an HTTPS-with-credentials URL in any form git might echo back,
@@ -53,7 +64,7 @@ _URL_CRED_RE = re.compile(r"https://[^@\s/]+:[^@\s]+@")
 
 @dataclass
 class CloneResult:
-    """Outcome of a clone (or refresh) against ``CLONE_ROOT``."""
+    """Outcome of a clone (or refresh) against the configured clone root."""
 
     success: bool
     path: str | None = None
@@ -139,23 +150,29 @@ async def clone_or_update(
     *,
     org_slug: str,
     pat: str | None = None,
+    branch: str | None = None,
 ) -> CloneResult:
-    """Clone ``url`` into ``/data/repos/<org_slug>/<repo>``, or fetch if present.
+    """Clone ``url`` into ``<repos_dir>/<org_slug>/<repo>``, or fetch if present.
 
     Args:
         url: GitHub HTTPS or SSH URL.
         org_slug: Bodhiorchard org slug — used as the first path segment so
             clones from different orgs never collide.
         pat: Optional GitHub personal-access token for HTTPS private repos.
+        branch: Branch the wizard onboarded the repo on. When set, ``git
+            clone -b`` lands HEAD here directly (and on the update path
+            we ``checkout`` + ``reset --hard`` to it) so every downstream
+            stage sees the user-selected ref instead of GitHub's
+            ``origin/HEAD``, which can be a feature branch.
 
     Returns:
         ``CloneResult`` with the absolute clone path on success.
     """
-    if not CLONE_ROOT.exists():
-        return CloneResult(
-            success=False,
-            error=f"Clone root {CLONE_ROOT} is missing (volume not mounted?)",
-        )
+    clone_root = _clone_root()
+    # Auto-create the clone root if it's missing. In Docker the volume
+    # mount creates ``/data`` for us; on the host Hybrid install we own
+    # the directory and creating it on first use is the right behaviour.
+    clone_root.mkdir(parents=True, exist_ok=True)
 
     parsed = _parse_github_url(url)
     if not parsed:
@@ -170,7 +187,7 @@ async def clone_or_update(
     if not _SAFE_SEG.match(owner) or not _SAFE_SEG.match(repo) or not _SAFE_SEG.match(org_slug):
         return CloneResult(success=False, error="Invalid characters in owner, repo, or org slug.")
 
-    dest = CLONE_ROOT / org_slug / repo
+    dest = clone_root / org_slug / repo
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     env: dict[str, str] | None = None
@@ -184,22 +201,34 @@ async def clone_or_update(
 
     if already_cloned:
         logger.info("repo_clone_update_start", dest=str(dest), owner=owner, repo=repo)
+        # Rewrite ``origin`` with the current credentials before fetching so
+        # an expired GitHub-App installation token (or a rotated PAT) baked
+        # into a prior clone doesn't dictate today's auth outcome.
+        await _run_git(["-C", str(dest), "remote", "set-url", "origin", effective_url], env=env)
         rc, _, stderr = await _run_git(
             ["-C", str(dest), "fetch", "--all", "--prune"],
             env=env,
         )
         if rc != 0:
-            # The clone is usable; we just couldn't refresh. Return success
-            # with a warning rather than a hard 400 so the caller can still
-            # register the existing repo on this org.
+            # Hard-fail rather than returning the stale tree as success.
+            # A silent fetch failure here cascades through the scan
+            # pipeline (Stage 0 ingest, route extraction, feature synth)
+            # against checkouts whose head_sha may be hours or days
+            # behind, producing empty graphs that the audit greenlit.
             logger.warning("repo_clone_fetch_failed", rc=rc, stderr=stderr[:300])
-            default_branch = await _detect_default_branch(dest, env)
-            return CloneResult(
-                success=True,
-                path=str(dest),
-                default_branch=default_branch,
-                error=f"Refresh skipped: {_sanitize(stderr, pat)}",
+            return CloneResult(success=False, error=_sanitize(stderr, pat))
+        if branch:
+            # Force HEAD onto the user-selected branch even if a previous
+            # clone left it on the remote default. ``-B`` upserts the
+            # local branch ref against ``origin/<branch>`` so a re-onboard
+            # always converges, regardless of prior state.
+            rc, _, stderr = await _run_git(
+                ["-C", str(dest), "checkout", "-B", branch, f"origin/{branch}"],
+                env=env,
             )
+            if rc != 0:
+                logger.warning("repo_clone_checkout_failed", branch=branch, stderr=stderr[:300])
+                return CloneResult(success=False, error=_sanitize(stderr, pat))
     else:
         logger.info(
             "repo_clone_start",
@@ -207,11 +236,15 @@ async def clone_or_update(
             owner=owner,
             repo=repo,
             ssh=_is_ssh_url(url),
+            branch=branch,
         )
-        rc, _, stderr = await _run_git(
-            ["clone", "--no-single-branch", effective_url, str(dest)],
-            env=env,
-        )
+        clone_args = ["clone", "--no-single-branch"]
+        if branch:
+            # ``-b`` works with ``--no-single-branch``: all refs still
+            # fetched, but HEAD lands on the user-selected branch.
+            clone_args += ["-b", branch]
+        clone_args += [effective_url, str(dest)]
+        rc, _, stderr = await _run_git(clone_args, env=env)
         if rc != 0:
             # Only remove the destination if git created it during this
             # failed clone — avoid nuking a pre-existing directory we
@@ -225,6 +258,70 @@ async def clone_or_update(
 
     logger.info("repo_clone_ok", path=str(dest), default_branch=default_branch)
     return CloneResult(success=True, path=str(dest), default_branch=default_branch)
+
+
+def purge_org_clones(org_slug: str) -> int:
+    """Remove every cached clone under ``<repos_dir>/<org_slug>/``.
+
+    Used only by the init-org flow — a fresh init means the DB has no
+    rows referencing any prior clones, so a leftover ``repoclone/<slug>/``
+    tree from a previous deployment is by definition orphaned and safe
+    to wipe. Do **not** call this from the bulk-onboard path: that runs
+    on a populated DB where sibling repos may belong to other in-flight
+    scans, and a whole-org purge would yank their working trees out.
+    Use :func:`purge_repo_clones` (per-payload) there.
+
+    Returns the number of repo directories removed.
+    """
+    if not _SAFE_SEG.match(org_slug):
+        raise ValueError(f"Invalid org slug: {org_slug!r}")
+    org_dir = _clone_root() / org_slug
+    if not org_dir.exists():
+        return 0
+    removed = sum(1 for entry in org_dir.iterdir() if entry.is_dir())
+    shutil.rmtree(org_dir, ignore_errors=True)
+    logger.info("repo_clones_purged_init", org_slug=org_slug, removed=removed)
+    return removed
+
+
+def purge_repo_clones(org_slug: str, repo_names: list[str]) -> int:
+    """Remove cached clones for the named repos under ``<repos_dir>/<org_slug>/``.
+
+    Scoped to the *specific* repos being re-onboarded so sibling clones
+    that other in-flight scans may still be reading from aren't wiped —
+    a whole-org purge previously broke concurrent scans by yanking the
+    working tree out from under them mid-extraction.
+
+    The original wipe defended against stale ``origin`` URLs in the
+    cloner's ``already_cloned`` branch. That defense moved into
+    :func:`clone_or_update` itself (it now rewrites ``origin`` with
+    fresh credentials before fetching and hard-fails on fetch errors),
+    so this helper only needs to clean the specific repos a fresh
+    onboard explicitly asked for.
+
+    Returns the number of repo directories actually removed.
+    """
+    if not _SAFE_SEG.match(org_slug):
+        raise ValueError(f"Invalid org slug: {org_slug!r}")
+    org_dir = _clone_root() / org_slug
+    if not org_dir.exists():
+        return 0
+
+    removed = 0
+    for name in repo_names:
+        if not _SAFE_SEG.match(name):
+            raise ValueError(f"Invalid repo name: {name!r}")
+        target = org_dir / name
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+            removed += 1
+    logger.info(
+        "repo_clones_purged",
+        org_slug=org_slug,
+        requested=len(repo_names),
+        removed=removed,
+    )
+    return removed
 
 
 def _sanitize(msg: str, pat: str | None) -> str:

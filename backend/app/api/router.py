@@ -13,6 +13,7 @@ from app.api.v1.bugs import router as bugs_router
 from app.api.v1.claude import router as claude_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.design_system import router as design_system_router
+from app.api.v1.features import router as features_router
 from app.api.v1.github_webhook import router as github_webhook_router
 from app.api.v1.internal_colyseus import router as internal_colyseus_router
 from app.api.v1.jira_import import router as jira_router
@@ -25,6 +26,7 @@ from app.api.v1.public import router as public_router
 from app.api.v1.races import internal_router as races_internal_router
 from app.api.v1.races import router as races_router
 from app.api.v1.roles import router as roles_router
+from app.api.v1.scans import router as scans_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.setup import router as setup_router
 from app.api.v1.skills import router as skills_router
@@ -46,6 +48,7 @@ api_router.include_router(bud_router, prefix="/api/v1/buds")
 api_router.include_router(bugs_router, prefix="/api/v1/bugs")
 api_router.include_router(dashboard_router, prefix="/api/v1/dashboard")
 api_router.include_router(design_system_router, prefix="/api/v1/design-systems")
+api_router.include_router(features_router, prefix="/api/v1/features")
 api_router.include_router(roles_router, prefix="/api/v1")
 api_router.include_router(agent_skills_router, prefix="/api/v1/settings/agent-skills")
 api_router.include_router(settings_router, prefix="/api/v1/settings")
@@ -66,3 +69,4 @@ api_router.include_router(mcp_router)
 api_router.include_router(internal_colyseus_router, prefix="/api/v1")
 api_router.include_router(races_router, prefix="/api/v1/races")
 api_router.include_router(races_internal_router, prefix="/api/v1")
+api_router.include_router(scans_router, prefix="/api/v1/reposcanv2")

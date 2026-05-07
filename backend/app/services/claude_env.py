@@ -19,11 +19,11 @@ from __future__ import annotations
 import os
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt_secret
 from app.models.organization import Organization
+from app.repositories.organization import OrganizationRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -71,13 +71,7 @@ async def load_claude_env_at_startup(session: AsyncSession) -> None:
     process env is left alone — Hybrid mode deployments rely on the host's
     existing login and don't need any DB-sourced override.
     """
-    result = await session.execute(
-        select(Organization)
-        .where(Organization.claude_auth_mode == AUTH_MODE_API_KEY)
-        .where(Organization.claude_api_key_encrypted.is_not(None))
-        .limit(1)
-    )
-    org = result.scalar_one_or_none()
+    org = await OrganizationRepository(session).get_first_with_claude_api_key(AUTH_MODE_API_KEY)
     if org is None:
         logger.info("claude_env_startup_no_stored_key")
         return

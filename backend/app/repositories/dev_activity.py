@@ -5,9 +5,10 @@
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, String, and_, case, cast, func, or_, select
+from sqlalchemy import Select, String, and_, case, cast, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dev_activity import DevActivityLog
@@ -39,6 +40,23 @@ class UntrackedRepoSummary:
 
     repo_path: str
     commit_count: int
+
+
+@dataclass
+class RepoContributor:
+    """One row of a repo's all-time top-contributors panel.
+
+    ``user_id`` is NULL when the activity rows are anonymous (webhook
+    events that pre-date user attribution). ``actor_name`` is the
+    git committer name written by the hook; we group by it as a
+    fallback identity when ``user_id`` is NULL so anonymous commits
+    still aggregate per-author instead of collapsing to one bucket.
+    """
+
+    user_id: uuid.UUID | None
+    actor_name: str
+    commit_count: int
+    files_changed: int
 
 
 def _apply_role_filter(
@@ -114,6 +132,159 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
         """Initialize the repository."""
         super().__init__(DevActivityLog, db, org_id=org_id)
+
+    async def map_shas_to_bud_ids(self, shas: list[str]) -> dict[str, uuid.UUID]:
+        """Distinct ``sha -> bud_id`` mapping for matching commit SHAs."""
+        if not shas:
+            return {}
+        stmt = self._scoped(
+            select(DevActivityLog.commit_sha, DevActivityLog.bud_id).where(
+                DevActivityLog.commit_sha.in_(shas),
+                DevActivityLog.bud_id.is_not(None),
+            )
+        ).distinct()
+        result = await self._db.execute(stmt)
+        return {row[0]: row[1] for row in result.all() if row[0] and row[1]}
+
+    async def count_events_by_user_in_window(
+        self,
+        event_types: list[str],
+        since: datetime,
+        until: datetime,
+    ) -> dict[tuple[uuid.UUID, str], int]:
+        """Count events grouped by ``(user_id, event_type)`` in a time window.
+
+        Returns:
+            Mapping of ``(user_id, event_type)`` tuples to counts. Rows
+            with NULL ``user_id`` are excluded.
+        """
+        stmt = self._scoped(
+            select(
+                DevActivityLog.user_id,
+                DevActivityLog.event_type,
+                func.count().label("cnt"),
+            )
+            .where(
+                DevActivityLog.created_at >= since,
+                DevActivityLog.created_at < until,
+                DevActivityLog.event_type.in_(event_types),
+                DevActivityLog.user_id.isnot(None),
+            )
+            .group_by(DevActivityLog.user_id, DevActivityLog.event_type)
+        )
+        result = await self._db.execute(stmt)
+        return {(row.user_id, row.event_type): row.cnt for row in result.all()}
+
+    async def top_contributors_for_repo(
+        self,
+        repo_id: uuid.UUID,
+        *,
+        limit: int = 5,
+    ) -> list[RepoContributor]:
+        """All-time top contributors for one tracked repo.
+
+        Aggregates commit events scoped by ``repo_id``: counts distinct
+        commit SHAs per ``(user_id, actor_name)`` pair and sums the
+        per-row file-change counts (``files_changed`` is a
+        comma-separated path list — we count via Postgres
+        ``array_length(string_to_array(…))``).
+
+        Grouped by both ``user_id`` and ``actor_name`` so anonymous
+        rows (NULL user_id, before user attribution rolled out) bucket
+        per author instead of collapsing into a single anonymous row.
+        Returns the top ``limit`` rows ordered by commit count
+        descending.
+        """
+        DAL = DevActivityLog  # noqa: N806
+        files_count = func.coalesce(
+            func.array_length(
+                func.string_to_array(func.coalesce(DAL.files_changed, ""), ","),
+                1,
+            ),
+            0,
+        )
+        stmt = self._scoped(
+            select(
+                DAL.user_id,
+                DAL.actor_name,
+                func.count(func.distinct(DAL.commit_sha)).label("commit_count"),
+                func.coalesce(func.sum(files_count), 0).label("files_changed"),
+            )
+            .where(
+                DAL.repo_id == repo_id,
+                DAL.event_type == "commit",
+                DAL.commit_sha.is_not(None),
+                DAL.actor_name.is_not(None),
+            )
+            .group_by(DAL.user_id, DAL.actor_name)
+            .order_by(func.count(func.distinct(DAL.commit_sha)).desc())
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return [
+            RepoContributor(
+                user_id=row.user_id,
+                actor_name=row.actor_name or "Unknown",
+                commit_count=int(row.commit_count or 0),
+                files_changed=int(row.files_changed or 0),
+            )
+            for row in result.all()
+        ]
+
+    async def commit_sha_exists(self, commit_sha: str) -> bool:
+        """Return True if a commit event with this SHA is already recorded."""
+        stmt = self._scoped(
+            select(DevActivityLog.id)
+            .where(
+                DevActivityLog.event_type == "commit",
+                DevActivityLog.commit_sha == commit_sha,
+            )
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def backfill_session_bud(self, session_id: str, bud_id: uuid.UUID) -> None:
+        """Set ``bud_id`` on prior session events that lacked one."""
+        stmt = (
+            update(DevActivityLog)
+            .where(
+                DevActivityLog.session_id == session_id,
+                DevActivityLog.org_id == self._org_id,
+                DevActivityLog.bud_id.is_(None),
+            )
+            .values(bud_id=bud_id)
+        )
+        await self._db.execute(stmt)
+
+    async def list_recent_branch_activity_for_bud(
+        self,
+        bud_id: uuid.UUID,
+        *,
+        limit: int = 200,
+    ) -> list[tuple[str | None, str | None, uuid.UUID | None, str | None]]:
+        """Recent branch-tagged dev events for a BUD.
+
+        Returns ``(branch, actor_name, user_id, files_changed)`` tuples for
+        the most recent ``limit`` rows that have a non-null ``branch``.
+        Used to summarize cross-developer activity on a BUD's branches.
+        """
+        stmt = self._scoped(
+            select(
+                DevActivityLog.branch,
+                DevActivityLog.actor_name,
+                DevActivityLog.user_id,
+                DevActivityLog.files_changed,
+            )
+            .where(
+                DevActivityLog.bud_id == bud_id,
+                DevActivityLog.branch.is_not(None),
+            )
+            .order_by(DevActivityLog.created_at.desc())
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.all())
 
     def _commit_filter(
         self,

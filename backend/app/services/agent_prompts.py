@@ -148,7 +148,7 @@ async def build_code_review_prompt(
         "- Only comment on lines added or modified in the diff.\n"
         "- You may read unchanged code to UNDERSTAND context, but do not "
         "  flag issues you find in unchanged lines.\n"
-        "- Exception: if `gitnexus_impact` reveals d=1 callers/dependents "
+        "- Exception: if `code_impact` reveals d=1 callers/dependents "
         "  that the diff failed to update, you MUST flag those even though "
         "  the caller files are unchanged — the diff is incomplete.\n"
         "- Exception: if the diff adds a new call to a pre-existing buggy "
@@ -161,7 +161,7 @@ async def build_code_review_prompt(
         "1. `get_bud_context` → fetch tech spec + PRD ACs\n"
         "2. `git diff` in each repo — this is your scope of review\n"
         "3. Read modified files ONLY as much as needed to understand the diff\n"
-        "4. `gitnexus_impact` on key symbols — flag d=1 dependents not updated\n"
+        "4. `code_impact` on key symbols — flag d=1 dependents not updated\n"
         "5. Verify each PRD AC has implementation in the diff\n\n"
         "## Quality Checklist (apply to changed lines only)\n\n"
         "| Check | Rule |\n"
@@ -173,7 +173,7 @@ async def build_code_review_prompt(
         "| No hacks | No hardcoded values, TODO/FIXME, bypassed checks |\n"
         "| Standards | Type hints, docstrings on public funcs, lint clean |\n"
         "| Spec match | Changes match tech arch + PRD acceptance criteria |\n"
-        "| Impact | gitnexus blast radius — d=1 dependents updated |\n\n"
+        "| Impact | code_impact blast radius — d=1 dependents updated |\n\n"
         "## Output (JSON only, no wrapper)\n\n"
         "```json\n"
         "{\n"
@@ -253,7 +253,7 @@ async def build_testing_prompt(
         "1. Use `get_bud_context` MCP tool to fetch the full tech spec\n"
         "2. Run `git diff` in each repo to see code changes\n"
         "3. Read the modified files to understand what was implemented\n"
-        "4. Use gitnexus MCP tools to explore the codebase structure\n\n"
+        "4. Use bodhi code-intel MCP tools to explore the codebase structure\n\n"
     )
     if draft_context:
         prompt += draft_context
@@ -460,23 +460,24 @@ def _build_design_context(
 
 
 def _build_repo_context(repo_pairs: list[tuple[str, str]]) -> str:
-    """Build repo context with gitnexus instructions."""
+    """Build repo context with code-intelligence MCP instructions."""
     if not repo_pairs:
         return ""
     repo_list = "\n".join(f"- **{name}**: `{path}`" for path, name in repo_pairs)
     return (
         f"\n## Available Repositories\n\n{repo_list}\n\n"
         "## IMPORTANT: Code Exploration Rules\n\n"
-        "Use gitnexus MCP tools to explore the codebase. "
+        "Use bodhi code-intel MCP tools to explore the codebase. "
         "Do NOT use bash find/grep/ls.\n\n"
-        "Available gitnexus MCP tools:\n"
-        '- `gitnexus_query({query: "concept"})` — find code by concept\n'
-        '- `gitnexus_context({name: "symbolName"})` — 360° view of a symbol\n'
-        '- `gitnexus_impact({target: "symbol", direction: "upstream"})` — blast radius\n'
-        "- Read `gitnexus://repo/*/processes` — list execution flows\n"
-        "- Read `gitnexus://repo/*/clusters` — list functional areas\n"
-        "- Read `gitnexus://repo/*/context` — codebase overview\n\n"
-        "Start by reading `gitnexus://repo/*/context`.\n"
+        "Available bodhi code-intel MCP tools:\n"
+        '- `code_query({query: "concept", repo_id})` — find code by concept\n'
+        '- `code_context({symbol: "name", repo_id})` — 360° view of a symbol\n'
+        '- `code_impact({target: "symbol", direction: "upstream", repo_id})` — blast radius\n'
+        "- `code_community({cluster_id, repo_id})` — list files/symbols in a domain cluster\n"
+        "- `code_god_nodes({repo_id})` — high-degree hubs / refactoring candidates\n"
+        "- `code_stats({repo_id})` — overall graph stats\n\n"
+        "Start with `code_stats` for an overview, then `code_query` for the area "
+        "you care about, then drill down with `code_context` and `code_impact`.\n"
     )
 
 
@@ -537,13 +538,13 @@ def _build_tech_arch_instructions(
         steps = []
         if has_designs:
             steps.append("Read wireframe files from the Design section.")
-        steps.append("Read `gitnexus://repo/*/context` for codebase overview.")
-        steps.append("Use `gitnexus_query` to find related code.")
-        steps.append("Use `gitnexus_context` on key symbols.")
+        steps.append("Call `code_stats(repo_id)` for codebase overview.")
+        steps.append("Use `code_query` to find related code.")
+        steps.append("Use `code_context` on key symbols.")
         steps.append("Output the plan as clean markdown.")
         for i, step in enumerate(steps, 1):
             instructions += f"{i}. {step}\n"
-        instructions += "\nUse gitnexus MCP tools, NOT bash find/grep/ls.\n"
+        instructions += "\nUse bodhi code-intel MCP tools, NOT bash find/grep/ls.\n"
 
     repo_names = [name for _, name in repo_pairs]
     repo_names_str = ", ".join(f'"{n}"' for n in repo_names)

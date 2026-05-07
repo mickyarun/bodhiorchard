@@ -57,17 +57,35 @@
       </v-list-item>
     </v-list>
 
-    <!-- Scan progress bar -->
+    <!-- Scan progress: per-phase timeline when available, legacy bar otherwise -->
     <div v-if="checklist.scanInProgress || wsScanActive" class="px-4 pb-3">
       <v-progress-linear
         :model-value="displayProgress"
         color="primary"
         rounded
-        height="6"
+        height="2"
       />
       <div class="text-caption text-medium-emphasis mt-1">
         {{ displayStatusLabel }}
       </div>
+      <ScanPhaseTimeline
+        v-if="scanStore.phases.length"
+        :phases="scanStore.phases"
+      />
+    </div>
+
+    <!-- Resume banner (shown when the most recent scan failed) -->
+    <div
+      v-if="scanStore.aggregateStatus === 'failed' && !wsScanActive"
+      class="px-4 pb-3"
+    >
+      <v-btn
+        variant="tonal"
+        color="primary"
+        prepend-icon="mdi-refresh"
+        :loading="resuming"
+        @click="onResume"
+      >Resume scan</v-btn>
     </div>
 
     <!-- Per-repo scan warnings (non-fatal, but surfaced so users know) -->
@@ -99,8 +117,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '@/services/api'
+import ScanPhaseTimeline from '@/components/scan/ScanPhaseTimeline.vue'
 import { useScanSocket } from '@/composables/useScanSocket'
-import type { ScanStatusData, RepoScanWarning } from '@/composables/useScanSocket'
+import type {
+  RepoScanWarning,
+  ScanStatusData,
+} from '@/composables/useScanSocket'
+import { useScanStore } from '@/stores/scan'
 import type { SetupChecklistStatus } from '@/types/setup'
 
 const checklist = ref<SetupChecklistStatus | null>(null)
@@ -109,10 +132,12 @@ let pollInterval: ReturnType<typeof setInterval> | null = null
 
 // WS-driven progress (real-time, replaces stale poll data)
 const { startTracking, stopTracking } = useScanSocket()
+const scanStore = useScanStore()
 const wsScanActive = ref(false)
 const wsProgress = ref(0)
 const wsStatusLabel = ref('')
 const wsWarnings = ref<RepoScanWarning[]>([])
+const resuming = ref(false)
 let currentWsScanId: string | null = null
 
 // Use WS progress when available, fall back to poll data
@@ -149,7 +174,7 @@ const items = computed<ChecklistItem[]>(() => {
       label: 'Scan repository',
       done: c.scanComplete,
       inProgress: scanInProgress,
-      progressText: scanInProgress ? `${progress}%` : undefined,
+      progressText: scanInProgress ? `${Math.round(progress)}%` : undefined,
     },
     { key: 'branches', label: 'Map branch strategy', done: c.branchesMapped, route: '/settings' },
     { key: 'github', label: 'Connect GitHub', done: c.githubConnected, route: '/settings', optional: true },
@@ -186,6 +211,7 @@ function maybeStartWsTracking(scanId: string): void {
       wsProgress.value = data.progressPct || 0
       wsStatusLabel.value = data.statusLabel || ''
       wsWarnings.value = data.repoWarnings || []
+      scanStore.ingestStatus(data)
     },
     onComplete: () => {
       wsScanActive.value = false
@@ -199,6 +225,18 @@ function maybeStartWsTracking(scanId: string): void {
       fetchStatus()
     },
   })
+}
+
+async function onResume(): Promise<void> {
+  resuming.value = true
+  try {
+    const newScanId = await scanStore.resume()
+    if (newScanId) {
+      maybeStartWsTracking(newScanId)
+    }
+  } finally {
+    resuming.value = false
+  }
 }
 
 async function fetchStatus(): Promise<void> {
