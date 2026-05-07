@@ -13,5 +13,4 @@ export {
   type LocalWallBox,
   computeHutWallBoxes,
   rotatePointYaw,
-  rotateHalfSize,
 } from './TakeoverPhysicsBuilder'
