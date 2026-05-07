@@ -26,6 +26,7 @@ pushed but no PR could be opened.
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 
 import structlog
@@ -86,6 +87,12 @@ async def phase_b1_repo_setup(
         Setup PR message string if a PR was created without a URL, else None.
     """
     setup_pr_message: str | None = None
+
+    # DEBUG: clear any error from the previous scan up front so the row
+    # only carries the most recent failure (or none) by the time the
+    # frontend reads it. Successful paths leave it null.
+    if tracked_repo is not None:
+        tracked_repo.setup_last_error = None
 
     try:
         await update_scan_progress(
@@ -202,7 +209,8 @@ async def phase_b1_repo_setup(
                 status="pushing_setup",
                 progress_pct=base_pct + 28,
             )
-            pushed_branch = await commit_and_push_setup_worktree(work_path)
+            push_result = await commit_and_push_setup_worktree(work_path)
+            pushed_branch = push_result.branch
             if pushed_branch and tracked_repo is not None:
                 # Stamp branch-pushed even when the App isn't configured —
                 # this is what powers the amber "Open PR on GitHub" chip on
@@ -213,6 +221,10 @@ async def phase_b1_repo_setup(
                     repo=repo_name,
                     branch=pushed_branch,
                 )
+            elif push_result.error and tracked_repo is not None:
+                # DEBUG: surface push stderr to the frontend chip tooltip
+                # so prod operators see the failure without reading logs.
+                tracked_repo.setup_last_error = push_result.error
 
         # Attempt to open / adopt the setup PR whenever the row has not yet
         # recorded one. Three paths feed in:
@@ -264,13 +276,23 @@ async def phase_b1_repo_setup(
         # MANUAL_REQUIRED / FAILED outcomes (App not installed) leave
         # ``setup_pr_url`` null forever, so without this gate we'd dirty
         # the session every scan for nothing.
-        if any_changed or pr_state_changed:
+        if (
+            any_changed
+            or pr_state_changed
+            or (tracked_repo is not None and tracked_repo.setup_last_error is not None)
+        ):
             await db.flush()
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "scan_repo_setup_failed",
             scan_id=scan_id,
             repo=repo_name,
         )
+        # DEBUG: capture the exception type + message on the row so the
+        # frontend can show it. Truncated to keep the column small.
+        if tracked_repo is not None:
+            tracked_repo.setup_last_error = f"{type(exc).__name__}: {exc!s}"[:1000]
+            with contextlib.suppress(Exception):
+                await db.flush()
 
     return setup_pr_message
