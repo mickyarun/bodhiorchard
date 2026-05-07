@@ -25,11 +25,15 @@ import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { SCATTER_PINES, FOREST_TREES } from '../assets/AssetManifest'
 import { isInsideAnyZone, randRange, type ExclusionZone } from '../utils/MathUtils'
+import { getActiveScale } from '@shared/world/layoutScale'
 
 // ─── Outer perimeter belt ────────────────────────────────────────────────
+// Perimeter radii (`pineRingInner`, `pineRingOuter`, `pineFramingRadius`)
+// are sourced per-build from `getActiveScale().perimeter` — the single
+// source of truth in `shared/world/layoutScale.ts`. Values below are
+// scatter algorithm tuning (counts, packing distance, jitter) — content,
+// not layout, so they stay file-local.
 const OUTER_PINE_COUNT = 32
-const OUTER_INNER_RADIUS = 55
-const OUTER_OUTER_RADIUS = 85
 const MIN_DISTANCE = 4.5
 
 /** Angular gaps where no perimeter trees are placed — hints at "paths
@@ -40,12 +44,6 @@ const PERIMETER_GAPS_DEG: Array<{ center: number; halfWidth: number }> = [
 ]
 
 // ─── Inner framing clumps ────────────────────────────────────────────────
-/**
- * Framing clumps sit BETWEEN the outer ring (r=55+) and the outer habitation
- * zones (housing/pool centers at r≈50). Placed at r=52 so they frame the
- * sightlines between zones without crowding the hub-adjacent area.
- */
-const FRAMING_CLUMP_RADIUS = 52
 const FRAMING_TREES_PER_CLUMP = 3     // tight trio reads as a single tree mass
 const FRAMING_SPREAD = 3.5            // cluster blob half-width
 
@@ -167,7 +165,8 @@ export class PineTreeSystem {
       const angleDeg = (angleRad * 180) / Math.PI
       if (this.isInGap(angleDeg)) continue
 
-      const r = OUTER_INNER_RADIUS + Math.random() * (OUTER_OUTER_RADIUS - OUTER_INNER_RADIUS)
+      const { pineRingInner, pineRingOuter } = getActiveScale().perimeter
+      const r = pineRingInner + Math.random() * (pineRingOuter - pineRingInner)
       const x = Math.cos(angleRad) * r
       const z = Math.sin(angleRad) * r
 
@@ -191,8 +190,9 @@ export class PineTreeSystem {
     exclusionZones: readonly ExclusionZone[],
   ): void {
     const angleRad = (angleDeg * Math.PI) / 180
-    const cx = Math.cos(angleRad) * FRAMING_CLUMP_RADIUS
-    const cz = Math.sin(angleRad) * FRAMING_CLUMP_RADIUS
+    const framingRadius = getActiveScale().perimeter.pineFramingRadius
+    const cx = Math.cos(angleRad) * framingRadius
+    const cz = Math.sin(angleRad) * framingRadius
 
     const placed: Array<{ x: number; z: number }> = []
     let attempts = 0

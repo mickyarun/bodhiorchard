@@ -22,10 +22,8 @@
  */
 import type { HousingVillage, HousingVillageResult } from './HousingVillage'
 import type { FenceBounds } from '@shared/world/VillageLayout'
+import { computeOuterPerimeterRadius } from '@shared/world/layoutScale'
 import type { TakeoverPhysicsBuilder } from '../takeover/TakeoverPhysicsBuilder'
-
-/** Extra margin past the furthest structure to the outer rail. */
-const OUTER_PERIMETER_MARGIN = 8
 
 export class HousingState {
   village: HousingVillage | null = null
@@ -60,7 +58,7 @@ export class HousingState {
    * its footprint past the static `housing.radius` in `shared/world/zones.ts`.
    */
   getOuterPerimeterRadius(staticWorldRadius: number): number {
-    return Math.max(staticWorldRadius, this.outerReach) + OUTER_PERIMETER_MARGIN
+    return computeOuterPerimeterRadius(staticWorldRadius, this.outerReach)
   }
 
   /** Emit the village's rectangular fence into Rapier, yaw-aware. */

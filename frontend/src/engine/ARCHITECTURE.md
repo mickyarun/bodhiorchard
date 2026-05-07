@@ -47,6 +47,42 @@ the fix is adjusting the IBL/exposure/material properties — not bypassing the 
 
 ---
 
+## Critical Design Decision: World Layout Source of Truth
+
+**All world-layout / zone / scaling / path geometry lives in `shared/world/`.**
+Frontend (`frontend/src/engine/world/`) and multiplayer (`multiplayer/src/sim/`) are
+**pure consumers** — they never own a layout constant. This rule was codified after
+repeated breakage from hardcoded radii and zone coordinates duplicated across the
+two processes.
+
+**The single source of truth is `shared/world/`:**
+
+| File | Owns |
+|------|------|
+| `shared/world/layoutScale.ts` | `LayoutScale` schema + `computeLayoutScale(N)` factory + `BASELINE_*` constants |
+| `shared/world/layoutScaleCache.ts` | `setActiveScale` / `getActiveScale` / `onScaleChange` cache + derived helpers |
+| `shared/world/zones.ts` | `ZONE_DECLS` declarative zones + `buildZones(scale)` resolver |
+| `shared/world/paths.ts` | `PathRoute` + `PathKind` + `buildRoutes(zones)` + `END_TRIM` + `evalRouteAt` |
+| `shared/world/treePositions.ts` | Repo-tree + agent-slot placement math (reads `getActiveScale()`) |
+
+**Boot wiring** — each process calls `setActiveScale(computeLayoutScale(repoCount))`
+once at startup; subsequent reads use the cached value. `onScaleChange` listeners keep
+dependent caches (e.g. resolved `ZONES` in `zones.ts`) in sync.
+
+**What stays in frontend/multiplayer (NOT layout):**
+- Visual style — material colours, gloss, texture sizes, opacity
+- Algorithm tuning — packing distances, jitter ranges, sampling resolution
+- Content — species weights, angular composition, decorative counts
+
+**Rule: if a number drives geometry (radius, distance, scale), it goes in `shared/world/`.**
+If a number is rendering tuning (visual style, packing, jitter), it stays file-local.
+When in doubt, ask: *would this need to change if N (repo count) changed?* If yes, layout.
+
+The `feedback_shared_world_only.md` user memory and the `LayoutScale` regression tests
+in `frontend/src/engine/world/*.regression.test.ts` enforce this rule.
+
+---
+
 ## Directory Structure
 
 ```

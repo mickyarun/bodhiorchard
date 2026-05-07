@@ -33,6 +33,7 @@ import type { RepoVisualization } from '../world/RepoVisualization'
 import { ProceduralTreeSystem } from '../world/ProceduralTreeSystem'
 import { RelationshipArcs } from '../world/RelationshipArcs'
 import { PathSystem } from '../world/PathSystem'
+import { buildRoutes } from '@shared/world/paths'
 import { ZoneSign } from '../world/ZoneSign'
 import { SkySystem } from '../environment/SkySystem'
 import { GroundSystem } from '../environment/GroundSystem'
@@ -193,7 +194,7 @@ export class SceneManager {
     // Built BEFORE repo trees so its exclusion zone is registered in time
     // and so it anchors the scene before anything else populates the hub.
     const buildingFactory = new BuildingFactory(this.loader, this.materials)
-    const hubAnchor = new HubAnchor(buildingFactory)
+    const hubAnchor = new HubAnchor(buildingFactory, this.layout.getHubGeometry())
     const hubResult = await hubAnchor.build(this.app, 0, 0)
     if (checkCancelled()) return
     this.buildingEntities.push(hubResult.entity)
@@ -321,7 +322,7 @@ export class SceneManager {
       }
       return z
     })
-    const pathRoutes = PathSystem.defaultRoutes([...pathZones])
+    const pathRoutes = buildRoutes(pathZones)
     this.paths = new PathSystem()
     await this.paths.build(this.app, this.loader, pathRoutes)
     if (checkCancelled()) return
