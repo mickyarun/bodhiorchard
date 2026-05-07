@@ -19,7 +19,7 @@
  * source of truth as the frontend's WorldLayout.
  */
 
-import { getZone } from "./WorldLayout"
+import { requireZone } from "./WorldLayout"
 import {
   CAFETERIA_LAYOUT,
   COFFEE_BAR_LAYOUT,
@@ -77,9 +77,9 @@ export function generateBreakSeats(teamSize: number): BreakSeat[] {
   const cofCount = Math.max(Math.floor(budget * 0.3), COFFEE_MIN)
   const cafCount = Math.max(budget - cofCount - poolCount, CAFE_MIN)
 
-  const caf  = getZone("cafeteria")!
-  const cof  = getZone("coffee_bar")!
-  const pool = getZone("pool")!
+  const caf  = requireZone("cafeteria")
+  const cof  = requireZone("coffee_bar")
+  const pool = requireZone("pool")
 
   return [
     ...seatsFromLayout(CAFETERIA_LAYOUT, caf.x, caf.z, cafCount),

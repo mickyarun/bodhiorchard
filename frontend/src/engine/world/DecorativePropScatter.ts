@@ -23,7 +23,7 @@ import {
   SCATTER_FLOWERS,
   DECOR,
 } from '../assets/AssetManifest'
-import { evalRouteAt, type PathRoute } from './PathSystem'
+import { evalRouteAt, type PathRoute } from '@shared/world/paths'
 import {
   isInsideAnyZone,
   randRange,

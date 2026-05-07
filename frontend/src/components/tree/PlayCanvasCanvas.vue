@@ -108,6 +108,14 @@ let engine: GardenEngine | null = null
 // from firing a stale `tryConnectOrgRoom` while setData is still building
 // the scene (race that produced the "CharacterSystem not ready" warning).
 let engineReady = false
+// Monotonic token bumped on every `initEngine` call. Each call captures its
+// token before any await; if the module-global `initToken` advances during
+// an await, a newer `initEngine` superseded this one (e.g. HMR re-mount,
+// rapid prop change) and the older call must bail rather than touch a
+// destroyed engine. This pattern fixes the recurring
+// "Cannot read properties of null (reading 'setVehicleUnlocks' / ...)"
+// crashes that bled into the PlayCanvas render loop as `device` undefined.
+let initToken = 0
 let resizeObserver: ResizeObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -210,7 +218,13 @@ function adaptTreeData(data: TreeData): EngineData {
 async function initEngine(): Promise<void> {
   if (!containerRef.value) return
 
-  // Clean up previous engine
+  // Capture the token BEFORE any await. Every checkpoint below verifies it
+  // hasn't advanced — if it has, a newer initEngine has already taken over
+  // (and called destroy() on the engine we built), so this run must exit
+  // before touching a torn-down instance.
+  const myToken = ++initToken
+
+  // Clean up the previous engine. After this we own the slot.
   if (engine) {
     engine.destroy()
     engine = null
@@ -219,10 +233,15 @@ async function initEngine(): Promise<void> {
   const w = containerRef.value.clientWidth || 1200
   const h = containerRef.value.clientHeight || 800
 
-  engine = new GardenEngine()
+  // Use a local `myEngine` ref for all post-await work. The module-global
+  // `engine` may be reassigned to null by a concurrent initEngine call;
+  // the local ref keeps THIS run referencing its own instance — and the
+  // token check decides whether to keep using it.
+  const myEngine = new GardenEngine()
+  engine = myEngine
   // Expose for console debugging: `__engine.toggleColliderDebug()`
-  ;(window as unknown as { __engine?: GardenEngine }).__engine = engine
-  await engine.init(containerRef.value, w, h, {
+  ;(window as unknown as { __engine?: GardenEngine }).__engine = myEngine
+  await myEngine.init(containerRef.value, w, h, {
     onSceneReady: () => emit('scene-ready'),
     onTreeClick: (info) => emit('tree-click', { repoName: info.repoName }),
     onDeveloperClick: (info) => emit('developer-click', {
@@ -250,10 +269,11 @@ async function initEngine(): Promise<void> {
     onInviteToRace: (userId, name) => emit('invite-to-race', { userId, name }),
     onSceneStateChange: (state) => { sceneState.value = state },
   })
+  if (myToken !== initToken) return
 
   // Seed the initial scene state so the touch overlay reacts correctly on
   // first render (before any transition has fired).
-  sceneState.value = engine.getSceneState()
+  sceneState.value = myEngine.getSceneState()
 
   // Tell engine who the authenticated user is (for identity preservation in
   // house visits and for JWT verification on Colyseus join). The auth store
@@ -262,9 +282,10 @@ async function initEngine(): Promise<void> {
 
   // Enable server-driven mode BEFORE setData so CharacterSystem/AgentSystem
   // skip their local build paths — spawns come from OrgRoom snapshots instead.
-  engine.enableServerDriven(true)
+  myEngine.enableServerDriven(true)
 
-  await engine.setData(adaptTreeData(props.treeData))
+  await myEngine.setData(adaptTreeData(props.treeData))
+  if (myToken !== initToken) return
 
   // Mark the engine as ready BEFORE the first connect attempt. This flag
   // gates the auth watcher so it never fires a stale `tryConnectOrgRoom`
@@ -275,12 +296,21 @@ async function initEngine(): Promise<void> {
   // Connect to the Colyseus OrgRoom (if auth is already available). The
   // watcher on authStore.user handles the case where auth resolves later.
   await tryConnectOrgRoom()
+  if (myToken !== initToken) return
 
-  // Fetch XP profile to get vehicle unlocks for the engine
-  const xpStore = useXPStore()
-  await xpStore.fetchProfile()
-  if (xpStore.profile) {
-    engine.setVehicleUnlocks(xpStore.profile.vehicle_unlocks)
+  // Fetch XP profile to get vehicle unlocks for the engine. Non-fatal —
+  // the 3D scene is fully built at this point; a network blip on the XP
+  // endpoint shouldn't surface as "Failed to load 3D scene." (which it
+  // would if this throw bubbled to onMounted's outer catch).
+  try {
+    const xpStore = useXPStore()
+    await xpStore.fetchProfile()
+    if (myToken !== initToken) return
+    if (xpStore.profile) {
+      myEngine.setVehicleUnlocks(xpStore.profile.vehicle_unlocks)
+    }
+  } catch (err) {
+    console.warn('[PlayCanvasCanvas] vehicle-unlock fetch failed (scene continues):', err)
   }
 }
 
@@ -484,24 +514,51 @@ function isInControl(): boolean {
 
 defineExpose({ toggleArcs, exitHouse, focusOnRepo, clearFocus, takeoverCharacter, exitTakeover, isTakeover, isInControl })
 
-onUnmounted(() => {
+function teardownEngine(): void {
   engineReady = false
+  // Bump the token so any in-flight initEngine bails at its next checkpoint.
+  initToken++
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
   }
   if (resizeTimer) {
     clearTimeout(resizeTimer)
+    resizeTimer = null
   }
   if (proximityTimer) {
     clearInterval(proximityTimer)
     proximityTimer = null
   }
-  if (engine) {
-    engine.destroy()
-    engine = null
+  // Null the module-global FIRST so any reads during/after destroy see
+  // the truth, and wrap engine.destroy() so a thrown subsystem teardown
+  // can't abort the rest of teardown — that would defeat the HMR dispose
+  // hook (the new module instance would create a second engine on top of
+  // a half-torn-down one).
+  const engineToDestroy = engine
+  engine = null
+  if (engineToDestroy) {
+    try {
+      engineToDestroy.destroy()
+    } catch (err) {
+      console.error('[PlayCanvasCanvas] engine.destroy() threw during teardown:', err)
+    }
   }
-})
+}
+
+onUnmounted(teardownEngine)
+
+// Vite HMR — when this module is hot-replaced (script edits trigger a
+// re-execution), Vue's onUnmounted does NOT always fire on the old
+// instance, so `teardownEngine` would otherwise leak a live PlayCanvas
+// Application + RAF loop. Wiring `dispose` ensures the old engine is
+// torn down BEFORE the new module instance creates its replacement —
+// no two engines fighting over the same canvas, no orphan render loop
+// drawing freed GPU buffers (the `WebglGraphicsDevice.draw → device
+// undefined` crash that used to spam the console after every save).
+if (import.meta.hot) {
+  import.meta.hot.dispose(teardownEngine)
+}
 </script>
 
 <style scoped>
