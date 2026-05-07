@@ -30,8 +30,13 @@ export interface RepoVisualization {
   /** Get the entity for a repo visual (for picking, interaction). */
   getTreeEntity(repoName: string): pc.Entity | undefined
 
-  /** Per-frame update for animated visualizations (optional). */
-  update?(dt: number): void
+  /**
+   * Per-frame update for animated visualizations (optional).
+   * `viewerPos`, when supplied, lets the implementation cull distant visuals
+   * relative to a ground-level viewer (e.g. takeover-mode character). Pass
+   * `null`/omit in modes where everything should always render.
+   */
+  update?(dt: number, viewerPos?: pc.Vec3 | null): void
 
   /** All entities tagged 'pickable' — repo containers + feature branches (optional). */
   getPickableEntities?(): pc.Entity[]

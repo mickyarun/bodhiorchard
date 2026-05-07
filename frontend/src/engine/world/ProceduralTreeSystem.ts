@@ -70,6 +70,27 @@ const LABEL_GAP = 0.3
 /** Default label height if tree has no tips (shouldn't happen in practice). */
 const DEFAULT_LABEL_Y = 4.0
 
+/**
+ * Distance LOD thresholds (squared, world units²) used only when an explicit
+ * viewerPos is supplied (currently: takeover mode). Hysteresis prevents
+ * per-frame flicker for trees parked exactly at the cull boundary.
+ */
+const VIEWER_DISABLE_DIST_SQ = 45 * 45
+const VIEWER_ENABLE_DIST_SQ  = 35 * 35
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Toggle a tree entry's visibility across all three sibling roots that hold
+ * its visuals (container, Tree3DSystem root, LeafSystem root). Used by the
+ * distance-LOD path in `update`.
+ */
+function setEntryVisible(entry: ProceduralEntry, visible: boolean): void {
+  entry.container.enabled = visible
+  entry.tree.getRoot().enabled = visible
+  entry.leaves.getRoot().enabled = visible
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ProceduralEntry {
@@ -250,8 +271,17 @@ export class ProceduralTreeSystem implements RepoVisualization {
     entry.label = label
   }
 
-  /** Advance all growing trees. Spawn leaves + labels on completion. Animate leaves each frame. */
-  update(dt: number): void {
+  /**
+   * Advance all growing trees. Spawn leaves + labels on completion. Animate
+   * leaves each frame.
+   *
+   * `viewerPos` opts a tree subtree out of the scene graph when its trunk is
+   * far from the active viewer (used in takeover mode to skip draw-call
+   * submission for trees behind / beyond the player). Pass `null` in modes
+   * where every tree should always render — e.g. observer/garden mode where
+   * the orbit camera surveys the whole orchard.
+   */
+  update(dt: number, viewerPos: pc.Vec3 | null = null): void {
     if (!this.appRef) return
 
     for (const entry of this.entries) {
@@ -302,6 +332,31 @@ export class ProceduralTreeSystem implements RepoVisualization {
 
       // Animate leaf wind sway every frame (no-op once leaves are baked)
       entry.leaves.update(dt)
+
+      // Distance LOD: hide distant trees outright when the viewer is a
+      // ground-level character (takeover). Three entities must toggle in
+      // lockstep — they're SIBLINGS under app.root, not children of one
+      // anchor: `container` owns the label + primary pick proxies, the
+      // Tree3DSystem root owns the instanced branches (the bulk of the draw
+      // cost), and the LeafSystem root owns the instanced leaves. Toggling
+      // all three removes every MeshInstance from PlayCanvas's render pass
+      // and skips state-setup for the whole tree. Hysteresis (35 re-enable /
+      // 45 disable) absorbs jitter at the boundary. Skipped during growth so
+      // we don't strand a half-built tree off-screen.
+      if (viewerPos && entry.done) {
+        const dx = entry.worldX - viewerPos.x
+        const dz = entry.worldZ - viewerPos.z
+        const distSq = dx * dx + dz * dz
+        const visible = entry.container.enabled
+        const next = visible
+          ? (distSq <= VIEWER_DISABLE_DIST_SQ)
+          : (distSq <  VIEWER_ENABLE_DIST_SQ)
+        if (next !== visible) setEntryVisible(entry, next)
+      } else if (!viewerPos && !entry.container.enabled) {
+        // Restore visibility when leaving takeover (or any mode that opted
+        // out of LOD) so observer mode never sees a permanently-hidden tree.
+        setEntryVisible(entry, true)
+      }
     }
   }
 

@@ -28,7 +28,7 @@ import { TreeBranch } from './TreeBranch'
 import { defaultTrunk, defaultBranch, type TreeRules, type Color3, WORLD_SCALE } from './TreeRules'
 import type { WindSystem } from './WindSystem'
 import type { BakedBranchGroup, BakedFeaturePrimary } from './treeCache'
-import { createInstancedEntity } from './instancing'
+import { createInstancedEntity, computeInstanceAabb } from './instancing'
 
 /** Data returned by bakeInstanced — everything needed to persist + reconstruct. */
 export interface BakedTreeExport {
@@ -42,6 +42,8 @@ const THICKNESS_DIVISOR   = 14
 const MIN_THICKNESS        = 0.003  // world units — prevents hairline artifacts on tiny branches
 const COLLECT_MAX_DEPTH   = 30
 const DEFAULT_LEVELS      = 16
+/** AABB inflation for baked branch batches — see attachInstancedBranchEntity. */
+const BRANCH_AABB_MARGIN  = 2.0
 
 export class Tree3DSystem {
   private app: pc.AppBase
@@ -593,6 +595,9 @@ export class Tree3DSystem {
   private attachInstancedBranchEntity(colorKey: string, matrices: Float32Array, count: number): void {
     const material = this.matCache.get(colorKey)
     if (!material || count === 0) return
+    // Margin covers a unit cylinder's worst-case extent under the instance's
+    // rotation/scale (branches up to ~1 unit long) plus slack for wind sway.
+    const aabb = computeInstanceAabb(matrices, count, BRANCH_AABB_MARGIN)
     const { entity, vb } = createInstancedEntity(
       this.app.graphicsDevice,
       this.getCylinderMesh(),
@@ -600,6 +605,7 @@ export class Tree3DSystem {
       matrices,
       count,
       `BakedBranches_${colorKey}`,
+      { aabb },
     )
     this.treeRoot.addChild(entity)
     this.bakedEntities.push(entity)

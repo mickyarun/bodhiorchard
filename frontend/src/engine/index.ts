@@ -586,8 +586,18 @@ export class GardenEngine {
         break
 
       case 'takeover':
-        // Garden stays alive — birds, clouds, agent robots, other characters
-        this.sceneManager?.update(dt)
+        // Garden stays alive — birds, clouds, agent robots, other characters.
+        // viewerPos drives ProceduralTreeSystem's distance-LOD: trees beyond
+        // ~45 units of the local player are removed from the render pass to
+        // keep WebGL command submission inside the frame budget. When mounted,
+        // the vehicle's position is authoritative for the player; otherwise
+        // the takeover capsule's position is used.
+        {
+          const viewerPos = this.vehicleCtrl?.isActive
+            ? (this.vehicleCtrl.getPosition() ?? this.takeoverCtrl?.getPosition() ?? null)
+            : (this.takeoverCtrl?.getPosition() ?? null)
+          this.sceneManager?.update(dt, viewerPos)
+        }
         // Same stopped-horse idle fix as 'garden' — applies here because the
         // local player may be observing other mounted users from takeover.
         this.vehicleSystem?.update()
