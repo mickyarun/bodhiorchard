@@ -22,17 +22,33 @@ import type { Zone } from './zones'
 
 export type PathKind = 'primary' | 'secondary'
 
-export interface PathRoute {
+interface PathRouteBase {
   fromX: number
   fromZ: number
   toX: number
   toZ: number
-  /** Optional quadratic Bezier control point. If unset, route is straight. */
-  controlX?: number
-  controlZ?: number
   /** Visual tier. Defaults to 'primary' for backward compatibility. */
   kind?: PathKind
 }
+
+export interface StraightRoute extends PathRouteBase {
+  curve: 'straight'
+}
+
+export interface BezierRoute extends PathRouteBase {
+  curve: 'bezier'
+  controlX: number
+  controlZ: number
+}
+
+/**
+ * Discriminated by `curve` so straight + curved routes can't be silently
+ * mixed: a `BezierRoute` always has both control coords; a `StraightRoute`
+ * has neither. Eliminates the prior `controlX?/controlZ?` partial-state
+ * class where one-but-not-the-other was a valid type but a meaningless
+ * runtime.
+ */
+export type PathRoute = StraightRoute | BezierRoute
 
 /** Fraction of route length trimmed at each end so paths stop shy of zone
  *  discs rather than poking into them. Shared by any system that samples
@@ -45,7 +61,7 @@ export const END_TRIM = 0.08
  * follow curves consistently with rendered paths.
  */
 export function evalRouteAt(route: PathRoute, t: number): { x: number; z: number } {
-  if (route.controlX === undefined || route.controlZ === undefined) {
+  if (route.curve === 'straight') {
     return {
       x: route.fromX + (route.toX - route.fromX) * t,
       z: route.fromZ + (route.toZ - route.fromZ) * t,
@@ -91,6 +107,7 @@ export function buildRoutes(zones: ReadonlyArray<Zone>): PathRoute[] {
   for (const zone of zones) {
     if (zone.tier === 'hub') continue
     routes.push({
+      curve: 'straight',
       fromX: hub.x, fromZ: hub.z,
       toX: zone.x, toZ: zone.z,
       kind: zone.tier === 'activity' ? 'primary' : 'secondary',

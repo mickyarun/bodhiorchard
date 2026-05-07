@@ -32,6 +32,7 @@ import {
   type PresenceState,
 } from "../sim/MemberPlacement"
 import { getTreePositions } from "../sim/WorldLayout"
+import { computeLayoutScale, getActiveScale, setActiveScale } from "../../../shared/world/layoutScale"
 import { generateBreakSeats, type BreakSeat } from "../sim/BreakSeatGenerator"
 import {
   DevActivitySim,
@@ -529,9 +530,35 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       if (m.has_slack) this.hasSlack.add(m.user_id)
     }
 
-    // Compute repo tree positions (used by Phase 5 dev_activity sim)
+    // Compute repo tree positions (used by Phase 5 dev_activity sim).
+    // Tune the active layout scale to this org's repo count BEFORE
+    // calling getTreePositions — the curve drives orchard radius which
+    // drives tree-ring radii. Must match the frontend's
+    // `WorldLayout.rescale(data.repos.length)` so client + server agree
+    // byte-for-byte on tree coords.
+    //
+    // Phase 3 caveat: this writes to the default-key scale slot. With
+    // multiple OrgRoom instances per Node process, the last-loaded org
+    // wins. Multi-org-per-process safety needs a `withRoomKey` context
+    // (see Phase 1.5 #2 deferred items in the plan).
+    //
+    // Concurrency probe: warn when the cached default-key scale already
+    // differs from this org's intended scale at write time — a signal
+    // that a peer OrgRoom raced this load with a different N. Today's
+    // single-org-per-process deployments never hit this; cross-org
+    // setups will see the warn and know they need the Phase 3 context.
     this.repoPositions.clear()
     const repoNames = snapshot.repos?.map(r => r.repo_name).sort() ?? []
+    const desiredScale = computeLayoutScale(repoNames.length)
+    const currentScale = getActiveScale()
+    if (currentScale.orchardRadius !== desiredScale.orchardRadius) {
+      console.warn(
+        `[OrgRoom] default-key scale clobber org=${this.state.orgId} ` +
+        `currentR=${currentScale.orchardRadius} desiredR=${desiredScale.orchardRadius} ` +
+        `— another OrgRoom likely raced this snapshot load. Phase 3 fix needed for multi-org-per-process.`,
+      )
+    }
+    setActiveScale(desiredScale)
     const treeCoords = getTreePositions(repoNames.length)
     repoNames.forEach((name, i) => {
       if (treeCoords[i]) this.repoPositions.set(name, treeCoords[i])

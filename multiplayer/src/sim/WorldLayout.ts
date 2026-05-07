@@ -27,7 +27,7 @@ import {
   DESK_SEAT_Y,
 } from "../../../shared/world/HouseTiers"
 
-export { ZONES, getZone, requireZone, type Zone } from "../../../shared/world/zones"
+export { getZones, getZone, requireZone, type Zone } from "../../../shared/world/zones"
 import { getZone, type Zone } from "../../../shared/world/zones"
 import {
   BASELINE_REPO_COUNT,

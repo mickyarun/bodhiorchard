@@ -18,6 +18,16 @@
  * Phase 2 will swap the stub for an N-driven curve.
  */
 
+import {
+  BASELINE_ORCHARD_RADIUS,
+  BASELINE_REPO_COUNT,
+  computeOrchardRadius,
+} from './orchardCurve'
+
+// Re-export so today's `import { BASELINE_REPO_COUNT } from './layoutScale'`
+// call sites stay valid after the curve split.
+export { BASELINE_ORCHARD_RADIUS, BASELINE_REPO_COUNT }
+
 const RAD_PER_DEG = Math.PI / 180
 
 /** Hub-anchor geometry (the central plaza + mound + bush ring + hero tree). */
@@ -108,22 +118,23 @@ export interface LayoutScale {
 // the type-design review — speculative `0`-typed fields create a false
 // impression of capability and add noise for every reader.
 
-/** Today's "typical" repo count — the baseline at which all literals were tuned. */
-export const BASELINE_REPO_COUNT = 8
-
-/** Orchard radius at baseline. Re-exported so `shared/world/zones.ts` can
- *  back-derive polar form from baseline coords without redeclaring. */
-export const BASELINE_ORCHARD_RADIUS = 18
-
 /**
  * Compute the layout scale for a given repo count.
  *
- * Phase 1 implementation: returns baseline values regardless of N. Phase 2
- * will replace this stub with an N-driven curve.
+ * The orchard radius scales via `computeOrchardRadius`. The pine
+ * perimeter belt translates outward by the same Δ so the gap from the
+ * outermost zone to the tree line stays constant at any N. Hub geometry
+ * (plaza, mound, bush ring) is intentionally fixed — it's the visual
+ * anchor that should read at the same human scale regardless of org
+ * size. Agent slots and tree-ring ratios are tree-relative or
+ * orchard-radius-relative respectively, so they auto-scale via the
+ * downstream readers without needing per-N values here.
  */
-export function computeLayoutScale(_repoCount: number): LayoutScale {
+export function computeLayoutScale(repoCount: number): LayoutScale {
+  const orchardRadius = computeOrchardRadius(repoCount)
+  const perimeterShift = orchardRadius - BASELINE_ORCHARD_RADIUS
   return {
-    orchardRadius: BASELINE_ORCHARD_RADIUS,
+    orchardRadius,
     hub: {
       plazaRadius: 8.5,
       moundRadius: 4.0,
@@ -156,9 +167,9 @@ export function computeLayoutScale(_repoCount: number): LayoutScale {
     },
     perimeter: {
       outerFenceMargin: 8,
-      pineFramingRadius: 52,
-      pineRingInner: 55,
-      pineRingOuter: 85,
+      pineFramingRadius: 52 + perimeterShift,
+      pineRingInner: 55 + perimeterShift,
+      pineRingOuter: 85 + perimeterShift,
     },
   }
 }
@@ -167,6 +178,7 @@ export function computeLayoutScale(_repoCount: number): LayoutScale {
 // "schema + factory" file under the size cap. Re-exported here so every
 // consumer can import from a single path.
 export {
+  DEFAULT_ROOM_KEY,
   computeOuterPerimeterRadius,
   getActiveScale,
   onScaleChange,

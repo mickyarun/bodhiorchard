@@ -135,24 +135,34 @@ export function buildZones(scale: LayoutScale): Zone[] {
 }
 
 /**
- * Resolved zone array. Populated eagerly at module load using the active
- * scale (lazy default = baseline) and kept in sync via `onScaleChange`:
- * any `setActiveScale` call rebuilds ZONES in place so `getZone` reflects
- * the new geometry. Mutated in place (rather than reassigned) so that
- * callers holding the array reference — including `multiplayer/.../WorldLayout.ts`
- * which re-exports it — see updates without re-importing.
+ * Internally-held resolved zone array. Replaced atomically via
+ * `onScaleChange` so readers never see a transient half-state. External
+ * code reads through `getZones()` (a `ReadonlyArray<Zone>`); the
+ * mutability and reassignment live behind that boundary.
+ *
+ * The earlier `export const ZONES` exposed the array directly and
+ * rebuilt via `length = 0; push(...)`, leaving a brief window where any
+ * sync iteration during the listener saw an empty array. Baseline-only
+ * scale today made the bug invisible; Phase 2 scale changes would have
+ * exposed it.
  */
-export const ZONES: Zone[] = buildZones(getActiveScale())
+let currentZones: ReadonlyArray<Zone> = buildZones(getActiveScale())
 
 onScaleChange(scale => {
-  const fresh = buildZones(scale)
-  ZONES.length = 0
-  ZONES.push(...fresh)
+  currentZones = buildZones(scale)
 })
+
+/**
+ * Read-only view of the resolved zones. Always reflects the current
+ * scale — call this fresh each time rather than caching the reference.
+ */
+export function getZones(): ReadonlyArray<Zone> {
+  return currentZones
+}
 
 /** Get a zone by name. Returns null if not found. */
 export function getZone(name: string): Zone | null {
-  return ZONES.find(z => z.name === name) ?? null
+  return currentZones.find(z => z.name === name) ?? null
 }
 
 /**

@@ -67,7 +67,8 @@ two processes.
 
 **Boot wiring** — each process calls `setActiveScale(computeLayoutScale(repoCount))`
 once at startup; subsequent reads use the cached value. `onScaleChange` listeners keep
-dependent caches (e.g. resolved `ZONES` in `zones.ts`) in sync.
+dependent caches (e.g. the resolved zone array exposed by `getZones()` in `zones.ts`)
+in sync via atomic reassignment.
 
 **What stays in frontend/multiplayer (NOT layout):**
 - Visual style — material colours, gloss, texture sizes, opacity

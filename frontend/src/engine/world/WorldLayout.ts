@@ -8,7 +8,7 @@
  * multiplayer server and the client stay in sync automatically. To
  * move a zone, edit shared/world/zones.ts — NOT this file.
  */
-import { ZONES as SHARED_ZONES, type Zone, type ZoneTier } from '@shared/world/zones'
+import { getZones, type Zone, type ZoneTier } from '@shared/world/zones'
 import { getTreePositions as sharedGetTreePositions } from '@shared/world/treePositions'
 import {
   BASELINE_REPO_COUNT,
@@ -21,10 +21,11 @@ import type { ExclusionZone } from '../utils/MathUtils'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 
 // Boot-wire the shared layout-scale cache at module load so any consumer
-// (frontend builders, tests, hot-reload re-mount) sees baseline geometry
-// before reading. Multiplayer mirrors this in `multiplayer/src/sim/WorldLayout.ts`.
-// Phase 2 will replace BASELINE_REPO_COUNT with the real org repoCount
-// threaded through SceneManager.
+// (tests, hot-reload re-mount, transient reads before construction) sees
+// baseline geometry before reading. The `WorldLayout` constructor below
+// then refines the scale with the real per-org `repoCount` once it's
+// known. Multiplayer mirrors this same pattern in
+// `multiplayer/src/sim/WorldLayout.ts` and `OrgRoom.loadSnapshot`.
 setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
 
 /** Backward-compatible alias — use InteractionPoint in new code. */
@@ -38,15 +39,38 @@ export type { ZoneTier }
  *  historical reasons — many builders import WorldZone directly. */
 export type WorldZone = Zone
 
-const ZONES: WorldZone[] = SHARED_ZONES
-
 export class WorldLayout {
   private zones: WorldZone[]
   private exclusionZones: ExclusionZone[] = []
   private seats: InteractionPoint[] = []
 
-  constructor() {
-    this.zones = [...ZONES]
+  /**
+   * @param repoCount Per-org repo count. Drives the orchard radius and
+   *   perimeter belt via `computeLayoutScale`. Pass 0 to render at the
+   *   baseline scale (treated as `BASELINE_REPO_COUNT` by the curve's
+   *   floor — small orgs get a usable orchard).
+   */
+  constructor(repoCount = BASELINE_REPO_COUNT) {
+    setActiveScale(computeLayoutScale(repoCount))
+    this.zones = [...getZones()]
+  }
+
+  /**
+   * Re-tune the world to a new repo count. Used at the top of
+   * `SceneManager.build()` once the per-org engine data lands — the
+   * constructor is called at app boot before that data exists. Updates
+   * the active scale (which fires the `onScaleChange` listener that
+   * rebuilds the shared zone cache) and refreshes this instance's local
+   * snapshot. Idempotent at the same N.
+   */
+  rescale(repoCount: number): void {
+    const scale = computeLayoutScale(repoCount)
+    setActiveScale(scale)
+    this.zones = [...getZones()]
+    console.log(
+      `[WorldLayout] rescale: repos=${repoCount} → orchardRadius=${scale.orchardRadius.toFixed(2)} ` +
+      `(baseline=${BASELINE_REPO_COUNT}/18, curve floor at ≤${BASELINE_REPO_COUNT})`,
+    )
   }
 
   /** Get a named zone. */

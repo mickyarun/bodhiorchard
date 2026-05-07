@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   BASELINE_ORCHARD_RADIUS,
   BASELINE_REPO_COUNT,
+  DEFAULT_ROOM_KEY,
   computeLayoutScale,
   getActiveScale,
   onScaleChange,
@@ -79,11 +80,53 @@ describe('computeLayoutScale at baseline reproduces today’s literals', () => {
   })
 })
 
-describe('Phase 1 stub: computeLayoutScale ignores repoCount', () => {
-  it('returns identical scales for any N (Phase 2 will replace this stub)', () => {
-    const a = computeLayoutScale(1)
-    const b = computeLayoutScale(50)
-    expect(a).toEqual(b)
+describe('Phase 2 curve: computeLayoutScale scales orchard with repoCount', () => {
+  it('returns baseline at N=BASELINE_REPO_COUNT (byte-identical, no Phase 1 regression)', () => {
+    const baseline = computeLayoutScale(BASELINE_REPO_COUNT)
+    expect(baseline.orchardRadius).toBe(BASELINE_ORCHARD_RADIUS)
+    expect(baseline.perimeter.pineRingInner).toBe(55)
+    expect(baseline.perimeter.pineRingOuter).toBe(85)
+    expect(baseline.perimeter.pineFramingRadius).toBe(52)
+  })
+
+  it('floors small orgs at the baseline radius (N≤8 → R=18)', () => {
+    expect(computeLayoutScale(1).orchardRadius).toBe(BASELINE_ORCHARD_RADIUS)
+    expect(computeLayoutScale(3).orchardRadius).toBe(BASELINE_ORCHARD_RADIUS)
+    expect(computeLayoutScale(7).orchardRadius).toBe(BASELINE_ORCHARD_RADIUS)
+  })
+
+  it('grows linearly above the floor at 2.5u per repo', () => {
+    // R = 18 + 2.5 * (N - 8) for 8 ≤ N ≤ where the cap kicks in
+    expect(computeLayoutScale(15).orchardRadius).toBeCloseTo(35.5, 9)
+    expect(computeLayoutScale(20).orchardRadius).toBeCloseTo(48, 9)
+    expect(computeLayoutScale(28).orchardRadius).toBeCloseTo(68, 9)
+  })
+
+  it('caps at 70 to bound camera framing and prevent runaway worlds', () => {
+    expect(computeLayoutScale(29).orchardRadius).toBe(70)
+    expect(computeLayoutScale(200).orchardRadius).toBe(70)
+    expect(computeLayoutScale(1000).orchardRadius).toBe(70)
+  })
+
+  it('shifts the pine perimeter belt by the same Δ as orchard growth (gap preserved)', () => {
+    const big = computeLayoutScale(20)
+    const delta = big.orchardRadius - BASELINE_ORCHARD_RADIUS
+    expect(big.perimeter.pineRingInner).toBeCloseTo(55 + delta, 9)
+    expect(big.perimeter.pineRingOuter).toBeCloseTo(85 + delta, 9)
+    expect(big.perimeter.pineFramingRadius).toBeCloseTo(52 + delta, 9)
+  })
+
+  it('hub geometry is N-invariant — the central plaza reads at the same human scale', () => {
+    const small = computeLayoutScale(3)
+    const big = computeLayoutScale(80)
+    expect(big.hub).toEqual(small.hub)
+  })
+
+  it('curve is monotonically non-decreasing in N', () => {
+    const radii = [1, 8, 12, 20, 40, 80, 200].map(n => computeLayoutScale(n).orchardRadius)
+    for (let i = 1; i < radii.length; i++) {
+      expect(radii[i]).toBeGreaterThanOrEqual(radii[i - 1])
+    }
   })
 })
 
@@ -141,5 +184,51 @@ describe('onScaleChange listener hook', () => {
     off()
     setActiveScale({ ...computeLayoutScale(BASELINE_REPO_COUNT), orchardRadius: 50 })
     expect(seen).toEqual([30])
+  })
+})
+
+describe('per-room scale isolation (Phase 2 prerequisite)', () => {
+  beforeEach(() => resetActiveScale())
+
+  it('writes under distinct room keys do not clobber each other', () => {
+    const baseline = computeLayoutScale(BASELINE_REPO_COUNT)
+    setActiveScale({ ...baseline, orchardRadius: 21 }, 'org_a')
+    setActiveScale({ ...baseline, orchardRadius: 33 }, 'org_b')
+    expect(getActiveScale('org_a').orchardRadius).toBe(21)
+    expect(getActiveScale('org_b').orchardRadius).toBe(33)
+  })
+
+  it('writing under a non-default key leaves the default-key scale untouched', () => {
+    setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT)) // primes default
+    const baseline = computeLayoutScale(BASELINE_REPO_COUNT)
+    setActiveScale({ ...baseline, orchardRadius: 99 }, 'org_a')
+    expect(getActiveScale().orchardRadius).toBe(BASELINE_ORCHARD_RADIUS)
+    expect(getActiveScale(DEFAULT_ROOM_KEY).orchardRadius).toBe(BASELINE_ORCHARD_RADIUS)
+  })
+
+  it('non-default-key writes do NOT fire onScaleChange listeners (Phase 1.5 scope)', () => {
+    const seen: number[] = []
+    const off = onScaleChange(scale => seen.push(scale.orchardRadius))
+    setActiveScale(
+      { ...computeLayoutScale(BASELINE_REPO_COUNT), orchardRadius: 99 },
+      'org_a',
+    )
+    expect(seen).toEqual([])
+    off()
+  })
+
+  it('reading an unwired non-default key throws (no silent baseline fallback)', () => {
+    expect(() => getActiveScale('org_unwired')).toThrow(
+      /getActiveScale\('org_unwired'\) called before setActiveScale/,
+    )
+  })
+
+  it('resetActiveScale(roomKey) clears just that key', () => {
+    const baseline = computeLayoutScale(BASELINE_REPO_COUNT)
+    setActiveScale({ ...baseline, orchardRadius: 21 }, 'org_a')
+    setActiveScale({ ...baseline, orchardRadius: 33 }, 'org_b')
+    resetActiveScale('org_a')
+    expect(() => getActiveScale('org_a')).toThrow()
+    expect(getActiveScale('org_b').orchardRadius).toBe(33)
   })
 })

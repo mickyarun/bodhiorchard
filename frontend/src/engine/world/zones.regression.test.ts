@@ -105,14 +105,14 @@ describe('runtime invariants on resolved zones', () => {
   })
 })
 
-describe('ZONES is kept in sync with the active scale (P2-b invalidation hook)', () => {
+describe('zone cache is kept in sync with the active scale (P2-b invalidation hook)', () => {
   // After each scale-mutation test, restore baseline so beforeEach in any
   // sibling describe block sees a consistent starting state.
   afterEach(() => {
     setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
   })
 
-  it('setActiveScale rebuilds ZONES in place so getZone reflects the new orchard radius', () => {
+  it('setActiveScale atomically swaps the zone cache so getZone reflects the new orchard radius', () => {
     const baseline = computeLayoutScale(BASELINE_REPO_COUNT)
     setActiveScale({ ...baseline, orchardRadius: 30 })
     expect(getZone('orchard')!.radius).toBe(30)
