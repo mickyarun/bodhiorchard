@@ -89,7 +89,7 @@
         </li>
         <li>Set <strong>Webhook URL</strong> to <code>{{ webhookUrl }}</code></li>
         <li>Set <strong>Webhook Secret</strong> &mdash; generate one with <code>openssl rand -hex 32</code> and paste it in both GitHub and here</li>
-        <li>Under <strong>Repository permissions</strong>: set <em>Pull requests</em> to <strong>Read &amp; Write</strong>, <em>Contents</em> to <strong>Read</strong>, <em>Issues</em> to <strong>Read</strong></li>
+        <li>Under <strong>Repository permissions</strong>: set <em>Pull requests</em> to <strong>Read &amp; Write</strong>, <em>Contents</em> to <strong>Read &amp; Write</strong>, <em>Issues</em> to <strong>Read</strong></li>
         <li>Under <strong>Subscribe to events</strong>: check <em>Pull request</em>, <em>Pull request review</em>, <em>Pull request review comment</em>, <em>Pull request review thread</em>, <em>Issue comment</em>, and <em>Issues</em></li>
         <li>Click <strong>Create GitHub App</strong> &mdash; copy the <strong>App ID</strong> and paste it above</li>
         <li>On the app page, scroll to <strong>Private keys</strong> &rarr; Generate a private key &mdash; paste the downloaded <code>.pem</code> contents above</li>
