@@ -483,8 +483,31 @@ export class SceneManager {
    *   SerializedExecutor to abort in-flight builds on disposal.
    */
   async rebuild(data: EngineData, signal?: AbortSignal): Promise<void> {
-    this.teardown()
-    await this.build(data, signal)
+    // Halt PlayCanvas auto-rendering for the entire teardown→build window.
+    //
+    // `teardown()` synchronously frees materials and entities; the async
+    // `build()` then takes many frames to repopulate the scene graph. Without
+    // this gate, the RAF render loop keeps drawing each frame and hits a
+    // window where vertex buffers / textures have been destroyed but PC's
+    // render queue still references them — surfacing as the recurring
+    // `WebglGraphicsDevice.draw → Cannot read properties of undefined
+    // (reading 'device')` console spam plus `RenderPass cannot be started
+    // while inside another render pass` on rebuild.
+    //
+    // The flag is restored in a `finally` so an aborted build (signal.reason
+    // throws) doesn't leave rendering disabled for the rest of the session.
+    // GardenEngine.destroy() also flips autoRender=false unconditionally
+    // before its own teardown — that path doesn't restore (the engine is
+    // gone).
+    const pcApp = this.app.app
+    const wasAutoRender = pcApp.autoRender
+    pcApp.autoRender = false
+    try {
+      this.teardown()
+      await this.build(data, signal)
+    } finally {
+      pcApp.autoRender = wasAutoRender
+    }
   }
 
   // ─── Public Accessors ─────────────────────────
