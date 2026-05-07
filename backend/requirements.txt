@@ -22,5 +22,8 @@ cachetools>=5.3.0
 # upstream dropping them silently doesn't break the app):
 #   python-dotenv: backend/alembic/env.py loads .env for the Alembic CLI
 #   PyYAML:        backend/app/services/skill_loader.py parses frontmatter
+#   PyJWT[crypto]: backend/app/services/github_app_jwt.py signs RS256 JWTs
+#                  for GitHub App auth — needs cryptography for RS256.
 python-dotenv>=1.0.0
 PyYAML>=6.0
+PyJWT[crypto]>=2.8.0
