@@ -214,6 +214,9 @@ export class GardenEngine {
 
     // Scene manager — orchestrates all Phase 2+ subsystems
     this.sceneManager = new SceneManager(this.app, this.materials)
+    // setCurrentUser may have been called before init(); replay the id so the
+    // village build picks up "your home" highlighting on the first scene build.
+    this.sceneManager.setCurrentUserId(this.currentUser?.id ?? null)
 
     // Picking system — hover tooltips + click for repo/feature entities
     this.picker = new TreePickerSystem()
@@ -1660,6 +1663,8 @@ export class GardenEngine {
     this.currentUser = user
     // Keep VehicleSystem in sync so it always skips the local user
     this.vehicleSystem?.setLocalUserId(user?.id ?? null)
+    // SceneManager uses this to highlight "your" home in the village.
+    this.sceneManager?.setCurrentUserId(user?.id ?? null)
   }
 
   /** Update the set of unlocked vehicle IDs (gates V-key mount). */

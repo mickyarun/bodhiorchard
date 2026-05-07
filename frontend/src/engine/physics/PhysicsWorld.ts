@@ -117,6 +117,29 @@ export class PhysicsWorld {
   }
 
   /**
+   * Add a door collider rotated around the Y axis. Same shape as `addDoor`
+   * but the cuboid is oriented so its thin face is parallel to the rotated
+   * front wall — required for non-axis-aligned villages where an axis-
+   * aligned door AABB would overlap an adjacent wall panel.
+   */
+  addDoorRotated(
+    id: string,
+    x: number, y: number, z: number,
+    halfW: number, halfH: number, halfD: number,
+    yawRad: number,
+  ): RAPIER_NS.RigidBody {
+    const half = yawRad * 0.5
+    const body = this.world.createRigidBody(
+      R.RigidBodyDesc.fixed()
+        .setTranslation(x, y, z)
+        .setRotation({ x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) }),
+    )
+    const collider = this.world.createCollider(R.ColliderDesc.cuboid(halfW, halfH, halfD), body)
+    this.doorHandles.set(collider.handle, id)
+    return body
+  }
+
+  /**
    * Hard gate for door detection. `false` disables all door hits until
    * set back to `true`; also clears any pending hit. Use for long-lived
    * states (takeover setup, interior mode) where you control both edges

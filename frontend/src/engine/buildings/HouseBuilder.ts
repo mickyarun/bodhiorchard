@@ -19,115 +19,41 @@
  * existing callers work without modification.
  */
 import * as pc from 'playcanvas'
+import type { Application } from '../core/Application'
 import { BuildingFactory } from './BuildingFactory'
 import { BUILDING } from '../assets/AssetManifest'
 import { setTreeData } from '../world/TreeNodeData'
 import { getHouseTier, BED_SURFACE_Y } from './HouseTierConfig'
+import { LabelRenderer, type LabelOptions } from '../rendering/LabelRenderer'
 import type { InteractionPoint } from '../characters/InteractionPoint'
 
 /** Shared wall height constant — exported so takeover physics can match visual walls. */
 export const WALL_HEIGHT = 1.29
 
-// ─── House Nameboard ─────────────────────────────
+// ─── House Nameplate Styling ─────────────────────
 
-const BOARD_TEX_W = 320
-const BOARD_TEX_H = 80
-const BOARD_WORLD_W = 1.6
-const BOARD_WORLD_H = BOARD_WORLD_W * (BOARD_TEX_H / BOARD_TEX_W)
+/** Vertical clearance above the highest roof point — keeps the plate off the ridge. */
+const NAMEPLATE_ROOF_CLEARANCE = 0.6
 
 /**
- * Create a wooden-plank-style nameboard for a house.
- * Uses canvas pre-flip so text reads correctly under billboard rotation.
- * Tagged 'billboard' for Application's per-frame camera-facing loop.
+ * Resolve the LabelRenderer options for a house nameplate.
+ * Own-home gets a gold pill + bigger font + "(You)" suffix so the player
+ * can spot their house at a glance in a row of identical KayKit cottages.
+ * Other members get the default dark pill.
  */
-function createHouseNameboard(
-  name: string,
-  device: pc.GraphicsDevice,
-  height: number,
-): pc.Entity {
-  const canvas = document.createElement('canvas')
-  canvas.width = BOARD_TEX_W
-  canvas.height = BOARD_TEX_H
-  const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, BOARD_TEX_W, BOARD_TEX_H)
-
-  // Pre-flip horizontally — billboard lookAt views the plane from behind,
-  // so mirroring the canvas content makes text read correctly in 3D.
-  ctx.translate(BOARD_TEX_W, 0)
-  ctx.scale(-1, 1)
-
-  // Wooden plank background
-  const pad = 6
-  const r = 8
-  ctx.fillStyle = '#3E2723' // dark wood brown
-  ctx.beginPath()
-  ctx.moveTo(pad + r, pad)
-  ctx.arcTo(BOARD_TEX_W - pad, pad, BOARD_TEX_W - pad, BOARD_TEX_H - pad, r)
-  ctx.arcTo(BOARD_TEX_W - pad, BOARD_TEX_H - pad, pad, BOARD_TEX_H - pad, r)
-  ctx.arcTo(pad, BOARD_TEX_H - pad, pad, pad, r)
-  ctx.arcTo(pad, pad, BOARD_TEX_W - pad, pad, r)
-  ctx.closePath()
-  ctx.fill()
-
-  // Subtle wood grain line
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(pad + 10, BOARD_TEX_H / 2)
-  ctx.lineTo(BOARD_TEX_W - pad - 10, BOARD_TEX_H / 2)
-  ctx.stroke()
-
-  // Light border
-  ctx.strokeStyle = '#5D4037'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(pad + r, pad)
-  ctx.arcTo(BOARD_TEX_W - pad, pad, BOARD_TEX_W - pad, BOARD_TEX_H - pad, r)
-  ctx.arcTo(BOARD_TEX_W - pad, BOARD_TEX_H - pad, pad, BOARD_TEX_H - pad, r)
-  ctx.arcTo(pad, BOARD_TEX_H - pad, pad, pad, r)
-  ctx.arcTo(pad, pad, BOARD_TEX_W - pad, pad, r)
-  ctx.closePath()
-  ctx.stroke()
-
-  // White text with slight shadow
-  ctx.shadowColor = 'rgba(0,0,0,0.5)'
-  ctx.shadowBlur = 3
-  ctx.shadowOffsetY = 1
-  ctx.fillStyle = '#FFFDE7' // warm white
-  ctx.font = 'bold 28px "Segoe UI", Arial, sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(name, BOARD_TEX_W / 2, BOARD_TEX_H / 2, BOARD_TEX_W - pad * 4)
-
-  const texture = new pc.Texture(device, {
-    width: BOARD_TEX_W, height: BOARD_TEX_H,
-    format: pc.PIXELFORMAT_RGBA8,
-    minFilter: pc.FILTER_LINEAR, magFilter: pc.FILTER_LINEAR,
-  })
-  const pixels = texture.lock()
-  pixels.set(ctx.getImageData(0, 0, BOARD_TEX_W, BOARD_TEX_H).data)
-  texture.unlock()
-
-  const mat = new pc.StandardMaterial()
-  mat.diffuseMap = texture
-  mat.emissiveMap = texture
-  mat.emissive = new pc.Color(1, 1, 1)
-  mat.opacityMap = texture
-  mat.opacityMapChannel = 'a'
-  mat.blendType = pc.BLEND_NORMAL
-  mat.depthWrite = false
-  mat.cull = pc.CULLFACE_NONE
-  mat.update()
-
-  const entity = new pc.Entity('HouseNameboard')
-  entity.addComponent('render', { type: 'plane' })
-  entity.render!.meshInstances[0].material = mat
-  entity.setLocalPosition(0, height, 0)
-  entity.setLocalScale(BOARD_WORLD_W, 1, BOARD_WORLD_H)
-  entity.setLocalEulerAngles(90, 0, 0)
-  entity.tags.add('billboard')
-
-  return entity
+function houseLabelStyle(name: string, isOwn: boolean): { text: string; options: LabelOptions } {
+  if (isOwn) {
+    return {
+      text: `${name} (You)`,
+      options: {
+        fontSize: 44,
+        textColor: '#1A1A1A',
+        bgColor: 'rgba(255, 200, 60, 0.95)',
+        borderRadius: 18,
+      },
+    }
+  }
+  return { text: name, options: { fontSize: 36 } }
 }
 
 /** Max seats per house across all tiers — used as seat index stride to prevent collisions in mixed-tier villages. */
@@ -173,18 +99,23 @@ export interface HouseResult {
    */
   exteriorHalfW?: number
   exteriorHalfD?: number
+  /**
+   * Billboard nameplate above the roof. Held on the result so a tier rebuild
+   * can call `LabelRenderer.cleanup` before destroying the pivot tree —
+   * otherwise `Application.billboards` keeps a reference to a destroyed entity.
+   */
+  nameLabel?: pc.Entity
 }
 
 export class HouseBuilder {
   private factory: BuildingFactory
-  private device: pc.GraphicsDevice
 
-  constructor(factory: BuildingFactory, device: pc.GraphicsDevice) {
+  constructor(factory: BuildingFactory) {
     this.factory = factory
-    this.device = device
   }
 
   async build(
+    app: Application,
     memberId: string,
     memberName: string,
     characterModel: string | null,
@@ -192,6 +123,7 @@ export class HouseBuilder {
     worldZ: number,
     index: number,
     tier = 1,
+    isOwn = false,
   ): Promise<HouseResult> {
     const tierDef = getHouseTier(tier)
     const root = new pc.Entity(`House_${memberName}`)
@@ -240,44 +172,76 @@ export class HouseBuilder {
       measuredHalfW = raw.halfW * s
       measuredHalfD = raw.halfD * s
 
-      // Nameboard above the building — measured from the actual GLB roof height.
-      const labelY = BuildingFactory.getEntityHeight(building) * s + 0.3
-      const board = createHouseNameboard(memberName, this.device, labelY)
-      board.setLocalPosition(targetHalfW, 0, targetHalfD)
-      root.addChild(board)
+      // Nameplate above the building — measured from the actual GLB roof height.
+      const labelY = BuildingFactory.getEntityHeight(building) * s + NAMEPLATE_ROOF_CLEARANCE
+      const nameLabel = this.attachNameLabel(app, root, memberName, isOwn, targetHalfW, labelY, targetHalfD)
 
       // Bed/exit from tier config — same source of truth as Kenney and multiplayer.
       bedPos = { x: worldX + tierDef.bed.x, y: BED_SURFACE_Y, z: worldZ + tierDef.bed.z }
       const doorCenterX = tierDef.doorIndex + 0.5
       exitPos = { x: worldX + doorCenterX, z: worldZ + tierDef.depth + 1.0, yaw: 0 }
-    } else {
-      // Kenney procedural house (tier 1)
-      await this.factory.createFloor(root, tierDef.width, tierDef.depth)
 
-      // Only tier 1 uses Kenney procedural — tiers with exteriorGlb take the
-      // KayKit branch above. If a future Kenney tier is added, restore a switch.
-      ;({ bedPos, exitPos } = await this.layoutTier1(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth, tierDef.doorIndex))
-
-      // Roof (Kenney only)
-      this.factory.createRoof(root, tierDef.width, tierDef.depth, WALL_HEIGHT)
-
-      // Nameboard above roof
-      const board = createHouseNameboard(memberName, this.device, WALL_HEIGHT + 0.4)
-      board.setLocalPosition(tierDef.width / 2, 0, tierDef.depth / 2)
-      root.addChild(board)
+      return this.makeResult(root, memberId, memberName, characterModel, tier,
+        bedPos, seats, exitPos, nameLabel, measuredHalfW, measuredHalfD)
     }
 
+    // Kenney procedural house (tier 1)
+    await this.factory.createFloor(root, tierDef.width, tierDef.depth)
+
+    // Only tier 1 uses Kenney procedural — tiers with exteriorGlb take the
+    // KayKit branch above. If a future Kenney tier is added, restore a switch.
+    ;({ bedPos, exitPos } = await this.layoutTier1(root, seats, worldX, worldZ, index, tierDef.width, tierDef.depth, tierDef.doorIndex))
+
+    // Roof (Kenney only)
+    this.factory.createRoof(root, tierDef.width, tierDef.depth, WALL_HEIGHT)
+
+    const nameLabel = this.attachNameLabel(
+      app, root, memberName, isOwn,
+      tierDef.width / 2, WALL_HEIGHT + NAMEPLATE_ROOF_CLEARANCE, tierDef.depth / 2,
+    )
+
+    return this.makeResult(root, memberId, memberName, characterModel, tier,
+      bedPos, seats, exitPos, nameLabel)
+  }
+
+  /**
+   * Build the billboard nameplate via the shared LabelRenderer (handles canvas,
+   * material, and Application.registerBillboard so it auto-faces the camera).
+   * Returned for the caller to track on HouseResult; cleanup happens on rebuild.
+   */
+  private attachNameLabel(
+    app: Application,
+    parent: pc.Entity,
+    name: string,
+    isOwn: boolean,
+    localX: number,
+    localY: number,
+    localZ: number,
+  ): pc.Entity {
+    const { text, options } = houseLabelStyle(name, isOwn)
+    const label = LabelRenderer.create(app, text, options)
+    label.setLocalPosition(localX, localY, localZ)
+    parent.addChild(label)
+    return label
+  }
+
+  private makeResult(
+    entity: pc.Entity,
+    memberId: string,
+    memberName: string,
+    characterModel: string | null,
+    tier: number,
+    bedPosition: { x: number; y: number; z: number },
+    seats: InteractionPoint[],
+    exitPosition: { x: number; z: number; yaw: number },
+    nameLabel: pc.Entity,
+    exteriorHalfW?: number,
+    exteriorHalfD?: number,
+  ): HouseResult {
     return {
-      entity: root,
-      memberId,
-      memberName,
-      characterModel,
-      tier,
-      bedPosition: bedPos,
-      seats,
-      exitPosition: exitPos,
-      exteriorHalfW: measuredHalfW,
-      exteriorHalfD: measuredHalfD,
+      entity, memberId, memberName, characterModel, tier,
+      bedPosition, seats, exitPosition, nameLabel,
+      exteriorHalfW, exteriorHalfD,
     }
   }
 
