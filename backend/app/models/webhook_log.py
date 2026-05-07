@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,7 +29,7 @@ class WebhookLog(Base):
     """Inbound webhook delivery record. Primary-key dedupe."""
 
     __tablename__ = "webhook_logs"
-    __table_args__ = (Index("ix_webhook_logs_org_received", "org_id", "received_at"),)
+    __table_args__ = (Index("ix_webhook_logs_org_received", "org_id", text("received_at DESC")),)
 
     delivery_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
