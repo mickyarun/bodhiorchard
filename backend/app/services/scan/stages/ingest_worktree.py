@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
 from app.services.git_operations import run_git
+from app.services.scan.stages._origin_auth import refresh_origin_auth
+
+if TYPE_CHECKING:
+    from app.models.organization import Organization
 
 logger = structlog.get_logger(__name__)
 
@@ -37,6 +42,7 @@ async def ensure_scan_test_worktree(
     main_branch: str,
     *,
     skip_fetch: bool,
+    org: Organization | None = None,
 ) -> str:
     """Create or refresh the sandbox worktree.
 
@@ -62,7 +68,7 @@ async def ensure_scan_test_worktree(
 
     if current_branch == main_branch:
         if not skip_fetch:
-            await fetch_and_reset(repo_path, main_branch, has_origin=has_origin)
+            await fetch_and_reset(repo_path, main_branch, has_origin=has_origin, org=org)
         return repo_path
 
     repo = Path(repo_path)
@@ -93,7 +99,13 @@ async def ensure_scan_test_worktree(
     if skip_fetch:
         return wt_str
 
-    await fetch_and_reset(repo_path, main_branch, worktree=wt_str, has_origin=has_origin)
+    await fetch_and_reset(
+        repo_path,
+        main_branch,
+        worktree=wt_str,
+        has_origin=has_origin,
+        org=org,
+    )
     return wt_str
 
 
@@ -103,21 +115,31 @@ async def fetch_and_reset(
     *,
     worktree: str | None = None,
     has_origin: bool | None = None,
+    org: Organization | None = None,
 ) -> None:
     """Fetch origin (if present) and hard-reset the target tree.
 
-    With an ``origin`` remote, fetches and resets to ``origin/<main_branch>``.
-    Without one (e.g. local-path imports), skips the fetch and resets to the
-    local ``<main_branch>`` ref instead.
+    With an ``origin`` remote, refreshes the origin auth (fresh GitHub
+    App installation token, or ``GIT_SSH_COMMAND`` for SSH deploy keys —
+    see :mod:`._origin_auth`), fetches, and resets to
+    ``origin/<main_branch>``. Without an origin (e.g. local-path imports),
+    skips the fetch and resets to the local ``<main_branch>`` ref instead.
 
     ``worktree`` is the path to reset; defaults to ``repo_path`` itself.
+    ``org`` carries the GitHub App credentials when present; pass ``None``
+    for sandbox / test runs without org context.
     """
     target = worktree or repo_path
     if has_origin is None:
         has_origin = await _has_origin_remote(repo_path)
 
     if has_origin:
-        _, stderr, rc = await run_git(["fetch", "origin", "--prune"], cwd=repo_path)
+        env = await refresh_origin_auth(repo_path, org)
+        _, stderr, rc = await run_git(
+            ["fetch", "origin", "--prune"],
+            cwd=repo_path,
+            env=env,
+        )
         if rc != 0:
             logger.warning("scan_ingest_fetch_failed", error=stderr[:200])
         reset_ref = f"origin/{main_branch}"

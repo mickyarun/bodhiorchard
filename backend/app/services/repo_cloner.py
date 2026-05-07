@@ -72,7 +72,7 @@ class CloneResult:
     error: str | None = None
 
 
-def _is_ssh_url(url: str) -> bool:
+def is_ssh_url(url: str) -> bool:
     """Match ``git@github.com:owner/repo(.git)`` or ``ssh://git@github.com/...``."""
     return url.startswith("git@") or url.startswith("ssh://")
 
@@ -84,7 +84,7 @@ def _parse_github_url(url: str) -> tuple[str, str] | None:
     clone arbitrary hosts from this endpoint since known_hosts only trusts
     github.com. Supports trailing ``.git`` and optional trailing slash.
     """
-    if _is_ssh_url(url):
+    if is_ssh_url(url):
         m = re.match(r"^git@github\.com:([^/]+)/([^/]+?)(?:\.git)?/?$", url)
         if m:
             return m.group(1), m.group(2)
@@ -192,7 +192,7 @@ async def clone_or_update(
 
     env: dict[str, str] | None = None
     effective_url = url
-    if _is_ssh_url(url):
+    if is_ssh_url(url):
         env = ssh_env()
     elif pat:
         effective_url = _compose_authenticated_url(url, pat)
@@ -235,7 +235,7 @@ async def clone_or_update(
             dest=str(dest),
             owner=owner,
             repo=repo,
-            ssh=_is_ssh_url(url),
+            ssh=is_ssh_url(url),
             branch=branch,
         )
         clone_args = ["clone", "--no-single-branch"]

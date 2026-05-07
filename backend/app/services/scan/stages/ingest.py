@@ -32,6 +32,7 @@ from typing import Any
 import structlog
 
 from app.repositories.cluster_cache import ClusterCacheRepository
+from app.repositories.organization import OrganizationRepository
 from app.repositories.repo_graph_cache import RepoGraphCacheRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
@@ -74,10 +75,21 @@ async def run(
             "Set config.ingest.main_branch explicitly."
         )
 
+    runtime = resolve_runtime_context(config)
+    org = None
+    if runtime is not None:
+        # Detach the org from its session — safe because AsyncSessionLocal
+        # is configured with ``expire_on_commit=False`` (see
+        # ``app/database.py``), so attribute access after the session
+        # closes won't trigger a lazy refresh.
+        async with with_session(runtime.org_id) as db:
+            org = await OrganizationRepository(db).get_by_id(runtime.org_id)
+
     worktree_path = await ensure_scan_test_worktree(
         ctx.repo_path,
         main_branch,
         skip_fetch=bool(config.get("skip_fetch", False)),
+        org=org,
     )
 
     head_sha = ""
@@ -86,7 +98,6 @@ async def run(
         if rc == 0:
             head_sha = stdout.strip()
 
-    runtime = resolve_runtime_context(config)
     repo_id_raw = config.get("repo_id")
 
     if runtime is not None and repo_id_raw is not None:

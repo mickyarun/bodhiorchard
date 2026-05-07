@@ -16,15 +16,24 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
-async def _run_shell_cmd(args: list[str], cwd: str, timeout: int = 30) -> tuple[str, str, int]:
+async def _run_shell_cmd(
+    args: list[str],
+    cwd: str,
+    timeout: int = 30,
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[str, str, int]:
     """Run an arbitrary shell command asynchronously.
 
-    Uses ``create_subprocess_exec`` (no shell) to avoid injection risks.
+    Uses argv-form subprocess invocation (no shell) to avoid injection risks.
 
     Args:
         args: Command and arguments (e.g. ["gh", "pr", "view", ...]).
         cwd: Working directory for the command.
         timeout: Maximum seconds to wait.
+        env: Optional environment override (e.g. ``GIT_SSH_COMMAND`` for
+            SSH deploy keys). ``None`` means inherit the parent process
+            env unchanged.
 
     Returns:
         Tuple of (stdout, stderr, returncode).
@@ -32,6 +41,7 @@ async def _run_shell_cmd(args: list[str], cwd: str, timeout: int = 30) -> tuple[
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=cwd,
+        env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -43,7 +53,13 @@ async def _run_shell_cmd(args: list[str], cwd: str, timeout: int = 30) -> tuple[
     )
 
 
-async def run_git(args: list[str], cwd: str, timeout: int = 60) -> tuple[str, str, int]:
+async def run_git(
+    args: list[str],
+    cwd: str,
+    timeout: int = 60,
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[str, str, int]:
     """Run a git command asynchronously.
 
     Delegates to ``_run_shell_cmd`` with ``git`` prepended.
@@ -52,11 +68,14 @@ async def run_git(args: list[str], cwd: str, timeout: int = 60) -> tuple[str, st
         args: Git subcommand and arguments.
         cwd: Working directory for the command.
         timeout: Maximum seconds to wait.
+        env: Optional environment override forwarded to the subprocess —
+            used by the scan-ingest auth refresh to pass
+            ``GIT_SSH_COMMAND`` for SSH-cloned repos. ``None`` inherits.
 
     Returns:
         Tuple of (stdout, stderr, returncode).
     """
-    return await _run_shell_cmd(["git", *args], cwd=cwd, timeout=timeout)
+    return await _run_shell_cmd(["git", *args], cwd=cwd, timeout=timeout, env=env)
 
 
 async def _detect_main_branch(repo_path: str) -> str | None:
