@@ -19,13 +19,8 @@
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
-import {
-  evalRouteAt,
-  PRIMARY_WIDTH,
-  END_TRIM,
-  BEZIER_SEGMENTS,
-  type PathRoute,
-} from './PathSystem'
+import { evalRouteAt, END_TRIM, type PathRoute } from '@shared/world/paths'
+import { PRIMARY_WIDTH, BEZIER_SEGMENTS } from './PathSystem'
 
 /** Wear strip sits between ground and path strip. */
 const WEAR_Y = 0.008

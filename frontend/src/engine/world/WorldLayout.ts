@@ -10,8 +10,22 @@
  */
 import { ZONES as SHARED_ZONES, type Zone, type ZoneTier } from '@shared/world/zones'
 import { getTreePositions as sharedGetTreePositions } from '@shared/world/treePositions'
+import {
+  BASELINE_REPO_COUNT,
+  computeLayoutScale,
+  getActiveScale,
+  setActiveScale,
+  type HubGeometry,
+} from '@shared/world/layoutScale'
 import type { ExclusionZone } from '../utils/MathUtils'
 import type { InteractionPoint } from '../characters/InteractionPoint'
+
+// Boot-wire the shared layout-scale cache at module load so any consumer
+// (frontend builders, tests, hot-reload re-mount) sees baseline geometry
+// before reading. Multiplayer mirrors this in `multiplayer/src/sim/WorldLayout.ts`.
+// Phase 2 will replace BASELINE_REPO_COUNT with the real org repoCount
+// threaded through SceneManager.
+setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
 
 /** Backward-compatible alias — use InteractionPoint in new code. */
 export type SeatSlot = InteractionPoint
@@ -43,6 +57,15 @@ export class WorldLayout {
   /** Get all zones. */
   getAllZones(): readonly WorldZone[] {
     return this.zones
+  }
+
+  /**
+   * Hub-anchor geometry — radii, ring count, scales — sourced from the
+   * active `LayoutScale`. `HubAnchor` consumes this so it never holds its
+   * own layout literals (they all live in `shared/world/layoutScale.ts`).
+   */
+  getHubGeometry(): HubGeometry {
+    return getActiveScale().hub
   }
 
   /** Get the world radius (outermost zone edge). */

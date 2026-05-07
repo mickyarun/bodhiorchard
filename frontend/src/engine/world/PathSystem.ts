@@ -19,7 +19,11 @@ import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { randRange } from '../utils/MathUtils'
-import type { WorldZone } from './WorldLayout'
+import { END_TRIM, evalRouteAt, type PathRoute } from '@shared/world/paths'
+
+// Layout primitives (`PathRoute`, `PathKind`, `END_TRIM`, `evalRouteAt`,
+// `buildRoutes`) live in `shared/world/paths.ts` — consumers should import
+// from there directly rather than via this renderer.
 
 const PATH_ASSET = 'assets/garden/path_stone.glb'
 const STONE_SPACING = 1.8
@@ -31,46 +35,9 @@ const SAND_TEX_SIZE = 128
 export const PRIMARY_WIDTH = 3.0
 /** Visual width of a secondary (hub↔habitation) path strip. */
 export const SECONDARY_WIDTH = 2.0
-/** Fraction of route length trimmed at each end so paths stop shy of zone
- *  discs rather than poking into them. Shared by any system that samples
- *  routes (GrassDressing, DecorativePropScatter, LanternSystem). */
-export const END_TRIM = 0.08
 /** Number of segments used to approximate a curved route. 16 is smooth
  *  enough at this scale without explosive draw-call cost. */
 export const BEZIER_SEGMENTS = 16
-
-export type PathKind = 'primary' | 'secondary'
-
-export interface PathRoute {
-  fromX: number
-  fromZ: number
-  toX: number
-  toZ: number
-  /** Optional quadratic Bezier control point. If unset, route is straight. */
-  controlX?: number
-  controlZ?: number
-  /** Visual tier. Defaults to 'primary' for backward compatibility. */
-  kind?: PathKind
-}
-
-/**
- * Evaluate a route position at parameter t ∈ [0,1].
- * Exposed so other systems (e.g. LanternSystem) that walk the same routes
- * can follow curves consistently with rendered paths.
- */
-export function evalRouteAt(route: PathRoute, t: number): { x: number; z: number } {
-  if (route.controlX === undefined || route.controlZ === undefined) {
-    return {
-      x: route.fromX + (route.toX - route.fromX) * t,
-      z: route.fromZ + (route.toZ - route.fromZ) * t,
-    }
-  }
-  const mt = 1 - t
-  return {
-    x: mt * mt * route.fromX + 2 * mt * t * route.controlX + t * t * route.toX,
-    z: mt * mt * route.fromZ + 2 * mt * t * route.controlZ + t * t * route.toZ,
-  }
-}
 
 export class PathSystem {
   private root: pc.Entity | null = null
@@ -304,37 +271,6 @@ export class PathSystem {
     texture.unlock()
 
     return texture
-  }
-
-  /**
-   * Build routes from the tiered zone layout — all paths straight and
-   * radiating from the hub so they align with each zone's fence gate
-   * (gates face the hub per the fence builder's "gate angle points
-   * toward orchard" convention).
-   *
-   *   - primary  : hub → each activity zone (wider, sand + stepping stones)
-   *   - secondary: hub → each habitation zone (narrower, dirt, no stones)
-   *
-   * An earlier design curved primary paths and routed secondary paths
-   * through activity zones for visual "branching," but both caused
-   * path-through-wall misalignment with the radial fence gates. The
-   * primary/secondary hierarchy now comes purely from width + material.
-   */
-  static defaultRoutes(zones: ReadonlyArray<WorldZone>): PathRoute[] {
-    const routes: PathRoute[] = []
-    const hub = zones.find(z => z.tier === 'hub')
-    if (!hub) return routes
-
-    for (const zone of zones) {
-      if (zone.tier === 'hub') continue
-      routes.push({
-        fromX: hub.x, fromZ: hub.z,
-        toX: zone.x, toZ: zone.z,
-        kind: zone.tier === 'activity' ? 'primary' : 'secondary',
-      })
-    }
-
-    return routes
   }
 
   destroy(): void {

@@ -2,36 +2,23 @@
 // Copyright (C) 2026 Arun Rajkumar
 
 /**
- * HubAnchor — The orchard-center landmark.
+ * HubAnchor — orchard-center landmark: hero Bodhi tree on a raised mound,
+ * ringed by flowers, footed on a cobble plaza. Sits at world origin (0,0)
+ * and gives the zoom-out view a focal point so spokes + activity zones
+ * read as arranged around something rather than radiating from nothing.
+ * Downstream systems treat its exclusion zone like any other zone.
  *
- * A single hero "Bodhi tree" sitting on a raised earth mound, ringed by
- * flowers, and footed on a cobble plaza. Purpose: give the zoom-out view a
- * strong focal point so the spoke-wheel of paths + surrounding activity
- * zones read as "arranged around something" rather than "radiating out of
- * nothing." See plan file image-41-garden-... for composition rationale.
- *
- * Layout (top-down, concentric rings):
- *
- *                   flower    flower
- *                      ·        ·
- *              flower  ┌──────┐  flower
- *                      │ 🌳   │
- *                      │ tree │          <- scaled 2.5× on mound
- *                      │ mound│
- *              flower  └──────┘  flower
- *                      ·        ·
- *                   flower    flower
- *                ─────────────────────   <- cobble plaza
- *
- * The entire anchor sits at the world origin (0,0). Downstream systems
- * (PathSystem, PineTreeSystem) treat its exclusion zone like any other
- * zone so paths terminate at the plaza edge rather than crossing it.
+ * All layout geometry (radii, ring count, tree scale, exclusion margin)
+ * is sourced from `HubGeometry` in `shared/world/layoutScale.ts`. The
+ * only numeric literals here are visual style — material colours, gloss,
+ * plaza-elevation epsilons that prevent z-fighting with path decals.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { BuildingFactory } from '../buildings/BuildingFactory'
 import { DECOR } from '../assets/AssetManifest'
 import type { ExclusionZone } from '../utils/MathUtils'
+import type { HubGeometry } from '@shared/world/layoutScale'
 
 export interface HubAnchorResult {
   entity: pc.Entity
@@ -44,26 +31,14 @@ export interface HubAnchorResult {
   trunkCollider: { x: number; z: number; radius: number; topY: number }
 }
 
-// ─── Layout tuning (local units, centered on anchor origin) ───────────────
-/**
- * Hub scale matters — at the original (6.5, 2.5× tree) the Bodhi was just
- * visually "competing" with surrounding activity zones (r=8), not dominating.
- * Widened to ~28% larger radius and ~28% larger tree so the hub clearly
- * reads as primary focal point from both zoom-out and walk-up views.
- */
-const PLAZA_RADIUS = 8.5        // outer cobble disc — hero-scale to hold canopy shadow
-const MOUND_RADIUS = 4.0        // raised earth pad under tree
-const MOUND_HEIGHT = 0.7        // visible elevation of the mound
-const RING_RADIUS = 5.8         // bush/flower ring, sits between mound and plaza edge
-const RING_COUNT = 12           // more bushes for larger circumference
-const HUB_TREE_SCALE = 3.2      // hero tree — clearly largest silhouette in scene
-
 export class HubAnchor {
   private factory: BuildingFactory
+  private geometry: HubGeometry
   private materials: pc.StandardMaterial[] = []
 
-  constructor(factory: BuildingFactory) {
+  constructor(factory: BuildingFactory, geometry: HubGeometry) {
     this.factory = factory
+    this.geometry = geometry
   }
 
   /** Destroy all GPU materials this builder allocated. */
@@ -83,11 +58,12 @@ export class HubAnchor {
 
     app.root.addChild(root)
 
+    const { plazaRadius, plazaExclusionMargin, moundRadius, moundHeight } = this.geometry
     return {
       entity: root,
       // Slightly larger than plaza so paths stop at the plaza rim with a
       // tiny breathing margin (prevents stepping stones landing on cobble).
-      exclusionZone: { x, z, radius: PLAZA_RADIUS + 0.5 },
+      exclusionZone: { x, z, radius: plazaRadius + plazaExclusionMargin },
       // Collider wraps the whole raised mound — player can't step onto
       // the platform. Geometry is tied to the visual mound constants so
       // visual and collision stay in lockstep (0.05 is the plaza-to-
@@ -95,8 +71,8 @@ export class HubAnchor {
       trunkCollider: {
         x,
         z,
-        radius: MOUND_RADIUS,
-        topY: 0.05 + MOUND_HEIGHT,
+        radius: moundRadius,
+        topY: 0.05 + moundHeight,
       },
     }
   }
@@ -114,9 +90,10 @@ export class HubAnchor {
    * overlay y=0.02) in case a future layout tweak overlaps their XZ.
    */
   private createPlaza(parent: pc.Entity): void {
+    const { plazaRadius } = this.geometry
     const plaza = new pc.Entity('HubPlaza')
     plaza.addComponent('render', { type: 'cylinder' })
-    plaza.setLocalScale(PLAZA_RADIUS * 2, 0.02, PLAZA_RADIUS * 2)
+    plaza.setLocalScale(plazaRadius * 2, 0.02, plazaRadius * 2)
     plaza.setLocalPosition(0, 0.03, 0)
 
     const mat = new pc.StandardMaterial()
@@ -137,14 +114,15 @@ export class HubAnchor {
    * mound's silhouette contributes to the scene read.
    */
   private createMound(parent: pc.Entity): void {
+    const { moundRadius, moundHeight } = this.geometry
     const mound = new pc.Entity('HubMound')
     mound.addComponent('render', { type: 'cylinder' })
-    mound.setLocalScale(MOUND_RADIUS * 2, MOUND_HEIGHT, MOUND_RADIUS * 2)
+    mound.setLocalScale(moundRadius * 2, moundHeight, moundRadius * 2)
     // Cylinder primitive is unit-height centered at origin, so after
-    // scaling by MOUND_HEIGHT its bottom face sits at (localY - MH/2).
+    // scaling by moundHeight its bottom face sits at (localY - MH/2).
     // Plaza top is now at y=0.04 — seat the mound with 0.01 clearance
     // above it (bottom at y=0.05) so they aren't coplanar either.
-    mound.setLocalPosition(0, 0.05 + MOUND_HEIGHT / 2, 0)
+    mound.setLocalPosition(0, 0.05 + moundHeight / 2, 0)
 
     const mat = new pc.StandardMaterial()
     this.materials.push(mat)
@@ -158,22 +136,15 @@ export class HubAnchor {
     parent.addChild(mound)
   }
 
-  /**
-   * Place the hero Bodhi tree GLB on the mound top, center-aligned via
-   * placeFurnitureCentered (which measures AABB so the trunk base sits at
-   * y=MOUND_HEIGHT regardless of the source model's pivot offset).
-   */
+  /** Hero Bodhi tree on the mound top, center-aligned via AABB-correcting
+   *  placeFurnitureCentered. Scale is applied after placement so it grows
+   *  upward from the trunk base rather than drifting off-center. */
   private async placeHubTree(parent: pc.Entity): Promise<void> {
-    // Mound top is at y = 0.05 + MOUND_HEIGHT (see createMound). Plant the
-    // tree trunk at that exact y so its base sits on the mound surface.
+    const { moundHeight, treeScale } = this.geometry
     const tree = await this.factory.placeFurnitureCentered(
-      parent, DECOR.hubTree, 0, 0.05 + MOUND_HEIGHT, 0,
+      parent, DECOR.hubTree, 0, 0.05 + moundHeight, 0,
     )
-    // Uniform scale-up for hero treatment. placeFurnitureCentered stashes
-    // the AABB-corrected local position; multiplying scale after placement
-    // scales about the entity origin, which sits at the trunk base — so
-    // the tree grows upward from the mound rather than drifting off-center.
-    tree.setLocalScale(HUB_TREE_SCALE, HUB_TREE_SCALE, HUB_TREE_SCALE)
+    tree.setLocalScale(treeScale, treeScale, treeScale)
   }
 
   /**
@@ -183,6 +154,7 @@ export class HubAnchor {
    * the eye catches them but the silhouette is carried by the bushes.
    */
   private async placeBushRing(parent: pc.Entity): Promise<void> {
+    const { ringRadius, ringCount } = this.geometry
     const paths = [
       DECOR.bushRound,
       DECOR.bushGreen,
@@ -195,10 +167,10 @@ export class HubAnchor {
       DECOR.bushCluster,
       DECOR.bushGreen,
     ]
-    for (let i = 0; i < RING_COUNT; i++) {
-      const theta = (i / RING_COUNT) * Math.PI * 2
-      const fx = Math.cos(theta) * RING_RADIUS
-      const fz = Math.sin(theta) * RING_RADIUS
+    for (let i = 0; i < ringCount; i++) {
+      const theta = (i / ringCount) * Math.PI * 2
+      const fx = Math.cos(theta) * ringRadius
+      const fz = Math.sin(theta) * ringRadius
       const path = paths[i % paths.length]
       // Random yaw breaks the perfect radial symmetry — ring reads as
       // "planted" rather than "procedurally generated asterisk."
