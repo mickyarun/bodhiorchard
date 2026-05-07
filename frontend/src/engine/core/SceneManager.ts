@@ -97,6 +97,16 @@ export class SceneManager {
   private agentSystem: AgentCharacterSystem | null = null
   private signEntities: pc.Entity[] = []
 
+  /**
+   * StandupPavilion holds its own per-frame `on('update')` handler for the
+   * campfire flame animation. Its `destroy()` unregisters that handler —
+   * which means we MUST hold the instance ref and call destroy explicitly
+   * during teardown, otherwise the handler keeps firing against entities
+   * the building-entities loop is about to free, surfacing as a
+   * `WebglGraphicsDevice.draw → device undefined` render crash.
+   */
+  private pavilion: StandupPavilion | null = null
+
   // Building entities (for destruction)
   private buildingEntities: pc.Entity[] = []
 
@@ -293,8 +303,10 @@ export class SceneManager {
     }
 
     if (pavilionZone) {
-      const pavilion = new StandupPavilion(buildingFactory)
-      const pavilionResult = await pavilion.build(this.app, pavilionZone.x, pavilionZone.z)
+      // Stored on `this.pavilion` — see field docstring for why the instance
+      // ref is load-bearing for clean teardown.
+      this.pavilion = new StandupPavilion(buildingFactory)
+      const pavilionResult = await this.pavilion.build(this.app, pavilionZone.x, pavilionZone.z)
       if (checkCancelled()) return
       this.buildingEntities.push(pavilionResult.entity)
       this.layout.addExclusionZones([pavilionResult.exclusionZone])
@@ -717,6 +729,13 @@ export class SceneManager {
 
     this.characterSystem?.destroy()
     this.characterSystem = null
+
+    // Pavilion MUST destroy before the building-entities loop runs — its
+    // destroy() unregisters the per-frame flame `on('update')` handler that
+    // would otherwise keep firing against the flame entities the loop below
+    // is about to free.
+    this.pavilion?.destroy()
+    this.pavilion = null
 
     for (const entity of this.buildingEntities) {
       entity.destroy()
