@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [hotfix/action-deploy]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
