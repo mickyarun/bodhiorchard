@@ -19,6 +19,52 @@ export interface RepoScanWarning {
   hint: string | null
 }
 
+/** Matches backend `ScanPhase` enum values. Stringly-typed here since
+ * the TS side doesn't generate the enum from the Python source — one
+ * new phase requires adding a string in both places, caught immediately
+ * because the timeline component won't render unknown phases.
+ *
+ * Internal: only consumed by `PhaseStatus` below. Not exported. */
+type ScanPhaseCode =
+  | 'mode_detection'
+  | 'code_index'
+  | 'repo_setup'
+  | 'stale_cleanup'
+  | 'skill_extraction'
+  | 'design_system_extract'
+  | 'feature_synthesis'
+  | 'extract_routes'
+  | 'skill_remap'
+  | 'backend_link'
+  | 'embedding_backfill'
+  | 'persist_results'
+
+/** Internal: only consumed by `PhaseStatus` below. */
+type PhaseCheckpointStatus =
+  | 'pending'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'skipped'
+
+/** One row in the per-phase timeline the `ScanPhaseTimeline` renders. */
+export interface PhaseStatus {
+  phase: ScanPhaseCode
+  phaseLabel: string
+  scope: 'per_repo' | 'global'
+  repoId: string | null
+  repoName: string | null
+  status: PhaseCheckpointStatus
+  attempt: number
+  errorCode: string | null
+  errorMessage: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  /** True when the checkpoint was copied from a prior scan's DONE row
+   * with matching SHA — the phase body didn't actually run this time. */
+  shaReused: boolean
+}
+
 export interface ScanStatusData {
   scanId: string
   status: string
@@ -33,13 +79,19 @@ export interface ScanStatusData {
   synthesisWarning: string | null
   setupPrMessage: string | null
   repoWarnings: RepoScanWarning[]
+  /** Per-phase timeline. Empty on legacy / pre-migration scans — the
+   * UI must fall back to the aggregate progress bar in that case. */
+  phases: PhaseStatus[]
+  /** Set on resumed / retried scans; points back to the scan this one
+   * inherits done/skipped checkpoints from. */
+  parentScanId: string | null
   error: string | null
 }
 
 export function useScanSocket() {
   const tracker = useRealtimeTracker<ScanStatusData>({
     topicPrefix: 'scan',
-    pollEndpoint: (id) => `/v1/skills/scan/${id}/status`,
+    pollEndpoint: (id) => `/v1/reposcanv2/scans/${id}/status`,
     isTerminal: (d) =>
       d.status === 'completed' ? 'completed' : d.status === 'failed' ? 'failed' : null,
     getError: (d) => d.error || null,

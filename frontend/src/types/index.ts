@@ -21,7 +21,10 @@ export interface User {
   name: string
   role: UserRoleName
   permissions: string[]
-  organizationId: string
+  // Wire field is snake_case (UserRead.org_id in backend/app/schemas/user.py)
+  // and there's no axios snake→camel transformer, so this MUST stay
+  // ``org_id`` to be readable at runtime.
+  org_id: string
   character_model: string | null
 }
 
@@ -380,22 +383,52 @@ export const BUD_STATUS_LABELS: Record<BUDStatus, string> = {
   'discarded': 'Discarded',
 }
 
-// Knowledge / Features types
-export interface KnowledgeItem {
-  id: string
-  title: string
-  content: string | null
-  category: string
-  tags: string[] | null
-  source: string | null
-  sourceRef: string | null
-  featureStatus: string | null
-  repoIds: string[]
+// Feature types — match backend app/schemas/feature.py response shape.
+export interface PrimaryLink {
+  repoId: string
+  repoName: string
+  codeLocations: Record<string, string[]> | null
 }
 
-export interface KnowledgeItemPage {
-  items: KnowledgeItem[]
+export interface BackendLink {
+  repoId: string
+  repoName: string
+  apiPaths: string[]
+  codeLocations: Record<string, string[]> | null
+}
+
+export interface Feature {
+  id: string
+  featureTitle: string
+  description: string
+  capabilities: Record<string, unknown>
+  clusterNames: string[]
+  tags: string[]
+  featureStatus: string | null
+  source: string | null
+  sourceRef: string | null
+  synthesizedAt: string
+  primary: PrimaryLink
+  backendLinks: BackendLink[]
+}
+
+export interface FeaturePage {
+  items: Feature[]
   total: number
+}
+
+export interface FeaturesByRepo {
+  repoId: string
+  repoName: string
+  featureCount: number
+  features: Feature[]
+}
+
+export interface RepoContributor {
+  userId: string | null
+  actorName: string
+  commitCount: number
+  filesChanged: number
 }
 
 export const FEATURE_STATUS_COLORS: Record<string, string> = {
@@ -420,6 +453,9 @@ export interface SkillProfile {
 }
 
 // Repo types
+export type LastScanStatus
+  = | 'queued' | 'running' | 'done' | 'failed' | 'skipped_unchanged' | 'cancelled'
+
 export interface RepoInfo {
   id: string
   path: string
@@ -434,8 +470,35 @@ export interface RepoInfo {
   uatBranch: string | null
   hasUncommittedChanges: boolean
   setupStatus: 'merged' | 'not_setup'
+  /** MCP setup-PR tracking. `setupBranchPushedAt` is the only signal
+   *  that distinguishes "first scan never ran" from "branch on origin
+   *  but no PR" (GitHub App not configured). `setupCompareUrl` is
+   *  derived server-side, so the row chip just needs an anchor href. */
+  setupBranchPushedAt?: string | null
+  setupPrUrl?: string | null
+  setupPrNumber?: number | null
+  setupPrState?: 'open' | 'merged' | 'closed' | null
+  setupCompareUrl?: string | null
   designSystemStatus: 'none' | 'extracting' | 'ready'
+  /** Status of the most recent ScanRepoRun for this repo across all
+   *  scans. `null` when never scanned. Drives the recency pill on the
+   *  Settings → Code list when the row isn't part of the live scan. */
+  lastScanStatus?: LastScanStatus | null
+  lastScanFinishedAt?: string | null
+  lastScanStartedAt?: string | null
+  lastScanFeatureCount?: number | null
+  lastScanId?: string | null
+  /** Architectural classification produced by the ``classify_repo``
+   *  scan stage. ``null`` until the first scan touches the repo (or
+   *  the user hits the manual classify endpoint). */
+  repoLayer?: RepoLayer | null
+  techStack?: string | null
+  dbFlavor?: string | null
 }
+
+/** Mirrors `app.models.repo_layer.RepoLayer`. */
+export type RepoLayer
+  = | 'frontend' | 'backend' | 'processor' | 'batch' | 'db' | 'shared'
 
 export interface RepoBranchList {
   branches: string[]

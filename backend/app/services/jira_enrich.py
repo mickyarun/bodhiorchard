@@ -16,11 +16,10 @@ import uuid
 from typing import Any
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument, BUDStatus
-from app.models.jira_import import JiraIssueBudMap, MapStatus
+from app.repositories.jira_import import JiraIssueBudMapRepository
 from app.services.job_queue import JobState, update_job
 
 logger = structlog.get_logger(__name__)
@@ -122,18 +121,9 @@ async def _get_imported_bud_ids(
     session_id: uuid.UUID,
 ) -> list[uuid.UUID]:
     """Get all BUD IDs created from an import session."""
-    stmt = (
-        select(JiraIssueBudMap.bud_id)
-        .where(
-            JiraIssueBudMap.org_id == org_id,
-            JiraIssueBudMap.import_session_id == session_id,
-            JiraIssueBudMap.status == MapStatus.IMPORTED,
-            JiraIssueBudMap.bud_id.is_not(None),
-        )
-        .distinct()
+    return await JiraIssueBudMapRepository(db, org_id=org_id).list_imported_bud_ids_for_session(
+        session_id
     )
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
 
 
 async def _enrich_single_bud(

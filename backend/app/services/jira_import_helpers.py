@@ -18,9 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bud import BUDDocument
 from app.models.bug import Bug, BugType
 from app.models.jira_import import ImportStatus, JiraIssueBudMap
-from app.models.user import OrgToUser, User
 from app.repositories.jira_import import JiraImportSessionRepository, JiraIssueBudMapRepository
+from app.repositories.organization import OrganizationRepository
+from app.repositories.user import UserRepository
 from app.schemas.jira_import import IssueTypeCount
+from app.services.embedding_service import embedding_service
 from app.services.jira_client import JiraClient
 from app.services.jira_consolidator import ConsolidatedGroup
 from app.services.jira_field_mapper import JiraFieldMapper
@@ -42,14 +44,10 @@ async def create_bug(
     Raises:
         ValueError: If the org has no members.
     """
-    from app.services.embedding_service import embedding_service
-
     fields = mapper.map_to_bug_fields(issue)
 
     # Use first org member as fallback reporter
-    stmt = select(OrgToUser.user_id).where(OrgToUser.org_id == org_id).limit(1)
-    result = await db.execute(stmt)
-    reporter_id = result.scalar_one_or_none()
+    reporter_id = await UserRepository(db).get_first_member_id(org_id)
     if not reporter_id:
         raise ValueError("No org members found — cannot assign bug reporter")
 
@@ -108,12 +106,7 @@ async def create_map_entry(
     # Delete any existing entry for this key to avoid unique constraint violation
     existing = await map_repo.get_by_jira_key(jira_key)
     if existing:
-        from sqlalchemy import delete
-
-        await map_repo._db.execute(
-            delete(JiraIssueBudMap).where(JiraIssueBudMap.id == existing.id)
-        )
-        await map_repo._db.flush()
+        await map_repo.delete_by_id(existing.id)
 
     entry = JiraIssueBudMap(
         org_id=org_id,
@@ -141,17 +134,8 @@ async def resolve_users(
 
     Returns dict of lowercase email → UUID string.
     """
-    if not emails:
-        return {}
-
-    stmt = (
-        select(User.email, User.id)
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .where(OrgToUser.org_id == org_id)
-        .where(User.email.in_(emails))
-    )
-    result = await db.execute(stmt)
-    return {email.lower(): str(uid) for email, uid in result.all()}
+    matched = await UserRepository(db).map_emails_to_ids(org_id, emails)
+    return {email: str(uid) for email, uid in matched.items()}
 
 
 async def get_org(db: AsyncSession, org_id: uuid.UUID) -> Any:
@@ -160,10 +144,7 @@ async def get_org(db: AsyncSession, org_id: uuid.UUID) -> Any:
     Raises:
         ValueError: If not found.
     """
-    from app.models.organization import Organization
-
-    result = await db.execute(select(Organization).where(Organization.id == org_id))
-    org = result.scalar_one_or_none()
+    org = await OrganizationRepository(db).get_by_id(org_id)
     if not org:
         raise ValueError(f"Organization {org_id} not found")
     return org
@@ -219,36 +200,11 @@ async def cleanup_orphaned_map_entries(db: AsyncSession, org_id: uuid.UUID) -> i
     This ensures re-importing a project after deleting BUDs works
     without hitting the unique constraint on (org_id, jira_issue_key).
     """
-    from sqlalchemy import delete
-
-    from app.models.bug import Bug
-
-    # Step 1: Delete entries where bud_id points to a deleted BUD
-    stmt1 = delete(JiraIssueBudMap).where(
-        JiraIssueBudMap.org_id == org_id,
-        JiraIssueBudMap.bud_id.is_not(None),
-        ~JiraIssueBudMap.bud_id.in_(select(BUDDocument.id).where(BUDDocument.org_id == org_id)),
+    map_repo = JiraIssueBudMapRepository(db, org_id=org_id)
+    total = await map_repo.delete_orphaned(
+        valid_bud_ids_select=select(BUDDocument.id).where(BUDDocument.org_id == org_id),
+        valid_bug_ids_select=select(Bug.id).where(Bug.org_id == org_id),
     )
-    r1 = await db.execute(stmt1)
-
-    # Step 2: Delete entries where bug_id points to a deleted Bug
-    stmt2 = delete(JiraIssueBudMap).where(
-        JiraIssueBudMap.org_id == org_id,
-        JiraIssueBudMap.bug_id.is_not(None),
-        ~JiraIssueBudMap.bug_id.in_(select(Bug.id).where(Bug.org_id == org_id)),
-    )
-    r2 = await db.execute(stmt2)
-
-    # Step 3: Delete ALL entries with no linked BUD or Bug
-    # (review_needed, pending, skipped, or any other status with null refs)
-    stmt3 = delete(JiraIssueBudMap).where(
-        JiraIssueBudMap.org_id == org_id,
-        JiraIssueBudMap.bud_id.is_(None),
-        JiraIssueBudMap.bug_id.is_(None),
-    )
-    r3 = await db.execute(stmt3)
-
-    total = (r1.rowcount or 0) + (r2.rowcount or 0) + (r3.rowcount or 0)
     if total:
         logger.info("cleaned_orphaned_map_entries", count=total, org_id=str(org_id))
     return total

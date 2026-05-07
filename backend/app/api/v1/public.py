@@ -12,11 +12,10 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.bud import BUDDocument
+from app.repositories.bud import BUDRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -73,15 +72,8 @@ async def check_bud_exists(
         request.client.host if request.client else "unknown",
     )
 
-    result = await db.execute(
-        select(BUDDocument.id)
-        .where(
-            BUDDocument.bud_number == bud_number,
-            BUDDocument.org_id == org_id,
-        )
-        .limit(1)
-    )
-    if result.scalar_one_or_none() is None:
+    bud_repo = BUDRepository(db, org_id=org_id)
+    if not await bud_repo.exists_by_number(bud_number):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"BUD-{bud_number} not found",

@@ -19,6 +19,12 @@ const bodhiorchardDark: ThemeDefinition = {
     info: '#3b82f6',
     'on-background': '#E8F5E9',
     'on-surface': '#E8F5E9',
+    // Muted text on the dark green surface. Vuetify's default
+    // ``on-surface-variant`` is near-black, which renders metadata
+    // (repo names, hints, "Optional" labels) invisibly against our
+    // surface. A desaturated sage keeps it readable but quieter than
+    // the primary on-surface tone.
+    'on-surface-variant': '#A5D6A7',
     'on-primary': '#ffffff',
     'on-secondary': '#1a1a1a',
   },

@@ -85,6 +85,92 @@ class GitHubClient:
                         pass
                 return None
 
+    async def list_pull_requests(
+        self,
+        owner_repo: str,
+        *,
+        head: str | None = None,
+        state: str = "open",
+    ) -> list[dict[str, object]]:
+        """List pull requests on a repository.
+
+        Used by ``create_setup_pr`` to detect a pre-existing open PR for the
+        ``bodhiorchard/init-setup`` head before opening a new one — keeps the
+        flow idempotent against repos that already have a setup branch + PR
+        from prior testing.
+
+        Args:
+            owner_repo: ``"owner/repo"`` string.
+            head: Optional ``"owner:branch"`` filter. GitHub only honours the
+                full ``owner:branch`` shape, not a bare branch name.
+            state: ``open``, ``closed``, or ``all``.
+
+        Returns:
+            List of PR dicts (each with at least ``number``, ``html_url``,
+            ``state``). Empty list on HTTP error.
+        """
+        url = f"{_BASE_URL}/repos/{owner_repo}/pulls"
+        params: dict[str, str] = {"state": state, "per_page": "100"}
+        if head:
+            params["head"] = head
+        async with AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.get(url, headers=self._headers, params=params)
+                resp.raise_for_status()
+            except HTTPStatusError:
+                logger.error(
+                    "github_list_prs_failed",
+                    status=resp.status_code,
+                    owner_repo=owner_repo,
+                    head=head,
+                )
+                return []
+            payload = resp.json()
+        if not isinstance(payload, list):
+            return []
+        return [item for item in payload if isinstance(item, dict)]
+
+    async def create_pull_request(
+        self,
+        owner_repo: str,
+        *,
+        title: str,
+        body: str,
+        head: str,
+        base: str,
+    ) -> dict[str, object] | None:
+        """Open a pull request via the GitHub REST API.
+
+        On ``422 "A pull request already exists"`` GitHub returns the
+        conflicting PR's URL inside ``errors[0].message``; rather than
+        re-derive it we let the caller fall back to ``list_pull_requests``
+        and adopt whatever's already there.
+
+        Returns:
+            Response dict (``number``, ``html_url``, ``state``, ...) on
+            success, or ``None`` on any error.
+        """
+        url = f"{_BASE_URL}/repos/{owner_repo}/pulls"
+        body_payload = {"title": title, "body": body, "head": head, "base": base}
+        async with AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.post(url, json=body_payload, headers=self._headers)
+                resp.raise_for_status()
+            except HTTPStatusError:
+                logger.warning(
+                    "github_create_pr_failed",
+                    status=resp.status_code,
+                    response_body=resp.text[:500],
+                    owner_repo=owner_repo,
+                    head=head,
+                    base=base,
+                )
+                return None
+            data = resp.json()
+        if not isinstance(data, dict):
+            return None
+        return data
+
     async def get_review_comments(
         self,
         owner_repo: str,
@@ -171,3 +257,62 @@ class GitHubClient:
                     fetched=len(all_commits),
                 )
         return all_commits
+
+    async def list_pr_files(
+        self,
+        owner_repo: str,
+        pr_number: int,
+    ) -> list[str]:
+        """Return the changed file paths for a pull request.
+
+        Used by the PR-merge feature-reconcile job to intersect the PR's
+        touched files against cached cluster file sets so untouched
+        clusters can be skipped before any LLM cost is incurred. Paginates
+        at 100 per page; caps at 30 pages (3000 files) — the same sanity
+        ceiling :meth:`get_pr_commits` uses.
+        """
+        url = f"{_BASE_URL}/repos/{owner_repo}/pulls/{pr_number}/files"
+        out: list[str] = []
+        page = 1
+        async with AsyncClient(timeout=30) as client:
+            while page <= 30:
+                try:
+                    resp = await client.get(
+                        url,
+                        headers=self._headers,
+                        params={"per_page": 100, "page": page},
+                    )
+                    resp.raise_for_status()
+                except HTTPStatusError:
+                    logger.error(
+                        "github_list_pr_files_failed",
+                        status=resp.status_code,
+                        owner_repo=owner_repo,
+                        pr_number=pr_number,
+                        page=page,
+                    )
+                    return out
+                except Exception:
+                    logger.error(
+                        "github_list_pr_files_connection_error",
+                        owner_repo=owner_repo,
+                        pr_number=pr_number,
+                        page=page,
+                        exc_info=True,
+                    )
+                    return out
+                batch = resp.json()
+                if not batch:
+                    break
+                out.extend(item["filename"] for item in batch if "filename" in item)
+                if len(batch) < 100:
+                    break
+                page += 1
+            else:
+                logger.warning(
+                    "github_list_pr_files_pagination_cap_hit",
+                    owner_repo=owner_repo,
+                    pr_number=pr_number,
+                    fetched=len(out),
+                )
+        return out

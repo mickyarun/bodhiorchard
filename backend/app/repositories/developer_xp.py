@@ -4,12 +4,15 @@
 """Repository for DeveloperXP and RewardEvent queries."""
 
 import uuid
+from datetime import datetime
 
+from sqlalchemy import func as sa_func
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.developer_xp import DeveloperXP, RewardEvent, RewardType
-from app.models.user import User
+from app.models.user import OrgToUser, User
 
 
 class DeveloperXPRepository:
@@ -26,8 +29,6 @@ class DeveloperXPRepository:
         concurrent events try to award XP to the same user. Handles the
         INSERT race (first-ever award) via IntegrityError retry.
         """
-        from sqlalchemy.exc import IntegrityError
-
         stmt = (
             select(DeveloperXP)
             .where(DeveloperXP.user_id == user_id, DeveloperXP.org_id == self.org_id)
@@ -59,10 +60,6 @@ class DeveloperXPRepository:
 
     async def get_leaderboard(self, limit: int = 20) -> list[tuple[User, DeveloperXP | None]]:
         """All org members ranked by XP (includes members with 0 XP)."""
-        from sqlalchemy import func as sa_func
-
-        from app.models.user import OrgToUser
-
         stmt = (
             select(User, DeveloperXP)
             .join(OrgToUser, OrgToUser.user_id == User.id)
@@ -85,6 +82,22 @@ class RewardEventRepository:
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
         self.db = db
         self.org_id = org_id
+
+    async def sum_xp_by_user_in_window(
+        self, since: datetime, until: datetime
+    ) -> dict[uuid.UUID, int]:
+        """Sum XP earned per user with ``created_at`` in [since, until)."""
+        result = await self.db.execute(
+            select(RewardEvent.user_id, sa_func.sum(RewardEvent.amount).label("total"))
+            .where(
+                RewardEvent.org_id == self.org_id,
+                RewardEvent.type == RewardType.XP,
+                RewardEvent.created_at >= since,
+                RewardEvent.created_at < until,
+            )
+            .group_by(RewardEvent.user_id)
+        )
+        return {row.user_id: int(row.total) for row in result.all()}
 
     async def has_source_ref(self, source_ref: str) -> bool:
         """Check if a reward event with this source_ref already exists (dedup)."""

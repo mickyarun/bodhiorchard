@@ -21,16 +21,14 @@ import uuid
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import get_db
 from app.core.security import verify_token
-from app.models.developer_xp import DeveloperXP
-from app.models.organization import Organization
-from app.models.user import OrgToUser, User
+from app.repositories.organization import OrganizationRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
+from app.repositories.user import UserRepository
 from app.schemas.settings import PresenceSettings
 from app.services.org_settings import get_presence_settings
 from app.services.presence_cache import get_presence_state
@@ -92,8 +90,7 @@ async def get_org_snapshot(
     # auto-mode toggle). Defaults preserve the legacy hardcoded behaviour
     # (Mon-Fri, 08:00-18:00, server-local) so un-migrated orgs get the
     # same presence sim output as before this field existed.
-    config_row = await db.execute(select(Organization.config).where(Organization.id == org_id))
-    org_config = config_row.scalar_one_or_none() or {}
+    org_config = await OrganizationRepository(db).get_config(org_id) or {}
     presence_settings = get_presence_settings(org_config)
 
     # Fetch ALL active org members — full membership list, not filtered by
@@ -155,59 +152,34 @@ async def _collect_org_members(
     """
     # Check once whether the org has a Slack bot token configured. Used
     # below to compute `has_slack` per member without re-querying.
-    token_row = await db.execute(
-        select(Organization.slack_bot_token).where(Organization.id == org_id)
-    )
-    org_has_slack_token = bool(token_row.scalar_one_or_none())
+    org_has_slack_token = bool(await OrganizationRepository(db).get_slack_bot_token(org_id))
 
-    stmt = (
-        select(
-            User.id,
-            User.name,
-            User.character_model,
-            User.slack_id,
-            DeveloperXP.level,
-            DeveloperXP.level_name,
-            DeveloperXP.house_level,
-            DeveloperXP.vehicle_unlocks,
-        )
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .outerjoin(
-            DeveloperXP,
-            (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == org_id),
-        )
-        .where(OrgToUser.org_id == org_id)
-        .where(User.is_active.is_(True))
-        .where(~User.name.ilike("%[bot]%"))
-        .order_by(User.id)
-    )
-    result = await db.execute(stmt)
-    rows = result.all()
+    rows = await UserRepository(db).list_active_members_with_xp(org_id)
 
     members: list[dict] = []
-    for row in rows:
+    for user, xp in rows:
         # Look up Slack presence state (falls back to "active" if no mapping).
         # ``get_presence_state`` applies the org's working-day + work-hours
         # rules when deciding ``on_break`` vs ``at_home`` for offline users.
         presence = "active"
-        if row.slack_id:
-            presence = get_presence_state(str(org_id), row.slack_id, presence_settings)
+        if user.slack_id:
+            presence = get_presence_state(str(org_id), user.slack_id, presence_settings)
 
         # "has_slack" is true only when BOTH the user has a slack_id AND
         # the org has a bot token. A user with slack_id in an org that
         # removed its token is still non-Slack-driven for presence purposes.
-        has_slack = bool(row.slack_id) and org_has_slack_token
+        has_slack = bool(user.slack_id) and org_has_slack_token
 
         members.append(
             {
-                "user_id": str(row.id),
-                "name": row.name or "",
-                "character_model": row.character_model,
+                "user_id": str(user.id),
+                "name": user.name or "",
+                "character_model": user.character_model,
                 "presence": presence,
-                "level": row.level or 1,
-                "level_name": row.level_name or "seedling",
-                "house_level": row.house_level or 1,
-                "vehicle_unlocks": list(row.vehicle_unlocks) if row.vehicle_unlocks else [],
+                "level": (xp.level if xp else None) or 1,
+                "level_name": (xp.level_name if xp else None) or "seedling",
+                "house_level": (xp.house_level if xp else None) or 1,
+                "vehicle_unlocks": list(xp.vehicle_unlocks) if xp and xp.vehicle_unlocks else [],
                 "has_slack": has_slack,
             }
         )
@@ -307,12 +279,7 @@ async def post_race_invite(
     # Org-membership check — prevents the bridge from addressing a user
     # who doesn't belong to the claimed org. The existing
     # ``OrgToUser`` table is the authoritative membership record.
-    stmt = select(OrgToUser.user_id).where(
-        OrgToUser.org_id == body.org_id,
-        OrgToUser.user_id == body.recipient_user_id,
-    )
-    membership = await db.execute(stmt)
-    if membership.scalar_one_or_none() is None:
+    if not await UserRepository(db).is_member_of_org(body.recipient_user_id, body.org_id):
         logger.warning(
             "race_invite_recipient_not_in_org",
             org_id=str(body.org_id),

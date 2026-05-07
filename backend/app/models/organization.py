@@ -29,6 +29,11 @@ class Organization(BaseModel):
     github_app_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     github_app_installation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     github_webhook_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Lowercase App slug from `GET /app` (e.g. "my-org-bodhi"). Used to build
+    # the install URL https://github.com/apps/{slug}/installations/new for
+    # the bulk-import flow. Auto-populated on first successful App-token
+    # use; never user-edited; not a secret so stored plain text.
+    github_app_slug: Mapped[str | None] = mapped_column(String(120), nullable=True)
     slack_bot_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_signing_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_team_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)

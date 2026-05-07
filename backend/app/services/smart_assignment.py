@@ -12,12 +12,14 @@ import uuid
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
 from app.models.skill_profile import SkillProfile
 from app.models.user import User, UserRole
+from app.repositories.bud import BUDRepository
+from app.repositories.skill_profile import SkillProfileRepository
+from app.repositories.user import UserRepository
 from app.services.bud_assignment import _TERMINAL_STATUSES
 
 logger = structlog.get_logger(__name__)
@@ -46,34 +48,19 @@ async def score_candidates(
     exclude_ids = set(exclude_user_ids or [])
 
     # Find active users with the target role
-    from app.models.user import OrgToUser
-
-    result = await db.execute(
-        select(User)
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .where(
-            OrgToUser.org_id == org_id,
-            OrgToUser.role == role,
-            User.is_active == true(),
-        )
-    )
-    candidates = [u for u in result.scalars().all() if u.id not in exclude_ids]
+    user_repo = UserRepository(db)
+    candidates_all = await user_repo.list_active_with_role(org_id, role)
+    candidates = [u for u in candidates_all if u.id not in exclude_ids]
     if not candidates:
         return []
 
     candidate_ids = [c.id for c in candidates]
 
     # Count active BUDs per candidate
-    load_result = await db.execute(
-        select(BUDDocument.assignee_id, func.count())
-        .where(
-            BUDDocument.org_id == org_id,
-            BUDDocument.assignee_id.in_(candidate_ids),
-            BUDDocument.status.notin_([s.value for s in _TERMINAL_STATUSES]),
-        )
-        .group_by(BUDDocument.assignee_id)
+    bud_repo = BUDRepository(db, org_id=org_id)
+    load_map = await bud_repo.count_active_loads_for_assignees(
+        candidate_ids, [s.value for s in _TERMINAL_STATUSES]
     )
-    load_map: dict[uuid.UUID, int] = {row[0]: row[1] for row in load_result}
 
     # Filter out overloaded developers
     candidates = [c for c in candidates if load_map.get(c.id, 0) < _MAX_ACTIVE_BUDS]
@@ -83,13 +70,9 @@ async def score_candidates(
     max_load = max(load_map.get(c.id, 0) for c in candidates) or 1
 
     # Fetch skill profiles for candidates (needed for both module extraction and scoring)
-    skill_result = await db.execute(
-        select(SkillProfile).where(
-            SkillProfile.org_id == org_id,
-            SkillProfile.user_id.in_([c.id for c in candidates]),
-        )
+    all_skills = await SkillProfileRepository(db, org_id=org_id).list_for_users(
+        [c.id for c in candidates]
     )
-    all_skills = list(skill_result.scalars().all())
 
     # Use impacted_repos from tech arch — no LLM call needed
     modules = {

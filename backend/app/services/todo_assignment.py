@@ -12,10 +12,10 @@ TODO transfers hands.
 import uuid
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.bud_todo import BUDTodo, BUDTodoStatus
+from app.models.bud_todo import BUDTodo
+from app.repositories.bud_todo import BUDTodoRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -54,15 +54,6 @@ async def assign_all_todos_to_lead(
 async def _list_unassigned_non_checkpoint_todos(
     db: AsyncSession, org_id: uuid.UUID, bud_id: uuid.UUID
 ) -> list[BUDTodo]:
-    result = await db.execute(
-        select(BUDTodo)
-        .where(
-            BUDTodo.org_id == org_id,
-            BUDTodo.bud_id == bud_id,
-            BUDTodo.assignee_id.is_(None),
-            BUDTodo.status == BUDTodoStatus.PENDING.value,
-            BUDTodo.is_checkpoint.is_(False),
-        )
-        .order_by(BUDTodo.sequence.asc())
+    return await BUDTodoRepository(db, org_id=org_id).list_unassigned_non_checkpoint_for_bud(
+        bud_id
     )
-    return list(result.scalars().all())

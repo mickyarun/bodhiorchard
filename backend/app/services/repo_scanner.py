@@ -1,15 +1,15 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Arun Rajkumar
 
 """Re-export shim for backwards compatibility.
 
-All symbols that were previously defined here have been split into:
+Symbols that were previously defined here have been split into:
 - ``git_operations`` — git CLI wrappers, branch detection, stash/restore
-- ``gitnexus_indexer`` — GitNexus analysis and knowledge graph queries
+- ``code_indexer`` — graphify-based code-graph indexing
 - ``repo_setup`` — MCP init, hooks, gitignore, package.json, commit/push, PR
 
-This module re-exports every public symbol so existing consumers
-(``settings.py``, ``scan_pipeline.py``, ``job_handlers.py``) keep working.
+Consumers that need code-graph data should import directly from
+``app.services.code_indexer``.
 """
 
 from app.services.git_operations import (  # noqa: F401
@@ -21,15 +21,6 @@ from app.services.git_operations import (  # noqa: F401
     restore_after_scan,
     run_git,
     stash_and_checkout_main,
-)
-from app.services.gitnexus_indexer import (  # noqa: F401
-    DocEntry,
-    FeatureEntry,
-    GitNexusNotInstalledError,
-    GitNexusResult,
-    ProcessEntry,
-    extract_repo_docs,
-    index_repo_with_gitnexus,
 )
 from app.services.repo_setup import (  # noqa: F401
     add_bodhiorchard_gitignore,

@@ -16,10 +16,10 @@ Kept separate from ``todo_parser`` (pure) and ``agent_result_handlers``
 import uuid
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
+from app.repositories.bud_todo import BUDTodoRepository
 from app.services.todo_parser import ParsedTodo, parse_implementation_todos
 
 logger = structlog.get_logger(__name__)
@@ -49,7 +49,7 @@ async def sync_todos_from_tech_spec(
     if not parsed:
         return 0
 
-    existing = await _load_existing_todos(db, bud_id)
+    existing = await _load_existing_todos(db, org_id, bud_id)
     parsed_seqs = {p.sequence for p in parsed}
 
     for todo in parsed:
@@ -75,9 +75,11 @@ async def sync_todos_from_tech_spec(
     return len(parsed)
 
 
-async def _load_existing_todos(db: AsyncSession, bud_id: uuid.UUID) -> dict[int, BUDTodo]:
-    result = await db.execute(select(BUDTodo).where(BUDTodo.bud_id == bud_id))
-    return {todo.sequence: todo for todo in result.scalars().all()}
+async def _load_existing_todos(
+    db: AsyncSession, org_id: uuid.UUID, bud_id: uuid.UUID
+) -> dict[int, BUDTodo]:
+    todos = await BUDTodoRepository(db, org_id=org_id).list_for_bud(bud_id)
+    return {todo.sequence: todo for todo in todos}
 
 
 def _build_new_todo(

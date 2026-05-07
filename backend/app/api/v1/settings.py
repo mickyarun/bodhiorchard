@@ -18,22 +18,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.v1.settings_claude import router as claude_router
+from app.api.v1.settings_github_members import router as gh_members_router
 from app.api.v1.settings_repos import router as repos_router
 from app.api.v1.settings_slack import router as slack_router
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.core.encryption import decrypt_secret, encrypt_secret
 from app.core.security import hash_password
+from app.mcp.auth import compute_token_prefix
+from app.models.organization import Organization
 from app.models.user import User
+from app.models.user_mcp_token import UserMCPToken
 from app.repositories.organization import OrganizationRepository
 from app.schemas.settings import (
     AIConfigSettings,
     ConnectionsRead,
     ConnectionsUpdate,
+    GitHubAppStatus,
     GitHubSettings,
     JiraSettingsRead,
     ScanSettings,
     SlackSettings,
     SourceCodeSettings,
+)
+from app.services.github_app_auth import fetch_and_persist_app_slug
+from app.services.github_app_jwt import (
+    GITHUB_APP_INSTALL_URL_TEMPLATE as _APP_INSTALL_URL_TEMPLATE,
+)
+from app.services.github_app_slug import (
+    GitHubAppNotFound,
+    GitHubAppValidationError,
+    GitHubCredentialsInvalid,
+    GitHubUnreachable,
+    validate_and_persist_app_slug,
 )
 from app.services.org_settings import (
     get_bud_stage_settings,
@@ -41,6 +57,14 @@ from app.services.org_settings import (
     get_presence_settings,
     get_qa_settings,
 )
+from app.services.slack_client import auth_test
+
+# Re-exported from ``github_app_jwt`` so service-layer modules can use
+# the same template without importing this route module (which would
+# create a cycle through ``settings_repos``). Kept as a module-level
+# name here for back-compat with anything that imports it from the
+# route module.
+GITHUB_APP_INSTALL_URL_TEMPLATE = _APP_INSTALL_URL_TEMPLATE
 
 logger = structlog.get_logger(__name__)
 
@@ -48,6 +72,7 @@ router = APIRouter(tags=["settings"])
 router.include_router(repos_router)
 router.include_router(slack_router)
 router.include_router(claude_router)
+router.include_router(gh_members_router)
 
 
 @router.get(
@@ -93,14 +118,7 @@ async def get_connections(
             localPath=source_code_cfg.get("local_path", ""),
             type=source_code_cfg.get("type", "single-repo"),
         ),
-        github=GitHubSettings(
-            enabled=bool(org.github_app_id),
-            connected=bool(org.github_app_id and org.github_app_private_key),
-            appId=org.github_app_id,
-            hasPrivateKey=bool(org.github_app_private_key),
-            installationId=org.github_app_installation_id,
-            webhookConfigured=bool(org.github_webhook_secret),
-        ),
+        github=_build_github_settings(org),
         slack=SlackSettings(
             enabled=slack_cfg.get("enabled", False),
             connected=bool(org.slack_bot_token),
@@ -115,9 +133,12 @@ async def get_connections(
             cloudProvider=llm_cfg.get("cloud_provider", "anthropic"),
             cloudApiKey=_mask_secret(decrypt_secret(llm_cfg.get("cloud_api_key", ""))),
             cloudModel=llm_cfg.get("cloud_model", "claude-sonnet-4-5-20250514"),
+            mergeModelDefault=llm_cfg.get("merge_model_default"),
+            mergeModelLarge=llm_cfg.get("merge_model_large"),
         ),
         scan=ScanSettings(
             timeoutSeconds=scan_cfg.get("timeout_seconds", 300),
+            mergeTimeoutSeconds=scan_cfg.get("merge_timeout_seconds", 300),
             maxTurns=scan_cfg.get("max_turns", 40),
             autoCreateMembers=scan_cfg.get("auto_create_members", True),
         ),
@@ -161,13 +182,20 @@ async def update_connections(
     # Source code — repos are managed via tracked_repositories table,
     # no longer stored in JSONB config.
 
-    # GitHub App
+    # GitHub App — track whether the user supplied any credential field
+    # in this PATCH so we can run synchronous validation (Phase J) instead
+    # of the lenient retrofit. Validating on unrelated PATCHes (e.g. a
+    # presence-settings toggle) would be wrong; the lenient path keeps
+    # the existing behaviour for those.
+    github_credentials_supplied = False
     if body.github is not None:
         config.setdefault("integrations", {})
         if body.github.app_id is not None:
             org.github_app_id = body.github.app_id
+            github_credentials_supplied = True
         if body.github.private_key:
             org.github_app_private_key = encrypt_secret(body.github.private_key)
+            github_credentials_supplied = True
         if body.github.webhook_secret:
             org.github_webhook_secret = encrypt_secret(body.github.webhook_secret)
         if body.github.installation_id is not None:
@@ -186,8 +214,6 @@ async def update_connections(
                 encrypt_secret(body.slack.bot_token) if body.slack.bot_token else None
             )
             # Auto-fetch team_id via auth.test so we can resolve orgs from webhooks
-            from app.services.slack_client import auth_test
-
             auth_info = await auth_test(body.slack.bot_token)
             if auth_info and auth_info.get("team_id"):
                 org.slack_team_id = auth_info["team_id"]
@@ -212,14 +238,28 @@ async def update_connections(
         if body.slack.team_id:
             org.slack_team_id = body.slack.team_id
 
-    # AI config — only persist preset (Claude Code only for now)
+    # AI config — preset + optional per-org merge model overrides.
     if body.ai_config is not None:
-        config["llm"] = {"preset": body.ai_config.preset}
+        existing_llm = dict(config.get("llm") or {})
+        existing_llm["preset"] = body.ai_config.preset
+        # None on either field means "use platform default"; persist as
+        # absent rather than null so get_merge_models's allowlist logic
+        # sees a clean fallback path.
+        if body.ai_config.merge_model_default is None:
+            existing_llm.pop("merge_model_default", None)
+        else:
+            existing_llm["merge_model_default"] = body.ai_config.merge_model_default
+        if body.ai_config.merge_model_large is None:
+            existing_llm.pop("merge_model_large", None)
+        else:
+            existing_llm["merge_model_large"] = body.ai_config.merge_model_large
+        config["llm"] = existing_llm
 
     # Scan settings
     if body.scan is not None:
         config["scan"] = {
             "timeout_seconds": body.scan.timeout_seconds,
+            "merge_timeout_seconds": body.scan.merge_timeout_seconds,
             "max_turns": body.scan.max_turns,
             "auto_create_members": body.scan.auto_create_members,
         }
@@ -245,6 +285,44 @@ async def update_connections(
     flag_modified(org, "config")
     await db.flush()
     await db.refresh(org)
+
+    # GitHub-App credential validation (Phase J).
+    #
+    # When the user supplied at least one credential field in this
+    # PATCH, we must give them a synchronous yes/no. ``GET /app`` either
+    # accepts the JWT (good) or returns 401/404 (bad) — translate that
+    # to a typed 400 so the credentials form can render an inline alert.
+    #
+    # If no credential fields are part of this PATCH (e.g. the user
+    # only flipped a toggle elsewhere), keep the lenient retrofit so we
+    # never break unrelated paths because of a transient GitHub blip.
+    if org.github_app_id and org.github_app_private_key and github_credentials_supplied:
+        try:
+            await validate_and_persist_app_slug(org, db)
+        except GitHubCredentialsInvalid as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"error": exc.code, "message": exc.message},
+            ) from exc
+        except GitHubAppNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"error": exc.code, "message": exc.message},
+            ) from exc
+        except GitHubUnreachable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"error": exc.code, "message": exc.message},
+            ) from exc
+        except GitHubAppValidationError as exc:  # pragma: no cover — future codes
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"error": exc.code, "message": exc.message},
+            ) from exc
+    elif org.github_app_id and org.github_app_private_key and org.github_app_slug is None:
+        # Lenient retrofit — fire and forget on the request session.
+        # Logs a warning and continues if GitHub is unreachable.
+        await fetch_and_persist_app_slug(org, db)
 
     return await get_connections(current_user, db)
 
@@ -280,9 +358,6 @@ async def regenerate_mcp_token(
     Returns:
         MCPTokenResponse with the plaintext token (one-time display).
     """
-    from app.mcp.auth import compute_token_prefix
-    from app.models.user_mcp_token import UserMCPToken
-
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
 
@@ -332,7 +407,7 @@ async def regenerate_mcp_token(
 async def mcp_token_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, bool]:
     """Check whether an MCP token has been set for the organization.
 
     Args:
@@ -369,6 +444,40 @@ def _is_masked(value: str | None) -> bool:
     placeholders returned by _mask_secret().
     """
     return bool(value and "****" in value)
+
+
+def _resolve_github_app_status(org: Organization) -> GitHubAppStatus:
+    """Map an org's GitHub App columns onto the public lifecycle enum."""
+    if not org.github_app_id or not org.github_app_private_key:
+        return GitHubAppStatus.NOT_CONFIGURED
+    if not org.github_app_installation_id:
+        return GitHubAppStatus.AWAITING_INSTALL
+    return GitHubAppStatus.READY
+
+
+def _build_github_settings(org: Organization) -> GitHubSettings:
+    """Compose the ``GitHubSettings`` response payload for an org.
+
+    ``connected`` is preserved as ``status != NOT_CONFIGURED`` so the
+    legacy boolean keeps working alongside the richer ``status`` enum.
+    """
+    status = _resolve_github_app_status(org)
+    install_url = (
+        GITHUB_APP_INSTALL_URL_TEMPLATE.format(slug=org.github_app_slug)
+        if org.github_app_slug
+        else None
+    )
+    return GitHubSettings(
+        enabled=bool(org.github_app_id),
+        connected=status != GitHubAppStatus.NOT_CONFIGURED,
+        appId=org.github_app_id,
+        hasPrivateKey=bool(org.github_app_private_key),
+        installationId=org.github_app_installation_id,
+        webhookConfigured=bool(org.github_webhook_secret),
+        status=status,
+        slug=org.github_app_slug,
+        installUrl=install_url,
+    )
 
 
 def _build_jira_read(config: dict) -> JiraSettingsRead:

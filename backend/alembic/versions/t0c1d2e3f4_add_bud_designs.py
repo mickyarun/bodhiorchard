@@ -57,7 +57,10 @@ def upgrade() -> None:
     # Migrate existing design_md rows into bud_designs with repo_id=NULL
     op.execute(
         """
-        INSERT INTO bud_designs (id, org_id, bud_id, repo_id, design_html, status, created_at, updated_at)
+        INSERT INTO bud_designs (
+            id, org_id, bud_id, repo_id, design_html,
+            status, created_at, updated_at
+        )
         SELECT gen_random_uuid(), org_id, id, NULL, design_md, 'ready', now(), now()
         FROM bud_documents
         WHERE design_md IS NOT NULL AND design_md != ''

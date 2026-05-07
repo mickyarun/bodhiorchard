@@ -92,6 +92,80 @@ def _extract_param_reads(handler: Callable[..., Any]) -> set[str] | None:
     return reads
 
 
+def _extract_all_string_key_reads(handler: Callable[..., Any]) -> set[str] | None:
+    """Return every string-literal key the handler accesses on ANY object.
+
+    Broader than ``_extract_param_reads`` — used to verify nested-shape
+    schema keys (e.g. ``op.get("canonical_synth_id")`` inside an array
+    item) actually get read. Walks ``<anything>.get("X")`` and
+    ``<anything>["X"]`` patterns regardless of the target variable.
+
+    Also follows imports: the handler often delegates op-shape
+    validation to a sibling helper (e.g. ``_validate_op_shape``) in the
+    same module, so we collect literal keys from every function in the
+    handler's module rather than just the handler body.
+
+    Returns ``None`` when the handler's source can't be parsed.
+    """
+    try:
+        # Walk the entire module the handler lives in — handlers commonly
+        # delegate per-op validation to a sibling helper in the same file.
+        module = inspect.getmodule(handler)
+        if module is None:
+            return None
+        source = inspect.getsource(module)
+    except (OSError, TypeError):
+        return None
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+
+    reads: set[str] = set()
+    for node in ast.walk(tree):
+        # <anything>.get("X", default?)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            reads.add(node.args[0].value)
+        # <anything>["X"]
+        elif isinstance(node, ast.Subscript):
+            key_node = node.slice
+            if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+                reads.add(key_node.value)
+    return reads
+
+
+def _collect_nested_item_property_keys(schema: dict[str, Any]) -> set[str]:
+    """Collect every property key declared inside an ``array → items.object`` shape.
+
+    The top-level ``check_mcp_contracts`` already validates top-level
+    properties. This helper recurses into ``properties[*].items.properties``
+    chains so a schema like ``ops: [{canonical_synth_id, …}]`` exposes
+    its nested keys for the handler-read check.
+    """
+    keys: set[str] = set()
+    properties = schema.get("properties") or {}
+    for prop_schema in properties.values():
+        if not isinstance(prop_schema, dict):
+            continue
+        if prop_schema.get("type") == "array":
+            items = prop_schema.get("items")
+            if isinstance(items, dict) and items.get("type") == "object":
+                nested_props = items.get("properties") or {}
+                keys.update(nested_props.keys())
+                keys.update(_collect_nested_item_property_keys(items))
+        elif prop_schema.get("type") == "object":
+            keys.update(_collect_nested_item_property_keys(prop_schema))
+    return keys
+
+
 def check_mcp_contracts() -> None:
     """Validate the schema ↔ handler contract for every registered MCP tool.
 
@@ -140,6 +214,29 @@ def check_mcp_contracts() -> None:
                 f"declared in the schema (Claude won't send them): "
                 f"{sorted(undeclared_reads)}"
             )
+
+        # 3. Nested item shapes (e.g. ``ops: [{canonical_synth_id, ...}]``)
+        # must have every declared key actually read by the handler or
+        # one of its sibling helpers in the same module. Catches the
+        # ``apply_feature_merge_plan: canonical_id vs canonical_synth_id``
+        # drift the top-level check missed.
+        nested_keys = _collect_nested_item_property_keys(tool.input_schema)
+        if nested_keys:
+            broad_reads = _extract_all_string_key_reads(handler)
+            if broad_reads is None:
+                logger.info(
+                    "mcp_contract_check_nested_skipped",
+                    tool=tool.name,
+                    reason="handler module source unavailable",
+                )
+            else:
+                unused_nested = nested_keys - broad_reads
+                if unused_nested:
+                    problems.append(
+                        f"{tool.name}: schema declares nested-item keys the "
+                        f"handler module never reads (likely schema drift): "
+                        f"{sorted(unused_nested)}"
+                    )
 
     if skipped:
         logger.info(

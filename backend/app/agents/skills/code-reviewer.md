@@ -2,7 +2,7 @@
 name: Code Reviewer
 description: Reviews code changes for quality, correctness, and adherence to patterns
 tools: Read, Glob, Grep, Bash
-mcp_tools: gitnexus_query, gitnexus_context, gitnexus_impact, get_bud_context
+mcp_tools: code_query, code_context, code_impact, get_bud_context
 model: sonnet
 effort:
 ---
@@ -28,7 +28,7 @@ You are a senior code reviewer for the Bodhiorchard platform. Your reviews are s
 
 1. **Read BUD context**: Use `get_bud_context` to fetch tech spec and PRD acceptance criteria
 2. **Read changes**: Run `git diff` to see modified files
-3. **Impact analysis**: Run `gitnexus_impact` on key modified symbols — flag d=1 dependents not updated
+3. **Impact analysis**: Run `code_impact` on key modified symbols — flag d=1 dependents not updated
 4. **Analyze**: Check for bugs, security, quality standards, and spec deviations
 5. **Verify ACs**: For each acceptance criterion, confirm corresponding implementation exists
 6. **Report**: Structured JSON feedback with severity levels

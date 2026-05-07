@@ -31,15 +31,32 @@
         color="primary"
         class="mb-3"
       >
-        <v-tab value="github" prepend-icon="mdi-github">GitHub clone</v-tab>
+        <v-tab
+          :value="TAB_GITHUB"
+          prepend-icon="mdi-github"
+          text="GitHub clone"
+        />
         <v-tab
           v-if="deploymentMode !== 'docker'"
-          value="local"
+          :value="TAB_LOCAL"
           prepend-icon="mdi-folder-outline"
-        >
-          Local path
-        </v-tab>
+          text="Local path"
+        />
+        <v-tab
+          :value="TAB_BULK"
+          prepend-icon="mdi-source-repository-multiple"
+          text="Bulk import"
+        />
       </v-tabs>
+
+      <!--
+        Bulk Import is shown in both setup and settings mode (Phase J
+        restored). The wizard pre-creates the org after the AI Engine
+        step so the picker has a backend to talk to.
+      -->
+      <div v-if="activeTab === TAB_BULK">
+        <RepoOnboardBulkTab :mode="props.mode" @onboarded="onBulkOnboarded" />
+      </div>
 
       <!-- GitHub clone tab -->
       <div v-if="activeTab === 'github'">
@@ -325,7 +342,7 @@
         </div>
         <v-chip
           v-for="(r, idx) in repos"
-          :key="r.path"
+          :key="r.gitHubFullName || r.path || idx"
           closable
           variant="tonal"
           size="small"
@@ -333,36 +350,24 @@
           @click:close="removeRepo(idx)"
         >
           <v-icon icon="mdi-source-repository" size="14" start />
-          {{ repoLabel(r.path) }}
-          <v-tooltip activator="parent" location="top" :text="r.path" />
+          {{ repoChipLabel(r) }}
+          <v-tooltip activator="parent" location="top" :text="r.gitHubFullName || r.path" />
         </v-chip>
       </div>
 
-      <v-alert
-        v-if="repos.length > 0 && deploymentMode !== 'docker'"
-        type="warning"
-        variant="tonal"
-        density="compact"
-        icon="mdi-source-branch-sync"
-        class="mt-3"
-      >
-        Scanning will temporarily stash uncommitted changes and checkout the main branch.
-        <strong>Commit or back up your work</strong> in all repos before proceeding.
-      </v-alert>
+      <template v-if="hasReposConfigured">
+        <!-- Step 2: Branch mapping — local-path entries only. Bulk + GitHub
+             clone flows auto-detect branches at add-time, so re-rendering
+             the picker here would just duplicate UI the user already saw. -->
+        <template v-if="localPathRepos.length > 0">
+        <v-divider class="my-4" />
 
-      <v-divider class="my-4" />
+        <div class="d-flex align-center ga-2 mb-3">
+          <v-avatar size="24" color="primary" class="text-caption font-weight-bold">2</v-avatar>
+          <span class="text-body-2 font-weight-medium">Map branches</span>
+        </div>
 
-      <!-- Step 2: Branch mapping -->
-      <div class="d-flex align-center ga-2 mb-3">
-        <v-avatar size="24" color="primary" class="text-caption font-weight-bold">2</v-avatar>
-        <span class="text-body-2 font-weight-medium">Map branches</span>
-      </div>
-
-      <div v-if="!repos.length" class="text-caption text-medium-emphasis mb-3 ml-8">
-        Add at least one repository above to configure branches.
-      </div>
-
-      <div v-for="(repo, idx) in repos" :key="repo.path" class="mb-4">
+        <div v-for="repo in localPathRepos" :key="repo.path" class="mb-4">
         <div class="text-body-2 font-weight-medium mb-2 d-flex align-center ga-2">
           <v-icon icon="mdi-source-repository" size="16" />
           {{ repoLabel(repo.path) }}
@@ -375,7 +380,7 @@
             Mapped
           </v-chip>
           <v-progress-circular
-            v-if="branchLoading[idx]"
+            v-if="branchLoading[repoIndex(repo)]"
             indeterminate
             size="14"
             width="2"
@@ -385,7 +390,7 @@
         <div class="d-flex ga-3">
           <v-combobox
             v-model="repo.mainBranch"
-            :items="branchOptions[idx] || []"
+            :items="branchOptions[repoIndex(repo)] || []"
             label="Main branch"
             density="compact"
             variant="outlined"
@@ -395,7 +400,7 @@
           />
           <v-combobox
             v-model="repo.developBranch"
-            :items="branchOptions[idx] || []"
+            :items="branchOptions[repoIndex(repo)] || []"
             label="Develop branch"
             density="compact"
             variant="outlined"
@@ -407,16 +412,17 @@
       </div>
 
       <v-alert
-        v-if="repos.length && !allMapped"
+        v-if="!allMapped"
         type="warning"
         variant="tonal"
         density="compact"
         icon="mdi-source-branch"
         class="text-body-2 mt-2"
       >
-        All repos need both <strong>main</strong> and <strong>develop</strong>
+        Local repos need both <strong>main</strong> and <strong>develop</strong>
         branches mapped before we can scan.
       </v-alert>
+        </template>
 
       <v-divider class="my-4" />
 
@@ -455,6 +461,7 @@
         how many Claude Code tool calls are made per feature synthesis
         (0 = unlimited).
       </div>
+      </template>
     </v-card>
 
     <!-- Directory picker dialog (host mode only) -->
@@ -551,17 +558,60 @@
 </template>
 
 <script setup lang="ts">
+// TODO(post-bulk-import): split this 800+ line file into per-tab subcomponents.
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useSetupStore } from '@/stores/setup'
 import type { SetupRepoConfig } from '@/types/setup'
+import type { BulkOnboardJobTerminalResult } from '@/types/repoOnboard'
 import api from '@/services/api'
+import RepoOnboardBulkTab from '@/components/settings/code/onboard/RepoOnboardBulkTab.vue'
+
+const TAB_GITHUB = 'github'
+const TAB_LOCAL = 'local'
+const TAB_BULK = 'bulk'
+type SourceTab = typeof TAB_GITHUB | typeof TAB_LOCAL | typeof TAB_BULK
+
+// Phase J: Bulk Import is now visible in both modes — the wizard
+// pre-creates the org after the AI Engine step so a live JWT exists by
+// the time the user reaches Source Code. The ``mode`` prop stays so
+// callers can opt into per-surface tweaks in the future without another
+// breaking signature change.
+const props = withDefaults(defineProps<{
+  /** Surface mode — propagated into the bulk tab so the wizard's
+   *  Continue button drives finalize in setup mode. */
+  mode?: 'setup' | 'settings'
+}>(), { mode: 'settings' })
 
 const setupStore = useSetupStore()
 const repos = computed(() => setupStore.state.sourceCode.repos)
+const hasReposConfigured = computed(() => setupStore.state.sourceCode.repos.length > 0)
+// Phase P — section 2 ("Map branches") only renders local-path entries.
+// Bulk and github-clone flows auto-detect main/develop on add, so showing
+// them again duplicates UI the user already touched.
+const localPathRepos = computed(() =>
+  repos.value.filter((r) => (r.source ?? 'github-clone') === 'local-path'),
+)
 
 // Deployment detection — drives which tab is visible/default.
 const deploymentMode = ref<'docker' | 'host' | null>(null)
-const activeTab = ref<'github' | 'local'>('github')
+const activeTab = ref<SourceTab>(TAB_GITHUB)
+
+function onBulkOnboarded(result: BulkOnboardJobTerminalResult): void {
+  // Bulk job runs full clone+scan server-side; mirror succeeded items
+  // into the setup store so finalize emits the installable-items shape.
+  for (const item of result.items) {
+    if (item.status !== 'done') continue
+    const path = `bulk:${item.fullName}`
+    if (setupStore.state.sourceCode.repos.some(r => r.path === path)) continue
+    setupStore.state.sourceCode.repos.push({
+      path,
+      mainBranch: item.mainBranch,
+      developBranch: item.developBranch || null,
+      gitHubFullName: item.fullName,
+      source: 'bulk',
+    })
+  }
+}
 
 // GitHub clone form state — queued list lets the user batch multiple
 // repos in one setup step with shared PAT/deploy-key auth.
@@ -599,8 +649,11 @@ const browseLoading = ref(false)
 const branchOptions = reactive<Record<number, string[]>>({})
 const branchLoading = reactive<Record<number, boolean>>({})
 
+// Section 2 only renders local-path entries, so the unmapped-warning gate
+// must scope to the same set — otherwise a bulk entry without a develop
+// branch would surface a warning the user has no UI to act on.
 const allMapped = computed(() =>
-  repos.value.length > 0 && repos.value.every(r => r.mainBranch && r.developBranch),
+  localPathRepos.value.every((r) => r.mainBranch && r.developBranch),
 )
 
 const cloneUrlHint = computed<string>(() => {
@@ -708,9 +761,12 @@ onMounted(async () => {
     activeTab.value = 'github'
   }
 
-  // Pre-fetch the deploy key so toggling to SSH is instant.
+  // Pre-fetch the deploy key so toggling to SSH is instant. Uses the
+  // authenticated endpoint because by this step the wizard already ran
+  // /setup/init-org, which mints a JWT and disables /setup/deploy-key
+  // (the unauth wizard route 403s post-init).
   try {
-    const { data } = await api.get('/setup/deploy-key')
+    const { data } = await api.get('/v1/settings/repos/deploy-key')
     deployKey.value = data.public_key || ''
   } catch {
     deployKey.value = ''
@@ -725,16 +781,34 @@ function repoLabel(path: string): string {
   return path.split('/').filter(Boolean).pop() || path
 }
 
+// Section 2 iterates the filtered ``localPathRepos`` list, but
+// ``branchOptions`` / ``branchLoading`` are keyed by the original index
+// in ``setupStore.state.sourceCode.repos`` (assigned at addRepo time).
+function repoIndex(repo: SetupRepoConfig): number {
+  return repos.value.indexOf(repo)
+}
+
+function repoChipLabel(r: SetupRepoConfig): string {
+  if (r.gitHubFullName) return r.gitHubFullName
+  return repoLabel(r.path)
+}
+
 function isRepoSelected(path: string): boolean {
   return repos.value.some(r => r.path === path)
 }
 
-function addRepo(path: string, detectedMain?: string | null, branches?: string[]): void {
+function addRepo(
+  path: string,
+  detectedMain?: string | null,
+  branches?: string[],
+  source: 'github-clone' | 'local-path' = 'local-path',
+): void {
   if (isRepoSelected(path)) return
   const repo: SetupRepoConfig = {
     path,
     mainBranch: detectedMain || null,
     developBranch: null,
+    source,
   }
   setupStore.state.sourceCode.repos.push(repo)
   const idx = setupStore.state.sourceCode.repos.length - 1
@@ -786,28 +860,31 @@ async function handleClone(): Promise<void> {
       item.error = undefined
 
       const useSsh = isSshUrl(item.url)
-      const payload: {
-        url: string
-        orgSlug: string
-        pat?: string | null
-      } = {
-        url: item.url,
-        orgSlug: setupStore.state.organization.slug || 'default',
-      }
+      // Authenticated endpoint — derives org from JWT, no orgSlug needed.
+      const payload: { url: string; pat?: string | null } = { url: item.url }
       if (isPrivate.value && !useSsh && pat.value.trim()) {
         payload.pat = pat.value.trim()
       }
 
       try {
-        const { data } = await api.post('/setup/clone-repo', payload, { timeout: 120_000 })
-        if (!data.success) {
-          item.status = 'error'
-          item.error = data.error || 'Clone failed.'
-          continue
+        // POST returns RepoInfo on success; failures surface as 4xx via the
+        // catch block below. The branch list is fetched separately because
+        // the auth endpoint keeps the clone response and the branch list
+        // decoupled (see settings_repos.py: /repos/{id}/branches).
+        const { data: repo } = await api.post('/v1/settings/repos/clone', payload, {
+          timeout: 120_000,
+        })
+        let branches: string[] = []
+        try {
+          const { data: branchList } = await api.get(
+            `/v1/settings/repos/${encodeURIComponent(repo.id)}/branches`,
+          )
+          branches = Array.isArray(branchList?.branches) ? branchList.branches : []
+        } catch {
+          // Branch fetch is best-effort — clone already succeeded.
         }
         item.status = 'done'
-        // Append with the default branch pre-filled so branch mapping is usually just "pick develop".
-        addRepo(data.path, data.default_branch, data.branches || [])
+        addRepo(repo.path, repo.mainBranch || '', branches, 'github-clone')
       } catch (err: unknown) {
         item.status = 'error'
         if (err && typeof err === 'object' && 'response' in err) {

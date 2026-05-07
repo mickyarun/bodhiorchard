@@ -151,7 +151,7 @@ scan_statuses: dict[str, ScanStatus] = {}  # skills.py
 GET /v1/skills/scan/{scan_id}/status  (every 1 second)
 ```
 
-`SettingsRepositories.vue` polls via `startPolling()` at line 814, updates a progress bar and status label, and stops on `completed` or `failed`.
+`frontend/src/views/settings/SettingsCode.vue` (backed by `useReposcanV2ScansStore` in `frontend/src/stores/reposcanv2Scans.ts`) polls scan progress every 2 seconds and renders the per-repo phase timeline.
 
 ---
 
@@ -180,7 +180,7 @@ GET /v1/skills/scan/{scan_id}/status  (every 1 second)
 | GitNexus indexer | `backend/app/services/gitnexus_indexer.py` | Phase B — code clustering |
 | Git analyzer | `backend/app/services/git_analyzer.py` | Phase E — commit history analysis |
 | Schemas | `backend/app/schemas/skills.py` | `ScanRequest`, `ScanResponse`, `ScanStatus` |
-| Frontend UI | `frontend/src/views/settings/SettingsRepositories.vue` | Scan buttons, progress, polling |
+| Frontend UI | `frontend/src/views/settings/SettingsCode.vue` | Repo list, scan controls, progress timeline |
 | Setup store | `frontend/src/stores/setup.ts` | Auto-scan after org creation |
 | Settings store | `frontend/src/stores/settings.ts` | Repo CRUD operations |
 

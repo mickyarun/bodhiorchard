@@ -12,15 +12,16 @@ import re
 import uuid
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
-from app.models.tracked_repository import TrackedRepository
-from app.models.user import User
+from app.models.tracked_repository import SetupPrState, TrackedRepository
+from app.repositories.bud import BUDRepository
 from app.repositories.pull_request import PullRequestRepository
+from app.repositories.user import UserRepository
 from app.schemas.github import GitHubComment, GitHubPullRequest, GitHubReview
 from app.services.bud_timeline import record_event
+from app.services.job_queue import JOB_PR_MERGE_UPDATE, create_job
 from app.services.pr_auto_transition import (
     check_all_prs_merged,
     check_all_repos_have_prs,
@@ -164,6 +165,18 @@ async def _handle_pr_closed(
 
         pr.merged_at = datetime.fromisoformat(pr_data.merged_at.replace("Z", "+00:00"))
 
+    # If this PR is the repo's MCP setup PR, flip the row's setup_pr_state
+    # so /settings/code can drop the "Setup PR open" chip without waiting
+    # for the next scan's filesystem check.
+    if repo.setup_pr_number == pr_data.number:
+        repo.setup_pr_state = SetupPrState.MERGED if is_merged else SetupPrState.CLOSED
+        logger.info(
+            "setup_pr_state_updated",
+            repo=repo.name,
+            pr_number=pr_data.number,
+            merged=is_merged,
+        )
+
     # Capture the post-merge SHA so downstream release-stage detection
     # can match this BUD's commits to release PRs (e.g. develop \u2192 uat),
     # regardless of whether the merge strategy was merge / squash / rebase.
@@ -244,6 +257,43 @@ async def _handle_pr_closed(
         pr_number=pr_data.number,
         merged=is_merged,
     )
+
+    # Feature-reconcile fan-out (purely additive). On a successful
+    # merge, enqueue a cluster-scoped feature-reconcile job so the
+    # Features tab tracks merged work without waiting for the next
+    # scheduled scan. Wrapped in try/except so a queueing failure
+    # never breaks the existing PR-tracking flow above.
+    if is_merged and pr_data.merge_commit_sha:
+        _enqueue_pr_merge_feature_reconcile(org_id, repo, pr_data)
+
+
+def _enqueue_pr_merge_feature_reconcile(
+    org_id: uuid.UUID,
+    repo: TrackedRepository,
+    pr_data: GitHubPullRequest,
+) -> None:
+    """Enqueue the PR-merge feature-reconcile job. Failures are logged, never raised."""
+    try:
+        merge_head = pr_data.merge_commit_sha or pr_data.head.sha
+        create_job(
+            JOB_PR_MERGE_UPDATE,
+            payload={
+                "org_id": str(org_id),
+                "repo_id": str(repo.id),
+                "pr_number": pr_data.number,
+                "base_sha": pr_data.base.sha,
+                "head_sha": merge_head,
+                "full_name": repo.github_repo_full_name or "",
+            },
+            user_id=None,
+        )
+    except Exception:
+        logger.warning(
+            "pr_merge_feature_reconcile_enqueue_failed",
+            repo_id=str(repo.id),
+            pr_number=pr_data.number,
+            exc_info=True,
+        )
 
 
 async def _maybe_detect_release_promotion(
@@ -576,21 +626,10 @@ async def _handle_pr_comment(
     db: AsyncSession,
 ) -> None:
     """Store a PR comment (issue_comment or review_comment) in the BUD."""
-    stmt = (
-        select(PullRequest)
-        .where(
-            PullRequest.org_id == org_id,
-            PullRequest.github_pr_number == pr_number,
-            PullRequest.github_repo_full_name == repo.github_repo_full_name,
-        )
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    pr = result.scalar_one_or_none()
+    pr_repo = PullRequestRepository(db, org_id=org_id)
+    pr = await pr_repo.get_by_repo_and_number(repo.github_repo_full_name, pr_number)
     if not pr or not pr.bud_id:
         return
-
-    from app.repositories.bud import BUDRepository
 
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id_for_update(pr.bud_id)
@@ -644,15 +683,4 @@ async def _resolve_github_user(
     github_login: str,
 ) -> uuid.UUID | None:
     """Resolve a GitHub login to a user_id within the org."""
-    if not github_login:
-        return None
-    from app.models.user import OrgToUser
-
-    stmt = (
-        select(User.id)
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .where(User.github_username == github_login, OrgToUser.org_id == org_id)
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    return result.scalar_one_or_none()
+    return await UserRepository(db).get_id_by_github_login(org_id, github_login)

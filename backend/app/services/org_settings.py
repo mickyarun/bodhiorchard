@@ -180,6 +180,40 @@ def get_ai_agent_profile(org_config: dict | None) -> dict[str, str]:
     return _AI_AGENT_PROFILES.get(preset, _AI_AGENT_PROFILES[_DEFAULT_AGENT_PRESET])
 
 
+_MERGE_MODEL_ALLOWLIST: frozenset[str] = frozenset({"claude-sonnet-4-6", "claude-opus-4-7"})
+
+
+def get_merge_models(org_config: dict | None) -> tuple[str, str]:
+    """Resolve (default_model, large_model) for cross-repo feature merge.
+
+    Reads the per-org overrides at ``org.config['llm']['merge_model_default']``
+    and ``org.config['llm']['merge_model_large']``. Either or both may be
+    absent / null; missing keys fall through to the platform-wide
+    ``LLMConfig`` defaults. Values outside the allowlist also fall back —
+    so a typo in the settings UI never escalates to running an unknown
+    model name through the runner.
+
+    Args:
+        org_config: The raw ``organization.config`` JSONB dict, or None.
+
+    Returns:
+        ``(default_model, large_model)`` ready to pass into
+        ``ClaudeRunnerConfig(model=...)``.
+    """
+    from app.config import settings
+
+    default_fallback = settings.llm.merge_model_default
+    large_fallback = settings.llm.merge_model_large
+
+    llm = (org_config or {}).get("llm") or {}
+    raw_default = llm.get("merge_model_default")
+    raw_large = llm.get("merge_model_large")
+
+    chosen_default = raw_default if raw_default in _MERGE_MODEL_ALLOWLIST else default_fallback
+    chosen_large = raw_large if raw_large in _MERGE_MODEL_ALLOWLIST else large_fallback
+    return chosen_default, chosen_large
+
+
 def get_jira_settings(org_config: dict | None) -> JiraSettings:
     """Resolve Jira connection settings from an organization config dict.
 

@@ -4,7 +4,7 @@
 """MCP (Model Context Protocol) server for Bodhiorchard.
 
 Exposes tools that Claude Code can call to read/write Bodhiorchard data:
-BUDs, knowledge base, bugs, task status, team context.
+BUDs, features, bugs, task status, team context.
 
 Mounted at /mcp/ on the main FastAPI app.
 """
@@ -23,15 +23,23 @@ from app.mcp.handlers_bud import (
     handle_get_bud_context,
     handle_write_bud,
 )
-from app.mcp.handlers_hooks import handle_dev_activity
-from app.mcp.handlers_knowledge import (
+from app.mcp.handlers_code_graph import (
+    handle_code_community,
+    handle_code_context,
+    handle_code_god_nodes,
+    handle_code_impact,
+    handle_code_query,
+    handle_code_stats,
+)
+from app.mcp.handlers_features import (
     handle_check_feature_exists,
-    handle_get_knowledge,
+    handle_get_features,
     handle_get_pending_features,
-    handle_merge_features,
     handle_search_bugs,
     handle_write_feature_registry,
 )
+from app.mcp.handlers_hooks import handle_dev_activity
+from app.mcp.handlers_scan import handle_write_synthesis_feature
 from app.mcp.handlers_team import (
     handle_get_design_system,
     handle_get_team_context,
@@ -115,17 +123,13 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         },
     ),
     MCPToolDefinition(
-        name="get_knowledge",
-        description="Query the organization knowledge base via semantic search",
+        name="get_features",
+        description="Search the organization's active features via semantic search",
         input_schema={
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query"},
                 "limit": {"type": "integer", "default": 10},
-                "category": {
-                    "type": "string",
-                    "description": "Category filter: feature_registry",
-                },
             },
             "required": ["query"],
         },
@@ -151,7 +155,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="write_feature_registry",
         description=(
-            "Save a synthesized feature description to the knowledge base. "
+            "Stage a synthesised feature for end-of-batch reconciliation. "
             "Also marks the source clusters as processed in the tracker. "
             "After calling this, call get_pending_features for the next batch."
         ),
@@ -187,17 +191,33 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "items": {"type": "string"},
                     "description": "Cluster names this feature was synthesized from",
                 },
+                "cluster_signature": {
+                    "type": "string",
+                    "description": (
+                        "Stable structural identity (SHA-256 hex of the cluster's"
+                        " canonical node-ID list). Looked up from cluster_cache"
+                        " by the synthesise stage and echoed back in the prompt"
+                        " context — pass it through verbatim."
+                    ),
+                },
+                "head_sha": {
+                    "type": "string",
+                    "description": (
+                        "Optional: current scan's HEAD SHA. Stamped on the row"
+                        " as ``last_seen_sha`` so the audit can tell stale rows"
+                        " apart. Omit if not surfaced in the prompt."
+                    ),
+                },
+                "source_ref": {
+                    "type": "string",
+                    "description": (
+                        "Optional free-form provenance reference (e.g. PR"
+                        " number, BUD-XXX, commit SHA) for traceability."
+                    ),
+                },
                 "repo_name": {
                     "type": "string",
                     "description": "Repository name (links feature to tracked repo)",
-                },
-                "merge_source_titles": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Titles of repo-specific features being merged. "
-                        "Those items will be deactivated after the merged feature is saved."
-                    ),
                 },
             },
             "required": [
@@ -206,6 +226,94 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 "capabilities",
                 "code_locations",
                 "tags",
+                "cluster_signature",
+                "repo_name",
+            ],
+        },
+    ),
+    MCPToolDefinition(
+        name="write_synthesis_feature",
+        description=(
+            "scan pipeline: persist a feature with full meta-community "
+            "linkage. Pass the community_id values you received in the "
+            "synthesis prompt — both the ones merged into this feature "
+            "(``source_community_ids``) and the ones you decided to skip "
+            "(``dropped_community_ids``). Backend writes the feature row, "
+            "links to source communities, and updates per-community "
+            "processing_status. Always pass ``scan_id`` and ``repo_id`` "
+            "from the prompt's *Scan context* block — they bind the "
+            "feature to this exact scan run."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Human-readable feature name, e.g. 'Card Payments'",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "1-2 sentence business description of the feature",
+                },
+                "source_community_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "community_id values from the synthesis prompt that "
+                        "were merged into this feature. Must be non-empty."
+                    ),
+                },
+                "dropped_community_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "community_id values from the synthesis prompt that "
+                        "you decided to skip (utility/noise). Optional."
+                    ),
+                },
+                "capabilities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "3-6 specific things this feature does",
+                },
+                "code_locations": {
+                    "type": "object",
+                    "description": (
+                        "Map of layer → file paths, e.g. {backend: [...], frontend: [...]}"
+                    ),
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2-5 lowercase search keywords",
+                },
+                "repo_name": {
+                    "type": "string",
+                    "description": "Repository name (must be tracked)",
+                },
+                "scan_id": {
+                    "type": "string",
+                    "description": (
+                        "UUID of the active scan, copied verbatim from the "
+                        "prompt's *Scan context* block. Binds this feature "
+                        "to the exact scan run. Required during scans; "
+                        "omit only for legacy ad-hoc calls."
+                    ),
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "UUID of the tracked repo, copied verbatim from the "
+                        "prompt's *Scan context* block. Used in preference "
+                        "to ``repo_name`` lookup when supplied."
+                    ),
+                },
+            },
+            "required": [
+                "name",
+                "description",
+                "source_community_ids",
+                "repo_name",
             ],
         },
     ),
@@ -231,39 +339,6 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 },
             },
             "required": ["feature_description"],
-        },
-    ),
-    MCPToolDefinition(
-        name="merge_features",
-        description=(
-            "Merge duplicate features across repos. Keeps the feature with "
-            "keep_title, deactivates features in merge_titles, and links the "
-            "kept feature to all specified repos."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "keep_title": {
-                    "type": "string",
-                    "description": (
-                        "Title of the feature to keep (e.g. 'Feature: Authentication')"
-                    ),
-                },
-                "merge_titles": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Titles of duplicate features to merge into the kept "
-                        "one (will be deactivated)"
-                    ),
-                },
-                "repo_names": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": ("All repo names this merged feature belongs to"),
-                },
-            },
-            "required": ["keep_title", "repo_names"],
         },
     ),
     MCPToolDefinition(
@@ -404,6 +479,113 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "required": ["bud_number", "sequence", "summary"],
         },
     ),
+    MCPToolDefinition(
+        name="code_impact",
+        description=(
+            "Return upstream callers / downstream callees of a target symbol "
+            "up to N hops, using the cached call graph from the latest scan. "
+            "Use BEFORE editing any function/method/class to assess blast radius."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Symbol label or node id (case-insensitive).",
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": "Tracked repo UUID.",
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["upstream", "downstream", "both"],
+                    "default": "upstream",
+                },
+                "depth": {
+                    "type": "integer",
+                    "default": 2,
+                    "description": "BFS hop limit (max 5).",
+                },
+            },
+            "required": ["target", "repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_query",
+        description=(
+            "Substring-rank search across all symbol labels and source files "
+            "in the cached call graph. Use to find candidate symbols by name "
+            "before calling code_impact / code_context."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "repo_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query", "repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_context",
+        description=(
+            "Single-symbol 360°: attributes, callers, and callees from the cached call graph."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "repo_id": {"type": "string"},
+            },
+            "required": ["symbol", "repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_community",
+        description=(
+            "Return cluster metadata + the file and symbol lists for a given "
+            "cluster_id (e.g. 'c0'). Lists every file the cluster touches."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string"},
+                "repo_id": {"type": "string"},
+            },
+            "required": ["cluster_id", "repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_god_nodes",
+        description=(
+            "Top-N highest-degree nodes in the call graph — likely god classes "
+            "or hub functions. Use to spot refactoring candidates."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 20},
+            },
+            "required": ["repo_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="code_stats",
+        description=(
+            "Overall stats for the cached call graph: node/edge counts, "
+            "language extension distribution, current head_sha."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string"},
+            },
+            "required": ["repo_id"],
+        },
+    ),
 ]
 
 
@@ -469,16 +651,22 @@ async def call_tool(
 TOOL_HANDLERS: dict[str, Any] = {
     "get_bud_context": handle_get_bud_context,
     "write_bud": handle_write_bud,
-    "get_knowledge": handle_get_knowledge,
+    "get_features": handle_get_features,
     "search_bugs": handle_search_bugs,
     "post_slack_message": handle_post_slack_message,
     "get_team_context": handle_get_team_context,
     "get_pending_features": handle_get_pending_features,
     "write_feature_registry": handle_write_feature_registry,
+    "write_synthesis_feature": handle_write_synthesis_feature,
     "check_feature_exists": handle_check_feature_exists,
-    "merge_features": handle_merge_features,
     "list_design_systems": handle_list_design_systems,
     "get_design_system": handle_get_design_system,
+    "code_impact": handle_code_impact,
+    "code_query": handle_code_query,
+    "code_context": handle_code_context,
+    "code_community": handle_code_community,
+    "code_god_nodes": handle_code_god_nodes,
+    "code_stats": handle_code_stats,
 }
 
 # Handlers that need the authenticated user (per-user MCP token).

@@ -16,18 +16,20 @@ from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
 import structlog
-from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent_activity import AgentActivityLog
-from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
-from app.models.bug import Bug, BugSeverity, BugStatus
-from app.models.dev_activity import DevActivityLog
-from app.models.developer_xp import DeveloperXP, RewardEvent, RewardType
-from app.models.pull_request import PRState, PullRequest
+from app.models.bud import BUDStatus
 from app.models.standup import StandupReport
-from app.models.user import OrgToUser, User
+from app.repositories.agent_activity import AgentActivityLogRepository
+from app.repositories.bud import BUDRepository
+from app.repositories.bud_timeline import BUDTimelineRepository
+from app.repositories.bug import BugRepository
+from app.repositories.dev_activity import DevActivityLogRepository
+from app.repositories.developer_xp import RewardEventRepository
+from app.repositories.pull_request import PullRequestRepository
+from app.repositories.standup import StandupReportRepository
+from app.repositories.user import UserRepository
 from app.schemas.standup import (
     BUDTransition,
     MemberStandupItem,
@@ -80,13 +82,7 @@ async def list_recent(
     limit: int = 14,
 ) -> list[StandupReport]:
     """Return the most recent standup reports for an org."""
-    result = await db.execute(
-        select(StandupReport)
-        .where(StandupReport.org_id == org_id)
-        .order_by(StandupReport.date.desc())
-        .limit(limit)
-    )
-    return list(result.scalars().all())
+    return await StandupReportRepository(db, org_id=org_id).list_recent(limit=limit)
 
 
 async def generate_standup(
@@ -198,12 +194,7 @@ async def _get_report_by_date(
     org_id: uuid.UUID,
     target_date: date,
 ) -> StandupReport | None:
-    result = await db.execute(
-        select(StandupReport).where(
-            StandupReport.org_id == org_id, StandupReport.date == target_date
-        )
-    )
-    return result.scalar_one_or_none()
+    return await StandupReportRepository(db, org_id=org_id).get_by_date(target_date)
 
 
 async def _get_since_timestamp(
@@ -216,16 +207,7 @@ async def _get_since_timestamp(
     Excludes the target_date itself so that re-generation or backfill
     scenarios don't accidentally use the current report's timestamp.
     """
-    result = await db.execute(
-        select(StandupReport.created_at)
-        .where(
-            StandupReport.org_id == org_id,
-            StandupReport.date < target_date,
-        )
-        .order_by(StandupReport.date.desc())
-        .limit(1)
-    )
-    last_ts = result.scalar_one_or_none()
+    last_ts = await StandupReportRepository(db, org_id=org_id).get_previous_created_at(target_date)
     if last_ts:
         return last_ts.replace(tzinfo=UTC) if last_ts.tzinfo is None else last_ts
     return datetime.now(UTC) - timedelta(hours=24)
@@ -236,25 +218,7 @@ async def _collect_members(
     org_id: uuid.UUID,
 ) -> list[tuple[uuid.UUID, str | None, str | None, int | None, str | None]]:
     """Return all active org members with XP info."""
-    result = await db.execute(
-        select(
-            User.id,
-            User.name,
-            User.avatar_url,
-            DeveloperXP.level,
-            DeveloperXP.level_name,
-        )
-        .join(OrgToUser, OrgToUser.user_id == User.id)
-        .outerjoin(
-            DeveloperXP,
-            (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == org_id),
-        )
-        .where(OrgToUser.org_id == org_id)
-        .where(User.is_active.is_(True))
-        .where(~User.name.ilike("%[bot]%"))
-        .order_by(User.name)
-    )
-    return list(result.all())
+    return await UserRepository(db).list_active_member_xp_summary(org_id)
 
 
 async def _collect_dev_activity(
@@ -264,23 +228,11 @@ async def _collect_dev_activity(
     until: datetime,
 ) -> dict[uuid.UUID, dict[str, int]]:
     """Aggregate commit and file_change counts per user from DevActivityLog."""
-    result = await db.execute(
-        select(
-            DevActivityLog.user_id,
-            DevActivityLog.event_type,
-            func.count().label("cnt"),
-        )
-        .where(
-            DevActivityLog.org_id == org_id,
-            DevActivityLog.created_at >= since,
-            DevActivityLog.created_at < until,
-            DevActivityLog.event_type.in_(["commit", "file_change"]),
-            DevActivityLog.user_id.isnot(None),
-        )
-        .group_by(DevActivityLog.user_id, DevActivityLog.event_type)
+    counts = await DevActivityLogRepository(db, org_id=org_id).count_events_by_user_in_window(
+        ["commit", "file_change"], since, until
     )
     out: dict[uuid.UUID, dict[str, int]] = defaultdict(lambda: {"commits": 0, "files_changed": 0})
-    for user_id, event_type, cnt in result.all():
+    for (user_id, event_type), cnt in counts.items():
         if event_type == "commit":
             out[user_id]["commits"] = cnt
         elif event_type == "file_change":
@@ -295,36 +247,14 @@ async def _collect_pr_activity(
     until: datetime,
 ) -> dict[uuid.UUID, dict[str, int]]:
     """Count PRs opened and merged per user in the time window."""
-    # PRs opened (created_at in window)
-    opened_result = await db.execute(
-        select(PullRequest.author_user_id, func.count().label("cnt"))
-        .where(
-            PullRequest.org_id == org_id,
-            PullRequest.created_at >= since,
-            PullRequest.created_at < until,
-            PullRequest.author_user_id.isnot(None),
-        )
-        .group_by(PullRequest.author_user_id)
-    )
+    pr_repo = PullRequestRepository(db, org_id=org_id)
+    opened = await pr_repo.count_opened_by_author_in_window(since, until)
+    merged = await pr_repo.count_merged_by_author_in_window(since, until)
     out: dict[uuid.UUID, dict[str, int]] = defaultdict(lambda: {"opened": 0, "merged": 0})
-    for user_id, cnt in opened_result.all():
+    for user_id, cnt in opened.items():
         out[user_id]["opened"] = cnt
-
-    # PRs merged (merged_at in window)
-    merged_result = await db.execute(
-        select(PullRequest.author_user_id, func.count().label("cnt"))
-        .where(
-            PullRequest.org_id == org_id,
-            PullRequest.state == PRState.MERGED,
-            PullRequest.merged_at >= since,
-            PullRequest.merged_at < until,
-            PullRequest.author_user_id.isnot(None),
-        )
-        .group_by(PullRequest.author_user_id)
-    )
-    for user_id, cnt in merged_result.all():
+    for user_id, cnt in merged.items():
         out[user_id]["merged"] = cnt
-
     return dict(out)
 
 
@@ -335,24 +265,11 @@ async def _collect_bud_transitions(
     until: datetime,
 ) -> dict[uuid.UUID, list[BUDTransition]]:
     """Collect BUD stage transitions (status_change events) per actor."""
-    result = await db.execute(
-        select(
-            BUDTimelineEvent.actor_id,
-            BUDDocument.bud_number,
-            BUDDocument.title,
-            BUDTimelineEvent.detail,
-        )
-        .join(BUDDocument, BUDTimelineEvent.bud_id == BUDDocument.id)
-        .where(
-            BUDTimelineEvent.org_id == org_id,
-            BUDTimelineEvent.event_type == "status_change",
-            BUDTimelineEvent.created_at >= since,
-            BUDTimelineEvent.created_at < until,
-            BUDTimelineEvent.actor_id.isnot(None),
-        )
+    rows = await BUDTimelineRepository(db, org_id=org_id).list_status_changes_with_bud_in_window(
+        since, until
     )
     out: dict[uuid.UUID, list[BUDTransition]] = defaultdict(list)
-    for actor_id, bud_number, title, detail in result.all():
+    for actor_id, bud_number, title, detail in rows:
         from_stage = (detail or {}).get("from", "")
         to_stage = (detail or {}).get("to", "")
         out[actor_id].append(
@@ -373,36 +290,14 @@ async def _collect_bug_activity(
     until: datetime,
 ) -> dict[uuid.UUID, dict[str, int]]:
     """Count bugs filed (by reporter) and resolved (by assignee) per user."""
+    bug_repo = BugRepository(db, org_id=org_id)
+    filed = await bug_repo.count_filed_by_reporter_in_window(since, until)
+    resolved = await bug_repo.count_resolved_by_assignee_in_window(since, until)
     out: dict[uuid.UUID, dict[str, int]] = defaultdict(lambda: {"filed": 0, "resolved": 0})
-
-    # Bugs filed in window
-    filed_result = await db.execute(
-        select(Bug.reporter_id, func.count().label("cnt"))
-        .where(
-            Bug.org_id == org_id,
-            Bug.created_at >= since,
-            Bug.created_at < until,
-            Bug.reporter_id.isnot(None),
-        )
-        .group_by(Bug.reporter_id)
-    )
-    for reporter_id, cnt in filed_result.all():
+    for reporter_id, cnt in filed.items():
         out[reporter_id]["filed"] = cnt
-
-    # Bugs resolved in window
-    resolved_result = await db.execute(
-        select(Bug.assignee_id, func.count().label("cnt"))
-        .where(
-            Bug.org_id == org_id,
-            Bug.resolved_at >= since,
-            Bug.resolved_at < until,
-            Bug.assignee_id.isnot(None),
-        )
-        .group_by(Bug.assignee_id)
-    )
-    for assignee_id, cnt in resolved_result.all():
+    for assignee_id, cnt in resolved.items():
         out[assignee_id]["resolved"] = cnt
-
     return dict(out)
 
 
@@ -413,18 +308,9 @@ async def _collect_agent_completions(
     until: datetime,
 ) -> dict[uuid.UUID, int]:
     """Count completed agent tasks per user in the time window."""
-    result = await db.execute(
-        select(AgentActivityLog.user_id, func.count().label("cnt"))
-        .where(
-            AgentActivityLog.org_id == org_id,
-            AgentActivityLog.event_type == "skill_completed",
-            AgentActivityLog.created_at >= since,
-            AgentActivityLog.created_at < until,
-            AgentActivityLog.user_id.isnot(None),
-        )
-        .group_by(AgentActivityLog.user_id)
-    )
-    return {user_id: cnt for user_id, cnt in result.all()}
+    return await AgentActivityLogRepository(
+        db, org_id=org_id
+    ).count_skill_completions_by_user_in_window(since, until)
 
 
 async def _collect_xp_earned(
@@ -434,17 +320,7 @@ async def _collect_xp_earned(
     until: datetime,
 ) -> dict[uuid.UUID, int]:
     """Sum XP earned per user in the time window."""
-    result = await db.execute(
-        select(RewardEvent.user_id, func.sum(RewardEvent.amount).label("total"))
-        .where(
-            RewardEvent.org_id == org_id,
-            RewardEvent.type == RewardType.XP,
-            RewardEvent.created_at >= since,
-            RewardEvent.created_at < until,
-        )
-        .group_by(RewardEvent.user_id)
-    )
-    return {user_id: int(total) for user_id, total in result.all()}
+    return await RewardEventRepository(db, org_id=org_id).sum_xp_by_user_in_window(since, until)
 
 
 # ─── Risk Flag Detection ───────────────────────────────────────────────────
@@ -481,26 +357,10 @@ async def _detect_flags(
             )
 
     # Flag 2: BUDs lagging — in development/testing past deadline
-    lagging_result = await db.execute(
-        select(
-            BUDDocument.bud_number,
-            BUDDocument.title,
-            BUDDocument.status,
-            BUDDocument.current_phase_deadline,
-        ).where(
-            BUDDocument.org_id == org_id,
-            BUDDocument.status.in_(
-                [
-                    BUDStatus.DEVELOPMENT,
-                    BUDStatus.TESTING,
-                    BUDStatus.CODE_REVIEW,
-                ]
-            ),
-            BUDDocument.current_phase_deadline.isnot(None),
-            BUDDocument.current_phase_deadline < func.now(),
-        )
+    lagging_rows = await BUDRepository(db, org_id=org_id).list_lagging_in_statuses(
+        [BUDStatus.DEVELOPMENT, BUDStatus.TESTING, BUDStatus.CODE_REVIEW]
     )
-    for bud_number, title, status_val, _deadline in lagging_result.all():
+    for bud_number, title, status_val in lagging_rows:
         status_str = status_val.value if hasattr(status_val, "value") else str(status_val)
         flags.append(
             StandupFlag(
@@ -512,14 +372,7 @@ async def _detect_flags(
         )
 
     # Flag 3: Critical bugs open
-    crit_result = await db.execute(
-        select(func.count()).where(
-            Bug.org_id == org_id,
-            Bug.severity == BugSeverity.CRITICAL,
-            Bug.status.in_([BugStatus.OPEN, BugStatus.IN_PROGRESS]),
-        )
-    )
-    crit_count = crit_result.scalar() or 0
+    crit_count = await BugRepository(db, org_id=org_id).count_critical_open()
     if crit_count > 0:
         flags.append(
             StandupFlag(

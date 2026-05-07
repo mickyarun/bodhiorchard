@@ -1,71 +1,36 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Arun Rajkumar
 
-"""Shared pytest fixtures for the Bodhiorchard test suite."""
+"""Shared pytest fixtures for the Bodhiorchard test suite.
+
+**No DB scaffolding lives here.** The previous autouse session-scope
+``setup_database`` fixture called ``Base.metadata.drop_all()`` on
+teardown — which happily wiped whatever ``TEST_DATABASE_URL`` resolved
+to. With the env var unset (or pointed at the dev DB by mistake), a
+single ``pytest`` invocation deleted the entire dev schema. None of
+the existing tests actually used the helper fixtures (``db_session``,
+``client``) — every test that needs DB state opens its own session
+inline. So the fixtures were both unused and dangerous; they're gone.
+
+If a future test genuinely needs a shared schema-bootstrapped DB:
+
+1. Put the bootstrap in a *function-scope* fixture, not session-scope.
+2. Hard-fail if the URL doesn't end with ``_test`` (or some equivalent
+   sentinel) — never trust a fallback.
+3. Document why the inline-session pattern in the existing tests is
+   not enough; the bar for re-introducing global DB teardown is high.
+"""
 
 import asyncio
 
-# Use an in-memory SQLite URL or a dedicated test Postgres instance.
-# Override via TEST_DATABASE_URL environment variable for CI.
-import os
-from collections.abc import AsyncGenerator
-
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-from app.core.deps import get_db
-from app.main import app
-from app.models import Base
-
-TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard_test",
-)
-
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """Create a session-scoped event loop for async tests."""
+    """Session-scoped event loop. Required by pytest-asyncio for
+    session-scope async fixtures defined elsewhere in the suite.
+    """
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
-
-
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def setup_database():
-    """Create all tables before the test session and drop them after."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
-
-
-@pytest_asyncio.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Provide a transactional database session that rolls back after each test."""
-    async with TestSessionLocal() as session:
-        yield session
-        await session.rollback()
-
-
-@pytest_asyncio.fixture
-async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
-    """Provide an async HTTP test client with the database session overridden."""
-
-    async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        yield db_session
-
-    app.dependency_overrides[get_db] = _override_get_db
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-    app.dependency_overrides.clear()

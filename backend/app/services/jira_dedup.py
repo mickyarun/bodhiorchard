@@ -18,10 +18,9 @@ import uuid
 from dataclasses import dataclass
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.bud import BUDDocument
+from app.repositories.bud import BUDRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -62,28 +61,11 @@ async def check_semantic_duplicate(
     Returns:
         DedupResult with classification and matched BUD info.
     """
-    stmt = (
-        select(
-            BUDDocument.id,
-            BUDDocument.bud_number,
-            BUDDocument.embedding.cosine_distance(candidate_vector).label("distance"),
-        )
-        .where(
-            BUDDocument.org_id == org_id,
-            BUDDocument.embedding.is_not(None),
-        )
-        .order_by("distance")
-        .limit(1)
+    nearest = await BUDRepository(db, org_id=org_id).find_nearest_neighbor(
+        candidate_vector,
+        exclude_bud_ids=list(exclude_bud_ids) if exclude_bud_ids else None,
     )
-
-    # Exclude BUDs from current import to avoid self-matching
-    if exclude_bud_ids:
-        stmt = stmt.where(BUDDocument.id.not_in(exclude_bud_ids))
-
-    result = await db.execute(stmt)
-    row = result.first()
-
-    if row is None:
+    if nearest is None:
         return DedupResult(
             is_duplicate=False,
             needs_review=False,
@@ -93,7 +75,7 @@ async def check_semantic_duplicate(
             note="No existing BUDs with embeddings",
         )
 
-    bud_id, bud_number, distance = row
+    bud_id, bud_number, distance = nearest
 
     if distance < THRESHOLD_AUTO_SKIP:
         return DedupResult(

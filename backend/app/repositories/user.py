@@ -4,12 +4,18 @@
 """User data access repository."""
 
 import uuid
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.developer_xp import DeveloperXP
+from app.models.skill_profile import SkillProfile
 from app.models.user import OrgToUser, User, UserEmailAlias
 from app.repositories.base import BaseRepository
+
+if TYPE_CHECKING:
+    from app.models.user import UserRole
 
 
 class UserRepository(BaseRepository[User]):
@@ -82,6 +88,275 @@ class UserRepository(BaseRepository[User]):
             .where(User.id == user_id, OrgToUser.org_id == org_id)
         )
         return result.scalar_one_or_none()
+
+    async def list_active_slack_user_pairs(self, org_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+        """``(user_id, slack_id)`` pairs for active org members with a slack_id."""
+        stmt = (
+            select(User.id, User.slack_id)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(
+                OrgToUser.org_id == org_id,
+                User.slack_id.is_not(None),
+                User.is_active.is_(True),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row[0], row[1]) for row in result.all() if row[1]]
+
+    async def get_by_slack_id_with_role(
+        self, org_id: uuid.UUID, slack_id: str
+    ) -> tuple[User, "UserRole | None"] | None:
+        """Look up an org member by Slack ID and return ``(user, role)``."""
+        stmt = (
+            select(User, OrgToUser.role)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(
+                OrgToUser.org_id == org_id,
+                User.slack_id == slack_id,
+            )
+        )
+        result = await self._db.execute(stmt)
+        row = result.one_or_none()
+        if row is None:
+            return None
+        return (row[0], row[1])
+
+    async def list_active_with_role(self, org_id: uuid.UUID, role) -> list[User]:
+        """Active org members whose ``OrgToUser.role`` equals ``role``."""
+        stmt = (
+            select(User)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(
+                OrgToUser.org_id == org_id,
+                OrgToUser.role == role,
+                User.is_active == true(),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_id_by_github_login(
+        self, org_id: uuid.UUID, github_login: str
+    ) -> uuid.UUID | None:
+        """Resolve a GitHub login to a user_id within an org. None if no match."""
+        if not github_login:
+            return None
+        stmt = (
+            select(User.id)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(User.github_username == github_login, OrgToUser.org_id == org_id)
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_role(self, user_id: uuid.UUID, org_id: uuid.UUID):
+        """Return the user's ``OrgToUser.role`` value within the org, or ``None``."""
+        stmt = select(OrgToUser.role).where(
+            OrgToUser.user_id == user_id,
+            OrgToUser.org_id == org_id,
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_first_member_id(self, org_id: uuid.UUID) -> uuid.UUID | None:
+        """Return any one user_id from ``OrgToUser`` for the given org, else None."""
+        stmt = select(OrgToUser.user_id).where(OrgToUser.org_id == org_id).limit(1)
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def map_emails_to_ids(self, org_id: uuid.UUID, emails: set[str]) -> dict[str, uuid.UUID]:
+        """Bulk-resolve emails to user_ids within an org.
+
+        Returns lowercase ``email -> user_id`` for matches.
+        """
+        if not emails:
+            return {}
+        stmt = (
+            select(User.email, User.id)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(OrgToUser.org_id == org_id)
+            .where(User.email.in_(emails))
+        )
+        result = await self._db.execute(stmt)
+        return {row[0].lower(): row[1] for row in result.all()}
+
+    async def list_active_members_for_tree(
+        self, org_id: uuid.UUID, *, limit: int = 50
+    ) -> list[tuple]:
+        """Heavy aggregate row used by the dashboard tree's member section.
+
+        Joins ``OrgToUser`` (membership), ``SkillProfile`` (touch totals),
+        and ``DeveloperXP`` (level/house). Returns rows with attributes
+        ``id``, ``name``, ``email``, ``avatar_url``, ``character_model``,
+        ``slack_id``, ``total_touches``, ``level``, ``level_name``,
+        ``house_level``. Ordered by ``User.id`` to match the Colyseus
+        snapshot's slot assignment.
+        """
+        stmt = (
+            select(
+                User.id,
+                User.name,
+                User.email,
+                User.avatar_url,
+                User.character_model,
+                User.slack_id,
+                func.coalesce(func.sum(SkillProfile.touch_count), 0).label("total_touches"),
+                DeveloperXP.level,
+                DeveloperXP.level_name,
+                DeveloperXP.house_level,
+            )
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .outerjoin(
+                SkillProfile,
+                (SkillProfile.user_id == User.id) & (SkillProfile.org_id == org_id),
+            )
+            .outerjoin(
+                DeveloperXP,
+                (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == org_id),
+            )
+            .where(OrgToUser.org_id == org_id)
+            .where(User.is_active.is_(True))
+            .where(~User.name.ilike("%[bot]%"))
+            .group_by(
+                User.id,
+                User.name,
+                User.email,
+                User.avatar_url,
+                User.character_model,
+                User.slack_id,
+                DeveloperXP.level,
+                DeveloperXP.level_name,
+                DeveloperXP.house_level,
+            )
+            .order_by(User.id)
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.all())
+
+    async def list_active_member_xp_summary(
+        self, org_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str | None, str | None, int | None, str | None]]:
+        """For each active, non-bot org member return ``(id, name,
+        avatar_url, level, level_name)`` ordered by name.
+
+        Used by the standup service which only needs the level summary,
+        not the full DeveloperXP row.
+        """
+        stmt = (
+            select(
+                User.id,
+                User.name,
+                User.avatar_url,
+                DeveloperXP.level,
+                DeveloperXP.level_name,
+            )
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .outerjoin(
+                DeveloperXP,
+                (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == org_id),
+            )
+            .where(OrgToUser.org_id == org_id)
+            .where(User.is_active.is_(True))
+            .where(~User.name.ilike("%[bot]%"))
+            .order_by(User.name)
+        )
+        result = await self._db.execute(stmt)
+        return [
+            (row.id, row.name, row.avatar_url, row.level, row.level_name) for row in result.all()
+        ]
+
+    async def is_member_of_org(self, user_id: uuid.UUID, org_id: uuid.UUID) -> bool:
+        """Return True if the user has an OrgToUser membership in the org."""
+        result = await self._db.execute(
+            select(OrgToUser.user_id).where(
+                OrgToUser.org_id == org_id,
+                OrgToUser.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def list_active_members_with_xp(
+        self, org_id: uuid.UUID
+    ) -> list[tuple[User, DeveloperXP | None]]:
+        """Active org members (excluding bots) with their XP rows.
+
+        Stable ordering by ``user.id`` so callers (e.g. Colyseus snapshot)
+        get deterministic slot assignment across reloads.
+        """
+        stmt = (
+            select(User, DeveloperXP)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .outerjoin(
+                DeveloperXP,
+                (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == org_id),
+            )
+            .where(OrgToUser.org_id == org_id)
+            .where(User.is_active.is_(True))
+            .where(~User.name.ilike("%[bot]%"))
+            .order_by(User.id)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.tuples().all())
+
+    async def get_by_slack_id_in_org(self, org_id: uuid.UUID, slack_id: str) -> User | None:
+        """Fetch the org member whose ``slack_id`` matches.
+
+        Args:
+            org_id: Organization UUID for membership scoping.
+            slack_id: Slack user ID to look up.
+
+        Returns:
+            The matching User or None.
+        """
+        result = await self._db.execute(
+            select(User)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(OrgToUser.org_id == org_id, User.slack_id == slack_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_membership(self, user_id: uuid.UUID, org_id: uuid.UUID) -> OrgToUser | None:
+        """Fetch the OrgToUser membership row for a user/org pair.
+
+        Args:
+            user_id: The user UUID.
+            org_id: The organization UUID.
+
+        Returns:
+            The OrgToUser row, or None if the user is not a member.
+        """
+        result = await self._db.execute(
+            select(OrgToUser).where(
+                OrgToUser.user_id == user_id,
+                OrgToUser.org_id == org_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_slack_id_to_name(self, org_id: uuid.UUID, slack_ids: set[str]) -> dict[str, str]:
+        """Map Slack user IDs to Bodhiorchard user display names within an org.
+
+        Args:
+            org_id: Organization UUID for membership scoping.
+            slack_ids: Set of Slack user IDs to resolve.
+
+        Returns:
+            Dict of slack_id → user.name (only entries with both fields).
+        """
+        if not slack_ids:
+            return {}
+        stmt = (
+            select(User.slack_id, User.name)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(
+                OrgToUser.org_id == org_id,
+                User.slack_id.in_(slack_ids),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return {row.slack_id: row.name for row in result.all() if row.slack_id and row.name}
 
     async def get_names_by_ids(self, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
         """Batch-fetch user names by IDs.
