@@ -21,7 +21,7 @@
   visual target and the link target.
 -->
 <template>
-  <v-tooltip v-if="state" location="top" max-width="480">
+  <v-tooltip v-if="state" location="top" :text="state.tooltip" max-width="280">
     <template #activator="{ props: tipProps }">
       <v-chip
         v-bind="tipProps"
@@ -37,9 +37,6 @@
         {{ state.label }}
       </v-chip>
     </template>
-    <!-- Use a slot (not the :text prop) so newlines in setupLastError
-         render as line breaks via white-space: pre-wrap. -->
-    <span class="repo-setup-tooltip">{{ state.tooltip }}</span>
   </v-tooltip>
 </template>
 
@@ -67,18 +64,8 @@ const TOOLTIP_MANUAL = (
 const TOOLTIP_PENDING
   = 'First scan will push `bodhiorchard/init-setup` and (if GitHub App is connected) raise the setup PR.'
 
-// DEBUG: when the last setup attempt failed, the backend stamps the
-// row with the captured stderr. Prepend it to whichever tooltip the
-// state machine picked so prod operators can diagnose stuck rows
-// without log access. Removed when setup-PR is stable.
-function withDebugError(base: string, err: string | null | undefined): string {
-  if (!err) return base
-  return `${base}\n\nLast push error:\n${err}`
-}
-
 const state = computed<ChipState | null>(() => {
   const r = props.repo
-  const err = r.setupLastError
   // Merged path — no chip needed. Either filesystem says files are on
   // main (legacy detection still in place) or the webhook flipped the
   // PR state to merged.
@@ -86,10 +73,10 @@ const state = computed<ChipState | null>(() => {
 
   if (r.setupPrState === 'open' && r.setupPrUrl) {
     return {
-      label: err ? 'Setup PR open ⚠' : 'Setup PR open',
-      color: err ? 'warning' : 'primary',
+      label: 'Setup PR open',
+      color: 'primary',
       icon: 'mdi-source-pull',
-      tooltip: withDebugError(TOOLTIP_PR_OPEN, err),
+      tooltip: TOOLTIP_PR_OPEN,
       href: r.setupPrUrl,
     }
   }
@@ -99,7 +86,7 @@ const state = computed<ChipState | null>(() => {
       label: 'Setup PR closed — re-scan',
       color: 'error',
       icon: 'mdi-source-pull',
-      tooltip: withDebugError(TOOLTIP_PR_CLOSED, err),
+      tooltip: TOOLTIP_PR_CLOSED,
       href: null,
     }
   }
@@ -109,16 +96,16 @@ const state = computed<ChipState | null>(() => {
       label: 'Open PR on GitHub',
       color: 'warning',
       icon: 'mdi-source-pull',
-      tooltip: withDebugError(TOOLTIP_MANUAL, err),
+      tooltip: TOOLTIP_MANUAL,
       href: r.setupCompareUrl,
     }
   }
 
   return {
-    label: err ? 'Setup pending ⚠' : 'Setup pending',
-    color: err ? 'error' : 'grey',
+    label: 'Setup pending',
+    color: 'grey',
     icon: 'mdi-link-off',
-    tooltip: withDebugError(TOOLTIP_PENDING, err),
+    tooltip: TOOLTIP_PENDING,
     href: null,
   }
 })
@@ -129,13 +116,5 @@ const state = computed<ChipState | null>(() => {
   /* Chips inside an anchor render as inline-flex; reset the underline
      in case the surrounding theme adds one to anchors. */
   text-decoration: none;
-}
-.repo-setup-tooltip {
-  /* DEBUG: preserves \n in setupLastError so the multi-line stderr
-     renders readably. Remove with the rest of the debug surface. */
-  white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.4;
 }
 </style>

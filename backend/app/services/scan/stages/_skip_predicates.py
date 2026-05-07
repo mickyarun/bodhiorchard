@@ -68,17 +68,6 @@ class SkipDecision:
 # --- Always-honored predicates ---------------------------------------------
 
 
-# DEBUG: when True, ``should_skip_repo_setup`` always returns ``skip=False``
-# so the per-repo setup phase re-runs on every scan even when the row
-# already records a successful push + adopted PR. Used to surface push
-# errors via ``tracked_repo.setup_last_error`` (chip tooltip) when prod
-# is stuck on a stale setup branch. Flip this back to ``False`` and
-# revert the surrounding instrumentation once setup-PR is reliably
-# pushing in prod. Scoped strictly to the setup predicate — does NOT
-# affect indexing, extract, synthesis, or any other skip predicate.
-_DEBUG_FORCE_SETUP_RERUN = True
-
-
 async def should_skip_repo_setup(
     db: AsyncSession,
     *,
@@ -90,8 +79,6 @@ async def should_skip_repo_setup(
     No SHA dependency — the setup branch is one-time and stays valid across
     commits. Re-pushing on every scan churns the GitHub App for no value.
     """
-    if _DEBUG_FORCE_SETUP_RERUN:
-        return SkipDecision(skip=False, reason="DEBUG: _DEBUG_FORCE_SETUP_RERUN=True")
     try:
         tracked = await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id)
         if tracked is None:

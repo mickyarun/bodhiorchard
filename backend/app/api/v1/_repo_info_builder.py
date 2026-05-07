@@ -120,9 +120,6 @@ def build_repo_info(
             repo.setup_pr_state.value if repo.setup_pr_state is not None else None
         )
         fields["setupCompareUrl"] = setup_compare_url(repo.github_repo_full_name, repo.main_branch)
-        # DEBUG: surfaced for the chip tooltip — see ``setup_last_error``
-        # column on ``tracked_repositories`` and migration ``zal_…``.
-        fields["setupLastError"] = repo.setup_last_error
         fields["designSystemStatus"] = detect_design_system_status(str(repo.id), ds_repo_ids)
     elif include_setup_compare:
         fields["setupCompareUrl"] = setup_compare_url(repo.github_repo_full_name, repo.main_branch)

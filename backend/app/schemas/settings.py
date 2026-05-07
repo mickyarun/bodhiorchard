@@ -293,11 +293,6 @@ class RepoInfo(BaseModel):
     setup_pr_number: int | None = Field(None, alias="setupPrNumber")
     setup_pr_state: Literal["open", "merged", "closed"] | None = Field(None, alias="setupPrState")
     setup_compare_url: str | None = Field(None, alias="setupCompareUrl")
-    # DEBUG: stderr from the most recent failed setup-branch push, surfaced
-    # so the row chip tooltip can explain *why* the setup is stuck. Cleared
-    # on the next successful push. Remove this field when the setup-PR
-    # path is stable in prod (see migration zal_…).
-    setup_last_error: str | None = Field(None, alias="setupLastError")
     design_system_status: str = Field("none", alias="designSystemStatus")
     last_scan_status: str | None = Field(None, alias="lastScanStatus")
     last_scan_finished_at: str | None = Field(None, alias="lastScanFinishedAt")
