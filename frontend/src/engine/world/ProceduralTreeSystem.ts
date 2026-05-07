@@ -31,6 +31,7 @@ import {
   saveTreeCache,
   pruneLRU,
   computeCacheKey,
+  SCHEMA_VERSION,
   type BakedLeafGroup,
   type BakedTree,
 } from '../treetest/treeCache'
@@ -195,9 +196,12 @@ export class ProceduralTreeSystem implements RepoVisualization {
       const featuresByTitle = new Map<string, EngineFeature>()
       for (const f of repoFeatures) featuresByTitle.set(f.title, f)
 
-      // Procedural tree — no emissive glow (garden engine uses PBR daylit scene)
+      // Procedural tree — no emissive glow (garden engine uses PBR daylit scene).
+      // LeafSystem is parented to the tree's treeRoot so leaves inherit world
+      // placement via the scene graph (treeRoot owns the orchard-relative
+      // position; leaves render at local offsets under it).
       const tree   = new Tree3DSystem(app.app, { useEmissive: false })
-      const leaves = new LeafSystem(app.app, this.materials)
+      const leaves = new LeafSystem(app.app, this.materials, tree.getRoot())
       tree.setFeatures(treeFeatures)
 
       const entry: ProceduralEntry = {
@@ -318,7 +322,7 @@ export class ProceduralTreeSystem implements RepoVisualization {
           // Persist the baked tree so the next session can skip growth.
           // Structured-clone preserves the Float32Arrays; fire-and-forget.
           const payload: BakedTree = {
-            schemaVersion: 1,
+            schemaVersion: SCHEMA_VERSION,
             cacheKey:      entry.cacheKey,
             savedAt:       Date.now(),
             branchGroups:  treeExport.branchGroups,

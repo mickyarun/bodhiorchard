@@ -65,10 +65,9 @@ describe('buildRoutes at baseline reproduces today’s routes', () => {
     }
   })
 
-  it('no curved control points (today’s routes are all straight)', () => {
+  it('all routes are straight (today’s baseline has no Bezier paths)', () => {
     for (const r of routes) {
-      expect(r.controlX).toBeUndefined()
-      expect(r.controlZ).toBeUndefined()
+      expect(r.curve).toBe('straight')
     }
   })
 
@@ -80,7 +79,7 @@ describe('buildRoutes at baseline reproduces today’s routes', () => {
 
 describe('evalRouteAt math', () => {
   it('linearly interpolates straight routes', () => {
-    const route: PathRoute = { fromX: 0, fromZ: 0, toX: 10, toZ: 6 }
+    const route: PathRoute = { curve: 'straight', fromX: 0, fromZ: 0, toX: 10, toZ: 6 }
     expect(evalRouteAt(route, 0)).toEqual({ x: 0, z: 0 })
     expect(evalRouteAt(route, 1)).toEqual({ x: 10, z: 6 })
     const mid = evalRouteAt(route, 0.5)
@@ -90,6 +89,7 @@ describe('evalRouteAt math', () => {
 
   it('computes the quadratic Bezier midpoint for curved routes', () => {
     const route: PathRoute = {
+      curve: 'bezier',
       fromX: 0, fromZ: 0,
       toX: 10, toZ: 0,
       controlX: 5, controlZ: 8,

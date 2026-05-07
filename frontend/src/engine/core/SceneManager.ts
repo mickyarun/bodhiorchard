@@ -153,6 +153,12 @@ export class SceneManager {
       return this.buildId !== currentBuild
     }
 
+    // Tune the world to this org's repo count. Must run before any
+    // zone-positioned entity is built — the orchard radius drives both
+    // tree placement and the perimeter belt offset. WorldLayout boots
+    // at baseline in its ctor; rescale brings it to the real N.
+    this.layout.rescale(data.repos.length)
+
     // Cache member data for identity lookups (character_model for house visits)
     this._memberDataMap.clear()
     for (const m of data.members) {

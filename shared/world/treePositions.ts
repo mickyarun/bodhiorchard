@@ -22,7 +22,7 @@
  *                  `orchardRadius * innerRingFactor`
  */
 
-import { ZONES, getZone, type Zone } from './zones'
+import { getZones, getZone, type Zone } from './zones'
 import { getActiveScale } from './layoutScale'
 
 /** Resolve the orchard zone or fail loudly — missing zone is a config bug. */
@@ -90,7 +90,7 @@ export function getAgentSlotAtTree(
  */
 function openDirectionFromOrchard(orchard: Zone): { rx: number; rz: number } {
   let sumX = 0, sumZ = 0, n = 0
-  for (const z of ZONES) {
+  for (const z of getZones()) {
     if (z.tier !== 'activity') continue
     sumX += z.x - orchard.x
     sumZ += z.z - orchard.z
