@@ -24,6 +24,11 @@ cachetools>=5.3.0
 #   PyYAML:        backend/app/services/skill_loader.py parses frontmatter
 #   PyJWT[crypto]: backend/app/services/github_app_jwt.py signs RS256 JWTs
 #                  for GitHub App auth — needs cryptography for RS256.
+#   networkx:      backend/app/services/code_indexer/* graph operations.
+#   graphifyy:     code-graph indexer (Leiden clustering). pip name has
+#                  TWO y's; the Python module is `graphify` (single y).
 python-dotenv>=1.0.0
 PyYAML>=6.0
 PyJWT[crypto]>=2.8.0
+networkx>=3.2
+graphifyy[leiden]>=0.5.5,<0.6
