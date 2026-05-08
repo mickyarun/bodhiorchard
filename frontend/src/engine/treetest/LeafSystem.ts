@@ -65,11 +65,11 @@ export class LeafSystem {
   private bakedEntities: pc.Entity[] = []
   private bakedVertexBuffers: pc.VertexBuffer[] = []
 
-  // Shared lance-leaf mesh, keyed by graphics device so hot-reload / multi-app
-  // contexts never hand out a mesh bound to a stale device. All LeafSystem
-  // instances on the same device share the same 9-vert geometry — 21 repos
-  // used to mean 21 identical GPU uploads.
-  private static _leafMeshByDevice = new WeakMap<pc.GraphicsDevice, pc.Mesh>()
+  // Lance-leaf mesh, lifetime tied to this LeafSystem instance. Built lazily
+  // on first spawn, freed in destroy(). Previously a static WeakMap keyed by
+  // device — that survived past the owning pc.Application's destroy and could
+  // hand a mesh with freed vertexBuffer.impl to the next mount.
+  private leafMesh: pc.Mesh | null = null
 
   constructor(app: pc.AppBase, materials: MaterialFactory, parent?: pc.Entity) {
     this.app = app
@@ -208,9 +208,10 @@ export class LeafSystem {
   }
 
   clear(): void {
-    // Destroy baked entities + their VBs first. The leaf mesh is shared across
-    // all LeafSystem instances on this device (see _leafMeshByDevice) and is
-    // owned by the device's lifetime, not this instance — we never destroy it.
+    // Destroy baked entities + their per-tree instancing VBs. The leaf mesh
+    // itself is owned by this instance and lives across rebuilds — we free
+    // it only in destroy(), so re-spawning leaves on a color change doesn't
+    // re-upload the 9-vert geometry every time.
     for (const e of this.bakedEntities) e.destroy()
     for (const vb of this.bakedVertexBuffers) vb.destroy()
     this.bakedEntities = []
@@ -223,6 +224,11 @@ export class LeafSystem {
 
   destroy(): void {
     this.clear()
+    if (this.leafMesh) {
+      this.leafMesh.vertexBuffer?.destroy()
+      this.leafMesh.indexBuffer?.[0]?.destroy()
+      this.leafMesh = null
+    }
     this.leafRoot.destroy()
   }
 
@@ -268,18 +274,14 @@ export class LeafSystem {
 
   /**
    * Lance/teardrop leaf mesh — 9 vertices (8 outer + center fan pivot), 8 triangles.
-   * Slight z-curve so the leaf isn't perfectly flat. Cached per graphics device
-   * so every LeafSystem on the same device shares one GPU upload — at 21 repos
-   * this drops from 21 × 36 bytes = 756B + 21 buffer lifecycles to a single
-   * shared mesh bound to the device's own lifetime.
+   * Slight z-curve so the leaf isn't perfectly flat. Built once per LeafSystem
+   * instance (one upload, reused across all leaves and across re-spawns within
+   * the same instance). Lifetime ends with destroy().
    */
   private getLeafMesh(): pc.Mesh {
-    const device = this.app.graphicsDevice
-    const cached = LeafSystem._leafMeshByDevice.get(device)
-    if (cached) return cached
-    const mesh = this.buildLeafMesh(device)
-    LeafSystem._leafMeshByDevice.set(device, mesh)
-    return mesh
+    if (this.leafMesh) return this.leafMesh
+    this.leafMesh = this.buildLeafMesh(this.app.graphicsDevice)
+    return this.leafMesh
   }
 
   private buildLeafMesh(device: pc.GraphicsDevice): pc.Mesh {
