@@ -7,6 +7,7 @@
       class="engine-loader"
       role="status"
       aria-live="polite"
+      aria-busy="true"
       :aria-label="`Loading orchard — ${currentPhaseLabel}`"
     >
       <!-- Layered organic backdrop. Two radial glows + animated noise so the
@@ -105,9 +106,8 @@ import { computed } from 'vue'
  */
 export type LoadingPhase =
   | 'mounting'         // Vue mounted, waiting for init() to start
-  | 'engine_init'      // pc.Application created, lighting set up
-  | 'loading_assets'   // GLBs being fetched / decoded
-  | 'building_scene'   // SceneManager.build() running
+  | 'engine_init'      // pc.Application created, lighting set up, scatter assets loaded
+  | 'building_scene'   // SceneManager.build() running — assembling the world
   | 'connecting'       // joining OrgRoom + fetching profile
   | 'ready'            // scene reveal — caller flips visible=false here
 
@@ -122,8 +122,7 @@ const props = defineProps<{
 // transition between fast and slow phases.
 const PHASE_PROGRESS: Record<LoadingPhase, number> = {
   mounting:        5,
-  engine_init:    15,
-  loading_assets: 35,
+  engine_init:    25,
   building_scene: 80,
   connecting:     95,
   ready:         100,
@@ -131,8 +130,7 @@ const PHASE_PROGRESS: Record<LoadingPhase, number> = {
 
 const PHASE_LABELS: Record<LoadingPhase, string> = {
   mounting:        'Preparing the orchard…',
-  engine_init:     'Lighting the world…',
-  loading_assets:  'Gathering trees & seeds…',
+  engine_init:     'Gathering trees & seeds…',
   building_scene:  'Planting the orchard…',
   connecting:      'Calling the others…',
   ready:           'Welcome.',
