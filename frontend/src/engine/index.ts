@@ -1719,9 +1719,14 @@ export class GardenEngine {
     // (billboard rotation, takeover input) doesn't run on torn-down state.
     // The full `app.destroy()` is still called at the end of this method
     // to free the graphics device — this is just the "stop drawing" gate.
+    //
+    // Routes through `Application.stopUpdates()` instead of reaching into
+    // `pc.Application.off('update')` directly so we only detach the listener
+    // our `Application` wrapper owns, leaving any future subsystem-registered
+    // update listeners intact.
     if (this.app?.app) {
       this.app.app.autoRender = false
-      this.app.app.off('update')
+      this.app.stopUpdates()
     }
 
     // Dispose the scene-build executor — aborts any in-flight rebuild via

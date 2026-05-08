@@ -16,6 +16,16 @@ import {
   getTreePositions,
 } from '@shared/world/treePositions'
 import { getZone } from '@shared/world/zones'
+import {
+  BASELINE_REPO_COUNT,
+  computeLayoutScale,
+  setActiveScale,
+} from '@shared/world/layoutScale'
+
+// Wire baseline before any module-load read of the active-scale cache.
+// `getActiveScale()` no longer lazy-inits — production wires this in
+// `WorldLayout.ts`, tests must do it explicitly.
+setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
 
 const ORCHARD = getZone('orchard')!
 
