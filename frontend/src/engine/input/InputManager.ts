@@ -163,6 +163,28 @@ export class InputManager {
     return { dx, dy }
   }
 
+  /**
+   * True while the user is actively orbiting the camera with a mouse drag.
+   * Used by `TreePickerSystem` to skip its per-frame raycast during a drag —
+   * the user's intent is "rotate the view," not "hover something," and the
+   * picker doing screen→world projection plus N ray-sphere tests on every
+   * mouse-move event was the dominant cost when moving the camera (especially
+   * on prod hardware). Takeover camera mode bypasses the picker entirely,
+   * which is why takeover felt smooth vs orbit.
+   *
+   * Returns true once the drag has crossed the click-vs-drag threshold,
+   * so a tiny jitter inside a click doesn't suppress hover detection.
+   * Touch-orbit is also covered: `touchOrbitId !== null` while the open-area
+   * touch-orbit gesture is ongoing.
+   */
+  isCameraDragging(): boolean {
+    if (this.touchOrbitId !== null) return true
+    if (!this.hasDragged) return false
+    return this.mouse.isPressed(pc.MOUSEBUTTON_LEFT)
+        || this.mouse.isPressed(pc.MOUSEBUTTON_RIGHT)
+        || this.mouse.isPressed(pc.MOUSEBUTTON_MIDDLE)
+  }
+
   /** Get pan delta this frame (middle-drag, consumed on read). */
   getPanDelta(): { dx: number; dy: number } {
     const dx = this.panDx

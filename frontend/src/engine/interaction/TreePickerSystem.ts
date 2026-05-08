@@ -59,6 +59,19 @@ export class TreePickerSystem {
       if (hit) this.handleClick(hit, callbacks)
     }
 
+    // Skip hover work during a camera drag. The user's intent is "rotate
+    // the view," not "hover something," and pickFeatureByScreen + raycast
+    // on every mouse-move during a drag was the dominant per-frame cost
+    // when moving the camera. Clear any stale hover so the tooltip closes
+    // when the drag begins.
+    if (input.isCameraDragging()) {
+      if (this.lastHoveredId) {
+        this.lastHoveredId = null
+        callbacks.onHover?.(null)
+      }
+      return
+    }
+
     // Hover — skip if mouse hasn't moved
     if (hoverPos.x === this.lastHoverPos.x && hoverPos.y === this.lastHoverPos.y) return
     this.lastHoverPos.x = hoverPos.x

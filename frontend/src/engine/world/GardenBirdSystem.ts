@@ -79,7 +79,6 @@ export class GardenBirdSystem {
   private birds:   GardenBirdEntry[] = []
   private asset:   pc.Asset | null = null
   private perches: pc.Vec3[] = []   // one per repo tree
-  private updateAccum = 0   // dt accumulator — system ticks at 30Hz, not 60
 
   // Scratch — zero allocation in update hot path
   private readonly _diff = new pc.Vec3()
@@ -127,28 +126,20 @@ export class GardenBirdSystem {
     }
   }
 
-  /** Per-frame update — ticks each bird's state machine. Throttled to 30Hz. */
+  /** Per-frame update — ticks each bird's state machine. */
   update(dt: number): void {
     if (this.birds.length === 0 || this.perches.length === 0) return
 
-    // 30Hz throttle. State handlers consume dt linearly (timer -= dt,
-    // pos += speed*dt) so passing accumulated dt every other frame is
-    // mathematically equivalent. 30Hz keeps flight motion visibly smooth.
-    this.updateAccum += dt
-    if (this.updateAccum < 1 / 30) return
-    const stepDt = this.updateAccum
-    this.updateAccum = 0
-
     for (let i = 0; i < this.birds.length; i++) {
       const bird = this.birds[i]
-      bird.elapsed += stepDt
+      bird.elapsed += dt
 
       switch (bird.state) {
-        case 'idle':       this.tickIdle(bird, i, stepDt);       break
-        case 'approach':   this.tickApproach(bird, stepDt);      break
-        case 'landing':    this.tickLanding(bird, stepDt);       break
-        case 'perching':   this.tickPerching(bird, stepDt);      break
-        case 'flying_off': this.tickFlyingOff(bird, i, stepDt);  break
+        case 'idle':       this.tickIdle(bird, i, dt);       break
+        case 'approach':   this.tickApproach(bird, dt);      break
+        case 'landing':    this.tickLanding(bird, dt);       break
+        case 'perching':   this.tickPerching(bird, dt);      break
+        case 'flying_off': this.tickFlyingOff(bird, i, dt);  break
       }
     }
   }
