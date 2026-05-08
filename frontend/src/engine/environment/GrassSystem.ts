@@ -6,12 +6,20 @@
  *
  * Loads grass and flower GLBs from Kenney Nature Kit and scatters hundreds
  * of instances across the world, skipping exclusion zones (buildings, trees).
+ *
+ * Hardware-instanced via `buildInstancedGlbs` so the 450 grass + 40 flower
+ * scatter points collapse into ~6 draw calls (one per (mesh, material)
+ * combination across the 3 grass + 3 flower GLBs) instead of 490 entities
+ * each driving its own per-mesh transform upload.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { SCATTER_GRASS, SCATTER_FLOWERS } from '../assets/AssetManifest'
 import { isInsideAnyZone, randRange, type ExclusionZone } from '../utils/MathUtils'
+import {
+  buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
+} from '../utils/GlbInstancing'
 
 const GRASS_COUNT = 450
 const FLOWER_COUNT = 40
@@ -20,8 +28,7 @@ const MIN_DISTANCE = 1.2 // tighter spacing for lush coverage
 
 export class GrassSystem {
   private root: pc.Entity | null = null
-  private grassAssets: pc.Asset[] = []
-  private flowerAssets: pc.Asset[] = []
+  private vbs: pc.VertexBuffer[] = []
 
   async build(
     app: Application,
@@ -30,36 +37,57 @@ export class GrassSystem {
   ): Promise<pc.Entity> {
     this.root = new pc.Entity('GrassSystem')
 
-    // Load all grass + flower GLBs
-    this.grassAssets = await loader.loadBatch(SCATTER_GRASS)
-    this.flowerAssets = await loader.loadBatch(SCATTER_FLOWERS)
+    const grassAssets = await loader.loadBatch(SCATTER_GRASS)
+    const flowerAssets = await loader.loadBatch(SCATTER_FLOWERS)
 
-    // Scatter grass — scaled up for visibility
-    const points = this.poissonScatter(GRASS_COUNT, WORLD_HALF, MIN_DISTANCE, exclusionZones)
-    for (const pt of points) {
-      const asset = this.grassAssets[Math.floor(Math.random() * this.grassAssets.length)]
-      const instance = loader.instance(asset)
-      instance.setPosition(pt.x, 0, pt.z)
-      instance.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(1.5, 4.0) // wider variety — some tiny, some large
-      instance.setLocalScale(s, s, s)
-      this.root.addChild(instance)
-    }
+    const grassGroups = this.scatterIntoAssetGroups(
+      grassAssets, GRASS_COUNT, MIN_DISTANCE, 1.5, 4.0, exclusionZones,
+    )
+    const flowerGroups = this.scatterIntoAssetGroups(
+      flowerAssets, FLOWER_COUNT, 3, 2.5, 5.5, exclusionZones,
+    )
 
-    // Scatter flowers (sparser, scaled up more — flowers are only ~0.16 units wide)
-    const flowerPoints = this.poissonScatter(FLOWER_COUNT, WORLD_HALF, 3, exclusionZones)
-    for (const pt of flowerPoints) {
-      const asset = this.flowerAssets[Math.floor(Math.random() * this.flowerAssets.length)]
-      const instance = loader.instance(asset)
-      instance.setPosition(pt.x, 0, pt.z)
-      instance.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(2.5, 5.5)
-      instance.setLocalScale(s, s, s)
-      this.root.addChild(instance)
-    }
+    const { entities, vbs } = buildInstancedGlbs(
+      app.app.graphicsDevice,
+      loader,
+      [...grassGroups, ...flowerGroups],
+      { namePrefix: 'GrassInstanced' },
+    )
+    for (const e of entities) this.root.addChild(e)
+    this.vbs = vbs
 
     app.root.addChild(this.root)
     return this.root
+  }
+
+  /**
+   * Scatter `count` points across the world (skipping exclusion zones) and
+   * randomly bucket each point into one of the asset groups. Each bucket's
+   * transforms list is what `buildInstancedGlbs` consumes to build a single
+   * instanced batch per (mesh, material) for that asset.
+   */
+  private scatterIntoAssetGroups(
+    assets: pc.Asset[],
+    count: number,
+    minDist: number,
+    minScale: number,
+    maxScale: number,
+    exclusionZones: readonly ExclusionZone[],
+  ): GlbScatterGroup[] {
+    const groups: GlbScatterGroup[] = assets.map((asset) => ({
+      asset, transforms: [],
+    }))
+    const points = this.poissonScatter(count, WORLD_HALF, minDist, exclusionZones)
+    for (const pt of points) {
+      const idx = Math.floor(Math.random() * assets.length)
+      const transform: ScatterTransform = {
+        x: pt.x, y: 0, z: pt.z,
+        yawDeg: randRange(0, 360),
+        scale:  randRange(minScale, maxScale),
+      }
+      groups[idx].transforms.push(transform)
+    }
+    return groups
   }
 
   /**
@@ -81,10 +109,8 @@ export class GrassSystem {
       const x = randRange(-halfExtent, halfExtent)
       const z = randRange(-halfExtent, halfExtent)
 
-      // Skip exclusion zones
       if (isInsideAnyZone(x, z, exclusionZones as ExclusionZone[])) continue
 
-      // Check minimum distance to existing points (limited check for speed)
       let tooClose = false
       const checkCount = Math.min(points.length, 20)
       for (let i = points.length - checkCount; i < points.length; i++) {
@@ -104,6 +130,8 @@ export class GrassSystem {
   }
 
   destroy(): void {
+    for (const vb of this.vbs) vb.destroy()
+    this.vbs = []
     if (this.root) {
       this.root.destroy()
       this.root = null
