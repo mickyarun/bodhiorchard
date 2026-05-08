@@ -22,6 +22,7 @@ import type { Application } from './Application'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { EngineData } from '../types'
 import { AssetLoader } from '../assets/AssetLoader'
+import { acquireRenderPause, releaseRenderPause } from '../utils/AppLifecycle'
 import {
   getAllDecorationGLBs,
   getEnvironmentGLBs, getBuildingGLBs, getMiscGLBs,
@@ -489,24 +490,26 @@ export class SceneManager {
     // `build()` then takes many frames to repopulate the scene graph. Without
     // this gate, the RAF render loop keeps drawing each frame and hits a
     // window where vertex buffers / textures have been destroyed but PC's
-    // render queue still references them — surfacing as the recurring
-    // `WebglGraphicsDevice.draw → Cannot read properties of undefined
-    // (reading 'device')` console spam plus `RenderPass cannot be started
-    // while inside another render pass` on rebuild.
+    // render queue still references them.
     //
-    // The flag is restored in a `finally` so an aborted build (signal.reason
-    // throws) doesn't leave rendering disabled for the rest of the session.
-    // GardenEngine.destroy() also flips autoRender=false unconditionally
-    // before its own teardown — that path doesn't restore (the engine is
-    // gone).
+    // Uses the ref-counted render-pause registry instead of writing
+    // `autoRender` directly. Direct writes raced with the visibility gate
+    // (tab hide/show during a long build flipped autoRender back to true
+    // mid-rebuild → partial scene-graph rendered → `'impl'` undefined
+    // crash). The registry composes safely with any other gate that
+    // acquires a pause for the same app.
+    //
+    // The token is released in `finally` so an aborted build doesn't leave
+    // rendering disabled for the session. GardenEngine.destroy() acquires
+    // its own pause unconditionally before teardown — that path doesn't
+    // release (the engine is gone).
     const pcApp = this.app.app
-    const wasAutoRender = pcApp.autoRender
-    pcApp.autoRender = false
+    const pauseToken = acquireRenderPause(pcApp, 'SceneManager.rebuild')
     try {
       this.teardown()
       await this.build(data, signal)
     } finally {
-      pcApp.autoRender = wasAutoRender
+      releaseRenderPause(pcApp, pauseToken)
     }
   }
 
