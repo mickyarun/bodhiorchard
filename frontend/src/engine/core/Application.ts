@@ -18,6 +18,7 @@ import type { EngineEvents } from '../types'
 import {
   installContextLossHandlers,
   installVisibilityGate,
+  installRenderErrorTrap,
 } from '../utils/AppLifecycle'
 
 export interface ApplicationConfig {
@@ -88,6 +89,7 @@ export class Application {
     this.lifecycleCleanups.push(
       installContextLossHandlers(canvas, this.app, 'Application'),
       installVisibilityGate(this.app),
+      installRenderErrorTrap(this.app, 'Application'),
     )
 
     // ─── Scene lighting: THE fix for black models ─────────────
