@@ -361,7 +361,7 @@ export class GardenEngine {
       })
       this.connectedOrgId = orgId
       this.sceneManager.agentSystemRef?.setServerDriven(true)
-      console.debug('[GardenEngine] Connected to OrgRoom org=', orgId)
+      if (import.meta.env.DEV) console.debug('[GardenEngine] Connected to OrgRoom org=', orgId)
     } catch (err) {
       console.warn('[GardenEngine] OrgRoom connect failed — continuing in local mode:', err)
       this.orgRoomClient = null
@@ -796,7 +796,7 @@ export class GardenEngine {
                 const dx = pos.x - door.x
                 const dz = pos.z - door.z
                 if (dx * dx + dz * dz < 0.8 * 0.8) {
-                  console.log('[GardenEngine] Coffee bar door hit → entering')
+                  if (import.meta.env.DEV) console.log('[GardenEngine] Coffee bar door hit → entering')
                   this._coffeeBarReentryCooldownMs = Date.now() + 2000
                   // location: 'coffeebar' tells OrgRoom to park the avatar
                   // at locationContext='coffeebar' (no walkHome). Other
@@ -821,7 +821,7 @@ export class GardenEngine {
                 const dx = pos.x - door.x
                 const dz = pos.z - door.z
                 if (dx * dx + dz * dz < 0.8 * 0.8) {
-                  console.log('[GardenEngine] Cafeteria door hit → entering')
+                  if (import.meta.env.DEV) console.log('[GardenEngine] Cafeteria door hit → entering')
                   this._cafeteriaReentryCooldownMs = Date.now() + 2000
                   // location: 'cafeteria' — see coffee-bar equivalent above.
                   this.exitTakeover({ location: 'cafeteria' })
@@ -845,17 +845,17 @@ export class GardenEngine {
 
           // Exit triggers — exitTakeover() has its own re-entry guard via !this.takeoverCtrl
           if (this.takeoverCtrl.isInactive) {
-            console.log('[GardenEngine] Inactivity timeout → exit takeover')
+            if (import.meta.env.DEV) console.log('[GardenEngine] Inactivity timeout → exit takeover')
             this.exitTakeover().catch(e => console.error('[GardenEngine] auto-exit failed:', e))
           } else {
             const door = this.takeoverCtrl.consumeDoorHit()
             if (door) {
-              console.log('[GardenEngine] Door hit:', door.doorId, '→ entering house')
+              if (import.meta.env.DEV) console.log('[GardenEngine] Door hit:', door.doorId, '→ entering house')
               this.exitTakeover()
                 .then(() => this.enterHouse(door.doorId))  // doorId = memberId
                 .catch(e => console.error('[GardenEngine] door entry failed:', e))
             } else if (this.input?.wasPressed(pc.KEY_ESCAPE)) {
-              console.log('[GardenEngine] ESC pressed → exit takeover')
+              if (import.meta.env.DEV) console.log('[GardenEngine] ESC pressed → exit takeover')
               this.exitTakeover().catch(e => console.error('[GardenEngine] ESC exit failed:', e))
             }
           }
@@ -882,7 +882,7 @@ export class GardenEngine {
 
   /** Enter a house interior by member ID. */
   async enterHouse(memberId: string): Promise<void> {
-    console.debug('[GardenEngine] enterHouse called for', memberId, 'sceneState=', this.sceneState)
+    if (import.meta.env.DEV) console.debug('[GardenEngine] enterHouse called for', memberId, 'sceneState=', this.sceneState)
     if (this.sceneState !== 'garden' || this._transitioning) {
       console.warn('[GardenEngine] enterHouse blocked: sceneState=', this.sceneState, 'transitioning=', this._transitioning)
       return
@@ -932,7 +932,7 @@ export class GardenEngine {
             name: this.currentUser.name,
             characterModel: this.currentUser.characterModel,
           } : null
-          console.debug('[GardenEngine] Entering house as visitor:', visitor)
+          if (import.meta.env.DEV) console.debug('[GardenEngine] Entering house as visitor:', visitor)
           await this.interior!.enter(house, visitor)
           this.sceneState = 'interior'
           this.events.emit('interior:enter', { memberId, memberName: house.memberName })
@@ -1345,7 +1345,7 @@ export class GardenEngine {
     import('@/services/api').then(({ default: api }) => {
       api.post('/v1/xp/claim-greeting-bonus', { target_user_id: targetId }).then(res => {
         if (res.data?.awarded) {
-          console.log('[GardenEngine] Greeting bonus! +0.25 SP')
+          if (import.meta.env.DEV) console.log('[GardenEngine] Greeting bonus! +0.25 SP')
           this.takeoverUI?.showCelebration('+0.25 SP — New greeting!')
         }
       }).catch(() => { /* silently ignore — non-critical */ })
@@ -1362,7 +1362,7 @@ export class GardenEngine {
    */
   toggleColliderDebug(): boolean {
     this._debugColliders = !this._debugColliders
-    console.log('[GardenEngine] collider debug =', this._debugColliders)
+    if (import.meta.env.DEV) console.log('[GardenEngine] collider debug =', this._debugColliders)
     return this._debugColliders
   }
 
@@ -1428,7 +1428,7 @@ export class GardenEngine {
     // the two paths distinct avoids the "click Exit, click Take Control,
     // end up back in the house I just left" loop that the overloaded
     // routing used to produce.
-    console.log('[GardenEngine] takeoverCharacter → entering garden WASD mode')
+    if (import.meta.env.DEV) console.log('[GardenEngine] takeoverCharacter → entering garden WASD mode')
 
     // Determine spawn position: explicit override (from exitHouse) takes
     // priority, otherwise check if the character is inside their own house
@@ -1440,7 +1440,7 @@ export class GardenEngine {
       character.entity.anim?.setInteger('speed', 0)
       character.entity.anim?.setInteger('working', 0)
       this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
-      console.debug('[GardenEngine] spawn override at', { x: spawnOverride.x.toFixed(2), z: spawnOverride.z.toFixed(2), yaw: spawnOverride.yaw })
+      if (import.meta.env.DEV) console.debug('[GardenEngine] spawn override at', { x: spawnOverride.x.toFixed(2), z: spawnOverride.z.toFixed(2), yaw: spawnOverride.yaw })
     } else {
       const ownHouse = this.sceneManager.memberHouseMap.get(userId)
       if (ownHouse && ownHouse.pivot) {
@@ -1464,7 +1464,7 @@ export class GardenEngine {
           character.entity.anim?.setInteger('speed', 0)
           character.entity.anim?.setInteger('working', 0)
           this.sceneManager.physicsWorld?.disableDoorsUntil(Date.now() + 500)
-          console.debug('[GardenEngine] teleported to own house exit at', { x: exit.x.toFixed(2), z: exit.z.toFixed(2), yaw: exit.yaw })
+          if (import.meta.env.DEV) console.debug('[GardenEngine] teleported to own house exit at', { x: exit.x.toFixed(2), z: exit.z.toFixed(2), yaw: exit.yaw })
         }
       }
     }
@@ -1534,7 +1534,7 @@ export class GardenEngine {
     this.takeoverProximity = new ProximitySystem()
 
     this.sceneState = 'takeover'
-    console.debug('[GardenEngine] Entered takeover mode for', userId)
+    if (import.meta.env.DEV) console.debug('[GardenEngine] Entered takeover mode for', userId)
   }
 
   /**
@@ -1632,7 +1632,7 @@ export class GardenEngine {
 
     this.sceneState = 'garden'
     this.takeoverUserId = null
-    console.log('[GardenEngine] Exited takeover mode — server walking home')
+    if (import.meta.env.DEV) console.log('[GardenEngine] Exited takeover mode — server walking home')
   }
 
   /** Whether the engine is currently in takeover mode. */

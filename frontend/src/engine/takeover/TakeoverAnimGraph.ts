@@ -143,7 +143,7 @@ export async function loadTakeoverAnimations(
     // Log discovered tracks for debugging
     if (advContainer?.animations) {
       const names = advContainer.animations.map(a => a.name || (a.resource as pc.AnimTrack)?.name)
-      console.debug('[TakeoverAnimGraph] movement_advanced tracks:', names)
+      if (import.meta.env.DEV) console.debug('[TakeoverAnimGraph] movement_advanced tracks:', names)
     }
   } catch (err) {
     console.warn('[TakeoverAnimGraph] Failed to load movement_advanced.glb:', err)
@@ -166,14 +166,14 @@ export async function loadTakeoverAnimations(
       // Fallback: use Walk at higher playback speed
       const walkTrack = findTrackByKeywords(advContainer, ['Walking', 'Walk'])
       if (walkTrack) layer.assignAnimation('Sprint', walkTrack)
-      console.debug('[TakeoverAnimGraph] No sprint track found, using walk fallback')
+      if (import.meta.env.DEV) console.debug('[TakeoverAnimGraph] No sprint track found, using walk fallback')
     }
 
     const jumpTrack = findTrackByKeywords(advContainer, JUMP_KEYWORDS)
     if (jumpTrack) {
       layer.assignAnimation('Jump', jumpTrack)
     } else {
-      console.debug('[TakeoverAnimGraph] No jump track found, jump will use idle')
+      if (import.meta.env.DEV) console.debug('[TakeoverAnimGraph] No jump track found, jump will use idle')
     }
   }
 }

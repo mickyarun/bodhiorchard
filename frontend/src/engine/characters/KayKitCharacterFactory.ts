@@ -199,9 +199,11 @@ export class KayKitCharacterFactory {
         clonedMaterials.push(mat)
       }
     }
-    console.debug('[KayKitCharacterFactory] meshes:', allMeshNames.join(', '),
-      '| tinted:', tintedMeshes.join(', ') || 'NONE',
-      '| colors:', { shirt: config.shirtColor, pants: config.pantsColor, skin: config.skinColor })
+    if (import.meta.env.DEV) {
+      console.debug('[KayKitCharacterFactory] meshes:', allMeshNames.join(', '),
+        '| tinted:', tintedMeshes.join(', ') || 'NONE',
+        '| colors:', { shirt: config.shirtColor, pants: config.pantsColor, skin: config.skinColor })
+    }
     return clonedMaterials
   }
 
