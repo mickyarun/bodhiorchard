@@ -32,6 +32,7 @@ import { InputManager } from "../input/InputManager";
 import {
   installContextLossHandlers,
   installVisibilityGate,
+  installRenderErrorTrap,
 } from "../utils/AppLifecycle";
 import {
   ForceSimulator,
@@ -140,6 +141,7 @@ export class GraphEngine {
     this.lifecycleCleanups.push(
       installContextLossHandlers(this.canvas, this.app, 'GraphEngine'),
       installVisibilityGate(this.app),
+      installRenderErrorTrap(this.app, 'GraphEngine'),
     );
 
     // PBR lighting

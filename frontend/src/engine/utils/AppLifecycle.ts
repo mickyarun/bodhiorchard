@@ -142,6 +142,140 @@ function getGl(canvas: HTMLCanvasElement): WebGL2RenderingContext | WebGLRenderi
 }
 
 /**
+ * Render-error trap. Wraps `app.tick` in a try/catch that catches the
+ * `Cannot read properties of undefined (reading 'impl')` crash family,
+ * walks the scene-graph to identify which MeshInstance has stale GPU
+ * resources, logs the offender (so we can find the root cause in the
+ * codebase), and halts auto-rendering so the spam stops at one frame.
+ *
+ * Why this exists: production users hit this crash with `glIsContextLost
+ * = false`, `autoRender = true`, and `visibility = 'visible'` — i.e.
+ * NOT WebGL context loss. The remaining hypothesis is a
+ * destroy/rebuild race that leaves a meshInstance pointing at a freed
+ * VertexBuffer / Mesh / Material / Shader. Without a trap the renderer
+ * crashes again on the next frame and again on the one after — 60 times
+ * a second forever — until `installContextLossHandlers`'s window.error
+ * listener happens to fire (it doesn't actually halt anything; it just
+ * logs).
+ *
+ * Behaviour:
+ *  - On crash: logs the meshInstance entity path, mesh state, material
+ *    state, vertex/index buffer state — whatever can be inspected
+ *    without re-triggering the same draw call.
+ *  - Sets `app.autoRender = false` so subsequent ticks render no-op.
+ *  - Re-throws the error so any other `window.error` listeners (e.g.
+ *    the diagnostic from `installContextLossHandlers`) still see it
+ *    and external monitoring (Sentry, etc.) is not silenced.
+ *
+ * Recovery: the page goes still rather than freezing in a crash spam.
+ * The user can reload to recover. If we get enough diagnostic dumps to
+ * pinpoint the destroy-race source, this trap can become a targeted fix
+ * and ship as a defensive belt-and-braces on top.
+ *
+ * @returns cleanup function — restores the original `app.tick`. Call
+ *   from the host's destroy() so a fresh app boot starts un-trapped.
+ */
+export function installRenderErrorTrap(
+  app: pc.AppBase, label: string,
+): () => void {
+  // Capture `app.tick` and rebind to `app` so PlayCanvas internals see
+  // the same `this`. We replace the property; tick is called once per
+  // RAF by the engine bootstrap.
+  const originalTick = (app as unknown as { tick: (dt?: number) => void }).tick.bind(app)
+  let tripped = false
+
+  const wrapped = (dt?: number): void => {
+    try {
+      originalTick(dt)
+    } catch (err) {
+      const msg = (err as Error)?.message ?? String(err)
+      // Filter strictly to the impl-undefined family so unrelated render
+      // bugs aren't swallowed.
+      if (!msg.includes("'impl'") && !msg.includes('reading \'impl\'')) {
+        throw err
+      }
+      if (!tripped) {
+        tripped = true
+        app.autoRender = false
+        // Walk the scene to find the offender. Reads are no-ops on a
+        // partly-torn-down meshInstance, so the diagnostic itself
+        // shouldn't re-trigger the same crash.
+        const offenders = findStaleMeshInstances(app)
+        console.error(
+          `[${label}] render trap caught impl-undefined — autoRender halted`,
+          {
+            offenderCount: offenders.length,
+            offenders: offenders.slice(0, 5), // first 5 only — keep log readable
+            originalError: msg,
+          },
+        )
+      }
+      throw err
+    }
+  }
+
+  ;(app as unknown as { tick: (dt?: number) => void }).tick = wrapped
+  return (): void => {
+    ;(app as unknown as { tick: (dt?: number) => void }).tick = originalTick
+  }
+}
+
+interface StaleMeshInstanceReport {
+  entityPath:    string
+  meshOk:        boolean
+  vbOk:          boolean
+  ibOk:          boolean
+  materialOk:    boolean
+  shaderOk:      boolean
+  instancingOk:  boolean
+}
+
+/**
+ * Walk every layer's mesh-instance set looking for buffers whose `.impl`
+ * field is null/undefined. Returns concise reports so the console log is
+ * scannable instead of a 200-entity dump.
+ */
+function findStaleMeshInstances(app: pc.AppBase): StaleMeshInstanceReport[] {
+  const out: StaleMeshInstanceReport[] = []
+  const scene = (app as unknown as {
+    scene: { layers: { layerList: Array<{ meshInstances: unknown[] }> } }
+  }).scene
+  const layers = scene?.layers?.layerList ?? []
+  for (const layer of layers) {
+    for (const mi of layer.meshInstances ?? []) {
+      const m = mi as {
+        node?: { name?: string; parent?: { name?: string } }
+        mesh?: { vertexBuffer?: { impl?: unknown }; indexBuffer?: Array<{ impl?: unknown }> }
+        material?: { shader?: { impl?: unknown } }
+        instancingData?: { vertexBuffer?: { impl?: unknown } }
+      }
+      const meshOk        = m.mesh != null
+      const vbOk          = m.mesh?.vertexBuffer?.impl != null
+      const ibOk          = !m.mesh?.indexBuffer?.length
+                              || m.mesh.indexBuffer[0]?.impl != null
+      const materialOk    = m.material != null
+      const shaderOk      = m.material?.shader == null
+                              || m.material.shader.impl != null
+      const instancingOk  = m.instancingData?.vertexBuffer == null
+                              || m.instancingData.vertexBuffer.impl != null
+      if (!(meshOk && vbOk && ibOk && materialOk && shaderOk && instancingOk)) {
+        out.push({
+          entityPath: pathOf(m.node),
+          meshOk, vbOk, ibOk, materialOk, shaderOk, instancingOk,
+        })
+      }
+    }
+  }
+  return out
+}
+
+function pathOf(node: { name?: string; parent?: { name?: string } } | undefined): string {
+  if (!node) return '(no-node)'
+  const parent = node.parent?.name ?? '?'
+  return `${parent}/${node.name ?? '(unnamed)'}`
+}
+
+/**
  * Pause `app.autoRender` while the document is hidden (background tab,
  * minimized window). Restores rendering when the tab becomes visible.
  *
