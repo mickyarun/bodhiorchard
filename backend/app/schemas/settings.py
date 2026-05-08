@@ -215,11 +215,20 @@ class PresenceSettings(BaseModel):
     @field_validator("timezone")
     @classmethod
     def _validate_timezone(cls, value: str | None) -> str | None:
-        """Reject unknown IANA timezone names. ``None`` is allowed."""
+        """Reject unknown IANA timezone names. ``None`` is allowed.
+
+        Uses ``ZoneInfo`` construction rather than ``available_timezones()`` so
+        legacy aliases (e.g. ``Asia/Calcutta``) resolve consistently across
+        hosts whose tz databases differ — Debian-slim images drop the
+        ``backward`` zones into a separate ``tzdata-legacy`` package, while
+        macOS ships them by default.
+        """
         if value is None:
             return None
-        if value not in zoneinfo.available_timezones():
-            raise ValueError(f"Unknown IANA timezone: {value!r}")
+        try:
+            zoneinfo.ZoneInfo(value)
+        except zoneinfo.ZoneInfoNotFoundError as exc:
+            raise ValueError(f"Unknown IANA timezone: {value!r}") from exc
         return value
 
     @model_validator(mode="after")
