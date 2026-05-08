@@ -71,7 +71,7 @@
           </g>
         </svg>
 
-        <h1 class="engine-loader__brand">bodhiorchard</h1>
+        <h1 class="engine-loader__brand">Bodhiorchard</h1>
         <p class="engine-loader__phase">{{ currentPhaseLabel }}</p>
 
         <!-- Progress bar. Fills smoothly as phase advances. -->
@@ -278,9 +278,8 @@ const progressPct = computed(() => PHASE_PROGRESS[props.phase])
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 22px;
   font-weight: 600;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.06em;
   color: #f4e8c8;
-  text-transform: lowercase;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
 }
 
