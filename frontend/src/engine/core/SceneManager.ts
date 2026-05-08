@@ -615,9 +615,11 @@ export class SceneManager {
 
       // Doors disabled until takeover starts (prevents fire on scene build)
       this._physics.setDoorsEnabled(false)
-      console.debug('[SceneManager] Physics initialized:',
-        this._memberHouseMap.size, 'houses,',
-        this.buildingHuts.length, 'huts')
+      if (import.meta.env.DEV) {
+        console.debug('[SceneManager] Physics initialized:',
+          this._memberHouseMap.size, 'houses,',
+          this.buildingHuts.length, 'huts')
+      }
     } catch (err) {
       console.warn('[SceneManager] Physics init failed — takeover will be disabled:', err)
       this._physics = null

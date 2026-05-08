@@ -19,6 +19,10 @@ import type { CharacterConfig } from './CharacterConfig'
 import { KayKitCharacterFactory, getClonedMaterials } from './KayKitCharacterFactory'
 import type { CharacterEntity } from './CharacterTypes'
 import { AssetLoader } from '../assets/AssetLoader'
+import {
+  installContextLossHandlers,
+  installVisibilityGate,
+} from '../utils/AppLifecycle'
 
 // ─── Scene Constants ───────────────────────────
 
@@ -56,6 +60,11 @@ export class CharacterPreviewScene {
   private transitionDuration = 0
   private isTransitioning = false
 
+  // Cleanup hooks for context-loss + visibility lifecycle helpers wired
+  // in init(). Drained in destroy() so a teardown does not leave dangling
+  // canvas-level / document-level listeners pointing at the freed app.
+  private lifecycleCleanups: Array<() => void> = []
+
   /** Initialize the preview scene with premium lighting and pedestal. */
   async init(container: HTMLElement): Promise<void> {
     this.canvas = document.createElement('canvas')
@@ -68,12 +77,22 @@ export class CharacterPreviewScene {
     const h = container.clientHeight || 400
 
     this.app = new pc.Application(this.canvas, {
-      graphicsDeviceOptions: { antialias: true, alpha: true },
+      graphicsDeviceOptions: {
+        antialias: true,
+        alpha: true,
+        // Discrete-GPU hint; silent fallback to integrated when none.
+        powerPreference: 'high-performance',
+      },
     })
     this.app.setCanvasFillMode(pc.FILLMODE_NONE)
     this.app.setCanvasResolution(pc.RESOLUTION_AUTO)
     this.app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, 2)
     this.app.resizeCanvas(w, h)
+
+    this.lifecycleCleanups.push(
+      installContextLossHandlers(this.canvas, this.app as pc.AppBase, 'CharacterPreview'),
+      installVisibilityGate(this.app as pc.AppBase),
+    )
 
     // Ambient — bright enough to see face details + slightly cool
     this.app.scene.ambientLight = new pc.Color(0.35, 0.35, 0.4)
@@ -247,6 +266,9 @@ export class CharacterPreviewScene {
     this.canvas?.removeEventListener('mousemove', this.onMouseMove)
     this.canvas?.removeEventListener('mouseup', this.onMouseUp)
     this.canvas?.removeEventListener('mouseleave', this.onMouseUp)
+
+    for (const cleanup of this.lifecycleCleanups) cleanup()
+    this.lifecycleCleanups = []
 
     if (this.character) {
       const mats = getClonedMaterials(this.character.entity)

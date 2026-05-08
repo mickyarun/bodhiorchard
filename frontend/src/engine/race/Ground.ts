@@ -125,7 +125,7 @@ export class Ground {
       this.material.update()
     })
     asset.once('error', (err: string) => {
-      console.debug('[Ground] grass.jpg failed to load, keeping fallback:', err)
+      if (import.meta.env.DEV) console.debug('[Ground] grass.jpg failed to load, keeping fallback:', err)
     })
     this.app.assets.add(asset)
     this.app.assets.load(asset)

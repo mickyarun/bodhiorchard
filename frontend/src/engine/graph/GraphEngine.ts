@@ -30,6 +30,10 @@ import type { EngineData, EngineFeature } from "../types";
 import { MaterialFactory } from "../rendering/MaterialFactory";
 import { InputManager } from "../input/InputManager";
 import {
+  installContextLossHandlers,
+  installVisibilityGate,
+} from "../utils/AppLifecycle";
+import {
   ForceSimulator,
   type ForceNode,
   type ForceEdge,
@@ -76,6 +80,11 @@ export class GraphEngine {
   private crossRepo: GraphCrossRepoSystem | null = null;
   private overlay: GraphOverlaySystem | null = null;
 
+  // Cleanup hooks for context-loss + visibility lifecycle helpers wired
+  // in init(). Drained in destroy() so a teardown does not leave dangling
+  // canvas-level / document-level listeners pointing at the freed app.
+  private lifecycleCleanups: Array<() => void> = [];
+
   // Entity tracking
   private nodeEntities = new Map<string, pc.Entity>();
   private edgeHandles = new Map<string, EdgeHandle>();
@@ -115,6 +124,8 @@ export class GraphEngine {
         antialias: true,
         alpha: false,
         preserveDrawingBuffer: false,
+        // Discrete-GPU hint; silent fallback to integrated when none.
+        powerPreference: 'high-performance',
       },
     });
 
@@ -125,6 +136,11 @@ export class GraphEngine {
       2,
     );
     this.app.resizeCanvas(width, height);
+
+    this.lifecycleCleanups.push(
+      installContextLossHandlers(this.canvas, this.app, 'GraphEngine'),
+      installVisibilityGate(this.app),
+    );
 
     // PBR lighting
     this.app.scene.ambientLight = new pc.Color(0.35, 0.35, 0.4);
@@ -450,6 +466,8 @@ export class GraphEngine {
     this.iblCubemap = null;
     this.materials?.clear();
     this.materials = null;
+    for (const cleanup of this.lifecycleCleanups) cleanup();
+    this.lifecycleCleanups = [];
     if (this.app) {
       this.app.destroy();
       this.app = null;

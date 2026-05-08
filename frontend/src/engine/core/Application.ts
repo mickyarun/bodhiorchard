@@ -15,6 +15,10 @@ import * as pc from 'playcanvas'
 import { Clock } from './Clock'
 import { EventBus } from './EventBus'
 import type { EngineEvents } from '../types'
+import {
+  installContextLossHandlers,
+  installVisibilityGate,
+} from '../utils/AppLifecycle'
 
 export interface ApplicationConfig {
   onUpdate?: (dt: number, clock: Clock) => void
@@ -40,6 +44,14 @@ export class Application {
   private updateHandler: ((dt: number) => void) | null = null
 
   /**
+   * Cleanup hooks for the lifecycle hardening helpers wired in `init()`.
+   * Called from `destroy()` so a teardown does not leave dangling
+   * canvas-level / document-level listeners pointing at a freed
+   * pc.Application.
+   */
+  private lifecycleCleanups: Array<() => void> = []
+
+  /**
    * Billboard registry — O(1) add/remove, avoids O(n) findByTag every frame.
    * Subsystems call registerBillboard/unregisterBillboard when creating/destroying labels.
    */
@@ -56,6 +68,10 @@ export class Application {
         antialias: true,
         alpha: false,
         preserveDrawingBuffer: false,
+        // Ask the browser for the discrete GPU on systems that have one.
+        // Silent fallback to integrated when no dGPU exists, so this is
+        // zero-risk on every machine the app might be opened on.
+        powerPreference: 'high-performance',
       },
     })
 
@@ -64,7 +80,10 @@ export class Application {
     this.app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, 2)
     this.app.resizeCanvas(width, height)
 
-    this.installContextLossHandlers(canvas)
+    this.lifecycleCleanups.push(
+      installContextLossHandlers(canvas, this.app, 'Application'),
+      installVisibilityGate(this.app),
+    )
 
     // ─── Scene lighting: THE fix for black models ─────────────
     // Slightly warm ambient tint for golden-hour feel (was cool 0.4/0.4/0.45).
@@ -300,50 +319,6 @@ export class Application {
   }
 
   /**
-   * WebGL context-loss / restore wiring.
-   *
-   * Browsers can release the WebGL context under memory pressure or after
-   * long tab idle (Chrome especially). When this happens, every graphics
-   * resource keeps its JS wrapper (`Texture`, `VertexBuffer`, ...) but
-   * loses its GPU-side `.impl`, and the very next render attempt crashes
-   * inside `WebglGraphicsDevice.draw` with `Cannot read properties of
-   * undefined (reading 'impl')` — once per frame, forever.
-   *
-   * `preventDefault()` on `webglcontextlost` tells the browser the app is
-   * handling the loss (without it, the canvas is permanently dead). We
-   * then halt auto-render so the doomed render path can't fire again.
-   *
-   * On restore, rebuilding every Texture / VertexBuffer / Shader in-place
-   * is invasive and error-prone; a full page reload is the pragmatic fix
-   * — same scene state comes back from the OrgRoom snapshot, freshly
-   * uploaded to the new context. Production users almost never hit this
-   * twice in a session, so the reload cost is negligible.
-   */
-  private installContextLossHandlers(canvas: HTMLCanvasElement): void {
-    canvas.addEventListener(
-      'webglcontextlost',
-      (e) => {
-        e.preventDefault()
-        this.app.autoRender = false
-        console.warn(
-          '[Application] WebGL context lost — rendering halted. Waiting for restore.',
-        )
-      },
-      false,
-    )
-    canvas.addEventListener(
-      'webglcontextrestored',
-      () => {
-        console.warn(
-          '[Application] WebGL context restored — reloading page to rebuild GPU resources.',
-        )
-        window.location.reload()
-      },
-      false,
-    )
-  }
-
-  /**
    * Detach the per-frame update listener installed in `init()`. Idempotent.
    *
    * Used by `GardenEngine.destroy()` to halt our update logic *before* the
@@ -372,6 +347,8 @@ export class Application {
     this.events.clear()
     this.billboards.clear()
     this.stopUpdates()
+    for (const cleanup of this.lifecycleCleanups) cleanup()
+    this.lifecycleCleanups = []
     this.app.destroy()
   }
 }

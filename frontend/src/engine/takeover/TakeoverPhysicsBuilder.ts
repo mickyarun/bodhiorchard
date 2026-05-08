@@ -106,11 +106,13 @@ export class TakeoverPhysicsBuilder {
 
     // Diagnostic: surface which tier each house is registered at so we can
     // verify tier-specific collider dimensions in the console.
-    console.debug('[TakeoverPhysicsBuilder] registerHouse',
-      memberId, 'house.tier=', house.tier, '→ tierDef=', tierDef.name,
-      'width=', tierDef.width, 'depth=', tierDef.depth,
-      'exteriorFootprint=', tierDef.exteriorFootprint, 'scale=', tierDef.exteriorScale,
-      'measuredHalfW=', house.exteriorHalfW, 'measuredHalfD=', house.exteriorHalfD)
+    if (import.meta.env.DEV) {
+      console.debug('[TakeoverPhysicsBuilder] registerHouse',
+        memberId, 'house.tier=', house.tier, '→ tierDef=', tierDef.name,
+        'width=', tierDef.width, 'depth=', tierDef.depth,
+        'exteriorFootprint=', tierDef.exteriorFootprint, 'scale=', tierDef.exteriorScale,
+        'measuredHalfW=', house.exteriorHalfW, 'measuredHalfD=', house.exteriorHalfD)
+    }
 
     if (tierDef.exteriorGlb && tierDef.exteriorFootprint) {
       // KayKit house: pivot is at center, collider centered on pivot.

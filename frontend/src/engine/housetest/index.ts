@@ -216,7 +216,7 @@ export class HouseTestEngine {
       // Check if player bumped into a door collider
       const doorHit = this.physics.consumeDoorHit()
       if (doorHit) {
-        console.log('[HouseTest] Door hit:', doorHit.doorId)
+        if (import.meta.env.DEV) console.log('[HouseTest] Door hit:', doorHit.doorId)
         this.enterHouse(doorHit.doorId)
       }
 
