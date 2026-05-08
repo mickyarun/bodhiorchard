@@ -21,6 +21,24 @@ export default defineConfig({
       '@shared': fileURLToPath(new URL('../shared', import.meta.url)),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split heavy 3rd-party + engine code into stable chunks so:
+        //  - dashboard route doesn't ship 1.5MB of PlayCanvas as one bundle
+        //  - engine edits don't invalidate the playcanvas chunk hash
+        //  - browser parallelises the network fetches
+        manualChunks(id) {
+          if (id.includes('node_modules/playcanvas')) return 'playcanvas'
+          if (id.includes('node_modules/@dimforge/rapier3d')) return 'rapier'
+          if (id.includes('node_modules/colyseus.js') || id.includes('node_modules/@colyseus')) {
+            return 'colyseus'
+          }
+          if (id.includes('/src/engine/')) return 'engine'
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     allowedHosts: ['frontendchat.ngrok.app', 'macbook-pro.taile1406f.ts.net'],
