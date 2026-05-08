@@ -64,8 +64,13 @@ export function installContextLossHandlers(
   // context. Strip back to terse warns once the timing is understood.
   const installedAt = Date.now()
   const fmt = (ts: number) => `t+${(ts - installedAt).toLocaleString()}ms`
+  // Per-install instance ID. With HMR / component remount the same Vue
+  // component creates a new pc.AppBase; without an instance ID, two
+  // "context-loss handlers installed" lines in the console look identical
+  // and we lose track of which app's listeners are firing later.
+  const instanceId = Math.random().toString(36).slice(2, 7)
   console.info(
-    `[${label}] context-loss handlers installed`,
+    `[${label}#${instanceId}] context-loss handlers installed`,
     {
       visibility: document.visibilityState,
       hasGl: !!getGl(canvas),
@@ -82,7 +87,7 @@ export function installContextLossHandlers(
     if (!lostToken) lostToken = acquireRenderPause(app, 'webglcontextlost')
     const gl = getGl(canvas)
     console.warn(
-      `[${label}] webglcontextlost fired @ ${fmt(Date.now())}`,
+      `[${label}#${instanceId}] webglcontextlost fired @ ${fmt(Date.now())}`,
       {
         visibility: document.visibilityState,
         glIsContextLost: gl?.isContextLost?.() ?? null,
@@ -92,7 +97,7 @@ export function installContextLossHandlers(
   }
   const onRestored = (): void => {
     console.warn(
-      `[${label}] webglcontextrestored fired @ ${fmt(Date.now())} — reloading`,
+      `[${label}#${instanceId}] webglcontextrestored fired @ ${fmt(Date.now())} — reloading`,
       { visibility: document.visibilityState },
     )
     window.location.reload()
@@ -100,7 +105,7 @@ export function installContextLossHandlers(
   const onVisibility = (): void => {
     const gl = getGl(canvas)
     console.info(
-      `[${label}] visibilitychange @ ${fmt(Date.now())}`,
+      `[${label}#${instanceId}] visibilitychange @ ${fmt(Date.now())}`,
       {
         visibility: document.visibilityState,
         glIsContextLost: gl?.isContextLost?.() ?? null,
@@ -116,7 +121,7 @@ export function installContextLossHandlers(
     if (msg.includes("'impl'") || msg.includes('reading \'impl\'')) {
       const gl = getGl(canvas)
       console.error(
-        `[${label}] impl-undefined caught by window @ ${fmt(Date.now())}`,
+        `[${label}#${instanceId}] impl-undefined caught by window @ ${fmt(Date.now())}`,
         {
           visibility: document.visibilityState,
           glIsContextLost: gl?.isContextLost?.() ?? null,
@@ -188,6 +193,10 @@ export function installRenderErrorTrap(
   // RAF by the engine bootstrap.
   const originalTick = (app as unknown as { tick: (dt?: number) => void }).tick.bind(app)
   let tripped = false
+  // Per-app instance ID so we can distinguish which `pc.AppBase` fired
+  // the trap when multiple apps coexist (HMR remount, throwing teardown
+  // leaving an old app alive). Math.random short ID keeps console scannable.
+  const instanceId = Math.random().toString(36).slice(2, 7)
 
   const wrapped = (dt?: number): void => {
     try {
@@ -210,19 +219,26 @@ export function installRenderErrorTrap(
         // Walk the scene to find the offender. Reads are no-ops on a
         // partly-torn-down meshInstance, so the diagnostic itself
         // shouldn't re-trigger the same crash.
-        const offenders = findStaleMeshInstances(app)
+        const scan = findStaleMeshInstances(app)
         // Flat text summary so the console line is readable without
-        // expanding the inspector. Entity path + which buffer is bad
-        // is what we actually need to locate the destroy-race source.
-        const summary = offenders.length === 0
-          ? '(no stale mesh-instances found in scene-graph)'
-          : offenders.slice(0, 3).map(o => describeOffender(o)).join(' | ')
+        // expanding the inspector. The `unique` counts disambiguate
+        // "51K stale meshInstances" from "1 shared mesh referenced
+        // 51K times" — completely different fixes.
+        const offenderSummary = scan.reports.length === 0
+          ? '(no stale mesh-instances found)'
+          : scan.reports.slice(0, 3).map(o => describeOffender(o)).join(' | ')
         console.error(
-          `[${label}] render trap: ${offenders.length} stale | ${summary} | autoRender halted`,
+          `[${label}#${instanceId}] render trap: ${scan.totalCounted} hits / ` +
+          `${scan.uniqueEntities} entities / ${scan.uniqueMeshes} meshes / ` +
+          `${scan.uniqueMaterials} materials | ${offenderSummary} | autoRender halted`,
           {
-            offenderCount: offenders.length,
-            offenders: offenders.slice(0, 10),
-            originalError: msg,
+            instanceId,
+            totalCounted:    scan.totalCounted,
+            uniqueEntities:  scan.uniqueEntities,
+            uniqueMeshes:    scan.uniqueMeshes,
+            uniqueMaterials: scan.uniqueMaterials,
+            reports:         scan.reports,
+            originalError:   msg,
           },
         )
       }
@@ -246,13 +262,29 @@ interface StaleMeshInstanceReport {
   instancingOk:  boolean
 }
 
+interface StaleScanResult {
+  totalCounted:    number   // total layer-mesh-instance hits (MIs counted per-layer membership)
+  uniqueMeshes:    number   // distinct pc.Mesh refs across all stale MIs
+  uniqueMaterials: number   // distinct pc.Material refs
+  uniqueEntities:  number   // distinct entity refs
+  reports:         StaleMeshInstanceReport[] // first 10 unique reports
+}
+
 /**
  * Walk every layer's mesh-instance set looking for buffers whose `.impl`
- * field is null/undefined. Returns concise reports so the console log is
- * scannable instead of a 200-entity dump.
+ * field is null/undefined. Deduplicates across layers (the same MI appears
+ * in multiple layers under PlayCanvas's composition model — counting per
+ * layer inflates totals 5–10× and obscures whether the leak is N
+ * meshInstances or 1 mesh shared by N).
  */
-function findStaleMeshInstances(app: pc.AppBase): StaleMeshInstanceReport[] {
-  const out: StaleMeshInstanceReport[] = []
+function findStaleMeshInstances(app: pc.AppBase): StaleScanResult {
+  const seen          = new Set<unknown>()
+  const meshSet       = new Set<unknown>()
+  const materialSet   = new Set<unknown>()
+  const entitySet     = new Set<unknown>()
+  const reports: StaleMeshInstanceReport[] = []
+  let totalCounted = 0
+
   const scene = (app as unknown as {
     scene: { layers: { layerList: Array<{ meshInstances: unknown[] }> } }
   }).scene
@@ -275,14 +307,29 @@ function findStaleMeshInstances(app: pc.AppBase): StaleMeshInstanceReport[] {
       const instancingOk  = m.instancingData?.vertexBuffer == null
                               || m.instancingData.vertexBuffer.impl != null
       if (!(meshOk && vbOk && ibOk && materialOk && shaderOk && instancingOk)) {
-        out.push({
-          entityPath: pathOf(m.node),
-          meshOk, vbOk, ibOk, materialOk, shaderOk, instancingOk,
-        })
+        totalCounted++
+        if (m.mesh) meshSet.add(m.mesh)
+        if (m.material) materialSet.add(m.material)
+        if (m.node) entitySet.add(m.node)
+        if (!seen.has(mi) && reports.length < 10) {
+          seen.add(mi)
+          reports.push({
+            entityPath: pathOf(m.node),
+            meshOk, vbOk, ibOk, materialOk, shaderOk, instancingOk,
+          })
+        } else {
+          seen.add(mi)
+        }
       }
     }
   }
-  return out
+  return {
+    totalCounted,
+    uniqueMeshes:    meshSet.size,
+    uniqueMaterials: materialSet.size,
+    uniqueEntities:  entitySet.size,
+    reports,
+  }
 }
 
 function pathOf(node: { name?: string; parent?: { name?: string } } | undefined): string {
