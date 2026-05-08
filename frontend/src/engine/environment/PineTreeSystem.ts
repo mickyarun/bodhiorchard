@@ -19,6 +19,11 @@
  * Species variation: pine (dominant), tall-green, leafy, autumn — mixed
  * so no single silhouette repeats in a cluster. Occasional autumn tree
  * gives warm color accents without a fall-biome commitment.
+ *
+ * Hardware-instanced: 41 scatter points across 3 species GLBs collapse
+ * into one draw call per (mesh, material) (≈3–6 draws total) instead of
+ * 41 per-entity matrix uploads. Pine is the dominant draw-call cost in
+ * the perimeter belt — instancing was the headline target of Tier B.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
@@ -26,33 +31,22 @@ import { AssetLoader } from '../assets/AssetLoader'
 import { SCATTER_PINES, FOREST_TREES } from '../assets/AssetManifest'
 import { isInsideAnyZone, randRange, type ExclusionZone } from '../utils/MathUtils'
 import { getActiveScale } from '@shared/world/layoutScale'
+import {
+  buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
+} from '../utils/GlbInstancing'
 
 // ─── Outer perimeter belt ────────────────────────────────────────────────
-// Perimeter radii (`pineRingInner`, `pineRingOuter`, `pineFramingRadius`)
-// are sourced per-build from `getActiveScale().perimeter` — the single
-// source of truth in `shared/world/layoutScale.ts`. Values below are
-// scatter algorithm tuning (counts, packing distance, jitter) — content,
-// not layout, so they stay file-local.
 const OUTER_PINE_COUNT = 32
 const MIN_DISTANCE = 4.5
 
-/** Angular gaps where no perimeter trees are placed — hints at "paths
- *  into the forest." Degrees in math convention (atan2(z,x)). */
 const PERIMETER_GAPS_DEG: Array<{ center: number; halfWidth: number }> = [
   { center: 0,   halfWidth: 6 },   // due east
   { center: 180, halfWidth: 6 },   // due west
 ]
 
 // ─── Inner framing clumps ────────────────────────────────────────────────
-const FRAMING_TREES_PER_CLUMP = 3     // tight trio reads as a single tree mass
-const FRAMING_SPREAD = 3.5            // cluster blob half-width
-
-/**
- * Angles chosen to sit between zone clusters in the current layout:
- *   -  90° = due south → between housing & pool (fills big southern gap)
- *   - 215° = NW → between coffee_bar and pavilion
- *   - 325° = NE → between pavilion and cafeteria
- */
+const FRAMING_TREES_PER_CLUMP = 3
+const FRAMING_SPREAD = 3.5
 const FRAMING_ANGLES_DEG = [90, 215, 325]
 
 /**
@@ -63,22 +57,22 @@ const FRAMING_ANGLES_DEG = [90, 215, 325]
  */
 const NON_PINE_SCALE = 0.25
 
-// ─── Species palette ──────────────────────────────────────────────────────
+const PINE_SPECIES_IDX = 0   // index into the assets[] array below
+
 /**
- * Pine-dominant mix. `tree_leafy` deliberately excluded — its rounded
- * blob silhouette clashes visually with the pointy pine skyline and
- * reads as "wrong tree species" from the zoom-out camera. Keep the
- * leafy-blob look reserved for the hub anchor (tree_round) and the
- * repo trees, which are meant to be silhouette-distinct.
+ * Species weights. `groupIdx` is the index into the `assets[]` / `groups[]`
+ * arrays built in `build()` — same order as `speciesPaths`. Reordering
+ * either array requires updating `groupIdx` here in lockstep.
  */
-const SPECIES_WEIGHTS: Array<{ pathIdx: number; weight: number }> = [
-  { pathIdx: 0, weight: 0.70 },  // pine_tree (strongly dominant)
-  { pathIdx: 1, weight: 0.20 },  // tree_tall_green
-  { pathIdx: 2, weight: 0.10 },  // tree_autumn (rare warm accent)
+const SPECIES_WEIGHTS: Array<{ groupIdx: number; weight: number }> = [
+  { groupIdx: 0, weight: 0.70 },  // pine_tree (strongly dominant)
+  { groupIdx: 1, weight: 0.20 },  // tree_tall_green
+  { groupIdx: 2, weight: 0.10 },  // tree_autumn (rare warm accent)
 ]
 
 export class PineTreeSystem {
   private root: pc.Entity | null = null
+  private vbs: pc.VertexBuffer[] = []
 
   async build(
     app: Application,
@@ -87,69 +81,70 @@ export class PineTreeSystem {
   ): Promise<pc.Entity> {
     this.root = new pc.Entity('PineTreeSystem')
 
-    // Load one of each species. Pine is the dominant choice; the others
-    // provide silhouette variation. FOREST_TREES is already preloaded via
-    // getEnvironmentGLBs() so these are warm-cache lookups.
     const speciesPaths = [
       SCATTER_PINES[0],               // pine_tree      (pathIdx 0)
       FOREST_TREES[2],                // tree_tall_green (pathIdx 1)
       FOREST_TREES[4],                // tree_autumn    (pathIdx 2)
     ]
     const assets = await loader.loadBatch(speciesPaths)
+    const groups: GlbScatterGroup[] = assets.map((asset) => ({
+      asset, transforms: [],
+    }))
 
     // 1. Outer perimeter belt — uniform scatter with angular gaps
     const outerPoints = this.outerRingScatter(
       OUTER_PINE_COUNT, MIN_DISTANCE, exclusionZones,
     )
     for (const pt of outerPoints) {
-      this.spawnTree(loader, assets, pt.x, pt.z, randRange(3, 7))
+      this.assignTree(groups, pt.x, pt.z, randRange(3, 7))
     }
 
     // 2. Inner framing clumps — dense clusters at between-zone angles
     for (const angleDeg of FRAMING_ANGLES_DEG) {
-      this.spawnClump(loader, assets, angleDeg, exclusionZones)
+      this.spawnClump(groups, angleDeg, exclusionZones)
     }
+
+    const { entities, vbs } = buildInstancedGlbs(
+      app.app.graphicsDevice,
+      loader,
+      groups,
+      { namePrefix: 'PineInstanced' },
+    )
+    for (const e of entities) this.root.addChild(e)
+    this.vbs = vbs
 
     app.root.addChild(this.root)
     return this.root
   }
 
-  /** Spawn a single tree at (x,z) with random species, yaw, and scale. */
-  private spawnTree(
-    loader: AssetLoader,
-    assets: pc.Asset[],
-    x: number,
-    z: number,
-    scale: number,
+  /**
+   * Pick a species and append a transform to that group's bucket.
+   * Non-pine species get NON_PINE_SCALE applied so their visual footprint
+   * matches pine — the GLBs have inconsistent native bounds.
+   */
+  private assignTree(
+    groups: GlbScatterGroup[], x: number, z: number, baseScale: number,
   ): void {
     const speciesIdx = this.pickWeightedSpecies()
-    const asset = assets[speciesIdx]
-    const instance = loader.instance(asset)
-    instance.setPosition(x, 0, z)
-    instance.setLocalEulerAngles(0, randRange(0, 360), 0)
-    // Non-pine GLBs (tall_green, autumn) have much larger default bounds
-    // than pine — without the strong scale-down they dwarf the hub tree.
-    const speciesScale = speciesIdx === 0 ? 1.0 : NON_PINE_SCALE
-    const s = scale * speciesScale
-    instance.setLocalScale(s, s, s)
-    this.root!.addChild(instance)
+    const speciesScale = speciesIdx === PINE_SPECIES_IDX ? 1.0 : NON_PINE_SCALE
+    const transform: ScatterTransform = {
+      x, y: 0, z,
+      yawDeg: randRange(0, 360),
+      scale:  baseScale * speciesScale,
+    }
+    groups[speciesIdx].transforms.push(transform)
   }
 
-  /** Weighted random species index from SPECIES_WEIGHTS. */
   private pickWeightedSpecies(): number {
     const r = Math.random()
     let acc = 0
-    for (const { pathIdx, weight } of SPECIES_WEIGHTS) {
+    for (const { groupIdx, weight } of SPECIES_WEIGHTS) {
       acc += weight
-      if (r <= acc) return pathIdx
+      if (r <= acc) return groupIdx
     }
-    return SPECIES_WEIGHTS[0].pathIdx
+    return SPECIES_WEIGHTS[0].groupIdx
   }
 
-  /**
-   * Perimeter ring scatter: uniform between INNER and OUTER, with angular
-   * gaps (no trees in gap windows) that hint at forest paths beyond.
-   */
   private outerRingScatter(
     count: number,
     minDist: number,
@@ -177,15 +172,8 @@ export class PineTreeSystem {
     return points
   }
 
-  /**
-   * Spawn FRAMING_TREES_PER_CLUMP trees in a jittered cluster at the given
-   * angle. Each tree's position is the clump center + gaussian-ish jitter.
-   * Clumps use denser-than-belt packing (smaller minDist) so silhouettes
-   * overlap and read as a single "tree mass" rather than individual trees.
-   */
   private spawnClump(
-    loader: AssetLoader,
-    assets: pc.Asset[],
+    groups: GlbScatterGroup[],
     angleDeg: number,
     exclusionZones: readonly ExclusionZone[],
   ): void {
@@ -201,13 +189,9 @@ export class PineTreeSystem {
       const x = cx + randRange(-FRAMING_SPREAD, FRAMING_SPREAD)
       const z = cz + randRange(-FRAMING_SPREAD, FRAMING_SPREAD)
       if (isInsideAnyZone(x, z, exclusionZones)) continue
-      // Tighter min-distance inside a clump — trees are meant to clump.
       if (this.isTooCloseToExisting(x, z, placed, 2.2)) continue
       placed.push({ x, z })
-      // Framing clumps sit slightly larger than the belt average to
-      // stand out as sightline markers, but not so much they rival the
-      // hub tree's visual weight.
-      this.spawnTree(loader, assets, x, z, randRange(4, 6))
+      this.assignTree(groups, x, z, randRange(4, 6))
     }
   }
 
@@ -239,6 +223,8 @@ export class PineTreeSystem {
   }
 
   destroy(): void {
+    for (const vb of this.vbs) vb.destroy()
+    this.vbs = []
     if (this.root) {
       this.root.destroy()
       this.root = null
