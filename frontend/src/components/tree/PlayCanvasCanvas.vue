@@ -16,6 +16,10 @@
     >
       {{ tooltipText }}
     </div>
+    <EngineLoadingOverlay
+      :visible="loaderVisible"
+      :phase="loaderPhase"
+    />
     <TouchControls
       v-if="isTouch && touchContext"
       :context="touchContext"
@@ -63,6 +67,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useXPStore } from '@/stores/xp'
 import api from '@/services/api'
 import TouchControls, { type TouchContext } from '@/components/touch/TouchControls.vue'
+import EngineLoadingOverlay, { type LoadingPhase } from '@/components/tree/EngineLoadingOverlay.vue'
 import { useTouchDevice } from '@/composables/useTouchDevice'
 
 const authStore = useAuthStore()
@@ -85,6 +90,13 @@ const emit = defineEmits<{
 const containerRef = ref<HTMLElement | null>(null)
 const tooltipText = ref<string | null>(null)
 const tooltipPos = ref({ x: 0, y: 0 })
+
+// Loading-overlay state. Visible from mount through scene-build; hides
+// on `scene-ready`. Phase is advanced manually at known checkpoints in
+// initEngine() — there's no per-asset progress today, but the phased
+// labels keep the user oriented while the orchard assembles.
+const loaderVisible = ref(true)
+const loaderPhase = ref<LoadingPhase>('mounting')
 
 // Touch overlay state — gated on device capability + current scene mode.
 // sceneState is mirrored into a ref via the onSceneStateChange callback so
@@ -241,8 +253,16 @@ async function initEngine(): Promise<void> {
   engine = myEngine
   // Expose for console debugging: `__engine.toggleColliderDebug()`
   ;(window as unknown as { __engine?: GardenEngine }).__engine = myEngine
+  loaderPhase.value = 'engine_init'
   await myEngine.init(containerRef.value, w, h, {
-    onSceneReady: () => emit('scene-ready'),
+    onSceneReady: () => {
+      // Reveal the world. The overlay's CSS transition fades it out over
+      // ~600ms so the scene doesn't snap in — gives the brain a moment
+      // to register 'we've arrived.'
+      loaderPhase.value = 'ready'
+      loaderVisible.value = false
+      emit('scene-ready')
+    },
     onTreeClick: (info) => emit('tree-click', { repoName: info.repoName }),
     onDeveloperClick: (info) => emit('developer-click', {
       name: info.name,
@@ -284,8 +304,10 @@ async function initEngine(): Promise<void> {
   // skip their local build paths — spawns come from OrgRoom snapshots instead.
   myEngine.enableServerDriven(true)
 
+  loaderPhase.value = 'building_scene'
   await myEngine.setData(adaptTreeData(props.treeData))
   if (myToken !== initToken) return
+  loaderPhase.value = 'connecting'
 
   // Mark the engine as ready BEFORE the first connect attempt. This flag
   // gates the auth watcher so it never fires a stale `tryConnectOrgRoom`
@@ -378,6 +400,8 @@ onMounted(async () => {
   } catch (err) {
     console.error('[PlayCanvasCanvas] Failed to initialize 3D engine:', err)
     initError.value = 'Failed to load 3D scene. Please refresh the page.'
+    // Hide the loader so the error message isn't masked by the splash.
+    loaderVisible.value = false
   }
 
   if (containerRef.value) {
