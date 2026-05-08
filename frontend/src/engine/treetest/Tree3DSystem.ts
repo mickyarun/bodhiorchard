@@ -125,11 +125,14 @@ export class Tree3DSystem {
   private bakedEntities: pc.Entity[] = []
   private bakedVertexBuffers: pc.VertexBuffer[] = []
 
-  // Shared unit cylinder mesh reused across every baked tree, keyed by device
-  // so that hot-reload / multi-app scenarios don't hand out a mesh bound to a
-  // stale graphics device (which would crash at first draw because the device's
-  // program library wouldn't be registered for it).
-  private static _cylinderMeshByDevice = new WeakMap<pc.GraphicsDevice, pc.Mesh>()
+  // Unit cylinder mesh reused across every baked tree in this system. Lifetime
+  // is tied to this instance — built lazily on first bake, destroyed in destroy().
+  // Previously a static WeakMap<device, mesh>: that pattern survived past the
+  // owning pc.Application's destroy whenever GC didn't immediately collect the
+  // device, so the next mount could end up rendering against a mesh whose
+  // vertexBuffer.impl had been freed (the BakedBranches "vertex_position not
+  // present" / "reading 'device' undefined" crash on second mount).
+  private cylinderMesh: pc.Mesh | null = null
 
   constructor(app: pc.AppBase, options?: { useEmissive?: boolean }) {
     this.app = app
@@ -741,17 +744,14 @@ export class Tree3DSystem {
   }
 
   private getCylinderMesh(): pc.Mesh {
-    const device = this.app.graphicsDevice
-    const cached = Tree3DSystem._cylinderMeshByDevice.get(device)
-    if (cached) return cached
+    if (this.cylinderMesh) return this.cylinderMesh
     // Build the unit cylinder directly against this app's graphics device.
     // pc.CylinderGeometry defaults: radius 0.5, height 1, 5 height segments,
     // 20 cap segments, centered at origin with Y axis vertical — matches the
     // primitive 'cylinder' in dimensions and is what TreeBranch transforms
     // expect (scale.y = branch length, thickness → scale.xz).
-    const mesh = pc.Mesh.fromGeometry(device, new pc.CylinderGeometry())
-    Tree3DSystem._cylinderMeshByDevice.set(device, mesh)
-    return mesh
+    this.cylinderMesh = pc.Mesh.fromGeometry(this.app.graphicsDevice, new pc.CylinderGeometry())
+    return this.cylinderMesh
   }
 
   private clearEntities(): void {
@@ -775,6 +775,14 @@ export class Tree3DSystem {
   destroy(): void {
     this.clearEntities()
     this.destroyMaterials()
+    // Free the unit cylinder VB/IB. Done HERE, not in clearBaked(), because
+    // clearBaked() runs on every regrow during tree-build animation and we
+    // want the mesh to live across rebakes within the same system instance.
+    if (this.cylinderMesh) {
+      this.cylinderMesh.vertexBuffer?.destroy()
+      this.cylinderMesh.indexBuffer?.[0]?.destroy()
+      this.cylinderMesh = null
+    }
     this.treeRoot.destroy()
   }
 }

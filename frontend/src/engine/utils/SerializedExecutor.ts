@@ -141,16 +141,33 @@ export class SerializedExecutor<T> {
    * disposal, all `submit()` calls return immediately without invoking
    * the runner.
    *
-   * Idempotent: calling dispose multiple times is safe.
+   * Returns a promise that resolves once the in-flight drain (if any) has
+   * fully settled — the runner has hit its next await boundary, observed
+   * the abort, and exited. Awaiting this is what lets a destroy path
+   * sequence "stop scene-build" before "free GPU buffers" without racing
+   * the next-frame teardown crash that surfaces as `BakedBranches_*`
+   * vertex-buffer-impl-undefined on a subsequent mount.
+   *
+   * Idempotent: calling dispose multiple times is safe; subsequent calls
+   * resolve immediately because `running` is null after the first drain
+   * exits.
    */
-  dispose(): void {
-    if (this._disposed) return
+  async dispose(): Promise<void> {
+    if (this._disposed) {
+      // Still wait if a drain happens to be in flight from the first
+      // dispose call (rare but possible during re-entrant teardown).
+      if (this.running) await this.running
+      return
+    }
     this._disposed = true
     this.pending = null
     // Abort the current iteration's signal so a long-running runner can
     // bail out at its next await boundary.
     this.currentAbort?.abort()
     this.currentAbort = null
+    // Wait for the drain loop to observe `_disposed` and exit. If no drain
+    // is running, this is a no-op.
+    if (this.running) await this.running
   }
 
   /**

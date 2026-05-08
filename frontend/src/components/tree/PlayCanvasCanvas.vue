@@ -116,6 +116,13 @@ const touchContext = computed<TouchContext | null>(() => {
 let proximityTimer: ReturnType<typeof setInterval> | null = null
 
 let engine: GardenEngine | null = null
+// Tracks an in-flight destroy() so a fast unmount → remount sequence
+// (route navigate-away-and-back) waits for the prior engine's GPU teardown
+// to settle before constructing the next one. Without this, two GardenEngines
+// briefly coexist and the new mount's first frame can reference buffers the
+// old destroy is still releasing — surfaces as the "BakedBranches_*
+// vertex_position not present" / "reading 'device' undefined" crash.
+let pendingDestroy: Promise<void> | null = null
 // Set to true only after `initEngine` completes — guards the auth watcher
 // from firing a stale `tryConnectOrgRoom` while setData is still building
 // the scene (race that produced the "CharacterSystem not ready" warning).
@@ -236,10 +243,26 @@ async function initEngine(): Promise<void> {
   // before touching a torn-down instance.
   const myToken = ++initToken
 
-  // Clean up the previous engine. After this we own the slot.
+  // Wait for any in-flight teardown from a prior unmount to fully settle —
+  // its destroy() may still be aborting the scene-build executor and freeing
+  // GPU buffers. Constructing a new GardenEngine before that finishes is
+  // exactly what produced the BakedBranches mesh-vertex-buffer crash on
+  // remount.
+  if (pendingDestroy) {
+    await pendingDestroy
+    if (myToken !== initToken) return
+  }
+
+  // Clean up the previous engine if initEngine is being called twice without
+  // an intervening unmount (defensive — shouldn't happen via Vue lifecycle).
   if (engine) {
-    engine.destroy()
+    try {
+      await engine.destroy()
+    } catch (err) {
+      console.error('[PlayCanvasCanvas] prior engine.destroy() threw:', err)
+    }
     engine = null
+    if (myToken !== initToken) return
   }
 
   const w = containerRef.value.clientWidth || 1200
@@ -561,12 +584,22 @@ function teardownEngine(): void {
   // a half-torn-down one).
   const engineToDestroy = engine
   engine = null
+  // Drop the debug global too — it's set on every mount (`window.__engine =
+  // myEngine`) and otherwise pins the most-recently-destroyed engine until
+  // the next mount overwrites it. Heap-snapshot showed Application instances
+  // still alive after navigate-away purely because of this ref.
+  if ((window as { __engine?: GardenEngine }).__engine === engineToDestroy) {
+    delete (window as { __engine?: GardenEngine }).__engine
+  }
   if (engineToDestroy) {
-    try {
-      engineToDestroy.destroy()
-    } catch (err) {
-      console.error('[PlayCanvasCanvas] engine.destroy() threw during teardown:', err)
-    }
+    // destroy() is async — capture the promise so a remount that fires
+    // during teardown can await it via `pendingDestroy`. Vue's onUnmounted
+    // and Vite's hot.dispose are fire-and-forget, so we don't await here.
+    pendingDestroy = engineToDestroy.destroy()
+      .catch(err => {
+        console.error('[PlayCanvasCanvas] engine.destroy() threw during teardown:', err)
+      })
+      .finally(() => { pendingDestroy = null })
   }
 }
 
