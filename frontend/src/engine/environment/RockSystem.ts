@@ -6,18 +6,26 @@
  *
  * Sparser than grass — placed along zone borders, near paths, as decorative clusters.
  * Mix sizes: large rocks as landmarks, small stones as fill.
+ *
+ * Hardware-instanced: 30 scatter points across 9 rock GLBs collapse into
+ * one draw call per (mesh, material) (≈9 draws total) instead of 30 per-entity
+ * matrix uploads.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { SCATTER_ROCKS } from '../assets/AssetManifest'
 import { isInsideAnyZone, randRange, type ExclusionZone } from '../utils/MathUtils'
+import {
+  buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
+} from '../utils/GlbInstancing'
 
 const ROCK_COUNT = 30
 const WORLD_HALF = 40
 
 export class RockSystem {
   private root: pc.Entity | null = null
+  private vbs: pc.VertexBuffer[] = []
 
   async build(
     app: Application,
@@ -27,6 +35,9 @@ export class RockSystem {
     this.root = new pc.Entity('RockSystem')
 
     const rockAssets = await loader.loadBatch(SCATTER_ROCKS)
+    const groups: GlbScatterGroup[] = rockAssets.map((asset) => ({
+      asset, transforms: [],
+    }))
 
     let placed = 0
     let attempts = 0
@@ -39,21 +50,32 @@ export class RockSystem {
 
       if (isInsideAnyZone(x, z, exclusionZones as ExclusionZone[])) continue
 
-      const asset = rockAssets[Math.floor(Math.random() * rockAssets.length)]
-      const instance = loader.instance(asset)
-      instance.setPosition(x, 0, z)
-      instance.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(2, 4) // rocks are ~0.26–1.0 units
-      instance.setLocalScale(s, s, s)
-      this.root.addChild(instance)
+      const idx = Math.floor(Math.random() * rockAssets.length)
+      const transform: ScatterTransform = {
+        x, y: 0, z,
+        yawDeg: randRange(0, 360),
+        scale:  randRange(2, 4), // rocks are ~0.26–1.0 units
+      }
+      groups[idx].transforms.push(transform)
       placed++
     }
+
+    const { entities, vbs } = buildInstancedGlbs(
+      app.app.graphicsDevice,
+      loader,
+      groups,
+      { namePrefix: 'RockInstanced' },
+    )
+    for (const e of entities) this.root.addChild(e)
+    this.vbs = vbs
 
     app.root.addChild(this.root)
     return this.root
   }
 
   destroy(): void {
+    for (const vb of this.vbs) vb.destroy()
+    this.vbs = []
     if (this.root) {
       this.root.destroy()
       this.root = null
