@@ -67,10 +67,12 @@ export class WorldLayout {
     const scale = computeLayoutScale(repoCount)
     setActiveScale(scale)
     this.zones = [...getZones()]
-    console.log(
-      `[WorldLayout] rescale: repos=${repoCount} → orchardRadius=${scale.orchardRadius.toFixed(2)} ` +
-      `(baseline=${BASELINE_REPO_COUNT}/18, curve floor at ≤${BASELINE_REPO_COUNT})`,
-    )
+    if (import.meta.env.DEV) {
+      console.log(
+        `[WorldLayout] rescale: repos=${repoCount} → orchardRadius=${scale.orchardRadius.toFixed(2)} ` +
+        `(baseline=${BASELINE_REPO_COUNT}/18, curve floor at ≤${BASELINE_REPO_COUNT})`,
+      )
+    }
   }
 
   /** Get a named zone. */
