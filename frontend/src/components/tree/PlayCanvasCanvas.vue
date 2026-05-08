@@ -107,6 +107,20 @@ const { isTouch } = useTouchDevice()
 const sceneState = ref<SceneState>('garden')
 const nearbyMemberId = ref<string | null>(null)
 
+// Re-show the loading overlay during interior transitions. The engine
+// flips sceneState to 'entering' just before kicking off the async house /
+// coffeebar / cafeteria load, then to the destination state on success
+// (or back to 'garden' on failure). One watcher covers all three because
+// they share the 'entering' transition state.
+watch(sceneState, (curr, prev) => {
+  if (curr === 'entering') {
+    loaderPhase.value = 'entering_interior'
+    loaderVisible.value = true
+  } else if (prev === 'entering') {
+    loaderVisible.value = false
+  }
+})
+
 const touchContext = computed<TouchContext | null>(() => {
   if (sceneState.value === 'takeover') return 'garden-takeover'
   if (sceneState.value === 'interior' || sceneState.value === 'coffeebar' || sceneState.value === 'cafeteria') return 'interior'
