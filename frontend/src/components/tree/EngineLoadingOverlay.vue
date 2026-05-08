@@ -105,11 +105,12 @@ import { computed } from 'vue'
  * and the parent fades the overlay out by toggling `visible`.
  */
 export type LoadingPhase =
-  | 'mounting'         // Vue mounted, waiting for init() to start
-  | 'engine_init'      // pc.Application created, lighting set up, scatter assets loaded
-  | 'building_scene'   // SceneManager.build() running — assembling the world
-  | 'connecting'       // joining OrgRoom + fetching profile
-  | 'ready'            // scene reveal — caller flips visible=false here
+  | 'mounting'           // Vue mounted, waiting for init() to start
+  | 'engine_init'        // pc.Application created, lighting set up, scatter assets loaded
+  | 'building_scene'     // SceneManager.build() running — assembling the world
+  | 'connecting'         // joining OrgRoom + fetching profile
+  | 'ready'              // scene reveal — caller flips visible=false here
+  | 'entering_interior'  // transitioning into a house / coffee bar / cafeteria
 
 const props = defineProps<{
   visible: boolean
@@ -121,19 +122,24 @@ const props = defineProps<{
 // chosen so the bar appears to advance steadily rather than jumping at the
 // transition between fast and slow phases.
 const PHASE_PROGRESS: Record<LoadingPhase, number> = {
-  mounting:        5,
-  engine_init:    25,
-  building_scene: 80,
-  connecting:     95,
-  ready:         100,
+  mounting:          5,
+  engine_init:      25,
+  building_scene:   80,
+  connecting:       95,
+  ready:           100,
+  // Interior entry has no sub-progress signal today; sit at 60% so the
+  // bar is clearly mid-flight and the indeterminate animation reads as
+  // "actively loading" rather than "stuck near done."
+  entering_interior: 60,
 }
 
 const PHASE_LABELS: Record<LoadingPhase, string> = {
-  mounting:        'Preparing the orchard…',
-  engine_init:     'Gathering trees & seeds…',
-  building_scene:  'Planting the orchard…',
-  connecting:      'Calling the others…',
-  ready:           'Welcome.',
+  mounting:           'Preparing the orchard…',
+  engine_init:        'Gathering trees & seeds…',
+  building_scene:     'Planting the orchard…',
+  connecting:         'Calling the others…',
+  ready:              'Welcome.',
+  entering_interior:  'Stepping inside…',
 }
 
 const currentPhaseLabel = computed(() => PHASE_LABELS[props.phase])
