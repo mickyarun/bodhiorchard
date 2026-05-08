@@ -86,6 +86,7 @@ const REST_BEHAVIORS: AnimalState[] = ['eating', 'looking', 'resting']
 export class GardenAnimalSystem {
   private root: pc.Entity
   private animals: AnimalEntry[] = []
+  private updateAccum = 0   // dt accumulator — system ticks at 30Hz, not 60
   private static readonly _diff = new pc.Vec3()
 
   constructor(app: pc.AppBase) {
@@ -141,14 +142,22 @@ export class GardenAnimalSystem {
   }
 
   update(dt: number): void {
+    // 30Hz throttle. State handlers consume dt linearly (timer -= dt,
+    // pos += speed*dt) so accumulated dt every other frame is equivalent.
+    // 30Hz keeps walking/head-bob motion visibly smooth at orchard scale.
+    this.updateAccum += dt
+    if (this.updateAccum < 1 / 30) return
+    const stepDt = this.updateAccum
+    this.updateAccum = 0
+
     for (const animal of this.animals) {
-      animal.elapsed += dt
+      animal.elapsed += stepDt
       switch (animal.state) {
-        case 'idle':    this.tickIdle(animal, dt); break
-        case 'walking': this.tickWalking(animal, dt); break
-        case 'eating':  this.tickEating(animal, dt); break
-        case 'looking': this.tickLooking(animal, dt); break
-        case 'resting': this.tickResting(animal, dt); break
+        case 'idle':    this.tickIdle(animal, stepDt); break
+        case 'walking': this.tickWalking(animal, stepDt); break
+        case 'eating':  this.tickEating(animal, stepDt); break
+        case 'looking': this.tickLooking(animal, stepDt); break
+        case 'resting': this.tickResting(animal, stepDt); break
       }
     }
   }

@@ -78,6 +78,7 @@ export class StandupPavilion {
   private updateHandler: ((dt: number) => void) | null = null
   private pcApp: pc.AppBase | null = null
   private fireT = 0   // elapsed time for flame animation
+  private flameAccum = 0   // accumulated dt — flame ticks at 30Hz, not 60
 
   constructor(factory: BuildingFactory) {
     this.factory = factory
@@ -380,7 +381,13 @@ export class StandupPavilion {
    */
   private tickFlames(dt: number): void {
     if (!this.pcApp) return  // destroyed — stale handler firing during teardown
-    this.fireT += dt
+    // 30Hz throttle: sin-based amplitude modulation is visually indistinguishable
+    // at 30 vs 60Hz for flame flicker, so halving the rate is invisible.
+    this.flameAccum += dt
+    if (this.flameAccum < 1 / 30) return
+    const stepDt = this.flameAccum
+    this.flameAccum = 0
+    this.fireT += stepDt
     for (const f of this.flames) {
       const wobble = Math.sin(this.fireT * f.rate + f.phase)
       const wobble2 = Math.sin(this.fireT * f.rate * 0.7 + f.phase + 1.3)
