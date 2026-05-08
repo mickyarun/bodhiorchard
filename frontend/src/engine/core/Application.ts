@@ -64,6 +64,8 @@ export class Application {
     this.app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, 2)
     this.app.resizeCanvas(width, height)
 
+    this.installContextLossHandlers(canvas)
+
     // ─── Scene lighting: THE fix for black models ─────────────
     // Slightly warm ambient tint for golden-hour feel (was cool 0.4/0.4/0.45).
     this.app.scene.ambientLight = new pc.Color(0.48, 0.45, 0.40)
@@ -295,6 +297,50 @@ export class Application {
 
   setConfig(config: ApplicationConfig): void {
     this.config = config
+  }
+
+  /**
+   * WebGL context-loss / restore wiring.
+   *
+   * Browsers can release the WebGL context under memory pressure or after
+   * long tab idle (Chrome especially). When this happens, every graphics
+   * resource keeps its JS wrapper (`Texture`, `VertexBuffer`, ...) but
+   * loses its GPU-side `.impl`, and the very next render attempt crashes
+   * inside `WebglGraphicsDevice.draw` with `Cannot read properties of
+   * undefined (reading 'impl')` — once per frame, forever.
+   *
+   * `preventDefault()` on `webglcontextlost` tells the browser the app is
+   * handling the loss (without it, the canvas is permanently dead). We
+   * then halt auto-render so the doomed render path can't fire again.
+   *
+   * On restore, rebuilding every Texture / VertexBuffer / Shader in-place
+   * is invasive and error-prone; a full page reload is the pragmatic fix
+   * — same scene state comes back from the OrgRoom snapshot, freshly
+   * uploaded to the new context. Production users almost never hit this
+   * twice in a session, so the reload cost is negligible.
+   */
+  private installContextLossHandlers(canvas: HTMLCanvasElement): void {
+    canvas.addEventListener(
+      'webglcontextlost',
+      (e) => {
+        e.preventDefault()
+        this.app.autoRender = false
+        console.warn(
+          '[Application] WebGL context lost — rendering halted. Waiting for restore.',
+        )
+      },
+      false,
+    )
+    canvas.addEventListener(
+      'webglcontextrestored',
+      () => {
+        console.warn(
+          '[Application] WebGL context restored — reloading page to rebuild GPU resources.',
+        )
+        window.location.reload()
+      },
+      false,
+    )
   }
 
   /**
