@@ -279,11 +279,10 @@ async function initEngine(): Promise<void> {
   loaderPhase.value = 'engine_init'
   await myEngine.init(containerRef.value, w, h, {
     onSceneReady: () => {
-      // Reveal the world. The overlay's CSS transition fades it out over
-      // ~600ms so the scene doesn't snap in — gives the brain a moment
-      // to register 'we've arrived.'
-      loaderPhase.value = 'ready'
-      loaderVisible.value = false
+      // Engine framework has booted, but trees/materials are NOT yet on
+      // the GPU — that happens during setData() below. Holding the loader
+      // here would prematurely reveal a black canvas; we hide it after
+      // setData() resolves instead.
       emit('scene-ready')
     },
     onTreeClick: (info) => emit('tree-click', { repoName: info.repoName }),
@@ -330,7 +329,14 @@ async function initEngine(): Promise<void> {
   loaderPhase.value = 'building_scene'
   await myEngine.setData(adaptTreeData(props.treeData))
   if (myToken !== initToken) return
-  loaderPhase.value = 'connecting'
+
+  // World is built — trees, characters, materials are uploaded to the
+  // GPU and the next frame will render them. Hide the loader now; the
+  // multiplayer connect below happens with the world already visible
+  // so other players' avatars pop in fluidly rather than being gated
+  // behind the splash.
+  loaderPhase.value = 'ready'
+  loaderVisible.value = false
 
   // Mark the engine as ready BEFORE the first connect attempt. This flag
   // gates the auth watcher so it never fires a stale `tryConnectOrgRoom`
