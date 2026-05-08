@@ -214,6 +214,25 @@ export class OrgRoomClient {
     }
     this.room = null
     this.memberSnapshots.clear()
+    this.activeRaceSnapshots.clear()
+    // Drop the 6 engine-owned callbacks. Each is an arrow function that
+    // captured `this` (the GardenEngine) when wireOrgRoomCallbacks ran —
+    // since OrgRoomClient is a process-lifetime singleton, leaving these
+    // set after disconnect pins the entire destroyed pc.Application via
+    // closure scope. Heap snapshot showed 1 retained Application per
+    // dashboard mount, all rooted through these fields.
+    //
+    // We do NOT clear memberChangeListeners / activeRaceListeners — those
+    // are subscriber-owned (their owners hold the unsubscribe fn from
+    // addMemberChangeListener / addActiveRaceListener and call it on their
+    // own teardown, e.g. InteriorManager.destroy → orgRoomUnsubscribe()).
+    // Clearing them here would break the subscriber contract.
+    this.onMemberAdd    = null
+    this.onMemberUpdate = null
+    this.onMemberRemove = null
+    this.onAgentAdd     = null
+    this.onAgentUpdate  = null
+    this.onAgentRemove  = null
   }
 
   /** Send a position update (for takeover mode). */

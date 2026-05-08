@@ -546,15 +546,33 @@ export class GardenEngine {
     this.orgRoomClient?.sendSimulateDevActivity()
   }
 
-  /** Disconnect from the org room (on unmount/destroy). */
+  /**
+   * Disconnect from the org room (on unmount/destroy). Each step is
+   * independently guarded so a failure in one (e.g. Colyseus disconnect
+   * throws on a half-torn-down WebSocket) does not skip the others —
+   * the same cascade-skip pattern that previously stranded pc.AppBase
+   * instances in the heap.
+   */
   async disconnectOrgRoom(): Promise<void> {
     if (this.orgRoomClient) {
-      await this.orgRoomClient.disconnect()
+      try {
+        await this.orgRoomClient.disconnect()
+      } catch (err) {
+        console.warn('[GardenEngine] orgRoomClient.disconnect failed:', err)
+      }
       this.orgRoomClient = null
       this.connectedOrgId = null
     }
-    this.sceneManager?.agentSystemRef?.setServerDriven(false)
-    this.vehicleSystem?.destroy()
+    try {
+      this.sceneManager?.agentSystemRef?.setServerDriven(false)
+    } catch (err) {
+      console.warn('[GardenEngine] agentSystem.setServerDriven failed:', err)
+    }
+    try {
+      this.vehicleSystem?.destroy()
+    } catch (err) {
+      console.warn('[GardenEngine] vehicleSystem.destroy failed:', err)
+    }
     this.vehicleSystem = null
   }
 
@@ -1707,7 +1725,7 @@ export class GardenEngine {
     this.app?.resize(width, height)
   }
 
-  destroy(): void {
+  async destroy(): Promise<void> {
     // Halt PlayCanvas rendering BEFORE any subsystem teardown. Without
     // this, sceneManager.destroy() can free a Mesh's vertex buffer while
     // the RAF still has one queued frame, which then calls
@@ -1729,49 +1747,87 @@ export class GardenEngine {
       this.app.stopUpdates()
     }
 
-    // Dispose the scene-build executor — aborts any in-flight rebuild via
-    // its AbortSignal so SceneManager.build can exit early at its next
-    // await checkpoint instead of touching nulled refs after destroy.
-    // Subsequent setData() calls become no-ops.
-    this.sceneBuildExecutor.dispose()
+    // Dispose the scene-build executor and AWAIT its in-flight drain. The
+    // dispose call signals abort; awaiting it ensures the runner has hit
+    // its next await boundary, observed the abort, and fully exited before
+    // we proceed to free GPU buffers. Without this await, a navigate-away-
+    // and-back sequence can trigger the "BakedBranches_* vertex_position
+    // not present" / "reading 'device' undefined" crash on the new mount,
+    // because the prior mount's runner was still releasing buffers when
+    // the new app's first tick fired against shared static state.
+    await this.sceneBuildExecutor.dispose()
 
-    // Disconnect multiplayer (fire-and-forget — don't block destroy)
-    void this.disconnectOrgRoom()
+    // Disconnect multiplayer and AWAIT it. OrgRoomClient is a process-
+    // lifetime singleton — disconnect() now also nulls the 6 engine-owned
+    // callbacks (onMemberAdd/Update/Remove, onAgent*) which would otherwise
+    // pin this destroyed GardenEngine via closure scope until the next
+    // connect() ran. Awaiting ensures those refs are dropped before destroy
+    // returns, so the next mount's GC pass can collect this app's heap.
+    // Wrapped in catch so a transport-level disconnect failure doesn't
+    // block the rest of teardown.
+    try {
+      await this.disconnectOrgRoom()
+    } catch (err) {
+      console.warn('[GardenEngine] disconnectOrgRoom failed during destroy:', err)
+    }
 
-    // Clean up takeover if active
-    this.takeoverCtrl?.exit()
-    this.takeoverCtrl = null
-    this.takeoverCam?.destroy()
-    this.takeoverCam = null
-    this.takeoverUI?.destroy()
-    this.takeoverUI = null
-    this.takeoverProximity = null
-    this.takeoverUserId = null
+    // Subsystem teardowns. Each is wrapped individually so a throw in one
+    // (e.g. an animation frame already ran on torn-down state, a vehicle
+    // detach hit a freed entity, a Colyseus listener threw on cleanup) does
+    // NOT cascade and skip past `this.app?.destroy()` further down — that
+    // was the bug heap-snapshot diagnosis revealed: 4 retained pc.Applications
+    // all had `_destroyRequested === false`, meaning a thrown subsystem
+    // teardown stranded them with intact scene graphs (~36 MB each).
+    //
+    // The OUTER try/finally is the belt: even if some unhandled error escapes
+    // the inner blocks, `this.app?.destroy()` STILL runs in the finally. This
+    // is the single most important invariant in destroy() — it's what tells
+    // PlayCanvas to release the GraphicsDevice + entity tree + material cache.
+    const safe = (label: string, fn: () => void): void => {
+      try { fn() } catch (err) {
+        console.warn(`[GardenEngine.destroy] ${label} threw:`, err)
+      }
+    }
 
-    this.interior?.destroy()
-    this.interior = null
-    this.coffeeBar?.destroy()
-    this.coffeeBar = null
-    this.cafeteria?.destroy()
-    this.cafeteria = null
-    this.picker = null
-    this.sceneManager?.destroy()
-    this.sceneManager = null
-    this.events.clear()
-    this.materials?.clear()
-    this.materials = null
-    this.input?.destroy()
-    this.input = null
-    this.camera?.destroyHelp()
-    this.camera = null
-    this.app?.destroy()
-    this.app = null
-    this.sceneState = 'garden'
-    this.savedCameraState = null
+    try {
+      // Clean up takeover if active
+      safe('takeoverCtrl.exit',  () => this.takeoverCtrl?.exit())
+      this.takeoverCtrl = null
+      safe('takeoverCam.destroy', () => this.takeoverCam?.destroy())
+      this.takeoverCam = null
+      safe('takeoverUI.destroy',  () => this.takeoverUI?.destroy())
+      this.takeoverUI = null
+      this.takeoverProximity = null
+      this.takeoverUserId = null
 
-    if (this.canvas) {
-      this.canvas.remove()
-      this.canvas = null
+      safe('interior.destroy',  () => this.interior?.destroy())
+      this.interior = null
+      safe('coffeeBar.destroy', () => this.coffeeBar?.destroy())
+      this.coffeeBar = null
+      safe('cafeteria.destroy', () => this.cafeteria?.destroy())
+      this.cafeteria = null
+      this.picker = null
+      safe('sceneManager.destroy', () => this.sceneManager?.destroy())
+      this.sceneManager = null
+      safe('events.clear', () => this.events.clear())
+      safe('materials.clear', () => this.materials?.clear())
+      this.materials = null
+      safe('input.destroy', () => this.input?.destroy())
+      this.input = null
+      safe('camera.destroyHelp', () => this.camera?.destroyHelp())
+      this.camera = null
+    } finally {
+      // ALWAYS run this — it's what releases the pc.AppBase and its scene
+      // graph. Skipping it strands ~36 MB and an entire WebGL context.
+      safe('app.destroy', () => this.app?.destroy())
+      this.app = null
+      this.sceneState = 'garden'
+      this.savedCameraState = null
+
+      if (this.canvas) {
+        safe('canvas.remove', () => this.canvas?.remove())
+        this.canvas = null
+      }
     }
   }
 }

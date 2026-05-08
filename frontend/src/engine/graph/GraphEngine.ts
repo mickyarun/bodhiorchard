@@ -454,29 +454,45 @@ export class GraphEngine {
   }
 
   destroy(): void {
-    this.clearGraph();
-    this.simulator = null;
-    this.crossRepo?.destroy();
-    this.crossRepo = null;
-    this.overlay?.destroy();
-    this.overlay = null;
-    this.input?.destroy();
-    this.input = null;
-    this.picking = null;
-    this.camera = null;
-    this.iblCubemap?.destroy();
-    this.iblCubemap = null;
-    this.materials?.clear();
-    this.materials = null;
-    for (const cleanup of this.lifecycleCleanups) cleanup();
-    this.lifecycleCleanups = [];
-    if (this.app) {
-      this.app.destroy();
-      this.app = null;
+    // Same defensive pattern as GardenEngine.destroy: per-subsystem try/catch
+    // so one throw doesn't cascade and skip past `this.app.destroy()`. Without
+    // this, a failed subsystem teardown can strand the entire pc.AppBase +
+    // scene graph in the heap (~36 MB per leaked instance).
+    const safe = (label: string, fn: () => void): void => {
+      try { fn() } catch (err) {
+        console.warn(`[GraphEngine.destroy] ${label} threw:`, err)
+      }
     }
-    if (this.canvas) {
-      this.canvas.remove();
-      this.canvas = null;
+
+    try {
+      safe('clearGraph',       () => this.clearGraph())
+      this.simulator = null
+      safe('crossRepo.destroy', () => this.crossRepo?.destroy())
+      this.crossRepo = null
+      safe('overlay.destroy',   () => this.overlay?.destroy())
+      this.overlay = null
+      safe('input.destroy',     () => this.input?.destroy())
+      this.input = null
+      this.picking = null
+      this.camera = null
+      safe('iblCubemap.destroy', () => this.iblCubemap?.destroy())
+      this.iblCubemap = null
+      safe('materials.clear',    () => this.materials?.clear())
+      this.materials = null
+      for (const cleanup of this.lifecycleCleanups) {
+        safe('lifecycleCleanup', cleanup)
+      }
+      this.lifecycleCleanups = []
+    } finally {
+      // ALWAYS run — releasing pc.AppBase is the most important step.
+      if (this.app) {
+        safe('app.destroy', () => this.app!.destroy())
+        this.app = null
+      }
+      if (this.canvas) {
+        safe('canvas.remove', () => this.canvas?.remove())
+        this.canvas = null
+      }
     }
   }
 
