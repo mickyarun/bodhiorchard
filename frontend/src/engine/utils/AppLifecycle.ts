@@ -72,9 +72,14 @@ export function installContextLossHandlers(
     },
   )
 
+  // Permanent pause acquired on context loss. Never released — page reloads
+  // on `webglcontextrestored`. Held in closure so destroy() doesn't have
+  // to know about it; if the app teardown happens first, the registry is
+  // GC'd with the app.
+  let lostToken: RenderPauseToken | null = null
   const onLost = (e: Event): void => {
     e.preventDefault()
-    app.autoRender = false
+    if (!lostToken) lostToken = acquireRenderPause(app, 'webglcontextlost')
     const gl = getGl(canvas)
     console.warn(
       `[${label}] webglcontextlost fired @ ${fmt(Date.now())}`,
@@ -196,16 +201,27 @@ export function installRenderErrorTrap(
       }
       if (!tripped) {
         tripped = true
-        app.autoRender = false
+        // Acquire a render-pause through the registry rather than writing
+        // autoRender directly. Otherwise a concurrent rebuild's finally
+        // block could `releaseRenderPause` and flip autoRender back to
+        // true while the trap thinks render is halted, which restarts
+        // the spam.
+        acquireRenderPause(app, 'render-trap')
         // Walk the scene to find the offender. Reads are no-ops on a
         // partly-torn-down meshInstance, so the diagnostic itself
         // shouldn't re-trigger the same crash.
         const offenders = findStaleMeshInstances(app)
+        // Flat text summary so the console line is readable without
+        // expanding the inspector. Entity path + which buffer is bad
+        // is what we actually need to locate the destroy-race source.
+        const summary = offenders.length === 0
+          ? '(no stale mesh-instances found in scene-graph)'
+          : offenders.slice(0, 3).map(o => describeOffender(o)).join(' | ')
         console.error(
-          `[${label}] render trap caught impl-undefined — autoRender halted`,
+          `[${label}] render trap: ${offenders.length} stale | ${summary} | autoRender halted`,
           {
             offenderCount: offenders.length,
-            offenders: offenders.slice(0, 5), // first 5 only — keep log readable
+            offenders: offenders.slice(0, 10),
             originalError: msg,
           },
         )
@@ -276,32 +292,125 @@ function pathOf(node: { name?: string; parent?: { name?: string } } | undefined)
 }
 
 /**
- * Pause `app.autoRender` while the document is hidden (background tab,
- * minimized window). Restores rendering when the tab becomes visible.
+ * Render a stale-mesh-instance report as a one-line scannable string:
+ *   "House/Door[mesh!]" — meshOk failed
+ *   "Forest/Pine[vb!,instancing!]" — vertexBuffer + instancing buffer freed
+ * Only the failing checks appear, so the path stays terse.
+ */
+function describeOffender(o: StaleMeshInstanceReport): string {
+  const fails: string[] = []
+  if (!o.meshOk)       fails.push('mesh!')
+  if (!o.vbOk)         fails.push('vb!')
+  if (!o.ibOk)         fails.push('ib!')
+  if (!o.materialOk)   fails.push('material!')
+  if (!o.shaderOk)     fails.push('shader!')
+  if (!o.instancingOk) fails.push('instancing!')
+  return `${o.entityPath}[${fails.join(',')}]`
+}
+
+/**
+ * Ref-counted render-pause registry attached to a pc.AppBase.
  *
- * Two production wins from this gate:
- *   1. CPU + GPU savings while the user has the tab in the background
- *      — RAF still fires throttled but every frame is now a no-op.
- *   2. Reduces the GPU memory pressure that prompts the browser to
- *      reclaim the WebGL context in the first place — i.e. it is
- *      *prevention* for the context-loss class of bug, complementing
- *      `installContextLossHandlers` which only handles the aftermath.
+ * Multiple subsystems pause auto-rendering for different reasons —
+ * visibility gate ("tab hidden"), rebuild gate ("scene under construction"),
+ * context-loss gate ("WebGL context lost"). Each used to write
+ * `app.autoRender` directly, which created a composition race: the gate
+ * with the most-recent write wins, even if other gates still want render
+ * paused. Production crash signature: visibility-gate fires "tab visible
+ * → autoRender = true" while rebuild is mid-async-build, partial scene
+ * graph renders against a half-torn-down state, `IE.draw` crashes on
+ * undefined `.impl`.
  *
- * Composition caveat: this gate writes `app.autoRender` directly. If a
- * code path elsewhere (e.g. `SceneManager.rebuild`'s try/finally render
- * pause) is also flipping the same flag, the two writes can race within
- * a narrow window. Acceptable today because the rebuild gate self-heals
- * on its `finally` and visibility transitions are user-initiated. If a
- * third gate appears, lift to ref-counted gates owned by the host.
+ * Each gate `acquire()`s a token; render is paused while ANY token is
+ * outstanding. `release()` decrements; when the last token is released,
+ * `autoRender` returns to `true`. Idempotent — calling `release()` on a
+ * stale token is a no-op.
+ */
+type RenderPauseToken = { released: boolean }
+interface RenderPauseRegistry {
+  acquire(reason: string): RenderPauseToken
+  release(token: RenderPauseToken): void
+}
+
+interface AppWithPauseRegistry {
+  __renderPause?: RenderPauseRegistry
+}
+
+function getRenderPauseRegistry(app: pc.AppBase): RenderPauseRegistry {
+  const slot = app as unknown as AppWithPauseRegistry
+  if (slot.__renderPause) return slot.__renderPause
+  let activeCount = 0
+  const reg: RenderPauseRegistry = {
+    acquire(_reason: string): RenderPauseToken {
+      activeCount++
+      app.autoRender = false
+      return { released: false }
+    },
+    release(token: RenderPauseToken): void {
+      if (token.released) return
+      token.released = true
+      activeCount--
+      if (activeCount <= 0) {
+        activeCount = 0
+        app.autoRender = true
+      }
+    },
+  }
+  slot.__renderPause = reg
+  return reg
+}
+
+/**
+ * Acquire a render-pause token from this app's registry. Render stays
+ * paused until `release()` is called on the returned token. Use this
+ * in any subsystem that needs auto-rendering off for a window — never
+ * write `app.autoRender = false` directly, or you'll race with peers.
+ */
+export function acquireRenderPause(
+  app: pc.AppBase, reason: string,
+): RenderPauseToken {
+  return getRenderPauseRegistry(app).acquire(reason)
+}
+
+export function releaseRenderPause(
+  app: pc.AppBase, token: RenderPauseToken,
+): void {
+  getRenderPauseRegistry(app).release(token)
+}
+
+/**
+ * Pause auto-rendering while the document is hidden (background tab,
+ * minimized window). Resumes when visible.
+ *
+ * Uses the ref-counted render-pause registry rather than writing
+ * `autoRender` directly so it composes safely with the rebuild gate
+ * and any future gates. The previous direct-write implementation
+ * raced with `SceneManager.rebuild` and was the suspected root cause
+ * of the recurring `'impl'` undefined crash that was NOT context loss.
  *
  * @returns cleanup function — detaches the visibilitychange listener.
  */
 export function installVisibilityGate(app: pc.AppBase): () => void {
+  let token: RenderPauseToken | null = null
   const onChange = (): void => {
-    app.autoRender = !document.hidden
+    if (document.hidden) {
+      if (!token) token = acquireRenderPause(app, 'visibility:hidden')
+    } else if (token) {
+      releaseRenderPause(app, token)
+      token = null
+    }
+  }
+  // Initial state — if we mount with a hidden tab (rare, e.g. background
+  // window-restore), pause immediately.
+  if (document.hidden) {
+    token = acquireRenderPause(app, 'visibility:hidden')
   }
   document.addEventListener('visibilitychange', onChange, false)
   return () => {
     document.removeEventListener('visibilitychange', onChange, false)
+    if (token) {
+      releaseRenderPause(app, token)
+      token = null
+    }
   }
 }
