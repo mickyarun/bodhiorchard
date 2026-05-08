@@ -271,8 +271,14 @@ export class SceneManager {
       this.buildingEntities.push(cafeteriaResult.entity)
       this.layout.addExclusionZones([cafeteriaResult.exclusionZone])
       this.layout.registerSeats(cafeteriaResult.seats)
+      // Cafeteria hut is offset inside its root (HUT_OFFSET_{X,Z}) so the
+      // kitchen sits at the back of the zone. Physics walls come from
+      // computeHutWallBoxes() in corner-local coords, so they must anchor on
+      // the hut's world origin — using the zone center drifts the collider
+      // by ~(-2.5, -3.8). Same fix as the coffee bar above.
       this.buildingHuts.push({
-        x: cafeteriaZone.x, z: cafeteriaZone.z,
+        x: cafeteriaResult.hutWorldOrigin.x,
+        z: cafeteriaResult.hutWorldOrigin.z,
         yawDeg: cafeteriaResult.entity.getEulerAngles().y,
         ...cafeteriaResult.hutDims,
       })
