@@ -1,10 +1,21 @@
 <template>
   <v-app>
     <!-- Sidebar -->
-    <v-navigation-drawer permanent color="surface" width="240" class="app-sidebar">
-      <div class="pa-4 pb-2 d-flex align-center justify-space-between">
-        <BodhiorchardLogo :size="28" />
-        <NotificationBell v-if="authStore.user?.id" :user-id="authStore.user.id" />
+    <v-navigation-drawer
+      v-model:rail="rail"
+      permanent
+      color="surface"
+      :width="240"
+      rail-width="68"
+      expand-on-hover
+      class="app-sidebar"
+    >
+      <div
+        class="pa-4 pb-2 d-flex align-center"
+        :class="rail ? 'justify-center' : 'justify-space-between'"
+      >
+        <BodhiorchardLogo :size="28" :show-text="!rail" />
+        <NotificationBell v-if="!rail && authStore.user?.id" :user-id="authStore.user.id" />
       </div>
 
       <v-list density="compact" nav class="px-2">
@@ -125,25 +136,28 @@
         </v-list>
 
         <!-- User menu -->
-        <div class="px-3 pb-3">
+        <div class="px-3 pb-3" :class="{ 'd-flex justify-center': rail }">
           <v-menu location="top start" :offset="[0, 4]">
             <template #activator="{ props }">
               <div
                 v-bind="props"
                 class="user-menu d-flex align-center ga-2 pa-2 rounded-lg cursor-pointer"
+                :class="{ 'user-menu--rail': rail }"
               >
                 <v-avatar size="32" color="primary" variant="tonal">
                   <span class="text-caption font-weight-bold">{{ userInitials }}</span>
                 </v-avatar>
-                <div class="flex-grow-1 overflow-hidden">
-                  <div class="text-body-2 font-weight-medium text-truncate">
-                    {{ authStore.user?.name || 'User' }}
+                <template v-if="!rail">
+                  <div class="flex-grow-1 overflow-hidden">
+                    <div class="text-body-2 font-weight-medium text-truncate">
+                      {{ authStore.user?.name || 'User' }}
+                    </div>
+                    <div class="text-caption text-medium-emphasis text-truncate">
+                      {{ authStore.user?.email || '' }}
+                    </div>
                   </div>
-                  <div class="text-caption text-medium-emphasis text-truncate">
-                    {{ authStore.user?.email || '' }}
-                  </div>
-                </div>
-                <v-icon icon="mdi-chevron-up" size="16" class="text-medium-emphasis" />
+                  <v-icon icon="mdi-chevron-up" size="16" class="text-medium-emphasis" />
+                </template>
               </div>
             </template>
 
@@ -175,6 +189,22 @@
             </v-list>
           </v-menu>
         </div>
+
+        <!-- Collapse / expand toggle — sticky bottom of the drawer. -->
+        <v-divider />
+        <div
+          class="d-flex pa-1"
+          :class="rail ? 'justify-center' : 'justify-end pe-2'"
+        >
+          <v-btn
+            :icon="rail ? 'mdi-chevron-right' : 'mdi-chevron-left'"
+            variant="text"
+            size="small"
+            density="comfortable"
+            :title="rail ? 'Expand sidebar' : 'Collapse sidebar'"
+            @click="toggleRail"
+          />
+        </div>
       </template>
     </v-navigation-drawer>
 
@@ -199,7 +229,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
@@ -227,6 +257,17 @@ const {
   canViewPresenceSettings,
   canViewJiraImport,
 } = usePermissions()
+
+// Collapsed-sidebar preference, persisted across reloads. `expand-on-hover`
+// on the drawer means even in rail mode the user can peek labels without
+// flipping this flag.
+const RAIL_KEY = 'bodhiorchard_sidebar_rail'
+const rail = ref(localStorage.getItem(RAIL_KEY) === 'true')
+watch(rail, (v) => localStorage.setItem(RAIL_KEY, String(v)))
+
+function toggleRail(): void {
+  rail.value = !rail.value
+}
 
 const userInitials = computed(() => {
   const name = authStore.user?.name || ''
