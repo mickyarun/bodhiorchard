@@ -27,8 +27,12 @@ cachetools>=5.3.0
 #   networkx:      backend/app/services/code_indexer/* graph operations.
 #   graphifyy:     code-graph indexer (Leiden clustering). pip name has
 #                  TWO y's; the Python module is `graphify` (single y).
+#   tzdata:        guarantees IANA legacy aliases (Asia/Calcutta, US/Eastern,
+#                  …) resolve via zoneinfo on Debian-slim images, which ship
+#                  only the canonical zones by default.
 python-dotenv>=1.0.0
 PyYAML>=6.0
 PyJWT[crypto]>=2.8.0
 networkx>=3.2
 graphifyy[leiden]>=0.5.5,<0.6
+tzdata>=2024.1
