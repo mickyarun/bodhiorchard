@@ -93,6 +93,12 @@ class TestPresenceSettingsValidation:
         settings = PresenceSettings(timezone="Asia/Kolkata")
         assert settings.timezone == "Asia/Kolkata"
 
+    @pytest.mark.parametrize("legacy_alias", ["Asia/Calcutta", "US/Eastern", "GB"])
+    def test_legacy_iana_alias_accepted(self, legacy_alias: str) -> None:
+        """Browsers on older ICU still emit ``backward`` aliases — regression
+        for prod failure where Debian-slim's tzdata omits these."""
+        assert PresenceSettings(timezone=legacy_alias).timezone == legacy_alias
+
     def test_null_timezone_accepted(self) -> None:
         """None is the legacy sentinel — must always pass through."""
         assert PresenceSettings(timezone=None).timezone is None
