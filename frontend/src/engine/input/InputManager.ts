@@ -69,6 +69,7 @@ export class InputManager {
 
   private canvas: HTMLCanvasElement | null = null
   private nativeWheelHandler: ((e: WheelEvent) => void) | null = null
+  private blurHandler: (() => void) | null = null
   private app: pc.AppBase | null = null
 
   init(canvas: HTMLCanvasElement, app?: pc.AppBase): void {
@@ -91,6 +92,21 @@ export class InputManager {
       e.preventDefault()
     }
     canvas.addEventListener('wheel', this.nativeWheelHandler, { passive: false })
+
+    // Drop drag state on focus loss. Without this, releasing a mouse button
+    // outside the canvas (alt-tab, devtools, popup) misses the mouseup and
+    // leaves `hasDragged` / `mouseDownPos` stale — the next stray mousemove
+    // would then be classified as a drag continuation. Resetting on blur
+    // means a re-entered button truly starts fresh.
+    this.blurHandler = (): void => {
+      this.mouseDownPos = null
+      this.hasDragged = false
+      this.orbitDx = 0
+      this.orbitDy = 0
+      this.panDx = 0
+      this.panDy = 0
+    }
+    window.addEventListener('blur', this.blurHandler)
 
     // Touch support (optional)
     if ('ontouchstart' in window) {
@@ -357,6 +373,11 @@ export class InputManager {
     if (this.canvas && this.nativeWheelHandler) {
       this.canvas.removeEventListener('wheel', this.nativeWheelHandler)
       this.nativeWheelHandler = null
+    }
+
+    if (this.blurHandler) {
+      window.removeEventListener('blur', this.blurHandler)
+      this.blurHandler = null
     }
 
     if (this.touch) {
