@@ -107,7 +107,7 @@ export class GroundSystem {
       this.material.update()
     }
     img.onerror = (err) => {
-      console.debug('[GroundSystem] grass.jpg failed to load, keeping procedural:', err)
+      if (import.meta.env.DEV) console.debug('[GroundSystem] grass.jpg failed to load, keeping procedural:', err)
     }
     img.src = '/assets/garden/grass.jpg'
   }

@@ -51,7 +51,7 @@ export class PoolScene {
       this.placeChair(root, def)
     }
 
-    console.log(`[PoolScene] ${POOL_CHAIRS.length} procedural beach chairs placed, seatY=${SEAT_HEIGHT}`)
+    if (import.meta.env.DEV) console.log(`[PoolScene] ${POOL_CHAIRS.length} procedural beach chairs placed, seatY=${SEAT_HEIGHT}`)
   }
 
   private placeChair(parent: pc.Entity, def: PoolChairDef): void {
