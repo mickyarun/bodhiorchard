@@ -46,25 +46,99 @@ export function installContextLossHandlers(
   app: pc.AppBase,
   label: string,
 ): () => void {
+  // ─── Diagnostic instrumentation ─────────────────────────────────────────
+  // Production users still report the `Cannot read properties of undefined
+  // (reading 'impl')` crash after long inactivity, despite this handler
+  // being installed. The hypothesis is a race: the browser releases the
+  // context, PlayCanvas's RAF fires one render attempt before the
+  // `webglcontextlost` event is dispatched, the render crashes inside
+  // `IE.draw` because per-resource `.impl` refs are already nulled, then
+  // the event fires and we set `autoRender = false` — but the user has
+  // already seen the uncaught error in the console.
+  //
+  // These logs capture the sequence so we can confirm or refute that
+  // hypothesis: install timestamp, visibility state on each transition,
+  // event-fire timestamp, the `gl.isContextLost()` flag at handler entry
+  // (true ⇒ event fired AFTER PC noticed the loss internally), and a
+  // global error listener that catches the 'impl' crash with full
+  // context. Strip back to terse warns once the timing is understood.
+  const installedAt = Date.now()
+  const fmt = (ts: number) => `t+${(ts - installedAt).toLocaleString()}ms`
+  console.info(
+    `[${label}] context-loss handlers installed`,
+    {
+      visibility: document.visibilityState,
+      hasGl: !!getGl(canvas),
+    },
+  )
+
   const onLost = (e: Event): void => {
     e.preventDefault()
     app.autoRender = false
+    const gl = getGl(canvas)
     console.warn(
-      `[${label}] WebGL context lost — rendering halted. Waiting for restore.`,
+      `[${label}] webglcontextlost fired @ ${fmt(Date.now())}`,
+      {
+        visibility: document.visibilityState,
+        glIsContextLost: gl?.isContextLost?.() ?? null,
+        statusMessage: (e as WebGLContextEvent).statusMessage || '(none)',
+      },
     )
   }
   const onRestored = (): void => {
     console.warn(
-      `[${label}] WebGL context restored — reloading page to rebuild GPU resources.`,
+      `[${label}] webglcontextrestored fired @ ${fmt(Date.now())} — reloading`,
+      { visibility: document.visibilityState },
     )
     window.location.reload()
   }
+  const onVisibility = (): void => {
+    const gl = getGl(canvas)
+    console.info(
+      `[${label}] visibilitychange @ ${fmt(Date.now())}`,
+      {
+        visibility: document.visibilityState,
+        glIsContextLost: gl?.isContextLost?.() ?? null,
+        autoRender: app.autoRender,
+      },
+    )
+  }
+  // Global error listener: catch the uncaught `'impl'` crash so we know
+  // whether it fired before or after `webglcontextlost`. Filter strictly
+  // to the PlayCanvas signature so we don't spam unrelated errors.
+  const onWindowError = (e: ErrorEvent): void => {
+    const msg = e.message || e.error?.message || ''
+    if (msg.includes("'impl'") || msg.includes('reading \'impl\'')) {
+      const gl = getGl(canvas)
+      console.error(
+        `[${label}] impl-undefined caught by window @ ${fmt(Date.now())}`,
+        {
+          visibility: document.visibilityState,
+          glIsContextLost: gl?.isContextLost?.() ?? null,
+          autoRender: app.autoRender,
+          msg,
+        },
+      )
+    }
+  }
+
   canvas.addEventListener('webglcontextlost', onLost, false)
   canvas.addEventListener('webglcontextrestored', onRestored, false)
+  document.addEventListener('visibilitychange', onVisibility, false)
+  window.addEventListener('error', onWindowError, false)
   return () => {
     canvas.removeEventListener('webglcontextlost', onLost, false)
     canvas.removeEventListener('webglcontextrestored', onRestored, false)
+    document.removeEventListener('visibilitychange', onVisibility, false)
+    window.removeEventListener('error', onWindowError, false)
   }
+}
+
+function getGl(canvas: HTMLCanvasElement): WebGL2RenderingContext | WebGLRenderingContext | null {
+  // Fetching an existing context with the same type returns the existing one
+  // per spec — does NOT create a second context. Safe to call repeatedly.
+  return (canvas.getContext('webgl2') as WebGL2RenderingContext | null)
+      ?? (canvas.getContext('webgl') as WebGLRenderingContext | null)
 }
 
 /**
