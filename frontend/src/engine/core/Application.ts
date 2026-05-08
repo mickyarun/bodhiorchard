@@ -56,6 +56,11 @@ export class Application {
    * Subsystems call registerBillboard/unregisterBillboard when creating/destroying labels.
    */
   private billboards = new Set<pc.Entity>()
+  // Cached camera position from the previous frame's billboard pass. When the
+  // camera hasn't moved (within epsilon) the entire billboard loop is a no-op
+  // — the labels already face the camera correctly. With 150–300 billboards
+  // in a typical scene this is the single largest per-frame win in steady state.
+  private lastBillboardCamPos = new pc.Vec3(Infinity, Infinity, Infinity)
 
   constructor() {
     this.clock = new Clock()
@@ -138,8 +143,11 @@ export class Application {
       castShadows: true,
       shadowBias: 0.05,
       normalOffsetBias: 0.05,
-      shadowResolution: 2048,
-      shadowDistance: 500,
+      // 1024 depth-map is 4× cheaper than 2048; orchard radius ~70u so a
+      // 200u shadow frustum covers everything not already lost in fog (end=500u).
+      shadowResolution: 1024,
+      shadowDistance: 200,
+      shadowType: pc.SHADOW_PCF3_32F,
     })
     this.sun.setEulerAngles(50, -30, 0)
     this.root.addChild(this.sun)
@@ -169,11 +177,18 @@ export class Application {
       // -Y normal faces the camera; the texture mirror-X scale on each label
       // compensates so text reads left-to-right in screen space. See
       // NameLabel / LevelBadge / LabelRenderer for the scale convention.
+      // Dirty-flag: skip the loop entirely when the camera hasn't moved.
+      // We deliberately orient disabled labels too — `lookAt` on a disabled
+      // entity is pure transform math (PlayCanvas defers world-matrix calc
+      // until render), and orienting them keeps the dirty-flag consistent
+      // when a parent re-enables a label between camera moves.
       const camPos = this.camera.getPosition()
-      for (const label of this.billboards) {
-        if (!label.enabled) continue
-        label.lookAt(camPos)
-        label.rotateLocal(90, 0, 0)
+      if (!camPos.equalsApprox(this.lastBillboardCamPos, 1e-4)) {
+        for (const label of this.billboards) {
+          label.lookAt(camPos)
+          label.rotateLocal(90, 0, 0)
+        }
+        this.lastBillboardCamPos.copy(camPos)
       }
     }
     this.app.on('update', this.updateHandler)
@@ -185,6 +200,11 @@ export class Application {
 
   registerBillboard(entity: pc.Entity): void {
     this.billboards.add(entity)
+    // Force the next frame's billboard pass to run so the new label gets
+    // oriented even if the camera is sitting still (takeover seat, paused view).
+    // Without this, freshly-spawned NPC nameplates appear edge-on until the
+    // camera moves — the dirty-flag would otherwise skip the loop.
+    this.lastBillboardCamPos.set(Infinity, Infinity, Infinity)
   }
 
   unregisterBillboard(entity: pc.Entity): void {
