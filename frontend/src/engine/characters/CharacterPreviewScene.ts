@@ -22,6 +22,7 @@ import { AssetLoader } from '../assets/AssetLoader'
 import {
   installContextLossHandlers,
   installVisibilityGate,
+  installRenderErrorTrap,
 } from '../utils/AppLifecycle'
 
 // ─── Scene Constants ───────────────────────────
@@ -92,6 +93,7 @@ export class CharacterPreviewScene {
     this.lifecycleCleanups.push(
       installContextLossHandlers(this.canvas, this.app as pc.AppBase, 'CharacterPreview'),
       installVisibilityGate(this.app as pc.AppBase),
+      installRenderErrorTrap(this.app as pc.AppBase, 'CharacterPreview'),
     )
 
     // Ambient — bright enough to see face details + slightly cool
