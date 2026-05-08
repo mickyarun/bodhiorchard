@@ -18,7 +18,12 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { getTreePositions } from '@shared/world/treePositions'
-import { resetActiveScale } from '@shared/world/layoutScale'
+import {
+  BASELINE_REPO_COUNT,
+  computeLayoutScale,
+  resetActiveScale,
+  setActiveScale,
+} from '@shared/world/layoutScale'
 
 const ORCHARD_X = 0
 const ORCHARD_Z = 0
@@ -57,7 +62,10 @@ function expectedTreePositions(count: number): Array<{ x: number; z: number }> {
 }
 
 describe('getTreePositions byte-identical regression at baseline', () => {
-  beforeEach(() => resetActiveScale())
+  beforeEach(() => {
+    resetActiveScale()
+    setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
+  })
 
   for (const n of [1, 4, 8, 9, 12, 30] as const) {
     it(`count=${n} matches the pre-refactor algorithm to 1e-9`, () => {

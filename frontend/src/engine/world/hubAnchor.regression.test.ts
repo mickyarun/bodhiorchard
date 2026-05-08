@@ -19,11 +19,15 @@ import {
   BASELINE_REPO_COUNT,
   computeLayoutScale,
   resetActiveScale,
+  setActiveScale,
 } from '@shared/world/layoutScale'
 import { getAgentFallbackSlot } from '@shared/world/treePositions'
 
 describe('HubAnchor geometry at baseline', () => {
-  beforeEach(() => resetActiveScale())
+  beforeEach(() => {
+    resetActiveScale()
+    setActiveScale(computeLayoutScale(BASELINE_REPO_COUNT))
+  })
 
   it('plaza exclusion radius equals 9.0 (today’s rim + breathing margin)', () => {
     const { hub } = computeLayoutScale(BASELINE_REPO_COUNT)
