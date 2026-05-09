@@ -107,6 +107,8 @@ interface ProceduralEntry {
   featuresByTitle: Map<string, EngineFeature>  // title → full feature data (for picking)
   cacheKey:        string              // stable key for treeCache; "__unimplemented__*" disables caching
   rootColor:       Color3              // palette-cycled trunk color — needed for cache save
+  userHidden:      boolean             // set true when filtered out via dashboard's repo selector;
+                                       // distance-LOD update() respects this and never re-enables
 }
 
 // ─── System ──────────────────────────────────────────────────────────────────
@@ -209,6 +211,7 @@ export class ProceduralTreeSystem implements RepoVisualization {
         worldX: pos.x, worldZ: pos.z,
         label: null, done: false, featuresByTitle,
         cacheKey: cacheKeys[i], rootColor: color,
+        userHidden: false,
       }
       this.entries.push(entry)
 
@@ -289,6 +292,13 @@ export class ProceduralTreeSystem implements RepoVisualization {
     if (!this.appRef) return
 
     for (const entry of this.entries) {
+      // Dashboard's repo-filter wins over LOD + growth: ensure user-hidden
+      // entries stay disabled and skip all per-frame work (growth, leaf
+      // animation, distance check). Growth resumes when the user unhides.
+      if (entry.userHidden) {
+        if (entry.container.enabled) setEntryVisible(entry, false)
+        continue
+      }
       if (!entry.done) {
         const stillGrowing = entry.tree.update(dt)
         if (!stillGrowing) {
@@ -371,6 +381,19 @@ export class ProceduralTreeSystem implements RepoVisualization {
 
   getTreeEntity(repoName: string): pc.Entity | undefined {
     return this.treeMap.get(repoName)
+  }
+
+  /**
+   * Toggle a single repo's visibility (dashboard repo-filter). Disables
+   * the container + tree mesh + leaves in lockstep, and marks the entry
+   * `userHidden` so the LOD update doesn't re-enable on the next frame.
+   * No-op if the repo isn't known to this visualization.
+   */
+  setRepoVisibility(repoName: string, visible: boolean): void {
+    const entry = this.entries.find(e => e.repoName === repoName)
+    if (!entry) return
+    entry.userHidden = !visible
+    setEntryVisible(entry, visible)
   }
 
   getTreeMap(): Map<string, pc.Entity> {
