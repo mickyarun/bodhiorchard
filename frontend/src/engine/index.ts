@@ -1695,16 +1695,24 @@ export class GardenEngine {
    *
    * Used for the dashboard's repo filter — flipping checkboxes should hide /
    * show trees instantly without tearing down PhysicsWorld + RAPIER state
-   * (which crashes any in-flight takeover that's holding a stale ref). The
-   * underlying entities stay in the scene graph; only the `enabled` flag is
-   * flipped, so children (branches, features, attached labels) follow.
+   * (which crashes any in-flight takeover that's holding a stale ref).
+   *
+   * Delegates to the active RepoVisualization's setRepoVisibility when
+   * available (correct path — handles sibling-rooted entities like
+   * Tree3DSystem.treeRoot + LeafSystem.leafRoot, plus marks the entry
+   * userHidden so distance-LOD doesn't re-enable). Falls back to a
+   * single-entity toggle for visualizations that don't implement it.
    */
   setRepoVisibility(visibilityByRepo: Map<string, boolean>): void {
     const repoVis = this.sceneManager?.repoVisualization
     if (!repoVis) return
     for (const [repoName, visible] of visibilityByRepo) {
-      const ent = repoVis.getTreeEntity(repoName)
-      if (ent) ent.enabled = visible
+      if (repoVis.setRepoVisibility) {
+        repoVis.setRepoVisibility(repoName, visible)
+      } else {
+        const ent = repoVis.getTreeEntity(repoName)
+        if (ent) ent.enabled = visible
+      }
     }
   }
 
