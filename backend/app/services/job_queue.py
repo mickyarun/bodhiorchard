@@ -154,6 +154,7 @@ def update_job(
     progress_pct: int | None = None,
     result: Any = ...,  # sentinel: ... means "don't change"
     error: str | None = ...,
+    error_code: str | None = ...,
 ) -> None:
     """Update a job's status in-place.
 
@@ -165,7 +166,9 @@ def update_job(
         status_message: Human-readable progress message.
         progress_pct: 0-100 progress percentage.
         result: Job result payload (only for completed jobs).
-        error: Error message (only for failed jobs).
+        error: Human-readable error message (only for failed jobs).
+        error_code: Stable error category identifier for the frontend
+            (e.g. "max_turns"); paired with ``error`` for failed jobs.
     """
     entry = _job_store.get(job_id)
     if entry is None:
@@ -181,6 +184,8 @@ def update_job(
         job.result = result
     if error is not ...:
         job.error = error
+    if error_code is not ...:
+        job.error_code = error_code
 
     # Push update over WebSocket event bus
     from app.services.event_bus import publish

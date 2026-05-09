@@ -176,7 +176,12 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             message=result.error or "AI unavailable",
             bud_id=uuid_mod.UUID(payload.bud_id),
         )
-        update_job(job_id, state=JobState.FAILED, error=result.error or "AI unavailable")
+        update_job(
+            job_id,
+            state=JobState.FAILED,
+            error=result.error or "AI unavailable",
+            error_code=result.error_code,
+        )
         await record_agent_timeline(
             payload.org_id,
             payload.bud_id,

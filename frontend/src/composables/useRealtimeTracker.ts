@@ -24,7 +24,7 @@ import type { AxiosError } from 'axios'
 export interface TrackerCallbacks<T> {
   onProgress?: (data: T) => void
   onComplete?: (data: T) => void
-  onError?: (error: string) => void
+  onError?: (error: string, errorCode?: string | null) => void
 }
 
 export interface TrackerConfig<T> {
@@ -36,6 +36,8 @@ export interface TrackerConfig<T> {
   isTerminal: (data: T) => 'completed' | 'failed' | null
   /** Extracts error message from data */
   getError: (data: T) => string | null
+  /** Extracts a stable error category code from data (optional). */
+  getErrorCode?: (data: T) => string | null
   /** Extracts result from data (optional, for job-style tracking) */
   getResult?: (data: T) => unknown
   /** Polling interval in ms (default: 2000) */
@@ -109,7 +111,8 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
       callbacks?.onComplete?.(d)
       stopTracking()
     } else if (terminal === 'failed') {
-      callbacks?.onError?.(config.getError(d) || 'Failed')
+      const code = config.getErrorCode?.(d) ?? null
+      callbacks?.onError?.(config.getError(d) || 'Failed', code)
       stopTracking()
     }
   }

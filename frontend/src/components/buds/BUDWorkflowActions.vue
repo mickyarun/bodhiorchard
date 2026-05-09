@@ -51,6 +51,7 @@
 import { ref } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useJobSocket } from '@/composables/useJobSocket'
+import { friendlyAgentError } from '@/types/agentErrors'
 import type { BUDDocument } from '@/types'
 
 const props = defineProps<{
@@ -108,9 +109,9 @@ function trackAgentTask(task: { job_id: string | null; task_type: string; status
       await budStore.fetchBUD(props.bud.id)
       emit('reload-timeline')
     },
-    async onError(err) {
+    async onError(err, errorCode) {
       agentGenerating.value = false
-      agentStatusMessage.value = `Failed: ${err}`
+      agentStatusMessage.value = friendlyAgentError(errorCode, err).headline
       agentName.value = ''
       // Refetch so bud.active_agent_task reflects the failed status —
       // the unified top banner and any per-tab consumers read from
