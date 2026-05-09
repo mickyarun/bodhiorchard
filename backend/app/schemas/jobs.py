@@ -30,6 +30,7 @@ class JobStatusRead(BaseModel):
     progress_pct: int = Field(default=0, alias="progressPct")
     result: Any = None
     error: str | None = None
+    error_code: str | None = Field(default=None, alias="errorCode")
 
     model_config = {"populate_by_name": True}
 

@@ -63,7 +63,14 @@
         <!-- Failed -->
         <div v-else-if="d.status === 'failed'" class="section-empty">
           <v-icon icon="mdi-alert-circle-outline" size="40" class="mb-3" color="error" />
-          <div>Design generation failed</div>
+          <AgentErrorMessage
+            v-if="designJobErrors.get(d.id)"
+            :code="designJobErrors.get(d.id)!.code"
+            :fallback="designJobErrors.get(d.id)!.message"
+            class="mb-3"
+            style="max-width: 480px"
+          />
+          <div v-else>Design generation failed</div>
           <v-btn variant="tonal" size="small" class="mt-3" @click="handleRegenerate(d.id)">
             <v-icon start size="15">mdi-refresh</v-icon>
             Retry
@@ -195,6 +202,8 @@ import { useBUDStore } from '@/stores/bud'
 import { useSettingsStore } from '@/stores/settings'
 import { useDesignSystemStore } from '@/stores/designSystem'
 import { useJobSocket } from '@/composables/useJobSocket'
+import { friendlyAgentError } from '@/types/agentErrors'
+import AgentErrorMessage from '@/components/common/AgentErrorMessage.vue'
 import type { BUDDesign, RepoInfo } from '@/types'
 
 const props = defineProps<{
@@ -227,6 +236,9 @@ const availableRepos = ref<RepoInfo[]>([])
 const availableReposLoading = ref(false)
 const selectedRepoIds = ref<string[]>([])
 const designJobProgress = reactive(new Map<string, string>())
+const designJobErrors = reactive(
+  new Map<string, { code: string | null; message: string }>(),
+)
 const designPreviewKey = ref(0)
 let notesSaveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -346,13 +358,15 @@ function trackDesignJob(designId: string, jobId: string): void {
         emit('chat-message', { role: 'ai', text: result.reply })
       }
     },
-    async onError(err) {
+    async onError(err, errorCode) {
       designJobProgress.delete(designId)
       const idx = designs.value.findIndex(d => d.id === designId)
       if (idx !== -1) {
         designs.value[idx] = { ...designs.value[idx], status: 'failed' }
       }
-      emit('chat-message', { role: 'ai', text: `Design generation failed: ${err}` })
+      designJobErrors.set(designId, { code: errorCode ?? null, message: err })
+      const friendly = friendlyAgentError(errorCode, err)
+      emit('chat-message', { role: 'ai', text: friendly.headline })
       await loadDesigns()
     },
   })
@@ -365,6 +379,7 @@ async function handleRegenerate(designId: string): Promise<void> {
     if (idx !== -1) {
       designs.value[idx] = { ...designs.value[idx], status: 'generating', job_id: result.jobId }
     }
+    designJobErrors.delete(designId)
     trackDesignJob(designId, result.jobId)
   }
 }
