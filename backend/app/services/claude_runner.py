@@ -20,6 +20,9 @@ from typing import Any
 
 import structlog
 
+from app.services import claude_errors
+from app.services.claude_errors import ClaudeErrorCode
+
 logger = structlog.get_logger(__name__)
 
 ProgressCallback = Callable[[str, dict[str, Any]], None]  # (tool_name, tool_input)
@@ -29,7 +32,14 @@ _BRIDGE_PATH = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridg
 
 @dataclass
 class ClaudeRunResult:
-    """Result from a Claude Code CLI execution."""
+    """Result from a Claude Code CLI execution.
+
+    ``error_code`` is a stable identifier for the failure category — the
+    frontend uses it to render rich UI (settings deep-links, role-aware
+    CTAs). It is ``None`` on success and on legacy code paths that don't
+    flow through ``claude_errors``; ``error`` remains the human-readable
+    fallback for any caller that doesn't translate the code itself.
+    """
 
     success: bool
     output: str
@@ -37,6 +47,7 @@ class ClaudeRunResult:
     turns_used: int | None = None
     duration_ms: int | None = None
     error: str | None = None
+    error_code: ClaudeErrorCode | None = None
 
 
 @dataclass
@@ -226,12 +237,18 @@ async def _run_with_streaming(
             last_stdout=last_stdout,
             stderr_preview=stderr_preview,
         )
-        detail = f"Timed out after {timeout}s"
+        code, message = claude_errors.from_timeout(timeout)
+        diagnostic_suffix = ""
         if last_stdout:
-            detail += f"; last stdout: {last_stdout}"
+            diagnostic_suffix = f" (last stdout: {last_stdout})"
         elif stderr_preview:
-            detail += f"; stderr: {stderr_preview[:200]}"
-        return ClaudeRunResult(success=False, output="", error=detail)
+            diagnostic_suffix = f" (stderr: {stderr_preview[:200]})"
+        return ClaudeRunResult(
+            success=False,
+            output="",
+            error=message + diagnostic_suffix,
+            error_code=code,
+        )
     except asyncio.CancelledError:
         # Caller cancelled the job — kill the CLI so it stops making
         # MCP tool calls (and spending tokens) before we re-raise.
@@ -244,10 +261,12 @@ async def _run_with_streaming(
                 pass
         raise
     except FileNotFoundError:
+        code, message = claude_errors.from_binary_missing()
         return ClaudeRunResult(
             success=False,
             output="",
-            error="Claude CLI binary not found",
+            error=message,
+            error_code=code,
         )
 
     # stderr was drained concurrently (above) so the pipe never blocked.
@@ -265,8 +284,8 @@ async def _run_with_streaming(
     if proc.returncode != 0:
         # Prefer, in order: structured error from any event; error_subtype
         # on the final result event; stderr; last raw stdout lines. The
-        # last-line fallback is ugly but vastly more useful than a bare
-        # "Exit code 1:" when every structured path has failed.
+        # last-line fallback is ugly but vastly more useful than nothing
+        # when every structured path has failed.
         detail = event_error_message
         if not detail and error_subtype:
             detail = f"{error_subtype} after {turns or 0} turns"
@@ -282,14 +301,12 @@ async def _run_with_streaming(
             error_subtype=error_subtype,
             recent_lines=recent_lines[-5:],
         )
+        code, message = claude_errors.from_returncode(proc.returncode, detail)
         return ClaudeRunResult(
             success=False,
             output=result_text,
-            error=(
-                f"Exit code {proc.returncode}: {detail}"
-                if detail
-                else f"Exit code {proc.returncode} (no diagnostic output)"
-            ),
+            error=message,
+            error_code=code,
         )
 
     if error_subtype:
@@ -299,12 +316,14 @@ async def _run_with_streaming(
             turns=turns,
             cost_usd=cost,
         )
+        code, message = claude_errors.from_subtype(error_subtype, turns=turns)
         return ClaudeRunResult(
             success=False,
             output=result_text,
             cost_usd=cost,
             turns_used=turns,
-            error=f"Claude CLI: {error_subtype} after {turns} turns",
+            error=message,
+            error_code=code,
         )
 
     logger.info(
@@ -503,17 +522,19 @@ async def run_claude_code(
             # deprecation) to stdout JSON with empty stderr. Surface that human
             # message instead of the opaque "Exit code N:".
             api_error = _parse_cli_error_payload(stdout_str)
-            error_msg = api_error or f"Exit code {proc.returncode}: {stderr_str[:500]}"
+            detail = api_error or (stderr_str[:500] if stderr_str else None)
             logger.error(
                 "claude_run_failed",
                 returncode=proc.returncode,
                 stderr=stderr_str[:500],
                 api_error=api_error,
             )
+            code, message = claude_errors.from_returncode(proc.returncode, detail)
             return ClaudeRunResult(
                 success=False,
                 output=stdout_str,
-                error=error_msg,
+                error=message,
+                error_code=code,
             )
 
         # Parse JSON output from Claude Code CLI
@@ -543,12 +564,14 @@ async def run_claude_code(
                         turns=turns,
                         cost_usd=cost,
                     )
+                    code, message = claude_errors.from_subtype(subtype, turns=turns)
                     return ClaudeRunResult(
                         success=False,
                         output=result_text,
                         cost_usd=cost,
                         turns_used=turns,
-                        error=f"Claude CLI: {subtype} after {turns} turns",
+                        error=message,
+                        error_code=code,
                     )
             except json.JSONDecodeError:
                 logger.warning(
@@ -583,10 +606,12 @@ async def run_claude_code(
             except ProcessLookupError:
                 pass  # Already exited
         logger.error("claude_run_timeout", timeout=config.timeout_seconds)
+        code, message = claude_errors.from_timeout(config.timeout_seconds)
         return ClaudeRunResult(
             success=False,
             output="",
-            error=f"Timed out after {config.timeout_seconds}s",
+            error=message,
+            error_code=code,
         )
     except asyncio.CancelledError:
         if proc is not None:
@@ -598,10 +623,12 @@ async def run_claude_code(
                 pass
         raise
     except FileNotFoundError:
+        code, message = claude_errors.from_binary_missing()
         return ClaudeRunResult(
             success=False,
             output="",
-            error="Claude CLI binary not found",
+            error=message,
+            error_code=code,
         )
     finally:
         if mcp_config_file is not None:

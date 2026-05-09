@@ -631,6 +631,8 @@ export interface JobStatusRead {
   progressPct: number
   result: unknown
   error: string | null
+  /** Stable category code for failures; see types/agentErrors.ts. */
+  errorCode?: string | null
 }
 
 export interface JobCreatedResponse {
