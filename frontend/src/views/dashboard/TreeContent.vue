@@ -3,6 +3,7 @@
     <PlayCanvasCanvas
       ref="canvasRef"
       :tree-data="displayData"
+      :visible-repos="visibleRepos"
       @tree-click="(info) => onTreeClick(info.repoName)"
       @developer-click="(info) => onDeveloperClick({ name: info.name, modelName: info.modelName, isAgent: false, careMode: null, member: null, clipNames: [] })"
       @house-click="(info) => onHouseClick({ name: info.name, activity: 'home' })"
@@ -63,6 +64,7 @@ import RaceSetupDialog from '@/components/race/RaceSetupDialog.vue'
 
 const props = defineProps<{
   displayData: TreeData
+  visibleRepos?: string[]
 }>()
 
 const emit = defineEmits<{
