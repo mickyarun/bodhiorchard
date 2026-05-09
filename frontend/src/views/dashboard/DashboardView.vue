@@ -116,10 +116,11 @@
     <div v-else class="flex-grow-1 position-relative overflow-hidden">
       <Transition name="fade" mode="out-in">
         <TreeContent
-          v-if="viewMode === 'tree' && displayData"
+          v-if="viewMode === 'tree' && store.treeData"
           key="tree"
           ref="treeContentRef"
-          :display-data="displayData"
+          :display-data="store.treeData"
+          :visible-repos="visibleRepos"
           @zone-enter="onZoneEnter"
           @zone-exit="onZoneExit"
         />

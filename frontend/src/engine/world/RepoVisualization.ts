@@ -31,6 +31,16 @@ export interface RepoVisualization {
   getTreeEntity(repoName: string): pc.Entity | undefined
 
   /**
+   * Toggle a single repo's visibility (dashboard repo-filter).
+   * Implementations are responsible for hiding every entity that makes up
+   * the repo's visual — typically a sibling-rooted set under app.root, not
+   * a single anchor — and for ensuring distance-LOD or other update loops
+   * don't re-enable hidden repos. Optional: implementations without
+   * per-repo visibility just don't define this.
+   */
+  setRepoVisibility?(repoName: string, visible: boolean): void
+
+  /**
    * Per-frame update for animated visualizations (optional).
    * `viewerPos`, when supplied, lets the implementation cull distant visuals
    * relative to a ground-level viewer (e.g. takeover-mode character). Pass

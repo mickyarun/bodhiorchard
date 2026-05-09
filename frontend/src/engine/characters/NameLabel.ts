@@ -81,7 +81,14 @@ export function createNameLabel(
   material.update()
 
   const entity = new pc.Entity('NameLabel')
-  entity.addComponent('render', { type: 'plane' })
+  // Render in the UI layer (renders AFTER the WORLD layer in the default
+  // pc.LayerComposition) so name plates always paint on top of path
+  // stones, fences, and other world geometry. depthTest=false on the
+  // material alone is not enough — opaque world meshes drawn later in
+  // the WORLD pass with depthWrite=true paint over a transparent label
+  // sharing the same layer. Promoting to LAYERID_UI side-steps that
+  // ordering entirely.
+  entity.addComponent('render', { type: 'plane', layers: [pc.LAYERID_UI] })
   entity.render!.meshInstances[0].material = material
   entity.setLocalPosition(0, height, 0)
   // Negative X scale compensates for the lookAt + rotateLocal billboard
