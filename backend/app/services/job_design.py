@@ -148,7 +148,12 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         if design_id:
             await _update_design_status(design_id, payload.org_id, "failed")
         await _maybe_complete_design_task(payload.bud_id, payload.org_id)
-        update_job(job_id, state=JobState.FAILED, error=result.error or "AI unavailable")
+        update_job(
+            job_id,
+            state=JobState.FAILED,
+            error=result.error or "AI unavailable",
+            error_code=result.error_code,
+        )
         return
 
     update_job(job_id, status_message="Saving wireframe...", progress_pct=80)

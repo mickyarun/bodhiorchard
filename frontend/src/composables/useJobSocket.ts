@@ -20,6 +20,7 @@ export function useJobSocket() {
     isTerminal: (d) =>
       d.state === 'completed' ? 'completed' : d.state === 'failed' ? 'failed' : null,
     getError: (d) => d.error || null,
+    getErrorCode: (d) => d.errorCode ?? null,
     getResult: (d) => d.result,
     pollIntervalMs: 1000,
     pollTimeoutMs: 660_000, // 11 min — must exceed backend max job timeout (600s)

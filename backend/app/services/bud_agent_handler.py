@@ -332,7 +332,12 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 task.status = AgentTaskStatus.FAILED
                 task.error_message = error_msg[:500]
                 await db.commit()
-                update_job(job_id, state=JobState.FAILED, error=error_msg)
+                update_job(
+                    job_id,
+                    state=JobState.FAILED,
+                    error=error_msg,
+                    error_code=result.error_code,
+                )
                 return
 
             # Dispatch to result handler

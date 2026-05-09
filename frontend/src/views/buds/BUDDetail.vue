@@ -806,6 +806,7 @@ import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
 import { useJobSocket } from '@/composables/useJobSocket'
+import { friendlyAgentError } from '@/types/agentErrors'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
@@ -1381,9 +1382,12 @@ async function handleChatSend(msg: string, images: string[] = []): Promise<void>
         }
       }
     },
-    onError(err) {
+    onError(err, errorCode) {
       chatLoading.value = false
-      chatMessages.value.push({ role: 'ai', text: `Error: ${err}` })
+      chatMessages.value.push({
+        role: 'ai',
+        text: friendlyAgentError(errorCode, err).headline,
+      })
     },
   })
 }
