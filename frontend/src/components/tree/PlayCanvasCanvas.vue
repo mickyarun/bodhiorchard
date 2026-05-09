@@ -73,9 +73,17 @@ import { useTouchDevice } from '@/composables/useTouchDevice'
 const authStore = useAuthStore()
 
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   treeData: TreeData
-}>()
+  // Subset of repo names that should be visible. Driving visibility from a
+  // separate prop (instead of filtering treeData) keeps the engine's setData
+  // build path off the filter hot path — toggling repos hides/shows trees
+  // without a full SceneManager.rebuild, which would tear down PhysicsWorld
+  // and crash any in-flight takeover.
+  visibleRepos?: string[]
+}>(), {
+  visibleRepos: undefined,
+})
 
 const emit = defineEmits<{
   (e: 'scene-ready'): void
@@ -472,6 +480,24 @@ watch(
     }
   },
   { deep: true },
+)
+
+// Toggle per-repo tree visibility on filter change WITHOUT rebuilding the
+// scene. Cheap operation (entity.enabled flips) — safe to run mid-takeover
+// or any other engine state. Triggers only on the prop reference change,
+// not on nested array mutations, so we keep the work minimal.
+watch(
+  () => props.visibleRepos,
+  (visible) => {
+    if (!engine) return
+    const visibleSet = visible ? new Set(visible) : null
+    const map = new Map<string, boolean>()
+    for (const repo of props.treeData.repos) {
+      // null visibleSet means 'show everything' (no filter applied yet).
+      map.set(repo.repo_name, visibleSet ? visibleSet.has(repo.repo_name) : true)
+    }
+    engine.setRepoVisibility(map)
+  },
 )
 
 // React to auth becoming available after mount. In practice `authStore.user`

@@ -1690,6 +1690,24 @@ export class GardenEngine {
     this.vehicleUnlocks = new Set(unlocks)
   }
 
+  /**
+   * Toggle per-repo tree visibility WITHOUT rebuilding the scene.
+   *
+   * Used for the dashboard's repo filter — flipping checkboxes should hide /
+   * show trees instantly without tearing down PhysicsWorld + RAPIER state
+   * (which crashes any in-flight takeover that's holding a stale ref). The
+   * underlying entities stay in the scene graph; only the `enabled` flag is
+   * flipped, so children (branches, features, attached labels) follow.
+   */
+  setRepoVisibility(visibilityByRepo: Map<string, boolean>): void {
+    const repoVis = this.sceneManager?.repoVisualization
+    if (!repoVis) return
+    for (const [repoName, visible] of visibilityByRepo) {
+      const ent = repoVis.getTreeEntity(repoName)
+      if (ent) ent.enabled = visible
+    }
+  }
+
   /** True whenever the player is actively controlling a character (takeover OR house interior). */
   get isInControl(): boolean {
     return this.sceneState === 'takeover' || this.sceneState === 'interior'
