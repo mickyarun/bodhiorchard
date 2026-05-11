@@ -31,7 +31,7 @@
 
 ## What is Bodhiorchard?
 
-Bodhiorchard is an **open-source, AI-first alternative to Agile project management tools** like Jira, Linear, and Shortcut. It runs locally on your laptop or Mac Mini with **11 specialized AI agents** that orchestrate the entire software development lifecycle — from feature intake to production deployment, learning, and continuous improvement. It's powered today by [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware intelligence and the **Anthropic direct API** for lighter, non-codebase agent calls; [**Ollama**](https://ollama.com) (fully local/free), the **OpenAI** direct API, and **OpenAI Codex** are on the near-term roadmap.
+Bodhiorchard is an **open-source, AI-first alternative to Agile project management tools** like Jira, Linear, and Shortcut. It runs locally on your laptop or Mac Mini with **12 specialized AI agents** that orchestrate the entire software development lifecycle — from feature intake to production deployment, learning, and continuous improvement. It's powered today by [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware intelligence and the **Anthropic direct API** for lighter, non-codebase agent calls; [**Ollama**](https://ollama.com) (fully local/free), the **OpenAI** direct API, and **OpenAI Codex** are on the near-term roadmap.
 
 ### The Problem
 
@@ -61,9 +61,9 @@ Bodhiorchard replaces human busywork with AI automation while keeping humans in 
 Every feature lives in one **BUD** — spec, tech spec, test plan, acceptance criteria, and full history. Replaces scattered Jira tickets, Google Docs, and Notion pages.
 
 ```
-BUD Lifecycle: bud -> design -> development -> testing -> uat -> prod -> closed
-                                                                        |
-                                                              discarded (any time)
+BUD Lifecycle: bud -> design -> tech_arch -> development -> testing -> uat -> prod -> closed
+                                                                                |
+                                                                      discarded (any time)
 ```
 
 - Markdown-based with separate sections for spec, tech spec, and test plan
@@ -131,7 +131,7 @@ Bodhiorchard exposes **10 MCP tools** to [Claude Code](https://docs.anthropic.co
 
 ## AI Agents
 
-Bodhiorchard ships with **11 specialized agents**, each triggered automatically and connected to each other:
+Bodhiorchard ships with **12 specialized agents**, each triggered automatically and connected to each other:
 
 ### Intake & Planning
 
@@ -145,7 +145,8 @@ Bodhiorchard ships with **11 specialized agents**, each triggered automatically 
 | Agent | Trigger | What It Does |
 |---|---|---|
 | **Design Agent** | BUD approved | Scopes UI/UX requirements, generates component breakdowns and interaction specs |
-| **Tech Plan Agent** | BUD approved | Creates file-level implementation TODOs with architecture analysis and dependency mapping |
+| **Tech Plan Agent** | BUD enters Tech Arch | Creates file-level implementation TODOs with architecture analysis and dependency mapping |
+| **Smart Assignment Agent** | Tech plan approved | Suggests best-fit developer from per-module skill profiles (0–1.0) and real-time capacity; manager reviews if present, otherwise auto-assigns |
 | **Status Agent** | GitHub webhook | Detects PR merges, infers status from branches, moves BUD folders, notifies stakeholders |
 | **Standup Agent** | Daily cron (08:30) | Aggregates git/PR/bug/chat activity into daily summaries with risk flag detection |
 
@@ -519,7 +520,7 @@ Long-running operations (repo scans, embedding builds, BUD generation) return `2
 - [x] 3D tree dashboard visualization
 - [x] Slack-native triage intake
 - [x] MCP server with 10 tools
-- [x] 11 AI agent definitions
+- [x] 12 AI agent definitions
 
 ### Phase 2 (Next)
 - [ ] Agent execution engine (autonomous agent runs)
