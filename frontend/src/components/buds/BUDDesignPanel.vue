@@ -101,11 +101,20 @@
             @blur="saveDesignById(d.id)"
           />
         </template>
-        <!-- Ready with HTML — use blob URL for full interactivity -->
+        <!-- Ready with HTML — srcdoc inlines the HTML as a same-origin
+             document so the wireframe's <script> tags execute. Blob URLs
+             were silently blocked in some prod environments.
+
+             We inject `<base href="about:srcdoc">` so relative links like
+             `<a href="#">` resolve against an inert URL instead of the
+             parent app's URL (the srcdoc default), which would otherwise
+             cause clicks to navigate the host app. We do NOT use the
+             `sandbox` attribute — without `allow-same-origin` it breaks
+             Vue 3's runtime template compiler in some Chromium versions. -->
         <template v-else-if="d.design_html">
           <iframe
             :key="d.id + '-' + designPreviewKey"
-            :src="designPreviewUrl(d.id)"
+            :srcdoc="designSrcdoc(d.design_html)"
             class="design-iframe"
           />
           <!-- Notes / Figma links -->
@@ -213,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useSettingsStore } from '@/stores/settings'
 import { useDesignSystemStore } from '@/stores/designSystem'
@@ -262,37 +271,38 @@ const activeDesignObj = computed(() =>
   designs.value.find(d => d.id === activeDesignTab.value) || null,
 )
 
-// Blob URLs for iframe rendering (no auth required)
-const designBlobUrls = reactive(new Map<string, string>())
-
-function updateBlobUrls(): void {
-  for (const url of designBlobUrls.values()) {
-    URL.revokeObjectURL(url)
+function designSrcdoc(html: string): string {
+  // Inject `<base href="about:srcdoc">` so relative URLs in the wireframe
+  // (notably `<a href="#">`) don't resolve against the parent app's URL
+  // and hijack its navigation. Idempotent — skips if a <base> is already
+  // present, and falls back to prepending if no <head> is found.
+  if (/<base\b/i.test(html)) return html
+  const baseTag = '<base href="about:srcdoc">'
+  const headOpenMatch = html.match(/<head\b[^>]*>/i)
+  if (headOpenMatch) {
+    const insertAt = headOpenMatch.index! + headOpenMatch[0].length
+    return html.slice(0, insertAt) + baseTag + html.slice(insertAt)
   }
-  designBlobUrls.clear()
-  for (const d of designs.value) {
-    if (d.design_html) {
-      const blob = new Blob([d.design_html], { type: 'text/html' })
-      designBlobUrls.set(d.id, URL.createObjectURL(blob))
-    }
-  }
-}
-
-function designPreviewUrl(designId: string): string {
-  return designBlobUrls.get(designId) || ''
+  return baseTag + html
 }
 
 function openDesignInTab(designId: string): void {
   const d = designs.value.find(dd => dd.id === designId)
   if (!d?.design_html) return
-  const blob = new Blob([d.design_html], { type: 'text/html' })
-  const url = URL.createObjectURL(blob)
-  window.open(url, '_blank')
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  // blob: URLs were silently blocked from running scripts in prod
+  // (both iframe and top-level). srcdoc on a full-viewport iframe
+  // gives us a same-origin context where scripts execute reliably.
+  const win = window.open('', '_blank')
+  if (!win) return
+  win.document.title = 'Design Preview'
+  win.document.body.style.margin = '0'
+  const iframe = win.document.createElement('iframe')
+  iframe.srcdoc = designSrcdoc(d.design_html)
+  iframe.style.cssText = 'border:0;width:100vw;height:100vh;display:block;'
+  win.document.body.appendChild(iframe)
 }
 
 function refreshDesignPreview(): void {
-  updateBlobUrls()
   designPreviewKey.value++
 }
 
@@ -312,7 +322,6 @@ onMounted(() => {
 
 async function loadDesigns(): Promise<void> {
   designs.value = await budStore.fetchDesigns(props.budId)
-  updateBlobUrls()
   designPreviewKey.value++
   if (designs.value.length > 0 && !activeDesignTab.value) {
     activeDesignTab.value = designs.value[0].id
@@ -427,12 +436,6 @@ watch(activeDesignTab, (newVal) => {
   if (newVal) emit('design-tab-change', newVal)
 })
 
-onBeforeUnmount(() => {
-  for (const url of designBlobUrls.values()) {
-    URL.revokeObjectURL(url)
-  }
-})
-
 defineExpose({
   designs,
   activeDesignTab,
@@ -442,7 +445,6 @@ defineExpose({
   toggleDesignEdit,
   refreshDesignPreview,
   triggerDesignGeneration,
-  updateBlobUrls,
 })
 </script>
 
