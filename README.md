@@ -1,21 +1,27 @@
 <div align="center">
 
-# Bodhiorchard
+# Bodhiorchard&trade;
 
 ### AI-Native Software Development Operations Platform
 
 **Replace Agile ceremonies with intelligent agents. Powered by AI. Runs on your machine.**
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com)
 [![Vue 3](https://img.shields.io/badge/Vue.js-3-4FC08D.svg)](https://vuejs.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791.svg)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com)
 
-[Getting Started](#getting-started) | [Architecture](#architecture) | [AI Agents](#ai-agents) | [MCP Integration](#model-context-protocol-mcp) | [Roadmap](#roadmap) | [License](#license)
+[About](#about) | [Getting Started](#getting-started) | [Architecture](#architecture) | [AI Agents](#ai-agents) | [MCP Integration](#model-context-protocol-mcp) | [Roadmap](#roadmap) | [License](#license)
 
 </div>
+
+---
+
+## About
+
+Bodhiorchard&trade; is an independent open-source project developed and maintained by Arun Rajkumar in his personal capacity. It is not affiliated with, owned by, or developed on behalf of any employer or client.
 
 ---
 
@@ -374,7 +380,7 @@ bodhiorchard/
 ├── BODHIORCHARD-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
 ├── AGENTS.md                # Agent capabilities documentation
 ├── TODO.md                  # Roadmap and progress tracking
-└── LICENSE                  # AGPL-3.0
+└── LICENSE                  # Apache-2.0
 ```
 
 ---
@@ -461,19 +467,17 @@ We welcome contributions! Please read our contributing guidelines before submitt
 6. Commit your changes
 7. Push to your branch and open a Pull Request
 
-### Contributor License Agreement
+### Contributor sign-off (DCO)
 
-By contributing to Bodhiorchard, you agree that your contributions will be licensed under the same license as the project (AGPL-3.0), and you grant the project maintainer (Arun Rajkumar) a perpetual, worldwide, non-exclusive, royalty-free license to use, modify, sublicense, and distribute your contributions.
+By contributing to this project, you agree to license your contribution under the Apache License, Version 2.0, and you certify your right to do so under the [Developer Certificate of Origin](https://developercertificate.org/). All commits must be signed off with `git commit -s` — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
 ## License
 
-Bodhiorchard is licensed under the [GNU Affero General Public License v3.0](LICENSE). This means:
+Bodhiorchard&trade; is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for attribution and independence declarations.
 
-- You can use, modify, and distribute the software freely
-- If you run a modified version as a network service (SaaS), you must make your source code available to users
-- All derivative works must also be licensed under AGPL-3.0
+Commercial licenses with additional support and proprietary integrations may be made available separately — contact the maintainer.
 
 ## Why "Bodhiorchard"?
 
@@ -503,8 +507,10 @@ Build well. Then go outside.
 
 <div align="center">
 
-**Built by [Arun Rajkumar](https://github.com/arunrajkumar)**
+**Built by [Arun Rajkumar](https://github.com/mickyarun)**
 
 If Bodhiorchard helps your team, give it a star and spread the word.
+
+<sub>&copy; 2025-2026 Arun Rajkumar. Bodhiorchard&trade; is a trademark of Arun Rajkumar.</sub>
 
 </div>
