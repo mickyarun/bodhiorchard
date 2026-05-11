@@ -95,12 +95,48 @@ def _format_tool_progress(tool_name: str, tool_input: dict[str, Any]) -> str:
             return f"Using {short}..."
 
 
-def make_progress_callback(job_id: str) -> ProgressCallback:
-    """Create a progress callback that updates a job's status message on each tool call."""
+_HEARTBEAT_DELAY_SECONDS = 15.0
+
+
+def make_progress_callback(
+    job_id: str,
+    *,
+    generating_message: str = "Generating response (this may take a minute or two)...",
+) -> ProgressCallback:
+    """Create a progress callback that updates a job's status message on each tool call.
+
+    Also schedules a delayed heartbeat: if no further tool calls arrive within
+    ``_HEARTBEAT_DELAY_SECONDS``, the status flips to ``generating_message``.
+    This prevents the UI from looking stuck during long text-generation phases
+    between tool calls (e.g. when the agent is emitting a 30 KB wireframe
+    HTML and no tool events fire for 30–90 seconds).
+
+    Callers can override ``generating_message`` to be task-specific
+    (e.g. "Generating wireframe HTML..." for design jobs).
+    """
+    pending: list[asyncio.Handle] = []
+
+    def _emit_heartbeat() -> None:
+        update_job(job_id, status_message=generating_message)
 
     def _on_tool_use(tool_name: str, tool_input: dict[str, Any]) -> None:
+        # New tool call — cancel any pending heartbeat so we don't overwrite
+        # a fresh "Reading X..." status with the generic generating message.
+        for handle in pending:
+            handle.cancel()
+        pending.clear()
+
         msg = _format_tool_progress(tool_name, tool_input)
         update_job(job_id, status_message=msg)
+
+        # Schedule the heartbeat. Skip silently if we're somehow called
+        # outside an event loop — the callback still works, it just won't
+        # publish the "still working" message.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        pending.append(loop.call_later(_HEARTBEAT_DELAY_SECONDS, _emit_heartbeat))
 
     return _on_tool_use
 

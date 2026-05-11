@@ -137,7 +137,10 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
             model=(designer_skill.model or None) if designer_skill else None,
             effort=(designer_skill.effort or None) if designer_skill else None,
         ),
-        progress_callback=make_progress_callback(job_id),
+        progress_callback=make_progress_callback(
+            job_id,
+            generating_message=("Generating wireframe HTML — this may take a minute or two..."),
+        ),
     )
 
     if not result.success:
