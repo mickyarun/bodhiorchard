@@ -13,7 +13,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791.svg)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com)
 
-[About](#about) | [Getting Started](#getting-started) | [Architecture](#architecture) | [AI Agents](#ai-agents) | [Claude Code](#claude-code-integration) | [API](#api) | [Screenshots](#screenshots) | [Roadmap](#roadmap) | [License](#license)
+[Getting Started](#getting-started) | [Architecture](#architecture) | [AI Agents](#ai-agents) | [Claude Code](#claude-code-integration) | [API](#api) | [Screenshots](#screenshots) | [Roadmap](#roadmap) | [License](#license)
 
 </div>
 
@@ -29,15 +29,9 @@
 
 ---
 
-## About
-
-Bodhiorchard&trade; is an independent open-source project developed and maintained by Arun Rajkumar in his personal capacity. It is not affiliated with, owned by, or developed on behalf of any employer or client.
-
----
-
 ## What is Bodhiorchard?
 
-Bodhiorchard is an **open-source, AI-first alternative to Agile project management tools** like Jira, Linear, and Shortcut. It runs locally on your laptop or Mac Mini with **11 specialized AI agents** that orchestrate the entire software development lifecycle — from feature intake to production deployment, learning, and continuous improvement. Today it's powered by [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware intelligence; [**Ollama**](https://ollama.com) (fully local/free), the **Anthropic** and **OpenAI** direct APIs, and **OpenAI Codex** are on the near-term roadmap.
+Bodhiorchard is an **open-source, AI-first alternative to Agile project management tools** like Jira, Linear, and Shortcut. It runs locally on your laptop or Mac Mini with **11 specialized AI agents** that orchestrate the entire software development lifecycle — from feature intake to production deployment, learning, and continuous improvement. It's powered today by [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware intelligence and the **Anthropic direct API** for lighter, non-codebase agent calls; [**Ollama**](https://ollama.com) (fully local/free), the **OpenAI** direct API, and **OpenAI Codex** are on the near-term roadmap.
 
 ### The Problem
 
@@ -263,12 +257,12 @@ More AI engines are in development and will appear as additional presets in the 
 
 | Engine | Status |
 |---|---|
+| **Anthropic** direct API (non-codebase agents) | Supported |
 | **Ollama** (fully local, free, air-gapped) | Planned |
-| **Anthropic** direct API (non-codebase agents) | Planned |
 | **OpenAI** API (GPT-4o/4/3.5) | Planned |
 | **OpenAI Codex** | In development |
 
-Until those land, Claude Code is the single supported engine for both codebase-aware and non-codebase agents.
+Claude Code remains the engine for codebase-aware agents; Anthropic's direct API now handles lighter non-codebase agent calls. The remaining engines unlock once their presets land in Settings.
 
 ### System Diagram
 
@@ -320,7 +314,7 @@ Until those land, Claude Code is the single supported engine for both codebase-a
 - Claude Code as the sole AI engine today (authenticated via API key in Full Docker, or host `claude login` in Hybrid)
 - Docker + Docker Compose on a local machine or Mac Mini
 - Cloudflare Tunnel for exposing webhooks to Slack / GitHub / internet
-- Ollama / direct Anthropic / OpenAI / Codex integrations planned (see *AI Configuration → Coming soon*)
+- Anthropic direct API live for non-codebase agents; Ollama / OpenAI / Codex integrations planned (see *AI Configuration → Coming soon*)
 
 ---
 
@@ -506,7 +500,7 @@ Long-running operations (repo scans, embedding builds, BUD generation) return `2
 | **Slack** | Supported | Feature intake, triage conversations, notifications (via Cloudflare Tunnel) |
 | **GitHub** | Supported | PR merge detection, branch status, deploy-key cloning of private repos |
 | **Ollama** | Coming soon | Local LLM inference — free, private, no API keys needed |
-| **Anthropic API** | Coming soon | Direct Claude API for non-codebase agents (bypasses Claude Code MCP) |
+| **Anthropic API** | Supported | Direct Claude API for non-codebase agents (bypasses Claude Code MCP) |
 | **OpenAI API** | Coming soon | Alternative cloud LLM provider |
 | **OpenAI Codex** | In development | Code-specialized agent tasks |
 | **Figma** | Planned | Design review capture via MCP |
@@ -602,5 +596,7 @@ Build well. Then go outside.
 If Bodhiorchard helps your team, give it a star and spread the word.
 
 <sub>&copy; 2025-2026 Arun Rajkumar. Bodhiorchard&trade; is a trademark of Arun Rajkumar.</sub>
+
+<sub>Independent open-source project — not affiliated with any employer or client.</sub>
 
 </div>
