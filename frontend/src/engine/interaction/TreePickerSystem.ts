@@ -27,6 +27,22 @@ export type TreeTooltipEnricher = (data: TreeNodeData, baseText: string) => stri
 /** Pixel radius within which a hover registers on a projected feature-branch point. */
 const FEATURE_HOVER_PX = 18
 
+/**
+ * True only when the entity AND every ancestor are enabled. PlayCanvas's
+ * Entity type doesn't expose `enabledInHierarchy` in its TS typings, so we
+ * walk the parent chain manually. Used to skip pick / hover for trees the
+ * dashboard's repo filter has hidden (their container or treeRoot is
+ * disabled, so descendants are effectively invisible).
+ */
+function isEffectivelyEnabled(entity: pc.Entity): boolean {
+  let node: pc.GraphNode | null = entity
+  while (node) {
+    if (!node.enabled) return false
+    node = node.parent
+  }
+  return true
+}
+
 export class TreePickerSystem {
   private lastHoveredId: string | null = null
   private lastHoverPos = { x: -1, y: -1 }
@@ -219,6 +235,11 @@ export class TreePickerSystem {
 
     for (const entity of pickableEntities) {
       if (!entity.tags.has('pickable')) continue
+      // Skip user-hidden trees + their feature branches. Walks the parent
+      // chain via isEffectivelyEnabled, so disabling the container or the
+      // Tree3DSystem treeRoot at setRepoVisibility time short-circuits
+      // both picking AND hover here.
+      if (!isEffectivelyEnabled(entity)) continue
       const data = getTreeData(entity)
       if (data?.type !== 'tree_feature') continue
 
@@ -257,6 +278,11 @@ export class TreePickerSystem {
 
     for (const entity of pickableEntities) {
       if (!entity.tags.has('pickable')) continue
+      // Skip user-hidden trees + their feature branches. Walks the parent
+      // chain via isEffectivelyEnabled, so disabling the container or the
+      // Tree3DSystem treeRoot at setRepoVisibility time short-circuits
+      // both picking AND hover here.
+      if (!isEffectivelyEnabled(entity)) continue
       let pos = entity.getPosition()
       const data = getTreeData(entity)
       // Houses are 4×4 tile buildings rotated 90°. The entity origin is at
