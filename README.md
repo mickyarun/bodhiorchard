@@ -2,9 +2,9 @@
 
 # Bodhiorchard&trade;
 
-### The open-source, AI-native dev-ops platform
+### Agent-Driven Development — the modern alternative to sprint, scrum, and agile
 
-**Replace Agile ceremonies with intelligent agents. From conversation to production — every phase powered by 12 agents working alongside humans.**
+**The open-source reference implementation. From conversation to production, every phase powered by 12 intelligent agents working alongside humans.**
 
 Self-hosted on your hardware. Your data stays local. Inference engine is your choice — Claude Code today, Ollama and OpenAI next.
 
@@ -33,7 +33,7 @@ Self-hosted on your hardware. Your data stays local. Inference engine is your ch
 
 ## What is Bodhiorchard?
 
-Bodhiorchard is an **open-source agentic SDLC platform** — a self-hosted alternative to Agile project-management tools like Jira, Linear, and Shortcut. Twelve specialised AI agents orchestrate the entire software development lifecycle (from feature intake through production deployment to retrospective and continuous learning), running on your hardware so the data plane never leaves your machine. Today the agents run on [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware reasoning and the **Anthropic direct API** for lightweight non-codebase calls; [**Ollama**](https://ollama.com) (fully air-gapped), the **OpenAI** direct API, and **OpenAI Codex** are on the near-term roadmap.
+Bodhiorchard is the **open-source reference implementation of Agent-Driven Development** — a modern way to build software that replaces sprint planning, scrum ceremonies, and agile ritual with twelve specialised AI agents working alongside humans across every phase of the lifecycle. The methodology drops *what was meant to help but became the work* (story points, planning poker, status meetings, retrospective theatre) and keeps *what actually matters* (clear specs, codebase context, accurate cycle-time predictions, real-time learning). Bodhiorchard runs self-hosted on your hardware so the data plane never leaves your machine; the agents run today on [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware reasoning and the **Anthropic direct API** for lightweight non-codebase calls, with [**Ollama**](https://ollama.com) (fully air-gapped), the **OpenAI** direct API, and **OpenAI Codex** on the near-term roadmap.
 
 ### The Problem
 
@@ -43,7 +43,7 @@ Traditional Agile tools create busywork: manual ticket creation, estimation poke
 
 Bodhiorchard replaces human busywork with AI automation while keeping humans in control of decisions that matter:
 
-| Phase | Agile / Scrum | Bodhiorchard |
+| Phase | Agile / Scrum | Agent-Driven Development (Bodhiorchard) |
 |---|---|---|
 | **Intake** | Ticket in Jira, manual triage, sprint planning | Chat message → Triage Agent analyses, finds duplicates, estimates capacity |
 | **Estimation** | Story points, planning poker, team debate | AI-PERT + Monte Carlo simulation — per-phase dates with P50 / P70 / P85 confidence, factoring developer skill profiles, backlog depth, and workload |
@@ -63,7 +63,7 @@ Bodhiorchard replaces human busywork with AI automation while keeping humans in 
 
 ## The Manifesto
 
-Eight principles, deliberately echoing the Agile Manifesto's "X over Y" structure — these are what Bodhiorchard chooses when the trade-off is real.
+Agent-Driven Development has its own manifesto. Eight principles, deliberately echoing the Agile Manifesto's "X over Y" structure — these are what an agent-driven team chooses when the trade-off is real.
 
 | We value… | …over |
 |---|---|
@@ -623,9 +623,13 @@ Long-running operations (repo scans, embedding builds, BUD generation) return `2
 
 ## FAQ
 
+### What is Agent-Driven Development?
+
+**Agent-Driven Development (ADD)** is a way of building software where specialised AI agents — not humans running status meetings — drive every phase of the lifecycle: intake, spec, design, tech architecture, implementation, testing, UAT, deployment, retrospective. Humans review, decide, and steer; agents do the drafting, the cross-referencing, the routine analysis, and the busywork. ADD positions itself in the same slot Agile occupied in 2001: a methodology that absorbs the lessons of the previous era (Waterfall's rigidity for Agile; Agile's ceremony overhead for ADD) and reorganises the work around the new capabilities available — in this case, capable AI agents. Bodhiorchard is the open-source reference implementation; the methodology itself is described in detail at [bodhiorchard.ai/methodology](https://bodhiorchard.ai/methodology) and is free to adopt with or without Bodhiorchard.
+
 ### Is Bodhiorchard a self-hosted Jira alternative?
 
-Yes — for the workflow layer (intake → spec → design → development → testing → deploy → retrospective). Bodhiorchard is the **open-source agentic SDLC platform** that sits between IDE-side AI coding assistants (Tabby, Continue, Cursor) and traditional PM tools (Jira, Linear, Plane). It is especially relevant to teams looking for an **Atlassian DC alternative** — Atlassian is sunsetting new self-hosted Jira licences in March 2026 with full shutdown in 2029.
+Yes — for the workflow layer (intake → spec → design → tech arch → development → testing → UAT → deploy → retrospective). Bodhiorchard is the open-source reference implementation of Agent-Driven Development, which sits between IDE-side AI coding assistants (Tabby, Continue, Cursor) and traditional PM tools (Jira, Linear, Plane). It is especially relevant to teams looking for an **Atlassian DC alternative** — Atlassian is sunsetting new self-hosted Jira licences in March 2026 with full shutdown in 2029.
 
 ### Does my code leave my machine?
 
