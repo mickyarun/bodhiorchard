@@ -265,6 +265,16 @@
         font-family: var(--mono); font-weight: 600; font-size: 0.85rem;
         padding: 0.15rem 0.6rem; border-radius: 4px;
       }
+      .try-it {
+        margin-top: 2rem; text-align: center;
+        font-size: 0.95rem;
+        color: var(--fg-dim);
+      }
+      .try-it code {
+        background: rgba(212, 168, 67, 0.1);
+        color: var(--secondary);
+        border: 0;
+      }
 
       /* ─── Manifesto (mirrors methodology page primary/secondary borders) ─ */
       .manifesto { padding-top: 4rem; padding-bottom: 4rem; }
@@ -459,6 +469,9 @@
             <p>Implementation agent + your devs land the PR. On deploy, the Learning agent compares estimate vs actual and auto-links any bugs back to the originating BUD.</p>
           </div>
         </div>
+        <p class="try-it">
+          Want to see this end-to-end before wiring up your own codebase? Clone the repo and try the <a href="https://github.com/mickyarun/bodhiorchard/tree/main/examples"><code>examples/</code> TaskFlow sample</a> — three small repos with realistic git history that exercise scan, skill profiling, and BUD generation in one rescan.
+        </p>
       </div>
     </section>
 

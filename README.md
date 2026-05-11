@@ -516,6 +516,36 @@ All three host processes run in a single terminal with color-coded logs. Ctrl-C 
 
 The database is the same shape either way, so you can swap modes against the same data. Stop the current mode first (`Ctrl-C` + `npm run stop` for Hybrid, `docker compose down` for Full Docker), then start the other. The stored `claude_auth_mode` on your organization determines which path agent runs take — update it in Settings when you switch.
 
+### Try the included examples
+
+Bodhiorchard ships with **TaskFlow** — three deliberately wired-together sample repos (`taskflow-api`, `taskflow-worker`, `taskflow-web`) under [`examples/`](examples/). They share four features (Auth, Tasks, Notifications, Billing) implemented across all three repos by four fictional developers, so the very first scan exercises cross-repo feature detection, skill profiling, and BUD generation without you needing to wire up your own codebase.
+
+**1. Seed the git history** (one-time, ~30s — creates four authors with realistic commit timelines):
+
+```bash
+cd examples
+bash setup-git-history.sh
+```
+
+**2. In the Bodhiorchard UI, add the three repos under Settings → Repositories:**
+
+```
+/absolute/path/to/examples/taskflow-api
+/absolute/path/to/examples/taskflow-worker
+/absolute/path/to/examples/taskflow-web
+```
+
+Map each to its `main` branch.
+
+**3. Click "Full Rescan"** in the Repositories settings. The scan finishes in ~1–2 minutes on a Mac Mini and you should see:
+
+- **~4–6 cross-repo features** in the Feature Registry (Authentication, Tasks, Notifications, Billing, Reminders) — each one linked to the repos that actually implement it, not three separate copies per repo.
+- **Skill profiles for 4 developers** under Settings → Developers, with per-module scores derived from real git history.
+- **A populated Living Tree dashboard** — one limb per repo, branches per feature, leaves coloured by git freshness.
+- **A pre-written `BUD-001-tech-spec.md`** in `examples/` you can paste into a new BUD via the UI to watch a realistic spec drive Tech Plan → Implementation.
+
+The TaskFlow repos are intentionally small (Vue 3 frontend, FastAPI + worker backends; ~6 commits per author) so the whole loop completes fast enough to demo. Read [`examples/README.md`](examples/README.md) for the full feature map, SQL verification queries, and author-to-skill mapping.
+
 ### Environment Variables
 
 | Variable | Description | Default |
