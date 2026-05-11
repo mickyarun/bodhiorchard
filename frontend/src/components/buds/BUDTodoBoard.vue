@@ -18,6 +18,7 @@
 import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useBUDTodosStore } from '@/stores/bud_todos'
 import { useAuthStore } from '@/stores/auth'
+import { subscribe, unsubscribe } from '@/services/socket'
 import type { BUDTodo } from '@/types'
 
 const props = defineProps<{ budId: string }>()
@@ -41,9 +42,46 @@ async function reload() {
   if (props.budId) await todosStore.fetchTodos(props.budId)
 }
 
-onMounted(reload)
-watch(() => props.budId, reload)
-onUnmounted(() => todosStore.reset())
+// Live updates: refetch when the backend fans out `todo:{budId}` events
+// (claim, cascade from a top-level reassignment, future status pushes).
+let currentTopic: string | null = null
+let currentHandler: ((data: unknown) => void) | null = null
+
+function bindSocket(budId: string) {
+  if (currentTopic && currentHandler) {
+    unsubscribe(currentTopic, currentHandler)
+  }
+  if (!budId) {
+    currentTopic = null
+    currentHandler = null
+    return
+  }
+  const topic = `todo:${budId}`
+  const handler = () => {
+    void todosStore.handleRemoteEvent(budId)
+  }
+  subscribe(topic, handler)
+  currentTopic = topic
+  currentHandler = handler
+}
+
+onMounted(() => {
+  void reload()
+  bindSocket(props.budId)
+})
+watch(
+  () => props.budId,
+  (id) => {
+    void reload()
+    bindSocket(id)
+  },
+)
+onUnmounted(() => {
+  if (currentTopic && currentHandler) {
+    unsubscribe(currentTopic, currentHandler)
+  }
+  todosStore.reset()
+})
 
 async function handleClaim(todo: BUDTodo) {
   if (todo.isCheckpoint) return

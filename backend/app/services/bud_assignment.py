@@ -28,6 +28,10 @@ from app.models.user import User, UserRole
 from app.repositories.bud import BUDRepository
 from app.repositories.user import UserRepository
 from app.services.bud_timeline import record_event
+from app.services.todo_assignment import (
+    assign_all_todos_to_lead,
+    cascade_assignee_to_todos,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -225,8 +229,6 @@ async def _assign_todos_to_lead_if_development(
     if new_status != BUDStatus.DEVELOPMENT:
         return
     try:
-        from app.services.todo_assignment import assign_all_todos_to_lead
-
         await assign_all_todos_to_lead(db, org_id, bud_id, lead_user_id)
     except Exception:
         logger.warning("todo_lead_assignment_failed", bud_id=str(bud_id))
@@ -240,7 +242,14 @@ async def assign_bud(
     actor_id: uuid.UUID | None,
     actor_name: str | None,
 ) -> None:
-    """Manually assign a BUD. Records timeline event."""
+    """Manually assign a BUD. Records timeline event.
+
+    During DEVELOPMENT, also cascades the new assignee onto every
+    non-checkpoint TODO — UNLESS any TODO is already in_progress,
+    completed, or has been taken over via ``takeover_todo``. In that
+    case the cascade is skipped to preserve developer claims, and the
+    top-level reassignment still goes through for visibility.
+    """
     assignee = await db.get(User, assignee_id)
     bud.assignee_id = assignee_id
     await record_event(
@@ -256,6 +265,14 @@ async def assign_bud(
             "method": "manual",
         },
     )
+
+    if bud.status == BUDStatus.DEVELOPMENT:
+        # The cascade returns -1 (and is a no-op) when any TODO has been
+        # claimed or progressed — no exception, so no try/except needed.
+        # A genuine DB error must propagate so the outer transaction rolls
+        # back; silently logging would leave the BUD assignee changed but
+        # the TODOs stale, which is worse than failing the whole request.
+        await cascade_assignee_to_todos(db, org_id, bud.id, assignee_id)
 
 
 async def unassign_bud(

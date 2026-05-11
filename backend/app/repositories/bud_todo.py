@@ -17,7 +17,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -39,6 +39,42 @@ class BUDTodoRepository(BaseRepository[BUDTodo]):
                 BUDTodo.bud_id == bud_id,
                 BUDTodo.assignee_id.is_(None),
                 BUDTodo.status == BUDTodoStatus.PENDING.value,
+                BUDTodo.is_checkpoint.is_(False),
+            )
+            .order_by(BUDTodo.sequence.asc())
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def has_active_or_taken_todos(self, bud_id: uuid.UUID) -> bool:
+        """True if any non-checkpoint TODO is in_progress, completed, or taken over.
+
+        Used to gate top-level BUD reassignment: when a developer has already
+        claimed (``taken_at IS NOT NULL``) or progressed any TODO, mass-
+        reassigning the BUD's TODOs would clobber their work, so the cascade
+        is skipped. Checkpoints are excluded — they're inert gating rows.
+        """
+        stmt = self._scoped(
+            select(func.count(BUDTodo.id)).where(
+                BUDTodo.bud_id == bud_id,
+                BUDTodo.is_checkpoint.is_(False),
+                or_(
+                    BUDTodo.status.in_(
+                        [BUDTodoStatus.IN_PROGRESS.value, BUDTodoStatus.COMPLETED.value]
+                    ),
+                    BUDTodo.taken_at.is_not(None),
+                ),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return int(result.scalar_one()) > 0
+
+    async def list_non_checkpoint_for_bud(self, bud_id: uuid.UUID) -> list[BUDTodo]:
+        """All non-checkpoint TODOs for a BUD, ordered by sequence."""
+        stmt = self._scoped(
+            select(BUDTodo)
+            .where(
+                BUDTodo.bud_id == bud_id,
                 BUDTodo.is_checkpoint.is_(False),
             )
             .order_by(BUDTodo.sequence.asc())
