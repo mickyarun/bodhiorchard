@@ -41,16 +41,40 @@ Traditional Agile tools create busywork: manual ticket creation, estimation poke
 
 Bodhiorchard replaces human busywork with AI automation while keeping humans in control of decisions that matter:
 
-| What Changes | Agile / Jira | Bodhiorchard |
+| Phase | Agile / Scrum | Bodhiorchard |
 |---|---|---|
-| **Feature Intake** | Manual ticket creation, sprint planning | Slack message triggers AI triage with duplicate detection and priority scoring |
-| **Estimation** | Story points, planning poker | AI predicts cycle time from historical data (85% confidence) |
-| **Specification** | PM writes PRD manually | BUD Agent generates spec with codebase context, enterprise rules, prior art |
-| **Design** | Designer hands off static specs | Design Agent scopes components, captures Figma reviews via MCP |
-| **Development** | Dev picks up ticket, starts from scratch | AI implements from tech plan, dev does code review |
-| **Testing** | QA writes test cases manually | Auto-generated test plans (unit, integration, e2e, perf, security, UAT) |
-| **Deployment** | Manual status updates | Webhook-driven status tracking, auto-notifications |
-| **Learning** | Post-mortems after incidents | Continuous learning after every deployment — patterns, retrospectives, skill growth |
+| **Intake** | Ticket in Jira, manual triage, sprint planning | Chat message → Triage Agent analyses, finds duplicates, estimates capacity |
+| **Estimation** | Story points, planning poker, team debate | AI-PERT + Monte Carlo simulation — per-phase dates with P50 / P70 / P85 confidence, factoring developer skill profiles, backlog depth, and workload |
+| **Specification** | PM writes BUD manually, reviews in meetings | BUD Agent drafts spec with codebase context, enterprise rules, prior art |
+| **Design** | Designer creates in Figma, hands off specs | AI generates wireframes; Designer reviews, edits, and advances to Tech Architecture |
+| **Tech Arch** | Architect writes design doc, reviews in meetings | AI generates tech plan; Tech Lead reviews; Smart Assignment Agent suggests developer |
+| **Development** | Dev picks up ticket, starts from scratch | Best-fit dev assigned by AI, implements from tech plan, human reviews code |
+| **Testing** | QA writes test cases manually, runs regression | Auto-generated test plan (unit, integration, e2e, perf, security, UAT) |
+| **QA & UAT** | QA writes test cases, manual handoff | QA approves / refines automation plan, executes manual tests, signs off for UAT |
+| **Deployment** | Release train, manual status updates | Status Agent auto-detects PR merges; BUD becomes a Feature on deploy |
+| **Bug Mgmt** | Manual triage, reassign in standup | External bugs reopen Features, auto-classified, restart flow from triage |
+| **Knowledge** | Confluence pages go stale, tribal knowledge | Learning Agent captures patterns; knowledge auto-syncs from code |
+| **Skills** | Manager intuition, annual reviews | Skill Agent rebuilds daily from git / BUD / bug history, recommends assignments |
+| **Retrospective** | Biweekly meeting, action items forgotten | Learning Agent auto-generates retrospective on every deployment |
+
+---
+
+## The Manifesto
+
+Eight principles, deliberately echoing the Agile Manifesto's "X over Y" structure — these are what Bodhiorchard chooses when the trade-off is real.
+
+| We value… | …over |
+|---|---|
+| **AI-generated first drafts** | blank-page paralysis |
+| **Cycle time predictions** | story points & planning poker |
+| **Continuous learning** | post-mortems after the damage |
+| **Human decisions** | human busywork |
+| **Living knowledge** | stale Confluence pages |
+| **BUD as single source of truth** | scattered tickets & docs |
+| **Skills that grow with the team** | static role assignments |
+| **Auto-healing quality loops** | manual bug triage |
+
+> The full methodology — phase-by-phase flow, AI-vs-Human role split, knowledge architecture — lives at **[bodhiorchard.ai/methodology](https://bodhiorchard.ai/methodology)**.
 
 ---
 
@@ -82,12 +106,55 @@ A **3D interactive visualization** of your organization rendered as a living tre
 
 Hover for developer details, click for drill-down, watch the tree grow as your codebase evolves.
 
+### AI-PERT + Monte Carlo Estimation
+
+Story points and planning poker replaced with probabilistic, per-phase delivery dates.
+
+- AI generates optimistic, likely, and pessimistic estimates (PERT) for each BUD phase.
+- **10,000 Monte Carlo simulations** produce **P50 / P70 / P85** confidence dates.
+- Estimates factor in developer skill profiles, current backlog depth, and team workload.
+
+> **Example prediction.** *Feature:* Notification Redesign (complexity 3/5). *Developer:* Alice (backend 0.92, frontend 0.35). *Go-live:* 70% by Apr 25 · 85% by May 2.
+
+### Smart Quality Loops
+
+Auto-healing bug management that prevents quality debt from accumulating.
+
+- **Bug threshold** — complexity × multiplier, configurable per org; when exceeded, auto-reassignment fires.
+- **Auto-reassignment** — original dev moves to bug review, QA rotates to the next waiting BUD.
+- **Feature reopening** — production bugs reopen the originating Feature and restart the flow from triage.
+- **Auto-classification** — each bug is tagged "missed feature" vs "development bug", driving different fix paths.
+- **Knowledge capture** — every fix adds to the knowledge base so the same bug class doesn't recur.
+
+### Backlog Intelligence
+
+Smart backlog management driven by data, not gut feelings.
+
+- **Capacity-aware triage** deprioritises or defers items based on real-time team capacity.
+- **Dynamic reassignment** shuffles work as business demand shifts.
+- **Customer priority scoring** — ARR + severity + tier drives ordering automatically.
+- **Best-fit developer** recommendations from the Skill Agent.
+- **Real-time utilisation** — per-developer capacity tracking keeps workloads balanced.
+
+### Knowledge That Grows — 4-Layer Architecture
+
+A 4-layer knowledge architecture replaces stale wikis with living, auto-synced knowledge.
+
+| Layer | Source | Sync cadence |
+|---|---|---|
+| **1. Git repos** | Source code + per-repo `CLAUDE.md` | Every 15 minutes |
+| **2. Agent skills** | Org standards, design guidelines, API patterns | On change |
+| **3. Central DB** | BUDs, enterprise rules, architecture decisions | Real-time |
+| **4. Vector search** | Semantic search across all of the above | Auto-indexed |
+
+**Why this beats Confluence:** auto-synced from source (not hand-maintained), semantically searchable (not keyword search), always current (daily staleness detection), and integrated into every agent prompt so agents always have the latest context.
+
 ### Developer Skill Profiling
 
 Automatic skill tracking from git history — no manual profile updates:
 
 - Per-developer, per-module expertise scores (0-1.0)
-- Bus factor alerts (modules touched by only one person)
+- **Bus factor alerts** — modules touched by only one person, flagging knowledge concentration risk
 - Intelligent task routing based on expertise match + capacity
 - Daily profile rebuilds from git commits, BUD assignments, and bug fixes
 
@@ -115,9 +182,9 @@ library — tree-sitter parsing → NetworkX graph → Leiden community detectio
 - Semantic search across all indexed code and documentation
 - Impact / blast-radius queries via the `code_*` MCP tool group
 
-### Claude Code-Native (MCP)
+### AI-engine-agnostic with first-class MCP
 
-Bodhiorchard exposes **10 MCP tools** to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other MCP-compatible clients — see [AI Engines](#ai-engines) below for the full tool list, dual-auth modes, and registration instructions.
+Bodhiorchard exposes **10 MCP tools** to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other MCP-compatible clients. Today's flagship engine is Claude Code; the Anthropic direct API handles lightweight non-codebase agents; Ollama, OpenAI, and OpenAI Codex are next. See [AI Engines](#ai-engines) for the full breakdown, auth modes, and the `~/.claude.json` registration snippet.
 
 ### Enterprise-Grade Security
 
@@ -126,6 +193,24 @@ Bodhiorchard exposes **10 MCP tools** to [Claude Code](https://docs.anthropic.co
 - **AES encryption at rest** for GitHub PATs, Slack tokens, and secrets
 - **JWT authentication** with refresh tokens
 - **Audit trail** — every agent action logged with full context
+
+### What AI handles vs what humans handle
+
+The point of the agents is not to replace human judgement — it's to absorb the busywork so humans can focus on the calls that actually matter.
+
+| 🤖 AI handles | 🧑 Humans handle |
+|---|---|
+| Intake analysis & duplicate detection | Review and advance decisions at every phase |
+| BUD drafting with codebase context | Code review & architecture choices |
+| Design scope & tech plan generation | Visual design in preferred tools |
+| Test case generation (automation + manual) | Business trade-offs & prioritisation |
+| Bug-to-BUD linking & threshold monitoring | Quality validation & UAT sign-off |
+| Status tracking & stakeholder updates | Reassignment review & override |
+| Pattern recognition & retrospectives | Knowledge curation & enterprise rules |
+| Skill profiling & assignment recommendations |  |
+| Knowledge sync (code → docs → vector DB) |  |
+| AI-PERT estimation with Monte Carlo intervals |  |
+| Smart developer assignment based on skills & capacity |  |
 
 ---
 
