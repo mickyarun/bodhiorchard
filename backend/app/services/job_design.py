@@ -19,16 +19,17 @@ Handles:
 - Design extract job: extracts design systems from tracked repositories
 """
 
-import re
 import uuid as uuid_mod
 from pathlib import Path
 from typing import Any
 
 import structlog
 
+from app.database import AsyncSessionLocal
+from app.models.bud import BUDDesignStatus
+from app.repositories.bud import BUDDesignRepository
 from app.schemas.jobs import DesignAgentJobPayload, DesignExtractJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
-from app.services.chat_persistence import persist_design
 from app.services.chat_prompts import build_design_prompt
 from app.services.job_chat import _parse_chat_response
 from app.services.job_queue import update_job
@@ -66,16 +67,19 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
             f"Focus exclusively on this repo's functionality and UI patterns.\n"
         )
 
-    # Prefer MCP-based design system access
-    design_tools = ["list_design_systems", "get_design_system"]
+    # Design tools: read existing wireframe, write iterated result, browse system.
+    design_tools = [
+        "list_design_systems",
+        "get_design_system",
+        "get_bud_designs",
+        "write_bud_design",
+    ]
     mcp_config = build_mcp_config(payload.org_id, tool_names=design_tools)
-    use_mcp = mcp_config is not None
 
-    prompt, ds_temp_file = await build_design_prompt(
+    prompt = await build_design_prompt(
         bud_ref=bud_ref,
         title=payload.title,
         org_id=payload.org_id,
-        current_content="",
         message=(
             f"Generate an initial wireframe for {bud_ref}: {payload.title}.\n\n"
             "## BUD Requirements\n\n"
@@ -85,10 +89,9 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
             "architecture, and user flow."
             f"{scope_note}"
         ),
-        repo_id=repo_id,
-        use_mcp=use_mcp,
-        repo_name=repo_name,
         bud_id=payload.bud_id,
+        repo_id=repo_id,
+        repo_name=repo_name,
     )
 
     update_job(
@@ -124,24 +127,18 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         bud_title=payload.title,
     )
 
-    sys_files = [str(ds_temp_file)] if ds_temp_file else []
-    try:
-        result = await run_claude_code(
-            prompt=prompt,
-            working_dir=repo_path,
-            config=ClaudeRunnerConfig(
-                max_turns=designer_skill.max_turns if designer_skill else 0,
-                timeout_seconds=900,
-                system_prompt_files=sys_files,
-                mcp=mcp_config,
-                model=(designer_skill.model or None) if designer_skill else None,
-                effort=(designer_skill.effort or None) if designer_skill else None,
-            ),
-            progress_callback=make_progress_callback(job_id),
-        )
-    finally:
-        if ds_temp_file is not None:
-            ds_temp_file.unlink(missing_ok=True)
+    result = await run_claude_code(
+        prompt=prompt,
+        working_dir=repo_path,
+        config=ClaudeRunnerConfig(
+            max_turns=designer_skill.max_turns if designer_skill else 0,
+            timeout_seconds=900,
+            mcp=mcp_config,
+            model=(designer_skill.model or None) if designer_skill else None,
+            effort=(designer_skill.effort or None) if designer_skill else None,
+        ),
+        progress_callback=make_progress_callback(job_id),
+    )
 
     if not result.success:
         await log_agent_activity(
@@ -168,72 +165,55 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         )
         return
 
-    update_job(job_id, status_message="Saving wireframe...", progress_pct=80)
+    update_job(job_id, status_message="Verifying wireframe...", progress_pct=80)
 
-    # Try to read wireframe from the expected file path
-    wireframe_html = None
+    # The agent persists its HTML via the ``write_bud_design`` MCP tool —
+    # we only check the DB to confirm the row was set to READY. The reply
+    # text is best-effort: parse the JSON response if present, otherwise
+    # fall back to a generic message (a contaminated stdout no longer
+    # blocks persistence).
+    wireframe_saved = await _design_was_saved(design_id, payload.org_id) if design_id else False
+
     reply = "Design wireframe generated."
-    rel_path: str | None = None
-    expected_path = (
-        Path(repo_path) / ".bodhiorchard" / "wireframes" / bud_ref / "wireframe.html"
-        if repo_path
-        else None
-    )
+    response = _parse_chat_response(result.output)
+    if response and response.get("reply"):
+        reply = response["reply"]
 
-    if expected_path and expected_path.exists():
-        wireframe_html = expected_path.read_text(encoding="utf-8")
-        rel_path = f".bodhiorchard/wireframes/{bud_ref}/wireframe.html"
-        # Try to get reply from Claude's JSON response
-        response = _parse_chat_response(result.output)
-        if response and response.get("reply"):
-            reply = response["reply"]
-    else:
-        # Fallback: try parsing from output text
-        response = _parse_chat_response(result.output)
-        if response:
-            wireframe_html = response.get("updated_content")
-            reply = response.get("reply", reply)
-        else:
-            wireframe_html = _extract_html_from_output(result.output)
-
-    # Persist to bud_designs table
-    if wireframe_html and design_id:
-        await persist_design(design_id, payload.org_id, wireframe_html, design_path=rel_path)
-    elif design_id:
+    if not wireframe_saved and design_id:
         await _update_design_status(design_id, payload.org_id, "failed")
         logger.warning(
-            "design_no_html_extracted",
+            "design_no_mcp_write",
             design_id=design_id,
             output_preview=result.output[:200],
         )
 
-    final_state = JobState.COMPLETED if wireframe_html else JobState.FAILED
-    final_error = None if wireframe_html else "AI returned text instead of HTML wireframe"
+    final_state = JobState.COMPLETED if wireframe_saved else JobState.FAILED
+    final_error = None if wireframe_saved else "Agent did not call write_bud_design MCP"
 
-    _final_event = "skill_completed" if wireframe_html else "skill_failed"
+    _final_event = "skill_completed" if wireframe_saved else "skill_failed"
     await log_agent_activity(
         None,
         org_id=_org_uuid,
         event_type=_final_event,
         skill_slug="designer",
-        message=f"Designer {'completed' if wireframe_html else 'failed'} for {bud_ref}",
+        message=f"Designer {'completed' if wireframe_saved else 'failed'} for {bud_ref}",
         bud_id=uuid_mod.UUID(payload.bud_id),
         skill_id=_skill_uuid,
         task_id=_task_uuid,
         repo_id=_repo_uuid,
-        metadata_={"design_id": design_id, "repo_id": repo_id} if wireframe_html else None,
+        metadata_={"design_id": design_id, "repo_id": repo_id} if wireframe_saved else None,
         bud_number=payload.bud_number,
         bud_title=payload.title,
     )
 
     # Re-estimate with design complexity context
-    if wireframe_html:
+    if wireframe_saved:
         try:
             await _estimate_after_design(payload.bud_id, payload.org_id)
         except Exception:
             logger.warning("design_estimation_failed", bud_id=payload.bud_id)
 
-    if wireframe_html:
+    if wireframe_saved:
         event_type = "design_generated"
         detail = {"design_id": design_id, "repo_id": repo_id}
     else:
@@ -256,7 +236,7 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
             "reply": reply,
             "design_id": design_id,
         },
-        status_message="Design wireframe ready" if wireframe_html else "No wireframe generated",
+        status_message="Design wireframe ready" if wireframe_saved else "No wireframe generated",
         progress_pct=100,
         error=final_error,
     )
@@ -397,60 +377,20 @@ async def handle_design_extract_job(job_id: str, raw_payload: dict[str, Any]) ->
 # ── Design helpers ────────────────────────────────────────────────
 
 
-def _extract_html_from_output(output: str) -> str | None:
-    """Extract an HTML document from mixed AI output.
+async def _design_was_saved(design_id: str, org_id: str) -> bool:
+    """Check whether the agent's ``write_bud_design`` MCP call landed.
 
-    Claude often wraps wireframes in narrative text or markdown code fences.
-    This tries multiple strategies to isolate just the HTML:
-
-    1. Markdown ```html code fence (most common with explanatory output).
-    2. <!DOCTYPE html>...</html> or <html>...</html> block.
-    3. HTML fragment starting with <meta>, <head>, <link>, or <style>
-       (Claude sometimes omits the <html> wrapper).
-    4. Entire output if it starts with a tag and contains closing tags.
-
-    Args:
-        output: Raw AI text output that may contain embedded HTML.
-
-    Returns:
-        Extracted HTML string, or None if no HTML found.
+    Returns True iff the row is in READY state with non-empty HTML —
+    i.e. the agent finished its iteration cleanly. Used in place of
+    stdout-JSON parsing, which is fragile when learning-mode prefixes
+    or other prose leak into the subprocess output.
     """
-    text = output.strip()
-
-    # 1. Extract from ```html code fence
-    html_fence = re.search(r"```html\s*\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
-    if html_fence:
-        return html_fence.group(1).strip()
-
-    # 2. Extract <!DOCTYPE html>...</html> or <html...>...</html>
-    doctype_match = re.search(
-        r"(<!DOCTYPE\s+html[^>]*>.*?</html>)", text, re.DOTALL | re.IGNORECASE
-    )
-    if doctype_match:
-        return doctype_match.group(1).strip()
-
-    html_tag_match = re.search(r"(<html[^>]*>.*?</html>)", text, re.DOTALL | re.IGNORECASE)
-    if html_tag_match:
-        return html_tag_match.group(1).strip()
-
-    # 3. HTML fragment embedded in prose
-    fragment_match = re.search(
-        r"(<!DOCTYPE\s+html|<html|<head|<meta\s|<link\s|<style)",
-        text,
-        re.IGNORECASE,
-    )
-    if fragment_match:
-        html_start = fragment_match.start()
-        extracted = text[html_start:].strip()
-        # Only accept if it has substantial HTML content (not just a stray tag in prose)
-        if len(extracted) > 200:
-            return extracted
-
-    # 4. Entire output if it starts with a tag and contains closing markers
-    if text.startswith("<") and ("</html>" in text.lower() or "</body>" in text.lower()):
-        return text
-
-    return None
+    async with AsyncSessionLocal() as db:
+        repo = BUDDesignRepository(db, org_id=uuid_mod.UUID(org_id))
+        design = await repo.get_by_id(uuid_mod.UUID(design_id))
+        if design is None:
+            return False
+        return design.status == BUDDesignStatus.READY and bool(design.design_html)
 
 
 async def _update_design_status(

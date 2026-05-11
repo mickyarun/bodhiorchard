@@ -178,7 +178,6 @@ class BUDDesign(BaseModel):
         UUID(as_uuid=True), ForeignKey("tracked_repositories.id"), nullable=True
     )
     design_html: Mapped[str | None] = mapped_column(Text, nullable=True)
-    design_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[BUDDesignStatus] = mapped_column(
         String(20), nullable=False, default=BUDDesignStatus.PENDING

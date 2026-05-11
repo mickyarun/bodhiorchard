@@ -83,7 +83,6 @@ class BUDDesignRead(BaseModel):
     repo_id: uuid.UUID | None = None
     repo_name: str | None = None
     design_html: str | None = None
-    design_path: str | None = None
     notes: str | None = None
     status: str
     job_id: str | None = None

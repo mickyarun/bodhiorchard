@@ -173,13 +173,7 @@ async def build_tech_arch_prompt(
     repo_pairs = [(path, name) for _, path, name in repo_triples]
     working_dir = repo_triples[0][1] if repo_triples else None
 
-    repo_id_to_name: dict[uuid_mod.UUID, str] = {}
-    repo_id_to_path: dict[uuid_mod.UUID, str] = {}
-    for rid, path, name in repo_triples:
-        repo_id_to_name[rid] = name
-        repo_id_to_path[rid] = path
-
-    design_context = _build_design_context(bud, repo_id_to_name, repo_id_to_path)
+    design_directive = _build_design_mcp_directive(bud, purpose="planning")
 
     ds_repo = DesignSystemRefRepository(db, org_id=org_id)
     has_design_system = bool(await ds_repo.get_default())
@@ -202,8 +196,8 @@ async def build_tech_arch_prompt(
         f"Generate a concise tech spec for {bud_ref}: {bud.title}.\n\n"
         f"## Requirements\n\n{bud.requirements_md or ''}\n"
     )
-    if design_context:
-        prompt += f"\n## Design Wireframes & Notes\n{design_context}\n"
+    if design_directive:
+        prompt += design_directive
     if has_design_system:
         prompt += (
             "\n## Design System\n\n"
@@ -215,7 +209,7 @@ async def build_tech_arch_prompt(
     if repo_context:
         prompt += repo_context
 
-    has_designs = bool(design_context or has_design_system)
+    has_designs = bool(design_directive or has_design_system)
     prompt += _build_tech_arch_instructions(bud, repo_pairs, has_designs)
 
     return prompt, working_dir
@@ -264,8 +258,7 @@ async def build_code_review_prompt(
 
     repo_list = "\n".join(repo_sections)
 
-    repo_path_map = {r.get("repo_id", ""): r.get("repo_path", "") for r in confirmed_repos}
-    design_refs = _build_design_refs(bud, repo_path_map)
+    design_refs = _build_design_mcp_directive(bud, purpose="reviewing")
 
     ctx = await load_bud_agent_context(db, bud_id=bud.id, org_id=org_id)
     linked_section = format_code_locations_section(
@@ -387,8 +380,7 @@ async def build_testing_prompt(
             "Refine these drafts into structured test cases. Do not pad — improve precision.\n\n"
         )
 
-    repo_path_map = {r.get("repo_id", ""): r.get("repo_path", "") for r in confirmed_repos}
-    design_refs = _build_design_refs(bud, repo_path_map)
+    design_refs = _build_design_mcp_directive(bud, purpose="writing test cases")
 
     ctx = await load_bud_agent_context(db, bud_id=bud.id, org_id=org_id)
     linked_section = format_code_locations_section(
@@ -562,61 +554,22 @@ def _build_repo_diff_sections(
     return sections, working_dir
 
 
-def _build_design_refs(
-    bud: BUDDocument,
-    repo_paths: dict[str, str] | None = None,
-) -> str:
-    """Build a compact wireframe reference block from BUD designs.
+def _build_design_mcp_directive(bud: BUDDocument, *, purpose: str) -> str:
+    """Tell the agent to fetch BUD wireframes via the ``get_bud_designs`` MCP.
 
-    Used by code review and testing prompts so agents can verify
-    implementation matches the approved wireframes.
+    Returns an empty string when the BUD has no design rows attached.
+    ``purpose`` is a short verb phrase (e.g. ``"planning"``, ``"reviewing"``,
+    ``"writing tests"``) used to make the instruction context-specific.
     """
     if not bud.designs:
         return ""
-    repo_paths = repo_paths or {}
-    refs: list[str] = []
-    for d in bud.designs:
-        if d.design_path:
-            base = repo_paths.get(str(d.repo_id), "") if d.repo_id else ""
-            full = f"{base}/{d.design_path}" if base else d.design_path
-            refs.append(f"- `{full}`")
-        if d.notes:
-            refs.append(f"  Notes: {d.notes[:200]}")
-    if not refs:
-        return ""
     return (
-        "\n## Design References\n\n"
-        "Approved wireframes (read to verify implementation matches):\n" + "\n".join(refs) + "\n"
+        "\n## BUD Wireframes\n\n"
+        f'Call `get_bud_designs` with `bud_id: "{bud.id}"` to fetch the '
+        f"approved wireframe HTML and override notes before {purpose}. "
+        "Do NOT inline the wireframe content into other outputs — refer to "
+        "the design only enough to confirm the implementation matches.\n"
     )
-
-
-def _build_design_context(
-    bud: BUDDocument,
-    repo_id_to_name: dict[uuid_mod.UUID, str],
-    repo_id_to_path: dict[uuid_mod.UUID, str],
-) -> str:
-    """Build design context string from BUD wireframes and notes."""
-    parts: list[str] = []
-    if not bud.designs:
-        return ""
-    for d in bud.designs:
-        repo_name = repo_id_to_name.get(d.repo_id, "general") if d.repo_id else "general"
-        repo_path = repo_id_to_path.get(d.repo_id) if d.repo_id else None
-
-        if d.design_path or d.notes:
-            parts.append(f"\n### Design: {repo_name}")
-            if d.design_path and repo_path:
-                full_path = f"{repo_path}/{d.design_path}"
-                parts.append(
-                    f"**Wireframe:** `{full_path}`\n"
-                    "Read this HTML wireframe to understand the UI layout.\n"
-                )
-            if d.notes:
-                parts.append(
-                    f"**Design Notes (OVERRIDE):**\n{d.notes}\n\n"
-                    "These notes take priority over the wireframe HTML.\n"
-                )
-    return "\n".join(parts)
 
 
 def _build_repo_context(repo_pairs: list[tuple[str, str]]) -> str:

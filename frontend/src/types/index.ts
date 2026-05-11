@@ -349,7 +349,6 @@ export interface BUDDesign {
   repo_id: string | null
   repo_name: string | null
   design_html: string | null
-  design_path: string | null
   notes: string | null
   status: BUDDesignStatus
   job_id: string | null

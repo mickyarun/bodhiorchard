@@ -2,7 +2,7 @@
 name: Code Reviewer
 description: Reviews code changes for quality, correctness, and adherence to patterns
 tools: Read, Glob, Grep, Bash
-mcp_tools: code_query, code_context, code_impact, get_bud_context
+mcp_tools: code_query, code_context, code_impact, get_bud_context, get_bud_designs
 model: sonnet
 effort:
 ---

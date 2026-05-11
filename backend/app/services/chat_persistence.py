@@ -69,28 +69,3 @@ async def persist_chat_update(
             setattr(bud, section, content)
             await db.commit()
             logger.info("chat_content_persisted", bud_id=bud_id, section=section)
-
-
-async def persist_design(
-    design_id: str,
-    org_id: str,
-    html: str,
-    design_path: str | None = None,
-) -> None:
-    """Write sanitized wireframe HTML to bud_designs row."""
-    from app.database import AsyncSessionLocal
-    from app.models.bud import BUDDesignStatus
-    from app.repositories.bud import BUDDesignRepository
-    from app.services.html_sanitizer import sanitize_design_html
-
-    safe_html = sanitize_design_html(html)
-
-    async with AsyncSessionLocal() as db:
-        repo = BUDDesignRepository(db, org_id=uuid_mod.UUID(org_id))
-        design = await repo.get_by_id(uuid_mod.UUID(design_id))
-        if design is not None:
-            design.design_html = safe_html
-            design.design_path = design_path
-            design.status = BUDDesignStatus.READY
-            await db.commit()
-            logger.info("design_persisted", design_id=design_id)
