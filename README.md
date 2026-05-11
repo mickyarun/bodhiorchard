@@ -13,7 +13,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791.svg)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com)
 
-[Getting Started](#getting-started) | [How It Runs](#how-it-runs) | [AI Engines](#ai-engines) | [AI Agents](#ai-agents) | [API](#api) | [Roadmap](#roadmap) | [License](#license)
+[Getting Started](#getting-started) | [How It Runs](#how-it-runs) | [AI Engines](#ai-engines) | [AI Agents](#ai-agents) | [Manifesto](#the-manifesto) | [API](#api) | [FAQ](#faq) | [License](#license)
 
 </div>
 
@@ -586,6 +586,42 @@ Long-running operations (repo scans, embedding builds, BUD generation) return `2
 | ![Living Tree dashboard](docs/images/screenshot-tree.png) | ![BUD board](docs/images/screenshot-bud-board.png) | ![Slack triage](docs/images/screenshot-slack-triage.png) |
 
 > Screenshots are placeholders for now — the broken-image icons disappear once `docs/images/screenshot-*.png` files land.
+
+---
+
+## FAQ
+
+### Is Bodhiorchard a self-hosted Jira alternative?
+
+Yes — for the workflow layer (intake → spec → design → development → testing → deploy → retrospective). Bodhiorchard is the **open-source agentic SDLC platform** that sits between IDE-side AI coding assistants (Tabby, Continue, Cursor) and traditional PM tools (Jira, Linear, Plane). It is especially relevant to teams looking for an **Atlassian DC alternative** — Atlassian is sunsetting new self-hosted Jira licences in March 2026 with full shutdown in 2029.
+
+### Does my code leave my machine?
+
+The **data plane is always local** — Postgres, embeddings, BUDs, scanned repos, and the audit log all sit on your hardware. Only the **LLM prompts** leave your machine, and only when you choose a cloud inference mode (Anthropic API key or Anthropic direct API). For fully air-gapped operation, wait for the planned Ollama preset.
+
+### Can I run Bodhiorchard without an Anthropic subscription?
+
+Yes — paste an Anthropic API key (pay-per-token, billed by Anthropic) into Settings and the agents run via Claude Code's CLI plus the Anthropic direct API. If you already have a Claude Pro / Max subscription on your host, the Hybrid deployment mode inherits that `claude login` session and you pay the flat subscription rate, no per-token bills.
+
+### How does Bodhiorchard compare to Tabby, Continue, or Cursor?
+
+Those are **IDE-side AI coding assistants** — they help an individual developer write code. Bodhiorchard is the **orchestration + project-management layer above them**: it ingests requests, drafts BUDs, predicts cycle time with AI-PERT, routes work to the best-fit developer, generates test plans, links bugs back to the originating BUD, and runs the retrospective. You can pair them — write code with Tabby / Cursor in your IDE while Bodhiorchard runs the lifecycle around it.
+
+### How does Bodhiorchard compare to GitHub Copilot Workspace?
+
+Copilot Workspace is cloud-only and GitHub-bound — your code, planning artefacts, and history live in GitHub's cloud. Bodhiorchard is **self-hosted, repo-agnostic, and AI-engine-agnostic**. You can point it at GitHub, GitLab, or a self-hosted Git server, and you can swap inference engines without re-deploying.
+
+### Does Bodhiorchard work on Windows?
+
+Yes — via **WSL2** for both deployment modes. Full Docker mode runs the whole stack inside WSL2 with no Windows host dependencies; Hybrid mode runs the host processes inside WSL2 with the infra containers backing them.
+
+### What does "BUD" mean?
+
+**BUD = Business Understanding Document.** Every feature lives in one BUD — spec, tech spec, test plan, acceptance criteria, and full history, all in markdown. It replaces the scattered combination of Jira tickets + Confluence pages + Google Docs + Notion that most teams end up with.
+
+### What's the licence? Can I use Bodhiorchard commercially?
+
+**Apache License 2.0** — yes, commercial use is allowed, including embedding in proprietary products. Contributions require **DCO sign-off** (`git commit -s`); see [CONTRIBUTING.md](CONTRIBUTING.md). For deeper commercial-licence terms with proprietary integrations and support, reach out to the maintainer.
 
 ---
 
