@@ -24,15 +24,22 @@ export function useJobSocket() {
     getResult: (d) => d.result,
     pollIntervalMs: 1000,
     pollTimeoutMs: 660_000, // 11 min — must exceed backend max job timeout (600s)
-    // Jobs are WS-native but the WS subscribe can land AFTER the worker
-    // has already published the terminal event — the frontend sees the
-    // running banner forever because `onComplete` never fires. Keep
-    // polling running alongside the WS (1 Hz) as a safety net; the
-    // tracker handles 404-after-cleanup silently so there's no spurious
-    // "Failed to check status" when the 5-min TTL reaps the in-memory
-    // entry. Same pattern `useScanSocket` uses for the identical race.
-    fetchInitialStateViaRest: false,
-    pollAlongsideWs: true,
+    // WS-primary tracking. The subscribe-vs-publish race (WS subscribe
+    // landing after the worker already published the terminal event) is
+    // closed by `fetchInitialStateViaRest`: one REST seed at
+    // `startTracking` returns the current state, so a job that already
+    // finished fires `onComplete` immediately. The seed swallows errors,
+    // so a job whose 5-min TTL already reaped doesn't surface as a
+    // spurious "Failed to check status". After the seed, the WS is the
+    // source of truth; the tracker's connection-health timer (5 s) auto-
+    // resumes polling if the WS drops mid-job and stops it on reconnect.
+    //
+    // Differs from `useScanSocket`, which keeps `pollAlongsideWs: true`
+    // because scans run for hours, state is durable in Redis, and the
+    // cost of missing a terminal event is high. For short-lived jobs the
+    // 1-Hz poll was pure log noise.
+    fetchInitialStateViaRest: true,
+    pollAlongsideWs: false,
   })
 
   return {
