@@ -14,9 +14,19 @@
 
 """HTML sanitization for AI-generated design wireframes.
 
-Design HTML is stored in the database and rendered in blob-URL iframes
-on the frontend. Blob-URL iframes are **origin-isolated** — they cannot
-access the parent page's DOM, cookies, localStorage, or session.
+Design HTML is stored in the database and rendered on the frontend via
+an ``iframe srcdoc`` (see ``BUDDesignPanel.vue``). ``srcdoc`` iframes
+inherit the parent document's origin, so the wireframe runs in the
+**same origin** as the host app — it can read cookies, ``localStorage``,
+and the parent DOM.
+
+We accept this trust posture because the AI generating the HTML is
+gated by the same org-level auth as the surrounding app: the threat
+model is **prompt drift / accidental misuse**, not adversarial input.
+A hostile prompt operator could already mint a BUD, write a malicious
+agent run, and exfiltrate org data via legitimate API calls; an
+iframe-side exfiltration is no worse than what the existing API
+surface allows.
 
 Because Vuetify CDN wireframes use:
 - Custom Vue component tags (``v-app``, ``v-card``, ``v-btn``, etc.)
@@ -24,10 +34,21 @@ Because Vuetify CDN wireframes use:
 - Full HTML document structure (``<!DOCTYPE>``, ``<html>``, ``<head>``)
 
 ... a tag-allowlist sanitizer like nh3 is unsuitable (it strips custom
-tags, structural tags, and scripts).  Instead, we use a lightweight
-regex-based approach that strips only the truly dangerous patterns:
-inline event handlers (``onclick``, ``onerror``, etc.) and
-``javascript:`` URLs.
+tags, structural tags, and scripts). Instead, we strip only the patterns
+with no legitimate place in a wireframe: ``javascript:`` / ``vbscript:``
+URLs and plugin-execution tags (``<object>``, ``<embed>``, ``<applet>``).
+
+Inline event handlers (``onclick``, ``onchange``, …) are intentionally
+**preserved** — the wireframes route interactivity through them (tab
+switching, button states), and ``<script>`` is already trusted, which
+is strictly more powerful than an inline handler.
+
+If the threat model ever changes (rendering wireframes authored by
+external collaborators outside the org), the frontend should add
+``sandbox="allow-scripts"`` to the iframe AND pre-compile Vue templates
+server-side (Vue's runtime template compiler is blocked under sandbox
+in some Chromium versions). This module would then tighten to an
+allowlist.
 """
 
 import re
@@ -35,12 +56,6 @@ import re
 import structlog
 
 logger = structlog.get_logger(__name__)
-
-# Inline event handler attributes (onclick, onerror, onload, etc.)
-_EVENT_HANDLER_RE = re.compile(
-    r"""\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)""",
-    re.IGNORECASE,
-)
 
 # javascript: / vbscript: URLs in href/src/action attributes
 _JS_URL_RE = re.compile(
@@ -72,6 +87,44 @@ _APP_MOUNT_OPEN_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Walking regexes for balancing nested <div> tags. The `\b` keeps us from
+# matching <divider> or similar; the close pattern tolerates whitespace
+# before `>` (e.g. `</div >`).
+_DIV_OPEN_RE = re.compile(r"<div\b", re.IGNORECASE)
+_DIV_CLOSE_RE = re.compile(r"</div\s*>", re.IGNORECASE)
+
+
+def _find_matching_div_close(html: str, after_open: int) -> int:
+    """Return the index of the ``</div>`` that closes a ``<div>`` whose
+    opening tag ended at ``after_open``. ``-1`` if the input is unbalanced.
+
+    Walks forward counting nested ``<div>`` opens vs closes — replaces the
+    earlier "last ``</div>`` before ``</body>``" heuristic, which corrupted
+    output for any wireframe with sibling ``<div>`` elements after ``#app``.
+
+    Known limitation: does not special-case HTML comments, ``<script>``,
+    or ``<style>`` blocks. A literal ``<div`` inside a Vue template string
+    (``template: '<div>...</div>'``) skews the counter. Building that in
+    would mean a real HTML mini-parser. When the count goes wrong, this
+    returns ``-1`` and the caller leaves the HTML untouched, so the failure
+    mode is benign (no wrap added) rather than corrupt output.
+    """
+    depth = 1
+    pos = after_open
+    while True:
+        close_m = _DIV_CLOSE_RE.search(html, pos)
+        if close_m is None:
+            return -1
+        open_m = _DIV_OPEN_RE.search(html, pos, close_m.start())
+        if open_m is not None:
+            depth += 1
+            pos = open_m.end()
+        else:
+            depth -= 1
+            if depth == 0:
+                return close_m.start()
+            pos = close_m.end()
+
 
 def _ensure_v_app_wrapper(html: str) -> str:
     """Wrap mount-point contents in ``<v-app>`` if a Vuetify wireframe lacks it.
@@ -93,13 +146,12 @@ def _ensure_v_app_wrapper(html: str) -> str:
     if not open_match:
         return html
 
-    body_close = html.lower().rfind("</body>")
-    if body_close == -1:
-        return html
-
-    # The `#app` div's matching `</div>` is the last one before `</body>`.
-    div_close = html.lower().rfind("</div>", open_match.end(), body_close)
+    div_close = _find_matching_div_close(html, open_match.end())
     if div_close == -1:
+        logger.warning(
+            "design_html_wrapper_skipped",
+            reason="unbalanced_div_count_from_mount_point",
+        )
         return html
 
     logger.warning(
@@ -118,12 +170,13 @@ def _ensure_v_app_wrapper(html: str) -> str:
 def sanitize_design_html(html: str) -> str:
     """Sanitize AI-generated design HTML for iframe rendering.
 
-    Strips inline event handlers and ``javascript:`` URLs while preserving
-    the full HTML document structure, custom Vue component tags, CDN scripts,
-    and inline styles needed for Vuetify wireframes.
+    Strips ``javascript:`` URLs and plugin-execution tags while preserving
+    full HTML document structure, custom Vue component tags, CDN scripts,
+    inline styles, and inline event handlers needed for Vuetify wireframes.
 
-    This is intentionally lighter than nh3 because the HTML is always
-    rendered in an origin-isolated blob-URL iframe.
+    This is intentionally lighter than nh3 because the threat model is
+    prompt drift, not adversarial input — see module docstring for the
+    trust-posture argument.
 
     Args:
         html: Raw HTML string from AI generation or user input.
@@ -132,9 +185,6 @@ def sanitize_design_html(html: str) -> str:
         Sanitized HTML string safe for iframe rendering.
     """
     result = html
-
-    # Remove inline event handlers (onclick, onerror, onload, etc.)
-    result = _EVENT_HANDLER_RE.sub("", result)
 
     # Neutralize javascript:/vbscript: URLs → replace entire value
     result = _JS_URL_RE.sub(r"\1\2about:blank\2", result)

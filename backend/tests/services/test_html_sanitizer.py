@@ -17,9 +17,13 @@
 from app.services.html_sanitizer import sanitize_design_html
 
 
-def test_strips_inline_event_handlers() -> None:
-    html = '<button onclick="alert(1)" class="x">Hi</button>'
-    assert "onclick" not in sanitize_design_html(html)
+def test_preserves_inline_event_handlers() -> None:
+    # Wireframes wire tab switching and button states through inline
+    # handlers; stripping them breaks interactivity. <script> is already
+    # trusted in the same iframe — onclick is strictly weaker, so the
+    # asymmetry was inconsistent. See module docstring for trust posture.
+    html = '<div class="wf-tab" onclick="showTab(\'mobile\')">Mobile</div>'
+    assert 'onclick="showTab(\'mobile\')"' in sanitize_design_html(html)
 
 
 def test_neutralizes_javascript_urls() -> None:
@@ -77,3 +81,35 @@ def test_wrap_with_attrs_on_app_div() -> None:
     )
     out = sanitize_design_html(html)
     assert "<v-app>" in out and "</v-app>" in out
+
+
+def test_wrap_handles_nested_divs_inside_mount() -> None:
+    # Multiple nested <div> inside #app: the </v-app> close must land at
+    # the matching </div> for #app, not at the first/innermost </div>.
+    html = (
+        '<html><body><div id="app">'
+        '<div class="layout"><div class="sidebar"><v-card>Hi</v-card></div></div>'
+        "</div></body></html>"
+    )
+    out = sanitize_design_html(html)
+    assert "<v-app>" in out and "</v-app>" in out
+    # </v-app> must close AFTER all nested </div>s for sidebar+layout,
+    # but BEFORE the </div> that closes #app itself.
+    assert out.count("</div>") == 3
+    v_app_close = out.index("</v-app>")
+    # Two </div> precede </v-app> (sidebar + layout); the third closes #app.
+    assert out.count("</div>", 0, v_app_close) == 2
+
+
+def test_wrap_handles_siblings_after_mount_div() -> None:
+    # The old heuristic ("last </div> before </body>") would have put
+    # </v-app> after the sibling footer div, swallowing it into v-app.
+    html = (
+        '<html><body><div id="app"><v-main>Hi</v-main></div>'
+        '<div class="footer">unrelated</div>'
+        "</body></html>"
+    )
+    out = sanitize_design_html(html)
+    assert "<v-app>" in out and "</v-app>" in out
+    # The sibling footer div must remain outside the v-app wrapper.
+    assert out.index("</v-app>") < out.index('<div class="footer"')
