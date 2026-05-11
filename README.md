@@ -13,7 +13,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791.svg)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com)
 
-[Getting Started](#getting-started) | [Architecture](#architecture) | [AI Agents](#ai-agents) | [Claude Code](#claude-code-integration) | [API](#api) | [Screenshots](#screenshots) | [Roadmap](#roadmap) | [License](#license)
+[Getting Started](#getting-started) | [How It Runs](#how-it-runs) | [AI Engines](#ai-engines) | [AI Agents](#ai-agents) | [API](#api) | [Roadmap](#roadmap) | [License](#license)
 
 </div>
 
@@ -117,7 +117,7 @@ library — tree-sitter parsing → NetworkX graph → Leiden community detectio
 
 ### Claude Code-Native (MCP)
 
-Bodhiorchard exposes **10 MCP tools** to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other MCP-compatible clients — see [Claude Code Integration](#claude-code-integration) below for the full tool list, dual-auth modes, and registration instructions.
+Bodhiorchard exposes **10 MCP tools** to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other MCP-compatible clients — see [AI Engines](#ai-engines) below for the full tool list, dual-auth modes, and registration instructions.
 
 ### Enterprise-Grade Security
 
@@ -126,6 +126,142 @@ Bodhiorchard exposes **10 MCP tools** to [Claude Code](https://docs.anthropic.co
 - **AES encryption at rest** for GitHub PATs, Slack tokens, and secrets
 - **JWT authentication** with refresh tokens
 - **Audit trail** — every agent action logged with full context
+
+---
+
+## How It Runs
+
+Bodhiorchard splits cleanly into two planes so you can pick how much of it lives on your hardware.
+
+### The data plane is always local
+
+Postgres + pgvector, every BUD, the embeddings index, the scanned repos, the agent skills, and the audit log all sit on your machine. Nothing in this plane ever calls home — even when you choose cloud inference, the data the agents reason over stays on your hardware.
+
+### Inference is your call
+
+Three first-class modes, three reasons to pick each:
+
+- **Local Claude Code** — point Bodhiorchard at a host `claude login` session. Pro / Max flat-rate, no per-token bills, codebase-aware.
+- **Cloud Claude via API key** — paste an `sk-ant-…` into **Settings → AI Configuration → Claude Code**. Pay-per-token, recommended for evaluators and CI.
+- **Anthropic direct API** — for the lightweight non-codebase agents (Triage, Bug-Linker, Standup). Lower latency and lower per-call cost than going through Claude Code.
+
+See [AI Engines](#ai-engines) for the engine-by-engine breakdown.
+
+### One-machine self-host
+
+A single laptop or Mac Mini runs the whole platform — frontend, backend, multiplayer, Postgres, Redis. A **Cloudflare Tunnel** optionally exposes just the Slack / GitHub webhook endpoints without putting the rest of the stack online. This makes Bodhiorchard a credible **self-hosted Jira alternative** for teams that don't want to live on per-seat SaaS.
+
+### What you get
+
+- **Lower cost than per-seat SaaS** — no platform-compute bills; pay only for whichever inference engine you wire up (or flat-rate if you're on a Claude subscription).
+- **Lower energy footprint** — a Mac Mini idles around 10W vs hundreds of watts for cloud VMs.
+- **Data residency by default** — code, BUDs, embeddings, and knowledge stay on your hardware even when inference is in the cloud.
+
+### System diagram
+
+```
+  Your Machine (Laptop / Mac Mini)
+  ┌────────────────────────────────────────────────────────────┐
+  │                                                            │
+  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐  │
+  │  │  Vue 3 SPA   │  │  FastAPI     │  │  Claude Code    │  │
+  │  │  (Frontend)   │──│  (Backend)   │──│  (AI Engine)    │  │
+  │  └──────────────┘  └──┬───┬───┬───┘  └────────┬────────┘  │
+  │                       │   │   │                │           │
+  │          ┌────────────┘   │   └──────────┐     │ MCP       │
+  │          │                │              │     │ (10 tools)│
+  │  ┌───────▼────┐  ┌────────▼──┐  ┌────────▼──────┐ │         │
+  │  │ PostgreSQL │  │  Redis    │  │ Ollama / OpenAI│ │         │
+  │  │ + pgvector │  │  Cache    │  │ (coming soon)  │ │         │
+  │  └────────────┘  └───────────┘  └────────────────┘ │         │
+  │                                                            │
+  └──────────────────────┬─────────────────────────────────────┘
+                         │ Cloudflare Tunnel (optional)
+                         │
+             ┌───────────▼───────────┐
+             │  Internet             │
+             │  ├─ Slack webhooks    │
+             │  ├─ GitHub webhooks   │
+             │  └─ Cloud LLM APIs   │
+             └───────────────────────┘
+```
+
+---
+
+## AI Engines
+
+Bodhiorchard is **AI-engine-agnostic**. The agent layer is engine-independent — adding a new engine is API rewiring only, no deployment changes. Today: Claude Code + the Anthropic direct API. Next: Ollama (air-gapped), OpenAI, OpenAI Codex.
+
+### Today — Claude Code (codebase-aware agents)
+
+Codebase-aware agent runs (BUD spec, Tech Plan, Implementation, Code Review) are executed by the Claude Code CLI, which gives agents file access, shell tool-use, and direct access to Bodhiorchard's MCP server.
+
+**Why Claude Code (and not just the raw API):**
+
+- **Codebase awareness out of the box** — Claude Code already knows how to read files, run shell commands, and edit code; Bodhiorchard reuses that surface area instead of re-implementing it.
+- **Token-efficient by default** — agent prompts use Anthropic prompt caching, structured tool-use, and incremental context loading. The cost per BUD stays low even on long sessions.
+- **One runtime, two billing models** — point Bodhiorchard at an Anthropic API key (pay-per-token) **or** at a host `claude login` session backed by a Claude Pro / Max subscription (flat-rate). Same agents either way.
+
+**Authentication modes:**
+
+| Mode | When the org uses this | Where the credential lives |
+|---|---|---|
+| `api_key` | Full Docker deployments, or any host that doesn't have a Claude subscription | `sk-ant-…` key encrypted in Postgres (Fernet AES-128) and pushed into the backend's process env on save |
+| `hybrid_host` | Hybrid deployments where the developer already runs `claude` interactively | Host's existing `claude login` session — nothing stored in the database |
+
+The backend auto-detects which mode is available (via `/.dockerenv`) and the Settings page only surfaces the option that actually works for that deployment.
+
+### Today — Anthropic direct API (lightweight non-codebase agents)
+
+Triage, Bug-Linker, and Standup don't need to read files — they reason over chat messages, bug reports, and aggregated activity. For those, Bodhiorchard skips Claude Code and calls the Anthropic API directly. Lower latency, lower per-call cost, same `sk-ant-…` key (configured at **Settings → AI Configuration → Anthropic API**).
+
+### Coming soon
+
+| Engine | Status |
+|---|---|
+| **Ollama** (fully local, free, air-gapped) | Planned |
+| **OpenAI** API (GPT-4o / 4 / 3.5) | Planned |
+| **OpenAI Codex** | In development |
+
+These will appear as additional presets in the AI Configuration page — API rewiring only, no deployment changes.
+
+### MCP server — the 10 tools Bodhiorchard exposes to Claude Code
+
+Bodhiorchard runs an MCP server on `:8001` that exposes 10 tools to Claude Code. They split into two groups:
+
+**BUD / repo intelligence**
+
+| Tool | Purpose |
+|---|---|
+| `get_bud_context` | Retrieve existing BUDs for context |
+| `write_bud` | Create or update a BUD document |
+| `get_knowledge` | Search feature registry and knowledge base |
+| `write_feature_registry` | Save synthesized features |
+| `check_feature_exists` | Deduplicate before creating |
+| `search_bugs` | Find related bugs |
+| `update_task_status` | Report progress back to Bodhiorchard |
+| `post_slack_message` | Send messages to Slack |
+| `get_team_context` | Get team capacity and skills |
+| `get_pending_features` | Get next batch for synthesis |
+
+**Code graph (`code_*` tool group)** — an in-tree code-graph indexer also exposes `code_impact`, `code_query`, `code_context`, `code_community`, `code_god_nodes`, and `code_stats` for impact / blast-radius analysis before refactors.
+
+### Registering Bodhiorchard's MCP server in your own Claude Code
+
+Add an entry to `~/.claude.json` (or use `claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "bodhiorchard": {
+      "type": "http",
+      "url": "http://localhost:8001/mcp"
+    }
+  }
+}
+```
+
+Restart Claude Code and the `bodhiorchard__*` tools will appear in tool-use. Pair this with the [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) that ship in `backend/app/agents/skills/` to drive Bodhiorchard's agents from a regular `claude` session on your laptop.
 
 ---
 
@@ -169,130 +305,7 @@ Every agent logs actions to an audit trail, uses the organization's configured L
 
 ---
 
-## Claude Code Integration
-
-Bodhiorchard is **Claude Code-native**. Every agent run is executed by the Claude Code CLI, which gives agents codebase-aware reasoning, tool-use, and direct access to Bodhiorchard's MCP server.
-
-### Why Claude Code (and not just the raw API)
-
-- **Codebase awareness out of the box** — Claude Code already knows how to read files, run shell commands, and edit code; Bodhiorchard reuses that surface area instead of re-implementing it.
-- **Token-efficient by default** — agent prompts use Anthropic prompt caching, structured tool-use, and incremental context loading. The cost per BUD stays low even on long sessions.
-- **One runtime, two billing models** — point Bodhiorchard at an Anthropic API key (pay-per-token) **or** at a host `claude login` session backed by a Claude Pro / Max subscription (flat-rate). Same agents either way.
-
-### Authentication modes
-
-| Mode | When the org uses this | Where the credential lives |
-|---|---|---|
-| `api_key` | Full Docker deployments, or any host that doesn't have a Claude subscription | `sk-ant-…` key encrypted in Postgres (Fernet AES-128) and pushed into the backend's process env on save |
-| `hybrid_host` | Hybrid deployments where the developer already runs `claude` interactively | Host's existing `claude login` session — nothing stored in the database |
-
-The backend auto-detects which mode is available (via `/.dockerenv`) and the Settings page only surfaces the option that actually works for that deployment.
-
-### MCP server — the 10 tools Claude Code calls
-
-Bodhiorchard runs an MCP server on `:8001` that exposes 10 tools to Claude Code. They split into two groups:
-
-**BUD / repo intelligence**
-
-| Tool | Purpose |
-|---|---|
-| `get_bud_context` | Retrieve existing BUDs for context |
-| `write_bud` | Create or update a BUD document |
-| `get_knowledge` | Search feature registry and knowledge base |
-| `write_feature_registry` | Save synthesized features |
-| `check_feature_exists` | Deduplicate before creating |
-| `search_bugs` | Find related bugs |
-| `update_task_status` | Report progress back to Bodhiorchard |
-| `post_slack_message` | Send messages to Slack |
-| `get_team_context` | Get team capacity and skills |
-| `get_pending_features` | Get next batch for synthesis |
-
-**Code graph (`code_*` tool group)** — an in-tree code-graph indexer also exposes `code_impact`, `code_query`, `code_context`, `code_community`, `code_god_nodes`, and `code_stats` for impact / blast-radius analysis before refactors.
-
-### Registering Bodhiorchard's MCP server in your own Claude Code
-
-Add an entry to `~/.claude.json` (or use `claude mcp add`):
-
-```json
-{
-  "mcpServers": {
-    "bodhiorchard": {
-      "type": "http",
-      "url": "http://localhost:8001/mcp"
-    }
-  }
-}
-```
-
-Restart Claude Code and the `bodhiorchard__*` tools will appear in tool-use. Pair this with the [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) that ship in `backend/app/agents/skills/` to drive Bodhiorchard's agents from a regular `claude` session on your laptop.
-
----
-
 ## Architecture
-
-### Runs on Your Machine — Not in the Cloud
-
-Bodhiorchard is designed to run **locally on your laptop or a Mac Mini** sitting under your desk. No expensive cloud servers. No per-seat SaaS subscriptions. One machine runs the entire platform — AI agents, database, vector search, and all.
-
-Need Slack integration or internet access? A **Cloudflare Tunnel** exposes just the webhook endpoints — your data stays on your hardware while the world can talk to it. This means:
-
-- **Dramatically lower cost** — no cloud compute bills, no per-user pricing
-- **Lower energy footprint** — a Mac Mini uses ~10W idle vs hundreds of watts for cloud VMs
-- **Your data stays local** — code, BUDs, and knowledge never leave your machine
-- **Your data stays on your hardware** — code, BUDs, and knowledge never leave the machine
-
-### AI Configuration
-
-Bodhiorchard's agents run on [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code). How the backend authenticates with Claude depends on where the backend is running:
-
-| Deployment | Claude auth | What you do |
-|---|---|---|
-| **Full Docker** (backend in a container) | Anthropic API key | Paste an `sk-ant-…` key in **Settings → AI Configuration → Claude Code**. Stored encrypted (Fernet AES-128), pay-per-token via Anthropic. |
-| **Local / Hybrid** (backend on the host) | Host's `claude login` session | Run `claude login` on your machine once. Agent runs inherit whatever Claude Pro/Max subscription or API key the host is signed into. Nothing saved to the database. |
-
-The backend auto-detects which mode it's in (via `/.dockerenv`) and the setup wizard + Settings page only surface the options that actually work for that deployment.
-
-#### Coming soon
-
-More AI engines are in development and will appear as additional presets in the AI Configuration page — API rewiring only, no deployment changes:
-
-| Engine | Status |
-|---|---|
-| **Anthropic** direct API (non-codebase agents) | Supported |
-| **Ollama** (fully local, free, air-gapped) | Planned |
-| **OpenAI** API (GPT-4o/4/3.5) | Planned |
-| **OpenAI Codex** | In development |
-
-Claude Code remains the engine for codebase-aware agents; Anthropic's direct API now handles lighter non-codebase agent calls. The remaining engines unlock once their presets land in Settings.
-
-### System Diagram
-
-```
-  Your Machine (Laptop / Mac Mini)
-  ┌────────────────────────────────────────────────────────────┐
-  │                                                            │
-  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐  │
-  │  │  Vue 3 SPA   │  │  FastAPI     │  │  Claude Code    │  │
-  │  │  (Frontend)   │──│  (Backend)   │──│  (AI Engine)    │  │
-  │  └──────────────┘  └──┬───┬───┬───┘  └────────┬────────┘  │
-  │                       │   │   │                │           │
-  │          ┌────────────┘   │   └──────────┐     │ MCP       │
-  │          │                │              │     │ (10 tools)│
-  │  ┌───────▼────┐  ┌────────▼──┐  ┌────────▼──────┐ │         │
-  │  │ PostgreSQL │  │  Redis    │  │ Ollama / OpenAI│ │         │
-  │  │ + pgvector │  │  Cache    │  │ (coming soon)  │ │         │
-  │  └────────────┘  └───────────┘  └────────────────┘ │         │
-  │                                                            │
-  └──────────────────────┬─────────────────────────────────────┘
-                         │ Cloudflare Tunnel (optional)
-                         │
-             ┌───────────▼───────────┐
-             │  Internet             │
-             │  ├─ Slack webhooks    │
-             │  ├─ GitHub webhooks   │
-             │  └─ Cloud LLM APIs   │
-             └───────────────────────┘
-```
 
 ### Tech Stack
 
@@ -315,7 +328,45 @@ Claude Code remains the engine for codebase-aware agents; Anthropic's direct API
 - Claude Code as the sole AI engine today (authenticated via API key in Full Docker, or host `claude login` in Hybrid)
 - Docker + Docker Compose on a local machine or Mac Mini
 - Cloudflare Tunnel for exposing webhooks to Slack / GitHub / internet
-- Anthropic direct API live for non-codebase agents; Ollama / OpenAI / Codex integrations planned (see *AI Configuration → Coming soon*)
+- Anthropic direct API live for non-codebase agents; Ollama / OpenAI / Codex integrations planned (see [AI Engines → Coming soon](#ai-engines))
+
+### Project Structure
+
+```
+bodhiorchard/
+├── backend/
+│   ├── app/
+│   │   ├── api/v1/          # REST API endpoints
+│   │   ├── agents/          # AI agent orchestration & skill definitions
+│   │   ├── core/            # Auth, security, dependencies
+│   │   ├── mcp/             # Model Context Protocol server
+│   │   ├── models/          # SQLAlchemy ORM models
+│   │   ├── repositories/    # Data access layer (org-scoped)
+│   │   ├── schemas/         # Pydantic request/response DTOs
+│   │   └── services/        # Business logic (LLM, scanning, synthesis)
+│   ├── alembic/             # Database migrations
+│   ├── entrypoint.sh        # Runs migrations then uvicorn
+│   └── Dockerfile           # Multi-stage production build
+│
+├── frontend/
+│   ├── src/
+│   │   ├── views/           # Page components
+│   │   ├── components/      # Reusable UI (tree visualization, cards)
+│   │   ├── stores/          # Pinia state management
+│   │   ├── types/           # TypeScript interfaces
+│   │   └── data/            # Shared data (agent definitions)
+│   └── package.json
+│
+├── multiplayer/             # Colyseus multiplayer server (TypeScript)
+├── scripts/                 # setup.sh, wait-for-postgres.sh
+├── docker-compose.yml       # Full stack: postgres + redis + backend + fe + mp
+├── docker-compose.infra.yml # Contributor infra only: postgres + redis
+├── package.json             # npm workspaces + dev scripts (root)
+├── BODHIORCHARD-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
+├── AGENTS.md                # Agent capabilities documentation
+├── TODO.md                  # Roadmap and progress tracking
+└── LICENSE                  # Apache-2.0
+```
 
 ---
 
@@ -396,46 +447,6 @@ The database is the same shape either way, so you can swap modes against the sam
 
 ---
 
-## Project Structure
-
-```
-bodhiorchard/
-├── backend/
-│   ├── app/
-│   │   ├── api/v1/          # REST API endpoints
-│   │   ├── agents/          # AI agent orchestration & skill definitions
-│   │   ├── core/            # Auth, security, dependencies
-│   │   ├── mcp/             # Model Context Protocol server
-│   │   ├── models/          # SQLAlchemy ORM models
-│   │   ├── repositories/    # Data access layer (org-scoped)
-│   │   ├── schemas/         # Pydantic request/response DTOs
-│   │   └── services/        # Business logic (LLM, scanning, synthesis)
-│   ├── alembic/             # Database migrations
-│   ├── entrypoint.sh        # Runs migrations then uvicorn
-│   └── Dockerfile           # Multi-stage production build
-│
-├── frontend/
-│   ├── src/
-│   │   ├── views/           # Page components
-│   │   ├── components/      # Reusable UI (tree visualization, cards)
-│   │   ├── stores/          # Pinia state management
-│   │   ├── types/           # TypeScript interfaces
-│   │   └── data/            # Shared data (agent definitions)
-│   └── package.json
-│
-├── multiplayer/             # Colyseus multiplayer server (TypeScript)
-├── scripts/                 # setup.sh, wait-for-postgres.sh
-├── docker-compose.yml       # Full stack: postgres + redis + backend + fe + mp
-├── docker-compose.infra.yml # Contributor infra only: postgres + redis
-├── package.json             # npm workspaces + dev scripts (root)
-├── BODHIORCHARD-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
-├── AGENTS.md                # Agent capabilities documentation
-├── TODO.md                  # Roadmap and progress tracking
-└── LICENSE                  # Apache-2.0
-```
-
----
-
 ## API
 
 Bodhiorchard exposes three programmable surfaces. All three run on the same host as the backend.
@@ -443,7 +454,7 @@ Bodhiorchard exposes three programmable surfaces. All three run on the same host
 | Surface | Port | What it's for |
 |---|---|---|
 | **REST** | `:8000/api/v1` | Day-to-day CRUD: BUDs, orgs, repos, skills, triage, Slack/GitHub webhooks. FastAPI; interactive docs at [/docs](http://localhost:8000/docs) (Swagger) and [/redoc](http://localhost:8000/redoc). |
-| **MCP** | `:8001/mcp` | 10 tools for Claude Code and other MCP clients — see [Claude Code Integration](#claude-code-integration) above. |
+| **MCP** | `:8001/mcp` | 10 tools for Claude Code and other MCP clients — see [AI Engines](#ai-engines) above. |
 | **WebSocket** | `:8000/ws/jobs/{job_id}` | Live progress for async jobs (repo scans, BUD generation, etc.). Frontend uses `useJobSocket`; CLI consumers can use `wscat`. |
 
 ### Key REST endpoints
