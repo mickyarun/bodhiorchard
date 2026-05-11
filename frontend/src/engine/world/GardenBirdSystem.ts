@@ -78,7 +78,11 @@ export class GardenBirdSystem {
   private root:    pc.Entity
   private birds:   GardenBirdEntry[] = []
   private asset:   pc.Asset | null = null
-  private perches: pc.Vec3[] = []   // one per repo tree
+  // Hold tree entity refs (not just positions) so we can filter out
+  // user-hidden repos at update time — birds should never perch on a
+  // tree the dashboard filter is hiding.
+  private treeEntities: pc.Entity[] = []
+  private perches: pc.Vec3[] = []   // one per visible repo tree, refreshed each frame
 
   // Scratch — zero allocation in update hot path
   private readonly _diff = new pc.Vec3()
@@ -117,17 +121,34 @@ export class GardenBirdSystem {
     }
   }
 
-  /** Supply repo tree positions so birds have perch targets. */
+  /** Supply repo tree entities so birds can read live positions + visibility. */
   setTrees(treeMap: Map<string, pc.Entity>): void {
+    this.treeEntities = Array.from(treeMap.values())
+    this.refreshPerches()
+  }
+
+  /**
+   * Recompute the perch list from the currently-enabled tree entities.
+   * Cheap (~N enabled-checks + position reads). Run every frame so we
+   * react automatically to dashboard repo-filter toggles and to the
+   * distance-LOD enabling/disabling trees in takeover.
+   */
+  private refreshPerches(): void {
     this.perches = []
-    for (const entity of treeMap.values()) {
+    for (const entity of this.treeEntities) {
+      if (!entity.enabled) continue
       const p = entity.getPosition()
       this.perches.push(new pc.Vec3(p.x, p.y, p.z))
     }
+    // Hide every bird in one stroke when there's nowhere to land. Birds
+    // mid-flight or mid-perch on a now-hidden tree disappear with the
+    // root; the state machine resumes from 'idle' when perches return.
+    this.root.enabled = this.perches.length > 0
   }
 
   /** Per-frame update — ticks each bird's state machine. */
   update(dt: number): void {
+    this.refreshPerches()
     if (this.birds.length === 0 || this.perches.length === 0) return
 
     for (let i = 0; i < this.birds.length; i++) {
