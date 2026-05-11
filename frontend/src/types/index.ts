@@ -427,6 +427,21 @@ export interface FeaturePage {
   total: number
 }
 
+export interface LinkedFeature {
+  id: string
+  title: string
+  linkType: 'touches' | 'depends_on'
+  source: 'pm_agent' | 'manual' | 'tech_arch'
+  repoId: string | null
+  repoName: string | null
+  codeLocations: Record<string, string[]> | null
+}
+
+export interface LinkFeaturesResponse {
+  insertedCount: number
+  insertedFeatureIds: string[]
+}
+
 export interface FeaturesByRepo {
   repoId: string
   repoName: string

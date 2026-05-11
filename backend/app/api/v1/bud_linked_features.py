@@ -39,6 +39,7 @@ from app.schemas.bud import (
     LinkFeaturesRequest,
     LinkFeaturesResponse,
 )
+from app.services.bud_timeline import record_event
 
 logger = structlog.get_logger(__name__)
 
@@ -104,6 +105,24 @@ async def link_features(
         list(dict.fromkeys(body.feature_ids)),
         source=BUDFeatureLinkSource.MANUAL,
     )
+    # Record one timeline event per manual link request (not per inserted id),
+    # so noisy multi-pick clicks show as a single audit row. Resolve titles
+    # so the timeline can name the features instead of opaque UUIDs.
+    if inserted:
+        title_map = await link_repo.titles_by_ids(inserted)
+        await record_event(
+            db,
+            current_user.org_id,
+            bud_id,
+            "feature_linked",
+            actor_id=current_user.id,
+            actor_name=current_user.name,
+            detail={
+                "feature_ids": [str(fid) for fid in inserted],
+                "feature_titles": [title_map.get(fid, "") for fid in inserted],
+                "count": len(inserted),
+            },
+        )
     await db.commit()
     logger.info(
         "linked_features_manual",
@@ -130,12 +149,29 @@ async def unlink_feature(
 
     link_repo = BUDFeatureLinkRepository(db, org_id=current_user.org_id)
     removed = await link_repo.unlink_features(bud_id, [feature_id])
-    await db.commit()
     if removed == 0:
+        # No commit needed — nothing changed. 404 surfaces the no-op cleanly.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Link not found",
         )
+    # Look up the title so the timeline names the feature instead of a UUID.
+    # The Feature row isn't deleted (only the link row is), so this resolves
+    # cleanly after the unlink.
+    title_map = await link_repo.titles_by_ids([feature_id])
+    await record_event(
+        db,
+        current_user.org_id,
+        bud_id,
+        "feature_unlinked",
+        actor_id=current_user.id,
+        actor_name=current_user.name,
+        detail={
+            "feature_id": str(feature_id),
+            "feature_title": title_map.get(feature_id, ""),
+        },
+    )
+    await db.commit()
 
 
 async def _require_bud(bud_id: uuid.UUID, org_id: uuid.UUID, db: AsyncSession) -> None:

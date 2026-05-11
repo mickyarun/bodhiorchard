@@ -332,6 +332,12 @@
             <v-tabs-window v-model="activeTab">
               <!-- Requirements -->
               <v-tabs-window-item value="requirements">
+                <BUDLinkedFeaturesPanel
+                  v-if="bud.id"
+                  :bud-id="bud.id"
+                  class="mx-4 mt-3 mb-3"
+                  @change="loadTimeline()"
+                />
                 <textarea
                   v-if="editingContent"
                   v-model="editContent"
@@ -841,6 +847,8 @@ import BUDQAPanel from '@/components/buds/BUDQAPanel.vue'
 import BUDBugsPanel from '@/components/buds/BUDBugsPanel.vue'
 import BUDReleaseStagePanel from '@/components/buds/BUDReleaseStagePanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
+import BUDLinkedFeaturesPanel from '@/components/buds/BUDLinkedFeaturesPanel.vue'
+import { useBudLinkedFeaturesStore } from '@/stores/budLinkedFeatures'
 import { useSettingsStore } from '@/stores/settings'
 import { formatDateTime } from '@/utils/date'
 import { marked } from 'marked'
@@ -852,6 +860,7 @@ const budStore = useBUDStore()
 const authStore = useAuthStore()
 const membersStore = useMembersStore()
 const settingsStore = useSettingsStore()
+const budLinkedFeaturesStore = useBudLinkedFeaturesStore()
 
 const bud = computed(() => budStore.currentBUD)
 
@@ -1396,6 +1405,12 @@ async function handleChatSend(msg: string, images: string[] = []): Promise<void>
           if (bud.value) await designPanelRef.value?.loadDesigns()
           designPanelRef.value?.refreshDesignPreview()
         }
+      }
+      // The PM agent that handles requirements_md chats also auto-populates
+      // bud_feature_link via its JSON-fence tail (independent of whether
+      // requirements text changed), so always refetch links on completion.
+      if (currentSection.value === 'requirements_md' && bud.value) {
+        void budLinkedFeaturesStore.fetch(bud.value.id)
       }
     },
     onError(err, errorCode) {

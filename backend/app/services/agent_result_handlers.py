@@ -28,6 +28,7 @@ import structlog
 from app.models.bud_agent_task import BUDAgentTask
 from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.repositories.bud_feature_link import BUDFeatureLinkRepository
+from app.services.bud_timeline import record_event
 
 logger = structlog.get_logger(__name__)
 
@@ -111,6 +112,25 @@ async def _persist_pm_linked_features(
     accepted = await link_repo.link_features(
         bud_id, valid_ids, source=BUDFeatureLinkSource.PM_AGENT
     )
+    # Surface auto-linking in the BUD timeline so users see when the PM
+    # agent picked features versus when a human did it. Skipped when
+    # ``accepted`` is empty (ON CONFLICT dedup means every id was already
+    # linked — no real activity to record). Titles are resolved so the
+    # timeline can name the features instead of opaque UUIDs.
+    if accepted:
+        title_map = await link_repo.titles_by_ids(accepted)
+        await record_event(
+            db,
+            org_id,
+            bud_id,
+            "features_auto_linked",
+            actor_name="PM Agent",
+            detail={
+                "feature_ids": [str(fid) for fid in accepted],
+                "feature_titles": [title_map.get(fid, "") for fid in accepted],
+                "count": len(accepted),
+            },
+        )
     logger.info(
         "pm_linked_features_persisted",
         bud_id=str(bud_id),
