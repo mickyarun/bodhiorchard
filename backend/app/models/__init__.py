@@ -34,6 +34,11 @@ from app.models.bud import (
 )
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.bud_estimate_snapshot import BUDEstimateSnapshot
+from app.models.bud_feature_link import (
+    BUDFeatureLink,
+    BUDFeatureLinkSource,
+    BUDFeatureLinkType,
+)
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.cluster_cache import ClusterCache
@@ -102,6 +107,9 @@ __all__ = [
     "BUDDesignStatus",
     "BUDDocument",
     "BUDEstimateSnapshot",
+    "BUDFeatureLink",
+    "BUDFeatureLinkSource",
+    "BUDFeatureLinkType",
     "BUDTodo",
     "BUDTodoStatus",
     "BUDStatus",

@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud_todo import BUDTodo
 from app.repositories.bud_todo import BUDTodoRepository
+from app.services.event_bus import publish
 
 logger = structlog.get_logger(__name__)
 
@@ -68,3 +69,61 @@ async def _list_unassigned_non_checkpoint_todos(
     return await BUDTodoRepository(db, org_id=org_id).list_unassigned_non_checkpoint_for_bud(
         bud_id
     )
+
+
+async def cascade_assignee_to_todos(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_id: uuid.UUID,
+    new_assignee_id: uuid.UUID,
+) -> int:
+    """Mirror a manual top-level BUD reassignment onto its TODOs.
+
+    Only touches ``assignee_id`` — never status. Aborts (returns ``-1``)
+    if any non-checkpoint TODO is in_progress, completed, or has been
+    taken over (``taken_at IS NOT NULL``); we never overwrite a
+    developer's claim with a top-level reassignment. Returns the count
+    of TODOs whose assignee changed when the cascade ran.
+
+    Caller is responsible for restricting this to DEVELOPMENT phase —
+    other phases don't have per-TODO ownership semantics yet.
+    """
+    repo = BUDTodoRepository(db, org_id=org_id)
+    if await repo.has_active_or_taken_todos(bud_id):
+        logger.info(
+            "todo_cascade_skipped_work_in_progress",
+            bud_id=str(bud_id),
+            new_assignee_id=str(new_assignee_id),
+        )
+        return -1
+
+    todos = await repo.list_non_checkpoint_for_bud(bud_id)
+    changed = 0
+    for todo in todos:
+        if todo.assignee_id != new_assignee_id:
+            todo.assignee_id = new_assignee_id
+            changed += 1
+
+    if changed:
+        await db.flush()
+        # Publish before commit, mirroring the ``todo_claimed`` path in
+        # ``api/v1/bud_todos.py``. If the outer transaction later rolls
+        # back, the worst case is a redundant refetch from the frontend
+        # that re-reads the unchanged DB state — no consistency risk
+        # because every subscriber re-queries the source of truth.
+        publish(
+            f"todo:{bud_id}",
+            {
+                "event": "assignee_cascaded",
+                "bud_id": str(bud_id),
+                "new_assignee_id": str(new_assignee_id),
+                "changed_count": changed,
+            },
+        )
+    logger.info(
+        "todo_cascade_assigned",
+        bud_id=str(bud_id),
+        new_assignee_id=str(new_assignee_id),
+        changed=changed,
+    )
+    return changed

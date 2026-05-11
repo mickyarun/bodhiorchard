@@ -29,7 +29,7 @@ from app.agents.skill_mapping import SECTION_SKILL_MAP
 from app.schemas.bud import SECTION_LABELS
 from app.schemas.jobs import ChatJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
-from app.services.chat_persistence import persist_chat_message, persist_chat_update, persist_design
+from app.services.chat_persistence import persist_chat_message, persist_chat_update
 from app.services.chat_prompts import build_chat_prompt, build_design_prompt, fetch_chat_history
 from app.services.job_queue import update_job
 from app.services.job_utils import (
@@ -84,27 +84,30 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         session_id=payload.session_id,
     )
 
-    ds_temp_file: Path | None = None
     repo_path: str | None = None
     mcp_config = None
 
     if payload.section == "design":
-        # Prefer MCP-based design system access (Claude queries on-demand)
-        design_tools = ["list_design_systems", "get_design_system"]
+        # Design tools: read/write the wireframe row + browse design system.
+        # Persistence is fully MCP-driven — no temp-file or stdout-JSON path.
+        design_tools = [
+            "list_design_systems",
+            "get_design_system",
+            "get_bud_designs",
+            "write_bud_design",
+        ]
         mcp_config = build_mcp_config(payload.org_id, tool_names=design_tools)
-        use_mcp = mcp_config is not None
 
         repo_path = await resolve_repo_path(payload.repo_id, payload.org_id)
         _repo_name = Path(repo_path).name if repo_path else None
-        prompt, ds_temp_file = await build_design_prompt(
+        prompt = await build_design_prompt(
             bud_ref,
             payload.title,
             payload.org_id,
-            payload.current_content,
             payload.message,
+            payload.bud_id,
             repo_id=payload.repo_id,
             history=history,
-            use_mcp=use_mcp,
             repo_name=_repo_name,
         )
     else:
@@ -157,7 +160,6 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     # Design section needs a longer timeout (matches design agent job)
     chat_timeout = 900 if payload.section == "design" else 300
 
-    sys_files = [str(ds_temp_file)] if ds_temp_file else []
     try:
         result = await run_claude_code(
             prompt=prompt,
@@ -165,7 +167,6 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             config=ClaudeRunnerConfig(
                 max_turns=skill.max_turns if skill else 0,
                 timeout_seconds=chat_timeout,
-                system_prompt_files=sys_files,
                 mcp=mcp_config,
                 model=(skill.model or None) if skill else None,
                 effort=(skill.effort or None) if skill else None,
@@ -173,8 +174,6 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             progress_callback=make_progress_callback(job_id),
         )
     finally:
-        if ds_temp_file is not None:
-            ds_temp_file.unlink(missing_ok=True)
         for p in image_paths:
             p.unlink(missing_ok=True)
 
@@ -234,12 +233,13 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         )
         return
 
-    # Persist content update to DB if present
-    updated = response.get("updated_content")
-    if updated is not None:
-        if payload.section == "design" and payload.design_id:
-            await persist_design(payload.design_id, payload.org_id, updated)
-        elif payload.section != "design":
+    # Persist non-design content updates from the JSON reply. Design
+    # wireframes are persisted by the agent itself via the
+    # ``write_bud_design`` MCP tool — we no longer parse stdout for HTML.
+    updated: str | None = None
+    if payload.section != "design":
+        updated = response.get("updated_content")
+        if updated is not None:
             await persist_chat_update(payload.bud_id, payload.org_id, payload.section, updated)
 
     reply_text = response.get("reply", "Done.")

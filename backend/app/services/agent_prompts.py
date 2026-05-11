@@ -19,12 +19,25 @@ returning (prompt_string, optional_working_dir). The prompt is
 passed to Claude Code CLI for execution.
 """
 
+import json
 import uuid as uuid_mod
 from pathlib import Path
 from typing import Any
 
+import structlog
+
 from app.models.bud import BUDDocument
+from app.repositories.feature_reads import FeatureReadRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
+from app.services.bud_agent_context import (
+    format_code_locations_section,
+    load_bud_agent_context,
+)
+from app.services.embedding_service import embedding_service
+from app.services.prompt_builder import build_prd_prompt as _build_prd
 from app.services.skill_loader import Skill
+
+logger = structlog.get_logger(__name__)
 
 
 async def build_prd_prompt(
@@ -33,8 +46,14 @@ async def build_prd_prompt(
     org_id: uuid_mod.UUID,
     db: Any,
 ) -> tuple[str, str | None]:
-    """Build PRD enrichment prompt from triage context."""
-    from app.services.prompt_builder import build_prd_prompt as _build
+    """Build PRD enrichment prompt from triage context.
+
+    Adds two grounding sections that kill the LLM's tendency to write
+    against generic / hallucinated content: real tracked-repo names,
+    and a top-K semantic prefetch of likely-related existing features.
+    Both are lightweight (<1 KB combined) compared to dumping the
+    full feature list, which can run to hundreds of rows per org.
+    """
 
     meta = bud.metadata_ or {}
     session_id = meta.get("triage_session_id")
@@ -47,7 +66,13 @@ async def build_prd_prompt(
         if session:
             triage_context = session.triage_context or {}
 
-    prompt = await _build(
+    repo_repo = TrackedRepoRepository(db, org_id=org_id)
+    repo_summaries = await _build_repo_summaries(repo_repo)
+
+    brief = _build_pm_brief(bud, triage_context)
+    candidate_features = await _build_pm_candidate_features(db, org_id=org_id, brief=brief)
+
+    prompt = await _build_prd(
         skill_name=skill.slug,
         bud_number=bud.bud_number,
         bud_title=bud.title,
@@ -55,8 +80,74 @@ async def build_prd_prompt(
         requirements_md=bud.requirements_md or "",
         org_id=org_id,
         db=db,
+        repo_summaries=repo_summaries,
+        candidate_features=candidate_features,
     )
     return prompt, None
+
+
+async def _build_repo_summaries(repo_repo: Any) -> list[str]:
+    """Render active tracked repos as compact markdown bullets.
+
+    Naming them in the prompt is what stops the PM agent from inventing
+    product names — embedding search alone can't fix a hallucination
+    that originates from missing context.
+    """
+    repos = await repo_repo.list_active()
+    summaries: list[str] = []
+    for repo in repos:
+        layer = repo.repo_layer.value if repo.repo_layer is not None else None
+        line = f"- **{repo.name}**" + (f" — layer={layer}" if layer else "")
+        summaries.append(line)
+    return summaries
+
+
+def _build_pm_brief(bud: BUDDocument, triage_context: dict[str, Any]) -> str:
+    """Concatenate the BUD signals an embedding-search query should see.
+
+    Combines title, current draft, and triage context into a single
+    string capped at 4 KB — the same length cap the embedding service
+    applies for feature content, so we stay within the model's
+    sensitive range.
+    """
+    parts: list[str] = [bud.title]
+    if bud.requirements_md:
+        parts.append(bud.requirements_md)
+    if triage_context:
+        parts.append(json.dumps(triage_context))
+    return "\n\n".join(parts)[:4000]
+
+
+async def _build_pm_candidate_features(
+    db: Any,
+    *,
+    org_id: uuid_mod.UUID,
+    brief: str,
+    limit: int = 8,
+) -> list[tuple[str, str, float]]:
+    """Top-K existing features ranked by cosine distance to the brief.
+
+    Returns ``(feature_id_str, title, similarity)`` where ``similarity``
+    is ``1 - distance`` so higher = closer. Defensive: returns ``[]``
+    when the brief is empty or embedding/search fails — the prompt
+    still works without prefetch, the agent can fall back to
+    ``get_features``.
+    """
+    if not brief.strip():
+        return []
+    try:
+        vec = await embedding_service.embed(brief)
+        feature_repo = FeatureReadRepository(db, org_id=org_id)
+        hits = await feature_repo.semantic_search(vec, limit=limit, only_active=True)
+    except Exception as exc:  # noqa: BLE001 — defensive: prefetch is opt-in context
+        logger.warning("pm_candidate_features_failed", error=str(exc))
+        return []
+    # pgvector ``cosine_distance`` is in [0, 2]; clamp the inverted
+    # similarity to non-negative so the prompt never renders
+    # ``similarity -0.13`` for pairs worse than orthogonal.
+    return [
+        (str(feat.id), feat.feature_title, max(0.0, 1.0 - distance)) for feat, distance in hits
+    ]
 
 
 async def build_tech_arch_prompt(
@@ -65,9 +156,15 @@ async def build_tech_arch_prompt(
     org_id: uuid_mod.UUID,
     db: Any,
 ) -> tuple[str, str | None]:
-    """Build tech architecture prompt with design context and repo info."""
+    """Build tech architecture prompt with design context and repo info.
+
+    Augments the existing repo/design context with an "Existing code to
+    read before planning" section sourced from every feature the BUD is
+    linked to — surfacing all layers of ``code_locations`` so the
+    planner can call ``code_context`` / ``code_impact`` against the
+    right files instead of guessing.
+    """
     from app.repositories.design_system import DesignSystemRefRepository
-    from app.repositories.tracked_repository import TrackedRepoRepository
 
     bud_ref = f"BUD-{bud.bud_number:03d}"
 
@@ -76,35 +173,43 @@ async def build_tech_arch_prompt(
     repo_pairs = [(path, name) for _, path, name in repo_triples]
     working_dir = repo_triples[0][1] if repo_triples else None
 
-    repo_id_to_name: dict[uuid_mod.UUID, str] = {}
-    repo_id_to_path: dict[uuid_mod.UUID, str] = {}
-    for rid, path, name in repo_triples:
-        repo_id_to_name[rid] = name
-        repo_id_to_path[rid] = path
-
-    design_context = _build_design_context(bud, repo_id_to_name, repo_id_to_path)
+    design_directive = _build_design_mcp_directive(bud, purpose="planning")
 
     ds_repo = DesignSystemRefRepository(db, org_id=org_id)
     has_design_system = bool(await ds_repo.get_default())
 
     repo_context = _build_repo_context(repo_pairs)
 
+    ctx = await load_bud_agent_context(db, bud_id=bud.id, org_id=org_id)
+    linked_section = format_code_locations_section(
+        ctx.linked_features,
+        heading="## Existing code to read before planning",
+        instruction=(
+            "Before proposing changes, call `code_context` / `code_impact` on "
+            "the symbols in these files to confirm current behaviour. Your "
+            "`impacted_repos` JSON fence MUST include every repo whose code "
+            "is listed above."
+        ),
+    )
+
     prompt = (
         f"Generate a concise tech spec for {bud_ref}: {bud.title}.\n\n"
         f"## Requirements\n\n{bud.requirements_md or ''}\n"
     )
-    if design_context:
-        prompt += f"\n## Design Wireframes & Notes\n{design_context}\n"
+    if design_directive:
+        prompt += design_directive
     if has_design_system:
         prompt += (
             "\n## Design System\n\n"
             "Use the `get_design_system` MCP tool to fetch design tokens. "
             "Do NOT hardcode values — reference the design system.\n"
         )
+    if linked_section:
+        prompt += "\n" + linked_section
     if repo_context:
         prompt += repo_context
 
-    has_designs = bool(design_context or has_design_system)
+    has_designs = bool(design_directive or has_design_system)
     prompt += _build_tech_arch_instructions(bud, repo_pairs, has_designs)
 
     return prompt, working_dir
@@ -116,7 +221,14 @@ async def build_code_review_prompt(
     org_id: uuid_mod.UUID,
     db: Any,
 ) -> tuple[str, str | None]:
-    """Build code review prompt with repo locations and PR-aware diffs."""
+    """Build code review prompt with repo locations and PR-aware diffs.
+
+    When the BUD has linked features, prepends a "Linked feature
+    surfaces" section listing the files those features OWN — the
+    reviewer uses this to flag scope-creep (PR touches files outside
+    any linked feature) and missing-coverage (linked feature has files
+    not touched by the PR but the requirement implies they should be).
+    """
     from app.repositories.dev_activity import DevActivityLogRepository
     from app.repositories.pull_request import PullRequestRepository
 
@@ -146,13 +258,28 @@ async def build_code_review_prompt(
 
     repo_list = "\n".join(repo_sections)
 
-    repo_path_map = {r.get("repo_id", ""): r.get("repo_path", "") for r in confirmed_repos}
-    design_refs = _build_design_refs(bud, repo_path_map)
+    design_refs = _build_design_mcp_directive(bud, purpose="reviewing")
+
+    ctx = await load_bud_agent_context(db, bud_id=bud.id, org_id=org_id)
+    linked_section = format_code_locations_section(
+        ctx.linked_features,
+        heading="## Linked feature surfaces",
+        instruction=(
+            "Cross-reference your `git diff` against these paths:\n"
+            "- Files touched by the PR that are NOT in any linked feature's "
+            "code_locations → flag as **scope-creep** (warning).\n"
+            "- Files listed above that the requirement implies should change "
+            "but the PR did NOT touch → flag as **missing-coverage** (warning).\n"
+            "- If a linked feature's expected file is touched, that's the "
+            "happy path — no flag needed."
+        ),
+    )
 
     prompt = (
         f"Code review for {bud_ref}: {bud.title}.\n\n"
         f"## Repos\n\n{repo_list}\n\n"
         f"{design_refs}"
+        f"{linked_section}"
         "## Scope\n\n"
         "**Review only what this diff changes. Do NOT flag pre-existing "
         "code that is unchanged.**\n\n"
@@ -253,13 +380,27 @@ async def build_testing_prompt(
             "Refine these drafts into structured test cases. Do not pad — improve precision.\n\n"
         )
 
-    repo_path_map = {r.get("repo_id", ""): r.get("repo_path", "") for r in confirmed_repos}
-    design_refs = _build_design_refs(bud, repo_path_map)
+    design_refs = _build_design_mcp_directive(bud, purpose="writing test cases")
+
+    ctx = await load_bud_agent_context(db, bud_id=bud.id, org_id=org_id)
+    linked_section = format_code_locations_section(
+        ctx.linked_features,
+        heading="## Linked feature surfaces (extend existing tests around these files)",
+        instruction=(
+            "For each file listed above, look for an adjacent test file (e.g. "
+            "`tests/...test_<name>.py` next to `app/.../<name>.py`, or "
+            "`<Component>.spec.ts` next to `<Component>.vue`). Prefer extending "
+            "those existing tests over creating new files — match their fixture "
+            "and assertion style. Only add new test files when no adjacent "
+            "tests exist."
+        ),
+    )
 
     prompt = (
         f"You are generating structured test cases for {bud_ref}: {bud.title}.\n\n"
         f"## Repositories\n\n{repo_list}\n\n"
         f"{design_refs}"
+        f"{linked_section}"
         "## How to Get Context\n\n"
         "1. Use `get_bud_context` MCP tool to fetch the full tech spec\n"
         "2. Run `git diff` in each repo to see code changes\n"
@@ -413,61 +554,22 @@ def _build_repo_diff_sections(
     return sections, working_dir
 
 
-def _build_design_refs(
-    bud: BUDDocument,
-    repo_paths: dict[str, str] | None = None,
-) -> str:
-    """Build a compact wireframe reference block from BUD designs.
+def _build_design_mcp_directive(bud: BUDDocument, *, purpose: str) -> str:
+    """Tell the agent to fetch BUD wireframes via the ``get_bud_designs`` MCP.
 
-    Used by code review and testing prompts so agents can verify
-    implementation matches the approved wireframes.
+    Returns an empty string when the BUD has no design rows attached.
+    ``purpose`` is a short verb phrase (e.g. ``"planning"``, ``"reviewing"``,
+    ``"writing tests"``) used to make the instruction context-specific.
     """
     if not bud.designs:
         return ""
-    repo_paths = repo_paths or {}
-    refs: list[str] = []
-    for d in bud.designs:
-        if d.design_path:
-            base = repo_paths.get(str(d.repo_id), "") if d.repo_id else ""
-            full = f"{base}/{d.design_path}" if base else d.design_path
-            refs.append(f"- `{full}`")
-        if d.notes:
-            refs.append(f"  Notes: {d.notes[:200]}")
-    if not refs:
-        return ""
     return (
-        "\n## Design References\n\n"
-        "Approved wireframes (read to verify implementation matches):\n" + "\n".join(refs) + "\n"
+        "\n## BUD Wireframes\n\n"
+        f'Call `get_bud_designs` with `bud_id: "{bud.id}"` to fetch the '
+        f"approved wireframe HTML and override notes before {purpose}. "
+        "Do NOT inline the wireframe content into other outputs — refer to "
+        "the design only enough to confirm the implementation matches.\n"
     )
-
-
-def _build_design_context(
-    bud: BUDDocument,
-    repo_id_to_name: dict[uuid_mod.UUID, str],
-    repo_id_to_path: dict[uuid_mod.UUID, str],
-) -> str:
-    """Build design context string from BUD wireframes and notes."""
-    parts: list[str] = []
-    if not bud.designs:
-        return ""
-    for d in bud.designs:
-        repo_name = repo_id_to_name.get(d.repo_id, "general") if d.repo_id else "general"
-        repo_path = repo_id_to_path.get(d.repo_id) if d.repo_id else None
-
-        if d.design_path or d.notes:
-            parts.append(f"\n### Design: {repo_name}")
-            if d.design_path and repo_path:
-                full_path = f"{repo_path}/{d.design_path}"
-                parts.append(
-                    f"**Wireframe:** `{full_path}`\n"
-                    "Read this HTML wireframe to understand the UI layout.\n"
-                )
-            if d.notes:
-                parts.append(
-                    f"**Design Notes (OVERRIDE):**\n{d.notes}\n\n"
-                    "These notes take priority over the wireframe HTML.\n"
-                )
-    return "\n".join(parts)
 
 
 def _build_repo_context(repo_pairs: list[tuple[str, str]]) -> str:

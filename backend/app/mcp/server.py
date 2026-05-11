@@ -34,6 +34,10 @@ from app.mcp.handlers_bud import (
     handle_get_bud_context,
     handle_write_bud,
 )
+from app.mcp.handlers_bud_design import (
+    handle_get_bud_designs,
+    handle_write_bud_design,
+)
 from app.mcp.handlers_code_graph import (
     handle_code_community,
     handle_code_context,
@@ -428,6 +432,71 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         },
     ),
     MCPToolDefinition(
+        name="get_bud_designs",
+        description=(
+            "Fetch the approved wireframe HTML attached to a BUD. Call "
+            "this BEFORE iterating on a design — never assume the prior "
+            "wireframe content from your own context. Returns one row per "
+            "(bud, repo) design, each with the sanitized HTML and any "
+            "override notes."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_id": {
+                    "type": "string",
+                    "description": "BUD UUID to fetch designs for.",
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional repo UUID to filter to a single design. "
+                        "Omit to get every per-repo design for the BUD."
+                    ),
+                },
+            },
+            "required": ["bud_id"],
+        },
+    ),
+    MCPToolDefinition(
+        name="write_bud_design",
+        description=(
+            "Persist an iterated wireframe HTML back to the BUD's design "
+            "row. The HTML is sanitized server-side; the row is upserted "
+            "by (bud_id, repo_id) and marked READY. Call this as the "
+            "FINAL step of any design iteration — do NOT rely on stdout "
+            "JSON parsing for persistence."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_id": {
+                    "type": "string",
+                    "description": "BUD UUID to attach the wireframe to.",
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional repo UUID. Omit for a BUD-level design "
+                        "not scoped to any single repository."
+                    ),
+                },
+                "html": {
+                    "type": "string",
+                    "description": "Complete, self-contained wireframe HTML.",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": (
+                        "Optional override notes (free text) that take "
+                        "priority over the HTML when downstream agents read."
+                    ),
+                },
+            },
+            "required": ["bud_id", "html"],
+        },
+    ),
+    MCPToolDefinition(
         name="get_bud_plan",
         description=(
             "Get the implementation plan for a BUD with your assigned TODOs. "
@@ -672,6 +741,8 @@ TOOL_HANDLERS: dict[str, Any] = {
     "check_feature_exists": handle_check_feature_exists,
     "list_design_systems": handle_list_design_systems,
     "get_design_system": handle_get_design_system,
+    "get_bud_designs": handle_get_bud_designs,
+    "write_bud_design": handle_write_bud_design,
     "code_impact": handle_code_impact,
     "code_query": handle_code_query,
     "code_context": handle_code_context,

@@ -233,6 +233,8 @@ async def build_prd_prompt(
     *,
     org_id: uuid.UUID | None = None,
     db: AsyncSession | None = None,
+    repo_summaries: list[str] | None = None,
+    candidate_features: list[tuple[str, str, float]] | None = None,
 ) -> str:
     """Build a prompt for the Product Manager agent to enrich a BUD with a full PRD.
 
@@ -242,6 +244,14 @@ async def build_prd_prompt(
         bud_title: The BUD title.
         triage_context: Accumulated context from the triage interview.
         requirements_md: The initial BUD content from triage.
+        org_id: Organization UUID — required for DB-backed skill override.
+        db: Async database session — required for DB-backed skill override.
+        repo_summaries: Optional one-line repo descriptors (``"- **name**
+            — layer=…"``) used to ground the PM in the real tracked
+            repositories. Renders as a "Tracked Repositories" section.
+        candidate_features: Optional ``(feature_id_str, title,
+            similarity)`` tuples from a semantic prefetch over existing
+            features. Renders as "Possibly-related existing features".
 
     Returns:
         Complete prompt string for the PM agent.
@@ -261,12 +271,34 @@ async def build_prd_prompt(
     sections.append(f"\n**Triage Context:**\n```json\n{triage_context}\n```")
     sections.append(f"\n**Current Content:**\n{requirements_md}")
 
-    # 3. Instructions
+    # 3. Grounding context — repos + likely-related existing features.
+    # Both sections are short, deterministic, and override the LLM's
+    # tendency to invent product names ("bodhigrove" etc.) or duplicate
+    # existing features when it has zero prior context.
+    if repo_summaries:
+        sections.append("\n---\n\n## Tracked Repositories\n")
+        sections.extend(repo_summaries)
+        sections.append(
+            "\n_All claims in this PRD must be grounded in these repos. "
+            "Do NOT invent product names or repos._"
+        )
+    if candidate_features:
+        sections.append("\n---\n\n## Possibly-related existing features\n")
+        sections.append(
+            "_Top matches by semantic similarity to the brief above — "
+            "treat as suggestions. If you need more, call "
+            '`get_features(query="...")`._\n'
+        )
+        for feature_id, title, similarity in candidate_features:
+            sections.append(f"- `{feature_id}` — {title} (similarity {similarity:.2f})")
+
+    # 4. Instructions
     sections.append("\n---\n\n## Instructions\n")
     sections.append(
         f"Enrich {bud_ref} with a focused PRD. Use `get_bud_context` to "
-        "read the current BUD, then `get_knowledge` to find related features. "
-        f"Write back using `write_bud` with `bud_number: {bud_number}` to UPDATE.\n\n"
+        "read the current BUD, then `get_features` to search for related "
+        f"features (refine the query if the prefetch above misses). Write "
+        f"back using `write_bud` with `bud_number: {bud_number}` to UPDATE.\n\n"
         "**IMPORTANT:** Pass `bud_number` to `write_bud` — omitting it creates a duplicate.\n\n"
         "**Keep it crisp — target 1,500-3,000 characters total.** "
         "Developers use Claude Code and need scope and decisions, not verbose explanations.\n\n"
@@ -277,7 +309,15 @@ async def build_prd_prompt(
         "- **Edge Cases**: Table (scenario | expected behavior), max 6 rows.\n"
         "- **Dependencies & Risks**: Bullet points, real blockers only.\n\n"
         "No code examples. No implementation details. No preamble.\n"
-        "Preserve the existing triage origin — append sections below it."
+        "Preserve the existing triage origin — append sections below it.\n\n"
+        "## Output Tail (REQUIRED)\n\n"
+        "After calling `write_bud`, end your final message with EXACTLY one\n"
+        "JSON fence listing the existing features your requirement touches —\n"
+        "use the ids from the 'Possibly-related existing features' list above\n"
+        "or from `get_features` results. Use an empty array when nothing applies.\n\n"
+        "```json\n"
+        '{"linked_feature_ids": ["<feature-uuid>", "..."]}\n'
+        "```"
     )
 
     prompt = "\n".join(sections)
@@ -287,6 +327,8 @@ async def build_prd_prompt(
         skill=skill_name,
         bud_number=bud_number,
         prompt_length=len(prompt),
+        repo_count=len(repo_summaries or []),
+        candidate_count=len(candidate_features or []),
     )
 
     return prompt

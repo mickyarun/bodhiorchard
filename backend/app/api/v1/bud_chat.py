@@ -22,7 +22,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
-from app.models.bud import BUDDesignStatus
 from app.models.user import User
 from app.repositories.bud import BUDChatMessageRepository, BUDDesignRepository, BUDRepository
 from app.schemas.bud import SECTION_PATTERN, ChatMessageRead
@@ -99,26 +98,19 @@ async def chat_bud(
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
 
-    # Resolve current content — for design, use bud_designs table
+    # Resolve repo scope for the design section so the worker can pass
+    # ``repo_id`` to ``get_design_system`` / ``write_bud_design`` MCP calls.
+    # The wireframe HTML itself is NOT loaded here — the agent fetches it
+    # on demand via ``get_bud_designs``, so we never inline ~30KB of prior
+    # HTML into the prompt or the job payload.
     design_repo_id: str | None = None
     if body.section == "design":
         current_content = ""
         if body.design_id:
             design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
             design = await design_repo.get_by_id(body.design_id)
-            if design:
-                design_repo_id = str(design.repo_id) if design.repo_id else None
-                if design.design_html:
-                    current_content = design.design_html
-        if not current_content:
-            design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
-            all_designs = await design_repo.list_for_bud(bud_id)
-            for d in all_designs:
-                if d.status == BUDDesignStatus.READY and d.design_html:
-                    current_content = d.design_html
-                    if not design_repo_id and d.repo_id:
-                        design_repo_id = str(d.repo_id)
-                    break
+            if design and design.repo_id:
+                design_repo_id = str(design.repo_id)
     else:
         current_content = getattr(bud, body.section) or ""
 

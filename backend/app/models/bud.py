@@ -37,6 +37,7 @@ from app.models.base import BaseModel
 
 if TYPE_CHECKING:
     from app.models.bud_agent_task import BUDAgentTask
+    from app.models.bud_feature_link import BUDFeatureLink
     from app.models.bud_todo import BUDTodo
 
 
@@ -141,6 +142,9 @@ class BUDDocument(BaseModel):
     todos: Mapped[list["BUDTodo"]] = relationship(
         back_populates="bud", cascade="all, delete-orphan", lazy="noload"
     )
+    feature_links: Mapped[list["BUDFeatureLink"]] = relationship(
+        back_populates="bud", cascade="all, delete-orphan", lazy="noload"
+    )
 
     def __repr__(self) -> str:
         return f"<BUDDocument(id={self.id}, bud_number={self.bud_number})>"
@@ -174,7 +178,6 @@ class BUDDesign(BaseModel):
         UUID(as_uuid=True), ForeignKey("tracked_repositories.id"), nullable=True
     )
     design_html: Mapped[str | None] = mapped_column(Text, nullable=True)
-    design_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[BUDDesignStatus] = mapped_column(
         String(20), nullable=False, default=BUDDesignStatus.PENDING

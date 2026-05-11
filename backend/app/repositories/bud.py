@@ -312,9 +312,18 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
-    async def list_with_repo_names(self, bud_id: uuid.UUID) -> list[dict]:
-        """List designs for a BUD with joined repo names."""
-        stmt = self._scoped(
+    async def list_with_repo_names(
+        self,
+        bud_id: uuid.UUID,
+        repo_id: uuid.UUID | None = None,
+    ) -> list[dict]:
+        """List designs for a BUD with joined repo names.
+
+        When ``repo_id`` is supplied, filter to that single design row at
+        the SQL layer — keeps the data slice narrow and keeps the filter
+        out of MCP/handler Python code (SQL stays in repositories).
+        """
+        stmt = (
             select(BUDDesign, TrackedRepository.name.label("repo_name"))
             .join(
                 TrackedRepository,
@@ -324,6 +333,9 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
             .where(BUDDesign.bud_id == bud_id)
             .order_by(BUDDesign.created_at)
         )
+        if repo_id is not None:
+            stmt = stmt.where(BUDDesign.repo_id == repo_id)
+        stmt = self._scoped(stmt)
         result = await self._db.execute(stmt)
         rows = result.all()
         return [
@@ -365,6 +377,7 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         design_html: str | None = None,
         status: BUDDesignStatus = BUDDesignStatus.PENDING,
         job_id: str | None = None,
+        notes: str | None = None,
     ) -> BUDDesign:
         """Create or update a design for a (bud, repo) pair."""
         stmt = self._scoped(
@@ -385,6 +398,8 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
             existing.status = status
             if job_id is not None:
                 existing.job_id = job_id
+            if notes is not None:
+                existing.notes = notes
             await self._db.flush()
             await self._db.refresh(existing)
             return existing
@@ -396,6 +411,7 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
             design_html=design_html,
             status=status,
             job_id=job_id,
+            notes=notes,
         )
         return await self.create(design)
 

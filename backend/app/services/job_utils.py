@@ -83,6 +83,10 @@ def _format_tool_progress(tool_name: str, tool_input: dict[str, Any]) -> str:
             return "Discovering design systems..."
         case "get_design_system":
             return "Loading design tokens..."
+        case "get_bud_designs":
+            return "Loading current wireframe..."
+        case "write_bud_design":
+            return "Saving wireframe..."
         case "check_feature_exists":
             return "Checking features..."
         case "search_bugs":
