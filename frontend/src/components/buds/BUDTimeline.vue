@@ -182,6 +182,31 @@
               </div>
             </template>
 
+            <!-- Feature link events -->
+            <template v-else-if="event.event_type === 'feature_linked'">
+              <div class="tl-primary">
+                <span v-if="event.actor_name" class="tl-actor">{{ event.actor_name }}</span>
+                <span>linked</span>
+                <span class="tl-section">{{ formatFeatureTitles(event.detail) }}</span>
+              </div>
+            </template>
+
+            <template v-else-if="event.event_type === 'feature_unlinked'">
+              <div class="tl-primary">
+                <span v-if="event.actor_name" class="tl-actor">{{ event.actor_name }}</span>
+                <span>unlinked</span>
+                <span class="tl-section">{{ formatSingleFeatureTitle(event.detail) }}</span>
+              </div>
+            </template>
+
+            <template v-else-if="event.event_type === 'features_auto_linked'">
+              <div class="tl-primary">
+                <span class="tl-actor">PM Agent</span>
+                <span>auto-linked</span>
+                <span class="tl-section">{{ formatFeatureTitles(event.detail) }}</span>
+              </div>
+            </template>
+
             <!-- Content Updated -->
             <template v-else-if="event.event_type === 'content_updated'">
               <div class="tl-primary">
@@ -314,6 +339,9 @@ const EVENT_MAP: Record<string, EventConfig> = {
   ac_verification_passed: { icon: 'mdi-check-decagram', color: 'success', label: 'ACs verified' },
   ac_verification_failed: { icon: 'mdi-alert-circle', color: 'error', label: 'ACs incomplete' },
   status_override: { icon: 'mdi-shield-alert', color: 'orange', label: 'Manual override' },
+  feature_linked: { icon: 'mdi-link-plus', color: 'teal', label: 'Feature linked' },
+  feature_unlinked: { icon: 'mdi-link-off', color: 'grey', label: 'Feature unlinked' },
+  features_auto_linked: { icon: 'mdi-robot', color: 'teal', label: 'Features auto-linked' },
 }
 
 const DEFAULT_CONFIG: EventConfig = { icon: 'mdi-circle-small', color: 'grey', label: 'Event' }
@@ -368,6 +396,32 @@ function formatSection(section: string): string {
 
 function formatAgent(agent: string): string {
   return AGENT_LABELS[agent] ?? agent
+}
+
+// Render the titles list on feature_linked / features_auto_linked events.
+// Trims empties (backend writes "" when a title can't be resolved), shows the
+// first two by name, and falls back to a "N features" count when the detail
+// is missing entirely (older events written before titles were captured).
+const MAX_TITLES_INLINE = 2
+function formatFeatureTitles(detail: Record<string, unknown> | undefined | null): string {
+  const titles = Array.isArray(detail?.feature_titles)
+    ? (detail.feature_titles as unknown[]).map(String).filter(t => t.length > 0)
+    : []
+  const count = Number(detail?.count ?? titles.length)
+  if (titles.length === 0) {
+    return count === 1 ? '1 feature' : `${count} features`
+  }
+  if (titles.length <= MAX_TITLES_INLINE) {
+    return titles.join(', ')
+  }
+  const head = titles.slice(0, MAX_TITLES_INLINE).join(', ')
+  const rest = titles.length - MAX_TITLES_INLINE
+  return `${head} and ${rest} more`
+}
+
+function formatSingleFeatureTitle(detail: Record<string, unknown> | undefined | null): string {
+  const title = typeof detail?.feature_title === 'string' ? detail.feature_title : ''
+  return title.length > 0 ? title : 'a feature'
 }
 
 function formatShortDate(dateStr: string | undefined | null): string {

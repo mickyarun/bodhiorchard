@@ -137,6 +137,23 @@ class BUDFeatureLinkRepository:
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
+    async def titles_by_ids(self, feature_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Return ``{feature_id: feature_title}`` for the given ids in this org.
+
+        Used by callers that need to render which features were linked /
+        unlinked in audit trails (timeline events, notifications). Out-of-org
+        ids silently drop out of the result — same defensive behaviour as
+        :meth:`_features_in_org`.
+        """
+        if not feature_ids:
+            return {}
+        stmt = select(Feature.id, Feature.feature_title).where(
+            Feature.id.in_(feature_ids),
+            Feature.org_id == self._org_id,
+        )
+        result = await self._db.execute(stmt)
+        return {row.id: row.feature_title for row in result}
+
     async def _bud_in_org(self, bud_id: uuid.UUID) -> bool:
         """True iff the BUD exists and belongs to this repo's org."""
         stmt = select(BUDDocument.id).where(
