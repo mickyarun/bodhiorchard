@@ -135,24 +135,31 @@
       rel="stylesheet"
     />
     <style>
+      /* Palette mirrors the Vue app's bodhiorchardDark Vuetify theme
+         (frontend/src/plugins/vuetify.ts). Forest green + warm gold. */
       :root {
-        --bg: #0b1014;
-        --bg-elev: #131a20;
-        --bg-card: #1a232b;
-        --border: #2a3640;
-        --fg: #e6edf3;
-        --fg-dim: #9aa7b2;
-        --accent: #7ee6a0;
-        --accent-dim: #4a8c64;
-        --warn: #f0b86e;
-        --link: #8ab4ff;
+        --bg: #0D1B0F;
+        --bg-elev: #152415;
+        --bg-card: #1E3220;
+        --border: rgba(255, 255, 255, 0.06);
+        --border-strong: rgba(255, 255, 255, 0.1);
+        --fg: #E8F5E9;
+        --fg-dim: #A5D6A7;
+        --fg-muted: rgba(255, 255, 255, 0.55);
+        --primary: #2E7D32;
+        --primary-bright: #66BB6A;
+        --secondary: #D4A843;
+        --link: #66BB6A;
         --mono: "JetBrains Mono", ui-monospace, monospace;
       }
       * { box-sizing: border-box; margin: 0; padding: 0; }
       html { scroll-behavior: smooth; }
       body {
         font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
-        background: var(--bg);
+        background:
+          radial-gradient(ellipse at top, rgba(46, 125, 50, 0.08) 0%, transparent 60%),
+          linear-gradient(135deg, #0D1B0F 0%, #152415 50%, #1E3220 100%);
+        background-attachment: fixed;
         color: var(--fg);
         line-height: 1.6;
         -webkit-font-smoothing: antialiased;
@@ -167,52 +174,62 @@
       p { color: var(--fg-dim); }
 
       /* ─── Hero ─────────────────────────────────────── */
-      .hero { text-align: center; padding-top: 6rem; padding-bottom: 3rem; }
-      .hero img.logo { width: 96px; height: auto; margin-bottom: 1.5rem; }
-      .hero h1 {
-        font-size: clamp(2.5rem, 6vw, 4rem);
-        background: linear-gradient(135deg, var(--fg) 0%, var(--accent) 100%);
-        -webkit-background-clip: text;
-        background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0.5rem;
+      .hero { text-align: center; padding-top: 5rem; padding-bottom: 3rem; }
+      .hero img.logo {
+        width: 64px; height: 64px; margin-bottom: 1.25rem;
+        opacity: 0.9; border-radius: 50%;
+        background: rgba(255, 255, 255, 0.03);
+        padding: 6px;
       }
-      .hero .etymology { font-family: var(--mono); font-size: 0.85rem; color: var(--fg-dim); margin-bottom: 1.5rem; }
-      .hero .tagline { font-size: 1.35rem; color: var(--fg); max-width: 720px; margin: 0 auto 1rem; font-weight: 500; }
+      .hero h1 {
+        font-size: clamp(2.4rem, 5.5vw, 3.6rem);
+        color: var(--fg);
+        margin-bottom: 0.5rem;
+        letter-spacing: -0.02em;
+      }
+      .hero h1 .tm {
+        color: var(--secondary);
+        font-size: 0.55em;
+        font-weight: 400;
+        vertical-align: super;
+        margin-left: 0.15em;
+      }
+      .hero .etymology { font-family: var(--mono); font-size: 0.8rem; color: var(--fg-dim); margin-bottom: 1.5rem; letter-spacing: 0.02em; }
+      .hero .tagline { font-size: 1.3rem; color: var(--fg); max-width: 720px; margin: 0 auto 1rem; font-weight: 500; line-height: 1.4; }
       .hero .sub { font-size: 1rem; color: var(--fg-dim); max-width: 640px; margin: 0 auto 2.5rem; }
-      .cta-row { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+      .cta-row { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
       .btn {
         display: inline-flex; align-items: center; gap: 0.5rem;
-        padding: 0.85rem 1.6rem; border-radius: 8px;
-        font-weight: 600; font-size: 1rem; transition: transform 0.15s ease, background 0.15s ease;
+        padding: 0.8rem 1.5rem; border-radius: 8px;
+        font-weight: 600; font-size: 0.95rem; transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
       }
       .btn:hover { text-decoration: none; transform: translateY(-1px); }
-      .btn-primary { background: var(--accent); color: var(--bg); }
-      .btn-primary:hover { background: #95efb0; }
-      .btn-secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
-      .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+      .btn-primary { background: var(--primary); color: #ffffff; border: 1px solid var(--primary); }
+      .btn-primary:hover { background: var(--primary-bright); border-color: var(--primary-bright); }
+      .btn-secondary { background: transparent; color: var(--fg); border: 1px solid var(--border-strong); }
+      .btn-secondary:hover { border-color: var(--primary-bright); color: var(--primary-bright); }
 
       /* ─── Demo video placeholder ─────────────────── */
       .demo { padding-top: 1rem; }
       .video-frame {
         position: relative; aspect-ratio: 16 / 9; width: 100%;
-        background: linear-gradient(135deg, #1a232b 0%, #0f1418 100%);
+        background: linear-gradient(135deg, #152415 0%, #0D1B0F 100%);
         border: 1px solid var(--border); border-radius: 12px;
         display: flex; align-items: center; justify-content: center;
         overflow: hidden;
       }
       .video-frame .play-icon {
-        width: 80px; height: 80px; border-radius: 50%;
-        background: var(--accent); display: flex; align-items: center; justify-content: center;
-        opacity: 0.9;
+        width: 72px; height: 72px; border-radius: 50%;
+        background: var(--primary); display: flex; align-items: center; justify-content: center;
+        opacity: 0.85;
       }
-      .video-frame .play-icon svg { width: 32px; height: 32px; fill: var(--bg); margin-left: 4px; }
-      .video-frame .caption { position: absolute; bottom: 1rem; left: 1rem; font-family: var(--mono); font-size: 0.85rem; color: var(--fg-dim); }
+      .video-frame .play-icon svg { width: 28px; height: 28px; fill: #ffffff; margin-left: 4px; }
+      .video-frame .caption { position: absolute; bottom: 1rem; left: 1rem; font-family: var(--mono); font-size: 0.8rem; color: var(--fg-muted); }
       .video-frame::before {
         content: ""; position: absolute; inset: 0;
         background-image:
-          linear-gradient(rgba(126, 230, 160, 0.05) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(126, 230, 160, 0.05) 1px, transparent 1px);
+          linear-gradient(rgba(212, 168, 67, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(212, 168, 67, 0.04) 1px, transparent 1px);
         background-size: 32px 32px;
       }
 
@@ -225,9 +242,9 @@
         display: flex; align-items: flex-end; padding: 1rem;
         font-family: var(--mono); font-size: 0.8rem; color: var(--fg-dim);
       }
-      .shot-tree   { background: linear-gradient(135deg, #1b3a2e 0%, #0e1a14 100%); }
-      .shot-bud    { background: linear-gradient(135deg, #2a2b4a 0%, #11121f 100%); }
-      .shot-triage { background: linear-gradient(135deg, #3a2a2b 0%, #1f1112 100%); }
+      .shot-tree   { background: linear-gradient(135deg, #1E3220 0%, #0D1B0F 100%); }
+      .shot-bud    { background: linear-gradient(135deg, #2a2615 0%, #1a1808 100%); }
+      .shot-triage { background: linear-gradient(135deg, #1E3220 0%, #0D1B0F 80%, #2a2615 100%); }
 
       /* ─── What it is ──────────────────────────────── */
       .what-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin-top: 2rem; }
@@ -244,21 +261,24 @@
       }
       .how-step .num {
         position: absolute; top: -14px; left: 1.5rem;
-        background: var(--accent); color: var(--bg);
+        background: var(--secondary); color: #1a1a1a;
         font-family: var(--mono); font-weight: 600; font-size: 0.85rem;
         padding: 0.15rem 0.6rem; border-radius: 4px;
       }
 
-      /* ─── Manifesto ───────────────────────────────── */
+      /* ─── Manifesto (mirrors methodology page primary/secondary borders) ─ */
       .manifesto { padding-top: 4rem; padding-bottom: 4rem; }
       .manifesto > p { margin-bottom: 2rem; }
       .manifesto-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
       .manifesto-item {
-        background: var(--bg-card); border-left: 3px solid var(--accent);
+        background: rgba(255, 255, 255, 0.02);
+        border-left: 3px solid var(--primary);
         padding: 0.9rem 1.1rem; border-radius: 6px;
         font-size: 0.95rem;
+        transition: background 0.2s ease;
       }
-      .manifesto-item:nth-child(even) { border-left-color: var(--warn); }
+      .manifesto-item:hover { background: rgba(255, 255, 255, 0.04); }
+      .manifesto-item:nth-child(even) { border-left-color: var(--secondary); }
       .manifesto-item .value { font-weight: 600; color: var(--fg); }
       .manifesto-item .over { color: var(--fg-dim); }
       .manifesto-link {
@@ -273,7 +293,7 @@
         border-radius: 8px; padding: 0; margin-bottom: 0.75rem;
         transition: border-color 0.15s ease;
       }
-      .faq details[open] { border-color: var(--accent-dim); }
+      .faq details[open] { border-color: var(--primary); }
       .faq summary {
         cursor: pointer; padding: 1rem 1.25rem;
         font-weight: 600; color: var(--fg);
@@ -287,7 +307,7 @@
         font-size: 1.3rem; color: var(--fg-dim);
         transition: transform 0.15s ease;
       }
-      .faq details[open] summary::after { content: "−"; color: var(--accent); }
+      .faq details[open] summary::after { content: "−"; color: var(--primary-bright); }
       .faq details > p { padding: 0 1.25rem 1.1rem; color: var(--fg-dim); font-size: 0.95rem; }
 
       /* ─── Apache 2.0 callout ──────────────────────── */
@@ -297,8 +317,8 @@
       }
       .apache .badge {
         display: inline-block; font-family: var(--mono); font-size: 0.85rem;
-        background: var(--bg-card); border: 1px solid var(--accent-dim);
-        color: var(--accent); padding: 0.3rem 0.8rem; border-radius: 6px;
+        background: rgba(212, 168, 67, 0.1); border: 1px solid var(--secondary);
+        color: var(--secondary); padding: 0.3rem 0.8rem; border-radius: 6px;
         margin-bottom: 1rem;
       }
       .apache h2 { margin-bottom: 0.75rem; }
@@ -329,7 +349,7 @@
     <!-- ═══ Hero ═══════════════════════════════════════════════════ -->
     <section class="hero">
       <img class="logo" src="assets/bodhiorchard-logo.png" alt="Bodhiorchard logo" />
-      <h1>Bodhiorchard&trade;</h1>
+      <h1>Bodhiorchard<span class="tm">&trade;</span></h1>
       <p class="etymology">bodhi (awakening) · orchard (a tended grove)</p>
       <p class="tagline">
         The open-source, AI-native dev-ops platform.
