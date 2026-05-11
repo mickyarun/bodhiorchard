@@ -292,13 +292,21 @@ function openDesignInTab(designId: string): void {
   // blob: URLs were silently blocked from running scripts in prod
   // (both iframe and top-level). srcdoc on a full-viewport iframe
   // gives us a same-origin context where scripts execute reliably.
+  //
+  // The iframe is pinned with `position:fixed;inset:0` so the wireframe
+  // owns the entire viewport regardless of user-agent margins on the
+  // parent about:blank document. `100vw`/`100vh` alone leaves an
+  // 8px gutter (default <body> margin) and causes the wireframe's
+  // position:sticky elements to anchor off-viewport.
   const win = window.open('', '_blank')
   if (!win) return
   win.document.title = 'Design Preview'
-  win.document.body.style.margin = '0'
+  win.document.documentElement.style.cssText = 'margin:0;padding:0;height:100%;'
+  win.document.body.style.cssText = 'margin:0;padding:0;height:100%;overflow:hidden;'
   const iframe = win.document.createElement('iframe')
   iframe.srcdoc = designSrcdoc(d.design_html)
-  iframe.style.cssText = 'border:0;width:100vw;height:100vh;display:block;'
+  iframe.style.cssText
+    = 'position:fixed;inset:0;border:0;width:100%;height:100%;display:block;'
   win.document.body.appendChild(iframe)
 }
 
