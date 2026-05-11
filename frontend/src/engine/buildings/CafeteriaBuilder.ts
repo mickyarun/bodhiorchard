@@ -41,7 +41,7 @@ import { CAFETERIA_LAYOUT } from '../../../../shared/world/breakSeats'
 /** Longest-axis target (metres) for café-pack props on the interior prep bar.
  *  The Coffeehouse Lounge Pack bakes node-level scale transforms so raw AABBs
  *  render 10–100× too large — placeScaledFurniture rescales them uniformly. */
-const FIT_SMALL = 0.45  // fruit bowl, fancy donuts
+const FIT_SMALL = 0.45  // fruit bowl
 
 /** Actual Kenney wall height from GLB measurement. */
 const WALL_HEIGHT = 1.29
@@ -175,7 +175,6 @@ export class CafeteriaBuilder {
     const prepBar = await this.factory.placeFurnitureCentered(hut, BUILDING.kitchenBar, HUT_WIDTH / 2, 0, 1.6)
     const barH = BuildingFactory.getEntityHeight(prepBar)
     await this.placeScaled(app, hut, CAFE.fruitBowl,   HUT_WIDTH / 2 - 0.5, barH, 1.6, FIT_SMALL)
-    await this.placeScaled(app, hut, CAFE.fancyDonuts, HUT_WIDTH / 2 + 0.4, barH, 1.6, FIT_SMALL)
 
     // ─── Outdoor picnic tables + benches (zone-centered coords) ────────
     // Nested loop order matches forEachBreakSeat(CAFETERIA_LAYOUT) so
