@@ -23,8 +23,9 @@ Generate structured test cases (automation + manual) covering functional, negati
 3. Target 15-25 test cases total — not exhaustive suites. Focus on what matters.
 4. Cover ALL categories: functional, negative, boundary, stress, security, accessibility, impact
 5. Map test cases to acceptance criteria — every AC must have at least one test
-6. Use code_* MCP tools to understand the codebase — do NOT use bash grep/find
-7. No preamble. Output ONLY valid JSON — no markdown wrappers, no explanation.
+6. **If the prompt contains a "Linked feature surfaces" section, look for adjacent test files** to those source paths and extend them (pytest fixtures, Vitest setup) — do not create parallel test files when the linked feature already has tests.
+7. Use code_* MCP tools to understand the codebase — do NOT use bash grep/find
+8. No preamble. Output ONLY valid JSON — no markdown wrappers, no explanation.
 
 ## Test Categories
 

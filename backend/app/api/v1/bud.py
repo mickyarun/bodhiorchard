@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.bud_chat import router as chat_router
 from app.api.v1.bud_designs import router as designs_router
 from app.api.v1.bud_estimates import router as estimates_router
+from app.api.v1.bud_linked_features import router as linked_features_router
 from app.api.v1.bud_prs import router as prs_router
 from app.api.v1.bud_qa import router as qa_router
 from app.api.v1.bud_todos import router as todos_router
@@ -98,6 +99,11 @@ router = APIRouter(tags=["buds"])
 # ── Sub-routers ───────────────────────────────────────────────────
 router.include_router(designs_router, prefix="/{bud_id}/designs", tags=["bud-designs"])
 router.include_router(estimates_router, prefix="/{bud_id}", tags=["bud-estimates"])
+router.include_router(
+    linked_features_router,
+    prefix="/{bud_id}/linked-features",
+    tags=["bud-linked-features"],
+)
 router.include_router(prs_router, tags=["bud-prs"])
 router.include_router(qa_router, prefix="/{bud_id}/qa", tags=["bud-qa"])
 router.include_router(workflows_router, prefix="/{bud_id}", tags=["bud-workflows"])

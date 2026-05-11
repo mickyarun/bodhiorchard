@@ -37,6 +37,7 @@ from app.models.base import BaseModel
 
 if TYPE_CHECKING:
     from app.models.bud_agent_task import BUDAgentTask
+    from app.models.bud_feature_link import BUDFeatureLink
     from app.models.bud_todo import BUDTodo
 
 
@@ -139,6 +140,9 @@ class BUDDocument(BaseModel):
         back_populates="bud", cascade="all, delete-orphan", lazy="noload"
     )
     todos: Mapped[list["BUDTodo"]] = relationship(
+        back_populates="bud", cascade="all, delete-orphan", lazy="noload"
+    )
+    feature_links: Mapped[list["BUDFeatureLink"]] = relationship(
         back_populates="bud", cascade="all, delete-orphan", lazy="noload"
     )
 

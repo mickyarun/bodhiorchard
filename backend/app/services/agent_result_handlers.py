@@ -18,12 +18,16 @@ Each handler processes Claude's output, persists results to the database,
 and optionally triggers follow-up actions (notifications, status transitions).
 """
 
+import json
+import re
 import uuid as uuid_mod
 from typing import Any
 
 import structlog
 
 from app.models.bud_agent_task import BUDAgentTask
+from app.models.bud_feature_link import BUDFeatureLinkSource
+from app.repositories.bud_feature_link import BUDFeatureLinkRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -35,7 +39,16 @@ async def handle_prd_result(
     task: BUDAgentTask,
     db: Any,
 ) -> dict | None:
-    """PRD result: Claude wrote to BUD via MCP write_bud tool — trigger first estimation."""
+    """PRD result: persist agent-declared feature links, then trigger estimation.
+
+    The PM agent's final stdout message ends with a single JSON fence
+    listing the existing-feature ids the requirement touches. We parse
+    that fence, drop hallucinated / cross-org ids defensively, and
+    upsert :class:`BUDFeatureLink` rows so downstream agents (Designer,
+    TechPlanner, Code Reviewer, Tester) inherit the grounding.
+    """
+    linked_count = await _persist_pm_linked_features(bud_id, org_id, output, db)
+
     # Generate initial delivery estimates now that PRD content exists
     try:
         from app.repositories.bud import BUDRepository
@@ -48,7 +61,83 @@ async def handle_prd_result(
     except Exception:
         logger.warning("estimation_failed_after_prd", bud_id=str(bud_id))
 
-    return {"section": "requirements_md", "output_length": len(output)}
+    return {
+        "section": "requirements_md",
+        "output_length": len(output),
+        "linked_feature_count": linked_count,
+    }
+
+
+async def _persist_pm_linked_features(
+    bud_id: uuid_mod.UUID,
+    org_id: uuid_mod.UUID,
+    output: str,
+    db: Any,
+) -> int:
+    """Parse + persist ``linked_feature_ids`` from the PM agent's output.
+
+    Returns the count of links actually accepted (after UUID parsing,
+    org-scope filtering, and ON CONFLICT dedup at the repository).
+    """
+    parsed = _extract_last_json_dict(output)
+    raw_ids = parsed.get("linked_feature_ids") if parsed else None
+    if not isinstance(raw_ids, list):
+        if parsed is not None:
+            logger.warning(
+                "pm_linked_feature_ids_missing_or_wrong_shape",
+                bud_id=str(bud_id),
+                fence_keys=list(parsed.keys()),
+            )
+        return 0
+
+    valid_ids: list[uuid_mod.UUID] = []
+    dropped: list[str] = []
+    for raw in raw_ids:
+        try:
+            valid_ids.append(uuid_mod.UUID(str(raw)))
+        except (ValueError, TypeError):
+            dropped.append(str(raw))
+    if dropped:
+        logger.warning(
+            "pm_linked_feature_ids_unparseable",
+            bud_id=str(bud_id),
+            dropped=dropped,
+        )
+
+    if not valid_ids:
+        return 0
+
+    link_repo = BUDFeatureLinkRepository(db, org_id=org_id)
+    accepted = await link_repo.link_features(
+        bud_id, valid_ids, source=BUDFeatureLinkSource.PM_AGENT
+    )
+    logger.info(
+        "pm_linked_features_persisted",
+        bud_id=str(bud_id),
+        requested=len(valid_ids),
+        accepted=len(accepted),
+    )
+    return len(accepted)
+
+
+def _extract_last_json_dict(output: str) -> dict[str, Any] | None:
+    """Return the dict parsed from the last ```json ... ``` fence in ``output``.
+
+    Returns ``None`` when no fence is present or the contents don't
+    parse as a JSON object. Reuses the same regex pattern as
+    :func:`_extract_impacted_repos_json` for consistency — they look at
+    the same kind of trailing-fence convention.
+    """
+    fences = list(re.finditer(r"```json\s*\n(.*?)\n\s*```", output, re.DOTALL))
+    if not fences:
+        return None
+    try:
+        parsed = json.loads(fences[-1].group(1))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
 
 
 async def handle_tech_arch_result(

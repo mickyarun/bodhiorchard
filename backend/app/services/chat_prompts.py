@@ -25,6 +25,11 @@ from pathlib import Path
 
 import structlog
 
+from app.database import AsyncSessionLocal
+from app.services.bud_agent_context import (
+    format_code_locations_section,
+    load_bud_agent_context,
+)
 from app.services.job_utils import HISTORY_CHAR_BUDGET
 
 logger = structlog.get_logger(__name__)
@@ -91,8 +96,16 @@ async def build_design_prompt(
     *,
     use_mcp: bool = False,
     repo_name: str | None = None,
+    bud_id: str | None = None,
 ) -> tuple[str, Path | None]:
-    """Build the Claude prompt for design wireframe generation."""
+    """Build the Claude prompt for design wireframe generation.
+
+    When ``bud_id`` is provided, the prompt is augmented with a
+    "Linked existing UI surface" section listing the frontend
+    ``code_locations`` of every feature the BUD is linked to (via
+    :class:`BUDFeatureLink`). The designer is then instructed to extend
+    that surface instead of designing in a vacuum.
+    """
     ds_content = ""
     ds_file: Path | None = None
 
@@ -109,6 +122,8 @@ async def build_design_prompt(
                     ds_content = ds.content
         except Exception:
             logger.warning("design_system_lookup_failed", org_id=org_id, repo_id=repo_id)
+
+    linked_section = await _build_design_linked_section(org_id, bud_id)
 
     parts = [
         f"You are designing a **visual HTML wireframe** for {bud_ref}: *{title}*.\n",
@@ -152,6 +167,9 @@ async def build_design_prompt(
             "No design system extracted. Use Vuetify 3 CDN with a clean dark theme.\n"
         )
 
+    if linked_section:
+        parts.append(linked_section)
+
     parts.append(
         "## Existing Application UI\n\n"
         "Read 2–3 existing Vue components from `src/` to understand the visual style. "
@@ -191,6 +209,38 @@ async def build_design_prompt(
     )
 
     return "\n".join(parts), ds_file
+
+
+async def _build_design_linked_section(org_id: str, bud_id: str | None) -> str:
+    """Render the "Linked existing UI surface" section, or ``""`` if none.
+
+    Pulls frontend ``code_locations`` from features the BUD is linked
+    to (via :class:`BUDFeatureLink`) so the wireframe extends real
+    components instead of being designed in isolation. Failures are
+    swallowed with a warning — the prompt still works without this
+    section.
+    """
+    if not bud_id:
+        return ""
+    try:
+        async with AsyncSessionLocal() as db:
+            ctx = await load_bud_agent_context(
+                db, bud_id=uuid_mod.UUID(bud_id), org_id=uuid_mod.UUID(org_id)
+            )
+        if not ctx.linked_features:
+            return ""
+        return format_code_locations_section(
+            ctx.linked_features,
+            layers=["frontend"],
+            heading="## Linked existing UI surface",
+            instruction=(
+                "Your wireframe MUST extend these existing components, not "
+                "replace them. Read each file before sketching the layout."
+            ),
+        )
+    except Exception:
+        logger.warning("design_linked_features_lookup_failed", org_id=org_id, bud_id=bud_id)
+        return ""
 
 
 def build_chat_prompt(

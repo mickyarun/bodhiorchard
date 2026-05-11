@@ -261,3 +261,45 @@ class CodeReviewOverrideRequest(BaseModel):
     """
 
     reason: str = Field(..., min_length=10, max_length=2000)
+
+
+class LinkedFeatureRead(BaseModel):
+    """One feature linked to a BUD, with PRIMARY-repo metadata flattened.
+
+    Shape is camelCase via ``model_config`` aliases so the frontend can
+    consume it without renaming. ``code_locations`` is the JSONB blob
+    from the PRIMARY :class:`FeatureToRepo` row — null when no PRIMARY
+    junction exists (rare; happens for legacy or BUD-authored features).
+    """
+
+    id: uuid.UUID
+    title: str = Field(..., alias="title")
+    link_type: str = Field(..., alias="linkType")
+    source: str
+    repo_id: uuid.UUID | None = Field(default=None, alias="repoId")
+    repo_name: str | None = Field(default=None, alias="repoName")
+    code_locations: dict[str, list[str]] | None = Field(default=None, alias="codeLocations")
+
+    model_config = {"populate_by_name": True}
+
+
+class LinkFeaturesRequest(BaseModel):
+    """Body for POST /buds/{bud_id}/linked-features.
+
+    ``feature_ids`` is treated as a set — duplicates are dropped, and
+    ids that don't belong to the requesting org or are inactive are
+    silently filtered at the repository layer.
+    """
+
+    feature_ids: list[uuid.UUID] = Field(..., min_length=1, alias="featureIds")
+
+    model_config = {"populate_by_name": True}
+
+
+class LinkFeaturesResponse(BaseModel):
+    """Response for POST /buds/{bud_id}/linked-features."""
+
+    inserted_count: int = Field(..., alias="insertedCount")
+    inserted_feature_ids: list[uuid.UUID] = Field(..., alias="insertedFeatureIds")
+
+    model_config = {"populate_by_name": True}

@@ -19,12 +19,13 @@ Generate standalone HTML wireframes using Vuetify CDN and the organization's des
 ## Critical Rules
 
 1. Always reference the BUD's user stories and acceptance criteria
-2. Use the project's **actual** design tokens (colors, fonts, component defaults) — fetch via MCP tools
-3. Output must be a **complete, self-contained HTML file** using Vuetify CDN
-4. Include accessibility requirements (WCAG 2.1 AA minimum) as `<!-- A11Y: ... -->` HTML comments
-5. Include UX considerations as `<!-- UX: ... -->` HTML comments
-6. Use realistic placeholder data, not "Lorem ipsum"
-7. **Write the wireframe to `.bodhiorchard/wireframes/{bud_ref}/wireframe.html`** — create the directory if needed
+2. **If the prompt contains a "Linked existing UI surface" section, EXTEND those components — do not replace them.** Read each file listed before sketching the layout.
+3. Use the project's **actual** design tokens (colors, fonts, component defaults) — fetch via MCP tools
+4. Output must be a **complete, self-contained HTML file** using Vuetify CDN
+5. Include accessibility requirements (WCAG 2.1 AA minimum) as `<!-- A11Y: ... -->` HTML comments
+6. Include UX considerations as `<!-- UX: ... -->` HTML comments
+7. Use realistic placeholder data, not "Lorem ipsum"
+8. **Write the wireframe to `.bodhiorchard/wireframes/{bud_ref}/wireframe.html`** — create the directory if needed
 
 ## Workflow
 

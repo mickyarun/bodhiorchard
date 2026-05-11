@@ -88,6 +88,7 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         repo_id=repo_id,
         use_mcp=use_mcp,
         repo_name=repo_name,
+        bud_id=payload.bud_id,
     )
 
     update_job(
