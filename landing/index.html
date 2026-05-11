@@ -3,12 +3,133 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bodhiorchard™ — AI-native software dev-ops, on your machine</title>
+    <title>Bodhiorchard™ — Open-source agentic SDLC platform · Self-hosted Jira alternative</title>
     <meta
       name="description"
-      content="Bodhiorchard replaces Agile ceremonies with intelligent agents. Runs locally on your laptop with a Claude subscription, or against an Anthropic API key. Open source, Apache 2.0."
+      content="Bodhiorchard is the open-source, AI-native dev-ops platform — 12 agents that replace Agile ceremonies. Self-hosted on your hardware, data stays local, AI engine is your choice (Claude Code today, Ollama and OpenAI next). Apache 2.0."
     />
+    <meta name="keywords" content="agentic SDLC, AI-native dev-ops, self-hosted Jira alternative, Atlassian DC alternative, Claude Code, MCP server, BUD methodology, AI agents, open-source project management, Apache 2.0" />
+    <link rel="canonical" href="https://bodhiorchard.ai/" />
     <link rel="icon" type="image/png" href="assets/bodhiorchard-logo-sm.png" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bodhiorchard.ai/" />
+    <meta property="og:title" content="Bodhiorchard™ — Open-source agentic SDLC platform" />
+    <meta property="og:description" content="12 AI agents replace Agile ceremonies. Self-hosted, AI-engine-agnostic, Apache 2.0. A credible self-hosted Jira alternative." />
+    <meta property="og:image" content="https://bodhiorchard.ai/assets/bodhiorchard-logo.png" />
+    <meta property="og:site_name" content="Bodhiorchard" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Bodhiorchard™ — Open-source agentic SDLC platform" />
+    <meta name="twitter:description" content="12 AI agents replace Agile ceremonies. Self-hosted, AI-engine-agnostic, Apache 2.0." />
+    <meta name="twitter:image" content="https://bodhiorchard.ai/assets/bodhiorchard-logo.png" />
+
+    <!-- JSON-LD: SoftwareApplication -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Bodhiorchard",
+      "alternateName": "Bodhiorchard™",
+      "description": "Open-source agentic SDLC platform — 12 AI agents that replace Agile ceremonies, self-hosted on your hardware with your choice of AI inference engine.",
+      "url": "https://bodhiorchard.ai/",
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Project Management",
+      "operatingSystem": "macOS, Linux, Windows (WSL2)",
+      "softwareVersion": "0.1.0",
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": {
+        "@type": "Person",
+        "name": "Arun Rajkumar",
+        "url": "https://github.com/mickyarun"
+      },
+      "sameAs": [
+        "https://github.com/mickyarun/bodhiorchard"
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD: FAQPage (mirrors the visible FAQ section below) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Is Bodhiorchard a self-hosted Jira alternative?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes — for the workflow layer. Bodhiorchard is the open-source agentic SDLC platform that sits between IDE-side AI coding assistants like Tabby, Continue, or Cursor and traditional PM tools like Jira, Linear, or Plane. It is especially relevant to teams looking for an Atlassian DC alternative, since Atlassian is sunsetting new self-hosted Jira licences in March 2026 with full shutdown in 2029."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does my code leave my machine when I use Bodhiorchard?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The data plane is always local — Postgres, embeddings, BUDs, scanned repos, and the audit log all sit on your hardware. Only the LLM prompts leave your machine, and only when you choose a cloud inference mode such as an Anthropic API key. For fully air-gapped operation, the planned Ollama preset will run inference on your hardware as well."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I run Bodhiorchard without an Anthropic subscription?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Paste an Anthropic API key into Settings and Bodhiorchard runs the agents via Claude Code's CLI plus the Anthropic direct API on a pay-per-token basis. If you already have a Claude Pro or Max subscription on your host, the Hybrid deployment mode inherits that claude login session and you pay the flat subscription rate, no per-token bills."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does Bodhiorchard compare to Tabby, Continue, or Cursor?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Tabby, Continue, and Cursor are IDE-side AI coding assistants that help an individual developer write code. Bodhiorchard is the orchestration and project-management layer above them — it ingests requests, drafts BUDs, predicts cycle time with AI-PERT, routes work to the best-fit developer, generates test plans, links bugs back to the originating BUD, and runs retrospectives."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does Bodhiorchard compare to GitHub Copilot Workspace?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Copilot Workspace is cloud-only and GitHub-bound; your code, planning artefacts, and history live in GitHub's cloud. Bodhiorchard is self-hosted, repo-agnostic, and AI-engine-agnostic. It points at GitHub, GitLab, or a self-hosted Git server, and inference engines can be swapped without redeploying."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does Bodhiorchard work on Windows?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes, via WSL2 for both deployment modes. Full Docker mode runs the whole stack inside WSL2 with no Windows host dependencies; Hybrid mode runs the host processes inside WSL2 with the infrastructure containers backing them."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What does BUD mean in Bodhiorchard?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "BUD stands for Business Understanding Document. Every feature lives in one BUD containing spec, tech spec, test plan, acceptance criteria, and full history — all in markdown. It replaces the scattered combination of Jira tickets, Confluence pages, Google Docs, and Notion that most teams end up with."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is Bodhiorchard's licence? Can I use it commercially?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Bodhiorchard is licensed under the Apache License 2.0, which permits commercial use including embedding in proprietary products. Contributions require DCO sign-off via git commit -s."
+          }
+        }
+      ]
+    }
+    </script>
+
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
       rel="stylesheet"
@@ -128,6 +249,47 @@
         padding: 0.15rem 0.6rem; border-radius: 4px;
       }
 
+      /* ─── Manifesto ───────────────────────────────── */
+      .manifesto { padding-top: 4rem; padding-bottom: 4rem; }
+      .manifesto > p { margin-bottom: 2rem; }
+      .manifesto-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
+      .manifesto-item {
+        background: var(--bg-card); border-left: 3px solid var(--accent);
+        padding: 0.9rem 1.1rem; border-radius: 6px;
+        font-size: 0.95rem;
+      }
+      .manifesto-item:nth-child(even) { border-left-color: var(--warn); }
+      .manifesto-item .value { font-weight: 600; color: var(--fg); }
+      .manifesto-item .over { color: var(--fg-dim); }
+      .manifesto-link {
+        margin-top: 2rem; text-align: center; font-family: var(--mono); font-size: 0.9rem;
+      }
+
+      /* ─── FAQ ─────────────────────────────────────── */
+      .faq { padding-top: 4rem; padding-bottom: 4rem; }
+      .faq > p { margin-bottom: 1.5rem; }
+      .faq details {
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: 8px; padding: 0; margin-bottom: 0.75rem;
+        transition: border-color 0.15s ease;
+      }
+      .faq details[open] { border-color: var(--accent-dim); }
+      .faq summary {
+        cursor: pointer; padding: 1rem 1.25rem;
+        font-weight: 600; color: var(--fg);
+        list-style: none; position: relative;
+        padding-right: 2.5rem;
+      }
+      .faq summary::-webkit-details-marker { display: none; }
+      .faq summary::after {
+        content: "+"; position: absolute; right: 1.25rem; top: 50%;
+        transform: translateY(-50%); font-family: var(--mono);
+        font-size: 1.3rem; color: var(--fg-dim);
+        transition: transform 0.15s ease;
+      }
+      .faq details[open] summary::after { content: "−"; color: var(--accent); }
+      .faq details > p { padding: 0 1.25rem 1.1rem; color: var(--fg-dim); font-size: 0.95rem; }
+
       /* ─── Apache 2.0 callout ──────────────────────── */
       .apache {
         text-align: center; padding: 4rem 1.5rem;
@@ -157,7 +319,7 @@
       @media (max-width: 720px) {
         section { padding: 3rem 1.25rem; }
         .hero { padding-top: 4rem; }
-        .shot-grid, .what-grid, .how-grid { grid-template-columns: 1fr; }
+        .shot-grid, .what-grid, .how-grid, .manifesto-grid { grid-template-columns: 1fr; }
         .hero .tagline { font-size: 1.15rem; }
       }
     </style>
@@ -170,11 +332,12 @@
       <h1>Bodhiorchard&trade;</h1>
       <p class="etymology">bodhi (awakening) · orchard (a tended grove)</p>
       <p class="tagline">
-        Replace Agile ceremonies with intelligent agents. Plant a BUD, watch it grow into production.
+        The open-source, AI-native dev-ops platform.
+        <br />
+        From conversation to production — every phase powered by intelligent agents working alongside humans.
       </p>
       <p class="sub">
-        An open-source, AI-native dev-ops platform. Runs locally on your laptop with a Claude subscription —
-        or against an Anthropic API key in the cloud. Token usage is heavily optimised either way.
+        Self-hosted on your hardware. Your data stays local. AI inference engine is your choice — Claude Code today, Ollama and OpenAI next.
       </p>
       <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/mickyarun/bodhiorchard">
@@ -183,6 +346,7 @@
           </svg>
           View on GitHub
         </a>
+        <a class="btn btn-secondary" href="/methodology">Read the methodology</a>
         <a class="btn btn-secondary" href="#demo">Watch the demo</a>
       </div>
     </section>
@@ -227,10 +391,30 @@
         </div>
         <div class="what-card">
           <span class="emoji">🤖</span>
-          <h3>Claude Code-native</h3>
-          <p>Eleven specialised agents run on Claude Code with prompt caching and structured tool-use. Same agents whether you run local or on the API.</p>
+          <h3>AI-engine-agnostic</h3>
+          <p>Twelve specialised agents. Today on Claude Code (codebase-aware) and the Anthropic direct API (lightweight calls); Ollama and OpenAI next. Token usage is heavily optimised.</p>
         </div>
       </div>
+    </section>
+
+    <!-- ═══ Manifesto ══════════════════════════════════════════════ -->
+    <section class="manifesto" id="manifesto">
+      <h2>The Manifesto</h2>
+      <p>Eight principles, deliberately echoing the Agile Manifesto's "X over Y" structure — what Bodhiorchard chooses when the trade-off is real.</p>
+      <div class="manifesto-grid">
+        <div class="manifesto-item"><span class="value">AI-generated first drafts</span> <span class="over">over blank-page paralysis</span></div>
+        <div class="manifesto-item"><span class="value">Cycle time predictions</span> <span class="over">over story points & planning poker</span></div>
+        <div class="manifesto-item"><span class="value">Continuous learning</span> <span class="over">over post-mortems after the damage</span></div>
+        <div class="manifesto-item"><span class="value">Human decisions</span> <span class="over">over human busywork</span></div>
+        <div class="manifesto-item"><span class="value">Living knowledge</span> <span class="over">over stale Confluence pages</span></div>
+        <div class="manifesto-item"><span class="value">BUD as single source of truth</span> <span class="over">over scattered tickets & docs</span></div>
+        <div class="manifesto-item"><span class="value">Skills that grow with the team</span> <span class="over">over static role assignments</span></div>
+        <div class="manifesto-item"><span class="value">Auto-healing quality loops</span> <span class="over">over manual bug triage</span></div>
+      </div>
+      <p class="manifesto-link">
+        Phase-by-phase flow, AI-vs-Human role split, knowledge architecture →
+        <a href="/methodology">read the full methodology</a>
+      </p>
     </section>
 
     <!-- ═══ How it works ═══════════════════════════════════════════ -->
@@ -258,6 +442,52 @@
       </div>
     </section>
 
+    <!-- ═══ FAQ ════════════════════════════════════════════════════ -->
+    <section class="faq" id="faq">
+      <h2>FAQ</h2>
+      <p>Common questions about Bodhiorchard's positioning, privacy posture, and inference choices.</p>
+
+      <details>
+        <summary>Is Bodhiorchard a self-hosted Jira alternative?</summary>
+        <p>Yes — for the workflow layer. Bodhiorchard is the <strong>open-source agentic SDLC platform</strong> that sits between IDE-side AI coding assistants (Tabby, Continue, Cursor) and traditional PM tools (Jira, Linear, Plane). It is especially relevant to teams looking for an <strong>Atlassian DC alternative</strong> — Atlassian is sunsetting new self-hosted Jira licences in March 2026 with full shutdown in 2029.</p>
+      </details>
+
+      <details>
+        <summary>Does my code leave my machine?</summary>
+        <p>The <strong>data plane is always local</strong> — Postgres, embeddings, BUDs, scanned repos, and the audit log all sit on your hardware. Only the LLM prompts leave your machine, and only when you choose a cloud inference mode (Anthropic API key or Anthropic direct API). For fully air-gapped operation, wait for the planned Ollama preset.</p>
+      </details>
+
+      <details>
+        <summary>Can I run Bodhiorchard without an Anthropic subscription?</summary>
+        <p>Yes — paste an Anthropic API key (pay-per-token, billed by Anthropic) into Settings and the agents run via Claude Code's CLI plus the Anthropic direct API. If you already have a Claude Pro / Max subscription on your host, the Hybrid deployment mode inherits that <code>claude login</code> session and you pay the flat subscription rate, no per-token bills.</p>
+      </details>
+
+      <details>
+        <summary>How does Bodhiorchard compare to Tabby, Continue, or Cursor?</summary>
+        <p>Those are <strong>IDE-side AI coding assistants</strong> — they help an individual developer write code. Bodhiorchard is the <strong>orchestration + project-management layer above them</strong>: it ingests requests, drafts BUDs, predicts cycle time with AI-PERT, routes work to the best-fit developer, generates test plans, links bugs back to the originating BUD, and runs the retrospective. You can pair them — write code with Tabby / Cursor in your IDE while Bodhiorchard runs the lifecycle around it.</p>
+      </details>
+
+      <details>
+        <summary>How does Bodhiorchard compare to GitHub Copilot Workspace?</summary>
+        <p>Copilot Workspace is cloud-only and GitHub-bound — your code, planning artefacts, and history live in GitHub's cloud. Bodhiorchard is <strong>self-hosted, repo-agnostic, and AI-engine-agnostic</strong>. You can point it at GitHub, GitLab, or a self-hosted Git server, and swap inference engines without re-deploying.</p>
+      </details>
+
+      <details>
+        <summary>Does Bodhiorchard work on Windows?</summary>
+        <p>Yes — via <strong>WSL2</strong> for both deployment modes. Full Docker mode runs the whole stack inside WSL2 with no Windows host dependencies; Hybrid mode runs the host processes inside WSL2 with the infra containers backing them.</p>
+      </details>
+
+      <details>
+        <summary>What does "BUD" mean?</summary>
+        <p><strong>BUD = Business Understanding Document.</strong> Every feature lives in one BUD — spec, tech spec, test plan, acceptance criteria, and full history, all in markdown. It replaces the scattered combination of Jira tickets + Confluence pages + Google Docs + Notion that most teams end up with.</p>
+      </details>
+
+      <details>
+        <summary>What's the licence? Can I use Bodhiorchard commercially?</summary>
+        <p><strong>Apache License 2.0</strong> — yes, commercial use is allowed, including embedding in proprietary products. Contributions require <strong>DCO sign-off</strong> (<code>git commit -s</code>). For deeper commercial-licence terms with proprietary integrations and support, reach out to the maintainer.</p>
+      </details>
+    </section>
+
     <!-- ═══ Apache 2.0 callout ═════════════════════════════════════ -->
     <section class="apache">
       <span class="badge">Apache License 2.0</span>
@@ -268,6 +498,9 @@
     <!-- ═══ Footer ═════════════════════════════════════════════════ -->
     <footer>
       <div class="links">
+        <a href="/methodology">Methodology</a>
+        <a href="#manifesto">Manifesto</a>
+        <a href="#faq">FAQ</a>
         <a href="https://github.com/mickyarun/bodhiorchard">GitHub</a>
         <a href="https://github.com/mickyarun/bodhiorchard/blob/main/CHANGELOG.md">Changelog</a>
         <a href="https://github.com/mickyarun/bodhiorchard/blob/main/SECURITY.md">Security</a>
