@@ -7,7 +7,7 @@ name = "bodhiorchard-backend"
 version = "0.1.0"
 description = "Bodhiorchard AI-powered software development platform backend"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.104.0",

@@ -13,7 +13,17 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791.svg)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com)
 
-[About](#about) | [Getting Started](#getting-started) | [Architecture](#architecture) | [AI Agents](#ai-agents) | [MCP Integration](#model-context-protocol-mcp) | [Roadmap](#roadmap) | [License](#license)
+[About](#about) | [Getting Started](#getting-started) | [Architecture](#architecture) | [AI Agents](#ai-agents) | [Claude Code](#claude-code-integration) | [API](#api) | [Screenshots](#screenshots) | [Roadmap](#roadmap) | [License](#license)
+
+</div>
+
+---
+
+<div align="center">
+
+> 📺 **[Watch the 90-second demo](https://placeholder-demo-video-url)** &nbsp;<!-- TODO: replace with the real Loom / YouTube URL -->
+
+![Bodhiorchard Living Tree Dashboard](docs/images/dashboard.png) <!-- TODO: drop a real hero screenshot at docs/images/dashboard.png -->
 
 </div>
 
@@ -52,7 +62,7 @@ Bodhiorchard replaces human busywork with AI automation while keeping humans in 
 
 ## Key Features
 
-### BUD (Build-Up Document) — Single Source of Truth
+### BUD (Business Understanding Document) — Single Source of Truth
 
 Every feature lives in one **BUD** — spec, tech spec, test plan, acceptance criteria, and full history. Replaces scattered Jira tickets, Google Docs, and Notion pages.
 
@@ -111,22 +121,9 @@ library — tree-sitter parsing → NetworkX graph → Leiden community detectio
 - Semantic search across all indexed code and documentation
 - Impact / blast-radius queries via the `code_*` MCP tool group
 
-### Model Context Protocol (MCP) Integration
+### Claude Code-Native (MCP)
 
-Bodhiorchard exposes **10 MCP tools** for Claude Code and other MCP-compatible AI assistants:
-
-| Tool | Purpose |
-|---|---|
-| `get_bud_context` | Retrieve existing BUDs for context |
-| `write_bud` | Create or update a BUD document |
-| `get_knowledge` | Search feature registry and knowledge base |
-| `write_feature_registry` | Save synthesized features |
-| `check_feature_exists` | Deduplicate before creating |
-| `search_bugs` | Find related bugs |
-| `update_task_status` | Report progress back to Bodhiorchard |
-| `post_slack_message` | Send messages to Slack |
-| `get_team_context` | Get team capacity and skills |
-| `get_pending_features` | Get next batch for synthesis |
+Bodhiorchard exposes **10 MCP tools** to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other MCP-compatible clients — see [Claude Code Integration](#claude-code-integration) below for the full tool list, dual-auth modes, and registration instructions.
 
 ### Enterprise-Grade Security
 
@@ -174,6 +171,65 @@ Bodhiorchard ships with **11 specialized agents**, each triggered automatically 
 | **Skill Agent** | Daily cron (02:00) | Rebuilds skill profiles from git/BUD/bug history, scores 0-1.0, detects bus factor risks |
 
 Every agent logs actions to an audit trail, uses the organization's configured LLM provider, and can be monitored in the UI.
+
+---
+
+## Claude Code Integration
+
+Bodhiorchard is **Claude Code-native**. Every agent run is executed by the Claude Code CLI, which gives agents codebase-aware reasoning, tool-use, and direct access to Bodhiorchard's MCP server.
+
+### Why Claude Code (and not just the raw API)
+
+- **Codebase awareness out of the box** — Claude Code already knows how to read files, run shell commands, and edit code; Bodhiorchard reuses that surface area instead of re-implementing it.
+- **Token-efficient by default** — agent prompts use Anthropic prompt caching, structured tool-use, and incremental context loading. The cost per BUD stays low even on long sessions.
+- **One runtime, two billing models** — point Bodhiorchard at an Anthropic API key (pay-per-token) **or** at a host `claude login` session backed by a Claude Pro / Max subscription (flat-rate). Same agents either way.
+
+### Authentication modes
+
+| Mode | When the org uses this | Where the credential lives |
+|---|---|---|
+| `api_key` | Full Docker deployments, or any host that doesn't have a Claude subscription | `sk-ant-…` key encrypted in Postgres (Fernet AES-128) and pushed into the backend's process env on save |
+| `hybrid_host` | Hybrid deployments where the developer already runs `claude` interactively | Host's existing `claude login` session — nothing stored in the database |
+
+The backend auto-detects which mode is available (via `/.dockerenv`) and the Settings page only surfaces the option that actually works for that deployment.
+
+### MCP server — the 10 tools Claude Code calls
+
+Bodhiorchard runs an MCP server on `:8001` that exposes 10 tools to Claude Code. They split into two groups:
+
+**BUD / repo intelligence**
+
+| Tool | Purpose |
+|---|---|
+| `get_bud_context` | Retrieve existing BUDs for context |
+| `write_bud` | Create or update a BUD document |
+| `get_knowledge` | Search feature registry and knowledge base |
+| `write_feature_registry` | Save synthesized features |
+| `check_feature_exists` | Deduplicate before creating |
+| `search_bugs` | Find related bugs |
+| `update_task_status` | Report progress back to Bodhiorchard |
+| `post_slack_message` | Send messages to Slack |
+| `get_team_context` | Get team capacity and skills |
+| `get_pending_features` | Get next batch for synthesis |
+
+**Code graph (`code_*` tool group)** — an in-tree code-graph indexer also exposes `code_impact`, `code_query`, `code_context`, `code_community`, `code_god_nodes`, and `code_stats` for impact / blast-radius analysis before refactors.
+
+### Registering Bodhiorchard's MCP server in your own Claude Code
+
+Add an entry to `~/.claude.json` (or use `claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "bodhiorchard": {
+      "type": "http",
+      "url": "http://localhost:8001/mcp"
+    }
+  }
+}
+```
+
+Restart Claude Code and the `bodhiorchard__*` tools will appear in tool-use. Pair this with the [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) that ship in `backend/app/agents/skills/` to drive Bodhiorchard's agents from a regular `claude` session on your laptop.
 
 ---
 
@@ -385,26 +441,60 @@ bodhiorchard/
 
 ---
 
-## API Documentation
+## API
 
-When the backend is running, interactive API documentation is available at:
+Bodhiorchard exposes three programmable surfaces. All three run on the same host as the backend.
 
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+| Surface | Port | What it's for |
+|---|---|---|
+| **REST** | `:8000/api/v1` | Day-to-day CRUD: BUDs, orgs, repos, skills, triage, Slack/GitHub webhooks. FastAPI; interactive docs at [/docs](http://localhost:8000/docs) (Swagger) and [/redoc](http://localhost:8000/redoc). |
+| **MCP** | `:8001/mcp` | 10 tools for Claude Code and other MCP clients — see [Claude Code Integration](#claude-code-integration) above. |
+| **WebSocket** | `:8000/ws/jobs/{job_id}` | Live progress for async jobs (repo scans, BUD generation, etc.). Frontend uses `useJobSocket`; CLI consumers can use `wscat`. |
 
-### Key Endpoints
+### Key REST endpoints
 
 | Endpoint | Description |
 |---|---|
 | `POST /api/v1/auth/login` | JWT authentication |
 | `GET /api/v1/buds` | List BUD documents |
 | `POST /api/v1/buds` | Create a new BUD |
-| `GET /api/v1/dashboard/tree-data` | 3D tree visualization data |
+| `GET /api/v1/dashboard/tree-data` | 3D Living-Tree visualization data |
 | `GET /api/v1/skills/profiles` | Developer skill profiles |
-| `POST /api/v1/skills/scan` | Trigger repository scan |
+| `POST /api/v1/skills/scan` | Trigger repository scan (returns `202` + `job_id`) |
 | `GET /api/v1/triage-sessions` | Triage approval queue |
 | `POST /api/v1/slack/events` | Slack webhook handler |
-| `POST /mcp/*` | MCP tools for AI assistants |
+
+### Example: create a BUD via `curl`
+
+```bash
+curl -X POST http://localhost:8000/api/v1/buds \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Add export-to-PDF on the dashboard",
+    "stage": "bud",
+    "summary": "Users want to share weekly dashboard snapshots with leadership."
+  }'
+```
+
+### Async-job pattern
+
+Long-running operations (repo scans, embedding builds, BUD generation) return `202 Accepted` with a `job_id`. Subscribe to `ws://localhost:8000/ws/jobs/{job_id}` for progress events instead of polling the REST endpoint.
+
+---
+
+## Screenshots
+
+<!--
+  Drop real PNGs at the paths below and they'll render here automatically.
+  Suggested width: 1600px. Suggested filenames are deliberate — the landing page reuses them.
+-->
+
+| Living Tree dashboard | BUD board | Slack triage |
+|---|---|---|
+| ![Living Tree dashboard](docs/images/screenshot-tree.png) | ![BUD board](docs/images/screenshot-bud-board.png) | ![Slack triage](docs/images/screenshot-slack-triage.png) |
+
+> Screenshots are placeholders for now — the broken-image icons disappear once `docs/images/screenshot-*.png` files land.
 
 ---
 

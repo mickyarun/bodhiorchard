@@ -201,10 +201,10 @@
         <v-card class="pa-5 card-border-dark h-100" color="surface">
           <div class="d-flex align-center mb-3">
             <v-icon icon="mdi-file-document-check-outline" color="primary" class="mr-2" />
-            <div class="text-subtitle-1 font-weight-medium">BUD: Single Source of Truth</div>
+            <div class="text-subtitle-1 font-weight-medium">BUD (Business Understanding Document)</div>
           </div>
           <p class="text-body-2 text-medium-emphasis mb-3">
-            Every feature lives in one BUD— spec, tech spec, test plan, acceptance criteria, and full history.
+            Every feature lives in one <strong>BUD</strong> — a Business Understanding Document holding the spec, tech spec, test plan, acceptance criteria, and full history.
             Replaces scattered Jira tickets, Google Docs, and Notion pages.
           </p>
           <div class="d-flex flex-wrap ga-2 mb-4">
