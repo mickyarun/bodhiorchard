@@ -1168,6 +1168,12 @@ watch(agentLocked, (locked, wasLocked) => {
   if (!locked && wasLocked) {
     loadTimeline()
     loadEstimates()
+    // The PM agent writes bud_feature_link rows from its JSON-fence tail
+    // on every run, regardless of which surface kicked it off (chat panel,
+    // stage transition, or BUD creation). agentLocked flipping back to
+    // false is the universal "agent finished" signal — refetch links here
+    // so panels stay in sync without having to wire each surface separately.
+    if (bud.value) void budLinkedFeaturesStore.fetch(bud.value.id)
   }
 })
 
@@ -1406,12 +1412,8 @@ async function handleChatSend(msg: string, images: string[] = []): Promise<void>
           designPanelRef.value?.refreshDesignPreview()
         }
       }
-      // The PM agent that handles requirements_md chats also auto-populates
-      // bud_feature_link via its JSON-fence tail (independent of whether
-      // requirements text changed), so always refetch links on completion.
-      if (currentSection.value === 'requirements_md' && bud.value) {
-        void budLinkedFeaturesStore.fetch(bud.value.id)
-      }
+      // Linked-features refetch is handled by the agentLocked watcher
+      // (universal hook for any PM run, not just the chat-job path).
     },
     onError(err, errorCode) {
       chatLoading.value = false
