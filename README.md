@@ -2,9 +2,11 @@
 
 # Bodhiorchard&trade;
 
-### AI-Native Software Development Operations Platform
+### The open-source, AI-native dev-ops platform
 
-**Replace Agile ceremonies with intelligent agents. Powered by AI. Runs on your machine.**
+**Replace Agile ceremonies with intelligent agents. From conversation to production — every phase powered by 12 agents working alongside humans.**
+
+Self-hosted on your hardware. Your data stays local. Inference engine is your choice — Claude Code today, Ollama and OpenAI next.
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -31,7 +33,7 @@
 
 ## What is Bodhiorchard?
 
-Bodhiorchard is an **open-source, AI-first alternative to Agile project management tools** like Jira, Linear, and Shortcut. It runs locally on your laptop or Mac Mini with **12 specialized AI agents** that orchestrate the entire software development lifecycle — from feature intake to production deployment, learning, and continuous improvement. It's powered today by [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware intelligence and the **Anthropic direct API** for lighter, non-codebase agent calls; [**Ollama**](https://ollama.com) (fully local/free), the **OpenAI** direct API, and **OpenAI Codex** are on the near-term roadmap.
+Bodhiorchard is an **open-source agentic SDLC platform** — a self-hosted alternative to Agile project-management tools like Jira, Linear, and Shortcut. Twelve specialised AI agents orchestrate the entire software development lifecycle (from feature intake through production deployment to retrospective and continuous learning), running on your hardware so the data plane never leaves your machine. Today the agents run on [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware reasoning and the **Anthropic direct API** for lightweight non-codebase calls; [**Ollama**](https://ollama.com) (fully air-gapped), the **OpenAI** direct API, and **OpenAI Codex** are on the near-term roadmap.
 
 ### The Problem
 
