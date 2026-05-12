@@ -1,0 +1,115 @@
+;; Copyright 2025-2026 Arun Rajkumar
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+;;
+;; Seatbelt profile for the ``claude`` subprocess under macOS Hybrid mode.
+;; Phase E — Layer 7.
+;;
+;; Loaded by ``claude_runner`` only when both conditions hold:
+;;     * platform.system() == "Darwin"
+;;     * BODHIORCHARD_HYBRID_SANDBOX=1 in the environment
+;;
+;; Seatbelt (sandbox-exec) is technically deprecated by Apple but
+;; Anthropic's own ``/sandbox`` slash command uses the same mechanism —
+;; de-facto standard for Mac process containment.
+;;
+;; Parameters (set via ``-D KEY=VALUE`` on the sandbox-exec command line):
+;;   WORKSPACE     — absolute path to the cloned repo (matches --add-dir).
+;;   HOME_DIR      — user's HOME (Claude reads ~/.claude/ session here).
+;;   TMPDIR        — per-process temp dir for MCP JSON config.
+;;   PYTHON_BIN    — interpreter that runs the PreToolUse hook.
+
+(version 1)
+(deny default)
+(allow process-fork)
+(allow signal (target self))
+
+;; Subprocess execution: the claude binary, node (Claude Code's runtime),
+;; git, npm, npx (for MCP servers), and the Python interpreter that runs
+;; pretool_guard.py / posttool_guard.py.
+(allow process-exec
+    (literal "/usr/local/bin/claude")
+    (literal "/opt/homebrew/bin/claude")
+    (literal "/usr/bin/git")
+    (literal "/opt/homebrew/bin/git")
+    (literal "/usr/bin/node")
+    (literal "/opt/homebrew/bin/node")
+    (literal "/usr/bin/python3")
+    (subpath "/opt/homebrew/bin")
+    (subpath "/usr/bin")
+    (subpath "/bin"))
+
+;; File reads: workspace, HOME (for ~/.claude session), system libs,
+;; the claude_guard hooks themselves (so they can be exec'd), and the
+;; per-process TMPDIR. /etc and /var/run are needed for DNS resolution
+;; via libresolv.
+(allow file-read*
+    (subpath (param "WORKSPACE"))
+    (subpath (param "HOME_DIR"))
+    (subpath (param "TMPDIR"))
+    (subpath "/usr/lib")
+    (subpath "/usr/share")
+    (subpath "/System")
+    (subpath "/Library/Frameworks")
+    (subpath "/opt/homebrew")
+    (subpath "/private/etc")
+    (subpath "/private/var/db/timezone")
+    (literal "/dev/urandom")
+    (literal "/dev/null")
+    (literal "/dev/dtracehelper"))
+
+;; File writes: workspace + TMPDIR + HOME/.claude only. Note the explicit
+;; deny rules below override any subpath allow that would otherwise let
+;; us touch ~/.ssh or ~/.aws.
+(allow file-write*
+    (subpath (param "WORKSPACE"))
+    (subpath (param "TMPDIR"))
+    (regex (string-append "^" (param "HOME_DIR") "/\\.claude(/|$)"))
+    (literal "/dev/null"))
+
+;; Hard deny on the credential paths even if a sloppy ``allow`` would
+;; otherwise permit them. ``(deny ...)`` rules take precedence over
+;; ``(allow ...)`` of the same operation.
+(deny file-read*
+    (regex (string-append "^" (param "HOME_DIR") "/\\.ssh"))
+    (regex (string-append "^" (param "HOME_DIR") "/\\.aws"))
+    (regex (string-append "^" (param "HOME_DIR") "/\\.netrc$"))
+    (regex (string-append "^" (param "HOME_DIR") "/\\.config/gh"))
+    (regex (string-append "^" (param "HOME_DIR") "/\\.claude/\\.credentials"))
+    (regex (string-append "^" (param "HOME_DIR") "/\\.claude/settings")))
+
+;; Network: outbound HTTPS to the allow-listed hosts only. macOS Seatbelt
+;; cannot filter by hostname directly — we allow outbound TCP/443 and
+;; rely on the Layer 6 init-firewall.sh on Linux for hostname-level
+;; control. On Mac the egress narrowing is at the IP level via the
+;; ``remote ip`` predicate; here we keep it open to TCP 443 broadly
+;; because the kernel-side allow list belongs in pf, not Seatbelt.
+(allow network*
+    (remote tcp "*:443")
+    (remote tcp "*:80")
+    (remote udp "*:53")
+    (remote tcp "*:53")
+    (local ip))
+;; Loopback for MCP stdio bridge etc.
+(allow network*
+    (remote ip "localhost:*")
+    (remote ip "127.0.0.1:*")
+    (remote ip "::1:*"))
+
+;; Misc Mach + IPC needed for Python / node startup. Without these the
+;; runtime crashes before any tool call.
+(allow mach-lookup)
+(allow ipc-posix-shm)
+(allow sysctl-read)
+(allow iokit-open)
+(allow file-issue-extension)

@@ -45,10 +45,12 @@ This package implements the layered defense documented in the project plan
 
 from app.services.claude_guard.env_filter import build_claude_env
 from app.services.claude_guard.inline_settings import build_inline_settings_json
+from app.services.claude_guard.macos_sandbox import maybe_wrap_with_sandbox
 from app.services.claude_guard.resource_limits import apply_subprocess_rlimits
 
 __all__ = [
     "apply_subprocess_rlimits",
     "build_claude_env",
     "build_inline_settings_json",
+    "maybe_wrap_with_sandbox",
 ]

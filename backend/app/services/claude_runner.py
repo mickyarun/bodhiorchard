@@ -38,6 +38,7 @@ from app.services.claude_guard import (
     apply_subprocess_rlimits,
     build_claude_env,
     build_inline_settings_json,
+    maybe_wrap_with_sandbox,
 )
 
 logger = structlog.get_logger(__name__)
@@ -561,6 +562,10 @@ async def run_claude_code(
     # the child's view so a prompt-injection that escapes the Bash deny
     # rules has nothing valuable to ``echo $...`` out.
     sub_env: dict[str, str] = build_claude_env(config.env_extra)
+
+    # Phase E Layer 7: optional macOS Seatbelt wrap. No-op on Linux /
+    # Windows, or when BODHIORCHARD_HYBRID_SANDBOX env flag is unset.
+    cmd = maybe_wrap_with_sandbox(cmd, cwd)
 
     # Streaming path: read stdout line-by-line for live progress
     if progress_callback is not None:
