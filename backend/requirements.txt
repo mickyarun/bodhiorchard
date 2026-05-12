@@ -30,7 +30,7 @@ cachetools>=5.3.0
 #   tzdata:        guarantees IANA legacy aliases (Asia/Calcutta, US/Eastern,
 #                  …) resolve via zoneinfo on Debian-slim images, which ship
 #                  only the canonical zones by default.
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 PyYAML>=6.0
 PyJWT[crypto]>=2.8.0
 networkx>=3.2
