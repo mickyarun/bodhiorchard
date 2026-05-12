@@ -15,6 +15,7 @@
 """Organization data access repository."""
 
 import uuid
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,7 +78,7 @@ class OrganizationRepository(BaseRepository[Organization]):
 
     async def list_with_slack_token_and_config(
         self,
-    ) -> list[tuple[uuid.UUID, str, dict | None]]:
+    ) -> list[tuple[uuid.UUID, str, dict[str, Any] | None]]:
         """For every org with a Slack bot token set, return ``(id, encrypted_token, config)``."""
         result = await self._db.execute(
             select(
@@ -95,7 +96,7 @@ class OrganizationRepository(BaseRepository[Organization]):
         )
         return result.scalar_one_or_none()
 
-    async def get_config(self, org_id: uuid.UUID) -> dict | None:
+    async def get_config(self, org_id: uuid.UUID) -> dict[str, Any] | None:
         """Return the JSONB ``config`` blob for an org, or None if absent."""
         result = await self._db.execute(
             select(Organization.config).where(Organization.id == org_id)

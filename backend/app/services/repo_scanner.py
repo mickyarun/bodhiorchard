@@ -45,3 +45,21 @@ from app.services.repo_setup import (  # noqa: F401
     init_bodhiorchard_mcp_in_repo,
     install_hooks,
 )
+
+__all__ = [
+    "_detect_develop_branch",
+    "_detect_main_branch",
+    "_run_shell_cmd",
+    "add_bodhiorchard_gitignore",
+    "add_prepare_script",
+    "commit_and_push_bodhiorchard_setup",
+    "create_setup_pr",
+    "detect_uncommitted_changes",
+    "ensure_repo_worktrees",
+    "init_bodhiorchard_mcp_in_repo",
+    "install_hooks",
+    "list_remote_branches",
+    "restore_after_scan",
+    "run_git",
+    "stash_and_checkout_main",
+]

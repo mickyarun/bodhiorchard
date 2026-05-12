@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +46,7 @@ async def phase_g_persist(
     org_id: uuid.UUID,
     repo_paths: list[str],
     new_shas: dict[str, str],
-    config: dict,
+    config: dict[str, Any],
     total_profiles: int,
     all_unmatched: list[str],
     overall_mode: str,
@@ -103,6 +104,8 @@ async def phase_g_persist(
 
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_by_id(org_id)
+    if org is None:
+        raise RuntimeError(f"Organization {org_id} not found during scan persist")
     org.config = config
     await db.flush()
     await db.commit()

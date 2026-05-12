@@ -48,7 +48,12 @@ async def handle_get_team_context(
             team[key] = {
                 "user_name": user.name if user else "Unknown",
                 "email": user.email if user else "",
-                "role": getattr(user, "role", "").value if getattr(user, "role", None) else "",
+                "role": (
+                    user_role.value
+                    if (user_role := getattr(user, "role", None)) is not None
+                    and hasattr(user_role, "value")
+                    else ""
+                ),
                 "modules": [],
             }
         team[key]["modules"].append(

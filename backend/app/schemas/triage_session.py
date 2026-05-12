@@ -16,6 +16,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -34,7 +35,7 @@ class TriageSessionRead(BaseModel):
     status: str
     priority: str | None = None
     feature_name: str | None = None
-    triage_context: dict | None = None
+    triage_context: dict[str, Any] | None = None
     bud_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime

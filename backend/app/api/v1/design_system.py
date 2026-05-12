@@ -16,6 +16,7 @@
 
 import uuid
 from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -47,7 +48,7 @@ router = APIRouter(tags=["design-systems"])
 async def list_design_systems(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List all design systems for the current org with repo names.
 
     Args:
@@ -70,7 +71,7 @@ async def get_design_system(
     ds_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Get a specific design system by ID.
 
     Args:
@@ -212,7 +213,7 @@ async def update_design_system_content(
     body: DesignSystemUpdateContent,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Manually update the content of a design system.
 
     Args:

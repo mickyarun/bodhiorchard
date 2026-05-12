@@ -18,6 +18,8 @@ Consolidates all outbound Slack HTTP calls into a single module.
 Uses httpx for async HTTP with explicit timeouts.
 """
 
+from typing import Any, cast
+
 import httpx
 import structlog
 
@@ -33,7 +35,7 @@ async def conversations_replies(
     ts: str,
     *,
     limit: int = 50,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Fetch threaded replies for a message.
 
     Args:
@@ -56,7 +58,7 @@ async def conversations_replies(
         if not data.get("ok"):
             logger.warning("slack_conversations_replies_failed", error=data.get("error"))
             return []
-        return data.get("messages", [])
+        return cast(list[dict[str, Any]], data.get("messages", []))
 
 
 async def conversations_history(
@@ -66,7 +68,7 @@ async def conversations_history(
     latest: str | None = None,
     inclusive: bool = True,
     limit: int = 1,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Fetch channel messages (used to retrieve a single message by timestamp).
 
     Args:
@@ -95,7 +97,7 @@ async def conversations_history(
         if not data.get("ok"):
             logger.warning("slack_conversations_history_failed", error=data.get("error"))
             return []
-        return data.get("messages", [])
+        return cast(list[dict[str, Any]], data.get("messages", []))
 
 
 async def chat_post_message(
@@ -104,7 +106,7 @@ async def chat_post_message(
     text: str,
     *,
     thread_ts: str | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Post a message to a Slack channel or thread.
 
     Args:
@@ -131,7 +133,7 @@ async def chat_post_message(
         if not data.get("ok"):
             logger.warning("slack_chat_post_message_failed", error=data.get("error"))
             return None
-        return data
+        return cast(dict[str, Any], data)
 
 
 async def reactions_add(
@@ -165,7 +167,7 @@ async def reactions_add(
         return True
 
 
-async def users_list(token: str) -> list[dict]:
+async def users_list(token: str) -> list[dict[str, Any]]:
     """Fetch all members of the Slack workspace.
 
     Args:
@@ -174,7 +176,7 @@ async def users_list(token: str) -> list[dict]:
     Returns:
         List of user dicts from the Slack API.
     """
-    members: list[dict] = []
+    members: list[dict[str, Any]] = []
     cursor = ""
     async with httpx.AsyncClient() as client:
         while True:
@@ -198,7 +200,7 @@ async def users_list(token: str) -> list[dict]:
     return members
 
 
-async def users_info(token: str, user_id: str) -> dict | None:
+async def users_info(token: str, user_id: str) -> dict[str, Any] | None:
     """Fetch a Slack user's profile by their user ID.
 
     Args:
@@ -219,7 +221,7 @@ async def users_info(token: str, user_id: str) -> dict | None:
         if not data.get("ok"):
             logger.warning("slack_users_info_failed", error=data.get("error"), user_id=user_id)
             return None
-        return data.get("user")
+        return cast(dict[str, Any] | None, data.get("user"))
 
 
 async def users_get_presence(token: str, user_id: str) -> str | None:
@@ -253,7 +255,7 @@ async def users_get_presence(token: str, user_id: str) -> str | None:
                 hint="check ENCRYPTION_KEY and stored token" if is_auth_err else None,
             )
             return None
-        return data.get("presence")
+        return cast(str | None, data.get("presence"))
 
 
 async def conversations_open(token: str, user_id: str) -> str | None:
@@ -288,7 +290,7 @@ async def conversations_open(token: str, user_id: str) -> str | None:
                     "slack_conversations_open_no_channel_id",
                     user_id=user_id,
                 )
-            return channel_id
+            return cast(str | None, channel_id)
     except (httpx.HTTPError, ValueError) as exc:
         logger.error(
             "slack_conversations_open_error",
@@ -298,7 +300,7 @@ async def conversations_open(token: str, user_id: str) -> str | None:
         return None
 
 
-async def auth_test(token: str) -> dict | None:
+async def auth_test(token: str) -> dict[str, Any] | None:
     """Call auth.test to retrieve bot/team info.
 
     Args:
@@ -317,4 +319,4 @@ async def auth_test(token: str) -> dict | None:
         if not data.get("ok"):
             logger.warning("slack_auth_test_failed", error=data.get("error"))
             return None
-        return data
+        return cast(dict[str, Any], data)

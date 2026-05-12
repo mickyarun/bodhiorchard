@@ -20,7 +20,6 @@ deduped via source_ref to prevent double-counting.
 """
 
 import uuid
-from decimal import Decimal
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,7 +62,7 @@ async def award_sp(
 
     old_sp = float(row.skill_points)
     new_sp = max(0.0, old_sp + amount)
-    row.skill_points = Decimal(str(round(new_sp, 2)))
+    row.skill_points = round(new_sp, 2)
 
     # Record the reward event (shared audit trail with XP, distinguished by type)
     if source_ref:
@@ -82,7 +81,7 @@ async def award_sp(
                 )
         except IntegrityError:
             # Restore balance — the ORM mutation happened before the savepoint
-            row.skill_points = Decimal(str(round(old_sp, 2)))
+            row.skill_points = round(old_sp, 2)
             logger.debug("sp_dedup_integrity", source_ref=source_ref)
             return None
 

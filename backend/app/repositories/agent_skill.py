@@ -20,7 +20,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_skill import AgentSkill
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
 
 
 class AgentSkillRepository(BaseRepository[AgentSkill]):
@@ -120,4 +120,4 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
         )
         result = await self._db.execute(stmt)
         await self._db.flush()
-        return (result.rowcount or 0) > 0
+        return (rowcount(result) or 0) > 0

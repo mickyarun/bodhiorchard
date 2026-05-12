@@ -20,6 +20,7 @@ and summary statistics for the QA/Testing phase of the BUD pipeline.
 
 import os
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -91,7 +92,7 @@ async def update_manual_result(
     if not bud:
         raise HTTPException(status_code=404, detail="BUD not found")
 
-    manual_cases: list[dict] = list(bud.qa_manual_cases or [])
+    manual_cases: list[dict[str, Any]] = list(bud.qa_manual_cases or [])
 
     # Find and update the target case
     found = False
@@ -246,8 +247,8 @@ async def get_qa_summary(
     if not bud:
         raise HTTPException(status_code=404, detail="BUD not found")
 
-    manual_cases: list[dict] = bud.qa_manual_cases or []
-    auto_cases: list[dict] = bud.qa_automation_cases or []
+    manual_cases: list[dict[str, Any]] = bud.qa_manual_cases or []
+    auto_cases: list[dict[str, Any]] = bud.qa_automation_cases or []
 
     evidence_repo = QATestEvidenceRepository(db, org_id=current_user.org_id)
     evidence_count = len(await evidence_repo.list_for_bud(bud_id))

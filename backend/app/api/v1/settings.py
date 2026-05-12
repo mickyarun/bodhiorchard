@@ -20,6 +20,7 @@ repo management, GitHub integration, and Slack member sync.
 
 import re
 import secrets
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -491,7 +492,7 @@ def _build_github_settings(org: Organization) -> GitHubSettings:
     )
 
 
-def _build_jira_read(config: dict) -> JiraSettingsRead:
+def _build_jira_read(config: dict[str, Any]) -> JiraSettingsRead:
     """Build the read-only Jira settings (no token) from org config."""
     jira = get_jira_settings(config)
     return JiraSettingsRead(

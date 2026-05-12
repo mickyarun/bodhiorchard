@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import uuid
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
@@ -130,7 +131,7 @@ class Scan(BaseModel):
     # JSONB array of {repo, phase, summary, hint?} dicts. Appended via
     # ``repo_warnings || $1::jsonb`` so concurrent writers compose
     # without lost updates.
-    repo_warnings: Mapped[list[dict]] = mapped_column(
+    repo_warnings: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=False,
         default=list,

@@ -21,7 +21,7 @@ job types with. Workers are spawned at startup based on registrations.
 import asyncio
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from typing import Any, NamedTuple
 
 import structlog
@@ -48,6 +48,11 @@ JOB_REPO_BULK_ONBOARD = "repo_bulk_onboard"
 _COMPLETED_TTL = 300  # seconds before cleanup
 _QUEUE_MAXSIZE = 50  # backpressure limit per queue
 
+# Sentinel value for "don't change" in partial updates. Using a unique object
+# avoids ambiguity with legitimate ``None`` or other values that callers may
+# want to assign.
+_UNSET: Any = object()
+
 
 class _JobEntry(NamedTuple):
     """Internal job store entry."""
@@ -68,7 +73,7 @@ _job_store: dict[str, _JobEntry] = {}  # job_id → entry
 _running_tasks: dict[str, asyncio.Task[None]] = {}
 
 # Handler = async function(job_id: str, payload: dict) -> None
-JobHandler = Callable[[str, dict[str, Any]], Awaitable[None]]
+JobHandler = Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
 
 _registry: dict[str, tuple[JobHandler, int, asyncio.Queue[tuple[str, dict[str, Any]]]]] = {}
 _workers: list[asyncio.Task[None]] = []
@@ -164,9 +169,9 @@ def update_job(
     state: JobState | None = None,
     status_message: str | None = None,
     progress_pct: int | None = None,
-    result: Any = ...,  # sentinel: ... means "don't change"
-    error: str | None = ...,
-    error_code: str | None = ...,
+    result: Any = _UNSET,  # sentinel: _UNSET means "don't change"
+    error: str | None = _UNSET,
+    error_code: str | None = _UNSET,
 ) -> None:
     """Update a job's status in-place.
 
@@ -192,11 +197,11 @@ def update_job(
         job.status_message = status_message
     if progress_pct is not None:
         job.progress_pct = progress_pct
-    if result is not ...:
+    if result is not _UNSET:
         job.result = result
-    if error is not ...:
+    if error is not _UNSET:
         job.error = error
-    if error_code is not ...:
+    if error_code is not _UNSET:
         job.error_code = error_code
 
     # Push update over WebSocket event bus

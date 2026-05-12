@@ -15,6 +15,7 @@
 """Single entry point for recording BUD timeline events."""
 
 import uuid
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +30,7 @@ async def record_event(
     event_type: str,
     actor_id: uuid.UUID | None = None,
     actor_name: str | None = None,
-    detail: dict | None = None,
+    detail: dict[str, Any] | None = None,
 ) -> BUDTimelineEvent:
     """Append a timeline event to a BUD."""
     repo = BUDTimelineRepository(db, org_id=org_id)

@@ -32,6 +32,7 @@ Protocol:
 
 import asyncio
 import json
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -73,10 +74,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     # ── State per connection ──────────────────────────────
     # topic → (event_bus queue, reader task)
-    subscriptions: dict[str, tuple[asyncio.Queue[dict], asyncio.Task[None]]] = {}
-    send_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=settings.ws.max_send_queue)
+    subscriptions: dict[str, tuple[asyncio.Queue[dict[str, Any]], asyncio.Task[None]]] = {}
+    send_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=settings.ws.max_send_queue)
 
-    async def _topic_reader(topic: str, bus_queue: asyncio.Queue[dict]) -> None:
+    async def _topic_reader(topic: str, bus_queue: asyncio.Queue[dict[str, Any]]) -> None:
         """Read from an event bus queue and forward into the send queue."""
         try:
             while True:
@@ -174,7 +175,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
 async def _sender_loop(
     websocket: WebSocket,
-    send_queue: asyncio.Queue[dict],
+    send_queue: asyncio.Queue[dict[str, Any]],
 ) -> None:
     """Continuously drain *send_queue* to the WebSocket, sending heartbeats on idle."""
     try:

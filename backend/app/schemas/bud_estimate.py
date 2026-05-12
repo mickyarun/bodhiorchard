@@ -22,6 +22,7 @@ right at the project's 300-line cap.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -71,9 +72,9 @@ class EstimateSnapshotRead(BaseModel):
 
     id: uuid.UUID
     trigger: str
-    phase_estimates: dict
+    phase_estimates: dict[str, Any]
     complexity: int | None = None
-    context: dict | None = None
+    context: dict[str, Any] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -42,7 +42,7 @@ logger = structlog.get_logger(__name__)
 # UAT-disabled orgs never transition to BUDStatus.UAT, so auto_assign_for_phase
 # will never look this key up for them. Keeping it in the map is harmless
 # and avoids per-org map filtering.
-PHASE_ROLE_MAP: dict[BUDStatus, str] = {
+PHASE_ROLE_MAP: dict[BUDStatus, UserRole] = {
     BUDStatus.BUD: UserRole.PM,
     BUDStatus.DESIGN: UserRole.DESIGNER,
     BUDStatus.TECH_ARCH: UserRole.TECH_LEAD,

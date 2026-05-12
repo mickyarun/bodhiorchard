@@ -58,8 +58,8 @@ async def list_profiles(
         key = str(profile.user_id) if profile.user_id else profile.module
         if key not in profiles_map:
             profiles_map[key] = SkillProfileRead(
-                userId=profile.user_id,
-                userName=user.name if user else "Unknown",
+                user_id=profile.user_id,
+                user_name=user.name if user else "Unknown",
                 email=user.email if user else "",
                 modules=[],
             )
@@ -68,7 +68,7 @@ async def list_profiles(
                 name=profile.module,
                 score=float(profile.skill_score),
                 languages=profile.languages or [],
-                touchCount=profile.touch_count,
+                touch_count=profile.touch_count,
             )
         )
 

@@ -21,7 +21,7 @@ from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.notification import Notification
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, SelectT, rowcount
 
 
 class NotificationRepository(BaseRepository[Notification]):
@@ -35,7 +35,7 @@ class NotificationRepository(BaseRepository[Notification]):
         super().__init__(Notification, db)
         self._user_id = user_id
 
-    def _scoped(self, stmt: Select[tuple[Notification, ...]]) -> Select[tuple[Notification, ...]]:
+    def _scoped(self, stmt: Select[SelectT]) -> Select[SelectT]:
         """Override: scope all queries by user_id instead of org_id."""
         return stmt.where(Notification.user_id == self._user_id)
 
@@ -80,7 +80,7 @@ class NotificationRepository(BaseRepository[Notification]):
         )
         result = await self._db.execute(stmt)
         await self._db.flush()
-        return result.rowcount
+        return rowcount(result)
 
     async def dismiss(self, notification_id: uuid.UUID) -> bool:
         """Soft-dismiss a notification. Returns False if not found/not owned."""
@@ -101,7 +101,7 @@ class NotificationRepository(BaseRepository[Notification]):
         )
         result = await self._db.execute(stmt)
         await self._db.flush()
-        return result.rowcount
+        return rowcount(result)
 
     async def cleanup_old(self, days: int = 30) -> int:
         """Hard-delete dismissed notifications older than N days."""

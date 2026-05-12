@@ -18,10 +18,12 @@ Tracks pending code clusters awaiting feature synthesis by Claude Code.
 Shared between the scan pipeline (producer) and MCP handlers (consumer).
 """
 
+from typing import Any
+
 # Pending clusters for feature synthesis, keyed by queue_key (str).
 # queue_key is "org_id" for single-repo or "org_id:repo_name" for parallel.
 # Set by scan pipeline before calling Claude Code, consumed by MCP tools.
-_synthesis_queue: dict[str, list[dict]] = {}
+_synthesis_queue: dict[str, list[dict[str, Any]]] = {}
 
 # Maps org_id → list of active queue keys (for parallel repo support).
 # When get_pending_features is called with just org_id, it checks all
@@ -31,7 +33,7 @@ _active_queue_keys: dict[str, list[str]] = {}
 
 def set_synthesis_queue(
     org_id: str,
-    clusters: list[dict],
+    clusters: list[dict[str, Any]],
     *,
     repo_name: str | None = None,
 ) -> str:
@@ -58,7 +60,7 @@ def remove_from_queue(org_id: str, cluster_names: list[str]) -> None:
             ]
 
 
-def get_queue_remaining(org_id: str, *, queue_key: str | None = None) -> list[dict]:
+def get_queue_remaining(org_id: str, *, queue_key: str | None = None) -> list[dict[str, Any]]:
     """Return clusters still pending synthesis.
 
     If queue_key is given, return from that specific queue.
@@ -66,7 +68,7 @@ def get_queue_remaining(org_id: str, *, queue_key: str | None = None) -> list[di
     """
     if queue_key:
         return _synthesis_queue.get(queue_key, [])
-    remaining: list[dict] = []
+    remaining: list[dict[str, Any]] = []
     for key in _active_queue_keys.get(org_id, []):
         remaining.extend(_synthesis_queue.get(key, []))
     return remaining

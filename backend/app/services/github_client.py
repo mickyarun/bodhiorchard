@@ -18,6 +18,8 @@ Thin wrapper around httpx for GitHub REST API v3.
 Handles auth headers and response parsing.
 """
 
+from typing import Any, cast
+
 import structlog
 from httpx import AsyncClient, HTTPStatusError
 
@@ -42,8 +44,8 @@ class GitHubClient:
         owner_repo: str,
         pr_number: int,
         body: str,
-        comments: list[dict] | None = None,
-    ) -> dict | None:
+        comments: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
         """Post a review with inline comments on a PR.
 
         Args:
@@ -56,7 +58,7 @@ class GitHubClient:
             GitHub API response dict, or None on failure.
         """
         url = f"{_BASE_URL}/repos/{owner_repo}/pulls/{pr_number}/reviews"
-        payload: dict = {"body": body, "event": "COMMENT"}
+        payload: dict[str, Any] = {"body": body, "event": "COMMENT"}
         if comments:
             payload["comments"] = comments
 
@@ -64,7 +66,7 @@ class GitHubClient:
             try:
                 resp = await client.post(url, json=payload, headers=self._headers)
                 resp.raise_for_status()
-                return resp.json()
+                return cast(dict[str, Any], resp.json())
             except HTTPStatusError:
                 logger.error(
                     "github_review_failed",
@@ -91,7 +93,7 @@ class GitHubClient:
                             "github_review_fallback_posted",
                             pr_number=pr_number,
                         )
-                        return fallback.json()
+                        return cast(dict[str, Any], fallback.json())
                     except HTTPStatusError:
                         pass
                 return None
@@ -187,7 +189,7 @@ class GitHubClient:
         owner_repo: str,
         pr_number: int,
         review_id: int,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Fetch inline comments for a specific PR review.
 
         Returns list of comment dicts with path, line, body, etc.
@@ -197,7 +199,7 @@ class GitHubClient:
             try:
                 resp = await client.get(url, headers=self._headers)
                 resp.raise_for_status()
-                return resp.json()
+                return cast(list[dict[str, Any]], resp.json())
             except HTTPStatusError:
                 logger.error(
                     "github_get_review_comments_failed",
@@ -211,7 +213,7 @@ class GitHubClient:
         self,
         owner_repo: str,
         pr_number: int,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Fetch the list of commits in a pull request.
 
         Used by release-stage detection to walk the commits of a release PR
@@ -221,7 +223,7 @@ class GitHubClient:
         commits across multiple BUDs.
         """
         url = f"{_BASE_URL}/repos/{owner_repo}/pulls/{pr_number}/commits"
-        all_commits: list[dict] = []
+        all_commits: list[dict[str, Any]] = []
         # GitHub paginates at 100/page; release PRs frequently exceed one
         # page. Cap at 30 pages (3000 commits) as a sanity ceiling — we'd
         # rather log and stop than hang on a runaway repo.

@@ -19,6 +19,7 @@ file changes, tool errors, API errors, and activity summaries.
 """
 
 import uuid
+from typing import Any
 
 from sqlalchemy import ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -97,7 +98,7 @@ class DevActivityLog(BaseModel):
     # so the BUD testing tab can group "untracked" rows by path and offer an
     # "Add as tracked" CTA. Backfilled to NULL for existing rows.
     repo_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    metadata_: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
         return (

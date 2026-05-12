@@ -32,6 +32,7 @@ Architecture:
 """
 
 import uuid
+from typing import cast
 
 import structlog
 from cachetools import TTLCache
@@ -88,7 +89,7 @@ async def get_tree_data(
     """
     cache_key = str(org_id)
     if not refresh and cache_key in _cache:
-        return _cache[cache_key]
+        return cast(TreeData, _cache[cache_key])
 
     tree = TreeData(org_id=str(org_id))
 

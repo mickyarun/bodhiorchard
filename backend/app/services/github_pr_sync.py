@@ -20,6 +20,7 @@ comments and posts them via the GitHub API.
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,7 +37,7 @@ logger = structlog.get_logger(__name__)
 async def sync_review_comments_to_github(
     bud_id: uuid.UUID,
     org_id: uuid.UUID,
-    comments: list[dict],
+    comments: list[dict[str, Any]],
     db: AsyncSession,
 ) -> None:
     """Persist agent review comments locally and post to any open PRs.
@@ -59,7 +60,7 @@ async def sync_review_comments_to_github(
 
     # Group comments by repo name first — used for both local storage and
     # GitHub post matching.
-    by_repo: dict[str, list[dict]] = {}
+    by_repo: dict[str, list[dict[str, Any]]] = {}
     for c in comments:
         repo = c.get("repo", "")
         if repo:
@@ -143,7 +144,7 @@ async def _store_agent_comments_in_bud(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud_id: uuid.UUID,
-    comments: list[dict],
+    comments: list[dict[str, Any]],
     repo_name: str,
 ) -> None:
     """Store agent-generated review comments directly in the BUD.
@@ -195,7 +196,7 @@ async def _store_agent_comments_in_bud(
     await db.flush()
 
 
-def _map_to_github_comments(comments: list[dict]) -> list[dict]:
+def _map_to_github_comments(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert agent comments to GitHub review comment format."""
     gh_comments = []
     for c in comments:
@@ -211,7 +212,7 @@ def _map_to_github_comments(comments: list[dict]) -> list[dict]:
             severity, "**Suggestion:**"
         )
 
-        entry: dict = {
+        entry: dict[str, Any] = {
             "path": file_path,
             "body": f"{prefix} {comment_body}",
         }

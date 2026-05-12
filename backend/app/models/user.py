@@ -63,9 +63,14 @@ class User(BaseModel):
     github_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
     character_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    # org_id, role, and role_id are NOT columns.
+    # org_id, role, role_id, role_ref are NOT columns.
     # They are set as transient instance attributes by get_current_user
     # from the OrgToUser membership validated via JWT org_id.
+    if TYPE_CHECKING:
+        org_id: uuid.UUID
+        role: UserRole
+        role_id: uuid.UUID | None
+        role_ref: "Role | None"
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email!r})>"

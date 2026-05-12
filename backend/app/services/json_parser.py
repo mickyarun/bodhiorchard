@@ -20,7 +20,7 @@ triage agents, and any future handler that needs to parse LLM output.
 """
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -50,7 +50,9 @@ def parse_json_response(output: str) -> dict[str, Any] | None:
 
     # 1. Direct JSON
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return cast(dict[str, Any], parsed)
     except json.JSONDecodeError:
         pass
 
@@ -59,7 +61,9 @@ def parse_json_response(output: str) -> dict[str, Any] | None:
         try:
             start = text.index("```json") + 7
             end = text.index("```", start)
-            return json.loads(text[start:end].strip())
+            parsed = json.loads(text[start:end].strip())
+            if isinstance(parsed, dict):
+                return cast(dict[str, Any], parsed)
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -68,7 +72,9 @@ def parse_json_response(output: str) -> dict[str, Any] | None:
     brace_end = text.rfind("}")
     if brace_start != -1 and brace_end > brace_start:
         try:
-            return json.loads(text[brace_start : brace_end + 1])
+            parsed = json.loads(text[brace_start : brace_end + 1])
+            if isinstance(parsed, dict):
+                return cast(dict[str, Any], parsed)
         except json.JSONDecodeError:
             pass
 

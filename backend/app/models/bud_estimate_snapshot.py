@@ -19,6 +19,7 @@ in time, enabling accuracy tracking (predicted vs actual) and audit history.
 """
 
 import uuid
+from typing import Any
 
 from sqlalchemy import ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -45,9 +46,9 @@ class BUDEstimateSnapshot(BaseModel):
         String(30),
         nullable=False,
     )
-    phase_estimates: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    phase_estimates: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     complexity: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    context: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

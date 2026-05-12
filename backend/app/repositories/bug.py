@@ -120,7 +120,7 @@ class BugRepository(BaseRepository[Bug]):
             .group_by(Bug.bud_id)
         )
         result = await self._db.execute(stmt)
-        return dict(result.all())
+        return {row[0]: row[1] for row in result.all() if row[0] is not None}
 
     async def list_filtered(
         self,
@@ -208,12 +208,12 @@ class BugRepository(BaseRepository[Bug]):
 
     @staticmethod
     def _apply_filters(
-        stmt: Select[tuple[Bug, ...]],
+        stmt: Select[tuple[Bug]],
         *,
         status: str | None = None,
         severity: str | None = None,
         bud_id: uuid.UUID | None = None,
-    ) -> Select[tuple[Bug, ...]]:
+    ) -> Select[tuple[Bug]]:
         """Apply optional filters to a Bug query."""
         if status:
             statuses = [s.strip().lower() for s in status.split(",")]

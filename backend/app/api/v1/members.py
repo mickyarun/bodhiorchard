@@ -136,10 +136,10 @@ async def add_member(
     await db.refresh(membership)
 
     # Set transient org/role attrs for _user_to_member serialization
-    created.org_id = org.id  # type: ignore[attr-defined]
-    created.role = membership.role  # type: ignore[attr-defined]
-    created.role_id = membership.role_id  # type: ignore[attr-defined]
-    created.role_ref = membership.role_ref  # type: ignore[attr-defined]
+    created.org_id = org.id
+    created.role = membership.role
+    created.role_id = membership.role_id
+    created.role_ref = membership.role_ref
 
     logger.info(
         "member_added",
@@ -246,8 +246,8 @@ async def assign_role(
     await db.refresh(membership)
 
     # Re-set transient attrs so _user_to_member sees the updated role
-    user.role_id = membership.role_id  # type: ignore[attr-defined]
-    user.role_ref = membership.role_ref  # type: ignore[attr-defined]
+    user.role_id = membership.role_id
+    user.role_ref = membership.role_ref
 
     logger.info(
         "role_assigned",

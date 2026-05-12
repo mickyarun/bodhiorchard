@@ -17,7 +17,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -112,14 +112,14 @@ class BUDDocument(BaseModel):
     requirements_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     tech_spec_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     test_plan_md: Mapped[str | None] = mapped_column(Text, nullable=True)
-    qa_automation_cases: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    qa_manual_cases: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    qa_automation_cases: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
+    qa_manual_cases: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
     qa_execution_plan_md: Mapped[str | None] = mapped_column(Text, nullable=True)
-    code_review_comments: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    code_review_comments: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
     embedding = mapped_column(Vector(384), nullable=True)
-    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
-    impacted_repos: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    estimated_dates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB, nullable=True)
+    impacted_repos: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
+    estimated_dates: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     complexity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prod_p70_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     current_phase_deadline: Mapped[datetime | None] = mapped_column(
@@ -242,7 +242,7 @@ class BUDTimelineEvent(BaseModel):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     actor_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     bud: Mapped["BUDDocument"] = relationship(back_populates="timeline_events")
 

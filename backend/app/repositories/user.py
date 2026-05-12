@@ -15,15 +15,15 @@
 """User data access repository."""
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Select, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.developer_xp import DeveloperXP
 from app.models.skill_profile import SkillProfile
-from app.models.user import OrgToUser, User, UserEmailAlias
-from app.repositories.base import BaseRepository
+from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
+from app.repositories.base import BaseRepository, SelectT
 
 if TYPE_CHECKING:
     from app.models.user import UserRole
@@ -45,7 +45,7 @@ class UserRepository(BaseRepository[User]):
         """
         super().__init__(User, db, org_id=org_id)
 
-    def _scoped(self, stmt: Select[tuple[User, ...]]) -> Select[tuple[User, ...]]:
+    def _scoped(self, stmt: Select[SelectT]) -> Select[SelectT]:
         """Apply tenant scope by joining OrgToUser when org_id is set."""
         if self._org_id is not None:
             stmt = stmt.join(OrgToUser, OrgToUser.user_id == User.id).where(
@@ -132,7 +132,7 @@ class UserRepository(BaseRepository[User]):
             return None
         return (row[0], row[1])
 
-    async def list_active_with_role(self, org_id: uuid.UUID, role) -> list[User]:
+    async def list_active_with_role(self, org_id: uuid.UUID, role: UserRole) -> list[User]:
         """Active org members whose ``OrgToUser.role`` equals ``role``."""
         stmt = (
             select(User)
@@ -161,7 +161,7 @@ class UserRepository(BaseRepository[User]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_role(self, user_id: uuid.UUID, org_id: uuid.UUID):
+    async def get_role(self, user_id: uuid.UUID, org_id: uuid.UUID) -> UserRole | None:
         """Return the user's ``OrgToUser.role`` value within the org, or ``None``."""
         stmt = select(OrgToUser.role).where(
             OrgToUser.user_id == user_id,
@@ -194,7 +194,7 @@ class UserRepository(BaseRepository[User]):
 
     async def list_active_members_for_tree(
         self, org_id: uuid.UUID, *, limit: int = 50
-    ) -> list[tuple]:
+    ) -> list[Any]:
         """Heavy aggregate row used by the dashboard tree's member section.
 
         Joins ``OrgToUser`` (membership), ``SkillProfile`` (touch totals),
@@ -419,11 +419,12 @@ class UserRepository(BaseRepository[User]):
         row = result.one_or_none()
         if row is None:
             return None
-        user, membership = row
-        user.org_id = membership.org_id  # type: ignore[attr-defined]
-        user.role = membership.role  # type: ignore[attr-defined]
-        user.role_id = membership.role_id  # type: ignore[attr-defined]
-        user.role_ref = membership.role_ref  # type: ignore[attr-defined]
+        user: User = row[0]
+        membership: OrgToUser = row[1]
+        user.org_id = membership.org_id
+        user.role = membership.role
+        user.role_id = membership.role_id
+        user.role_ref = membership.role_ref
         return user
 
     async def list_with_membership(self, org_id: uuid.UUID) -> list[User]:
@@ -442,10 +443,10 @@ class UserRepository(BaseRepository[User]):
         )
         users = []
         for user, membership in result.all():
-            user.org_id = membership.org_id  # type: ignore[attr-defined]
-            user.role = membership.role  # type: ignore[attr-defined]
-            user.role_id = membership.role_id  # type: ignore[attr-defined]
-            user.role_ref = membership.role_ref  # type: ignore[attr-defined]
+            user.org_id = membership.org_id
+            user.role = membership.role
+            user.role_id = membership.role_id
+            user.role_ref = membership.role_ref
             users.append(user)
         return users
 

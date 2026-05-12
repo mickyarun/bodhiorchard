@@ -32,6 +32,8 @@ module, so we just construct the same class with the persisted values
 and the shipped defaults fill any gaps.
 """
 
+from typing import Any
+
 from app.schemas.settings import (
     BUDStageSettings,
     JiraSettings,
@@ -46,7 +48,7 @@ from app.services.estimation_engine import PHASE_ORDER
 DEFAULT_PRESENCE_SETTINGS: PresenceSettings = PresenceSettings()
 
 
-def get_qa_settings(org_config: dict | None) -> QAAutomationSettings:
+def get_qa_settings(org_config: dict[str, Any] | None) -> QAAutomationSettings:
     """Resolve QA settings from an organization config dict.
 
     Accepts ``None`` / missing / partial ``qa`` sections and fills in the
@@ -63,7 +65,7 @@ def get_qa_settings(org_config: dict | None) -> QAAutomationSettings:
     return QAAutomationSettings(**raw)
 
 
-def get_bud_stage_settings(org_config: dict | None) -> BUDStageSettings:
+def get_bud_stage_settings(org_config: dict[str, Any] | None) -> BUDStageSettings:
     """Resolve BUD stage settings from an organization config dict.
 
     Args:
@@ -76,7 +78,7 @@ def get_bud_stage_settings(org_config: dict | None) -> BUDStageSettings:
     return BUDStageSettings(**raw)
 
 
-def is_uat_enabled(org_config: dict | None) -> bool:
+def is_uat_enabled(org_config: dict[str, Any] | None) -> bool:
     """Return whether the org includes a UAT stage in its BUD lifecycle.
 
     Thin wrapper so callers that only care about the single boolean don't
@@ -85,7 +87,7 @@ def is_uat_enabled(org_config: dict | None) -> bool:
     return get_bud_stage_settings(org_config).uat_enabled
 
 
-def get_presence_settings(org_config: dict | None) -> PresenceSettings:
+def get_presence_settings(org_config: dict[str, Any] | None) -> PresenceSettings:
     """Resolve per-org presence-inference settings from an organization config dict.
 
     Accepts ``None`` / missing / partial ``presence`` sections and fills
@@ -121,7 +123,7 @@ def get_presence_settings(org_config: dict | None) -> PresenceSettings:
         return DEFAULT_PRESENCE_SETTINGS
 
 
-def get_bug_reject_threshold(org_config: dict | None) -> int:
+def get_bug_reject_threshold(org_config: dict[str, Any] | None) -> int:
     """Return the open-bug count that triggers auto-rejection from testing.
 
     Thin wrapper so callers don't need to construct QAAutomationSettings.
@@ -129,7 +131,7 @@ def get_bug_reject_threshold(org_config: dict | None) -> int:
     return get_qa_settings(org_config).bug_reject_threshold
 
 
-def get_phase_order(org_config: dict | None) -> list[str]:
+def get_phase_order(org_config: dict[str, Any] | None) -> list[str]:
     """Return the BUD phase order for this org, filtered by toggles.
 
     Delegates to the canonical ``PHASE_ORDER`` in ``estimation_engine`` and
@@ -171,7 +173,7 @@ _AI_AGENT_PROFILES: dict[str, dict[str, str]] = {
 _DEFAULT_AGENT_PRESET = "claude-code"
 
 
-def get_ai_agent_profile(org_config: dict | None) -> dict[str, str]:
+def get_ai_agent_profile(org_config: dict[str, Any] | None) -> dict[str, str]:
     """Resolve the AI coding agent profile (display name + productivity hint).
 
     Reads ``org.config["llm"]["preset"]`` (the same key written by the AI
@@ -194,7 +196,7 @@ def get_ai_agent_profile(org_config: dict | None) -> dict[str, str]:
 _MERGE_MODEL_ALLOWLIST: frozenset[str] = frozenset({"claude-sonnet-4-6", "claude-opus-4-7"})
 
 
-def get_merge_models(org_config: dict | None) -> tuple[str, str]:
+def get_merge_models(org_config: dict[str, Any] | None) -> tuple[str, str]:
     """Resolve (default_model, large_model) for cross-repo feature merge.
 
     Reads the per-org overrides at ``org.config['llm']['merge_model_default']``
@@ -225,7 +227,7 @@ def get_merge_models(org_config: dict | None) -> tuple[str, str]:
     return chosen_default, chosen_large
 
 
-def get_jira_settings(org_config: dict | None) -> JiraSettings:
+def get_jira_settings(org_config: dict[str, Any] | None) -> JiraSettings:
     """Resolve Jira connection settings from an organization config dict.
 
     Accepts ``None`` / missing / partial ``jira`` sections and fills in

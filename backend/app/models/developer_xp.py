@@ -21,6 +21,7 @@ RewardEvent records each individual XP or SP award for audit and transparency.
 import enum
 import uuid
 from datetime import date
+from typing import Any
 
 from sqlalchemy import (
     Date,
@@ -138,7 +139,7 @@ class RewardEvent(BaseModel):
         nullable=False,
         default=1.0,
     )
-    metadata_: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
         return f"<RewardEvent(user={self.user_id}, {self.type.value}+{self.amount} {self.source})>"

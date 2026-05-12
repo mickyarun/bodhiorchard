@@ -56,7 +56,7 @@ async def fetch_chat_history(
         return [
             {
                 "role": m.role,
-                "user_name": m.user.name if m.user else None,
+                "user_name": (m.user.name if m.user else None) or "",
                 "message": m.message,
                 "created_at": m.created_at.strftime("%I:%M %p") if m.created_at else "",
             }

@@ -74,7 +74,7 @@ async def close_redis() -> None:
     global _redis, _redis_available  # noqa: PLW0603
 
     if _redis is not None:
-        await _redis.aclose()
+        await _redis.aclose()  # type: ignore[attr-defined]
         logger.info("redis_closed")
     _redis = None
     _redis_available = None

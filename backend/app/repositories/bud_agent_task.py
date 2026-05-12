@@ -15,13 +15,14 @@
 """BUD agent task data access repository."""
 
 import uuid
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
 
 
 async def recover_stuck_agent_tasks(db: AsyncSession) -> int:
@@ -54,7 +55,7 @@ async def recover_stuck_agent_tasks(db: AsyncSession) -> int:
     )
     result = await db.execute(stmt)
     await db.flush()
-    return result.rowcount or 0
+    return rowcount(result) or 0
 
 
 class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
@@ -170,7 +171,9 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
         await self._db.execute(stmt)
         await self._db.flush()
 
-    async def mark_completed(self, task_id: uuid.UUID, result_summary: dict | None = None) -> None:
+    async def mark_completed(
+        self, task_id: uuid.UUID, result_summary: dict[str, Any] | None = None
+    ) -> None:
         """Mark a task as completed.
 
         Args:

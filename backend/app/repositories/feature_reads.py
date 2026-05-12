@@ -136,7 +136,9 @@ class FeatureReadRepository:
 
     async def list_features_with_repo_paths(
         self,
-    ) -> list[tuple[uuid.UUID, str | None, str | None, str | None, dict | None, str | None]]:
+    ) -> list[
+        tuple[uuid.UUID, str | None, str | None, str | None, dict[str, Any] | None, str | None]
+    ]:
         """Per-repo rows for every active feature.
 
         Returns ``(feature_id, title, source_ref, feature_status,

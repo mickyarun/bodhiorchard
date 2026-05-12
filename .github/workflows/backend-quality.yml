@@ -1,0 +1,192 @@
+name: Backend quality
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-quality.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-quality.yml"
+
+jobs:
+  mypy:
+    name: mypy --strict (blocks merge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run mypy
+        run: mypy app/
+
+  ruff:
+    name: ruff (lint + format)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: ruff check
+        run: ruff check app/
+
+      - name: ruff format --check
+        run: ruff format --check app/
+
+  pytest:
+    name: pytest (backend tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bodhiorchard
+          POSTGRES_PASSWORD: bodhiorchard
+          POSTGRES_DB: bodhiorchard_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bodhiorchard"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard_test
+      REDIS_URL: redis://localhost:6379
+      SECRET_KEY: ci-secret-not-for-prod
+      ENCRYPTION_KEY: ci-encryption-key-not-for-prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run pytest with coverage
+        run: |
+          pytest -q --maxfail=10 \
+            --cov=app --cov-report=term-missing --cov-report=xml --cov-report=html
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.xml
+            backend/htmlcov/
+          retention-days: 14
+
+  alembic-check:
+    name: alembic (migrations in sync with models)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bodhiorchard
+          POSTGRES_PASSWORD: bodhiorchard
+          POSTGRES_DB: bodhiorchard_migrations
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bodhiorchard"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard_migrations
+      SECRET_KEY: ci-secret-not-for-prod
+      ENCRYPTION_KEY: ci-encryption-key-not-for-prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Apply existing migrations
+        run: alembic upgrade head
+
+      - name: Detect un-migrated model changes
+        run: |
+          set -euo pipefail
+          # Autogenerate a candidate revision; if alembic finds any
+          # divergence between models and the post-`upgrade head` DB
+          # state, the revision file will be non-empty.
+          alembic revision --autogenerate -m "ci_drift_check" --rev-id ci_drift_check
+          drift_file=$(ls alembic/versions/ci_drift_check_*.py 2>/dev/null | head -n 1 || true)
+          if [ -z "$drift_file" ]; then
+            echo "alembic produced no revision file — assuming no drift."
+            exit 0
+          fi
+          if grep -E "op\.(add_column|drop_column|create_table|drop_table|alter_column|create_index|drop_index|create_foreign_key|drop_constraint)" "$drift_file"; then
+            echo "::error::Model changes detected without a matching migration."
+            echo "Run \`alembic revision --autogenerate -m '<message>'\` locally, review, and commit."
+            cat "$drift_file"
+            exit 1
+          fi
+          echo "Generated revision had no schema ops — no drift."

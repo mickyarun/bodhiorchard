@@ -19,6 +19,7 @@ across bud_agent_handler, job_chat, job_design, and job_agents.
 """
 
 import uuid
+from typing import Any
 
 import structlog
 from sqlalchemy import select
@@ -42,7 +43,7 @@ async def log_agent_activity(
     skill_id: uuid.UUID | None = None,
     task_id: uuid.UUID | None = None,
     repo_id: uuid.UUID | None = None,
-    metadata_: dict | None = None,
+    metadata_: dict[str, Any] | None = None,
     bud_number: int | None = None,
     bud_title: str | None = None,
 ) -> None:
@@ -115,7 +116,7 @@ async def _write_and_publish(
     skill_id: uuid.UUID | None,
     task_id: uuid.UUID | None,
     repo_id: uuid.UUID | None,
-    metadata_: dict | None,
+    metadata_: dict[str, Any] | None,
     bud_number: int | None,
     bud_title: str | None,
 ) -> None:

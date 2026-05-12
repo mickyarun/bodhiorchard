@@ -1,0 +1,23 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # Default behavior: opens / updates a "release PR" on main.
+          # Merging that PR cuts a GitHub release, generates a tag, and
+          # appends a section to CHANGELOG.md based on conventional
+          # commits since the last release.
+          release-type: simple
+          token: ${{ secrets.GITHUB_TOKEN }}

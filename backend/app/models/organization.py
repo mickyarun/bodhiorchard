@@ -14,6 +14,8 @@
 
 """Organization model for multi-tenant isolation."""
 
+from typing import Any
+
 from sqlalchemy import Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -35,7 +37,7 @@ class Organization(BaseModel):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
-    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     github_app_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     github_app_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     github_app_installation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

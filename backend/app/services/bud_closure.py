@@ -158,7 +158,9 @@ def _trigger_impacted_repo_scan(
     if not isinstance(impacted, list) or not impacted:
         return
 
-    repo_ids = [r.get("repo_id") for r in impacted if isinstance(r, dict) and r.get("repo_id")]
+    repo_ids: list[str] = [
+        str(rid) for r in impacted if isinstance(r, dict) and (rid := r.get("repo_id"))
+    ]
     if not repo_ids:
         return
 

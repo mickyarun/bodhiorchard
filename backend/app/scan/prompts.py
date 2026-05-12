@@ -31,6 +31,8 @@ phase modules invoke them when they need a prompt.
 
 from __future__ import annotations
 
+from typing import Any
+
 _WRITE_FEATURE_DOCS = """      - feature_name: Human-readable name (e.g., "Card Payments")
       - description: 1-2 sentences of what this feature does in business terms
       - capabilities: 3-6 specific things this feature does
@@ -139,9 +141,9 @@ README Overview:
 
 
 def build_merge_prompt(
-    new_features: list[dict],
-    existing_canonicals: list[dict],
-    unlinked_repos: list[dict] | None = None,
+    new_features: list[dict[str, Any]],
+    existing_canonicals: list[dict[str, Any]],
+    unlinked_repos: list[dict[str, Any]] | None = None,
 ) -> str:
     """Build a two-section prompt for cross-repo feature merging.
 

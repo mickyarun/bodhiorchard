@@ -25,6 +25,7 @@ from __future__ import annotations
 import platform
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 
 @lru_cache(maxsize=1)
@@ -49,7 +50,7 @@ def deployment_mode() -> str:
     return "docker" if is_running_in_docker() else "host"
 
 
-def deployment_info() -> dict:
+def deployment_info() -> dict[str, Any]:
     """Summary dict surfaced to the setup UI."""
     in_docker = is_running_in_docker()
     return {

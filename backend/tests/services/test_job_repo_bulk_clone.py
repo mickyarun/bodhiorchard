@@ -88,9 +88,13 @@ class _FakeTrackedRepoRepo:
     def __init__(self, _db: Any, *, org_id: uuid.UUID | None = None) -> None:
         self._org_id = org_id
 
-    async def upsert(self, path: str, name: str) -> _FakeTrackedRepo:
+    async def upsert_for_github_repo(
+        self, *, github_full_name: str, path: str, name: str
+    ) -> _FakeTrackedRepo:
         _FakeTrackedRepoRepo.upserts.append((path, name))
-        return _FakeTrackedRepo(path=path, name=name)
+        repo = _FakeTrackedRepo(path=path, name=name)
+        repo.github_repo_full_name = github_full_name
+        return repo
 
     async def set_onboard_metadata(
         self,
@@ -171,6 +175,14 @@ def patched_handler(monkeypatch: pytest.MonkeyPatch) -> None:
         return "ghs_TEST_TOKEN_VALUE"
 
     monkeypatch.setattr(job_repo_bulk_clone, "get_installation_token", _fake_token)
+
+    # Keep the handler off real filesystem and Redis state during tests.
+    monkeypatch.setattr(job_repo_bulk_clone, "purge_repo_clones", lambda *_a, **_kw: 0)
+
+    async def _fake_delete_key(_key: str) -> None:
+        return None
+
+    monkeypatch.setattr(job_repo_bulk_clone, "delete_key", _fake_delete_key)
 
 
 def _make_payload(*full_names: str) -> dict[str, Any]:

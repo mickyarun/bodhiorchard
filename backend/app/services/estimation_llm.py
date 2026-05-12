@@ -21,6 +21,7 @@ this module stays focused on assembly + the LLM I/O loop.
 
 import json
 import re
+from typing import Any
 
 import structlog
 
@@ -40,13 +41,13 @@ logger = structlog.get_logger(__name__)
 def build_estimation_prompt(
     bud: BUDDocument,
     complexity: int,
-    backlog_ctx: dict,
-    skill_ctx: dict | None,
+    backlog_ctx: dict[str, Any],
+    skill_ctx: dict[str, Any] | None,
     historical_ctx: str,
     remaining_phases: list[str],
-    org_config: dict | None = None,
+    org_config: dict[str, Any] | None = None,
     capacity_summary: list[tuple[str, float, str]] | None = None,
-    bug_context: dict | None = None,
+    bug_context: dict[str, Any] | None = None,
     historical_n_used: int = 0,
 ) -> str:
     """Build the LLM prompt for PERT three-point estimation.
@@ -144,13 +145,13 @@ class LLMEstimateResult:
 async def llm_pert_estimate(
     bud: BUDDocument,
     complexity: int,
-    backlog_ctx: dict,
-    skill_ctx: dict | None,
+    backlog_ctx: dict[str, Any],
+    skill_ctx: dict[str, Any] | None,
     historical_ctx: str,
     remaining_phases: list[str],
-    org_config: dict | None = None,
+    org_config: dict[str, Any] | None = None,
     capacity_summary: list[tuple[str, float, str]] | None = None,
-    bug_context: dict | None = None,
+    bug_context: dict[str, Any] | None = None,
     historical_n_used: int = 0,
 ) -> LLMEstimateResult | None:
     """Call LLM for PERT estimates + complexity. Returns None on failure."""

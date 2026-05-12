@@ -23,6 +23,7 @@ optionally to bud_agent_tasks via task_id.
 """
 
 import uuid
+from typing import Any
 
 from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -110,7 +111,7 @@ class AgentActivityLog(BaseModel):
         nullable=True,
     )
     files_changed: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata_: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
         return (

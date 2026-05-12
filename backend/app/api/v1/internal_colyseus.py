@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hmac
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -71,7 +72,7 @@ async def get_org_snapshot(
     org_id: uuid.UUID,
     _: None = Depends(_verify_bridge_secret),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Return a snapshot of the org's members + repos for Colyseus.
 
     Called by Colyseus when an OrgRoom is created (first client joins).
@@ -134,7 +135,7 @@ async def _collect_org_members(
     db: AsyncSession,
     org_id: uuid.UUID,
     presence_settings: PresenceSettings,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Return every active member of an org for the Colyseus snapshot.
 
     Joins ``users`` via ``org_to_user`` membership (authoritative for
@@ -167,7 +168,7 @@ async def _collect_org_members(
 
     rows = await UserRepository(db).list_active_members_with_xp(org_id)
 
-    members: list[dict] = []
+    members: list[dict[str, Any]] = []
     for user, xp in rows:
         # Look up Slack presence state (falls back to "active" if no mapping).
         # ``get_presence_state`` applies the org's working-day + work-hours
@@ -199,9 +200,9 @@ async def _collect_org_members(
 
 @router.post("/verify-token")
 async def verify_user_token(
-    payload: dict,
+    payload: dict[str, Any],
     _: None = Depends(_verify_bridge_secret),
-) -> dict:
+) -> dict[str, Any]:
     """Verify a user JWT token.
 
     Called by Colyseus when a client attempts to join an OrgRoom.

@@ -21,7 +21,7 @@ job ID tracking pattern.
 
 import uuid
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -86,7 +86,7 @@ class BUDAgentTask(BaseModel):
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    result_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    result_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     triggered_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

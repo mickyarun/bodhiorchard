@@ -19,6 +19,8 @@ Extracted from slack_intake.py to keep file sizes manageable. Shares the
 same TriageSession model, session routing, and Slack client.
 """
 
+from typing import Any
+
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -274,8 +276,8 @@ async def run_bug_triage_agent(
 def _build_bug_triage_prompt(
     session_status: str,
     original_text: str,
-    thread_messages: list[dict],
-    triage_context: dict | None,
+    thread_messages: list[dict[str, Any]],
+    triage_context: dict[str, Any] | None,
 ) -> str:
     """Build the system prompt for the bug triage agent."""
     thread_text = "\n".join(

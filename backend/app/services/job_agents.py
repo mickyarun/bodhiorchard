@@ -115,15 +115,15 @@ async def handle_triage_job(job_id: str, raw_payload: dict[str, Any]) -> None:
                 elif payload.action == "continue_triage":
                     from app.schemas.slack import SlackMessageEvent
 
-                    event = SlackMessageEvent.model_validate(event_data)
+                    msg = SlackMessageEvent.model_validate(event_data)
                     await continue_triage(
                         db=db,
                         org=org,
                         bot_token=bot_token,
-                        channel=event.channel,
-                        thread_ts=event.thread_ts or event.ts,
-                        new_message=event.text,
-                        sender_slack_id=event.user or "",
+                        channel=msg.channel,
+                        thread_ts=msg.thread_ts or msg.ts,
+                        new_message=msg.text,
+                        sender_slack_id=msg.user or "",
                     )
                 elif payload.action == "pm_approval":
                     from app.schemas.slack import SlackReactionEvent
