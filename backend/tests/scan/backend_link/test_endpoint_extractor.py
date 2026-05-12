@@ -118,9 +118,8 @@ def test_chained_replace_resolves_underlying_constant(tmp_path: Path) -> None:
     ``replace`` method.
 
     Regression: this scenario silently returned ``[]`` for every feature
-    in the ATOAConsumerWebNew codebase that used ``api_urls.X.replace()``
-    + ``this.http.makeRequest({url: ...})`` (Dentally, PointOne,
-    Merchant Hosted Payment Pages, several others).
+    in a real Nuxt frontend codebase that used ``api_urls.X.replace()``
+    + ``this.http.makeRequest({url: ...})`` across many features.
     """
     consts = tmp_path / "src" / "consts.ts"
     _write(

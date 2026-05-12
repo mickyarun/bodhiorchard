@@ -51,7 +51,7 @@ def _run(rel_path: str, *, repo_root: str = "/repo") -> bool:
         "cmd/server/main.go",
         "src/main/java/com/co/Service.java",
         "Sources/MyApp/Auth.swift",
-        "lib/atoa/payments.ex",
+        "lib/myapp/payments.ex",
         "app/Http/Controllers/UserController.php",
         "frontend/components/Button.vue",
         "src/index.tsx",

@@ -55,12 +55,12 @@ def test_progress_logger_passes_repo_name_for_per_repo_phases() -> None:
     cb = make_scan_progress_logger(
         scan_id="abc-123",
         phase="feature_synthesis",
-        repo_name="ATOACore",
+        repo_name="BackendCore",
     )
     with capture_logs() as captured:
         cb("write_feature_registry", {"feature_name": "Feature: Auth"})
 
     events = [e for e in captured if e.get("event") == "claude_tool_call"]
     assert len(events) == 1
-    assert events[0]["repo"] == "ATOACore"
+    assert events[0]["repo"] == "BackendCore"
     assert events[0]["phase"] == "feature_synthesis"

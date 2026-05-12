@@ -15,7 +15,7 @@
 """Cross-repo relationship detection for the Living Tree Dashboard.
 
 Creates inter-service arcs between repos that share branch/community
-names (e.g. "User" in ATOACore and "User" in ATOAPayment). Pure
+names (e.g. "User" in a core-backend repo and "User" in a payment-service repo). Pure
 data transformation — no DB queries or subprocess calls.
 """
 
@@ -30,7 +30,7 @@ def collect_cross_repo_relationships(tree: TreeData) -> None:
     """Create inter-service arcs between repos sharing community names.
 
     When two repos both have a community (branch) with the same name —
-    e.g. "User" in ATOACore and "User" in ATOAPayment — it signals a
+    e.g. "User" in a core-backend repo and "User" in a payment-service repo — it signals a
     shared domain concept. We emit a synthetic IMPORTS arc so the garden
     draws a visible connection between those trees.
 

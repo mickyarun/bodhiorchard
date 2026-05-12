@@ -57,7 +57,7 @@ _MAX_DIR_DEPTH = 6
 #   - spreads across enough child folders that going one deeper produces
 #     multiple meaningful sub-buckets (each ≥ 2 files).
 #
-# Tuned against ATOACore's ``src/controllers/api/<domain>/`` (269 files,
+# Tuned against a real backend repo's ``src/controllers/api/<domain>/`` (269 files,
 # 25 child folders → recurse) vs ``src/services/payments/`` (well under
 # 30 files, ≤ 2 child folders → don't recurse). Small enough that
 # Rails-namespaced ``app/controllers/api/v1/<resource>_controller.rb``

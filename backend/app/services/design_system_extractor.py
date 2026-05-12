@@ -378,7 +378,7 @@ async def _llm_extract(
 
     # Even on non-success (e.g. ``error_max_turns``) Claude often has
     # written a usable partial design-system doc to ``result.output``
-    # before the cap hit. ``output_tokens=1824`` on a real atoa_pax run
+    # before the cap hit. ``output_tokens=1824`` on a real Flutter-app run
     # was ~80% of a complete doc — throwing it away forced the fallback.
     # Only hard-fail if the output is truly empty / doesn't look like the
     # expected markdown shape.

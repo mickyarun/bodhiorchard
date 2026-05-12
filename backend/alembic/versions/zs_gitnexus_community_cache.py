@@ -15,7 +15,7 @@
 """Add gitnexus_community_cache for fast extract-stage hydration.
 
 The v2 ``extract`` stage runs a per-community cypher subprocess to fetch
-each community's file list. On large repos (e.g. ATOAMerchantapp with
+each community's file list. On large repos (e.g. a real merchant-app repo with
 ~2,360 communities) this fan-out, serialised by the global ``_NPX_LOCK``,
 costs ~40 minutes of wall-clock time per scan — even when the SHA is
 unchanged.

@@ -139,7 +139,7 @@ def test_non_jvm_layouts_unchanged() -> None:
 
 
 def test_layer_dir_recurses_into_per_domain_buckets() -> None:
-    """``src/controllers/api/<domain>/`` is the ATOACore failure shape.
+    """``src/controllers/api/<domain>/`` is the canonical failure shape.
 
     With the old single-pass depth=3 logic every controller domain
     collapsed into one mega-cluster keyed at ``src/controllers/api``.
@@ -210,7 +210,7 @@ def test_recurse_min_files_kwarg_lets_smaller_layer_dirs_split() -> None:
     """A 25-file ``controllers/api/`` across 6 domains stays mega-clustered
     at the default ``recurse_min_files=30`` — but lowering the kwarg
     triggers the per-domain split. Lets callers tune for repos whose
-    layer dirs are smaller than ATOACore's.
+    layer dirs are smaller than the calibration target's.
     """
     partition: dict[int, list[str]] = {0: []}
     nodes: dict[str, str] = {}

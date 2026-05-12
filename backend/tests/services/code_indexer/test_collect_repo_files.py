@@ -47,7 +47,7 @@ def fake_repo(tmp_path: Path) -> Path:
         "src/legacy/Modal.jsx",
         "src/esm/index.mjs",
         "lib/main.dart",
-        "lib/atoa/payments.ex",
+        "lib/myapp/payments.ex",
         "test/payments_test.exs",
         "src/Project.jl",
         "rtl/cpu.v",
