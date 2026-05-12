@@ -118,7 +118,7 @@ def test_globs_reject_non_design_dart_files(tmp_path: Path) -> None:
     (lib / "constants" / "asset_strings.dart").write_text("// strings")
     (lib / "constants" / "regular_expressions.dart").write_text("// regexes")
     (lib / "constants" / "route_path.dart").write_text("// routes")
-    (lib / "atoa_public_key.dart").write_text("// rsa pubkey")
+    (lib / "rsa_public_key.dart").write_text("// rsa pubkey")
 
     # Signal (must be discovered)
     (lib / "theme" / "app_theme.dart").write_text("class AppTheme {}")
@@ -145,4 +145,4 @@ def test_globs_reject_non_design_dart_files(tmp_path: Path) -> None:
     assert "asset_strings.dart" not in discovered
     assert "regular_expressions.dart" not in discovered
     assert "route_path.dart" not in discovered
-    assert "atoa_public_key.dart" not in discovered
+    assert "rsa_public_key.dart" not in discovered

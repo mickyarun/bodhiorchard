@@ -43,7 +43,7 @@ def test_missing_repo_synth_flips_is_clean() -> None:
     """Any RepoAnomaly in missing_repo_synth flips is_clean to False."""
     anomaly = RepoAnomaly(
         repo_id=uuid.uuid4(),
-        repo_name="ATOABatch",
+        repo_name="BatchService",
         cluster_count=33,
         synth_count=0,
     )
@@ -67,10 +67,10 @@ def test_empty_ingest_flips_is_clean() -> None:
     either way every downstream stage runs on an empty input and the
     scan completes producing nothing. The audit must surface this.
     """
-    anomaly = EmptyIngestAnomaly(repo_id=uuid.uuid4(), repo_name="ATOACore")
+    anomaly = EmptyIngestAnomaly(repo_id=uuid.uuid4(), repo_name="BackendCore")
     report = ScanAuditReport(empty_ingest=[anomaly])
     assert report.is_clean is False
-    assert report.empty_ingest[0].repo_name == "ATOACore"
+    assert report.empty_ingest[0].repo_name == "BackendCore"
 
 
 def test_repo_anomaly_carries_orchestrator_log_fields() -> None:
@@ -82,10 +82,10 @@ def test_repo_anomaly_carries_orchestrator_log_fields() -> None:
     """
     anomaly = RepoAnomaly(
         repo_id=uuid.uuid4(),
-        repo_name="AtoaIntegration",
+        repo_name="IntegrationService",
         cluster_count=22,
         synth_count=0,
     )
-    assert anomaly.repo_name == "AtoaIntegration"
+    assert anomaly.repo_name == "IntegrationService"
     assert anomaly.cluster_count == 22
     assert anomaly.synth_count == 0

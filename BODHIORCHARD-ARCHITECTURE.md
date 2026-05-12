@@ -4519,7 +4519,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Bodhiorchard                                    Arun • Atoa • ⚙    │
+│  Bodhiorchard                                    Arun • Acme • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Good morning, Arun                          Thu, Mar 5 2026    │
@@ -4569,7 +4569,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Bodhiorchard                                   Sarah • Atoa • ⚙    │
+│  Bodhiorchard                                   Sarah • Acme • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Good morning, Sarah                         Thu, Mar 5 2026    │
@@ -4626,7 +4626,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Bodhiorchard                                   James • Atoa • ⚙    │
+│  Bodhiorchard                                   James • Acme • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Good morning, James                         Thu, Mar 5 2026    │
@@ -4678,7 +4678,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Bodhiorchard                                    Alex • Atoa • ⚙    │
+│  Bodhiorchard                                    Alex • Acme • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─── OPEN TICKETS ──────────────────────────────────────┐     │

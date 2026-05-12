@@ -20,7 +20,7 @@
 The code indexer (``app.services.code_indexer.label_cluster``) names
 each cluster with a single TF-IDF-derived path token. Two distinct
 clusters can land on the same label when the repo organises the same
-domain across multiple roots — e.g. ATOACore has clusters from
+domain across multiple roots — e.g. a single repo may have clusters from
 ``src/services/ais/``, ``src/repository/ais/`` and ``src/utils/ais/``
 all labelled ``ais`` after the per-cluster merge_by_dir step.
 Downstream stages then either fragment the synthesis input or — worse

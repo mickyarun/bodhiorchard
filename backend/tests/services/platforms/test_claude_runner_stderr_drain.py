@@ -18,7 +18,7 @@ The old code opened ``stderr=PIPE`` but only read stderr after the
 process exited. If the child wrote more than ~64 KB to stderr (the OS
 pipe buffer size on macOS) it would block on ``write()``, which stopped
 stdout production, which stalled the stream-json reader, which sat there
-until the 10-minute timeout fired. ``atoa_pax`` hit exactly this.
+until the 10-minute timeout fired. A real Flutter-app scan hit exactly this.
 
 This test drives :func:`run_claude_code`'s internal subprocess via a
 monkeypatch that swaps the ``claude`` binary for a tiny Python script

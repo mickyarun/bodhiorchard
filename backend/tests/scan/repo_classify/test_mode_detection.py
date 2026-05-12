@@ -100,7 +100,7 @@ def test_batch_name_overrides_worktree(tmp_path: Path) -> None:
 def test_postgres_node_with_stray_mongo_file_classifies_as_postgres(tmp_path: Path) -> None:
     """A Node service that imports ``pg`` is postgres regardless of stray mongo files.
 
-    Regression: ATOACommunication uses postgres but the previous heuristic
+    Regression: a real comms-service repo uses postgres but the previous heuristic
     globbed ``**/mongo*.js`` anywhere in the tree and mis-flagged it as
     mongo because the repo shipped a sample ``mongo-shell-helper.js``.
     Dependency keys are authoritative; lone files are not.
@@ -165,12 +165,12 @@ def test_python_with_pymysql_classifies_as_mysql(tmp_path: Path) -> None:
 def test_flutter_pubspec_detected_as_frontend(tmp_path: Path) -> None:
     """A ``pubspec.yaml`` with a ``flutter:`` section is FRONTEND/flutter.
 
-    Regression: ``atoa_pax`` is a Flutter app but was falling through to
+    Regression: a real Flutter app was falling through to
     ``RepoLayer.SHARED`` because the classifier only inspected
     ``package.json`` / ``pyproject.toml`` / ``requirements.txt``.
     """
     (tmp_path / "pubspec.yaml").write_text(
-        "name: atoa_pax\n"
+        "name: consumer_pax\n"
         "dependencies:\n"
         "  flutter:\n"
         "    sdk: flutter\n"
