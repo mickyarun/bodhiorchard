@@ -113,8 +113,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Run pytest
-        run: pytest -q --maxfail=10
+      - name: Run pytest with coverage
+        run: |
+          pytest -q --maxfail=10 \
+            --cov=app --cov-report=term-missing --cov-report=xml --cov-report=html
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.xml
+            backend/htmlcov/
+          retention-days: 14
 
   alembic-check:
     name: alembic (migrations in sync with models)
