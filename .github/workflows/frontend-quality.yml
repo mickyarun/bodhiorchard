@@ -1,0 +1,97 @@
+name: Frontend quality
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "multiplayer/**"
+      - "shared/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/frontend-quality.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "multiplayer/**"
+      - "shared/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/frontend-quality.yml"
+
+jobs:
+  frontend-typecheck:
+    name: vue-tsc (frontend type-check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install workspace deps
+        run: npm ci
+
+      - name: Type-check frontend
+        run: npx --workspace bodhiorchard-frontend vue-tsc --noEmit
+
+  frontend-tests:
+    name: vitest (frontend tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install workspace deps
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm --workspace bodhiorchard-frontend test
+
+  multiplayer-build:
+    name: tsc (multiplayer build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install workspace deps
+        run: npm ci
+
+      - name: Build multiplayer
+        run: npm --workspace bodhiorchard-multiplayer run build
+
+  multiplayer-tests:
+    name: jest (multiplayer tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install workspace deps
+        run: npm ci
+
+      - name: Run multiplayer tests
+        run: npm --workspace bodhiorchard-multiplayer test
