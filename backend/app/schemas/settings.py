@@ -187,6 +187,11 @@ class BUDStageSettings(BaseModel):
 WeekdayKey = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
+def _default_working_days() -> list[WeekdayKey]:
+    """Default working-days set — Monday through Friday."""
+    return ["mon", "tue", "wed", "thu", "fri"]
+
+
 class PresenceSettings(BaseModel):
     """Org-level presence-inference configuration.
 
@@ -207,7 +212,7 @@ class PresenceSettings(BaseModel):
 
     auto_mode_enabled: bool = Field(default=True, alias="autoModeEnabled")
     working_days: list[WeekdayKey] = Field(
-        default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"],
+        default_factory=_default_working_days,
         alias="workingDays",
         min_length=1,
     )

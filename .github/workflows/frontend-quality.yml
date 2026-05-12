@@ -1,23 +1,14 @@
 name: Frontend quality
 
 on:
+  # NO ``paths:`` filter — every required status check below is gated by
+  # the branch protection ruleset, and GitHub holds a required check in
+  # "Expected" forever if its workflow doesn't run at all. Always trigger
+  # on every PR so the checks always report; npm ci is cheap and the
+  # type-check / test runs are fast when nothing in frontend/ changed.
   pull_request:
-    paths:
-      - "frontend/**"
-      - "multiplayer/**"
-      - "shared/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/frontend-quality.yml"
   push:
     branches: [main]
-    paths:
-      - "frontend/**"
-      - "multiplayer/**"
-      - "shared/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/frontend-quality.yml"
 
 jobs:
   frontend-typecheck:

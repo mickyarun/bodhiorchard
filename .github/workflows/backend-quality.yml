@@ -1,15 +1,14 @@
 name: Backend quality
 
 on:
+  # NO ``paths:`` filter — every required status check below is gated by
+  # the branch protection ruleset, and GitHub holds a required check in
+  # "Expected" forever if its workflow doesn't run at all. Always trigger
+  # on every PR so the checks always report; the jobs themselves are
+  # cheap when nothing in backend/ changed.
   pull_request:
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend-quality.yml"
   push:
     branches: [main]
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend-quality.yml"
 
 jobs:
   mypy:

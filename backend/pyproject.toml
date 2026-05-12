@@ -1,6 +1,14 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
+
+# Hatchling auto-detects the source directory by matching the project
+# name (``bodhiorchard-backend`` → looks for ``bodhiorchard_backend/``).
+# This project lives under ``app/`` instead, so the discovery has to be
+# explicit — without this block, ``pip install -e ".[dev]"`` fails in
+# fresh CI build envs with "Unable to determine which files to ship".
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
 
 [project]
 name = "bodhiorchard-backend"
@@ -18,6 +26,7 @@ dependencies = [
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "python-jose[cryptography]>=3.3.0",
+    "pyjwt[crypto]>=2.8.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.6",
     "httpx>=0.27.0",

@@ -23,6 +23,8 @@ Call ``close_redis()`` during application shutdown to release the
 connection pool cleanly.
 """
 
+from typing import Any, cast
+
 import structlog
 from redis.asyncio import Redis
 
@@ -52,7 +54,10 @@ async def get_redis() -> Redis | None:
                 settings.redis.redis_url,
                 decode_responses=True,
             )
-            await _redis.ping()
+            # redis-py types ping() as Awaitable[bool] | bool depending on
+            # client mode; the async client always returns the Awaitable
+            # branch at runtime, so cast for mypy.
+            await cast(Any, _redis.ping())
             _redis_available = True
             logger.info("redis_connected", url=settings.redis.redis_url)
         except Exception:
@@ -74,7 +79,10 @@ async def close_redis() -> None:
     global _redis, _redis_available  # noqa: PLW0603
 
     if _redis is not None:
-        await _redis.aclose()  # type: ignore[attr-defined]
+        # ``aclose`` is the modern PEP 533 close hook; redis-py stubs only
+        # added it in recent versions, so route through Any to avoid a
+        # version-pin to the stub package.
+        await cast(Any, _redis).aclose()
         logger.info("redis_closed")
     _redis = None
     _redis_available = None
