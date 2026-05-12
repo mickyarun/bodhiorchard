@@ -110,8 +110,49 @@ _BLOCKED_TOKENS = frozenset(
 )
 
 
-# Split path segments on common camelCase / kebab / snake / dot separators.
-_TOKEN_SPLIT = re.compile(r"[/\\._\-]+|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+# Path separators split a filepath into segments (one dir or filename at a time);
+# within a segment we split on dots/underscores/hyphens and on camelCase boundaries.
+# Keeping the two passes distinct lets us emit a kebab-joined compound *per segment*
+# so a camelCase directory like ``orderShipment`` becomes the token ``order-shipment``
+# instead of leaving the LLM-facing label to choose between the bare halves.
+_PATH_SEPARATOR = re.compile(r"[/\\]+")
+_SEGMENT_SPLIT = re.compile(r"[._\-]+|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
+def extract_path_tokens(files: Iterable[str]) -> set[str]:
+    """Return the meaningful token vocabulary for a set of file paths.
+
+    Same blocked-token + camelCase + per-segment-bigram rules as
+    :func:`label_cluster`, but returns just the *set* of tokens — callers
+    that only need to test set membership (e.g. domain-overlap guards in
+    the synthesis handler) shouldn't have to import the private Counter.
+    """
+    return set(_count_tokens(files).keys())
+
+
+def extract_text_tokens(text: str) -> set[str]:
+    """Return the meaningful token vocabulary for arbitrary text.
+
+    Splits on non-alphanumerics, then re-applies camelCase splitting + the
+    same blocked-token filter used for file paths. Lets callers compare a
+    feature title or description against a cluster's path vocabulary on
+    equal terms.
+
+    Compound bigrams (``order-shipment``) are emitted only *within* a single
+    contiguous run — a camelCase or hyphen/underscore-joined word like
+    ``orderShipment`` produces ``{"order", "shipment", "order-shipment"}``.
+    A space-separated phrase like ``"Order Shipment"`` produces
+    ``{"order", "shipment"}`` without the bigram, because the separator
+    breaks the run. That's by design: bigrams encode "these tokens belong
+    together in the path/identifier", and free-form text doesn't give us
+    that signal. Single-token overlap is enough for the guard, so the
+    asymmetry is safe in practice.
+    """
+    tokens: set[str] = set()
+    for raw in re.findall(r"[A-Za-z][A-Za-z0-9]*", text):
+        for tok in _tokenise_segment(raw):
+            tokens.add(tok)
+    return tokens
 
 
 def build_corpus_tokens(corpus_files: Iterable[str]) -> Counter[str]:
@@ -154,8 +195,16 @@ def label_cluster(
         return fallback
 
     if corpus_tokens is None and corpus_files is None:
-        winner, _ = cluster_tokens.most_common(1)[0]
-        return _kebab(winner)
+        # No IDF signal — rank by raw count, but apply the same
+        # compound-preference tiebreaker so multi-word domain nouns like
+        # ``order-shipment`` don't lose to their bare halves when both
+        # occur identically often.
+        ranked = sorted(
+            cluster_tokens.items(),
+            key=lambda kv: (kv[1], "-" in kv[0], -len(kv[0])),
+            reverse=True,
+        )
+        return _kebab(ranked[0][0])
 
     if corpus_tokens is None:
         # Caller passed corpus_files only — compute once.
@@ -183,11 +232,17 @@ def label_cluster(
         bonus = 1.0 + coverage  # in [1, 2]
         return count * idf * bonus
 
+    # Tiebreaker: on identical score+count, prefer compound forms (those with
+    # an embedded ``-``) — they carry the multi-word domain noun
+    # (``order-shipment``, ``bank-feed``) that single-token labels would
+    # otherwise lose. We still fall back to shorter-token preference after that
+    # so we don't pick noisy long tokens when the compound signal is absent.
     scored = sorted(
         cluster_tokens.items(),
         key=lambda kv: (
             score(kv[0], kv[1]),
             kv[1],
+            "-" in kv[0],
             -len(kv[0]),
         ),
         reverse=True,
@@ -198,18 +253,40 @@ def label_cluster(
 
 
 def _count_tokens(files: Iterable[str]) -> Counter[str]:
-    """Tokenise paths and count occurrences, dropping noise tokens."""
+    """Tokenise paths and count occurrences, dropping noise tokens.
+
+    For each path segment with two-or-more non-blocked tokens, also emits a
+    kebab-joined compound (``order-shipment``) so multi-word domain names
+    survive the bag-of-tokens reduction.
+    """
     counter: Counter[str] = Counter()
     for f in files:
-        for tok in _tokenise(f):
-            if tok and tok.lower() not in _BLOCKED_TOKENS and not tok.isdigit():
-                counter[tok.lower()] += 1
+        for segment in _PATH_SEPARATOR.split(f):
+            for tok in _tokenise_segment(segment):
+                counter[tok] += 1
     return counter
 
 
-def _tokenise(path: str) -> list[str]:
-    """Split a path into camelCase/kebab/snake/dot-separated tokens."""
-    return [t for t in _TOKEN_SPLIT.split(path) if t]
+def _tokenise_segment(segment: str) -> list[str]:
+    """Split one path segment into tokens + emit adjacent-pair compounds.
+
+    Returns lowercased tokens. For each adjacent pair of non-blocked tokens in
+    the segment, also emits the kebab-joined bigram (``order-shipment``,
+    ``shipment-batch``). Bigrams rather than one full compound keep the
+    two-word domain noun consistent across sibling segments of different
+    lengths (``OrderShipmentService`` vs ``OrderShipmentServiceBatch``) — both
+    contribute to the same bigram count, so the dominant 2-word domain name
+    wins TF-IDF cleanly instead of being diluted across multiple ad-hoc
+    compounds.
+    """
+    if not segment:
+        return []
+    parts = [t.lower() for t in _SEGMENT_SPLIT.split(segment) if t]
+    cleaned = [p for p in parts if p not in _BLOCKED_TOKENS and not p.isdigit()]
+    if len(cleaned) < 2:
+        return cleaned
+    bigrams = [f"{a}-{b}" for a, b in zip(cleaned, cleaned[1:], strict=False)]
+    return [*cleaned, *bigrams]
 
 
 def _kebab(token: str) -> str:

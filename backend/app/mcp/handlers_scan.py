@@ -44,6 +44,7 @@ from app.mcp.synth_feature_writer import persist_synth_feature
 from app.models.organization import Organization
 from app.repositories.cluster_cache import ClusterCacheRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
+from app.services.code_indexer.labeling import extract_path_tokens, extract_text_tokens
 
 logger = structlog.get_logger(__name__)
 
@@ -111,6 +112,7 @@ async def handle_write_synthesis_feature(
         repo_id=repo_id,
         source_ids=source_ids,
         existing=code_locations,
+        feature_text=f"{feature_name} {description}",
     )
 
     queued = await persist_synth_feature(
@@ -165,6 +167,7 @@ async def _expand_and_signature(
     repo_id: uuid.UUID,
     source_ids: list[str],
     existing: Any,
+    feature_text: str = "",
 ) -> tuple[dict[str, list[str]], str]:
     """Expand ``code_locations`` AND derive a stable ``cluster_signature``.
 
@@ -175,21 +178,50 @@ async def _expand_and_signature(
     individual signatures into one structural identity for the
     feature: ``sha256(sorted([sig1, sig2, ...]))``.
 
+    Domain-overlap guard: when ``feature_text`` is provided, a cluster
+    is dropped from the union when its full token vocabulary shares
+    *zero* tokens with the title+description vocabulary. That's the
+    server-side defense against the LLM lumping unrelated clusters
+    under one feature (e.g. clusters from an unrelated domain getting
+    attached because both happen to carry ambiguous one-word labels in
+    the synthesis prompt). The guard only fires on no-overlap — partial
+    overlap is treated as valid since legitimate features can span
+    clusters with different domain nouns.
+
     When no source_ids resolve (older prompts that emit composite
     labels, or a cache miss), falls back to a label-derived
     signature so the writer never produces an empty-string signature
     that would collide across unrelated features.
     """
+    candidate_ids = [s for s in source_ids if isinstance(s, str) and _CLUSTER_ID_RE.match(s)]
+
+    head_sha = await _latest_head_sha(db, org_id=org_id, repo_id=repo_id)
+    feature_tokens = extract_text_tokens(feature_text) if feature_text else set()
+
     base: dict[str, list[str]] = {}
     if isinstance(existing, dict):
         for layer, files in existing.items():
             if not isinstance(layer, str) or not isinstance(files, list):
                 continue
-            base[layer] = [f for f in files if isinstance(f, str)]
-
-    candidate_ids = [s for s in source_ids if isinstance(s, str) and _CLUSTER_ID_RE.match(s)]
-
-    head_sha = await _latest_head_sha(db, org_id=org_id, repo_id=repo_id)
+            kept: list[str] = []
+            for f in files:
+                if not isinstance(f, str):
+                    continue
+                # LLM-supplied paths are *logged* on no-overlap, never dropped.
+                # The model's direct ``code_locations`` output is intent; the
+                # cluster-expansion path below is our inference and is the only
+                # place we suppress data. Telemetry stays here so we can audit
+                # how often the model wedges out-of-domain paths into a
+                # feature.
+                if not _path_overlaps_feature(f, feature_tokens):
+                    logger.warning(
+                        "synth_feature_file_no_domain_overlap",
+                        layer=layer,
+                        file_path=f,
+                        decision="kept",
+                    )
+                kept.append(f)
+            base[layer] = kept
 
     constituent_signatures: list[str] = []
     if candidate_ids and head_sha:
@@ -203,6 +235,15 @@ async def _expand_and_signature(
         for cid in candidate_ids:
             cluster = by_id.get(cid)
             if cluster is None:
+                continue
+            if not _cluster_overlaps_feature(cluster.files, feature_tokens):
+                logger.warning(
+                    "synth_feature_cluster_rejected",
+                    reason="no_domain_overlap",
+                    cluster_id=cid,
+                    cluster_label=cluster.label,
+                    sample_file=(cluster.files or [None])[0],
+                )
                 continue
             if cluster.signature:
                 constituent_signatures.append(cluster.signature)
@@ -218,6 +259,39 @@ async def _expand_and_signature(
 
     signature = _combine_signatures(constituent_signatures, fallback=str(source_ids))
     return merged_locations, signature
+
+
+def _cluster_overlaps_feature(cluster_files: list[str] | None, feature_tokens: set[str]) -> bool:
+    """True when the cluster's token vocabulary overlaps the feature text.
+
+    Used as a soft guard against LLM cross-contamination. Returns True
+    when either side has no signal (no feature text supplied, no cluster
+    files) so we don't suppress data on missing information; only the
+    no-overlap-with-data case rejects.
+    """
+    if not feature_tokens or not cluster_files:
+        return True
+    cluster_tokens = extract_path_tokens(cluster_files)
+    if not cluster_tokens:
+        return True
+    return not cluster_tokens.isdisjoint(feature_tokens)
+
+
+def _path_overlaps_feature(file_path: str, feature_tokens: set[str]) -> bool:
+    """True when a single file's path vocabulary overlaps the feature text.
+
+    Per-file variant of :func:`_cluster_overlaps_feature`. Pure predicate —
+    the *caller* decides whether to drop or merely log. The cluster handler
+    drops on False; the LLM-supplied-paths handler emits a warning and keeps
+    the file. Keeping the function action-free lets each call site own its
+    own policy.
+    """
+    if not feature_tokens:
+        return True
+    path_tokens = extract_path_tokens([file_path])
+    if not path_tokens:
+        return True
+    return not path_tokens.isdisjoint(feature_tokens)
 
 
 def _combine_signatures(individual: list[str], *, fallback: str) -> str:
