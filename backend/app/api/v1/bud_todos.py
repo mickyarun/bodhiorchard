@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
+from app.models.bud import BUDStatus
 from app.models.bud_todo import BUDTodo
 from app.models.user import User
 from app.repositories.bud import BUDRepository
@@ -30,8 +31,10 @@ from app.schemas.bud_todos import (
     BUDTodoRead,
     BUDTodoUpdate,
 )
+from app.schemas.jobs import TodoGenerateJobPayload
 from app.services.bud_timeline import record_event
 from app.services.event_bus import publish
+from app.services.job_queue import JOB_TODO_GENERATE, create_job, is_job_active
 
 logger = structlog.get_logger(__name__)
 
@@ -167,3 +170,52 @@ async def claim_todo(
     refreshed = await repo.get_by_sequence(bud_id, todo.sequence)
     assert refreshed is not None
     return BUDTodoClaimResponse(todo=_to_read(refreshed), previous_assignee_id=previous)
+
+
+@router.post(
+    "/{bud_id}/todos/regenerate",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def regenerate_todos(
+    bud_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Fire-and-forget TODO regenerate; subscribe to ``topic`` for events.
+
+    Agent runs in a background task (30-120s). In-flight TODOs preserved.
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "BUD not found")
+    if bud.status != BUDStatus.DEVELOPMENT.value:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"BUD must be in development phase (currently {bud.status}).",
+        )
+    if is_job_active(JOB_TODO_GENERATE, {"bud_id": str(bud_id)}):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Regeneration already in progress for this BUD.",
+        )
+
+    payload = TodoGenerateJobPayload(
+        org_id=str(current_user.org_id),
+        bud_id=str(bud_id),
+        mode="regenerate",
+        actor_id=str(current_user.id),
+        actor_name=current_user.name,
+    )
+    job = create_job(
+        JOB_TODO_GENERATE,
+        payload=payload.model_dump(),
+        user_id=str(current_user.id),
+    )
+    publish(f"todo:{bud_id}", {"event": "regenerate_scheduled", "job_id": job.job_id})
+    return {
+        "topic": f"todo:{bud_id}",
+        "job_id": job.job_id,
+        "status": "scheduled",
+    }

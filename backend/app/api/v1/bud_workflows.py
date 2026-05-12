@@ -162,9 +162,11 @@ async def approve_tech_arch(
         detail={"from": BUDStatus.TECH_ARCH.value, "to": BUDStatus.DEVELOPMENT.value},
     )
 
-    # Crystallize the approved plan: regen todos from tech spec, broadcast
-    # to the Development tab, re-estimate. Must run *before* auto-assign so
-    # _assign_todos_to_lead_if_development sees the freshly synced rows.
+    # Crystallize the approved plan: enqueue the todo-generator agent.
+    # The worker (job_todo_generate) handles TODO sync, re-estimation, AND
+    # assigning TODOs to the BUD's phase lead — which is set by
+    # ``auto_assign_for_phase`` below. The worker reads ``bud.assignee_id``
+    # AFTER the ~30s agent run, by which time this PATCH has committed.
     await on_bud_development_started(
         db,
         current_user.org_id,

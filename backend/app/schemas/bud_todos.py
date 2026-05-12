@@ -16,6 +16,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,15 +30,18 @@ class BUDTodoRead(BaseModel):
     bud_id: uuid.UUID = Field(alias="budId")
     sequence: int
     title: str
+    description: str | None = None
     phase: str
     status: str
     is_checkpoint: bool = Field(alias="isCheckpoint")
+    repo_name: str | None = Field(default=None, alias="repoName")
+    code_locations: list[str] = Field(default_factory=list, alias="codeLocations")
     assignee_id: uuid.UUID | None = Field(default=None, alias="assigneeId")
     assignee_name: str | None = Field(default=None, alias="assigneeName")
     context_md: str | None = Field(default=None, alias="contextMd")
     summary: str | None = None
     taken_at: datetime | None = Field(default=None, alias="takenAt")
-    detail: dict | None = None
+    detail: dict[str, Any] | None = None
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 

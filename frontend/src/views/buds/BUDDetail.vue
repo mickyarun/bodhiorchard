@@ -47,7 +47,7 @@
                 >
                   {{ BUD_STATUS_LABELS[bud.status] }}
                 </v-chip>
-                <v-menu location="bottom">
+                <v-menu location="bottom" :close-on-content-click="false">
                   <template #activator="{ props: assigneeProps }">
                     <v-chip
                       v-bind="assigneeProps"
@@ -61,26 +61,26 @@
                       {{ bud.assignee_name || 'Unassigned' }}
                     </v-chip>
                   </template>
-                  <v-card min-width="240" max-width="300" class="pa-2">
+                  <v-card min-width="280" max-width="340" class="pa-2">
                     <v-text-field
                       v-model="assigneeSearch"
                       variant="outlined"
-                      density="compact"
+                      density="comfortable"
                       placeholder="Search members..."
                       hide-details
                       prepend-inner-icon="mdi-magnify"
-                      class="mb-1"
+                      class="mb-2"
+                      autofocus
                     />
-                    <v-list density="compact" max-height="240" class="overflow-y-auto">
+                    <v-list max-height="280" class="overflow-y-auto">
                       <v-list-item
                         v-if="bud.assignee_id"
-                        density="compact"
                         @click="handleAssigneeChange(null)"
                       >
                         <template #prepend>
-                          <v-icon size="18" color="error">mdi-account-remove</v-icon>
+                          <v-icon size="20" color="error">mdi-account-remove</v-icon>
                         </template>
-                        <v-list-item-title class="text-caption">Unassign</v-list-item-title>
+                        <v-list-item-title class="text-body-2">Unassign</v-list-item-title>
                       </v-list-item>
                       <v-list-item
                         v-for="m in membersStore.members.filter(
@@ -88,15 +88,14 @@
                         )"
                         :key="m.id"
                         :active="bud.assignee_id === m.id"
-                        density="compact"
                         @click="handleAssigneeChange(m.id)"
                       >
                         <template #prepend>
-                          <v-avatar size="24" color="surface-variant" class="mr-2">
-                            <span class="text-caption">{{ m.name.charAt(0).toUpperCase() }}</span>
+                          <v-avatar size="28" color="surface-variant" class="mr-2">
+                            <span class="text-body-2">{{ m.name.charAt(0).toUpperCase() }}</span>
                           </v-avatar>
                         </template>
-                        <v-list-item-title class="text-caption">{{ m.name }}</v-list-item-title>
+                        <v-list-item-title class="text-body-2">{{ m.name }}</v-list-item-title>
                         <v-list-item-subtitle class="text-caption">{{ m.role }}</v-list-item-subtitle>
                       </v-list-item>
                     </v-list>
@@ -1549,11 +1548,6 @@ function formatDate(dateStr: string): string {
 
 .bud-page-content {
   padding: 24px 32px 48px;
-  max-width: 960px;
-}
-
-.bud-main.chat-open .bud-page-content {
-  max-width: none;
 }
 
 /* ── AI Chat button ────────────────────────────── */

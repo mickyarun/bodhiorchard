@@ -14,15 +14,15 @@
 
 """Unit tests for ``bud_development.on_bud_development_started``.
 
-Pure unit tests with patched collaborators — no DB, no event bus.
-We're not testing ``sync_todos_from_tech_spec`` / ``estimate_bud_dates``
-themselves (covered by their own suites); we're testing the orchestration
-contract: ordering, non-fatality, gated publish.
+The hook is a thin enqueuer: build the ``TodoGenerateJobPayload``,
+call ``create_job(JOB_TODO_GENERATE, ...)``, return. All Claude work
+runs in the worker. These tests verify the enqueue contract and the
+non-fatal failure path.
 """
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -31,10 +31,7 @@ from app.services import bud_development
 
 @pytest.fixture
 def fake_bud() -> SimpleNamespace:
-    return SimpleNamespace(
-        id=uuid.uuid4(),
-        tech_spec_md="## Implementation TODO\n1. Step one\n",
-    )
+    return SimpleNamespace(id=uuid.uuid4(), tech_spec_md="## Plan\n")
 
 
 @pytest.fixture
@@ -47,123 +44,67 @@ def org_id() -> uuid.UUID:
     return uuid.uuid4()
 
 
-class TestOrchestration:
-    async def test_happy_path_syncs_publishes_estimates(
+class TestEnqueue:
+    async def test_enqueues_initial_job_with_correct_payload(
         self,
         monkeypatch: pytest.MonkeyPatch,
         fake_db: MagicMock,
         fake_bud: SimpleNamespace,
         org_id: uuid.UUID,
     ) -> None:
-        sync = AsyncMock(return_value=3)
-        estimate = AsyncMock(return_value={})
-        publish = MagicMock()
-        monkeypatch.setattr(bud_development, "sync_todos_from_tech_spec", sync)
-        monkeypatch.setattr(bud_development, "estimate_bud_dates", estimate)
-        monkeypatch.setattr(bud_development, "publish", publish)
+        create_job = MagicMock(return_value=SimpleNamespace(job_id="job-1"))
+        monkeypatch.setattr(bud_development, "create_job", create_job)
 
         await bud_development.on_bud_development_started(fake_db, org_id, fake_bud)  # type: ignore[arg-type]
 
-        sync.assert_awaited_once_with(
-            fake_db, org_id, fake_bud.id, fake_bud.tech_spec_md, default_assignee_id=None
-        )
-        publish.assert_called_once()
-        topic, payload = publish.call_args.args
-        assert topic == f"todo:{fake_bud.id}"
-        assert payload == {
-            "event": "todos_regenerated",
-            "bud_id": str(fake_bud.id),
-            "todo_count": 3,
-        }
-        estimate.assert_awaited_once()
-        assert estimate.await_args.kwargs["trigger"] == "bud_development_started"
+        create_job.assert_called_once()
+        kwargs = create_job.call_args.kwargs
+        assert kwargs["payload"]["bud_id"] == str(fake_bud.id)
+        assert kwargs["payload"]["org_id"] == str(org_id)
+        assert kwargs["payload"]["mode"] == "initial"
 
-    async def test_publish_skipped_when_no_todos_parsed(
+    async def test_actor_metadata_forwarded_to_payload(
         self,
         monkeypatch: pytest.MonkeyPatch,
         fake_db: MagicMock,
         fake_bud: SimpleNamespace,
         org_id: uuid.UUID,
     ) -> None:
-        monkeypatch.setattr(
-            bud_development, "sync_todos_from_tech_spec", AsyncMock(return_value=0)
-        )
-        monkeypatch.setattr(bud_development, "estimate_bud_dates", AsyncMock(return_value={}))
-        publish = MagicMock()
-        monkeypatch.setattr(bud_development, "publish", publish)
-
-        await bud_development.on_bud_development_started(fake_db, org_id, fake_bud)  # type: ignore[arg-type]
-
-        publish.assert_not_called()
-
-    async def test_todo_sync_failure_is_swallowed_and_estimation_still_runs(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        fake_db: MagicMock,
-        fake_bud: SimpleNamespace,
-        org_id: uuid.UUID,
-    ) -> None:
-        monkeypatch.setattr(
-            bud_development,
-            "sync_todos_from_tech_spec",
-            AsyncMock(side_effect=ValueError("malformed TODO section")),
-        )
-        estimate = AsyncMock(return_value={})
-        publish = MagicMock()
-        monkeypatch.setattr(bud_development, "estimate_bud_dates", estimate)
-        monkeypatch.setattr(bud_development, "publish", publish)
-
-        await bud_development.on_bud_development_started(fake_db, org_id, fake_bud)  # type: ignore[arg-type]
-
-        publish.assert_not_called()
-        estimate.assert_awaited_once()
-
-    async def test_estimation_failure_is_swallowed_after_successful_sync(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        fake_db: MagicMock,
-        fake_bud: SimpleNamespace,
-        org_id: uuid.UUID,
-    ) -> None:
-        monkeypatch.setattr(
-            bud_development, "sync_todos_from_tech_spec", AsyncMock(return_value=2)
-        )
-        monkeypatch.setattr(
-            bud_development,
-            "estimate_bud_dates",
-            AsyncMock(side_effect=RuntimeError("estimator down")),
-        )
-        publish = MagicMock()
-        monkeypatch.setattr(bud_development, "publish", publish)
-
-        # Must not raise.
-        await bud_development.on_bud_development_started(fake_db, org_id, fake_bud)  # type: ignore[arg-type]
-
-        publish.assert_called_once()
-
-    async def test_actor_metadata_forwarded_to_estimator(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        fake_db: MagicMock,
-        fake_bud: SimpleNamespace,
-        org_id: uuid.UUID,
-    ) -> None:
-        monkeypatch.setattr(
-            bud_development, "sync_todos_from_tech_spec", AsyncMock(return_value=1)
-        )
-        estimate = AsyncMock(return_value={})
-        monkeypatch.setattr(bud_development, "estimate_bud_dates", estimate)
-        monkeypatch.setattr(bud_development, "publish", MagicMock())
+        create_job = MagicMock(return_value=SimpleNamespace(job_id="j"))
+        monkeypatch.setattr(bud_development, "create_job", create_job)
 
         actor_id = uuid.uuid4()
         await bud_development.on_bud_development_started(
             fake_db,  # type: ignore[arg-type]
             org_id,
-            fake_bud,  # type: ignore[arg-type]
+            fake_bud,
             actor_id=actor_id,
             actor_name="Alice",
         )
 
-        kwargs = estimate.await_args.kwargs
-        assert kwargs["actor_id"] == actor_id
-        assert kwargs["actor_name"] == "Alice"
+        payload = create_job.call_args.kwargs["payload"]
+        assert payload["actor_id"] == str(actor_id)
+        assert payload["actor_name"] == "Alice"
+
+    async def test_enqueue_failure_publishes_failed_and_does_not_raise(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        fake_db: MagicMock,
+        fake_bud: SimpleNamespace,
+        org_id: uuid.UUID,
+    ) -> None:
+        monkeypatch.setattr(
+            bud_development,
+            "create_job",
+            MagicMock(side_effect=RuntimeError("queue full")),
+        )
+        publish = MagicMock()
+        monkeypatch.setattr(bud_development, "publish", publish)
+
+        # Must not raise — caller's transaction stays intact.
+        await bud_development.on_bud_development_started(fake_db, org_id, fake_bud)  # type: ignore[arg-type]
+
+        publish.assert_called_once_with(
+            f"todo:{fake_bud.id}",
+            {"event": "generating_failed", "error": "queue full"},
+        )

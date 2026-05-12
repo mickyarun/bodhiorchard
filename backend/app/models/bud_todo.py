@@ -23,7 +23,7 @@ BUD phase.
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     Boolean,
@@ -34,6 +34,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -98,9 +99,14 @@ class BUDTodo(BaseModel):
         nullable=True,
     )
     context_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    repo_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    code_locations: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     taken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     # Relationships
     bud: Mapped["BUDDocument"] = relationship(back_populates="todos", lazy="selectin")
