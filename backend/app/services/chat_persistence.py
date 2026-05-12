@@ -23,8 +23,6 @@ import structlog
 
 from app.database import AsyncSessionLocal
 from app.repositories.bud import BUDChatMessageRepository, BUDRepository
-from app.services.bud_estimation import estimate_bud_dates
-from app.services.todo_sync import sync_todos_from_tech_spec
 
 logger = structlog.get_logger(__name__)
 
@@ -62,46 +60,16 @@ async def persist_chat_update(
 ) -> None:
     """Write updated chat content to the BUD in the database.
 
-    When ``section == "tech_spec_md"``, BUDTodo rows are re-synced from the
-    new spec inside the same transaction — a sync failure rolls back the
-    content change so spec and todos can never drift. Estimation re-runs
-    after a successful commit and is non-fatal (mirrors the initial
-    tech-arch agent path in ``agent_result_handlers``).
+    Todo regeneration and re-estimation are intentionally NOT triggered
+    here. The tech spec stays mutable through chat / manual / agent
+    re-runs during planning; todos crystallize from the *approved* plan
+    at the DEVELOPMENT-phase transition — see
+    ``services/bud_development.on_bud_development_started``.
     """
-    org_uuid = uuid_mod.UUID(org_id)
-    bud_uuid = uuid_mod.UUID(bud_id)
-
     async with AsyncSessionLocal() as db:
-        bud_repo = BUDRepository(db, org_id=org_uuid)
-        bud = await bud_repo.get_by_id(bud_uuid)
-        if bud is None:
-            return
-
-        setattr(bud, section, content)
-
-        if section == "tech_spec_md":
-            try:
-                await sync_todos_from_tech_spec(
-                    db, org_uuid, bud.id, content, default_assignee_id=None
-                )
-            except Exception as exc:
-                await db.rollback()
-                logger.error(
-                    "todo_sync_failed_after_chat_edit",
-                    bud_id=bud_id,
-                    error=str(exc),
-                )
-                raise RuntimeError(
-                    "Failed to regenerate BUD todos from the updated tech "
-                    f"architecture: {exc}. Tech spec change has been rolled back."
-                ) from exc
-
-        await db.commit()
-        logger.info("chat_content_persisted", bud_id=bud_id, section=section)
-
-        if section == "tech_spec_md":
-            try:
-                await db.refresh(bud)
-                await estimate_bud_dates(db, org_uuid, bud, trigger="tech_arch_chat_edit")
-            except Exception:
-                logger.warning("estimation_failed_after_chat_tech_arch_edit", bud_id=bud_id)
+        bud_repo = BUDRepository(db, org_id=uuid_mod.UUID(org_id))
+        bud = await bud_repo.get_by_id(uuid_mod.UUID(bud_id))
+        if bud is not None:
+            setattr(bud, section, content)
+            await db.commit()
+            logger.info("chat_content_persisted", bud_id=bud_id, section=section)

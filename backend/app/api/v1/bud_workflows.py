@@ -16,7 +16,6 @@
 
 import uuid
 
-import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,8 +25,7 @@ from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.schemas.bud import BUDRead, ReassignmentRequest, RejectTechArchRequest
-
-logger = structlog.get_logger(__name__)
+from app.services.bud_development import on_bud_development_started
 
 router = APIRouter()
 
@@ -164,6 +162,17 @@ async def approve_tech_arch(
         detail={"from": BUDStatus.TECH_ARCH.value, "to": BUDStatus.DEVELOPMENT.value},
     )
 
+    # Crystallize the approved plan: regen todos from tech spec, broadcast
+    # to the Development tab, re-estimate. Must run *before* auto-assign so
+    # _assign_todos_to_lead_if_development sees the freshly synced rows.
+    await on_bud_development_started(
+        db,
+        current_user.org_id,
+        bud,
+        actor_id=current_user.id,
+        actor_name=current_user.name,
+    )
+
     # Smart assignment for development
     new_assignee_id = await auto_assign_for_phase(
         db,
@@ -185,21 +194,6 @@ async def approve_tech_arch(
             message=f'You\'ve been assigned to implement "{bud.title}".',
             bud_id=str(bud.id),
         )
-
-    # Re-estimate with developer skills now available
-    try:
-        from app.services.bud_estimation import estimate_bud_dates
-
-        await estimate_bud_dates(
-            db,
-            current_user.org_id,
-            bud,
-            trigger="tech_arch_approved",
-            actor_id=current_user.id,
-            actor_name=current_user.name,
-        )
-    except Exception:
-        logger.warning("estimation_failed_after_approval", bud_id=str(bud.id))
 
     await db.flush()
     await db.refresh(bud)

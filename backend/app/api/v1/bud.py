@@ -440,6 +440,25 @@ async def update_bud(
             actor_name=current_user.name,
             detail={"from": old_status.value, "to": new_status.value},
         )
+
+        # Same dev-transition side effects fired by approve_tech_arch — see
+        # backend/app/services/bud_development.py. Must run before auto-assign
+        # so _assign_todos_to_lead_if_development sees freshly synced rows.
+        # Apply ``bud.status`` early so the hook's estimator reads the new
+        # phase (the generic setattr loop below would otherwise run later
+        # in the request — mirror the approve_tech_arch ordering).
+        if old_status != BUDStatus.DEVELOPMENT and new_status == BUDStatus.DEVELOPMENT:
+            from app.services.bud_development import on_bud_development_started
+
+            bud.status = new_status
+            await on_bud_development_started(
+                db,
+                current_user.org_id,
+                bud,
+                actor_id=current_user.id,
+                actor_name=current_user.name,
+            )
+
         await auto_assign_for_phase(
             db,
             current_user.org_id,

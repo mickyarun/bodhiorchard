@@ -205,19 +205,10 @@ async def handle_tech_arch_result(
         bud.impacted_repos = impacted
         await db.flush()
 
-        # Parse Implementation TODO section into BUDTodo records.
-        # TODOs are created UNASSIGNED — the assignment agent distributes them
-        # across developers when the BUD transitions to DEVELOPMENT phase
-        # (see bud_assignment.auto_assign_for_phase). Failure here is
-        # non-fatal — BUD still falls back to single-assignee flow.
-        try:
-            from app.services.todo_sync import sync_todos_from_tech_spec
-
-            await sync_todos_from_tech_spec(
-                db, org_id, bud.id, bud.tech_spec_md, default_assignee_id=None
-            )
-        except Exception:
-            logger.warning("todo_sync_failed_after_tech_arch", bud_id=str(bud_id))
+        # Todos intentionally NOT generated here. The tech spec is still
+        # mutable (chat tweaks, manual edits, agent re-runs) until approval;
+        # todos crystallize from the *approved* plan at the DEVELOPMENT-phase
+        # transition — see services/bud_development.on_bud_development_started.
 
         # Re-estimate with richer context (now has tech spec + impacted repos)
         try:
