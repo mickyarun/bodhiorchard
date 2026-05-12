@@ -35,4 +35,4 @@ PyYAML>=6.0
 PyJWT[crypto]>=2.8.0
 networkx>=3.2
 graphifyy[leiden]>=0.5.5,<0.6
-tzdata>=2024.1
+tzdata>=2026.2
