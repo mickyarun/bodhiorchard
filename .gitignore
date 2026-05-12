@@ -71,5 +71,5 @@ examples/*/graphify-out/
 # Plan and experiment artefacts. These tend to accumulate snapshots of
 # real-world tuning data (customer repo names, dataset measurements) that
 # don't belong in source control. Keep them local-only.
-docs/plans/
+docs/
 backend/experiments/
