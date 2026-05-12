@@ -56,6 +56,7 @@ repo. Zero hardcoded domain vocabulary.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import uuid
@@ -414,6 +415,7 @@ async def _emit_one_feature(
     capabilities = _capabilities_from_files(files)
     source_ids = [c.cluster_id for c in clusters]
     loc = _classify_layers(files)
+    cluster_signature = _signature_for(clusters, fallback=f"audit:{label}")
     await persist_synth_feature(
         db=db,
         org=org,
@@ -422,10 +424,23 @@ async def _emit_one_feature(
         description=description,
         capabilities=capabilities,
         cluster_names=source_ids,
+        cluster_signature=cluster_signature,
         code_locations=loc,
         tags=[AUDIT_TAG],
     )
     await db.flush()
+
+
+def _signature_for(clusters: list[ClusterCache], *, fallback: str) -> str:
+    """SHA-256 of the sorted constituent cluster signatures.
+
+    Mirrors the combiner in ``app.mcp.handlers_scan`` so audit-emitted features
+    share the same structural identity scheme as LLM-synthesised ones — the
+    reconciler can match by signature regardless of which path created the row.
+    """
+    constituent = sorted(c.signature for c in clusters if c.signature)
+    canonical = "\n".join(constituent) if constituent else f"fallback:{fallback}"
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _make_feature_title(label: str) -> str:
