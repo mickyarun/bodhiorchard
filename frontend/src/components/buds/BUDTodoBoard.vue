@@ -16,10 +16,20 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, watch } from 'vue'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import { useBUDTodosStore } from '@/stores/bud_todos'
 import { useAuthStore } from '@/stores/auth'
 import { subscribe, unsubscribe } from '@/services/socket'
 import type { BUDTodo } from '@/types'
+
+// Titles come from the tech-spec parser as inline markdown
+// (``**[Module]** Verb …`` / `` `code` ``). Render inline so we don't
+// wrap each title in `<p>` tags.
+function renderInlineTitle(md: string): string {
+  if (!md) return ''
+  return DOMPurify.sanitize(marked.parseInline(md, { async: false }) as string)
+}
 
 const props = defineProps<{ budId: string }>()
 
@@ -164,8 +174,8 @@ function isYours(todo: BUDTodo): boolean {
           <template #prepend>
             <v-icon size="x-small" color="grey-darken-1">mdi-gate</v-icon>
           </template>
-          <v-list-item-title class="font-weight-medium">
-            {{ todo.title }}
+          <v-list-item-title class="todo-title font-weight-medium">
+            <span v-html="renderInlineTitle(todo.title)" />
           </v-list-item-title>
         </v-list-item>
 
@@ -178,9 +188,9 @@ function isYours(todo: BUDTodo): boolean {
             <v-icon :color="statusColor(todo.status)">{{ statusIcon(todo.status) }}</v-icon>
           </template>
 
-          <v-list-item-title>
+          <v-list-item-title class="todo-title">
             <span class="text-caption text-medium-emphasis mr-2">#{{ todo.sequence }}</span>
-            {{ todo.title }}
+            <span v-html="renderInlineTitle(todo.title)" />
           </v-list-item-title>
 
           <v-list-item-subtitle v-if="todo.summary" class="mt-1 text-body-2">
@@ -238,5 +248,23 @@ function isYours(todo: BUDTodo): boolean {
 <style scoped>
 .todo-yours {
   border-left: 3px solid rgb(var(--v-theme-primary));
+}
+
+/* Vuetify's v-list-item-title defaults to single-line ellipsis truncation,
+   which mangles long todo titles. Allow wrap so the full title is readable. */
+.todo-title {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.4;
+}
+
+/* Inline code spans inside rendered markdown — match Vuetify's monospace feel. */
+.todo-title :deep(code) {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background-color: rgba(var(--v-theme-on-surface), 0.08);
 }
 </style>
