@@ -70,6 +70,35 @@ services:
       # Persistent store for the backend's ed25519 deploy keypair used to
       # clone private GitHub repos. Only the public key is ever exposed.
       - ssh_data:/data/ssh
+    # Phase D Layer 6 hardening — defense in depth around the ``claude``
+    # subprocess. To enable the egress firewall on a Linux host:
+    #
+    # 1. Uncomment the cap_drop / cap_add / tmpfs blocks below.
+    # 2. Set ``BODHIORCHARD_EGRESS_FIREWALL=1`` in the compose env so
+    #    entrypoint.sh runs ``backend/docker/init-firewall.sh`` before
+    #    starting uvicorn.
+    # 3. The firewall allow-lists ``api.anthropic.com``,
+    #    ``api.github.com``, ``registry.npmjs.org``, ``pypi.org``, etc.
+    #    Any other outbound TCP gets DROP'd at the netfilter layer.
+    #
+    # Left as opt-in because (a) Docker Desktop for Mac does not surface
+    # NET_ADMIN reliably and (b) iptables-on-podman / k3s has different
+    # plumbing. Production Linux hosts: turn it on.
+    #
+    # cap_drop:
+    #   - ALL
+    # cap_add:
+    #   - NET_ADMIN           # required for the firewall init
+    #   - CHOWN               # for uvicorn / pip / alembic to write logs
+    #   - DAC_OVERRIDE
+    #   - FOWNER
+    #   - SETUID
+    #   - SETGID
+    #   - KILL                # graceful shutdown
+    # tmpfs:
+    #   - /tmp:rw,size=128M,mode=1777    # MCP tokens land here; wiped on stop
+    # environment:
+    #   BODHIORCHARD_EGRESS_FIREWALL: "1"
 
   multiplayer:
     build:

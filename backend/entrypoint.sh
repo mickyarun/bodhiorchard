@@ -18,6 +18,22 @@
 
 set -e
 
+# Phase D Layer 6: optional egress firewall lockdown. Set
+# BODHIORCHARD_EGRESS_FIREWALL=1 in the compose env to enable. Requires
+# cap_add: NET_ADMIN on the container. On hosts where iptables isn't
+# available (or the cap is denied), the script logs and exits 0 — the
+# app-layer Phase B deny list + Phase A workspace pin still apply.
+if [ "${BODHIORCHARD_EGRESS_FIREWALL:-0}" = "1" ]; then
+    echo "==> Applying egress firewall (Phase D)"
+    if [ -x /app/backend/docker/init-firewall.sh ]; then
+        /app/backend/docker/init-firewall.sh || true
+    elif [ -x /app/docker/init-firewall.sh ]; then
+        /app/docker/init-firewall.sh || true
+    else
+        echo "init-firewall.sh not found; skipping egress lockdown" >&2
+    fi
+fi
+
 echo "==> Running database migrations"
 alembic upgrade head
 
