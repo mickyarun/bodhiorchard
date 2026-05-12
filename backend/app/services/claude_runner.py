@@ -34,7 +34,11 @@ import structlog
 
 from app.services import claude_errors
 from app.services.claude_errors import ClaudeErrorCode
-from app.services.claude_guard import apply_subprocess_rlimits, build_claude_env
+from app.services.claude_guard import (
+    apply_subprocess_rlimits,
+    build_claude_env,
+    build_inline_settings_json,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -453,11 +457,19 @@ async def run_claude_code(
         "--output-format",
         output_format,
         "--dangerously-skip-permissions",
-        # Force a neutral output style so skill output isn't polluted by the
-        # developer's interactive outputStyle (e.g. "learning" prepends
-        # ★ Insight blocks that break HTML/JSON extraction downstream).
+        # Inline ``--settings`` JSON. Built from a Phase A/B/2-aware
+        # builder so we get, in one place:
+        # * outputStyle "default" — neutralizes the developer's
+        #   interactive outputStyle (e.g. "learning" would inject
+        #   ★ Insight blocks that break downstream extraction);
+        # * permissions.deny — declarative deny list for known-bad
+        #   bash patterns and secret-file paths;
+        # * disableBypassPermissionsMode — hard-disable YOLO inside the
+        #   child so a planted .claude/settings.json cannot re-enable it;
+        # * hooks.PreToolUse — wires the regex-based ``pretool_guard.py``
+        #   script as the real Bash / Read gate.
         "--settings",
-        json.dumps({"outputStyle": "default"}),
+        build_inline_settings_json(),
     ]
 
     # stream-json requires --verbose (Claude CLI constraint)

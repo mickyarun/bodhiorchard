@@ -29,13 +29,26 @@ commit messages, BUD doc bodies) can therefore push the subprocess into:
 This package implements the layered defense documented in the project plan
 ``plans/claude-we-are-running-parallel-hickey.md``:
 
-* ``env_filter`` — Layer 4. Whitelist the env vars the subprocess inherits.
-* ``resource_limits`` — Audit/limits. Kernel-enforced memory + process caps.
-* (later) ``deny_rules`` / ``inline_settings`` / ``pretool_guard`` — Layers
-  2–3. Inline ``permissions.deny`` JSON and a PreToolUse hook script.
+* ``env_filter`` (Phase A) — Layer 4. Whitelist the env vars the subprocess
+  inherits, dropping ``ENCRYPTION_KEY`` / ``DATABASE_URL`` / ``GITHUB_TOKEN``.
+* ``resource_limits`` (Phase A) — kernel-enforced memory + process caps via
+  a ``preexec_fn`` (RLIMIT_AS, RLIMIT_NPROC, setsid).
+* ``deny_rules`` (Phase B) — single source of truth for the inline
+  ``permissions.deny`` list and the regex matchers used by the hook.
+* ``inline_settings`` (Phase B) — builds the inline ``--settings`` JSON
+  passed to ``claude``: outputStyle + deny list + disableBypassPermissions
+  + PreToolUse hook wiring.
+* ``pretool_guard`` (Phase B) — standalone hook script invoked by the CLI
+  on every Bash / Read / Edit / Write event; the real gate behind the
+  declarative deny list.
 """
 
 from app.services.claude_guard.env_filter import build_claude_env
+from app.services.claude_guard.inline_settings import build_inline_settings_json
 from app.services.claude_guard.resource_limits import apply_subprocess_rlimits
 
-__all__ = ["apply_subprocess_rlimits", "build_claude_env"]
+__all__ = [
+    "apply_subprocess_rlimits",
+    "build_claude_env",
+    "build_inline_settings_json",
+]
