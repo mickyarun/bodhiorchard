@@ -41,8 +41,13 @@ from app.services.skill_loader import load_skill
 
 logger = structlog.get_logger(__name__)
 
-_AGENT_TIMEOUT_SECONDS = 240
-_AGENT_MAX_TURNS = 12
+# Single-shot: the agent receives the full tech spec + repo list and
+# emits the JSON payload immediately. No tool calls — the spec already
+# contains every file path the agent needs to surface in
+# ``code_locations``. Keeping ``max_turns=1`` cuts wall-clock time from
+# ~30s to ~5-10s and removes a class of "agent went exploring" failures.
+_AGENT_TIMEOUT_SECONDS = 90
+_AGENT_MAX_TURNS = 1
 
 
 class TodoGenerationError(RuntimeError):
@@ -121,11 +126,17 @@ def _build_prompt(bud: BUDDocument, impacted_repos: list[tuple[uuid.UUID, str]])
 
 
 def _build_config() -> ClaudeRunnerConfig:
-    """Build runner config: read-only tools, short turn budget."""
+    """Build runner config: single turn, no tools, short timeout.
+
+    The agent doesn't need to read files — every path it should surface
+    is already in the tech spec we hand it. Locking ``allowed_tools=[]``
+    forces it to emit JSON immediately rather than spending turns on
+    ``Read``/``Grep`` exploration.
+    """
     return ClaudeRunnerConfig(
         max_turns=_AGENT_MAX_TURNS,
         timeout_seconds=_AGENT_TIMEOUT_SECONDS,
-        allowed_tools=["Read", "Glob", "Grep"],
+        allowed_tools=[],
     )
 
 
