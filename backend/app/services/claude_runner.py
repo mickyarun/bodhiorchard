@@ -19,6 +19,7 @@ Bodhiorchard backend via local subprocess execution.
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -33,6 +34,7 @@ import structlog
 
 from app.services import claude_errors
 from app.services.claude_errors import ClaudeErrorCode
+from app.services.claude_guard import apply_subprocess_rlimits, build_claude_env
 
 logger = structlog.get_logger(__name__)
 
@@ -177,6 +179,9 @@ async def _run_with_streaming(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=10 * 1024 * 1024,  # 10MB — Claude stream-json lines can exceed 64KB default
+            # Phase A guard: kernel-enforced RLIMIT_AS + RLIMIT_NPROC + setsid
+            # in the child. Returns ``None`` on Windows so this is a no-op there.
+            preexec_fn=apply_subprocess_rlimits(),
         )
 
         async def _drain_stderr() -> None:
@@ -428,7 +433,11 @@ async def run_claude_code(
             ),
         )
 
-    cwd = str(working_dir) if working_dir else "."
+    # Resolve to an absolute path so the Phase A ``--add-dir`` workspace
+    # pin allows exactly the intended directory. With a relative ``"."``
+    # the CLI would widen the filesystem allowlist to whatever the
+    # FastAPI worker happens to be running from.
+    cwd = str(Path(working_dir).resolve()) if working_dir else str(Path.cwd().resolve())
 
     # Force stream-json when a progress callback is provided
     output_format = config.output_format
@@ -476,6 +485,13 @@ async def run_claude_code(
         # ops instead of exploring the codebase.
         cmd.extend(["--allowedTools", ",".join(config.allowed_tools)])
 
+    # Phase A guard: pin Claude's filesystem allowlist to the working
+    # directory. Without this, a successful prompt-injection can
+    # ``Read(~/.ssh/id_rsa)`` even though the working directory is the
+    # cloned repo. ``--add-dir`` is additive; the CLI's default working-dir
+    # entry stays in place so legitimate repo reads continue to work.
+    cmd.extend(["--add-dir", cwd])
+
     # Append system prompt files (e.g., design system reference)
     for spf in config.system_prompt_files:
         cmd.extend(["--append-system-prompt-file", spf])
@@ -504,8 +520,16 @@ async def run_claude_code(
             delete=False,
             mode="w",
         ) as tmp:
+            # Phase A guard: tighten file mode to owner-read-only BEFORE
+            # writing the token, so there is no window where the token is
+            # on disk under a world-readable umask. Best-effort on Windows
+            # (no ``fchmod``); the path-based ``os.chmod`` below covers it.
+            with contextlib.suppress(OSError):
+                os.fchmod(tmp.fileno(), 0o600)
             tmp.write(json.dumps(mcp_json))
             mcp_config_file = Path(tmp.name)
+        with contextlib.suppress(OSError):
+            os.chmod(mcp_config_file, 0o600)
         cmd.extend(["--mcp-config", str(mcp_config_file)])
 
     logger.info(
@@ -519,10 +543,12 @@ async def run_claude_code(
         mcp_enabled=config.mcp is not None,
     )
 
-    # Build subprocess environment with optional extras (e.g. agent context)
-    sub_env: dict[str, str] | None = None
-    if config.env_extra:
-        sub_env = {**os.environ, **config.env_extra}
+    # Phase A guard: build the subprocess env from a whitelist instead of
+    # inheriting ``os.environ`` wholesale. Removes ``ENCRYPTION_KEY``,
+    # ``DATABASE_URL``, ``SECRET_KEY``, ``GITHUB_TOKEN`` and friends from
+    # the child's view so a prompt-injection that escapes the Bash deny
+    # rules has nothing valuable to ``echo $...`` out.
+    sub_env: dict[str, str] = build_claude_env(config.env_extra)
 
     # Streaming path: read stdout line-by-line for live progress
     if progress_callback is not None:
@@ -547,6 +573,8 @@ async def run_claude_code(
             env=sub_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Phase A guard: same rlimits + setsid the streaming path uses.
+            preexec_fn=apply_subprocess_rlimits(),
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(),
@@ -814,6 +842,12 @@ async def _get_claude_version() -> str | None:
             "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Phase A guard: scrub env even for the offline ``--version``
+            # check, so the version probe doesn't accidentally become a
+            # disclosure surface (e.g. if a future CLI release logs
+            # ``ANTHROPIC_API_KEY`` presence to stderr).
+            env=build_claude_env(None),
+            preexec_fn=apply_subprocess_rlimits(),
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         if proc.returncode == 0:
