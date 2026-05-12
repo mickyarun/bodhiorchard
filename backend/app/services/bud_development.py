@@ -18,6 +18,14 @@ The tech spec churns freely during planning (chat edits, agent re-runs,
 manual editing). Todos are derived state that should crystallize once,
 when the approved plan is locked in by the dev-phase transition. Mirrors
 the ``on_bud_closed`` pattern in ``bud_closure.py``.
+
+All Claude work for this transition (TODO generation **and** PERT
+re-estimation) runs inside the ``JOB_TODO_GENERATE`` worker so the HTTP
+PATCH that triggers the transition returns in tens of milliseconds.
+That keeps the frontend's axios timeout (30s) comfortably clear and
+ensures the Development tab is mounted — and subscribed to the
+``todo:{bud_id}`` topic — before the agent starts publishing progress
+events.
 """
 
 import uuid
@@ -26,87 +34,49 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
-from app.services.bud_estimation import estimate_bud_dates
+from app.schemas.jobs import TodoGenerateJobPayload
 from app.services.event_bus import publish
-from app.services.todo_sync import sync_todos_from_tech_spec
+from app.services.job_queue import JOB_TODO_GENERATE, create_job
 
 logger = structlog.get_logger(__name__)
 
 
 async def on_bud_development_started(
-    db: AsyncSession,
+    db: AsyncSession,  # noqa: ARG001 — kept for caller signature compatibility
     org_id: uuid.UUID,
     bud: BUDDocument,
     actor_id: uuid.UUID | None = None,
     actor_name: str | None = None,
 ) -> None:
-    """Run dev-transition side effects: todo regen, WS publish, estimation.
+    """Enqueue the dev-transition work. Returns in ~tens of ms.
 
-    Called from both transition paths (approval workflow + manual PATCH
-    override) so behavior is symmetric. Each side-effect is independent
-    and non-fatal — by the time we're here ``bud.status`` is already
-    ``DEVELOPMENT`` and the caller has follow-up work (auto-assign,
-    notifications) that must not be blocked by a parser or estimator
-    glitch. Failures are logged and swallowed; the transaction is left
-    intact for the caller to commit.
+    Both the TODO-generator agent and the PERT re-estimator are Claude
+    calls (each ~10-30s); both run in the ``JOB_TODO_GENERATE`` worker
+    so this PATCH path stays fast. Frontend reacts to events on the
+    ``todo:{bud_id}`` topic.
     """
-    todo_count = await _sync_todos(db, org_id, bud)
-    if todo_count > 0:
-        _publish_regenerated(bud.id, todo_count)
-    await _reestimate(db, org_id, bud, actor_id, actor_name)
-
-
-async def _sync_todos(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    bud: BUDDocument,
-) -> int:
     try:
-        return await sync_todos_from_tech_spec(
-            db, org_id, bud.id, bud.tech_spec_md, default_assignee_id=None
-        )
-    except Exception as exc:
-        logger.warning(
-            "todo_sync_failed_at_dev_transition",
+        payload = TodoGenerateJobPayload(
+            org_id=str(org_id),
             bud_id=str(bud.id),
-            error=str(exc),
-        )
-        return 0
-
-
-def _publish_regenerated(bud_id: uuid.UUID, todo_count: int) -> None:
-    # Publish before commit, mirroring ``cascade_assignee_to_todos``: the
-    # worst case on rollback is a redundant refetch from the frontend
-    # that re-reads unchanged DB state — no consistency risk.
-    publish(
-        f"todo:{bud_id}",
-        {
-            "event": "todos_regenerated",
-            "bud_id": str(bud_id),
-            "todo_count": todo_count,
-        },
-    )
-
-
-async def _reestimate(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    bud: BUDDocument,
-    actor_id: uuid.UUID | None,
-    actor_name: str | None,
-) -> None:
-    try:
-        await estimate_bud_dates(
-            db,
-            org_id,
-            bud,
-            trigger="bud_development_started",
-            actor_id=actor_id,
+            mode="initial",
+            actor_id=str(actor_id) if actor_id else None,
             actor_name=actor_name,
         )
+        create_job(
+            JOB_TODO_GENERATE,
+            payload=payload.model_dump(),
+            user_id=str(actor_id) if actor_id else None,
+        )
     except Exception as exc:
+        # Enqueue failure must not block the PATCH; surface via WS so
+        # the UI shows the error instead of a stuck spinner.
         logger.warning(
-            "estimation_failed_at_dev_transition",
+            "todo_generate_enqueue_failed",
             bud_id=str(bud.id),
             error=str(exc),
+        )
+        publish(
+            f"todo:{bud.id}",
+            {"event": "generating_failed", "error": str(exc)},
         )

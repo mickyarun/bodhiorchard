@@ -137,9 +137,12 @@ export interface BUDTodo {
   budId: string
   sequence: number
   title: string
+  description: string | null
   phase: string
   status: BUDTodoStatus
   isCheckpoint: boolean
+  repoName: string | null
+  codeLocations: string[]
   assigneeId: string | null
   assigneeName: string | null
   contextMd: string | null

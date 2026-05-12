@@ -31,6 +31,9 @@ export const useBUDTodosStore = defineStore('budTodos', () => {
   const loading = ref(false)
   const error = ref('')
   const currentBudId = ref<string | null>(null)
+  // True between POST /todos/regenerate and the bg task's terminal event
+  // (todos_regenerated | generating_failed) — drives the button spinner.
+  const regenerating = ref(false)
 
   async function fetchTodos(budId: string): Promise<void> {
     loading.value = true
@@ -77,10 +80,42 @@ export const useBUDTodosStore = defineStore('budTodos', () => {
    * Called by the WebSocket handler when a `todo:{budId}` event arrives.
    * Refreshes the specific TODO that changed. We refetch the whole list
    * for simplicity — list size is small (typically 5-15 TODOs).
+   *
+   * Also clears the `regenerating` flag on terminal regenerate events
+   * (`todos_regenerated` / `generating_failed`) so the UI spinner stops
+   * even if the user navigated away and back.
    */
-  async function handleRemoteEvent(budId: string): Promise<void> {
-    if (currentBudId.value === budId) {
-      await fetchTodos(budId)
+  async function handleRemoteEvent(
+    budId: string,
+    event?: string,
+  ): Promise<void> {
+    if (currentBudId.value !== budId) return
+    if (event === 'todos_regenerated' || event === 'generating_failed') {
+      regenerating.value = false
+    }
+    await fetchTodos(budId)
+  }
+
+  /**
+   * Trigger an async regenerate of all TODOs via the `todo-generator`
+   * agent. Returns 202 immediately; the WS topic carries the progress
+   * events. In-flight TODOs (claimed / in-progress / completed) are
+   * always preserved.
+   *
+   * On 409 (`already running`) we leave `regenerating` true — the
+   * existing task will fire the terminal event that clears it.
+   */
+  async function regenerate(budId: string): Promise<void> {
+    regenerating.value = true
+    try {
+      await api.post(`/v1/buds/${budId}/todos/regenerate`)
+    } catch (e: unknown) {
+      const msg = extractApiError(e, 'Failed to start regenerate')
+      // 409 = already running; let the existing task complete.
+      if (!msg.toLowerCase().includes('already')) {
+        regenerating.value = false
+        error.value = msg
+      }
     }
   }
 
@@ -93,16 +128,19 @@ export const useBUDTodosStore = defineStore('budTodos', () => {
     todos.value = []
     currentBudId.value = null
     error.value = ''
+    regenerating.value = false
   }
 
   return {
     todos,
     loading,
     error,
+    regenerating,
     currentBudId,
     fetchTodos,
     claimTodo,
     updateTodo,
+    regenerate,
     handleRemoteEvent,
     reset,
   }

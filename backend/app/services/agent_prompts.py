@@ -630,9 +630,6 @@ def _build_tech_arch_instructions(
     sections_list += (
         "- **Dependencies & Risks**: Bullet points, real blockers only.\n"
         "- **Development Workflow**: Branch name + implementation order.\n"
-        "- **Implementation TODO**: Numbered checklist of tasks in order. "
-        "Each task = one file or logical unit. Include a code review checkpoint "
-        "after each phase.\n"
         "- **Code Review Standards**: Include this exact checklist at the end — "
         "developers must verify at each phase:\n"
         "  - [ ] Modularity: each function <50 lines, each file <300 lines\n"
