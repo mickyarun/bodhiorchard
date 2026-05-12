@@ -458,6 +458,14 @@ class TestInlineSettingsBuilder:
         assert first_hook["type"] == "command"
         assert "pretool_guard.py" in first_hook["command"]
 
+    def test_posttool_hook_wired(self) -> None:
+        """Phase F: PostToolUse hook must be present for audit observability."""
+        payload = json.loads(build_inline_settings_json())
+        post = payload["hooks"].get("PostToolUse", [])
+        assert post, "PostToolUse hook missing"
+        first = post[0]["hooks"][0]
+        assert "posttool_guard.py" in first["command"]
+
 
 class TestCanonicalize:
     """Canonicalization is the foundation of bypass resistance."""

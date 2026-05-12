@@ -53,6 +53,7 @@ _BACKEND_ROOT = _THIS_DIR.parent.parent.parent
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
+from app.services.claude_guard.audit_log import append_event  # noqa: E402 — sys.path
 from app.services.claude_guard.deny_rules import (  # noqa: E402 — sys.path mutation above
     match_bash_deny,
     match_path_deny,
@@ -122,14 +123,43 @@ def evaluate(event: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def main() -> int:
-    """Read stdin, decide, write stdout. Always exit 0 (fail open on error)."""
+    """Read stdin, decide, write stdout. Always exit 0 (fail open on error).
+
+    Every decision (allow or deny) is also appended to the audit JSONL so
+    Phase F observability captures the full tool-call stream.
+    """
     try:
         raw = sys.stdin.read()
         event = json.loads(raw) if raw.strip() else {}
         decision = evaluate(event)
+        tool_name = event.get("tool_name", "")
+        tool_input = event.get("tool_input") or {}
+
         if decision is not None:
+            reason_text = decision["hookSpecificOutput"].get("permissionDecisionReason", "")
+            # Extract the rule name out of the standardized reason text
+            # for cleaner audit grouping. Falls back to ``"unknown"``.
+            rule = "unknown"
+            if "rule '" in reason_text:
+                rule = reason_text.split("rule '", 1)[1].split("'", 1)[0]
+
+            append_event(
+                event="pre_tool",
+                tool_name=tool_name,
+                decision="deny",
+                rule=rule,
+                reason=reason_text,
+                tool_input=tool_input,
+            )
             json.dump(decision, sys.stdout)
             sys.stdout.write("\n")
+        else:
+            append_event(
+                event="pre_tool",
+                tool_name=tool_name,
+                decision="allow",
+                tool_input=tool_input,
+            )
     except (json.JSONDecodeError, OSError, ValueError) as exc:
         # Fail open: a buggy hook should not brick the subprocess. The
         # inline ``permissions.deny`` layer remains as backstop.

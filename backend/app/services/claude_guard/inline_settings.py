@@ -41,7 +41,8 @@ from typing import Any
 
 from app.services.claude_guard.deny_rules import INLINE_DENY_LIST
 
-_HOOK_SCRIPT = str(Path(__file__).resolve().parent / "pretool_guard.py")
+_PRE_HOOK_SCRIPT = str(Path(__file__).resolve().parent / "pretool_guard.py")
+_POST_HOOK_SCRIPT = str(Path(__file__).resolve().parent / "posttool_guard.py")
 
 
 def build_inline_settings_json() -> str:
@@ -54,7 +55,9 @@ def build_inline_settings_json() -> str:
     contains spaces (``/Applications/Python 3.12/...``) still produces
     a well-formed shell command.
     """
-    hook_command = f"{shlex.quote(sys.executable)} {shlex.quote(_HOOK_SCRIPT)}"
+    py = shlex.quote(sys.executable)
+    pre_hook = f"{py} {shlex.quote(_PRE_HOOK_SCRIPT)}"
+    post_hook = f"{py} {shlex.quote(_POST_HOOK_SCRIPT)}"
     payload: dict[str, Any] = {
         "outputStyle": "default",
         "permissions": {
@@ -67,11 +70,20 @@ def build_inline_settings_json() -> str:
             "PreToolUse": [
                 {
                     "matcher": "Bash",
-                    "hooks": [{"type": "command", "command": hook_command}],
+                    "hooks": [{"type": "command", "command": pre_hook}],
                 },
                 {
                     "matcher": "Read|Edit|Write",
-                    "hooks": [{"type": "command", "command": hook_command}],
+                    "hooks": [{"type": "command", "command": pre_hook}],
+                },
+            ],
+            # Phase F observability: append every completed tool call to
+            # the audit JSONL so we can later promote real usage into
+            # per-skill tool budgets (Layer 1 deferred per plan).
+            "PostToolUse": [
+                {
+                    "matcher": "Bash|Read|Edit|Write|Glob|Grep",
+                    "hooks": [{"type": "command", "command": post_hook}],
                 },
             ],
         },
