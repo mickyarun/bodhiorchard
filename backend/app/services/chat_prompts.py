@@ -128,34 +128,40 @@ async def build_design_prompt(
         "typography scale, spacing, and radii **verbatim** — do NOT invent "
         "hex values, font sizes, or paddings. Apply tokens as CSS custom "
         "properties on `:root` and reference them via `var(...)`.\n\n"
-        "If no design system is available, derive the palette and typography "
-        "from the existing source files (next section). Do NOT default to a "
-        "generic Material or stock theme.\n"
+        "The design-system content includes an **App Skeleton** section "
+        "wrapped between `<!-- APP-SKELETON-BEGIN -->` and "
+        "`<!-- APP-SKELETON-END -->`. If those markers are present, "
+        "**extend that skeleton** — keep its nav and shell verbatim, and "
+        "place this BUD's screen inside the marked content region. Do NOT "
+        "redesign the navigation. Only if the skeleton section is absent "
+        "should you derive nav from the linked feature files below (or "
+        "omit nav for an isolated screen wireframe).\n"
     )
 
     if linked_section:
         parts.append(linked_section)
-
-    parts.append(
-        "## Existing Application UI\n\n"
-        "Read 2–3 existing source files from `src/` (or the project's "
-        "equivalent) — components, screens, stylesheets, or theme files — "
-        "to learn the real visual style of this repo: actual colors used, "
-        "typography choices, spacing rhythm, corner radii, shadow style, "
-        "hover/active states.\n\n"
-        "Your wireframe MUST mirror those visual choices, NOT a generic "
-        "default. If the repo uses Vue / React / Flutter / Compose components, "
-        "you still output plain HTML (see Instructions), but the *visual "
-        "result* should look like a screen from this repo — same palette, "
-        "same typographic hierarchy, same density.\n"
-    )
+        parts.append(
+            "## Existing Screen Context\n\n"
+            "The linked feature above lists the source files this BUD "
+            "touches. Read **only those specific files** to understand "
+            "the screen you are extending — its current structure, the "
+            "components it uses, and any inline styling. Do NOT browse "
+            "additional files for general visual style: tokens come from "
+            "the design system, shell comes from the App Skeleton.\n"
+        )
 
     parts.append(
         "## Current Wireframe\n\n"
         f'Call `get_bud_designs` with `bud_id: "{bud_id}"`'
         + (f' and `repo_id: "{repo_id}"`' if repo_id else "")
         + " to fetch the existing wireframe (if any) before iterating. "
-        "Do NOT assume the prior content from your own context — always fetch it.\n"
+        "Do NOT assume the prior content from your own context — always "
+        "fetch it.\n\n"
+        "**Parallelize fetches.** When you need both the design system "
+        "and the prior wireframe, issue `get_design_system` and "
+        "`get_bud_designs` in the **same assistant turn** (two tool "
+        "blocks in one response), not sequentially. This halves the "
+        "network round-trip on every iteration.\n"
     )
 
     if history:

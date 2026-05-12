@@ -31,6 +31,7 @@ from app.schemas.jobs import ChatJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
 from app.services.chat_persistence import persist_chat_message, persist_chat_update
 from app.services.chat_prompts import build_chat_prompt, build_design_prompt, fetch_chat_history
+from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
 from app.services.job_queue import update_job
 from app.services.job_utils import (
     build_mcp_config,
@@ -43,6 +44,45 @@ from app.services.job_utils import (
 from app.services.skill_loader import load_skill
 
 logger = structlog.get_logger(__name__)
+
+# Design-chat iteration uses Haiku 4.5 by default: ~3× faster TTFT than
+# Sonnet, and the per-iteration delta (small visual edits on an existing
+# wireframe) is well within Haiku's quality envelope. Sonnet remains the
+# default for the initial JOB_DESIGN_AGENT run (designer.md skill).
+DESIGN_ITERATION_MODEL = "claude-haiku-4-5"
+
+# A small-edit chat needs at most: fetch prior wireframe, optionally fetch
+# design system, write back. Four turns is the comfortable ceiling — the
+# initial design agent keeps its 10-turn budget via the skill config.
+DESIGN_ITERATION_MAX_TURNS = 4
+
+# Anthropic prompt-cache TTL is 5 minutes and ``--resume`` is documented to
+# invalidate the cache on very long sessions. Skip resume when the chat has
+# accumulated past these thresholds — a fresh session is faster than a
+# session whose cache will miss anyway.
+RESUME_HISTORY_MSG_CAP = 50
+# Bytes-of-content cap is conservative: real prompt size is ~1.5–2× the
+# content bytes once role tags and chat scaffolding are added, so we cap
+# below the 100KB target to leave headroom.
+RESUME_HISTORY_BYTE_CAP = 60_000
+# Per-message overhead used in the byte estimate (role tag + framing).
+_RESUME_HISTORY_MSG_OVERHEAD = 200
+
+
+def _should_resume_session(history: list[dict[str, str]] | None) -> bool:
+    """Return True when reusing the CLI session via ``--resume`` is worthwhile.
+
+    Returns False on long histories where the documented cache-invalidation
+    behaviour on resume would make the round-trip slower, not faster.
+    Adds a fixed per-message overhead so role tags and chat scaffolding
+    aren't undercounted vs the raw content bytes.
+    """
+    if not history:
+        return True
+    if len(history) > RESUME_HISTORY_MSG_CAP:
+        return False
+    total = sum(len(m.get("content") or "") + _RESUME_HISTORY_MSG_OVERHEAD for m in history)
+    return total <= RESUME_HISTORY_BYTE_CAP
 
 
 async def handle_chat_job(job_id: str, raw_payload: dict[str, Any]) -> None:
@@ -148,10 +188,7 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         bud_id=uuid_mod.UUID(payload.bud_id),
     )
 
-    from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
-
     # Read config from the skill definition
-    skill_name = SECTION_SKILL_MAP.get(payload.section, "product-manager")
     try:
         skill = load_skill(skill_name)
     except FileNotFoundError:
@@ -160,19 +197,54 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     # Design section needs a longer timeout (matches design agent job)
     chat_timeout = 900 if payload.section == "design" else 300
 
+    # Iteration-specific design overrides: Haiku for speed, tighter turn
+    # cap because the agent is editing an existing wireframe, and
+    # ``--resume`` so the Anthropic prompt cache stays warm across the
+    # hot iteration loop. The initial JOB_DESIGN_AGENT run keeps the
+    # skill's Sonnet + max_turns config — only chat iteration changes.
+    is_design_iteration = payload.section == "design"
+    skill_model = (skill.model or None) if skill else None
+    skill_turns = skill.max_turns if skill else 0
+    iteration_model = DESIGN_ITERATION_MODEL if is_design_iteration else skill_model
+    iteration_turns = DESIGN_ITERATION_MAX_TURNS if is_design_iteration else skill_turns
+    resume_session_id: str | None = None
+    if is_design_iteration and payload.session_id and _should_resume_session(history):
+        resume_session_id = payload.session_id
+
+    def _build_config(*, resume_id: str | None) -> ClaudeRunnerConfig:
+        return ClaudeRunnerConfig(
+            max_turns=iteration_turns,
+            timeout_seconds=chat_timeout,
+            mcp=mcp_config,
+            model=iteration_model,
+            effort=(skill.effort or None) if skill else None,
+            resume_session_id=resume_id,
+        )
+
     try:
         result = await run_claude_code(
             prompt=prompt,
             working_dir=repo_path,
-            config=ClaudeRunnerConfig(
-                max_turns=skill.max_turns if skill else 0,
-                timeout_seconds=chat_timeout,
-                mcp=mcp_config,
-                model=(skill.model or None) if skill else None,
-                effort=(skill.effort or None) if skill else None,
-            ),
+            config=_build_config(resume_id=resume_session_id),
             progress_callback=make_progress_callback(job_id),
         )
+        # ``--resume`` fails when the session file is missing (e.g. backend
+        # restarted between iterations) and on cache-invalidating long
+        # histories the docs warn about. Retry once without it so a stale
+        # session_id doesn't block an iteration — we pay the cache-creation
+        # cost on this turn but the next turn warms the new session.
+        if not result.success and resume_session_id:
+            logger.warning(
+                "design_chat_retry_without_resume",
+                session_id=resume_session_id,
+                error_code=result.error_code,
+            )
+            result = await run_claude_code(
+                prompt=prompt,
+                working_dir=repo_path,
+                config=_build_config(resume_id=None),
+                progress_callback=make_progress_callback(job_id),
+            )
     finally:
         for p in image_paths:
             p.unlink(missing_ok=True)

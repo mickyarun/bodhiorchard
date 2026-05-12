@@ -59,6 +59,12 @@ class ClaudeRunResult:
     duration_ms: int | None = None
     error: str | None = None
     error_code: ClaudeErrorCode | None = None
+    # Prompt-cache telemetry from the CLI's ``result`` event ``usage`` block.
+    # ``cache_read_input_tokens`` should dominate in steady-state iteration;
+    # ``cache_creation_input_tokens`` is the cost of seeding the cache and
+    # should fall to ~0 on warm sessions. See claude_runner._extract_usage.
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
 
 @dataclass
@@ -87,6 +93,11 @@ class ClaudeRunnerConfig:
     model: str | None = None
     effort: str | None = None
     env_extra: dict[str, str] | None = None
+    # Pass ``--resume <id>`` so the CLI restores the prior session from
+    # ``~/.claude/projects/...`` and keeps the Anthropic prompt cache warm.
+    # The Anthropic cache TTL is 5 minutes, so this only buys a hit when
+    # iterations are back-to-back — exactly the design-chat hot loop.
+    resume_session_id: str | None = None
     # Restrict the subprocess to a specific tool allowlist. When non-empty,
     # passes ``--allowedTools <comma list>`` to the Claude CLI so the
     # subprocess can ONLY invoke those tools. Anything else (Bash, Read,
@@ -130,6 +141,8 @@ async def _run_with_streaming(
     result_text = ""
     cost: float | None = None
     turns: int | None = None
+    cache_read: int | None = None
+    cache_creation: int | None = None
     error_subtype: str | None = None
     # Structured error surfaced by any event (not just ``result``). The CLI
     # can emit ``is_error: true`` payloads on auth / credit / rate-limit /
@@ -179,7 +192,8 @@ async def _run_with_streaming(
                     stderr_chunks.append(chunk)
 
         async def _read_and_wait() -> None:
-            nonlocal result_text, cost, turns, error_subtype, event_error_message
+            nonlocal result_text, cost, turns, cache_read, cache_creation
+            nonlocal error_subtype, event_error_message
             assert proc.stdout is not None  # noqa: S101
             while True:
                 try:
@@ -218,6 +232,7 @@ async def _run_with_streaming(
                     result_text = event.get("result", "") or ""
                     cost = event.get("total_cost_usd")
                     turns = event.get("num_turns")
+                    cache_read, cache_creation = _extract_cache_usage(event)
                     subtype = event.get("subtype", "")
                     if isinstance(subtype, str) and subtype.startswith("error"):
                         error_subtype = subtype
@@ -290,6 +305,8 @@ async def _run_with_streaming(
         output_length=len(result_text),
         stderr_length=len(stderr_str),
         stderr_preview=stderr_str[:300] if stderr_str else "",
+        cache_read_tokens=cache_read,
+        cache_creation_tokens=cache_creation,
     )
 
     if proc.returncode != 0:
@@ -335,6 +352,8 @@ async def _run_with_streaming(
             turns_used=turns,
             error=message,
             error_code=code,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
 
     logger.info(
@@ -343,6 +362,8 @@ async def _run_with_streaming(
         turns=turns,
         output_length=len(result_text),
         output_preview=result_text[:200],
+        cache_read_tokens=cache_read,
+        cache_creation_tokens=cache_creation,
     )
 
     return ClaudeRunResult(
@@ -350,6 +371,8 @@ async def _run_with_streaming(
         output=result_text,
         cost_usd=cost,
         turns_used=turns,
+        cache_read_tokens=cache_read,
+        cache_creation_tokens=cache_creation,
     )
 
 
@@ -432,6 +455,8 @@ async def run_claude_code(
         cmd.extend(["--model", config.model])
     if config.effort:
         cmd.extend(["--effort", config.effort])
+    if config.resume_session_id:
+        cmd.extend(["--resume", config.resume_session_id])
     if config.allowed_tools:
         # Tighten the subprocess sandbox: only the listed tools can be
         # invoked. Used by the merge phase to disallow Bash / Read /
@@ -552,6 +577,8 @@ async def run_claude_code(
         result_text = stdout_str
         cost = None
         turns = None
+        cache_read: int | None = None
+        cache_creation: int | None = None
 
         if config.output_format == "json":
             try:
@@ -566,6 +593,8 @@ async def run_claude_code(
                 result_text = parsed.get("result", "") or ""
                 cost = parsed.get("total_cost_usd")
                 turns = parsed.get("num_turns")
+                if isinstance(parsed, dict):
+                    cache_read, cache_creation = _extract_cache_usage(parsed)
 
                 # Detect error subtypes (e.g. error_max_turns)
                 if isinstance(subtype, str) and subtype.startswith("error"):
@@ -583,6 +612,8 @@ async def run_claude_code(
                         turns_used=turns,
                         error=message,
                         error_code=code,
+                        cache_read_tokens=cache_read,
+                        cache_creation_tokens=cache_creation,
                     )
             except json.JSONDecodeError:
                 logger.warning(
@@ -597,6 +628,8 @@ async def run_claude_code(
             turns=turns,
             output_length=len(result_text),
             output_preview=result_text[:200],
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
 
         return ClaudeRunResult(
@@ -604,6 +637,8 @@ async def run_claude_code(
             output=result_text,
             cost_usd=cost,
             turns_used=turns,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
 
     except TimeoutError:
@@ -685,6 +720,51 @@ def _extract_event_error(event: dict[str, Any]) -> str | None:
         msg = (event.get("result") or "").strip()
         if msg:
             return f"{subtype}: {msg}"[:500]
+    return None
+
+
+def _extract_cache_usage(event: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Pull (cache_read_tokens, cache_creation_tokens) from a CLI result event.
+
+    The Claude CLI puts the Anthropic API ``usage`` block under either
+    ``usage`` at the top level (newer CLIs) or nested in ``message.usage``
+    (older streaming events). We accept both shapes.
+
+    A warm session (Anthropic prompt cache hit) shows
+    ``cache_read_input_tokens > 0`` and ``cache_creation_input_tokens ~ 0``;
+    a cold start is the opposite. Use these to verify ``--resume`` is
+    actually buying us a cache hit.
+    """
+    usage = event.get("usage")
+    if not isinstance(usage, dict):
+        msg = event.get("message")
+        if isinstance(msg, dict):
+            usage = msg.get("usage")
+    if not isinstance(usage, dict):
+        return None, None
+    read = _coerce_token_count(usage.get("cache_read_input_tokens"))
+    creation = _coerce_token_count(usage.get("cache_creation_input_tokens"))
+    # When the usage block is present but neither field parses, log once at
+    # debug so a future CLI schema change doesn't silently null out cache
+    # telemetry — the whole point of this helper is to verify --resume is
+    # buying cache hits.
+    if read is None and creation is None and usage:
+        logger.debug("claude_usage_unparseable", usage_keys=sorted(usage.keys()))
+    return read, creation
+
+
+def _coerce_token_count(value: Any) -> int | None:
+    """Coerce a usage-block token count to ``int``, accepting int or float.
+
+    The CLI returns ints today; this is forward-compat with a JSON-number
+    serialization that lands as ``float`` post-parse.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
     return None
 
 
