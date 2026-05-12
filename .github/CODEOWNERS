@@ -1,0 +1,32 @@
+# CODEOWNERS — automatic review assignment
+#
+# Syntax: <pattern> <owner1> <owner2> ...
+# Owners receive a review request on every PR that touches the pattern.
+# The last matching rule wins, so put the most specific rules at the bottom.
+# See https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything not matched below.
+*                                @mickyarun
+
+# Backend (Python / FastAPI / SQLAlchemy / Alembic)
+/backend/                        @mickyarun
+
+# Frontend (Vue / Vuetify / PlayCanvas)
+/frontend/                       @mickyarun
+
+# Multiplayer (Colyseus)
+/multiplayer/                    @mickyarun
+
+# Shared (frontend + multiplayer consume this — changes affect both)
+/shared/                         @mickyarun
+
+# Database migrations get extra scrutiny — any change must be reviewed
+# even if the surrounding directory was already approved.
+/backend/alembic/                @mickyarun
+
+# CI / repo plumbing
+/.github/                        @mickyarun
+/CLAUDE.md                       @mickyarun
+/pyproject.toml                  @mickyarun
+/package.json                    @mickyarun
+/docker-compose*.yml             @mickyarun
