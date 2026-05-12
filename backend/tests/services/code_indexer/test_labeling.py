@@ -19,7 +19,11 @@
 
 from __future__ import annotations
 
-from app.services.code_indexer.labeling import label_cluster
+from app.services.code_indexer.labeling import (
+    extract_path_tokens,
+    extract_text_tokens,
+    label_cluster,
+)
 
 
 def test_picks_distinctive_domain_token() -> None:
@@ -53,15 +57,59 @@ def test_kebab_compounds_camelcase_token() -> None:
         "src/bankFeed/BankFeedController.ts",
     ]
     label = label_cluster(cluster_files)
-    # CamelCase tokens split into separate components; the dominant
-    # path-token wins. Either Bank or Feed is acceptable as long as the
-    # label is a meaningful domain word (not infrastructure).
-    assert label in {"bank", "feed", "bank-feed"}
-    assert label not in {"src", "ts", "services"}
+    # Per-segment compound emission means ``bank-feed`` outscores its parts
+    # when the segment carries both tokens — keeps the domain noun intact for
+    # the synthesis prompt.
+    assert label == "bank-feed"
+
+
+def test_compound_token_beats_single_token_on_tie() -> None:
+    # Regression: when a compound camelCase directory like ``orderShipment``
+    # splits into two single tokens (``order`` + ``shipment``), the bare
+    # halves can collide with unrelated single-domain clusters in the
+    # synthesis prompt's JSON payload. The per-segment compound restores
+    # the two-word domain noun so the label remains unambiguous.
+    cluster_files = [
+        "src/services/orderShipment/OrderShipmentService.ts",
+        "src/services/orderShipment/OrderShipmentServiceBatch.ts",
+        "src/controllers/api/orderShipment/OrderShipmentController.ts",
+        "src/repository/orderShipment/OrderShipmentRepository.ts",
+    ]
+    corpus = cluster_files + [
+        "src/services/inventory/InventoryService.ts",
+        "src/services/billing/BillingService.ts",
+        "src/services/order/OrderService.ts",
+    ]
+    assert label_cluster(cluster_files, corpus_files=corpus) == "order-shipment"
 
 
 def test_falls_back_when_cluster_empty() -> None:
     assert label_cluster([], fallback="unknown") == "unknown"
+
+
+def test_extract_text_tokens_handles_punctuated_titles() -> None:
+    # Feature titles in the wild carry parentheses, slashes, version
+    # markers — the tokeniser should reduce them to the same vocabulary
+    # the path extractor produces so the domain-overlap guard can compare
+    # them on equal terms.
+    tokens = extract_text_tokens("Inventory (Stock & Catalog) Management")
+    assert "inventory" in tokens
+    assert "management" in tokens
+    assert "catalog" in tokens
+    assert "stock" in tokens
+    assert "(" not in "".join(tokens)
+
+
+def test_extract_path_tokens_emits_compound_bigrams() -> None:
+    tokens = extract_path_tokens(
+        ["src/controllers/api/orderShipment/OrderShipmentController.ts"],
+    )
+    assert "order-shipment" in tokens
+    assert "order" in tokens
+    assert "shipment" in tokens
+    # Blocked infrastructure stays out.
+    assert "controllers" not in tokens
+    assert "ts" not in tokens
 
 
 def test_deterministic_across_runs() -> None:
