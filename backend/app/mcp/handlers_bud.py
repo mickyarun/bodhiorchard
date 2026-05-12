@@ -134,7 +134,7 @@ async def handle_write_bud(
         "bud_number": next_number,
         "title": title,
         "feature_created": True,
-        "feature_title": feature_item.title,
+        "feature_title": feature_item.feature_title,
     }
 
 

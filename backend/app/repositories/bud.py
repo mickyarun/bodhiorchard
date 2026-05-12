@@ -15,6 +15,7 @@
 """BUD document data access repository."""
 
 import uuid
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,7 +104,7 @@ class BUDRepository(BaseRepository[BUDDocument]):
         return result.scalar_one() + 1
 
     async def find_nearest_full_with_distance(
-        self, candidate_vector
+        self, candidate_vector: list[float]
     ) -> tuple[BUDDocument, float] | None:
         """Nearest full BUDDocument with its cosine distance, or ``None``."""
         stmt = self._scoped(
@@ -120,7 +121,10 @@ class BUDRepository(BaseRepository[BUDDocument]):
         return (row[0], row[1]) if row else None
 
     async def find_nearest_neighbor(
-        self, candidate_vector, *, exclude_bud_ids: list[uuid.UUID] | None = None
+        self,
+        candidate_vector: list[float],
+        *,
+        exclude_bud_ids: list[uuid.UUID] | None = None,
     ) -> tuple[uuid.UUID, int, float] | None:
         """Nearest BUD by pgvector cosine distance.
 
@@ -253,7 +257,7 @@ class BUDRepository(BaseRepository[BUDDocument]):
         result = await self._db.execute(stmt)
         return [(row.bud_number, row.title, row.status) for row in result.all()]
 
-    async def get_impacted_repos(self, bud_id: uuid.UUID) -> list[dict] | None:
+    async def get_impacted_repos(self, bud_id: uuid.UUID) -> list[dict[str, Any]] | None:
         """Return only the ``impacted_repos`` JSONB column for a BUD.
 
         Cheaper than fetching the full BUDDocument when only the impacted
@@ -316,7 +320,7 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         self,
         bud_id: uuid.UUID,
         repo_id: uuid.UUID | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """List designs for a BUD with joined repo names.
 
         When ``repo_id`` is supplied, filter to that single design row at

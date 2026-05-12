@@ -44,7 +44,7 @@ logger = structlog.get_logger(__name__)
 async def create_bug(
     db: AsyncSession,
     org_id: uuid.UUID,
-    issue: dict,
+    issue: dict[str, Any],
     mapper: JiraFieldMapper,
     bud_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
@@ -98,7 +98,7 @@ async def create_map_entry(
     org_id: uuid.UUID,
     session_id: uuid.UUID,
     jira_key: str,
-    issue: dict | None,
+    issue: dict[str, Any] | None,
     *,
     status: str,
     bud_id: uuid.UUID | None = None,
@@ -221,7 +221,7 @@ async def cleanup_orphaned_map_entries(db: AsyncSession, org_id: uuid.UUID) -> i
     return total
 
 
-def find_issue_in_group(group: ConsolidatedGroup, key: str) -> dict | None:
+def find_issue_in_group(group: ConsolidatedGroup, key: str) -> dict[str, Any] | None:
     """Find an issue dict by key within a consolidated group."""
     if group.primary.get("key") == key:
         return group.primary

@@ -24,6 +24,8 @@ Usage::
     mapped = mapper.map_issue(raw_jira_issue)
 """
 
+from typing import Any, cast
+
 from app.models.bud import BUDStatus
 from app.models.bug import BugSeverity, BugStatus
 from app.services.jira_adf_converter import adf_to_markdown
@@ -93,7 +95,7 @@ class JiraFieldMapper:
         self._type_map = {k.lower(): v for k, v in (type_map or {}).items()}
         self._user_cache = user_cache or {}
 
-    def classify_issue(self, issue: dict) -> str:
+    def classify_issue(self, issue: dict[str, Any]) -> str:
         """Determine target type for a Jira issue: 'bud', 'bug', or 'skip'.
 
         Priority:
@@ -114,7 +116,7 @@ class JiraFieldMapper:
         # Unknown types default to BUD
         return "bud"
 
-    def map_to_bud_fields(self, issue: dict) -> dict:
+    def map_to_bud_fields(self, issue: dict[str, Any]) -> dict[str, Any]:
         """Map a Jira issue to BUD model constructor kwargs.
 
         Returns dict with keys: title, status, requirements_md, metadata_.
@@ -136,7 +138,7 @@ class JiraFieldMapper:
                 description[:_MAX_DESCRIPTION_CHARS] + "\n\n*[Truncated — full text too long]*"
             )
 
-        result: dict = {
+        result: dict[str, Any] = {
             "title": title,
             "status": status,
             "requirements_md": description or "*No description provided in Jira.*",
@@ -147,7 +149,7 @@ class JiraFieldMapper:
 
         return result
 
-    def map_to_bug_fields(self, issue: dict) -> dict:
+    def map_to_bug_fields(self, issue: dict[str, Any]) -> dict[str, Any]:
         """Map a Jira Bug issue to Bug model constructor kwargs.
 
         Returns dict with keys: title, description, severity, status, module.
@@ -165,7 +167,7 @@ class JiraFieldMapper:
         components = fields.get("components") or []
         module = components[0].get("name") if components else None
 
-        result: dict = {
+        result: dict[str, Any] = {
             "title": title,
             "description": description,
             "severity": severity,
@@ -177,7 +179,7 @@ class JiraFieldMapper:
 
         return result
 
-    def extract_comments(self, issue: dict) -> list[dict]:
+    def extract_comments(self, issue: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract comments from a Jira issue for timeline events.
 
         Returns list of dicts with: author, body, created.
@@ -186,7 +188,7 @@ class JiraFieldMapper:
         comment_field = fields.get("comment", {})
         raw_comments = comment_field.get("comments", [])
 
-        result: list[dict] = []
+        result: list[dict[str, Any]] = []
         for c in raw_comments:
             body_adf = c.get("body")
             body_md = adf_to_markdown(body_adf) if body_adf else c.get("body", "")
@@ -203,7 +205,7 @@ class JiraFieldMapper:
 
     # ── Internal helpers ──────────────────────────────────────────
 
-    def _convert_description(self, fields: dict) -> str:
+    def _convert_description(self, fields: dict[str, Any]) -> str:
         """Convert description field (ADF or plain text) to Markdown."""
         desc = fields.get("description")
         if desc is None:
@@ -212,7 +214,7 @@ class JiraFieldMapper:
             return adf_to_markdown(desc)
         return str(desc)
 
-    def _resolve_bud_status(self, fields: dict) -> str:
+    def _resolve_bud_status(self, fields: dict[str, Any]) -> str:
         """Map Jira status to BUD status."""
         status_obj = fields.get("status") or {}
         status_name = (status_obj.get("name") or "").lower()
@@ -229,7 +231,7 @@ class JiraFieldMapper:
         # 3. Fall back to category
         return _DEFAULT_CATEGORY_MAP.get(category_key, BUDStatus.BUD)
 
-    def _resolve_bug_status(self, fields: dict) -> str:
+    def _resolve_bug_status(self, fields: dict[str, Any]) -> str:
         """Map Jira status to Bug status."""
         status_obj = fields.get("status") or {}
         category_key = status_obj.get("statusCategory", {}).get("key", "").lower()
@@ -239,20 +241,20 @@ class JiraFieldMapper:
             return BugStatus.IN_PROGRESS
         return BugStatus.OPEN
 
-    def _resolve_bug_severity(self, fields: dict) -> str:
+    def _resolve_bug_severity(self, fields: dict[str, Any]) -> str:
         """Map Jira priority to Bug severity."""
         priority = fields.get("priority") or {}
         name = (priority.get("name") or "medium").lower()
         return _PRIORITY_SEVERITY_MAP.get(name, BugSeverity.MEDIUM)
 
-    def _resolve_user(self, assignee: dict | None) -> str | None:
+    def _resolve_user(self, assignee: dict[str, Any] | None) -> str | None:
         """Resolve Jira assignee to Bodhiorchard user UUID via email cache."""
         if not assignee:
             return None
         email = (assignee.get("emailAddress") or "").lower()
         return self._user_cache.get(email)
 
-    def _build_metadata(self, issue: dict, fields: dict) -> dict:
+    def _build_metadata(self, issue: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
         """Build the metadata_ JSONB dict preserving original Jira data."""
         priority = fields.get("priority") or {}
         labels = fields.get("labels") or []
@@ -284,39 +286,39 @@ class JiraFieldMapper:
 # ── Utility functions ─────────────────────────────────────────────
 
 
-def _get_issue_type_name(issue: dict) -> str:
+def _get_issue_type_name(issue: dict[str, Any]) -> str:
     """Extract the issue type name from a Jira issue dict."""
     return issue.get("fields", {}).get("issuetype", {}).get("name") or "Unknown"
 
 
-def get_parent_key(issue: dict) -> str | None:
+def get_parent_key(issue: dict[str, Any]) -> str | None:
     """Extract the parent issue key (for Epic link or parent field)."""
     fields = issue.get("fields", {})
     # Jira Cloud uses "parent" for both Epic link and Sub-task parent
     parent = fields.get("parent")
     if parent:
-        return parent.get("key")
+        return cast(str | None, parent.get("key"))
     return None
 
 
-def get_subtask_keys(issue: dict) -> list[str]:
+def get_subtask_keys(issue: dict[str, Any]) -> list[str]:
     """Extract subtask keys from an issue."""
     fields = issue.get("fields", {})
     subtasks = fields.get("subtasks") or []
     return [s.get("key") for s in subtasks if s.get("key")]
 
 
-def is_epic(issue: dict) -> bool:
+def is_epic(issue: dict[str, Any]) -> bool:
     """Check if an issue is an Epic."""
     return _get_issue_type_name(issue).lower() == "epic"
 
 
-def is_subtask(issue: dict) -> bool:
+def is_subtask(issue: dict[str, Any]) -> bool:
     """Check if an issue is a Sub-task."""
     return _get_issue_type_name(issue).lower() in ("sub-task", "subtask")
 
 
-def build_user_cache_from_issues(issues: list[dict]) -> set[str]:
+def build_user_cache_from_issues(issues: list[dict[str, Any]]) -> set[str]:
     """Extract all unique assignee/reporter emails from a batch of issues.
 
     Returns set of lowercase emails for bulk user resolution.

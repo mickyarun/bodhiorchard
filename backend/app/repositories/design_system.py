@@ -16,6 +16,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -153,7 +154,7 @@ class DesignSystemRefRepository(BaseRepository[DesignSystemRef]):
         )
         await self._db.flush()
 
-    async def list_with_repo_names(self) -> list[dict]:
+    async def list_with_repo_names(self) -> list[dict[str, Any]]:
         """List all design systems for this org with joined repo names.
 
         Returns:

@@ -15,6 +15,7 @@
 """BUD chat endpoints: chat history and chat submission."""
 
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -45,7 +46,7 @@ async def get_chat_history(
     session_id: uuid.UUID | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Load persisted chat messages for a BUD section (and optional design/session)."""
     chat_repo = BUDChatMessageRepository(db, org_id=current_user.org_id)
     messages = await chat_repo.list_messages(bud_id, section, design_id, session_id)

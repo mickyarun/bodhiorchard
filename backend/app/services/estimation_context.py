@@ -19,6 +19,7 @@ and historical calibration data to feed the estimation engine.
 """
 
 import uuid
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,7 +77,7 @@ async def get_bug_context(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud: BUDDocument,
-) -> dict:
+) -> dict[str, Any]:
     """Count open bugs linked to this BUD, returning a dict for the prompt.
 
     A single aggregate query — no per-bug iteration. Returns
@@ -93,7 +94,7 @@ async def get_backlog_context(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud: BUDDocument,
-) -> dict:
+) -> dict[str, Any]:
     """Gather backlog depth and assignee workload."""
     est_repo = BUDEstimateQueryRepository(db, org_id=org_id)
     status_val = bud.status.value if isinstance(bud.status, BUDStatus) else bud.status
@@ -114,7 +115,7 @@ async def get_skill_context(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud: BUDDocument,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Get assignee's skill profile data for skill-aware phases."""
     current_status = bud.status.value if isinstance(bud.status, BUDStatus) else bud.status
     if current_status not in SKILL_AWARE_PHASES or not bud.assignee_id:

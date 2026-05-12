@@ -33,6 +33,7 @@ import asyncio
 import uuid
 import zoneinfo
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -211,7 +212,7 @@ async def _refresh_org_presence(
     db: AsyncSession,
     org_id: uuid.UUID,
     encrypted_token: str | None,
-    org_config: dict | None,
+    org_config: dict[str, Any] | None,
 ) -> tuple[int, int]:
     """Refresh Slack presence for a single org.
 

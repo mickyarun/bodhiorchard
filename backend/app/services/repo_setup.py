@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -630,7 +631,7 @@ async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> boo
     claude_dir.mkdir(exist_ok=True)
     settings_path = claude_dir / "settings.json"
 
-    settings: dict = {}
+    settings: dict[str, Any] = {}
     if settings_path.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
             settings = json.loads(settings_path.read_text())
@@ -1315,7 +1316,7 @@ async def install_claude_hooks(repo_path: str, backend_url: str) -> bool:
     import contextlib
 
     settings_path = repo / ".claude" / "settings.json"
-    settings: dict = {}
+    settings: dict[str, Any] = {}
     if settings_path.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
             settings = json.loads(settings_path.read_text())
@@ -1505,7 +1506,7 @@ def add_prepare_script(repo_path: str) -> bool:
 
     pkg_path = Path(repo_path) / "package.json"
 
-    pkg: dict = {}
+    pkg: dict[str, Any] = {}
     if pkg_path.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
             pkg = json.loads(pkg_path.read_text())

@@ -20,6 +20,7 @@ decide whether to show the Override CTA.
 """
 
 import uuid
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,7 +43,7 @@ async def get_pr_status_summary(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud: BUDDocument,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Return per-impacted-repo PR status + comment count for the Code Review tab.
 
     For each repo in ``bud.impacted_repos``, looks up the most recent PR linked
@@ -85,16 +86,16 @@ async def get_pr_status_summary(
         if repo_name:
             comment_counts[repo_name] = comment_counts.get(repo_name, 0) + 1
 
-    result: list[dict] = []
+    result: list[dict[str, Any]] = []
     for ir in impacted_repos:
         repo_id = str(ir.get("repo_id", ""))
         repo_name = ir.get("repo_name", "")
-        pr = pr_by_repo_id.get(repo_id)
+        matched_pr: PullRequest | None = pr_by_repo_id.get(repo_id)
 
-        if pr is not None:
-            pr_state = pr.state.value
-            pr_number: int | None = pr.github_pr_number
-            pr_url: str | None = pr.html_url
+        if matched_pr is not None:
+            pr_state = matched_pr.state.value
+            pr_number: int | None = matched_pr.github_pr_number
+            pr_url: str | None = matched_pr.html_url
         else:
             pr_state = "not_raised"
             pr_number = None

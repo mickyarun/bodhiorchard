@@ -21,6 +21,7 @@ Triggers auto-transitions when all impacted repos have PRs or all merge.
 
 import re
 import uuid
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +39,7 @@ from app.services.pr_auto_transition import (
     check_all_repos_have_prs,
     resolve_bud_from_branch,
 )
+from app.services.release_detection import ReleaseStage
 
 logger = structlog.get_logger(__name__)
 
@@ -48,7 +50,7 @@ async def handle_github_event(
     org_id: uuid.UUID,
     repo: TrackedRepository,
     event_type: str,
-    payload: dict,
+    payload: dict[str, Any],
     db: AsyncSession,
 ) -> None:
     """Dispatch a GitHub webhook event to the appropriate handler."""
@@ -393,7 +395,7 @@ async def _record_release_event_for_bud(
     bud_id: uuid.UUID,
     repo: TrackedRepository,
     pr_data: GitHubPullRequest,
-    stage: str,
+    stage: ReleaseStage,
 ) -> None:
     """Fast-path: record a merged_to_{stage} event for a known BUD.
 
@@ -409,7 +411,7 @@ async def _record_release_event_for_bud(
         bud_id,
         stage,
         pr_data.number,
-        repo.id,  # type: ignore[arg-type]
+        repo.id,
     )
     if already:
         return
@@ -563,8 +565,8 @@ async def _fetch_and_store_review_comments(
     """Fetch inline comments for a review from GitHub API, store in BUD."""
     from app.models.organization import Organization
     from app.repositories.bud import BUDRepository
+    from app.services.github_app_auth import get_installation_token
     from app.services.github_client import GitHubClient
-    from app.services.github_pr_sync import get_installation_token
 
     org = await db.get(Organization, org_id)
     if not org:
@@ -580,6 +582,8 @@ async def _fetch_and_store_review_comments(
         review.id,
     )
 
+    if pr.bud_id is None:
+        return
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id_for_update(pr.bud_id)
     if not bud:
@@ -646,6 +650,8 @@ async def _handle_pr_comment(
     db: AsyncSession,
 ) -> None:
     """Store a PR comment (issue_comment or review_comment) in the BUD."""
+    if repo.github_repo_full_name is None:
+        return
     pr_repo = PullRequestRepository(db, org_id=org_id)
     pr = await pr_repo.get_by_repo_and_number(repo.github_repo_full_name, pr_number)
     if not pr or not pr.bud_id:

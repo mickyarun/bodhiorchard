@@ -25,6 +25,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import structlog
 import yaml
@@ -185,7 +186,7 @@ async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
     return seeded
 
 
-def _parse_frontmatter(content: str) -> tuple[dict, str]:
+def _parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """Parse YAML frontmatter from markdown content.
 
     Args:
@@ -209,7 +210,7 @@ def _parse_frontmatter(content: str) -> tuple[dict, str]:
     return frontmatter, match.group(2)
 
 
-def _parse_list(value: str | list) -> list[str]:
+def _parse_list(value: str | list[Any]) -> list[str]:
     """Parse a comma-separated string or list into a list of stripped strings.
 
     Args:

@@ -43,7 +43,7 @@ from app.config import settings
 logger = structlog.get_logger(__name__)
 
 # topic → set of subscriber queues
-_subscribers: dict[str, set[asyncio.Queue[dict]]] = {}
+_subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
 
 #: Signature for a fan-out transport. Transports MUST be non-blocking and
 #: never raise — raised exceptions are logged and swallowed so one bad
@@ -57,18 +57,18 @@ _transports: list[Transport] = []
 _transport_tasks: set[asyncio.Task[None]] = set()
 
 
-def subscribe(topic: str) -> asyncio.Queue[dict]:
+def subscribe(topic: str) -> asyncio.Queue[dict[str, Any]]:
     """Create a queue and register it under *topic*.
 
     Returns the queue; the caller reads from it to receive events.
     """
-    queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=settings.ws.max_subscribe_queue)
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=settings.ws.max_subscribe_queue)
     _subscribers.setdefault(topic, set()).add(queue)
     # Subscribe logging removed — too noisy at debug level (fires on every page load)
     return queue
 
 
-def unsubscribe(topic: str, queue: asyncio.Queue[dict]) -> None:
+def unsubscribe(topic: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
     """Remove *queue* from *topic*. Deletes the topic key if empty."""
     subs = _subscribers.get(topic)
     if subs is None:
@@ -100,7 +100,7 @@ def clear_transports() -> None:
     _transports.clear()
 
 
-def publish(topic: str, data: dict) -> None:
+def publish(topic: str, data: dict[str, Any]) -> None:
     """Fan out *data* to queue subscribers AND external transports.
 
     Queue subscribers receive an envelope `{"topic": topic, "data": data}`.
@@ -139,7 +139,7 @@ def publish(topic: str, data: dict) -> None:
         task.add_done_callback(_transport_tasks.discard)
 
 
-async def _invoke_transport(transport: Transport, topic: str, data: dict) -> None:
+async def _invoke_transport(transport: Transport, topic: str, data: dict[str, Any]) -> None:
     """Run *transport* and contain any exception it raises."""
     try:
         await transport(topic, data)

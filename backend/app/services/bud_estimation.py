@@ -21,6 +21,7 @@ LLM calls → estimation_llm.
 
 import uuid
 from datetime import UTC, date, datetime
+from typing import Any, cast
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,7 +61,7 @@ async def estimate_bud_dates(
     trigger: str = "manual",
     actor_id: uuid.UUID | None = None,
     actor_name: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Compute and persist per-phase estimated completion dates for a BUD.
 
     Orchestrates: context gathering → AI-PERT → Monte Carlo → persist.
@@ -224,7 +225,7 @@ async def override_phase_date(
     reason: str,
     actor_id: uuid.UUID,
     actor_name: str,
-) -> dict:
+) -> dict[str, Any]:
     """Override a single phase's estimated date with a mandatory reason.
 
     Only phases enabled for this org can be overridden — e.g. a UAT-
@@ -286,4 +287,4 @@ async def override_phase_date(
 
     await db.flush()
     await db.refresh(bud)
-    return estimated[phase]
+    return cast(dict[str, Any], estimated[phase])

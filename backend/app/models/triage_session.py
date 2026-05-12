@@ -16,6 +16,7 @@
 
 import uuid
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -67,7 +68,7 @@ class TriageSession(BaseModel):
     )
     priority: Mapped[str | None] = mapped_column(String(20), nullable=True)
     feature_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    triage_context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    triage_context: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     bud_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("bud_documents.id"), nullable=True
     )

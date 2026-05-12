@@ -16,6 +16,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -58,6 +59,7 @@ class DeveloperXPRepository:
                 result = await self.db.execute(stmt)
                 row = result.scalar_one_or_none()
 
+        assert row is not None, "DeveloperXP row should exist after get_or_create"
         return row
 
     async def get_by_user(self, user_id: uuid.UUID) -> DeveloperXP | None:
@@ -129,7 +131,7 @@ class RewardEventRepository:
         source: str,
         source_ref: str | None = None,
         multiplier: float = 1.0,
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> RewardEvent:
         """Record a reward event (XP or SP)."""
         event = RewardEvent(

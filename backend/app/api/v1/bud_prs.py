@@ -91,10 +91,10 @@ async def get_pr_checklist(
     for repo in impacted:
         repo_id = repo.get("repo_id", "")
         repo_name = repo.get("repo_name", "unknown")
-        pr = pr_by_repo.get(repo_id)
-        if pr and pr.state == "merged":
+        pr_view: PullRequestRead | None = pr_by_repo.get(repo_id)
+        if pr_view and pr_view.state == "merged":
             item_status = "merged"
-        elif pr:
+        elif pr_view:
             item_status = "open"
         else:
             item_status = "no_pr"
@@ -102,7 +102,7 @@ async def get_pr_checklist(
             PRChecklistItem(
                 repo_id=repo_id,
                 repo_name=repo_name,
-                pr=pr,
+                pr=pr_view,
                 status=item_status,
             )
         )

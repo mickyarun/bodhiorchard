@@ -31,7 +31,7 @@ Usage::
 import asyncio
 import base64
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import structlog
@@ -93,7 +93,10 @@ class JiraClient:
         Raises:
             JiraApiError: On auth failure or unreachable server.
         """
-        return await self._get("/rest/api/3/serverInfo")
+        data = await self._get("/rest/api/3/serverInfo")
+        if not isinstance(data, dict):
+            raise JiraApiError(0, "Unexpected response shape for /serverInfo")
+        return data
 
     async def get_site_identifier(self) -> str:
         """Return a stable site identifier for this Jira instance.
@@ -108,7 +111,7 @@ class JiraClient:
             The Jira site's canonical base URL (e.g. ``https://team.atlassian.net``).
         """
         info = await self.test_connection()
-        return info.get("baseUrl", self._base_url)
+        return cast(str, info.get("baseUrl", self._base_url))
 
     async def list_projects(self) -> list[dict[str, Any]]:
         """List all accessible Jira projects.
@@ -117,7 +120,9 @@ class JiraClient:
             List of project dicts with ``key``, ``name``, ``lead``, etc.
         """
         data = await self._get("/rest/api/3/project/search", params={"maxResults": 100})
-        return data.get("values", [])
+        if not isinstance(data, dict):
+            return []
+        return cast(list[dict[str, Any]], data.get("values", []))
 
     async def get_issue(self, issue_key: str) -> dict[str, Any]:
         """Fetch a single issue by key.
@@ -128,7 +133,10 @@ class JiraClient:
         Returns:
             Full issue dict with fields.
         """
-        return await self._get(f"/rest/api/3/issue/{issue_key}")
+        data = await self._get(f"/rest/api/3/issue/{issue_key}")
+        if not isinstance(data, dict):
+            raise JiraApiError(0, f"Unexpected response shape for issue {issue_key}")
+        return data
 
     # ── Paginated Search ──────────────────────────────────────────
 
@@ -148,7 +156,7 @@ class JiraClient:
         # Try total field first (still present on some Jira instances)
         total = data.get("total")
         if total is not None and total > 0:
-            return total
+            return cast(int, total)
 
         # Fall back to counting issues in the response
         issues = data.get("issues", [])
@@ -351,7 +359,7 @@ class JiraClient:
                     f"Jira API {method} {path} returned {resp.status_code}: {resp.text[:300]}",
                 )
 
-            return resp.json()
+            return cast(dict[str, Any] | list[dict[str, Any]], resp.json())
 
         raise JiraApiError(0, f"Max retries ({_MAX_RETRIES}) exceeded for {method} {path}")
 

@@ -15,15 +15,33 @@
 """Generic base repository for async SQLAlchemy 2.0 CRUD operations."""
 
 import uuid
-from typing import Any
+from typing import Any, Generic, TypeVar, cast
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Result, Select, func, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import BaseModel as ORMBase
 
+T = TypeVar("T", bound=ORMBase)
+SelectT = TypeVar("SelectT", bound=tuple[Any, ...])
 
-class BaseRepository[T: ORMBase]:
+
+def rowcount(result: Result[Any]) -> int:
+    """Read ``rowcount`` from an UPDATE/DELETE execute result.
+
+    SQLAlchemy's ``AsyncSession.execute`` is typed to return ``Result[Any]``
+    even for DML statements, but at runtime DML always yields a
+    ``CursorResult`` which exposes ``rowcount``.
+    """
+    return cast(CursorResult[Any], result).rowcount
+
+
+# PEP 695 `class BaseRepository[T: ORMBase]` would be more concise, but
+# mypy strict mode doesn't yet accept the new generic syntax without the
+# experimental NewGenericSyntax flag. Stick with `Generic[T]` until that
+# stabilises.
+class BaseRepository(Generic[T]):  # noqa: UP046
     """Async repository base with tenant-scoped CRUD.
 
     Args:
@@ -44,7 +62,7 @@ class BaseRepository[T: ORMBase]:
         self._db = db
         self._org_id = org_id
 
-    def _scoped(self, stmt: Select[tuple[T, ...]]) -> Select[tuple[T, ...]]:
+    def _scoped(self, stmt: Select[SelectT]) -> Select[SelectT]:
         """Apply tenant scope to a select statement if org_id is set."""
         if self._org_id is not None and hasattr(self._model, "org_id"):
             stmt = stmt.where(self._model.org_id == self._org_id)  # type: ignore[attr-defined]

@@ -16,6 +16,7 @@
 
 import uuid
 from datetime import date
+from typing import Any
 
 from sqlalchemy import Date, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -34,9 +35,9 @@ class StandupReport(BaseModel):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
-    content: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    content: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    flags: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    flags: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     posted_to_slack_ts: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     def __repr__(self) -> str:

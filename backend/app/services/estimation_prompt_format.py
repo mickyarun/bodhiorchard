@@ -27,6 +27,7 @@ can simply concatenate without checking emptiness.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from app.models.bud import BUDDocument
 
@@ -60,7 +61,7 @@ def format_capacity_block(
     return "\n".join(lines) + "\n"
 
 
-def format_bug_line(bug_context: dict | None) -> str:
+def format_bug_line(bug_context: dict[str, Any] | None) -> str:
     """One-line open-bug summary, or empty when there are none / no data."""
     if not bug_context:
         return ""

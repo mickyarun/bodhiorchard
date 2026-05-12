@@ -312,7 +312,7 @@ async def _run_with_streaming(
             error_subtype=error_subtype,
             recent_lines=recent_lines[-5:],
         )
-        code, message = claude_errors.from_returncode(proc.returncode, detail)
+        code, message = claude_errors.from_returncode(proc.returncode or 0, detail)
         return ClaudeRunResult(
             success=False,
             output=result_text,
@@ -540,7 +540,7 @@ async def run_claude_code(
                 stderr=stderr_str[:500],
                 api_error=api_error,
             )
-            code, message = claude_errors.from_returncode(proc.returncode, detail)
+            code, message = claude_errors.from_returncode(proc.returncode or 0, detail)
             return ClaudeRunResult(
                 success=False,
                 output=stdout_str,
@@ -646,7 +646,7 @@ async def run_claude_code(
             mcp_config_file.unlink(missing_ok=True)
 
 
-def _extract_event_error(event: dict) -> str | None:
+def _extract_event_error(event: dict[str, Any]) -> str | None:
     """Pull a human error message out of a single stream-json event.
 
     The Claude CLI emits errors in several shapes depending on where the
@@ -733,7 +733,7 @@ async def _get_claude_version() -> str | None:
 
 async def test_claude_connection(
     env_extra: dict[str, str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Run a simple test to verify Claude Code CLI works.
 
     Performs two checks:

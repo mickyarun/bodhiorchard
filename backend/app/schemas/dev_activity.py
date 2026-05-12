@@ -16,7 +16,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -58,7 +58,7 @@ class DevActivityRead(BaseModel):
     branch: str | None = None
     commit_sha: str | None = None
     file_path: str | None = None
-    metadata: dict | None = Field(None, validation_alias="metadata_")
+    metadata: dict[str, Any] | None = Field(None, validation_alias="metadata_")
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -152,7 +152,7 @@ class DevActivityHookRequest(BaseModel):
     commit_sha: str = Field(default="", max_length=40)
     file_path: str = Field(default="", max_length=1000)
     files_changed: str = Field(default="", max_length=5000)
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class DevActivityHookResponse(BaseModel):

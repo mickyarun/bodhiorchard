@@ -38,6 +38,7 @@ Two responsibilities:
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,9 +55,9 @@ async def phase_e_skills(
     db: AsyncSession,
     org_id: uuid.UUID,
     repo_path: str,
-    skill_entries: list,
+    skill_entries: list[Any],
     email_to_user: dict[str, User],
-    scan_cfg: dict,
+    scan_cfg: dict[str, Any],
 ) -> tuple[int, list[str]]:
     """Phase E: Git skill analysis — optionally auto-create members, then upsert profiles.
 

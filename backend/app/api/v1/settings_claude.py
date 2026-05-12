@@ -21,6 +21,8 @@ mode (a per-org encrypted API key, applied to the backend process env).
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -132,7 +134,7 @@ async def update_claude_settings(
 async def test_claude_settings(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Run ``claude --version`` + a trivial prompt against the current auth."""
     # Ensure the most recent stored key (if any) is in process env first, in
     # case the backend was restarted since the last PATCH.

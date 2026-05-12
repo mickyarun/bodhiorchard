@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.skill_profile import SkillProfile
 from app.models.user import User
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
 
 
 class SkillProfileRepository(BaseRepository[SkillProfile]):
@@ -54,7 +54,7 @@ class SkillProfileRepository(BaseRepository[SkillProfile]):
             .where(SkillProfile.feature_id.is_not(None))
             .order_by(SkillProfile.skill_score.desc())
         )
-        return list(result.all())
+        return [(row[0], row[1]) for row in result.all()]
 
     async def get_by_user_and_module(
         self,
@@ -88,7 +88,7 @@ class SkillProfileRepository(BaseRepository[SkillProfile]):
         result = await self._db.execute(
             sql_delete(SkillProfile).where(SkillProfile.org_id == self._org_id)
         )
-        return result.rowcount
+        return rowcount(result)
 
     async def transfer_profiles(
         self,

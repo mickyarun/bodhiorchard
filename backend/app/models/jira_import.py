@@ -21,6 +21,7 @@ Two tables support the Jira import pipeline:
 
 import uuid
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -79,13 +80,13 @@ class JiraImportSession(BaseModel):
     )
 
     # Import configuration: JQL filter, status mapping, consolidation mode, etc.
-    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     # Discovery results: issue counts by type, statuses found, sample issues
-    discovery_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    discovery_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     # Final reconciliation report (set on completion)
-    result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 

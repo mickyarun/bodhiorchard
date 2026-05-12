@@ -16,6 +16,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +37,7 @@ class PullRequestRead(BaseModel):
     review_status: str
     author_github_login: str
     merged_at: datetime | None = None
-    metadata: dict | None = Field(None, validation_alias="metadata_")
+    metadata: dict[str, Any] | None = Field(None, validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
 

@@ -20,6 +20,7 @@ session tracking, status mapping, and reconciliation reporting.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -91,7 +92,7 @@ class DiscoveryResult(BaseModel):
     statuses_found: list[str] = Field(default_factory=list, alias="statusesFound")
     estimated_time_seconds: int = Field(0, alias="estimatedTimeSeconds")
     already_imported_count: int = Field(0, alias="alreadyImportedCount")
-    sample_issues: list[dict] = Field(default_factory=list, alias="sampleIssues")
+    sample_issues: list[dict[str, Any]] = Field(default_factory=list, alias="sampleIssues")
 
     model_config = {"populate_by_name": True}
 

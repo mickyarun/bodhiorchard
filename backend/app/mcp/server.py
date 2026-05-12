@@ -20,7 +20,7 @@ BUDs, features, bugs, task status, team context.
 Mounted at /mcp/ on the main FastAPI app.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -713,7 +713,7 @@ async def call_tool(
     # Auth-aware handlers receive the full MCPAuthResult (needs user).
     auth_handler = AUTH_TOOL_HANDLERS.get(tool_name)
     if auth_handler is not None:
-        return await auth_handler(db, auth, body.params)
+        return cast(dict[str, Any], await auth_handler(db, auth, body.params))
 
     handler = TOOL_HANDLERS.get(tool_name)
     if handler is None:
@@ -722,7 +722,7 @@ async def call_tool(
             detail=f"Unknown tool: {tool_name}",
         )
 
-    return await handler(db, auth.org, body.params)
+    return cast(dict[str, Any], await handler(db, auth.org, body.params))
 
 
 # --- Tool handler dispatch ---

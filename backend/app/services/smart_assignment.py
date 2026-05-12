@@ -48,7 +48,7 @@ async def score_candidates(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud: BUDDocument,
-    role: str,
+    role: UserRole,
     exclude_user_ids: list[uuid.UUID] | None = None,
 ) -> list[tuple[User, float]]:
     """Score all eligible users with the given role in the org for a BUD.
@@ -142,7 +142,7 @@ async def assign_best_for_role(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud: BUDDocument,
-    role: str,
+    role: UserRole,
     exclude_user_ids: list[uuid.UUID] | None = None,
 ) -> User | None:
     """Pick the best user with the given role for a BUD based on skill profiles.

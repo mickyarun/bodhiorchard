@@ -16,6 +16,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +56,7 @@ class BUDTimelineRepository(BaseRepository[BUDTimelineEvent]):
 
     async def list_status_changes_with_bud_in_window(
         self, since: datetime, until: datetime
-    ) -> list[tuple[uuid.UUID, int, str | None, dict | None]]:
+    ) -> list[tuple[uuid.UUID, int, str | None, dict[str, Any] | None]]:
         """``status_change`` events in [since, until) joined with BUD info.
 
         Returns ``(actor_id, bud_number, bud_title, detail)`` tuples for

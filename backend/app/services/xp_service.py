@@ -21,6 +21,7 @@ detection, and WebSocket notification. Streak logic is in check_and_award_streak
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,7 +79,7 @@ async def award_xp(
     source: str,
     source_ref: str | None = None,
     multiplier: float = 1.0,
-    metadata: dict | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> XPAwardResult | None:
     """Award XP to a developer. Handles dedup, level-up, and WebSocket publish.
 

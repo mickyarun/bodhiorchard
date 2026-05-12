@@ -22,6 +22,7 @@ helper is independently unit-testable. No DB access, no LLM calls.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from typing import Any
 
 from app.models.bud import BUDDocument
 from app.models.user import UserRole
@@ -125,7 +126,7 @@ def build_estimated_dates(
     pert_estimates: dict[str, PERTEstimate],
     mc_results: dict[str, dict[str, float]],
     today: date,
-) -> dict:
+) -> dict[str, Any]:
     """Build the estimated_dates JSONB, preserving manual overrides.
 
     Phase D (Critical Chain Method): per-phase
@@ -136,7 +137,7 @@ def build_estimated_dates(
     the aggregated √Σ buffer.
     """
     existing = dict(bud.estimated_dates or {})
-    result: dict = {}
+    result: dict[str, Any] = {}
 
     for phase in remaining:
         if phase in existing and existing[phase].get("source") == "override":

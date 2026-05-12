@@ -25,6 +25,7 @@ Usage::
 """
 
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 import structlog
 
@@ -49,10 +50,10 @@ class ConsolidatedGroup:
         bugs: Bug issues linked to this group (become Bug records).
     """
 
-    primary: dict
-    children: list[dict] = field(default_factory=list)
-    subtasks: list[dict] = field(default_factory=list)
-    bugs: list[dict] = field(default_factory=list)
+    primary: dict[str, Any]
+    children: list[dict[str, Any]] = field(default_factory=list)
+    subtasks: list[dict[str, Any]] = field(default_factory=list)
+    bugs: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def all_jira_keys(self) -> list[str]:
@@ -66,15 +67,15 @@ class ConsolidatedGroup:
     @property
     def primary_key(self) -> str:
         """Return the lead issue's Jira key."""
-        return self.primary.get("key", "")
+        return cast(str, self.primary.get("key", ""))
 
 
 def consolidate_issues(
-    issues: list[dict],
+    issues: list[dict[str, Any]],
     *,
     mode: str = "epic",
     mapper: JiraFieldMapper,
-) -> tuple[list[ConsolidatedGroup], list[dict]]:
+) -> tuple[list[ConsolidatedGroup], list[dict[str, Any]]]:
     """Group issues into consolidated BUD groups and standalone bugs.
 
     Args:
@@ -92,14 +93,14 @@ def consolidate_issues(
 
 
 def _epic_consolidation(
-    issues: list[dict],
+    issues: list[dict[str, Any]],
     mapper: JiraFieldMapper,
-) -> tuple[list[ConsolidatedGroup], list[dict]]:
+) -> tuple[list[ConsolidatedGroup], list[dict[str, Any]]]:
     """Consolidate: Epics absorb children; orphans stay standalone."""
     # Build Epic groups
     epic_groups: dict[str, ConsolidatedGroup] = {}
-    orphans: list[dict] = []
-    standalone_bugs: list[dict] = []
+    orphans: list[dict[str, Any]] = []
+    standalone_bugs: list[dict[str, Any]] = []
 
     # First pass: identify Epics
     for issue in issues:
@@ -156,12 +157,12 @@ def _epic_consolidation(
 
 
 def _flat_consolidation(
-    issues: list[dict],
+    issues: list[dict[str, Any]],
     mapper: JiraFieldMapper,
-) -> tuple[list[ConsolidatedGroup], list[dict]]:
+) -> tuple[list[ConsolidatedGroup], list[dict[str, Any]]]:
     """Flat mode: every non-bug issue becomes its own BUD group."""
     groups: list[ConsolidatedGroup] = []
-    standalone_bugs: list[dict] = []
+    standalone_bugs: list[dict[str, Any]] = []
 
     for issue in issues:
         target = mapper.classify_issue(issue)
@@ -200,7 +201,7 @@ def build_consolidated_requirements(
         Markdown string for the BUD's requirements_md.
     """
     primary_fields = mapper.map_to_bud_fields(group.primary)
-    primary_desc = primary_fields.get("requirements_md", "")
+    primary_desc = cast(str, primary_fields.get("requirements_md", ""))
 
     # Standalone issue — return description as-is
     if not group.children and not group.subtasks:

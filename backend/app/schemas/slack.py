@@ -19,6 +19,8 @@ Slack sends varied shapes, so we use Optional fields liberally and
 don't enforce strict validation — we parse what we need and ignore the rest.
 """
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -70,4 +72,4 @@ class SlackEventWrapper(BaseModel):
     team_id: str = ""
     event_id: str = ""
     event_time: int = 0
-    event: dict = Field(default_factory=dict)
+    event: dict[str, Any] = Field(default_factory=dict)

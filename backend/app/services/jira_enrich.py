@@ -31,7 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument, BUDStatus
 from app.repositories.jira_import import JiraIssueBudMapRepository
-from app.services.job_queue import JobState, update_job
+from app.schemas.jobs import JobState
+from app.services.job_queue import update_job
 
 logger = structlog.get_logger(__name__)
 

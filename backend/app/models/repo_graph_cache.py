@@ -32,6 +32,7 @@ One row per (repo, head_sha) pair — the cluster-level metadata lives in
 """
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import (
     DateTime,
@@ -77,7 +78,7 @@ class RepoGraphCache(BaseModel):
     graph_json: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     node_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     edge_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    computed_at: Mapped["DateTime"] = mapped_column(  # type: ignore[type-arg]
+    computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),

@@ -15,6 +15,7 @@
 """BUD design wireframe endpoints."""
 
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -42,7 +43,7 @@ async def list_designs(
     bud_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List all design wireframes for a BUD with repo names."""
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
     return await design_repo.list_with_repo_names(bud_id)
@@ -58,7 +59,7 @@ async def generate_designs(
     body: DesignGenerateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Create bud_design rows and enqueue design jobs for each repo."""
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
@@ -166,7 +167,7 @@ async def update_design_html(
     body: DesignHtmlUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Manually edit a design wireframe's HTML or notes."""
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
     design = await design_repo.get_by_id(design_id)
@@ -197,7 +198,7 @@ async def regenerate_design(
     design_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Re-trigger design generation for a single design."""
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)

@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.repo_layer import RepoLayer
 from app.models.tracked_repository import RepoStatus, TrackedRepository
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
 
 
 class TrackedRepoRepository(BaseRepository[TrackedRepository]):
@@ -124,7 +124,7 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
             )
             .values(head_sha=None, last_scanned_at=None)
         )
-        return result.rowcount
+        return rowcount(result)
 
     async def upsert(self, path: str, name: str) -> TrackedRepository:
         """Insert a new repo or re-activate if previously removed/ignored.
@@ -323,7 +323,7 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
                 )
             ).order_by(TrackedRepository.name)
         )
-        return list(result.all())
+        return [(row.path, row.name) for row in result.all()]
 
     async def get_names_by_ids(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
         """Batch-resolve repo IDs to display names.
@@ -377,7 +377,7 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
                 ).where(TrackedRepository.status == RepoStatus.ACTIVE)
             ).order_by(TrackedRepository.name)
         )
-        return list(result.all())
+        return [(row.id, row.path, row.name) for row in result.all()]
 
     async def get_name_by_id(self, repo_id: uuid.UUID) -> str | None:
         """Return only the ``name`` column for a tracked repo, or None."""

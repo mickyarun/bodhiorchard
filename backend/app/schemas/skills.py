@@ -142,7 +142,7 @@ class ScanStatus(BaseModel):
     parent_scan_id: str | None = Field(default=None, alias="parentScanId")
     error: str | None = None
 
-    @computed_field(alias="statusLabel")  # type: ignore[misc]
+    @computed_field(alias="statusLabel")  # type: ignore[prop-decorator]
     @property
     def status_label(self) -> str:
         """Human-readable label for the current status."""

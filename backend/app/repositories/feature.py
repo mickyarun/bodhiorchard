@@ -485,7 +485,7 @@ class FeatureRepository(BaseRepository[Feature]):
                 )
             )
         )
-        return list(result.all())
+        return [(row[0], row[1]) for row in result.all()]
 
     async def cluster_names_for_repo(self, repo_id: uuid.UUID) -> set[str]:
         """Flat set of cluster names already synthesised under this repo.

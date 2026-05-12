@@ -19,12 +19,13 @@ Provides tenant-scoped CRUD plus dedup-specific queries for
 """
 
 import uuid
+from typing import Any
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import Select, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
 
 # ── Startup recovery ──────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ async def recover_stuck_import_sessions(db: AsyncSession) -> int:
     )
     result = await db.execute(stmt)
     await db.flush()
-    return result.rowcount or 0
+    return rowcount(result) or 0
 
 
 # ── Session Repository ────────────────────────────────────────────
@@ -94,7 +95,7 @@ class JiraImportSessionRepository(BaseRepository[JiraImportSession]):
         error: str | None = None,
     ) -> None:
         """Update a session's status and optionally set an error."""
-        values: dict = {"status": status}
+        values: dict[str, Any] = {"status": status}
         if error is not None:
             values["error"] = error[:2000]
         stmt = (
@@ -201,7 +202,7 @@ class JiraIssueBudMapRepository(BaseRepository[JiraIssueBudMap]):
             )
         ).group_by(JiraIssueBudMap.status)
         result = await self._db.execute(stmt)
-        return dict(result.all())
+        return {row[0]: row[1] for row in result.all()}
 
     async def bulk_add(self, maps: list[JiraIssueBudMap]) -> None:
         """Add multiple map entries without individual flushes."""
@@ -221,7 +222,7 @@ class JiraIssueBudMapRepository(BaseRepository[JiraIssueBudMap]):
         consolidated_into: str | None = None,
     ) -> None:
         """Update a single mapping's status and linked IDs."""
-        values: dict = {"status": status}
+        values: dict[str, Any] = {"status": status}
         if bud_id is not None:
             values["bud_id"] = bud_id
         if bug_id is not None:
@@ -254,7 +255,7 @@ class JiraIssueBudMapRepository(BaseRepository[JiraIssueBudMap]):
             )
         ).distinct()
         result = await self._db.execute(stmt)
-        return list(result.scalars().all())
+        return [row for row in result.scalars().all() if row is not None]
 
     async def delete_by_id(self, entry_id: uuid.UUID) -> None:
         """Delete a single map entry by id (org-scoped)."""
@@ -265,7 +266,12 @@ class JiraIssueBudMapRepository(BaseRepository[JiraIssueBudMap]):
         await self._db.execute(stmt)
         await self._db.flush()
 
-    async def delete_orphaned(self, *, valid_bud_ids_select, valid_bug_ids_select) -> int:
+    async def delete_orphaned(
+        self,
+        *,
+        valid_bud_ids_select: Select[tuple[uuid.UUID]],
+        valid_bug_ids_select: Select[tuple[uuid.UUID]],
+    ) -> int:
         """Delete map entries whose bud/bug links no longer resolve.
 
         Three passes (single tx):
@@ -291,7 +297,7 @@ class JiraIssueBudMapRepository(BaseRepository[JiraIssueBudMap]):
             JiraIssueBudMap.bug_id.is_(None),
         )
         r3 = await self._db.execute(stmt3)
-        return (r1.rowcount or 0) + (r2.rowcount or 0) + (r3.rowcount or 0)
+        return (rowcount(r1) or 0) + (rowcount(r2) or 0) + (rowcount(r3) or 0)
 
     async def delete_pending_for_session(self, session_id: uuid.UUID) -> int:
         """Delete pending map entries from a session (cleanup before re-run).
@@ -307,4 +313,4 @@ class JiraIssueBudMapRepository(BaseRepository[JiraIssueBudMap]):
         )
         result = await self._db.execute(stmt)
         await self._db.flush()
-        return result.rowcount or 0
+        return rowcount(result) or 0

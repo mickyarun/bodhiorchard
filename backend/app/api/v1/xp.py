@@ -14,6 +14,8 @@
 
 """XP/gamification API endpoints."""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -182,10 +184,10 @@ async def upgrade_house(
 
 @router.post("/claim-greeting-bonus")
 async def claim_greeting_bonus(
-    body: dict,
+    body: dict[str, Any],
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Award 0.25 SP for first greeting emote near each unique user.
 
     One award per (greeter, target) pair — greet 4 different people = 1 SP.

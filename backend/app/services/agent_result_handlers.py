@@ -39,7 +39,7 @@ async def handle_prd_result(
     output: str,
     task: BUDAgentTask,
     db: Any,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """PRD result: persist agent-declared feature links, then trigger estimation.
 
     The PM agent's final stdout message ends with a single JSON fence
@@ -166,7 +166,7 @@ async def handle_tech_arch_result(
     output: str,
     task: BUDAgentTask,
     db: Any,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Tech arch result: save output to tech_spec_md and populate impacted_repos.
 
     The agent outputs markdown followed by a JSON block with impacted_repos.
@@ -240,7 +240,7 @@ async def handle_code_review_result(
     output: str,
     task: BUDAgentTask,
     db: Any,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Code review result: parse JSON, sync any comments to GitHub.
 
     The code_review → testing transition is no longer owned by this handler.
@@ -277,7 +277,7 @@ async def handle_code_review_result(
         raw_comments = review_data.get("code_review_comments", [])
         # Defensive: if the agent returned a scalar or garbage, don't crash
         # downstream with a confusing error.
-        new_comments: list[dict] = raw_comments if isinstance(raw_comments, list) else []
+        new_comments: list[dict[str, Any]] = raw_comments if isinstance(raw_comments, list) else []
         comment_count = len(new_comments)
 
         # Stash auto/manual test plan drafts in metadata for the testing phase
@@ -310,7 +310,7 @@ async def handle_testing_result(
     output: str,
     task: BUDAgentTask,
     db: Any,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Testing result: parse JSON and store test cases in BUD columns.
 
     When the org has QA automation disabled (``org.config.qa.enabled``
@@ -549,8 +549,8 @@ def _normalize_testing_output(parsed: dict[str, Any]) -> dict[str, Any]:
         "impact",
     }
     if not auto and manual:
-        reclassified_auto: list = []
-        remaining_manual: list = []
+        reclassified_auto: list[Any] = []
+        remaining_manual: list[Any] = []
         for tc in manual:
             cat = (tc.get("category") or "").lower()
             if cat in auto_categories:

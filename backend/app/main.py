@@ -18,6 +18,7 @@ import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from fastapi import FastAPI
@@ -226,6 +227,6 @@ app.include_router(api_router)
 
 
 @app.get("/")
-async def root() -> dict:
+async def root() -> dict[str, Any]:
     """Root endpoint returning API identity and version."""
     return {"name": "Bodhiorchard", "version": "0.1.0"}

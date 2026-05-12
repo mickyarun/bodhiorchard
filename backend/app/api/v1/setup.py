@@ -17,6 +17,7 @@
 import asyncio
 import contextlib
 from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -59,7 +60,7 @@ router = APIRouter(tags=["setup"])
 
 
 @router.get("/status")
-async def setup_status(db: AsyncSession = Depends(get_db)) -> dict:
+async def setup_status(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Check whether initial setup has been completed.
 
     Reads a Redis fast-path flag first so the wizard's polling
@@ -161,7 +162,7 @@ async def browse_directories(
 @router.get("/repo-branches")
 async def get_repo_branches(
     path: str = Query(..., description="Absolute path to a git repository"),
-) -> dict:
+) -> dict[str, Any]:
     """List branches for a repo by path (no auth — used during setup).
 
     Args:
@@ -207,7 +208,7 @@ async def _require_setup_incomplete(db: AsyncSession) -> None:
 
 
 @router.get("/deployment-info")
-async def get_deployment_info() -> dict:
+async def get_deployment_info() -> dict[str, Any]:
     """Report whether the backend is running in Docker or on the host.
 
     Used by the setup wizard to decide which Claude auth options to surface:
@@ -231,7 +232,7 @@ async def get_deployment_info() -> dict:
 
 
 @router.get("/check-claude")
-async def check_claude(db: AsyncSession = Depends(get_db)) -> dict:
+async def check_claude(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Test Claude Code against the backend's current process env (no auth).
 
     Returns:
@@ -245,7 +246,7 @@ async def check_claude(db: AsyncSession = Depends(get_db)) -> dict:
 async def check_claude_with_credentials(
     body: ClaudeCheckRequest | None = None,
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Test Claude Code against provisional credentials during setup.
 
     When ``auth_mode == 'api_key'`` and ``api_key`` is supplied, the key
@@ -442,16 +443,16 @@ async def get_checklist_status(
     qa_configured = bool(org.config and org.config.get("qa"))
 
     return SetupStatusResponse(
-        orgCreated=True,
-        claudeCodeTested=True,  # If they got past setup, Claude was tested
-        repoAdded=len(active_repos) > 0,
-        scanComplete=scan_complete,
-        scanInProgress=scan_in_progress,
-        scanId=scan_id,
-        scanProgress=scan_progress,
-        githubConnected=bool(org.github_app_id),
-        slackConnected=bool(org.slack_bot_token),
-        branchesMapped=all(r.main_branch for r in active_repos) if active_repos else False,
-        membersImported=len(users) > 1,
-        qaConfigured=qa_configured,
+        org_created=True,
+        claude_code_tested=True,  # If they got past setup, Claude was tested
+        repo_added=len(active_repos) > 0,
+        scan_complete=scan_complete,
+        scan_in_progress=scan_in_progress,
+        scan_id=scan_id,
+        scan_progress=scan_progress,
+        github_connected=bool(org.github_app_id),
+        slack_connected=bool(org.slack_bot_token),
+        branches_mapped=all(r.main_branch for r in active_repos) if active_repos else False,
+        members_imported=len(users) > 1,
+        qa_configured=qa_configured,
     )

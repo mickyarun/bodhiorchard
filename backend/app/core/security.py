@@ -15,6 +15,7 @@
 """JWT token creation/validation and password hashing utilities."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -33,7 +34,7 @@ def hash_password(password: str) -> str:
     Returns:
         The bcrypt hash string.
     """
-    return pwd_context.hash(password)
+    return cast(str, pwd_context.hash(password))
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -46,11 +47,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         True if the password matches, False otherwise.
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    return cast(bool, pwd_context.verify(plain_password, hashed_password))
 
 
 def create_access_token(
-    data: dict,
+    data: dict[str, Any],
     expires_delta: timedelta | None = None,
 ) -> str:
     """Create a signed JWT access token.
@@ -67,14 +68,17 @@ def create_access_token(
         expires_delta or timedelta(minutes=settings.auth.access_token_expire_minutes)
     )
     to_encode.update({"exp": expire})
-    return jwt.encode(
-        to_encode,
-        settings.auth.secret_key,
-        algorithm=settings.auth.algorithm,
+    return cast(
+        str,
+        jwt.encode(
+            to_encode,
+            settings.auth.secret_key,
+            algorithm=settings.auth.algorithm,
+        ),
     )
 
 
-def create_refresh_token(data: dict) -> str:
+def create_refresh_token(data: dict[str, Any]) -> str:
     """Create a signed JWT refresh token with a longer expiry.
 
     Args:
@@ -86,14 +90,17 @@ def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.now(UTC) + timedelta(days=settings.auth.refresh_token_expire_days)
     to_encode.update({"exp": expire, "type": "refresh"})
-    return jwt.encode(
-        to_encode,
-        settings.auth.secret_key,
-        algorithm=settings.auth.algorithm,
+    return cast(
+        str,
+        jwt.encode(
+            to_encode,
+            settings.auth.secret_key,
+            algorithm=settings.auth.algorithm,
+        ),
     )
 
 
-def verify_token(token: str) -> dict | None:
+def verify_token(token: str) -> dict[str, Any] | None:
     """Decode and validate a JWT access token.
 
     Args:
@@ -108,6 +115,6 @@ def verify_token(token: str) -> dict | None:
             settings.auth.secret_key,
             algorithms=[settings.auth.algorithm],
         )
-        return payload
+        return cast("dict[str, Any]", payload)
     except JWTError:
         return None

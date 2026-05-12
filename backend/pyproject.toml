@@ -52,6 +52,21 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+module = [
+    "networkx",
+    "networkx.*",
+    "graphify.*",
+    "pgvector.*",
+    "aioboto3",
+    "yaml",
+    "jose",
+    "jose.*",
+    "passlib.*",
+    "cachetools",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

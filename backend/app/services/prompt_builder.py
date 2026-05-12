@@ -19,6 +19,7 @@ information into a complete prompt for Claude Code CLI execution.
 """
 
 import uuid
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,9 +58,9 @@ async def _resolve_skill(
 
 
 async def build_agent_prompt(
-    backlog_item: dict,
+    backlog_item: dict[str, Any],
     skill_name: str,
-    repo_context: dict | None = None,
+    repo_context: dict[str, Any] | None = None,
     org_knowledge: list[str] | None = None,
     *,
     org_id: uuid.UUID | None = None,
@@ -142,9 +143,9 @@ async def build_slack_triage_prompt(
     skill_name: str,
     session_status: str,
     original_text: str,
-    thread_messages: list[dict],
+    thread_messages: list[dict[str, Any]],
     *,
-    triage_context: dict | None = None,
+    triage_context: dict[str, Any] | None = None,
     org_id: uuid.UUID | None = None,
     db: AsyncSession | None = None,
 ) -> str:
@@ -228,7 +229,7 @@ async def build_prd_prompt(
     skill_name: str,
     bud_number: int,
     bud_title: str,
-    triage_context: dict,
+    triage_context: dict[str, Any],
     requirements_md: str,
     *,
     org_id: uuid.UUID | None = None,

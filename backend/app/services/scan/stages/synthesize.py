@@ -242,7 +242,7 @@ async def run(
     # any active rows that nothing matched as inactive. Only runs on
     # success — a failed LLM run leaves the accumulator stale and
     # we'll retry from scratch on next scan.
-    if outcome.success:
+    if outcome.success and repo_id is not None:
         reconcile_summary = await _reconcile_synthesised_batch(config, repo_id=repo_id)
         extras.update(reconcile_summary)
 

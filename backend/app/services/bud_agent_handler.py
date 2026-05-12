@@ -83,7 +83,7 @@ class ResultHandler(Protocol):
         output: str,
         task: BUDAgentTask,
         db: Any,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """Process agent output and persist results.
 
         Args:

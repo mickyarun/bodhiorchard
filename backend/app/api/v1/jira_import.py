@@ -20,6 +20,7 @@ and session history for the Jira import pipeline.
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -132,7 +133,7 @@ async def disconnect_jira(
 async def list_jira_projects(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List accessible Jira projects."""
     client = await _get_jira_client(db, current_user.org_id)
     projects = await client.list_projects()
@@ -158,7 +159,7 @@ async def discover_jira_project(
     body: JiraDiscoverRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Scan a Jira project and return preview data (async job)."""
     jira_settings = await _get_jira_settings_or_404(db, current_user.org_id)
 
@@ -207,7 +208,7 @@ async def start_jira_import(
     body: JiraImportRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Start the Jira import pipeline (async job)."""
     session_repo = JiraImportSessionRepository(db, org_id=current_user.org_id)
     session = await session_repo.get_by_id(body.session_id)
@@ -293,7 +294,7 @@ async def get_review_items(
     session_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Get items flagged for manual duplicate review."""
     map_repo = JiraIssueBudMapRepository(db, org_id=current_user.org_id)
     items = await map_repo.get_review_needed(session_id)
@@ -322,7 +323,7 @@ async def enrich_imported_buds(
     session_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Trigger AI enrichment (PRD agent) on all BUDs from an import session."""
     session_repo = JiraImportSessionRepository(db, org_id=current_user.org_id)
     session = await session_repo.get_by_id(session_id)
@@ -363,7 +364,7 @@ async def review_item_action(
     body: ReviewActionRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Act on a review-needed item: skip, import, or merge."""
     map_repo = JiraIssueBudMapRepository(db, org_id=current_user.org_id)
     entry = await map_repo.get_by_id(map_id)
@@ -417,7 +418,7 @@ async def _create_bud_from_map_entry(
     from app.services.embedding_service import embedding_service
 
     # Parse stored BUD data from map entry note (JSON)
-    stored: dict = {}
+    stored: dict[str, Any] = {}
     if entry.note:
         with contextlib.suppress(json.JSONDecodeError):
             stored = json.loads(entry.note)

@@ -16,7 +16,7 @@
 
 import uuid
 from collections.abc import AsyncGenerator, Callable
-from typing import Literal
+from typing import Any, Literal
 
 import structlog
 from fastapi import Depends, HTTPException, status
@@ -114,10 +114,10 @@ async def get_current_user(
         )
 
     # Set transient org context on the user instance
-    user.org_id = membership.org_id  # type: ignore[attr-defined]
-    user.role = membership.role  # type: ignore[attr-defined]
-    user.role_id = membership.role_id  # type: ignore[attr-defined]
-    user.role_ref = membership.role_ref  # type: ignore[attr-defined]
+    user.org_id = membership.org_id
+    user.role = membership.role
+    user.role_id = membership.role_id
+    user.role_ref = membership.role_ref
 
     # Block API access when password change is required
     if user.must_change_password:
@@ -177,10 +177,10 @@ async def get_current_user_pending_password(
             detail="Not a member of this organization",
         )
 
-    user.org_id = membership.org_id  # type: ignore[attr-defined]
-    user.role = membership.role  # type: ignore[attr-defined]
-    user.role_id = membership.role_id  # type: ignore[attr-defined]
-    user.role_ref = membership.role_ref  # type: ignore[attr-defined]
+    user.org_id = membership.org_id
+    user.role = membership.role
+    user.role_id = membership.role_id
+    user.role_ref = membership.role_ref
 
     return user
 
@@ -227,7 +227,7 @@ async def get_user_permissions(user: User, db: AsyncSession) -> set[str]:
 def require_permissions(
     *permissions: str,
     mode: Literal["all", "any"] = "all",
-) -> Callable:
+) -> Callable[..., Any]:
     """FastAPI dependency factory that enforces permission checks.
 
     Usage::

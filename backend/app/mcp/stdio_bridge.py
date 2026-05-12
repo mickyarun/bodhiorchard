@@ -39,6 +39,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from typing import Any, cast
 
 BACKEND_URL = os.environ.get("BODHIORCHARD_BACKEND_URL", "http://localhost:8000")
 MCP_TOOLS_FILTER = os.environ.get("BODHIORCHARD_MCP_TOOLS", "")
@@ -73,7 +74,9 @@ def _get_token() -> str:
     return ""
 
 
-def _api_request(method: str, path: str, body: dict | None = None) -> dict:
+def _api_request(
+    method: str, path: str, body: dict[str, Any] | None = None
+) -> dict[str, Any] | list[dict[str, Any]]:
     """Make an HTTP request to the Bodhiorchard backend.
 
     Returns a structured error dict on HTTP failures (e.g. 401) so that
@@ -93,7 +96,7 @@ def _api_request(method: str, path: str, body: dict | None = None) -> dict:
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read().decode())
+            return cast(dict[str, Any] | list[dict[str, Any]], json.loads(resp.read().decode()))
     except urllib.error.HTTPError as exc:
         detail = ""
         with contextlib.suppress(Exception):
@@ -102,10 +105,12 @@ def _api_request(method: str, path: str, body: dict | None = None) -> dict:
         return {"error": f"Backend returned HTTP {exc.code}", "status": exc.code, "detail": detail}
 
 
-def _get_tools() -> list[dict]:
+def _get_tools() -> list[dict[str, Any]]:
     """Fetch tool definitions from the Bodhiorchard backend."""
     _log("tools/list requested")
     tools = _api_request("GET", "/mcp/tools")
+    if not isinstance(tools, list):
+        return []
     allowed = (
         {t.strip() for t in MCP_TOOLS_FILTER.split(",") if t.strip()} if MCP_TOOLS_FILTER else None
     )
@@ -123,19 +128,22 @@ def _get_tools() -> list[dict]:
     return result
 
 
-def _call_tool(name: str, arguments: dict) -> dict:
+def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Execute a tool call via the Bodhiorchard backend."""
     _log(f"tools/call name={name}")
-    return _api_request("POST", f"/mcp/tools/{name}", {"params": arguments})
+    result = _api_request("POST", f"/mcp/tools/{name}", {"params": arguments})
+    if isinstance(result, list):
+        return {"result": result}
+    return result
 
 
-def _send(msg: dict) -> None:
+def _send(msg: dict[str, Any]) -> None:
     """Write a JSON-RPC message to stdout."""
     sys.stdout.write(json.dumps(msg) + "\n")
     sys.stdout.flush()
 
 
-def _send_result(req_id: int | str, result: dict) -> None:
+def _send_result(req_id: int | str, result: dict[str, Any]) -> None:
     """Send a JSON-RPC success response."""
     _send({"jsonrpc": "2.0", "id": req_id, "result": result})
 

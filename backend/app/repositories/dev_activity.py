@@ -295,12 +295,12 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
             .limit(limit)
         )
         result = await self._db.execute(stmt)
-        return list(result.all())
+        return [(row[0], row[1], row[2], row[3]) for row in result.all()]
 
     def _commit_filter(
         self,
         bud_id: uuid.UUID,
-    ) -> Select[tuple[DevActivityLog, ...]]:
+    ) -> Select[tuple[DevActivityLog]]:
         """Base query for commit events linked to a BUD."""
         return self._scoped(
             select(DevActivityLog).where(

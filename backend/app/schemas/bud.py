@@ -16,7 +16,7 @@
 
 import uuid
 from datetime import datetime
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -54,7 +54,7 @@ class BUDCreate(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=500)
     requirements_md: str | None = None
-    metadata_: dict | None = Field(None, alias="metadata")
+    metadata_: dict[str, Any] | None = Field(None, alias="metadata")
 
     model_config = {"populate_by_name": True}
 
@@ -68,8 +68,8 @@ class BUDUpdate(BaseModel):
     requirements_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
-    code_review_comments: list[dict] | None = None
-    metadata_: dict | None = Field(None, alias="metadata")
+    code_review_comments: list[dict[str, Any]] | None = None
+    metadata_: dict[str, Any] | None = Field(None, alias="metadata")
     assignee_id: uuid.UUID | None = None
 
     model_config = {"populate_by_name": True}
@@ -123,10 +123,10 @@ class BUDAgentTaskRead(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def extract_skill_slug(cls, data: object) -> object:
+    def extract_skill_slug(cls, data: Any) -> Any:
         """Pull skill_slug from the joined AgentSkill relationship."""
         if hasattr(data, "skill") and data.skill is not None:
-            data.skill_slug = data.skill.skill_slug  # type: ignore[union-attr]
+            data.skill_slug = data.skill.skill_slug
         return data
 
 
@@ -141,14 +141,14 @@ class BUDRead(BaseModel):
     requirements_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
-    qa_automation_cases: list[dict] | None = None
-    qa_manual_cases: list[dict] | None = None
+    qa_automation_cases: list[dict[str, Any]] | None = None
+    qa_manual_cases: list[dict[str, Any]] | None = None
     qa_execution_plan_md: str | None = None
-    code_review_comments: list[dict] | None = None
+    code_review_comments: list[dict[str, Any]] | None = None
     designs: list[BUDDesignRead] = []
-    metadata: dict | None = Field(None, validation_alias="metadata_")
-    impacted_repos: list[dict] | None = None
-    estimated_dates: dict | None = None
+    metadata: dict[str, Any] | None = Field(None, validation_alias="metadata_")
+    impacted_repos: list[dict[str, Any]] | None = None
+    estimated_dates: dict[str, Any] | None = None
     complexity: int | None = None
     prod_p70_date: datetime | None = None
     current_phase_deadline: datetime | None = None
@@ -162,10 +162,10 @@ class BUDRead(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def extract_assignee_name(cls, data: object) -> object:
+    def extract_assignee_name(cls, data: Any) -> Any:
         """Pull assignee name from the joined User relationship."""
         if hasattr(data, "assignee") and data.assignee is not None:
-            data.assignee_name = data.assignee.name  # type: ignore[union-attr]
+            data.assignee_name = data.assignee.name
         return data
 
 
@@ -189,10 +189,10 @@ class BUDListItem(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def extract_assignee_name(cls, data: object) -> object:
+    def extract_assignee_name(cls, data: Any) -> Any:
         """Pull assignee name from the joined User relationship."""
         if hasattr(data, "assignee") and data.assignee is not None:
-            data.assignee_name = data.assignee.name  # type: ignore[union-attr]
+            data.assignee_name = data.assignee.name
         return data
 
 
@@ -228,7 +228,7 @@ class TimelineEventRead(BaseModel):
     id: uuid.UUID
     event_type: str
     actor_name: str | None = None
-    detail: dict | None = None
+    detail: dict[str, Any] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

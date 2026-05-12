@@ -14,6 +14,8 @@
 
 """Claude Code CLI endpoints for testing and running tasks."""
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends
 
@@ -33,7 +35,7 @@ router = APIRouter(tags=["claude"])
 @router.get("/test")
 async def test_claude(
     current_user: User = Depends(get_current_user),
-) -> dict:
+) -> dict[str, Any]:
     """Test Claude Code CLI availability and connectivity.
 
     Runs a simple prompt to verify the CLI is installed and the API key works.
@@ -53,7 +55,7 @@ async def run_claude_task(
     working_dir: str | None = None,
     max_turns: int = 20,
     current_user: User = Depends(get_current_user),
-) -> dict:
+) -> dict[str, Any]:
     """Trigger a Claude Code CLI task directly (for testing/development).
 
     Args:

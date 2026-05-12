@@ -18,6 +18,8 @@ Orchestrates the brain-emoji → triage → PM approval → BUD creation flow.
 Each function is called from background tasks in the Slack webhook handler.
 """
 
+from typing import Any
+
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -449,7 +451,7 @@ async def _run_triage_agent(
         )
 
 
-def _parse_agent_response(output: str) -> dict | None:
+def _parse_agent_response(output: str) -> dict[str, Any] | None:
     """Parse the agent's JSON response, handling common formatting issues."""
     from app.services.json_parser import parse_json_response
 

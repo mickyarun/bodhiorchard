@@ -106,7 +106,7 @@ async def check_bug_threshold(
     from app.services.bud_assignment import auto_assign_for_phase, unassign_bud
 
     if old_assignee_id:
-        await unassign_bud(db, org_id, bud)
+        await unassign_bud(db, org_id, bud, actor_id=None, actor_name="system")
 
     await auto_assign_for_phase(db, org_id, bud, BUDStatus.DEVELOPMENT)
 

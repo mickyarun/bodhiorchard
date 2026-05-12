@@ -28,13 +28,14 @@ Usage::
 """
 
 from collections.abc import Callable
+from typing import Any, cast
 
 import structlog
 
 logger = structlog.get_logger(__name__)
 
 
-def adf_to_markdown(doc: dict | None) -> str:
+def adf_to_markdown(doc: dict[str, Any] | None) -> str:
     """Convert an ADF document to Markdown.
 
     Args:
@@ -49,7 +50,7 @@ def adf_to_markdown(doc: dict | None) -> str:
     return _convert_nodes(doc.get("content", []))
 
 
-def _convert_nodes(nodes: list[dict]) -> str:
+def _convert_nodes(nodes: list[dict[str, Any]]) -> str:
     """Convert a list of ADF nodes to Markdown."""
     parts: list[str] = []
     for node in nodes:
@@ -59,7 +60,7 @@ def _convert_nodes(nodes: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def _convert_node(node: dict) -> str | None:
+def _convert_node(node: dict[str, Any]) -> str | None:
     """Dispatch a single ADF node to its type-specific handler."""
     node_type = node.get("type", "")
     handler = _NODE_HANDLERS.get(node_type)
@@ -72,15 +73,15 @@ def _convert_node(node: dict) -> str | None:
 # ── Inline text + marks ───────────────────────────────────────────
 
 
-def _convert_text(node: dict) -> str:
+def _convert_text(node: dict[str, Any]) -> str:
     """Convert a text node, applying any inline marks (bold, italic, etc.)."""
-    text = node.get("text", "")
+    text = cast(str, node.get("text", ""))
     for mark in node.get("marks", []):
         text = _apply_mark(text, mark)
     return text
 
 
-def _apply_mark(text: str, mark: dict) -> str:
+def _apply_mark(text: str, mark: dict[str, Any]) -> str:
     """Wrap text with Markdown formatting for a given mark."""
     mark_type = mark.get("type", "")
     if mark_type == "strong":
@@ -101,7 +102,7 @@ def _apply_mark(text: str, mark: dict) -> str:
     return text
 
 
-def _convert_inline_content(node: dict) -> str:
+def _convert_inline_content(node: dict[str, Any]) -> str:
     """Convert a node's inline children (text, mention, emoji, etc.)."""
     parts: list[str] = []
     for child in node.get("content", []):
@@ -132,36 +133,36 @@ def _convert_inline_content(node: dict) -> str:
 # ── Block-level handlers ──────────────────────────────────────────
 
 
-def _handle_paragraph(node: dict) -> str:
+def _handle_paragraph(node: dict[str, Any]) -> str:
     return _convert_inline_content(node)
 
 
-def _handle_heading(node: dict) -> str:
+def _handle_heading(node: dict[str, Any]) -> str:
     level = node.get("attrs", {}).get("level", 1)
     text = _convert_inline_content(node)
     return f"{'#' * level} {text}"
 
 
-def _handle_blockquote(node: dict) -> str:
+def _handle_blockquote(node: dict[str, Any]) -> str:
     inner = _convert_nodes(node.get("content", []))
     return "\n".join(f"> {line}" for line in inner.splitlines())
 
 
-def _handle_code_block(node: dict) -> str:
+def _handle_code_block(node: dict[str, Any]) -> str:
     lang = node.get("attrs", {}).get("language", "")
     code = _convert_inline_content(node)
     return f"```{lang}\n{code}\n```"
 
 
-def _handle_bullet_list(node: dict) -> str:
+def _handle_bullet_list(node: dict[str, Any]) -> str:
     return _convert_list_items(node, ordered=False)
 
 
-def _handle_ordered_list(node: dict) -> str:
+def _handle_ordered_list(node: dict[str, Any]) -> str:
     return _convert_list_items(node, ordered=True)
 
 
-def _convert_list_items(node: dict, *, ordered: bool) -> str:
+def _convert_list_items(node: dict[str, Any], *, ordered: bool) -> str:
     """Convert list items with proper bullet/number prefixes."""
     lines: list[str] = []
     for i, item in enumerate(node.get("content", []), start=1):
@@ -178,7 +179,7 @@ def _convert_list_items(node: dict, *, ordered: bool) -> str:
     return "\n".join(lines)
 
 
-def _handle_table(node: dict) -> str:
+def _handle_table(node: dict[str, Any]) -> str:
     """Convert an ADF table to Markdown pipe table."""
     rows: list[list[str]] = []
     for row_node in node.get("content", []):
@@ -205,11 +206,11 @@ def _handle_table(node: dict) -> str:
     return "\n".join(lines)
 
 
-def _handle_rule(node: dict) -> str:
+def _handle_rule(node: dict[str, Any]) -> str:
     return "---"
 
 
-def _handle_panel(node: dict) -> str:
+def _handle_panel(node: dict[str, Any]) -> str:
     """Convert a panel (info/warning/error/note) to a blockquote."""
     panel_type = node.get("attrs", {}).get("panelType", "info")
     prefix_map = {"info": "Info", "warning": "Warning", "error": "Error", "note": "Note"}
@@ -221,7 +222,7 @@ def _handle_panel(node: dict) -> str:
     return "\n".join(lines)
 
 
-def _handle_media_single(node: dict) -> str:
+def _handle_media_single(node: dict[str, Any]) -> str:
     """Convert a media node to an image reference or placeholder."""
     for child in node.get("content", []):
         if child.get("type") == "media":
@@ -235,7 +236,7 @@ def _handle_media_single(node: dict) -> str:
     return ""
 
 
-def _handle_media_group(node: dict) -> str:
+def _handle_media_group(node: dict[str, Any]) -> str:
     """Convert a group of media items to a list of references."""
     parts: list[str] = []
     for child in node.get("content", []):
@@ -247,14 +248,14 @@ def _handle_media_group(node: dict) -> str:
     return "\n".join(parts)
 
 
-def _handle_expand(node: dict) -> str:
+def _handle_expand(node: dict[str, Any]) -> str:
     """Convert an expand/collapse section to a details summary."""
     title = node.get("attrs", {}).get("title", "Details")
     inner = _convert_nodes(node.get("content", []))
     return f"**{title}**\n\n{inner}"
 
 
-def _handle_task_list(node: dict) -> str:
+def _handle_task_list(node: dict[str, Any]) -> str:
     """Convert ADF action items to Markdown checkboxes."""
     lines: list[str] = []
     for item in node.get("content", []):
@@ -267,7 +268,7 @@ def _handle_task_list(node: dict) -> str:
     return "\n".join(lines)
 
 
-def _handle_decision_list(node: dict) -> str:
+def _handle_decision_list(node: dict[str, Any]) -> str:
     """Convert ADF decision items to a bulleted list."""
     lines: list[str] = []
     for item in node.get("content", []):
@@ -281,10 +282,10 @@ def _handle_decision_list(node: dict) -> str:
 # ── Fallback ──────────────────────────────────────────────────────
 
 
-def _fallback_text(node: dict) -> str:
+def _fallback_text(node: dict[str, Any]) -> str:
     """Extract any readable text from an unknown node via recursion."""
     if "text" in node:
-        return node["text"]
+        return cast(str, node["text"])
     content = node.get("content", [])
     if content:
         return _convert_inline_content(node)
@@ -293,7 +294,7 @@ def _fallback_text(node: dict) -> str:
 
 # ── Handler registry ──────────────────────────────────────────────
 
-_NODE_HANDLERS: dict[str, Callable[[dict], str]] = {
+_NODE_HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "paragraph": _handle_paragraph,
     "heading": _handle_heading,
     "blockquote": _handle_blockquote,

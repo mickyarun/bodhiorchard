@@ -15,6 +15,7 @@
 """Authentication endpoints: login, register, and current user retrieval."""
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -100,7 +101,7 @@ async def change_password(
     body: ChangePasswordRequest,
     current_user: User = Depends(get_current_user_pending_password),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     """Change the current user's password and clear must_change_password flag.
 
     Args:
@@ -245,10 +246,10 @@ async def register(
     await db.flush()
 
     # Set transient org context for the response serialization
-    created.org_id = org.id  # type: ignore[attr-defined]
-    created.role = UserRole.DEVELOPER  # type: ignore[attr-defined]
-    created.role_id = None  # type: ignore[attr-defined]
-    created.role_ref = None  # type: ignore[attr-defined]
+    created.org_id = org.id
+    created.role = UserRole.DEVELOPER
+    created.role_id = None
+    created.role_ref = None
 
     return created
 

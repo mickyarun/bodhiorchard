@@ -58,7 +58,7 @@ async def build_prd_prompt(
     meta = bud.metadata_ or {}
     session_id = meta.get("triage_session_id")
 
-    triage_context: dict = {}
+    triage_context: dict[str, Any] = {}
     if session_id:
         from app.models.triage_session import TriageSession
 
@@ -517,7 +517,7 @@ async def build_testing_prompt(
 
 
 def _build_repo_diff_sections(
-    confirmed_repos: list[dict],
+    confirmed_repos: list[dict[str, Any]],
     last_shas: dict[str, str],
     pr_branches: dict[str, str],
 ) -> tuple[list[str], str | None]:

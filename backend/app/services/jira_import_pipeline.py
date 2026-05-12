@@ -40,6 +40,7 @@ from app.schemas.jira_import import (
     ReviewItem,
     SkippedCounts,
 )
+from app.schemas.jobs import JobState
 from app.services.jira_client import JiraClient
 from app.services.jira_consolidator import (
     ConsolidatedGroup,
@@ -60,7 +61,7 @@ from app.services.jira_import_helpers import (
     mark_session_failed,
     resolve_users,
 )
-from app.services.job_queue import JobState, update_job
+from app.services.job_queue import update_job
 
 logger = structlog.get_logger(__name__)
 
@@ -136,7 +137,7 @@ async def handle_discovery_job(job_id: str, raw_payload: dict[str, Any]) -> None
             update_job(job_id, status_message="Fetching sample issues...", progress_pct=60)
 
             # Fetch 5 sample issues for preview
-            sample_issues: list[dict] = []
+            sample_issues: list[dict[str, Any]] = []
             async for batch in client.search_issues(f"{jql} ORDER BY created DESC", start_at=0):
                 for issue in batch[:5]:
                     sample_issues.append(
@@ -284,7 +285,7 @@ async def handle_import_job(job_id: str, raw_payload: dict[str, Any]) -> None:
             if custom_jql:
                 jql = f'project = "{pk}"{base_filter} AND ({custom_jql}) ORDER BY created ASC'
 
-            all_issues: list[dict] = []
+            all_issues: list[dict[str, Any]] = []
             page_num = 0
             total = session.total_issues or 0
             resume_at = session.processed_count or 0
@@ -407,7 +408,7 @@ async def _load_groups(
     org_id: uuid.UUID,
     session_id: uuid.UUID,
     groups: list[ConsolidatedGroup],
-    standalone_bugs: list[dict],
+    standalone_bugs: list[dict[str, Any]],
     mapper: JiraFieldMapper,
     map_repo: JiraIssueBudMapRepository,
     job_id: str,

@@ -17,6 +17,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -132,7 +133,7 @@ class PullRequest(BaseModel):
         nullable=False,
         default=PRReviewStatus.PENDING,
     )
-    metadata_: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
         return (

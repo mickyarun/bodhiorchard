@@ -230,14 +230,14 @@ async def slack_events(
             create_job(JOB_TRIAGE, payload=triage_payload.model_dump())
 
     elif event_type == "message":
-        event = SlackMessageEvent.model_validate(event_data)
+        msg = SlackMessageEvent.model_validate(event_data)
         # Only handle thread replies from humans (not bot messages, not top-level)
-        if event.thread_ts and not event.bot_id and not event.subtype:
+        if msg.thread_ts and not msg.bot_id and not msg.subtype:
             triage_payload = TriageJobPayload(
                 team_id=payload.team_id or "",
                 action="continue_triage",
                 event_type="message",
-                event_data=event.model_dump(),
+                event_data=msg.model_dump(),
             )
             create_job(JOB_TRIAGE, payload=triage_payload.model_dump())
 

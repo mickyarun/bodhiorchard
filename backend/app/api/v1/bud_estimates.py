@@ -154,7 +154,8 @@ async def get_estimate_history(
     """Get historical estimate snapshots for a BUD."""
     await _get_bud_or_404(bud_id, current_user.org_id, db)
     repo = BUDEstimateSnapshotRepository(db, org_id=current_user.org_id)
-    return await repo.list_for_bud(bud_id, limit=limit)
+    snapshots = await repo.list_for_bud(bud_id, limit=limit)
+    return [EstimateSnapshotRead.model_validate(s) for s in snapshots]
 
 
 # ── Helpers ──────────────────────────────────────────────────────

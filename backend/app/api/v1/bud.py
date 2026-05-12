@@ -16,6 +16,7 @@
 
 import uuid
 from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
@@ -539,7 +540,7 @@ async def update_bud(
 async def _trigger_status_jobs(
     bud: BUDDocument,
     old_status: BUDStatus,
-    update_data: dict,
+    update_data: dict[str, Any],
     response: Response,
     current_user: User,
     db: AsyncSession,
@@ -878,7 +879,7 @@ async def cancel_agent_task(
         return BUDAgentTaskRead.model_validate(task)
 
     reason = f"Cancelled by {current_user.email}"
-    signalled = bool(task.job_id) and cancel_in_memory_job(task.job_id, reason=reason)
+    signalled = cancel_in_memory_job(task.job_id, reason=reason) if task.job_id else False
 
     if not signalled:
         # Orphan — no worker will ever clean this up, so we do it here.
