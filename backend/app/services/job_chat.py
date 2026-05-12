@@ -45,12 +45,6 @@ from app.services.skill_loader import load_skill
 
 logger = structlog.get_logger(__name__)
 
-# Design-chat iteration uses Haiku 4.5 by default: ~3× faster TTFT than
-# Sonnet, and the per-iteration delta (small visual edits on an existing
-# wireframe) is well within Haiku's quality envelope. Sonnet remains the
-# default for the initial JOB_DESIGN_AGENT run (designer.md skill).
-DESIGN_ITERATION_MODEL = "claude-haiku-4-5"
-
 # A small-edit chat needs at most: fetch prior wireframe, optionally fetch
 # design system, write back. Four turns is the comfortable ceiling — the
 # initial design agent keeps its 10-turn budget via the skill config.
@@ -81,8 +75,21 @@ def _should_resume_session(history: list[dict[str, str]] | None) -> bool:
         return True
     if len(history) > RESUME_HISTORY_MSG_CAP:
         return False
-    total = sum(len(m.get("content") or "") + _RESUME_HISTORY_MSG_OVERHEAD for m in history)
+    total = sum(len(m.get("message") or "") + _RESUME_HISTORY_MSG_OVERHEAD for m in history)
     return total <= RESUME_HISTORY_BYTE_CAP
+
+
+def _is_subsequent_iteration(history: list[dict[str, str]] | None) -> bool:
+    """Return True if a prior AI reply exists for this chat thread.
+
+    First message in a thread → no prior AI message → ``False`` →
+    caller should use ``--session-id`` to claim the namespace. Once an
+    AI reply lands, subsequent calls use ``--resume`` to load the same
+    CLI session from disk and warm the Anthropic prompt cache.
+    """
+    if not history:
+        return False
+    return any(m.get("role") == "ai" for m in history)
 
 
 async def handle_chat_job(job_id: str, raw_payload: dict[str, Any]) -> None:
@@ -205,44 +212,61 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     is_design_iteration = payload.section == "design"
     skill_model = (skill.model or None) if skill else None
     skill_turns = skill.max_turns if skill else 0
-    iteration_model = DESIGN_ITERATION_MODEL if is_design_iteration else skill_model
+    # Iteration model comes from the skill's ``iteration_model`` field
+    # (configurable in the agent-prompt frontend). Falls back to the skill's
+    # main ``model`` when empty. Only the design section applies the
+    # turn-cap override — other sections keep the skill's own turn budget.
+    skill_iteration_model = (skill.iteration_model or skill.model or None) if skill else None
+    iteration_model = skill_iteration_model if is_design_iteration else skill_model
     iteration_turns = DESIGN_ITERATION_MAX_TURNS if is_design_iteration else skill_turns
-    resume_session_id: str | None = None
-    if is_design_iteration and payload.session_id and _should_resume_session(history):
-        resume_session_id = payload.session_id
 
-    def _build_config(*, resume_id: str | None) -> ClaudeRunnerConfig:
+    # CLI session wiring for prompt-cache warmth across iterations.
+    # First message in a thread → no prior AI reply → claim the namespace
+    # with ``--session-id <uuid>``. Subsequent messages → ``--resume <uuid>``
+    # so the CLI loads the prior session file and Anthropic returns a cache
+    # hit on the stable prefix.
+    cli_session_id: str | None = None
+    is_resume = False
+    if is_design_iteration and payload.session_id and _should_resume_session(history):
+        cli_session_id = payload.session_id
+        is_resume = _is_subsequent_iteration(history)
+
+    def _build_config(*, session_id: str | None, resume: bool) -> ClaudeRunnerConfig:
         return ClaudeRunnerConfig(
             max_turns=iteration_turns,
             timeout_seconds=chat_timeout,
             mcp=mcp_config,
             model=iteration_model,
             effort=(skill.effort or None) if skill else None,
-            resume_session_id=resume_id,
+            cli_session_id=session_id,
+            is_resume=resume,
         )
 
     try:
         result = await run_claude_code(
             prompt=prompt,
             working_dir=repo_path,
-            config=_build_config(resume_id=resume_session_id),
+            config=_build_config(session_id=cli_session_id, resume=is_resume),
             progress_callback=make_progress_callback(job_id),
         )
-        # ``--resume`` fails when the session file is missing (e.g. backend
-        # restarted between iterations) and on cache-invalidating long
-        # histories the docs warn about. Retry once without it so a stale
-        # session_id doesn't block an iteration — we pay the cache-creation
-        # cost on this turn but the next turn warms the new session.
-        if not result.success and resume_session_id:
+        # Both ``--session-id`` and ``--resume`` can fail when the CLI's
+        # session-file state disagrees with what we passed (backend restart
+        # between iterations, stale client-provided id, a session file
+        # already existing for a brand-new id we tried to claim, etc.).
+        # Retry once dropping session affinity entirely — we pay the
+        # cache-creation cost on this turn but the user's edit still
+        # lands; the next turn re-warms with a fresh session.
+        if not result.success and cli_session_id:
             logger.warning(
-                "design_chat_retry_without_resume",
-                session_id=resume_session_id,
+                "design_chat_retry_without_session_affinity",
+                session_id=cli_session_id,
+                was_resume=is_resume,
                 error_code=result.error_code,
             )
             result = await run_claude_code(
                 prompt=prompt,
                 working_dir=repo_path,
-                config=_build_config(resume_id=None),
+                config=_build_config(session_id=None, resume=False),
                 progress_callback=make_progress_callback(job_id),
             )
     finally:

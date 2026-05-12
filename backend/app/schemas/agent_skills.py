@@ -30,6 +30,13 @@ class AgentSkillRead(BaseModel):
     prompt: str
     max_turns: int = Field(0, description="Max Claude CLI turns (0 = unlimited)")
     model: str = Field("", description="Claude model alias or ID (empty = CLI default)")
+    iteration_model: str = Field(
+        "",
+        description=(
+            "Optional faster model for chat-iteration paths "
+            "(e.g. claude-haiku-4-5). Empty falls back to ``model``."
+        ),
+    )
     effort: str = Field(
         "", description="Reasoning effort: low, medium, high, max (empty = default)"
     )
@@ -53,6 +60,7 @@ class AgentSkillRead(BaseModel):
             prompt=skill.prompt,
             max_turns=skill.max_turns,
             model=skill.model,
+            iteration_model=skill.iteration_model,
             effort=skill.effort,
             is_customized=is_customized,
         )
@@ -71,6 +79,9 @@ class AgentSkillUpdate(BaseModel):
     prompt: str | None = Field(None, min_length=1, max_length=100_000)
     max_turns: int | None = Field(None, ge=0, le=100, description="0 = unlimited")
     model: str | None = Field(None, max_length=100, description="Claude model alias or ID")
+    iteration_model: str | None = Field(
+        None, max_length=100, description="Faster model for chat iteration (empty = use model)"
+    )
     effort: str | None = Field(None, max_length=20, description="Reasoning effort level")
 
     @model_validator(mode="after")
@@ -86,6 +97,7 @@ class AgentSkillUpdate(BaseModel):
                 self.prompt,
                 self.max_turns,
                 self.model,
+                self.iteration_model,
                 self.effort,
             )
         ):

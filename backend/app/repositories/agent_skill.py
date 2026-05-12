@@ -58,6 +58,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
         prompt: str,
         max_turns: int = 0,
         model: str = "",
+        iteration_model: str = "",
         effort: str = "",
     ) -> AgentSkill:
         """Insert or update a skill for a given slug.
@@ -71,6 +72,8 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             prompt: Full markdown prompt body.
             max_turns: Max Claude CLI turns (0 = unlimited).
             model: Claude model alias or ID (empty = CLI default).
+            iteration_model: Faster model for chat-iteration paths
+                (empty = fall back to ``model``).
             effort: Reasoning effort level (empty = default).
 
         Returns:
@@ -85,6 +88,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             existing.prompt = prompt
             existing.max_turns = max_turns
             existing.model = model
+            existing.iteration_model = iteration_model
             existing.effort = effort
             await self._db.flush()
             await self._db.refresh(existing)
@@ -100,6 +104,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             prompt=prompt,
             max_turns=max_turns,
             model=model,
+            iteration_model=iteration_model,
             effort=effort,
         )
         return await self.create(skill)

@@ -5,6 +5,7 @@ tools: Read
 mcp_tools: get_bud_context, list_design_systems, get_design_system, get_bud_designs, write_bud_design
 max_turns: 10
 model: sonnet
+iteration_model: claude-haiku-4-5
 effort:
 ---
 

@@ -48,6 +48,11 @@ class Skill:
     prompt: str  # Full markdown body (after frontmatter)
     max_turns: int = 0  # 0 = unlimited (omit --max-turns flag)
     model: str = ""  # empty = use CLI default. Values: "opus", "sonnet", full model ID
+    # Optional override for chat-iteration paths (e.g. BUD design chat
+    # follow-ups). When empty, falls back to ``model``. Use this to put a
+    # faster model on the hot iteration loop (Haiku) while keeping a
+    # higher-quality model (Sonnet) for the initial agent run.
+    iteration_model: str = ""
     effort: str = ""  # empty = use CLI default. Values: "low", "medium", "high", "max"
 
 
@@ -80,6 +85,7 @@ def load_skill(skill_name: str) -> Skill:
         prompt=body.strip(),
         max_turns=int(frontmatter.get("max_turns", 0)),
         model=str(frontmatter.get("model", "") or ""),
+        iteration_model=str(frontmatter.get("iteration_model", "") or ""),
         effort=str(frontmatter.get("effort", "") or ""),
     )
 
@@ -128,6 +134,7 @@ async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSessio
         prompt=skill_row.prompt,
         max_turns=skill_row.max_turns or 0,
         model=skill_row.model or "",
+        iteration_model=skill_row.iteration_model or "",
         effort=skill_row.effort or "",
     )
 
@@ -176,6 +183,7 @@ async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
                 prompt=skill.prompt,
                 max_turns=skill.max_turns,
                 model=skill.model,
+                iteration_model=skill.iteration_model,
                 effort=skill.effort,
             )
             seeded += 1

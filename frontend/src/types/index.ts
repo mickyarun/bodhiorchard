@@ -667,6 +667,13 @@ export interface JobCreatedResponse {
   jobId: string
 }
 
+export interface ChatJobCreatedResponse extends JobCreatedResponse {
+  // Server-generated session_id for the chat thread. Echoed back to the
+  // backend on subsequent messages so the worker can pass --resume <id>
+  // and the Anthropic prompt cache stays warm for back-to-back edits.
+  sessionId: string
+}
+
 // ── Chat Message Types ──────────────────────────────────────────
 export interface ChatMessageRead {
   id: string

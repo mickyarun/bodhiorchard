@@ -149,6 +149,23 @@ async def build_design_prompt(
             "additional files for general visual style: tokens come from "
             "the design system, shell comes from the App Skeleton.\n"
         )
+    else:
+        # No frontend code_locations from BUDFeatureLink (e.g. BUD only links
+        # to backend services). Without screen context the agent invents
+        # generic page titles instead of matching the existing app's
+        # terminology — caught in the wild when initial designs produced
+        # generic headings instead of the real screen names.
+        parts.append(
+            "## Existing Screen Context (no linked screen)\n\n"
+            "No linked frontend file was provided for this BUD. Read **one "
+            "or two** existing screen/page components from this repo to "
+            "learn the real page-heading text, breadcrumb style, and "
+            "filter-bar pattern (e.g. a list-view or details-view file "
+            "in the project's pages/views/screens directory). Issue the "
+            "reads **in parallel in one turn** when reading more than "
+            "one file. Read no more than two files total — the App "
+            "Skeleton and design-system tokens cover everything else.\n"
+        )
 
     parts.append(
         "## Current Wireframe\n\n"

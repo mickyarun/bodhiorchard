@@ -54,6 +54,13 @@ class AgentSkill(BaseModel):
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     max_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     model: Mapped[str] = mapped_column(String(100), nullable=False, default="", server_default="")
+    # Optional override used on chat-iteration paths (e.g. BUD design chat
+    # follow-ups). Empty falls back to ``model``. A faster model here
+    # (e.g. Haiku) gives ~3× faster iterations while ``model`` (Sonnet)
+    # remains in charge of the initial generation.
+    iteration_model: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="", server_default=""
+    )
     effort: Mapped[str] = mapped_column(String(20), nullable=False, default="", server_default="")
 
     # Relationships

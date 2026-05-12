@@ -93,11 +93,19 @@ class ClaudeRunnerConfig:
     model: str | None = None
     effort: str | None = None
     env_extra: dict[str, str] | None = None
-    # Pass ``--resume <id>`` so the CLI restores the prior session from
-    # ``~/.claude/projects/...`` and keeps the Anthropic prompt cache warm.
-    # The Anthropic cache TTL is 5 minutes, so this only buys a hit when
-    # iterations are back-to-back — exactly the design-chat hot loop.
-    resume_session_id: str | None = None
+    # Session-id wiring for keeping the Anthropic prompt cache warm across
+    # CLI invocations. The CLI assigns its own UUID by default, so an
+    # externally-tracked id (e.g. our chat thread's session_id) would not
+    # match its persistence file. Two flags solve this:
+    #   - ``--session-id <uuid>`` on the FIRST call forces the CLI to use
+    #     OUR uuid as the session id (writes ``~/.claude/projects/.../<uuid>.jsonl``).
+    #   - ``--resume <uuid>`` on subsequent calls loads that same session
+    #     from disk, keeping the prompt cache warm (5-min Anthropic TTL).
+    # ``is_resume`` selects which flag to pass. Both flags use the same id
+    # so the caller owns the namespace. Leaving ``cli_session_id`` None
+    # uses the CLI default behaviour (fresh session each run).
+    cli_session_id: str | None = None
+    is_resume: bool = False
     # Restrict the subprocess to a specific tool allowlist. When non-empty,
     # passes ``--allowedTools <comma list>`` to the Claude CLI so the
     # subprocess can ONLY invoke those tools. Anything else (Bash, Read,
@@ -455,8 +463,12 @@ async def run_claude_code(
         cmd.extend(["--model", config.model])
     if config.effort:
         cmd.extend(["--effort", config.effort])
-    if config.resume_session_id:
-        cmd.extend(["--resume", config.resume_session_id])
+    if config.cli_session_id:
+        # First call in a thread uses --session-id to claim the namespace;
+        # subsequent calls use --resume to load the prior session and hit
+        # the prompt cache. Same uuid in both flags.
+        flag = "--resume" if config.is_resume else "--session-id"
+        cmd.extend([flag, config.cli_session_id])
     if config.allowed_tools:
         # Tighten the subprocess sandbox: only the listed tools can be
         # invoked. Used by the merge phase to disallow Bash / Read /

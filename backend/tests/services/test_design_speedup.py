@@ -31,7 +31,7 @@ import pytest
 from app.services import chat_prompts
 from app.services.claude_runner import _coerce_token_count, _extract_cache_usage
 from app.services.design_system_extractor import _extraction_instructions
-from app.services.job_chat import _should_resume_session
+from app.services.job_chat import _is_subsequent_iteration, _should_resume_session
 from app.services.platforms import PlatformKind
 
 
@@ -80,7 +80,7 @@ def test_coerce_token_count_rejects_bool_and_str() -> None:
 
 
 def test_should_resume_session_allows_short_history() -> None:
-    history = [{"role": "user", "content": "small"}] * 5
+    history = [{"role": "user", "message": "small"}] * 5
     assert _should_resume_session(history) is True
 
 
@@ -91,14 +91,30 @@ def test_should_resume_session_allows_empty_history() -> None:
 
 
 def test_should_resume_session_blocks_long_message_count() -> None:
-    history = [{"role": "user", "content": "x"}] * 100
+    history = [{"role": "user", "message": "x"}] * 100
     assert _should_resume_session(history) is False
 
 
 def test_should_resume_session_blocks_large_byte_count() -> None:
     """Even a short message count blocks if total bytes exceed the cap."""
-    history = [{"role": "user", "content": "x" * 60_000}] * 3
+    history = [{"role": "user", "message": "x" * 30_000}] * 3
     assert _should_resume_session(history) is False
+
+
+def test_is_subsequent_iteration_detects_prior_ai_reply() -> None:
+    """First message → no AI reply yet → False. After AI replies → True."""
+    assert _is_subsequent_iteration([]) is False
+    assert _is_subsequent_iteration([{"role": "user", "message": "hi"}]) is False
+    assert (
+        _is_subsequent_iteration(
+            [
+                {"role": "user", "message": "hi"},
+                {"role": "ai", "message": "done"},
+                {"role": "user", "message": "tweak"},
+            ]
+        )
+        is True
+    )
 
 
 def _fake_platform(kind: PlatformKind) -> SimpleNamespace:
@@ -155,3 +171,37 @@ async def test_build_design_prompt_references_skeleton_and_drops_browse() -> Non
     # generic discovery was the main per-BUD slowdown.
     assert "Read 2–3 existing source files" not in prompt
     assert "Read 2-3 existing source files" not in prompt
+    # When no frontend screen is linked, the prompt provides a targeted
+    # fallback (1–2 file reads, in parallel) so the agent learns real
+    # page-heading terminology. Without this BUDs produced generic page
+    # titles ("Refunds") instead of matching the app's real screen names.
+    assert "no linked screen" in prompt.lower()
+    # Cap-of-two contract — accept prose ("one or two") or digit
+    # form ("1-2" / "1–2") so wording can evolve without invalidating
+    # the test.
+    lowered = prompt.lower()
+    assert ("one or two" in lowered) or ("1–2" in prompt) or ("1-2" in prompt)
+
+
+@pytest.mark.asyncio
+async def test_build_design_prompt_skips_fallback_when_linked() -> None:
+    """When a linked feature *does* provide frontend files, the fallback
+    instruction must NOT fire — its purpose is only to cover the
+    backend-only-link case."""
+
+    async def _with_links(_org_id: str, _bud_id: str) -> str:
+        return "## Linked existing UI surface\n\n- src/pages/Foo.vue\n"
+
+    with patch.object(chat_prompts, "_build_design_linked_section", _with_links):
+        prompt = await chat_prompts.build_design_prompt(
+            bud_ref="BUD-001",
+            title="Add task filter",
+            org_id="11111111-1111-1111-1111-111111111111",
+            message="Make the header darker",
+            bud_id="22222222-2222-2222-2222-222222222222",
+            repo_id="33333333-3333-3333-3333-333333333333",
+        )
+
+    assert "Linked existing UI surface" in prompt
+    assert "Existing Screen Context" in prompt
+    assert "no linked screen" not in prompt.lower()

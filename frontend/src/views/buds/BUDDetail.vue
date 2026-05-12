@@ -1388,6 +1388,11 @@ async function handleChatSend(msg: string, images: string[] = []): Promise<void>
     return
   }
 
+  // Persist the server-generated session_id so the next message in this
+  // thread carries it forward — that's what lets the worker pass
+  // --resume <id> and hit the Anthropic prompt cache on iteration 2+.
+  if (result.sessionId) currentSessionId.value = result.sessionId
+
   startTracking(result.jobId, {
     onProgress(status) {
       chatStatusMessage.value = status.statusMessage
