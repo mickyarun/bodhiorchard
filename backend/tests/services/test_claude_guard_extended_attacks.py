@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Extended attack coverage — Phase B+ rule expansion.
+"""Extended attack coverage — additional rule classes.
 
 Pins the 7 new BASH attack classes (reverse_shell, cryptominer,
 keychain_dump, container_escape, process_injection, persistence, recon,

@@ -21,7 +21,7 @@ three things:
 * ``outputStyle: "default"`` — neutralizes a developer's interactive
   outputStyle (e.g. ``learning``) that would inject ``★ Insight`` blocks
   into skill output (see ``project_claude_subprocess_isolation`` memory).
-* ``permissions.deny`` — the Phase B inline deny list, evaluated by
+* ``permissions.deny`` — the inline deny list, evaluated by
   Claude's prefix matcher before any tool runs. Bypassable, but cheap.
 * ``hooks.PreToolUse`` — invokes ``pretool_guard.py`` for every Bash /
   Read / Edit / Write event, the real gate.
@@ -77,9 +77,9 @@ def build_inline_settings_json() -> str:
                     "hooks": [{"type": "command", "command": pre_hook}],
                 },
             ],
-            # Phase F observability: append every completed tool call to
+            # Audit observability: append every completed tool call to
             # the audit JSONL so we can later promote real usage into
-            # per-skill tool budgets (Layer 1 deferred per plan).
+            # per-skill tool budgets (per-skill tool budgets deferred).
             "PostToolUse": [
                 {
                     "matcher": "Bash|Read|Edit|Write|Glob|Grep",

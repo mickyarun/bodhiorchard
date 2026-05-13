@@ -21,7 +21,7 @@ Before this module existed, ``claude_runner`` spawned the CLI with
 ``SECRET_KEY`` (JWT signing key), ``GITHUB_TOKEN``, ``AWS_*``, every
 ``BODHIORCHARD_*`` setting.
 
-A successful prompt-injection that escapes the Bash deny list (Layer 3) can
+A successful prompt-injection that escapes the Bash deny list can
 ``echo $DATABASE_URL`` or ``echo $ENCRYPTION_KEY`` and there is nothing to
 stop the value from being exfiltrated. This module narrows the child view
 to the bare minimum it actually needs to run, so even if every other layer

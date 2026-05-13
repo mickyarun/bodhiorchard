@@ -13,7 +13,7 @@
 ;; limitations under the License.
 ;;
 ;; Seatbelt profile for the ``claude`` subprocess under macOS Hybrid mode.
-;; Phase E — Layer 7.
+;; macOS Hybrid mode.
 ;;
 ;; Loaded by ``claude_runner`` only when both conditions hold:
 ;;     * platform.system() == "Darwin"
@@ -90,7 +90,7 @@
 
 ;; Network: outbound HTTPS to the allow-listed hosts only. macOS Seatbelt
 ;; cannot filter by hostname directly — we allow outbound TCP/443 and
-;; rely on the Layer 6 init-firewall.sh on Linux for hostname-level
+;; rely on the init-firewall.sh on Linux for hostname-level
 ;; control. On Mac the egress narrowing is at the IP level via the
 ;; ``remote ip`` predicate; here we keep it open to TCP 443 broadly
 ;; because the kernel-side allow list belongs in pf, not Seatbelt.

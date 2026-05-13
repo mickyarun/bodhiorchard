@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Phase A unit tests for the ``claude_guard`` security module."""
+"""Unit tests for the ``claude_guard`` security module."""
 
 from __future__ import annotations
 
@@ -257,3 +257,56 @@ class TestClaudeRunnerIntegration:
 
         assert captured.get("mcp_path") is not None
         assert captured["mode"] == 0o600, f"got mode {oct(captured['mode'])}"  # type: ignore[arg-type, call-overload]
+
+
+class TestValidateWorkingDir:
+    """``_validate_working_dir`` rejects credential / system roots."""
+
+    def test_valid_workspace_path_accepted(self, tmp_path: object) -> None:
+        from app.services.claude_runner import _validate_working_dir
+
+        result = _validate_working_dir(str(tmp_path))
+        assert result == str(tmp_path)
+
+    def test_none_defaults_to_cwd(self) -> None:
+        from pathlib import Path as _Path
+
+        from app.services.claude_runner import _validate_working_dir
+
+        result = _validate_working_dir(None)
+        assert _Path(result).is_dir()
+
+    def test_missing_dir_rejected(self) -> None:
+        from app.services.claude_runner import _validate_working_dir
+
+        with pytest.raises(ValueError, match="does not exist"):
+            _validate_working_dir("/nonexistent/path/xyz")
+
+    @pytest.mark.parametrize(
+        "forbidden_path",
+        [
+            "/etc",
+            "/proc",
+            "/sys",
+            "/dev",
+        ],
+    )
+    def test_system_roots_rejected(self, forbidden_path: str) -> None:
+        from pathlib import Path as _Path
+
+        from app.services.claude_runner import _validate_working_dir
+
+        if not _Path(forbidden_path).is_dir():
+            pytest.skip(f"{forbidden_path} not present on test host")
+        with pytest.raises(ValueError, match="system root"):
+            _validate_working_dir(forbidden_path)
+
+    def test_credential_dir_rejected(self, tmp_path: object) -> None:
+        from pathlib import Path as _Path
+
+        from app.services.claude_runner import _validate_working_dir
+
+        ssh_dir = _Path(tmp_path) / ".ssh"  # type: ignore[operator]
+        ssh_dir.mkdir()
+        with pytest.raises(ValueError, match="credential dir"):
+            _validate_working_dir(str(ssh_dir))

@@ -70,8 +70,8 @@ services:
       # Persistent store for the backend's ed25519 deploy keypair used to
       # clone private GitHub repos. Only the public key is ever exposed.
       - ssh_data:/data/ssh
-    # Phase D Layer 6 hardening — defense in depth around the ``claude``
-    # subprocess. To enable the egress firewall on a Linux host:
+    # Defense-in-depth hardening around the ``claude`` subprocess.
+    # To enable the egress firewall on a Linux host:
     #
     # 1. Uncomment the cap_drop / cap_add / tmpfs blocks below.
     # 2. Set ``BODHIORCHARD_EGRESS_FIREWALL=1`` in the compose env so

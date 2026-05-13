@@ -14,7 +14,7 @@
 
 """Wrap the ``claude`` argv with ``sandbox-exec`` on macOS Hybrid mode.
 
-Phase E — Layer 7. Opt-in via ``BODHIORCHARD_HYBRID_SANDBOX=1``. When
+macOS Hybrid mode. Opt-in via ``BODHIORCHARD_HYBRID_SANDBOX=1``. When
 enabled and running on Darwin, ``maybe_wrap_with_sandbox()`` prepends
 ``sandbox-exec -f bodhi.sb -D WORKSPACE=... -D HOME_DIR=... ...`` to
 the command list before ``asyncio.create_subprocess_exec`` is called.

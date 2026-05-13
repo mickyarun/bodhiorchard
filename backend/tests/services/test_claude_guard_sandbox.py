@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Phase E unit tests: macOS Seatbelt wrapper.
+"""Unit tests: macOS Seatbelt wrapper.
 
 These tests run on every platform — the wrap behavior gates internally
 on sys.platform + env flag, so the tests just verify the gating logic.

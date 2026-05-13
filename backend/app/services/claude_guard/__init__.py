@@ -26,21 +26,23 @@ commit messages, BUD doc bodies) can therefore push the subprocess into:
 * force-pushing or wiping branches,
 * persisting via a planted ``.claude/settings.json`` hook.
 
-This package implements the layered defense documented in the project plan
-``plans/claude-we-are-running-parallel-hickey.md``:
+This package implements a layered defense:
 
-* ``env_filter`` (Phase A) — Layer 4. Whitelist the env vars the subprocess
-  inherits, dropping ``ENCRYPTION_KEY`` / ``DATABASE_URL`` / ``GITHUB_TOKEN``.
-* ``resource_limits`` (Phase A) — kernel-enforced memory + process caps via
-  a ``preexec_fn`` (RLIMIT_AS, RLIMIT_NPROC, setsid).
-* ``deny_rules`` (Phase B) — single source of truth for the inline
+* ``env_filter`` — whitelist the env vars the subprocess inherits,
+  dropping ``ENCRYPTION_KEY`` / ``DATABASE_URL`` / ``GITHUB_TOKEN``.
+* ``resource_limits`` — kernel-enforced memory + process caps via a
+  ``preexec_fn`` (RLIMIT_AS, RLIMIT_NPROC, setsid).
+* ``deny_rules`` — single source of truth for the inline
   ``permissions.deny`` list and the regex matchers used by the hook.
-* ``inline_settings`` (Phase B) — builds the inline ``--settings`` JSON
-  passed to ``claude``: outputStyle + deny list + disableBypassPermissions
-  + PreToolUse hook wiring.
-* ``pretool_guard`` (Phase B) — standalone hook script invoked by the CLI
-  on every Bash / Read / Edit / Write event; the real gate behind the
-  declarative deny list.
+* ``inline_settings`` — builds the inline ``--settings`` JSON passed to
+  ``claude``: outputStyle + deny list + disableBypassPermissions +
+  PreToolUse hook wiring.
+* ``pretool_guard`` — standalone hook script invoked by the CLI on every
+  Bash / Read / Edit / Write event; the real gate behind the declarative
+  deny list.
+* ``audit_log`` / ``posttool_guard`` — append-only JSONL audit of every
+  tool decision for forensics + future tool-budget tuning.
+* ``macos_sandbox`` — opt-in Seatbelt wrapper for Hybrid mode on Darwin.
 """
 
 from app.services.claude_guard.env_filter import build_claude_env

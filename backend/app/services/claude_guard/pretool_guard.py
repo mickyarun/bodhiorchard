@@ -96,7 +96,7 @@ def evaluate(event: dict[str, Any]) -> dict[str, Any] | None:
         if hit:
             rule_name, matched = hit
             return _deny(
-                f"Blocked by Phase B Bash deny rule '{rule_name}' "
+                f"Blocked by Bash deny rule '{rule_name}' "
                 f"(matched substring: {matched!r}). "
                 "If this is a legitimate command, contact the operator."
             )
@@ -114,7 +114,7 @@ def evaluate(event: dict[str, Any]) -> dict[str, Any] | None:
         if hit:
             rule_name, matched = hit
             return _deny(
-                f"Blocked by Phase B path deny rule '{rule_name}' "
+                f"Blocked by path deny rule '{rule_name}' "
                 f"(matched substring: {matched!r}). "
                 f"Resolved path: {canonical!r}"
             )
@@ -126,7 +126,7 @@ def main() -> int:
     """Read stdin, decide, write stdout. Always exit 0 (fail open on error).
 
     Every decision (allow or deny) is also appended to the audit JSONL so
-    Phase F observability captures the full tool-call stream.
+    Audit observability captures the full tool-call stream.
     """
     try:
         raw = sys.stdin.read()

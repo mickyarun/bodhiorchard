@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Phase B unit tests: deny rules + PreToolUse hook + inline settings.
+"""Unit tests: deny rules + PreToolUse hook + inline settings.
 
 Coverage spans the 8 documented attack classes plus common bypass
 attempts. Each test pins a specific real-world prompt-injection payload
@@ -459,7 +459,7 @@ class TestInlineSettingsBuilder:
         assert "pretool_guard.py" in first_hook["command"]
 
     def test_posttool_hook_wired(self) -> None:
-        """Phase F: PostToolUse hook must be present for audit observability."""
+        """PostToolUse hook must be present for audit observability."""
         payload = json.loads(build_inline_settings_json())
         post = payload["hooks"].get("PostToolUse", [])
         assert post, "PostToolUse hook missing"

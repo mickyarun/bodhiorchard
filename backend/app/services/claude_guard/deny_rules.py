@@ -498,7 +498,7 @@ READ_DENY_RULES: list[tuple[str, re.Pattern[str]]] = [
         "secret_extensions",
         # Generic key / certificate / vault file extensions. False-
         # positive risk on workspace files (.key in a frontend project),
-        # mitigated by Phase A ``--add-dir`` (the file must already be
+        # mitigated by ``--add-dir`` workspace pin (the file must already be
         # inside the workspace and survive the read tool's own checks).
         re.compile(r"\.(pem|p12|pfx|jks|keystore|kdbx)$"),
     ),
@@ -522,8 +522,8 @@ def canonicalize_bash(command: str) -> str:
     a parser — but to defeat obvious payload-hiding. Determined attackers
     can still bypass with multi-stage indirection (write a script, then
     chmod+exec it; alias a variable with IFS; use ``python -c`` /
-    ``urllib`` instead of curl). Layer 4 (env scrub), Layer 5
-    (``--add-dir`` pin) and Layer 6 (egress firewall) cover the residual.
+    ``urllib`` instead of curl). The env scrub, ``--add-dir`` workspace
+    pin, and egress firewall cover the residual.
     """
     out = command
     # Decode \xHH hex escapes

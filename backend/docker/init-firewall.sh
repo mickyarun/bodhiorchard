@@ -17,7 +17,7 @@
 # subprocesses. Adapted from Anthropic's reference devcontainer script
 # (https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh).
 #
-# Phase D — Layer 6. Runs as a one-shot init container BEFORE the
+# Egress firewall: Runs as a one-shot init container BEFORE the
 # backend starts. Locks egress to a small allowlist so a compromised
 # ``claude`` subprocess cannot phone home, even if every app-layer
 # defense fails.
@@ -27,7 +27,7 @@
 #   * statsig.anthropic.com     — Claude Code telemetry (gated by env)
 #   * registry.npmjs.org        — Claude Code self-update + MCP installs
 #   * pypi.org / files.pythonhosted.org — pip installs (allow-listed
-#     here only because Layer 2 already denies them at the tool gate)
+#     here only because the deny list already covers them at the tool gate)
 #   * github.com / api.github.com — Git clones over HTTPS
 #
 # Requires ``NET_ADMIN`` capability inside the container. If the host
@@ -81,16 +81,40 @@ iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 # anthropic CDNs) doesn't strand us. Failure to resolve a single
 # domain is non-fatal — log and continue.
 ALLOWED_DOMAINS=(
+    # Anthropic API + telemetry
     "api.anthropic.com"
     "statsig.anthropic.com"
+    # Package managers — Claude Code self-update + MCP installs
     "registry.npmjs.org"
     "pypi.org"
     "files.pythonhosted.org"
+    # Git / GitHub — repository clones, PR + check writes
     "github.com"
     "api.github.com"
     "objects.githubusercontent.com"
     "codeload.github.com"
+    # Slack — bug intake, slack-triage agent, agent-activity fan-out
+    "slack.com"
+    "api.slack.com"
+    "hooks.slack.com"
+    "files.slack.com"
+    "slack-files.com"
+    # Atlassian / Jira — bug import + customer tenants
+    "api.atlassian.com"
+    "auth.atlassian.com"
+    # NOTE: Customer Jira tenants live on *.atlassian.net subdomains; the
+    # iptables host-resolution approach can't wildcard. Set
+    # BODHIORCHARD_EXTRA_ALLOWED_DOMAINS (comma-separated) in the
+    # compose env to extend at deploy time, e.g.
+    # "BODHIORCHARD_EXTRA_ALLOWED_DOMAINS=acme.atlassian.net,foo.atlassian.net".
 )
+
+# Caller-supplied extras (per-deployment customer tenants etc.) appended
+# without modifying the in-tree default list.
+if [[ -n "${BODHIORCHARD_EXTRA_ALLOWED_DOMAINS:-}" ]]; then
+    IFS=',' read -r -a extra_domains <<< "$BODHIORCHARD_EXTRA_ALLOWED_DOMAINS"
+    ALLOWED_DOMAINS+=("${extra_domains[@]}")
+fi
 
 resolve_and_allow() {
     local domain="$1"

@@ -187,7 +187,7 @@ async def _run_with_streaming(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=10 * 1024 * 1024,  # 10MB — Claude stream-json lines can exceed 64KB default
-            # Phase A guard: kernel-enforced RLIMIT_AS + RLIMIT_NPROC + setsid
+            # guard: kernel-enforced RLIMIT_AS + RLIMIT_NPROC + setsid
             # in the child. Returns ``None`` on Windows so this is a no-op there.
             preexec_fn=apply_subprocess_rlimits(),
         )
@@ -411,6 +411,53 @@ def is_claude_cli_available() -> bool:
     return shutil.which("claude") is not None
 
 
+# Paths the resolved ``working_dir`` must never alias — credential stores,
+# kernel pseudo-filesystems, and the engine's own config dir. Mirrors the
+# ``READ_DENY_RULES`` but applied at the spawn boundary so a buggy
+# caller can never widen the subprocess's filesystem allowlist into a
+# secret store.
+_FORBIDDEN_CWD_PREFIXES: tuple[str, ...] = (
+    "/etc",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/var/db",
+    "/private/etc",
+)
+
+
+def _validate_working_dir(working_dir: str | Path | None) -> str:
+    """Resolve and validate the spawn cwd. Returns absolute path.
+
+    Layered on top of CodeQL's ``py/path-injection`` concern: even though
+    ``working_dir`` is set by trusted internal backend code (never raw
+    HTTP input), we hard-fail if the resolved path is missing, not a
+    directory, or aliases a credential / system root. This shrinks the
+    blast radius if a future caller passes a tainted value by mistake.
+    """
+    resolved = Path(str(working_dir)).resolve() if working_dir else Path.cwd().resolve()
+
+    if not resolved.is_dir():
+        raise ValueError(
+            f"run_claude_code working_dir does not exist or is not a directory: {resolved}"
+        )
+
+    resolved_str = str(resolved)
+    for forbidden in _FORBIDDEN_CWD_PREFIXES:
+        if resolved_str == forbidden or resolved_str.startswith(forbidden + "/"):
+            raise ValueError(f"run_claude_code refuses to spawn under a system root: {resolved}")
+
+    # Also refuse paths that alias a credential dir under any user's home.
+    home_dir_pattern = ("/.ssh", "/.aws", "/.gnupg", "/.kube", "/.claude/.credentials")
+    for cred in home_dir_pattern:
+        if cred in resolved_str:
+            raise ValueError(
+                f"run_claude_code refuses to spawn inside a credential dir: {resolved}"
+            )
+
+    return resolved_str
+
+
 async def run_claude_code(
     prompt: str,
     working_dir: str | Path | None = None,
@@ -446,11 +493,17 @@ async def run_claude_code(
             ),
         )
 
-    # Resolve to an absolute path so the Phase A ``--add-dir`` workspace
+    # Resolve to an absolute path so the ``--add-dir`` workspace pin workspace
     # pin allows exactly the intended directory. With a relative ``"."``
     # the CLI would widen the filesystem allowlist to whatever the
     # FastAPI worker happens to be running from.
-    cwd = str(Path(working_dir).resolve()) if working_dir else str(Path.cwd().resolve())
+    #
+    # ``working_dir`` is set by trusted internal backend code (job_design,
+    # bud_agent_handler, scan/synthesis) and never flows from raw HTTP
+    # request bodies. We still validate strictly: the resolved path must
+    # be an existing directory and must NOT alias a credential or system
+    # root, so even a buggy caller can't widen the sandbox.
+    cwd = _validate_working_dir(working_dir)
 
     # Force stream-json when a progress callback is provided
     output_format = config.output_format
@@ -466,7 +519,7 @@ async def run_claude_code(
         "--output-format",
         output_format,
         "--dangerously-skip-permissions",
-        # Inline ``--settings`` JSON. Built from a Phase A/B/2-aware
+        # Inline ``--settings`` JSON. Built from a security-aware
         # builder so we get, in one place:
         # * outputStyle "default" — neutralizes the developer's
         #   interactive outputStyle (e.g. "learning" would inject
@@ -506,7 +559,7 @@ async def run_claude_code(
         # ops instead of exploring the codebase.
         cmd.extend(["--allowedTools", ",".join(config.allowed_tools)])
 
-    # Phase A guard: pin Claude's filesystem allowlist to the working
+    # guard: pin Claude's filesystem allowlist to the working
     # directory. Without this, a successful prompt-injection can
     # ``Read(~/.ssh/id_rsa)`` even though the working directory is the
     # cloned repo. ``--add-dir`` is additive; the CLI's default working-dir
@@ -540,7 +593,7 @@ async def run_claude_code(
             delete=False,
             mode="w",
         ) as tmp:
-            # Phase A guard: tighten file mode to owner-read-only BEFORE
+            # guard: tighten file mode to owner-read-only BEFORE
             # writing the token, so there is no window where the token is
             # on disk under a world-readable umask. Best-effort on Windows
             # (no ``fchmod``); the path-based ``os.chmod`` below covers it.
@@ -563,14 +616,14 @@ async def run_claude_code(
         mcp_enabled=config.mcp is not None,
     )
 
-    # Phase A guard: build the subprocess env from a whitelist instead of
+    # guard: build the subprocess env from a whitelist instead of
     # inheriting ``os.environ`` wholesale. Removes ``ENCRYPTION_KEY``,
     # ``DATABASE_URL``, ``SECRET_KEY``, ``GITHUB_TOKEN`` and friends from
     # the child's view so a prompt-injection that escapes the Bash deny
     # rules has nothing valuable to ``echo $...`` out.
     sub_env: dict[str, str] = build_claude_env(config.env_extra)
 
-    # Phase E Layer 7: optional macOS Seatbelt wrap. No-op on Linux /
+    # macOS Hybrid mode: optional macOS Seatbelt wrap. No-op on Linux /
     # Windows, or when BODHIORCHARD_HYBRID_SANDBOX env flag is unset.
     cmd = maybe_wrap_with_sandbox(cmd, cwd)
 
@@ -597,7 +650,7 @@ async def run_claude_code(
             env=sub_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            # Phase A guard: same rlimits + setsid the streaming path uses.
+            # guard: same rlimits + setsid the streaming path uses.
             preexec_fn=apply_subprocess_rlimits(),
         )
         stdout, stderr = await asyncio.wait_for(
@@ -871,7 +924,7 @@ async def _get_claude_version() -> str | None:
             "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            # Phase A guard: scrub env even for the offline ``--version``
+            # guard: scrub env even for the offline ``--version``
             # check, so the version probe doesn't accidentally become a
             # disclosure surface (e.g. if a future CLI release logs
             # ``ANTHROPIC_API_KEY`` presence to stderr).
