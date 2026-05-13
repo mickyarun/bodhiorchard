@@ -28,9 +28,11 @@ inside the repository layer.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import structlog
 from httpx import (
@@ -78,6 +80,28 @@ _TRANSIENT_HTTP_ERRORS: tuple[type[Exception], ...] = (
 _HTTP_RETRY_ATTEMPTS = 3
 _HTTP_RETRY_BASE_DELAY_S = 0.25
 
+# Strict ``owner/repo`` pattern; rejects any payload containing extra
+# ``/``, ``.``-traversal, URL-encoded bytes, whitespace, or scheme
+# markers — every known way to turn ``{full_name}`` into a different
+# GitHub API endpoint than the caller intended. Slightly more permissive
+# than GitHub's own UI rules (it allows trailing hyphens in either part);
+# the goal is path-injection rejection, not exact mirror of GitHub's
+# name validator. Non-matching real names just 404 against GitHub.
+_FULL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+
+
+def _validate_repo_full_name(full_name: str) -> str:
+    """Return ``full_name`` if it matches the strict GitHub ``owner/repo`` shape.
+
+    Raises :class:`ValueError` otherwise. Used as a defence-in-depth
+    check before interpolating a caller-supplied identifier into a
+    GitHub API URL — the route layer also enforces membership in the
+    installation set, but the service layer can't assume that.
+    """
+    if not _FULL_NAME_PATTERN.match(full_name):
+        raise ValueError(f"invalid GitHub repo identifier: {full_name!r}")
+    return full_name
+
 
 def compose_app_clone_url(token: str, full_name: str) -> str:
     """Return the HTTPS clone URL with the installation token embedded.
@@ -87,8 +111,13 @@ def compose_app_clone_url(token: str, full_name: str) -> str:
     as the username). The token must NEVER be logged — every log site
     that touches this URL must run it through ``repo_cloner._sanitize``
     first.
+
+    Validates ``full_name`` before interpolation so a caller can't smuggle
+    path-traversal characters into the URL.
     """
-    return APP_CLONE_URL_TEMPLATE.format(token=token, full_name=full_name)
+    return APP_CLONE_URL_TEMPLATE.format(
+        token=token, full_name=_validate_repo_full_name(full_name)
+    )
 
 
 def _install_token_headers(token: str) -> dict[str, str]:
@@ -183,8 +212,17 @@ async def _paginated_get(
 
         # ``Link`` is only set when there's a next page. Subsequent
         # requests use the absolute URL from the header verbatim — no
-        # extra params, GitHub embeds them.
+        # extra params, GitHub embeds them. The next URL is enforced to
+        # share the GitHub origin to prevent a malicious upstream from
+        # pivoting our bearer-token request at an internal host
+        # (partial-SSRF via Link header).
         next_url = _next_link(resp.headers.get("link"))
+        if next_url is not None and not _is_same_origin(next_url, GITHUB_BASE_URL):
+            logger.warning(
+                "github_install_repos_cross_origin_pagination_dropped",
+                path=path,
+            )
+            next_url = None
         url = next_url
         next_params = None
 
@@ -193,7 +231,10 @@ def _next_link(link_header: str | None) -> str | None:
     """Parse an RFC 5988 ``Link`` header and return the ``rel="next"`` URL.
 
     Returns ``None`` when there is no next page or the header is absent
-    / malformed.
+    / malformed. The returned URL is whatever the server sent — callers
+    MUST verify it points at the expected origin before issuing a
+    request (see :func:`_is_same_origin`); the ``Link`` header is part
+    of the HTTP response and therefore not trusted on its own.
     """
     if not link_header:
         return None
@@ -208,6 +249,27 @@ def _next_link(link_header: str | None) -> str | None:
         if any('rel="next"' in rp for rp in rel_parts):
             return url_part.strip().lstrip("<").rstrip(">")
     return None
+
+
+def _is_same_origin(url: str, base: str) -> bool:
+    """Return True when ``url`` matches ``base`` on scheme + host (+ port).
+
+    Defends against partial-SSRF via a malicious ``Link`` header: GitHub
+    paginated endpoints embed absolute URLs in their ``Link: …; rel="next"``
+    header and we follow them verbatim. A compromised or MITM'd upstream
+    could point us at an internal host, and our bearer token would ride
+    along. Limiting follow-ups to the configured GitHub origin keeps the
+    token in its intended audience without affecting legitimate GitHub
+    traffic (real GitHub never paginates across hosts).
+
+    Only ``http``/``https`` URLs are considered same-origin; anything
+    else (``file://``, ``gopher://``, missing scheme) returns ``False``.
+    """
+    parsed = urlsplit(url)
+    base_parsed = urlsplit(base)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    return parsed.scheme == base_parsed.scheme and parsed.netloc == base_parsed.netloc
 
 
 def _build_install_url(org: Organization) -> str | None:
@@ -313,7 +375,7 @@ async def list_remote_branches_via_api(
     if not token:
         return []
 
-    path = REPO_BRANCHES_PATH_TEMPLATE.format(full_name=full_name)
+    path = REPO_BRANCHES_PATH_TEMPLATE.format(full_name=_validate_repo_full_name(full_name))
     branches: list[str] = []
     async with AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
         async for item in _paginated_get(client, token, path):
