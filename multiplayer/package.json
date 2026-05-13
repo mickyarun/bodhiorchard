@@ -12,8 +12,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@colyseus/ws-transport": "^0.17.0",
-    "colyseus": "^0.17.0"
+    "@colyseus/ws-transport": "^0.17.13",
+    "colyseus": "^0.17.10"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

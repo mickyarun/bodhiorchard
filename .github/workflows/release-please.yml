@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         with:
           # Default behavior: opens / updates a "release PR" on main.
           # Merging that PR cuts a GitHub release, generates a tag, and
