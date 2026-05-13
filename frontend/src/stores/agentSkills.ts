@@ -26,6 +26,7 @@ export interface AgentSkill {
   prompt: string
   maxTurns: number
   model: string
+  iterationModel: string
   effort: string
   isCustomized: boolean
 }
@@ -39,6 +40,7 @@ interface AgentSkillApi {
   prompt: string
   max_turns: number
   model: string
+  iteration_model: string
   effort: string
   is_customized: boolean
 }
@@ -53,6 +55,7 @@ function fromApi(raw: AgentSkillApi): AgentSkill {
     prompt: raw.prompt,
     maxTurns: raw.max_turns,
     model: raw.model ?? '',
+    iterationModel: raw.iteration_model ?? '',
     effort: raw.effort ?? '',
     isCustomized: raw.is_customized,
   }
@@ -89,7 +92,7 @@ export const useAgentSkillsStore = defineStore('agentSkills', () => {
 
   async function updateSkill(
     slug: string,
-    updates: Partial<Pick<AgentSkill, 'name' | 'description' | 'tools' | 'mcpTools' | 'prompt' | 'maxTurns' | 'model' | 'effort'>>,
+    updates: Partial<Pick<AgentSkill, 'name' | 'description' | 'tools' | 'mcpTools' | 'prompt' | 'maxTurns' | 'model' | 'iterationModel' | 'effort'>>,
   ): Promise<boolean> {
     saving.value = true
     error.value = null
@@ -103,6 +106,7 @@ export const useAgentSkillsStore = defineStore('agentSkills', () => {
       if (updates.prompt !== undefined) payload.prompt = updates.prompt
       if (updates.maxTurns !== undefined) payload.max_turns = updates.maxTurns
       if (updates.model !== undefined) payload.model = updates.model
+      if (updates.iterationModel !== undefined) payload.iteration_model = updates.iterationModel
       if (updates.effort !== undefined) payload.effort = updates.effort
 
       const { data } = await api.put<AgentSkillApi>(`/v1/settings/agent-skills/${slug}`, payload)

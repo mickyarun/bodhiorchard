@@ -66,6 +66,7 @@ def _skill_to_read(slug: str, skill_row: AgentSkill) -> AgentSkillRead:
         prompt=skill_row.prompt,
         max_turns=getattr(skill_row, "max_turns", 0) or 0,
         model=getattr(skill_row, "model", "") or "",
+        iteration_model=getattr(skill_row, "iteration_model", "") or "",
         effort=getattr(skill_row, "effort", "") or "",
         is_customized=_check_customized(skill_row.prompt, slug),
     )
@@ -216,6 +217,11 @@ async def update_agent_skill(
         prompt = body.prompt if body.prompt is not None else existing.prompt
         max_turns = body.max_turns if body.max_turns is not None else (existing.max_turns or 0)
         model = body.model if body.model is not None else (getattr(existing, "model", "") or "")
+        iteration_model = (
+            body.iteration_model
+            if body.iteration_model is not None
+            else (getattr(existing, "iteration_model", "") or "")
+        )
         effort = (
             body.effort if body.effort is not None else (getattr(existing, "effort", "") or "")
         )
@@ -228,6 +234,11 @@ async def update_agent_skill(
         prompt = body.prompt if body.prompt is not None else file_skill.prompt
         max_turns = body.max_turns if body.max_turns is not None else file_skill.max_turns
         model = body.model if body.model is not None else file_skill.model
+        iteration_model = (
+            body.iteration_model
+            if body.iteration_model is not None
+            else file_skill.iteration_model
+        )
         effort = body.effort if body.effort is not None else file_skill.effort
 
     updated = await repo.upsert(
@@ -239,6 +250,7 @@ async def update_agent_skill(
         prompt=prompt,
         max_turns=max_turns,
         model=model,
+        iteration_model=iteration_model,
         effort=effort,
     )
 
@@ -257,7 +269,18 @@ async def reset_agent_skill(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Reset a skill to its file default by deleting the DB override.
+    """Reset a skill to its file default by overwriting the DB row.
+
+    We do not DELETE the row: ``bud_agent_tasks.skill_id`` has a NOT
+    NULL / non-cascading FK pointing at ``agent_skills.id``, so a row
+    with any historical agent task referencing it cannot be removed
+    (Postgres raises ``ForeignKeyViolationError`` and the API 500s
+    silently). Instead, upsert the row back to the file defaults so:
+    - the foreign key remains valid (task history is preserved),
+    - all fields (prompt, max_turns, model, iteration_model, effort,
+      tools, mcp_tools, description, name) match the file defaults,
+    - ``is_customized`` correctly flips back to ``False`` on the next
+      list call (since it compares the prompt to the file default).
 
     Args:
         slug: The skill slug.
@@ -265,13 +288,20 @@ async def reset_agent_skill(
         db: The async database session.
 
     Raises:
-        HTTPException: If no override exists to reset.
+        HTTPException: If the file default for this slug cannot be loaded.
     """
+    file_skill = _load_skill_or_raise(slug)
     repo = AgentSkillRepository(db, org_id=current_user.org_id)
-    deleted = await repo.delete_by_slug(slug)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No custom override exists for skill: {slug}",
-        )
+    await repo.upsert(
+        skill_slug=slug,
+        name=file_skill.name,
+        description=file_skill.description,
+        tools=file_skill.tools,
+        mcp_tools=file_skill.mcp_tools,
+        prompt=file_skill.prompt,
+        max_turns=file_skill.max_turns,
+        model=file_skill.model,
+        iteration_model=file_skill.iteration_model,
+        effort=file_skill.effort,
+    )
     logger.info("agent_skill_reset", slug=slug, org_id=str(current_user.org_id))

@@ -144,7 +144,7 @@
                 />
               </div>
 
-              <div class="d-flex ga-4 mb-4">
+              <div class="d-flex ga-4 mb-4 flex-wrap">
                 <v-select
                   v-model="editForm.model"
                   :items="modelOptions"
@@ -155,6 +155,18 @@
                   density="compact"
                   hide-details
                   style="max-width: 180px"
+                />
+                <v-select
+                  v-model="editForm.iterationModel"
+                  :items="iterationModelOptions"
+                  item-title="title"
+                  item-value="value"
+                  label="Iteration Model"
+                  variant="outlined"
+                  density="compact"
+                  hint="Faster model for chat follow-ups; empty = use Model"
+                  persistent-hint
+                  style="max-width: 220px"
                 />
                 <v-select
                   v-model="editForm.effort"
@@ -287,6 +299,17 @@ const modelOptions = [
   { title: 'Haiku', value: 'haiku' },
 ]
 
+// Iteration model is for chat follow-ups (e.g. BUD design hot loop). Empty
+// falls back to ``model``. Explicit Haiku 4.5 is the common pick for
+// "fast cheap iteration on a stable design system".
+const iterationModelOptions = [
+  { title: 'Same as Model', value: '' },
+  { title: 'Sonnet', value: 'sonnet' },
+  { title: 'Opus', value: 'opus' },
+  { title: 'Haiku', value: 'haiku' },
+  { title: 'Haiku 4.5', value: 'claude-haiku-4-5' },
+]
+
 const effortOptions = [
   { title: 'Default', value: '' },
   { title: 'Low', value: 'low' },
@@ -303,6 +326,7 @@ const editForm = ref({
   prompt: '',
   maxTurns: 0,
   model: '',
+  iterationModel: '',
   effort: '',
 })
 
@@ -323,6 +347,7 @@ function toggle(slug: string): void {
       prompt: skill.prompt,
       maxTurns: skill.maxTurns,
       model: skill.model ?? '',
+      iterationModel: skill.iterationModel ?? '',
       effort: skill.effort ?? '',
     }
   }
@@ -343,6 +368,7 @@ async function saveSkill(slug: string): Promise<void> {
     prompt: editForm.value.prompt,
     maxTurns: editForm.value.maxTurns,
     model: editForm.value.model,
+    iterationModel: editForm.value.iterationModel,
     effort: editForm.value.effort,
   })
 }

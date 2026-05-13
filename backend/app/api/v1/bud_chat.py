@@ -26,7 +26,7 @@ from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.user import User
 from app.repositories.bud import BUDChatMessageRepository, BUDDesignRepository, BUDRepository
 from app.schemas.bud import SECTION_PATTERN, ChatMessageRead
-from app.schemas.jobs import ChatJobPayload, JobCreatedResponse
+from app.schemas.jobs import ChatJobCreatedResponse, ChatJobPayload
 from app.services.job_queue import JOB_BUD_CHAT, create_job
 
 logger = structlog.get_logger(__name__)
@@ -83,7 +83,7 @@ class BUDChatRequest(BaseModel):
 
 @router.post(
     "/chat",
-    response_model=JobCreatedResponse,
+    response_model=ChatJobCreatedResponse,
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(require_permissions("buds:edit"))],
 )
@@ -92,12 +92,29 @@ async def chat_bud(
     body: BUDChatRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> JobCreatedResponse:
-    """Submit a BUD chat request for async AI processing."""
+) -> ChatJobCreatedResponse:
+    """Submit a BUD chat request for async AI processing.
+
+    For the ``design`` section, generates ``session_id`` server-side when
+    the client omits one so the worker can pass it to ``--session-id`` /
+    ``--resume`` and keep the Anthropic prompt cache warm across
+    iterations of the same chat thread. The id is returned to the
+    client so subsequent messages carry it forward.
+
+    Other sections don't benefit from session affinity today (their
+    workers don't pass ``--resume``), so we honour the client-provided
+    id when present but don't manufacture one — avoiding a UUID churn
+    that no consumer uses.
+    """
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+
+    if body.section == "design":
+        session_id: uuid.UUID | None = body.session_id or uuid.uuid4()
+    else:
+        session_id = body.session_id
 
     # Resolve repo scope for the design section so the worker can pass
     # ``repo_id`` to ``get_design_system`` / ``write_bud_design`` MCP calls.
@@ -124,7 +141,7 @@ async def chat_bud(
         message=body.message,
         design_id=body.design_id,
         user_id=current_user.id,
-        session_id=body.session_id,
+        session_id=session_id,
     )
     await db.flush()
 
@@ -139,9 +156,12 @@ async def chat_bud(
         design_id=str(body.design_id) if body.design_id else None,
         repo_id=design_repo_id,
         user_id=str(current_user.id),
-        session_id=str(body.session_id) if body.session_id else None,
+        session_id=str(session_id) if session_id else None,
         images=body.images,
     )
 
     job = create_job(JOB_BUD_CHAT, payload=payload.model_dump(), user_id=str(current_user.id))
-    return JobCreatedResponse(job_id=job.job_id)
+    return ChatJobCreatedResponse(
+        job_id=job.job_id,
+        session_id=str(session_id) if session_id else "",
+    )

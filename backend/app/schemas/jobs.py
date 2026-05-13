@@ -54,6 +54,20 @@ class JobCreatedResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ChatJobCreatedResponse(JobCreatedResponse):
+    """Job-created response for BUD chat, carrying the session_id.
+
+    The chat endpoint generates a ``session_id`` server-side when the
+    client omits one, so subsequent messages reuse it and the worker
+    can pass ``--resume <session_id>`` to keep the Anthropic prompt
+    cache warm across iterations. Returning it on every chat response
+    keeps the frontend in sync without depending on it remembering to
+    call "New Session" first.
+    """
+
+    session_id: str = Field(alias="sessionId")
+
+
 # ── Typed Payloads (per job type) ──────────────────────────────────
 
 

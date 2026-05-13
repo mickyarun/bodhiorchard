@@ -15,7 +15,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { AxiosError } from 'axios'
-import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, JobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus } from '@/types'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus } from '@/types'
 import { BUD_STATUS_ORDER, CODE_REVIEW_OVERRIDE_REASON_MIN } from '@/types'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
@@ -143,14 +143,14 @@ export const useBUDStore = defineStore('bud', () => {
     designId?: string,
     sessionId?: string,
     images?: string[],
-  ): Promise<JobCreatedResponse | null> {
+  ): Promise<ChatJobCreatedResponse | null> {
     error.value = ''
     try {
       const body: Record<string, unknown> = { message, section }
       if (designId) body.design_id = designId
       if (sessionId) body.session_id = sessionId
       if (images?.length) body.images = images
-      const { data } = await api.post(`/v1/buds/${id}/chat`, body)
+      const { data } = await api.post<ChatJobCreatedResponse>(`/v1/buds/${id}/chat`, body)
       return data
     } catch {
       return null
