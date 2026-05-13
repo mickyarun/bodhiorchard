@@ -181,8 +181,13 @@ INLINE_DENY_LIST: list[str] = [
     "Edit(.claude/settings*.json)",
     "Edit(.claude/hooks/**)",
     "Edit(.github/workflows/**)",
-    # --- Blanket: no outbound HTTP fetches (lethal-trifecta class) ------
-    "WebFetch",
+    # NOTE: ``WebFetch`` is intentionally NOT blanket-denied. The PM and
+    # DevOps skills both declare it in their ``tools:`` frontmatter for
+    # legitimate research (vendor docs, RFCs, GitHub issues). The egress
+    # firewall (Layer 6, opt-in) bounds which hostnames are reachable
+    # under hardened deployments. Per-domain blocks can be added later
+    # using Claude's ``WebFetch(domain:evil.com)`` syntax if specific
+    # exfiltration patterns surface.
 ]
 
 
@@ -318,10 +323,18 @@ BASH_DENY_RULES: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "env_exfil",
+        # Catches ``printenv`` / ``env`` / ``cat /proc/self/environ``,
+        # plus bare or bracketed shell var references whose NAME shape
+        # screams secret (``$DATABASE_URL``, ``${GITHUB_TOKEN}``,
+        # ``$AWS_SECRET_ACCESS_KEY``). Keywords cover the common
+        # bodhiorchard secret-var families: TOKEN, KEY, SECRET,
+        # PASSWORD/PASSWD, CREDENTIAL, DATABASE.
         re.compile(
             r"(^|[\s;&|])(printenv|env)(\s*$|\s|/)|"
             r"cat\s+/proc/self/environ|"
-            r"\$\{[A-Z_]*(TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIAL)[A-Z_]*\}|"
+            r"\$\{?[A-Z0-9_]*"
+            r"(TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIAL|DATABASE)"
+            r"[A-Z0-9_]*\}?|"
             r"\$\(\s*(env|printenv)\b",
             re.IGNORECASE,
         ),

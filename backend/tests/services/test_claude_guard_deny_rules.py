@@ -439,11 +439,31 @@ class TestInlineSettingsBuilder:
         deny = payload["permissions"]["deny"]
         assert "Bash(curl:*)" in deny
         assert "Read(./.env)" in deny
-        assert "WebFetch" in deny
 
-    def test_payload_disables_bypass_mode(self) -> None:
+    def test_payload_does_not_block_web_tools(self) -> None:
+        """WebFetch / WebSearch must remain available — PM, DevOps, and
+        other skills declare them as legitimate research capabilities.
+        Network containment lives in the egress firewall layer, not the
+        permission deny list.
+        """
         payload = json.loads(build_inline_settings_json())
-        assert payload["permissions"]["disableBypassPermissionsMode"] == "disable"
+        deny = payload["permissions"]["deny"]
+        assert "WebFetch" not in deny
+        assert "WebSearch" not in deny
+
+    def test_payload_does_not_set_disable_bypass(self) -> None:
+        """Must NOT set ``disableBypassPermissionsMode``.
+
+        When combined with ``--dangerously-skip-permissions`` the flag
+        forces normal-permission mode where MCP tools need explicit
+        allow rules; we have none, so MCP calls would be denied. The
+        defense against planted ``.claude/settings.json`` re-enabling
+        YOLO is provided by the inline ``--settings`` flag precedence,
+        the deny list, and the PreToolUse hook — all independent of
+        this mode toggle.
+        """
+        payload = json.loads(build_inline_settings_json())
+        assert "disableBypassPermissionsMode" not in payload["permissions"]
 
     def test_payload_wires_pretool_hook_for_bash_and_read(self) -> None:
         payload = json.loads(build_inline_settings_json())

