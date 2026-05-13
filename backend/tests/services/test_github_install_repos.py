@@ -277,6 +277,7 @@ def test_validate_repo_full_name_accepts_real_github_names(full_name: str) -> No
         "acme/",
         "/owner",
         "acme/widgets\nX-Injected: yes",
+        "acme/widgets\n",  # trailing newline must not slip past ``\Z`` anchor
         "",
         "A" * 40 + "/widgets",  # owner over 39 chars
         "acme/" + "R" * 101,  # repo over 100 chars

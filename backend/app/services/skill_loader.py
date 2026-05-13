@@ -35,6 +35,29 @@ logger = structlog.get_logger(__name__)
 
 SKILLS_DIR = Path(__file__).parent.parent / "agents" / "skills"
 
+# Skill slugs are kebab-case identifiers — alphanumerics + ``-`` only.
+# Mirrors the route-level ``_SLUG_PATTERN`` in ``app/api/v1/agent_skills.py``
+# but is enforced here too: services can be called from job handlers,
+# tests, or future callers that bypass the route layer, and a slug
+# carrying ``/`` or ``..`` would resolve outside ``SKILLS_DIR``.
+# ``\A`` / ``\Z`` (not ``^`` / ``$``) — Python's ``$`` matches before a
+# trailing ``\n``, which would otherwise let ``triage-analyst\n`` slip
+# through and end up in a path like ``.../triage-analyst\n.md``.
+_SKILL_NAME_PATTERN = re.compile(r"\A[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?\Z")
+
+
+def _validate_skill_name(skill_name: str) -> str:
+    """Return ``skill_name`` if it matches the kebab-case slug pattern.
+
+    Raises :class:`ValueError` otherwise. Defence-in-depth for
+    :func:`load_skill` — the route validates the slug too, but the
+    service can be called by background jobs and seed scripts that
+    don't go through FastAPI.
+    """
+    if not _SKILL_NAME_PATTERN.match(skill_name):
+        raise ValueError(f"invalid skill name: {skill_name!r}")
+    return skill_name
+
 
 @dataclass(frozen=True)
 class Skill:
@@ -67,9 +90,9 @@ def load_skill(skill_name: str) -> Skill:
 
     Raises:
         FileNotFoundError: If the skill file doesn't exist.
-        ValueError: If the file has invalid frontmatter.
+        ValueError: If the skill name is malformed or the file has invalid frontmatter.
     """
-    skill_path = SKILLS_DIR / f"{skill_name}.md"
+    skill_path = SKILLS_DIR / f"{_validate_skill_name(skill_name)}.md"
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill not found: {skill_path}")
 

@@ -128,6 +128,15 @@ async def browse_directories(
 
     Returns the resolved current path, parent path, and child directories.
     Only directories are listed — no file contents are exposed.
+
+    Design note (intentional path-as-input): this endpoint backs the
+    first-run setup wizard's local-disk file picker. The whole point is
+    to let the operator browse their machine for a codebase to onboard,
+    so the path is caller-supplied by design. The router-level
+    ``_require_setup_incomplete`` guard makes the endpoint inert once
+    any organisation exists, bounding exposure to the pre-install
+    window. CodeQL flags this as ``py/path-injection``; dismissed in
+    Code Scanning as "won't fix — setup-only filesystem browser".
     """
     target = Path(path).expanduser().resolve() if path else Path.home()
 
@@ -170,6 +179,14 @@ async def get_repo_branches(
 
     Returns:
         Dict with branches list and auto-detected main/develop.
+
+    Design note (intentional path-as-input): same pre-install window as
+    ``browse_directories`` — the operator points the wizard at a local
+    git checkout. The ``(repo_path / ".git").exists()`` guard bounds
+    the side-effects to "must look like a git repo", and the router's
+    ``_require_setup_incomplete`` guard disables the endpoint once any
+    organisation exists. CodeQL flags this as ``py/path-injection``;
+    dismissed in Code Scanning as "won't fix — setup-only branch lister".
     """
     repo_path = Path(path).resolve()
     if not repo_path.exists() or not (repo_path / ".git").exists():

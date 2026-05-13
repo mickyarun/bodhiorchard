@@ -126,7 +126,16 @@ async def add_repo(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RepoInfo:
-    """Add a repository by absolute path. Any valid git checkout is accepted."""
+    """Add a repository by absolute path. Any valid git checkout is accepted.
+
+    Design note (intentional path-as-input): Bodhiorchard's local-first
+    onboarding model is "point me at a checkout you already have." The
+    caller must be an authenticated user; the ``(repo_path / ".git")``
+    guard ensures the path is a real git tree before we touch it.
+    CodeQL flags this as ``py/path-injection`` but the path *being* the
+    input is the feature, not a bug — dismissed in Code Scanning as
+    "won't fix — local-first repo registration".
+    """
     repo_path = Path(body.path).resolve()
     if not repo_path.exists():
         raise HTTPException(
