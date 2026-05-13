@@ -226,26 +226,15 @@
 
               <!-- Tech Spec -->
               <v-tabs-window-item value="tech-spec">
-                <textarea
-                  v-if="editingTechSpec"
-                  v-model="editTechSpec"
-                  class="section-editor"
-                  placeholder="Technical implementation details..."
-                  @blur="saveTechSpec"
+                <BUDTechSpecTab
+                  v-if="bud"
+                  :bud="bud"
+                  :editing="editingTechSpec"
+                  :edit-value="editTechSpec"
+                  @update:edit-value="editTechSpec = $event"
+                  @save="saveTechSpec"
+                  @start-edit="toggleTechSpecEdit"
                 />
-                <div
-                  v-else-if="bud.tech_spec_md"
-                  class="rendered-markdown"
-                  v-html="renderMarkdown(bud.tech_spec_md)"
-                />
-                <div v-else class="section-empty">
-                  <v-icon icon="mdi-code-braces" size="40" class="mb-3" />
-                  <div>No tech spec yet</div>
-                  <v-btn variant="tonal" size="small" class="mt-3" @click="toggleTechSpecEdit">
-                    <v-icon start size="15">mdi-pencil-outline</v-icon>
-                    Start writing
-                  </v-btn>
-                </div>
               </v-tabs-window-item>
 
               <!-- Development -->
@@ -626,10 +615,10 @@ import BUDBugsPanel from '@/components/buds/BUDBugsPanel.vue'
 import BUDReleaseStagePanel from '@/components/buds/BUDReleaseStagePanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
+import BUDTechSpecTab from '@/components/buds/BUDTechSpecTab.vue'
 import { useBudLinkedFeaturesStore } from '@/stores/budLinkedFeatures'
 import { useSettingsStore } from '@/stores/settings'
 import { formatDateTime } from '@/utils/date'
-import { renderMarkdown } from '@/utils/markdown'
 
 const route = useRoute()
 const router = useRouter()
@@ -1414,5 +1403,3 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
   opacity: 0;
 }
 </style>
-
-<style src="@/components/buds/bud-section.css"></style>
