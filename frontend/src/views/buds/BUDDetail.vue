@@ -339,6 +339,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
 import { useBudChat } from '@/composables/useBudChat'
 import { useBudStatusTransitions } from '@/composables/useBudStatusTransitions'
+import '@/components/buds/agent-banner.css'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { onSocketReconnect } from '@/services/wsReconnect'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
@@ -838,5 +839,3 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
   opacity: 0;
 }
 </style>
-
-<style src="@/components/buds/agent-banner.css"></style>

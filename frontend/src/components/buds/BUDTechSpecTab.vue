@@ -17,6 +17,7 @@
 <script setup lang="ts">
 import type { BUDDocument } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
+import './bud-section.css'
 
 defineProps<{
   bud: BUDDocument
@@ -56,5 +57,3 @@ const emit = defineEmits<{
     </div>
   </div>
 </template>
-
-<style src="./bud-section.css"></style>

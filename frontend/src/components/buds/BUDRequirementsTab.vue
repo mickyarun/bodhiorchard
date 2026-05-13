@@ -19,6 +19,7 @@ import { computed } from 'vue'
 import type { BUDDocument } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
 import BUDLinkedFeaturesPanel from './BUDLinkedFeaturesPanel.vue'
+import './bud-section.css'
 
 const props = defineProps<{
   bud: BUDDocument
@@ -102,5 +103,3 @@ const showEnrichHint = computed(() =>
     </div>
   </div>
 </template>
-
-<style src="./bud-section.css"></style>
