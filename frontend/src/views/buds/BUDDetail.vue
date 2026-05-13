@@ -158,40 +158,16 @@
               <v-tab value="prod">Prod</v-tab>
               <v-tab v-if="isClosed" value="closed">{{ bud.status === 'discarded' ? 'Discarded' : 'Closed' }}</v-tab>
             </v-tabs>
-            <div v-if="!isReadOnlyTab" class="toolbar-actions">
-              <v-btn
-                variant="text"
-                size="small"
-                class="toolbar-btn"
-                :disabled="agentLocked"
-                @click="toggleEdit"
-              >
-                <v-icon size="15" class="mr-1">{{ isEditing ? 'mdi-eye-outline' : 'mdi-pencil-outline' }}</v-icon>
-                {{ isEditing ? 'Preview' : 'Edit' }}
-              </v-btn>
-              <span class="toolbar-sep" />
-              <v-btn
-                variant="text"
-                size="small"
-                class="toolbar-btn"
-                :disabled="agentLocked"
-                @click="downloadSection(currentSection)"
-              >
-                <v-icon size="15" class="mr-1">mdi-tray-arrow-down</v-icon>
-                Export
-              </v-btn>
-              <v-btn
-                v-if="activeTab !== 'design'"
-                variant="text"
-                size="small"
-                class="toolbar-btn"
-                :disabled="agentLocked"
-                @click="triggerUpload(currentSection)"
-              >
-                <v-icon size="15" class="mr-1">mdi-tray-arrow-up</v-icon>
-                Import
-              </v-btn>
-            </div>
+            <BUDSectionToolbar
+              v-if="!isReadOnlyTab"
+              :is-editing="isEditing"
+              :agent-locked="agentLocked"
+              :active-tab="activeTab"
+              :current-section="currentSection"
+              @toggle-edit="toggleEdit"
+              @export-section="downloadSection"
+              @import-section="handleImportSection"
+            />
           </div>
 
           <!-- Content panel -->
@@ -483,14 +459,6 @@
         </v-card>
       </v-dialog>
 
-      <!-- Hidden file input -->
-      <input
-        ref="fileInput"
-        type="file"
-        accept=".md,.txt,.markdown,.html,.htm"
-        style="display: none;"
-        @change="handleFileUpload"
-      />
     </div>
 
     <!-- Chat side panel -->
@@ -539,6 +507,7 @@ import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
 import BUDTechSpecTab from '@/components/buds/BUDTechSpecTab.vue'
 import BUDClosedTab from '@/components/buds/BUDClosedTab.vue'
+import BUDSectionToolbar from '@/components/buds/BUDSectionToolbar.vue'
 import { useBudLinkedFeaturesStore } from '@/stores/budLinkedFeatures'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -685,10 +654,6 @@ const chatStatusMessage = ref('')
 const currentSessionId = ref<string | undefined>(undefined)
 
 const { startTracking } = useJobSocket()
-
-// File upload
-const fileInput = ref<HTMLInputElement | null>(null)
-const uploadSection = ref('requirements_md')
 
 // Status dropdown items. Uses the org-filtered phase order so UAT is
 // hidden when the org has it disabled (see usePhaseOrder). This is the
@@ -1162,18 +1127,9 @@ function downloadSection(section: string): void {
   URL.revokeObjectURL(a.href)
 }
 
-function triggerUpload(section: string): void {
-  uploadSection.value = section
-  fileInput.value?.click()
-}
-
-async function handleFileUpload(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file || !bud.value) return
-
-  await budStore.importBUD(bud.value.id, uploadSection.value, file)
-  input.value = ''
+async function handleImportSection(section: string, file: File): Promise<void> {
+  if (!bud.value) return
+  await budStore.importBUD(bud.value.id, section, file)
 }
 
 async function loadTimeline(): Promise<void> {
@@ -1257,26 +1213,6 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
   justify-content: space-between;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
   margin-bottom: 0;
-}
-
-.toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-right: 4px;
-}
-
-.toolbar-actions .v-btn {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 500;
-  font-size: 12px;
-}
-
-.toolbar-sep {
-  width: 1px;
-  height: 18px;
-  background: rgba(var(--v-theme-on-surface), 0.12);
 }
 
 /* ── Content panel ─────────────────────────────── */
