@@ -483,8 +483,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
-import { useJobSocket } from '@/composables/useJobSocket'
-import { friendlyAgentError } from '@/types/agentErrors'
+import { useBudChat } from '@/composables/useBudChat'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { onSocketReconnect } from '@/services/wsReconnect'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
@@ -646,14 +645,31 @@ const { editing: editingTechSpec, editValue: editTechSpec, toggle: toggleTechSpe
 const { editing: editingTestPlan, toggle: toggleTestPlanEdit } =
   useMarkdownSection('test_plan_md', bud)
 
-// Chat state
-const chatOpen = ref(false)
-const chatLoading = ref(false)
-const chatMessages = ref<{ role: 'user' | 'ai'; text: string; userName?: string | null; images?: string[] }[]>([])
-const chatStatusMessage = ref('')
-const currentSessionId = ref<string | undefined>(undefined)
-
-const { startTracking } = useJobSocket()
+// Chat orchestration (state + history + send + Jira-enrich seed).
+// The composable depends on `currentSection`, `designPanelRef`, and
+// the per-section editor refs, all of which are declared below — but
+// composables only read these on invocation, so forward references
+// resolve fine at call time.
+const {
+  chatOpen, chatLoading, chatMessages, chatStatusMessage, currentSessionId,
+  loadChatHistory, startNewSession, handleChatSend, enrichWithAI,
+} = useBudChat({
+  getBud: () => bud.value,
+  getCurrentSection: () => currentSection.value,
+  getDesignTabId: () => designPanelRef.value?.activeDesignTab,
+  setActiveTab: (tab) => { activeTab.value = tab },
+  syncEditor: (section, content) => {
+    if (section === 'requirements_md' && editingContent.value) {
+      editContent.value = content
+    } else if (section === 'tech_spec_md' && editingTechSpec.value) {
+      editTechSpec.value = content
+    }
+  },
+  onDesignContentUpdated: async () => {
+    if (bud.value) await designPanelRef.value?.loadDesigns()
+    designPanelRef.value?.refreshDesignPreview()
+  },
+})
 
 // Status dropdown items. Uses the org-filtered phase order so UAT is
 // hidden when the org has it disabled (see usePhaseOrder). This is the
@@ -697,22 +713,6 @@ const agentLocked = computed(() => {
   const phaseActive = !!workflowRef.value?.phaseInFlight
   return taskActive || phaseActive
 })
-
-function enrichWithAI(): void {
-  activeTab.value = 'requirements'
-  chatOpen.value = true
-  nextTick(() => {
-    handleChatSend(
-      'This BUD was imported from Jira with minimal description. '
-      + 'DO NOT update the content yet. Instead, put your clarifying questions '
-      + 'directly in the "reply" field and set "updated_content" to null. '
-      + 'Ask me 2-3 questions about: what this feature does, who it\'s for, '
-      + 'acceptance criteria, and edge cases. I will answer, then you write the PRD.',
-      [],
-    )
-  })
-}
-
 
 // Top-level cleanup target for the BUD-activity subscription. Populated
 // from inside onMounted once the route id is known; fired by the
@@ -860,21 +860,6 @@ watch(activeTab, () => {
   currentSessionId.value = undefined
   loadChatHistory()
 })
-
-async function loadChatHistory(): Promise<void> {
-  if (!bud.value) return
-  const section = currentSection.value
-  const designId = section === 'design' && designPanelRef.value?.activeDesignTab
-    ? designPanelRef.value.activeDesignTab
-    : undefined
-  const history = await budStore.fetchChatHistory(bud.value.id, section, designId, currentSessionId.value)
-  chatMessages.value = history.map(m => ({ role: m.role, text: m.message, userName: m.user_name }))
-}
-
-function startNewSession(): void {
-  currentSessionId.value = crypto.randomUUID()
-  chatMessages.value = []
-}
 
 async function handleSaveTitle(title: string): Promise<void> {
   if (!bud.value) return
@@ -1034,66 +1019,6 @@ async function handleDelete(): Promise<void> {
   if (!bud.value) return
   const ok = await budStore.deleteBUD(bud.value.id)
   if (ok) router.push('/buds')
-}
-
-// ── Chat ──────────────────────────────────────────────
-
-async function handleChatSend(msg: string, images: string[] = []): Promise<void> {
-  if (!bud.value || chatLoading.value) return
-
-  chatMessages.value.push({ role: 'user', text: msg, images: images.length ? images : undefined })
-  chatLoading.value = true
-  chatStatusMessage.value = ''
-
-  const chatDesignId = currentSection.value === 'design' && designPanelRef.value?.activeDesignTab
-    ? designPanelRef.value.activeDesignTab
-    : undefined
-  const result = await budStore.chatBUD(bud.value.id, msg, currentSection.value, chatDesignId, currentSessionId.value, images)
-  if (!result) {
-    chatMessages.value.push({ role: 'ai', text: 'Sorry, something went wrong. Please try again.' })
-    chatLoading.value = false
-    return
-  }
-
-  // Persist the server-generated session_id so the next message in this
-  // thread carries it forward — that's what lets the worker pass
-  // --resume <id> and hit the Anthropic prompt cache on iteration 2+.
-  if (result.sessionId) currentSessionId.value = result.sessionId
-
-  startTracking(result.jobId, {
-    onProgress(status) {
-      chatStatusMessage.value = status.statusMessage
-    },
-    async onComplete(data) {
-      chatLoading.value = false
-      const result = (data as unknown as Record<string, unknown>).result as { reply: string; updated_content: string | null } | null
-      const reply = result?.reply || ''
-      const updated_content = result?.updated_content ?? null
-      if (reply) chatMessages.value.push({ role: 'ai', text: reply })
-      if (updated_content !== null) {
-        if (budStore.currentBUD) {
-          (budStore.currentBUD as Record<string, unknown>)[currentSection.value] = updated_content
-        }
-        if (currentSection.value === 'requirements_md' && editingContent.value) {
-          editContent.value = updated_content
-        } else if (currentSection.value === 'tech_spec_md' && editingTechSpec.value) {
-          editTechSpec.value = updated_content
-        } else if (currentSection.value === 'design') {
-          if (bud.value) await designPanelRef.value?.loadDesigns()
-          designPanelRef.value?.refreshDesignPreview()
-        }
-      }
-      // Linked-features refetch is handled by the agentLocked watcher
-      // (universal hook for any PM run, not just the chat-job path).
-    },
-    onError(err, errorCode) {
-      chatLoading.value = false
-      chatMessages.value.push({
-        role: 'ai',
-        text: friendlyAgentError(errorCode, err).headline,
-      })
-    },
-  })
 }
 
 // ── Export / Import ───────────────────────────────────
