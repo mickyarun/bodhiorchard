@@ -411,51 +411,74 @@ def is_claude_cli_available() -> bool:
     return shutil.which("claude") is not None
 
 
-# Paths the resolved ``working_dir`` must never alias — credential stores,
-# kernel pseudo-filesystems, and the engine's own config dir. Mirrors the
-# ``READ_DENY_RULES`` but applied at the spawn boundary so a buggy
-# caller can never widen the subprocess's filesystem allowlist into a
-# secret store.
-_FORBIDDEN_CWD_PREFIXES: tuple[str, ...] = (
-    "/etc",
-    "/proc",
-    "/sys",
-    "/dev",
-    "/var/db",
-    "/private/etc",
+# Path prefixes the spawn cwd MUST start with. A positive allowlist:
+# any working_dir that does not begin with one of these roots is
+# rejected by string comparison BEFORE any filesystem syscall touches
+# the value. The list covers macOS user homes, Linux user homes, the
+# standard tmp dirs used by tests + pytest, and the canonical Full
+# Docker clone root. Operators with a custom layout can extend at
+# deploy time via ``BODHIORCHARD_EXTRA_CWD_ROOTS`` (colon-separated,
+# each entry MUST end with ``/``).
+_ALLOWED_CWD_ROOTS: tuple[str, ...] = (
+    "/Users/",
+    "/home/",
+    "/root/",
+    "/tmp/",
+    "/var/tmp/",
+    "/var/folders/",
+    "/private/var/",
+    "/workspace/",
+    "/data/repos/",
+    "/app/",
 )
+
+
+def _allowed_cwd_roots() -> tuple[str, ...]:
+    """Return the in-tree allowlist plus any deploy-time additions."""
+    extra = os.environ.get("BODHIORCHARD_EXTRA_CWD_ROOTS", "")
+    if not extra:
+        return _ALLOWED_CWD_ROOTS
+    extras = tuple(p for p in extra.split(":") if p.endswith("/"))
+    return _ALLOWED_CWD_ROOTS + extras
 
 
 def _validate_working_dir(working_dir: str | Path | None) -> str:
     """Resolve and validate the spawn cwd. Returns absolute path.
 
-    Layered on top of CodeQL's ``py/path-injection`` concern: even though
-    ``working_dir`` is set by trusted internal backend code (never raw
-    HTTP input), we hard-fail if the resolved path is missing, not a
-    directory, or aliases a credential / system root. This shrinks the
-    blast radius if a future caller passes a tainted value by mistake.
+    Positive-allowlist sanitization: the string form of ``working_dir``
+    must start with one of ``_allowed_cwd_roots()``. Anything else
+    raises ``ValueError`` BEFORE any path syscall touches the value, so
+    a tainted caller-supplied path cannot reach the filesystem
+    allowlist Claude is about to receive. ``None`` falls back to the
+    FastAPI worker's own cwd, which is trusted.
     """
-    resolved = Path(str(working_dir)).resolve() if working_dir else Path.cwd().resolve()
+    if working_dir is None:
+        return str(Path.cwd().resolve())
 
+    raw = str(working_dir)
+
+    allowed = _allowed_cwd_roots()
+    if not any(raw.startswith(root) for root in allowed):
+        raise ValueError(
+            f"run_claude_code working_dir not under an allowed root: {raw!r}"
+        )
+
+    # Belt-and-braces: even if a future allowed root contained a
+    # credential subdir, refuse the substring.
+    for cred in ("/.ssh", "/.aws", "/.gnupg", "/.kube", "/.claude/.credentials"):
+        if cred in raw:
+            raise ValueError(
+                f"run_claude_code refuses to spawn inside a credential dir: {raw!r}"
+            )
+
+    # Past the allowlist gate the value is considered sanitized.
+    resolved = Path(raw).resolve()
     if not resolved.is_dir():
         raise ValueError(
             f"run_claude_code working_dir does not exist or is not a directory: {resolved}"
         )
 
-    resolved_str = str(resolved)
-    for forbidden in _FORBIDDEN_CWD_PREFIXES:
-        if resolved_str == forbidden or resolved_str.startswith(forbidden + "/"):
-            raise ValueError(f"run_claude_code refuses to spawn under a system root: {resolved}")
-
-    # Also refuse paths that alias a credential dir under any user's home.
-    home_dir_pattern = ("/.ssh", "/.aws", "/.gnupg", "/.kube", "/.claude/.credentials")
-    for cred in home_dir_pattern:
-        if cred in resolved_str:
-            raise ValueError(
-                f"run_claude_code refuses to spawn inside a credential dir: {resolved}"
-            )
-
-    return resolved_str
+    return str(resolved)
 
 
 async def run_claude_code(

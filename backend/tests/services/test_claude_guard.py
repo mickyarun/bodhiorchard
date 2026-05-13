@@ -276,11 +276,13 @@ class TestValidateWorkingDir:
         result = _validate_working_dir(None)
         assert _Path(result).is_dir()
 
-    def test_missing_dir_rejected(self) -> None:
+    def test_missing_dir_rejected(self, tmp_path: object) -> None:
         from app.services.claude_runner import _validate_working_dir
 
+        # Under an allowed root but the leaf directory doesn't exist.
+        missing = str(tmp_path) + "/does-not-exist-xyz"  # type: ignore[operator]
         with pytest.raises(ValueError, match="does not exist"):
-            _validate_working_dir("/nonexistent/path/xyz")
+            _validate_working_dir(missing)
 
     @pytest.mark.parametrize(
         "forbidden_path",
@@ -289,16 +291,13 @@ class TestValidateWorkingDir:
             "/proc",
             "/sys",
             "/dev",
+            "/var/db/some/path",
         ],
     )
-    def test_system_roots_rejected(self, forbidden_path: str) -> None:
-        from pathlib import Path as _Path
-
+    def test_unallowed_roots_rejected(self, forbidden_path: str) -> None:
         from app.services.claude_runner import _validate_working_dir
 
-        if not _Path(forbidden_path).is_dir():
-            pytest.skip(f"{forbidden_path} not present on test host")
-        with pytest.raises(ValueError, match="system root"):
+        with pytest.raises(ValueError, match="allowed root"):
             _validate_working_dir(forbidden_path)
 
     def test_credential_dir_rejected(self, tmp_path: object) -> None:
@@ -310,3 +309,19 @@ class TestValidateWorkingDir:
         ssh_dir.mkdir()
         with pytest.raises(ValueError, match="credential dir"):
             _validate_working_dir(str(ssh_dir))
+
+    def test_extra_cwd_roots_env_extends_allowlist(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: object
+    ) -> None:
+        """Deploy-time env var can add custom roots."""
+        from app.services.claude_runner import _validate_working_dir
+
+        # ``/opt/`` is not in the default allowlist.
+        with pytest.raises(ValueError, match="allowed root"):
+            _validate_working_dir("/opt/myapp/workspace")
+
+        monkeypatch.setenv("BODHIORCHARD_EXTRA_CWD_ROOTS", "/opt/myapp/:/srv/")
+        # Path under the extra root, but file doesn't exist → rejected on
+        # the directory check, NOT the allowlist check.
+        with pytest.raises(ValueError, match="does not exist"):
+            _validate_working_dir("/opt/myapp/workspace")
