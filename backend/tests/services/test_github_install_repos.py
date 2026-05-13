@@ -37,6 +37,8 @@ from app.services.github_install_repos import (
     GITHUB_BASE_URL,
     INSTALLATION_REPOS_PATH,
     REPO_BRANCHES_PATH_TEMPLATE,
+    _is_same_origin,
+    _validate_repo_full_name,
     compose_app_clone_url,
     list_installation_repos,
     list_remote_branches_via_api,
@@ -214,6 +216,102 @@ async def test_list_remote_branches_via_api_pagination() -> None:
 
     branches = await list_remote_branches_via_api(org, full_name)  # type: ignore[arg-type]
     assert branches == ["main", "develop", "release/2026-q2"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_remote_branches_stops_on_cross_origin_link() -> None:
+    """A malicious ``Link`` header pointing off-origin must NOT be followed.
+
+    Simulates a compromised upstream returning ``Link: <http://evil/...>; rel="next"``.
+    The same-origin guard drops it, so only the first page is fetched
+    and no request is ever issued against the attacker host (which would
+    leak the bearer token).
+    """
+    org = _FakeOrg()
+    full_name = "acme/widgets"
+    path = REPO_BRANCHES_PATH_TEMPLATE.format(full_name=full_name)
+    evil_route = respx.get("http://evil.example/internal").mock(
+        return_value=Response(200, json=[{"name": "leaked"}]),
+    )
+    respx.get(f"{GITHUB_BASE_URL}{path}").mock(
+        return_value=Response(
+            200,
+            json=[{"name": "main"}],
+            headers={"link": '<http://evil.example/internal>; rel="next"'},
+        ),
+    )
+
+    branches = await list_remote_branches_via_api(org, full_name)  # type: ignore[arg-type]
+    assert branches == ["main"]
+    assert evil_route.call_count == 0, "cross-origin Link header must not be followed"
+
+
+@pytest.mark.parametrize(
+    "full_name",
+    [
+        "acme/widgets",
+        "Acme/widgets-2",
+        "user1/repo.with.dots",
+        "a/b",
+        "X" * 39 + "/" + "Y" * 100,  # max-length owner + repo
+    ],
+)
+def test_validate_repo_full_name_accepts_real_github_names(full_name: str) -> None:
+    """All real-world GitHub identifiers pass through unchanged."""
+    assert _validate_repo_full_name(full_name) == full_name
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "../etc/passwd",
+        "acme/../other",
+        "acme/widgets/../../user",
+        "acme//widgets",
+        "acme/wid gets",
+        "acme/widgets?token=x",
+        "acme/widgets#frag",
+        "acme/widgets%2F..",
+        "/acme/widgets",
+        "acme/",
+        "/owner",
+        "acme/widgets\nX-Injected: yes",
+        "",
+        "A" * 40 + "/widgets",  # owner over 39 chars
+        "acme/" + "R" * 101,  # repo over 100 chars
+    ],
+)
+def test_validate_repo_full_name_rejects_path_injection(payload: str) -> None:
+    """Any path-injection-shaped payload is rejected at the service boundary."""
+    with pytest.raises(ValueError, match="invalid GitHub repo identifier"):
+        _validate_repo_full_name(payload)
+
+
+def test_list_remote_branches_rejects_invalid_full_name() -> None:
+    """Even with a valid token, an invalid ``full_name`` never reaches httpx."""
+    with pytest.raises(ValueError, match="invalid GitHub repo identifier"):
+        # ``compose_app_clone_url`` is sync; covers the second sink site.
+        compose_app_clone_url("ghs_x", "../escape")
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://api.github.com/foo", True),
+        ("https://api.github.com/foo?bar=1", True),
+        ("http://api.github.com/foo", False),  # scheme mismatch
+        ("https://api.github.com.evil/foo", False),  # netloc suffix attack
+        ("https://api.github.com:8443/foo", False),  # port mismatch
+        ("https://evil.example/foo", False),
+        ("file:///etc/passwd", False),
+        ("//api.github.com/foo", False),  # scheme-relative; no scheme
+        ("not a url", False),
+    ],
+)
+def test_is_same_origin_match(url: str, expected: bool) -> None:
+    """Only same scheme + netloc as ``api.github.com`` returns True."""
+    assert _is_same_origin(url, "https://api.github.com") is expected
 
 
 def _gh_repo(full_name: str) -> dict[str, Any]:
