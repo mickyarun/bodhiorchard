@@ -32,152 +32,20 @@
       <template v-else-if="bud">
         <div class="bud-page-content">
           <!-- Header -->
-          <div class="d-flex align-start ga-3 mb-1">
-            <v-btn icon="mdi-arrow-left" variant="text" size="small" class="mt-1" @click="$router.push('/buds')" />
-            <div class="flex-grow-1">
-              <div class="d-flex align-center ga-2 mb-1 flex-wrap">
-                <span class="text-caption text-medium-emphasis">
-                  BUD-{{ String(bud.bud_number).padStart(3, '0') }}
-                </span>
-                <v-chip
-                  :color="statusColor"
-                  variant="tonal"
-                  size="x-small"
-                  label
-                >
-                  {{ BUD_STATUS_LABELS[bud.status] }}
-                </v-chip>
-                <v-menu location="bottom" :close-on-content-click="false">
-                  <template #activator="{ props: assigneeProps }">
-                    <v-chip
-                      v-bind="assigneeProps"
-                      :color="bud.assignee_name ? 'teal' : 'default'"
-                      variant="tonal"
-                      size="x-small"
-                      label
-                      class="cursor-pointer"
-                    >
-                      <v-icon start size="12">{{ bud.assignee_name ? 'mdi-account' : 'mdi-account-outline' }}</v-icon>
-                      {{ bud.assignee_name || 'Unassigned' }}
-                    </v-chip>
-                  </template>
-                  <v-card min-width="280" max-width="340" class="pa-2">
-                    <v-text-field
-                      v-model="assigneeSearch"
-                      variant="outlined"
-                      density="comfortable"
-                      placeholder="Search members..."
-                      hide-details
-                      prepend-inner-icon="mdi-magnify"
-                      class="mb-2"
-                      autofocus
-                    />
-                    <v-list max-height="280" class="overflow-y-auto">
-                      <v-list-item
-                        v-if="bud.assignee_id"
-                        @click="handleAssigneeChange(null)"
-                      >
-                        <template #prepend>
-                          <v-icon size="20" color="error">mdi-account-remove</v-icon>
-                        </template>
-                        <v-list-item-title class="text-body-2">Unassign</v-list-item-title>
-                      </v-list-item>
-                      <v-list-item
-                        v-for="m in membersStore.members.filter(
-                          mm => mm.isActive && mm.name.toLowerCase().includes(assigneeSearch.toLowerCase())
-                        )"
-                        :key="m.id"
-                        :active="bud.assignee_id === m.id"
-                        @click="handleAssigneeChange(m.id)"
-                      >
-                        <template #prepend>
-                          <v-avatar size="28" color="surface-variant" class="mr-2">
-                            <span class="text-body-2">{{ m.name.charAt(0).toUpperCase() }}</span>
-                          </v-avatar>
-                        </template>
-                        <v-list-item-title class="text-body-2">{{ m.name }}</v-list-item-title>
-                        <v-list-item-subtitle class="text-caption">{{ m.role }}</v-list-item-subtitle>
-                      </v-list-item>
-                    </v-list>
-                  </v-card>
-                </v-menu>
-                <v-menu>
-                  <template #activator="{ props: menuProps }">
-                    <v-btn v-bind="menuProps" icon="mdi-dots-vertical" variant="text" size="x-small" />
-                  </template>
-                  <v-list density="compact" min-width="180">
-                    <v-list-subheader>Change Status</v-list-subheader>
-                    <v-list-item
-                      v-if="isClosed"
-                      disabled
-                    >
-                      <span class="text-caption text-medium-emphasis">
-                        {{ bud.status === 'discarded' ? 'Discarded' : 'Closed' }} — cannot change status
-                      </span>
-                    </v-list-item>
-                    <template v-else>
-                      <v-list-item
-                        v-for="s in statusItems"
-                        :key="s.value"
-                        :title="s.title"
-                        :active="bud.status === s.value"
-                        :disabled="agentLocked"
-                        @click="updateStatus(s.value)"
-                      />
-                    </template>
-                    <v-divider class="my-1" />
-                    <v-list-item
-                      base-color="error"
-                      class="delete-item"
-                      :disabled="agentLocked"
-                      @click="confirmDelete = true"
-                    >
-                      <div class="d-flex align-center">
-                        <v-icon icon="mdi-delete-outline" size="18" class="mr-2" />
-                        Delete BUD
-                      </div>
-                    </v-list-item>
-                  </v-list>
-                </v-menu>
-                <v-btn
-                  :variant="chatOpen ? 'flat' : 'tonal'"
-                  :color="chatOpen ? 'primary' : 'default'"
-                  size="x-small"
-                  class="ai-chat-btn"
-                  :disabled="agentLocked"
-                  @click="chatOpen = !chatOpen"
-                >
-                  <v-icon start size="14">mdi-creation-outline</v-icon>
-                  AI
-                </v-btn>
-              </div>
-              <div
-                v-if="!editingTitle"
-                class="text-h5 font-weight-bold"
-                :class="agentLocked ? 'prd-locked-title' : 'cursor-pointer'"
-                @click="startEditTitle"
-              >
-                {{ bud.title }}
-              </div>
-              <v-text-field
-                v-else
-                v-model="editTitle"
-                variant="outlined"
-                density="compact"
-                autofocus
-                hide-details
-                class="mt-1"
-                style="max-width: 500px;"
-                @blur="saveTitle"
-                @keyup.enter="saveTitle"
-                @keyup.escape="editingTitle = false"
-              />
-            </div>
-          </div>
-
-          <div class="text-caption text-medium-emphasis mb-3 ml-12">
-            Created {{ formatDate(bud.created_at) }} &middot; Updated {{ formatDate(bud.updated_at) }}
-          </div>
+          <BUDHeader
+            :bud="bud"
+            :status-color="statusColor"
+            :status-items="statusItems"
+            :is-closed="isClosed"
+            :agent-locked="agentLocked"
+            :chat-open="chatOpen"
+            @back="router.push('/buds')"
+            @update:chat-open="chatOpen = $event"
+            @change-assignee="handleAssigneeChange"
+            @update-status="updateStatus"
+            @delete="confirmDelete = true"
+            @save-title="handleSaveTitle"
+          />
 
           <!-- Workflow banners, approval/reject/reassign dialogs, repo confirmation -->
           <BUDWorkflowActions
@@ -185,7 +53,7 @@
             :bud="bud"
             :can-approve="canApprove"
             :is-current-assignee="isCurrentAssignee"
-            @reload-timeline="loadTimeline(); loadEstimates()"
+            @reload-timeline="loadTimeline(); reloadEstimates()"
           />
 
           <!-- Status change progress -->
@@ -331,63 +199,18 @@
             <v-tabs-window v-model="activeTab">
               <!-- Requirements -->
               <v-tabs-window-item value="requirements">
-                <BUDLinkedFeaturesPanel
-                  v-if="bud.id"
-                  :bud-id="bud.id"
-                  class="mx-4 mt-3 mb-3"
-                  @change="loadTimeline()"
+                <BUDRequirementsTab
+                  v-if="bud"
+                  :bud="bud"
+                  :editing="editingContent"
+                  :edit-value="editContent"
+                  :agent-locked="agentLocked"
+                  @update:edit-value="editContent = $event"
+                  @save="saveContent"
+                  @start-edit="toggleContentEdit"
+                  @enrich="enrichWithAI"
+                  @features-changed="loadTimeline"
                 />
-                <textarea
-                  v-if="editingContent"
-                  v-model="editContent"
-                  class="section-editor"
-                  placeholder="Write requirements in markdown..."
-                  @blur="saveContent"
-                />
-                <template v-else-if="bud.requirements_md">
-                  <!-- Jira import hint: thin content that could be enriched -->
-                  <v-alert
-                    v-if="isJiraImported && !agentLocked && bud.requirements_md.length < 200"
-                    type="info"
-                    variant="tonal"
-                    density="compact"
-                    class="mx-4 mt-3 mb-0"
-                  >
-                    <div class="d-flex align-center ga-3">
-                      <div class="text-caption flex-grow-1">
-                        Imported from Jira — use AI to expand into a full PRD with acceptance criteria
-                      </div>
-                      <v-btn size="small" variant="flat" color="primary" @click="enrichWithAI()">
-                        <v-icon start size="15">mdi-creation-outline</v-icon>
-                        Enrich
-                      </v-btn>
-                    </div>
-                  </v-alert>
-                  <div
-                    class="rendered-markdown"
-                    v-html="renderMarkdown(bud.requirements_md)"
-                  />
-                </template>
-                <div v-else class="section-empty">
-                  <v-icon icon="mdi-text-box-outline" size="40" class="mb-3" />
-                  <div>No requirements written yet</div>
-                  <div class="d-flex ga-2 mt-3">
-                    <v-btn variant="tonal" size="small" @click="toggleContentEdit">
-                      <v-icon start size="15">mdi-pencil-outline</v-icon>
-                      Start writing
-                    </v-btn>
-                    <v-btn
-                      v-if="!agentLocked"
-                      variant="tonal"
-                      size="small"
-                      color="primary"
-                      @click="enrichWithAI()"
-                    >
-                      <v-icon start size="15">mdi-creation-outline</v-icon>
-                      Enrich with AI
-                    </v-btn>
-                  </div>
-                </div>
               </v-tabs-window-item>
 
               <!-- Design -->
@@ -588,52 +411,15 @@
           </div>
 
           <!-- Delivery Estimates (hidden when closed/discarded — no forecast needed) -->
-          <BUDEstimateTimeline
+          <BUDEstimationSection
             v-if="!isClosed"
-            :estimates="budEstimates"
+            ref="estimationRef"
+            :bud-id="bud.id"
             :current-phase="bud.status"
-            :loading="estimatesLoading"
-            :recalculating="recalculating"
-            @recalculate="handleRecalculate"
-            @override-phase="openOverrideDialog"
-            class="mt-4"
           />
 
           <!-- Linked Bugs -->
           <BUDBugsPanel :bud-id="bud.id" :bud-status="bud.status" class="mt-4" />
-
-          <!-- Override Dialog -->
-          <v-dialog v-model="overrideDialogOpen" max-width="420">
-            <v-card color="surface" class="pa-5">
-              <div class="text-subtitle-1 font-weight-medium mb-3">
-                Override {{ overridePhase }} deadline
-              </div>
-              <v-text-field
-                v-model="overrideDate"
-                label="New deadline"
-                type="date"
-                class="mb-3"
-              />
-              <v-textarea
-                v-model="overrideReason"
-                label="Reason (required)"
-                rows="3"
-                :rules="[v => !!v?.trim() || 'Reason is required']"
-              />
-              <v-card-actions class="pa-0 mt-2">
-                <v-spacer />
-                <v-btn variant="text" @click="overrideDialogOpen = false">Cancel</v-btn>
-                <v-btn
-                  color="warning"
-                  variant="flat"
-                  :disabled="!overrideDate || !overrideReason.trim()"
-                  @click="submitOverride"
-                >
-                  Override
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-dialog>
 
           <!-- Status Override Reason Dialog -->
           <v-dialog v-model="overrideReasonDialog" max-width="420">
@@ -766,16 +552,8 @@
           </v-snackbar>
 
           <!-- Activity Timeline (collapsible) -->
-          <div class="timeline-section mt-4">
-            <button class="timeline-toggle" @click="timelineOpen = !timelineOpen">
-              <v-icon :icon="timelineOpen ? 'mdi-chevron-down' : 'mdi-chevron-right'" size="18" />
-              <span class="text-subtitle-2 font-weight-medium">Activity</span>
-              <span class="text-caption text-medium-emphasis ml-1">({{ timelineEvents.length }})</span>
-            </button>
-            <div v-if="timelineOpen" class="timeline-body">
-              <BUDTimeline :events="timelineEvents" :loading="timelineLoading" />
-            </div>
-          </div>
+          <BUDActivitySection :events="timelineEvents" :loading="timelineLoading" />
+
         </div>
       </template>
 
@@ -834,10 +612,10 @@ import { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
 import type { BUDSectionKey, BUDStatus, TimelineEvent } from '@/types'
-import { useEstimates } from '@/composables/useEstimates'
 import ChatPanel from '@/components/buds/ChatPanel.vue'
-import BUDEstimateTimeline from '@/components/buds/BUDEstimateTimeline.vue'
-import BUDTimeline from '@/components/buds/BUDTimeline.vue'
+import BUDEstimationSection from '@/components/buds/BUDEstimationSection.vue'
+import BUDActivitySection from '@/components/buds/BUDActivitySection.vue'
+import BUDHeader from '@/components/buds/BUDHeader.vue'
 import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
 import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
 import BUDTodoBoard from '@/components/buds/BUDTodoBoard.vue'
@@ -847,12 +625,11 @@ import BUDQAPanel from '@/components/buds/BUDQAPanel.vue'
 import BUDBugsPanel from '@/components/buds/BUDBugsPanel.vue'
 import BUDReleaseStagePanel from '@/components/buds/BUDReleaseStagePanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
-import BUDLinkedFeaturesPanel from '@/components/buds/BUDLinkedFeaturesPanel.vue'
+import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
 import { useBudLinkedFeaturesStore } from '@/stores/budLinkedFeatures'
 import { useSettingsStore } from '@/stores/settings'
 import { formatDateTime } from '@/utils/date'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { renderMarkdown } from '@/utils/markdown'
 
 const route = useRoute()
 const router = useRouter()
@@ -991,22 +768,19 @@ const isCurrentAssignee = computed(() =>
   bud.value?.assignee_id != null && authStore.user?.id === bud.value.assignee_id,
 )
 
-// Timeline + assignee state
+// Timeline state (rendered by BUDActivitySection; events are also
+// consumed by the Closed-tab computeds below, so the ref stays in the
+// view).
 const timelineEvents = ref<TimelineEvent[]>([])
 const timelineLoading = ref(false)
-const timelineOpen = ref(false)
-const assigneeSearch = ref('')
 
-// Estimation (composable)
-const {
-  budEstimates, estimatesLoading, recalculating,
-  overrideDialogOpen, overridePhase, overrideDate, overrideReason,
-  loadEstimates, handleRecalculate, openOverrideDialog, submitOverride,
-} = useEstimates(() => bud.value?.id)
-
-// Title editing
-const editingTitle = ref(false)
-const editTitle = ref('')
+// Delivery-estimates ref — used to trigger reloads after status
+// changes, agent runs, and webhook activity (the section auto-loads on
+// mount/budId change; this is for the cross-cutting refresh paths).
+const estimationRef = ref<InstanceType<typeof BUDEstimationSection> | null>(null)
+function reloadEstimates(): void {
+  estimationRef.value?.loadEstimates()
+}
 
 // Markdown section editing via composable
 const { editing: editingContent, editValue: editContent, toggle: toggleContentEdit, save: saveContent } =
@@ -1072,10 +846,6 @@ const agentLocked = computed(() => {
   return taskActive || phaseActive
 })
 
-const isJiraImported = computed(() => {
-  return bud.value?.metadata?.source === 'jira_import'
-})
-
 function enrichWithAI(): void {
   activeTab.value = 'requirements'
   chatOpen.value = true
@@ -1091,12 +861,6 @@ function enrichWithAI(): void {
   })
 }
 
-// ── Markdown rendering ────────────────────────────────
-function renderMarkdown(md: string | null): string {
-  if (!md) return ''
-  const raw = marked.parse(md, { async: false }) as string
-  return DOMPurify.sanitize(raw)
-}
 
 // Top-level cleanup target for the BUD-activity subscription. Populated
 // from inside onMounted once the route id is known; fired by the
@@ -1128,7 +892,8 @@ onMounted(async () => {
   await loadChatHistory()
   membersStore.fetchMembers()
   loadTimeline()
-  loadEstimates()
+  // BUDEstimationSection auto-loads on mount via its budId watcher; no
+  // explicit call needed here.
   // Settings store powers the UAT toggle visibility (uatStageEnabled)
   // and the release-stage panels' "configure branch" CTA
   // (hasUatBranchConfigured / hasMainBranchConfigured). Both actions
@@ -1141,7 +906,7 @@ onMounted(async () => {
   const handleBudActivity = () => {
     budStore.fetchBUD(id)
     loadTimeline()
-    loadEstimates()
+    reloadEstimates()
   }
   subscribe(budActivityTopic, handleBudActivity)
   // Also resync on WS reconnect — webhook-driven activity events that
@@ -1228,7 +993,7 @@ watch(agentLocked, (locked, wasLocked) => {
   if (locked && chatOpen.value) chatOpen.value = false
   if (!locked && wasLocked) {
     loadTimeline()
-    loadEstimates()
+    reloadEstimates()
     // The PM agent writes bud_feature_link rows from its JSON-fence tail
     // on every run, regardless of which surface kicked it off (chat panel,
     // stage transition, or BUD creation). agentLocked flipping back to
@@ -1259,22 +1024,10 @@ function startNewSession(): void {
   chatMessages.value = []
 }
 
-function startEditTitle(): void {
-  if (agentLocked.value) return
-  editTitle.value = bud.value?.title || ''
-  editingTitle.value = true
-}
-
-async function saveTitle(): Promise<void> {
-  if (!bud.value || !editTitle.value.trim()) {
-    editingTitle.value = false
-    return
-  }
-  if (editTitle.value.trim() !== bud.value.title) {
-    await budStore.updateBUD(bud.value.id, { title: editTitle.value.trim() })
-    await loadTimeline()
-  }
-  editingTitle.value = false
+async function handleSaveTitle(title: string): Promise<void> {
+  if (!bud.value) return
+  await budStore.updateBUD(bud.value.id, { title })
+  await loadTimeline()
 }
 
 const statusChanging = ref(false)
@@ -1549,13 +1302,6 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
   await loadTimeline()
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
 </script>
 
 <style scoped>
@@ -1617,14 +1363,6 @@ function formatDate(dateStr: string): string {
   padding: 24px 32px 48px;
 }
 
-/* ── AI Chat button ────────────────────────────── */
-.ai-chat-btn {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 600;
-  font-size: 13px;
-}
-
 /* ── Tabs + Toolbar row ────────────────────────── */
 .tabs-toolbar-row {
   display: flex;
@@ -1663,190 +1401,6 @@ function formatDate(dateStr: string): string {
   min-height: 300px;
 }
 
-/* ── Editor ────────────────────────────────────── */
-.section-editor {
-  display: block;
-  width: 100%;
-  min-height: 450px;
-  padding: 24px 28px;
-  border: none;
-  outline: none;
-  resize: vertical;
-  background: transparent;
-  color: rgba(var(--v-theme-on-surface), 0.87);
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-  font-size: 13px;
-  line-height: 1.75;
-  box-sizing: border-box;
-}
-
-/* ── Rendered Markdown ─────────────────────────── */
-.rendered-markdown {
-  padding: 24px 28px;
-  line-height: 1.75;
-  color: rgba(var(--v-theme-on-surface), 0.87);
-  font-size: 14px;
-}
-
-.rendered-markdown :deep(h1) {
-  font-size: 1.5em;
-  font-weight: 700;
-  margin: 0 0 16px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-  color: rgba(var(--v-theme-on-surface), 0.95);
-}
-
-.rendered-markdown :deep(h2) {
-  font-size: 1.2em;
-  font-weight: 600;
-  margin: 28px 0 10px;
-  color: rgba(var(--v-theme-on-surface), 0.92);
-}
-
-.rendered-markdown :deep(h3) {
-  font-size: 1.05em;
-  font-weight: 600;
-  margin: 22px 0 8px;
-  color: rgba(var(--v-theme-on-surface), 0.88);
-}
-
-.rendered-markdown :deep(p) {
-  margin: 0 0 14px;
-}
-
-.rendered-markdown :deep(ul),
-.rendered-markdown :deep(ol) {
-  margin: 0 0 14px;
-  padding-left: 24px;
-}
-
-.rendered-markdown :deep(li) {
-  margin-bottom: 5px;
-}
-
-.rendered-markdown :deep(li p) {
-  margin: 0;
-}
-
-.rendered-markdown :deep(strong) {
-  font-weight: 600;
-  color: rgba(var(--v-theme-on-surface), 0.95);
-}
-
-.rendered-markdown :deep(em) {
-  font-style: italic;
-  color: rgba(var(--v-theme-on-surface), 0.7);
-}
-
-.rendered-markdown :deep(code) {
-  background: rgba(var(--v-theme-on-surface), 0.07);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 0.87em;
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-}
-
-.rendered-markdown :deep(pre) {
-  background: rgba(var(--v-theme-on-surface), 0.05);
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 6px;
-  padding: 14px 18px;
-  margin: 0 0 14px;
-  overflow-x: auto;
-}
-
-.rendered-markdown :deep(pre code) {
-  background: none;
-  padding: 0;
-  font-size: 13px;
-}
-
-.rendered-markdown :deep(blockquote) {
-  border-left: 3px solid rgba(var(--v-theme-primary), 0.4);
-  padding-left: 16px;
-  margin: 0 0 14px;
-  color: rgba(var(--v-theme-on-surface), 0.6);
-}
-
-.rendered-markdown :deep(hr) {
-  border: none;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-  margin: 24px 0;
-}
-
-.rendered-markdown :deep(table) {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 0 0 14px;
-  font-size: 13px;
-}
-
-.rendered-markdown :deep(th),
-.rendered-markdown :deep(td) {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-  padding: 8px 12px;
-  text-align: left;
-}
-
-.rendered-markdown :deep(th) {
-  background: rgba(var(--v-theme-on-surface), 0.04);
-  font-weight: 600;
-}
-
-.rendered-markdown :deep(a) {
-  color: rgb(var(--v-theme-primary));
-  text-decoration: none;
-}
-
-.rendered-markdown :deep(a:hover) {
-  text-decoration: underline;
-}
-
-/* ── Empty state ───────────────────────────────── */
-.section-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 24px;
-  color: rgba(var(--v-theme-on-surface), 0.35);
-  font-size: 14px;
-}
-
-.section-empty .v-icon {
-  opacity: 0.35;
-}
-
-/* ── Timeline section ──────────────────────────── */
-.timeline-section {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 8px;
-  background: rgb(var(--v-theme-surface));
-}
-
-.timeline-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding: 10px 14px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: rgba(var(--v-theme-on-surface), 0.87);
-  text-align: left;
-}
-
-.timeline-toggle:hover {
-  background: rgba(var(--v-theme-on-surface), 0.04);
-  border-radius: 8px;
-}
-
-.timeline-body {
-  padding: 0 14px 14px;
-}
-
 /* ── Panel slide transition ────────────────────── */
 .slide-panel-enter-active,
 .slide-panel-leave-active {
@@ -1859,11 +1413,6 @@ function formatDate(dateStr: string): string {
   min-width: 0;
   opacity: 0;
 }
-
-/* ── PRD lock state ───────────────────────────── */
-.prd-locked-title {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
 </style>
+
+<style src="@/components/buds/bud-section.css"></style>

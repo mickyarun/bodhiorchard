@@ -1,0 +1,176 @@
+/* Copyright 2025-2026 Arun Rajkumar
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Shared styles for BUD-tab section editors and rendered markdown.
+ * Imported by every tab subcomponent that uses the .section-editor /
+ * .rendered-markdown / .section-empty classes (Requirements, Tech Spec
+ * preview in BUDDetail.vue, future Closed-tab). Kept as a plain
+ * stylesheet (not <style scoped>) so the same rules attach regardless
+ * of which component owns the markup.
+ */
+
+/* ── Editor ────────────────────────────────────── */
+.section-editor {
+  display: block;
+  width: 100%;
+  min-height: 450px;
+  padding: 24px 28px;
+  border: none;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  color: rgba(var(--v-theme-on-surface), 0.87);
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.75;
+  box-sizing: border-box;
+}
+
+/* ── Rendered Markdown ─────────────────────────── */
+.rendered-markdown {
+  padding: 24px 28px;
+  line-height: 1.75;
+  color: rgba(var(--v-theme-on-surface), 0.87);
+  font-size: 14px;
+}
+
+.rendered-markdown h1 {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin: 0 0 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+  color: rgba(var(--v-theme-on-surface), 0.95);
+}
+
+.rendered-markdown h2 {
+  font-size: 1.2em;
+  font-weight: 600;
+  margin: 28px 0 10px;
+  color: rgba(var(--v-theme-on-surface), 0.92);
+}
+
+.rendered-markdown h3 {
+  font-size: 1.05em;
+  font-weight: 600;
+  margin: 22px 0 8px;
+  color: rgba(var(--v-theme-on-surface), 0.88);
+}
+
+.rendered-markdown p {
+  margin: 0 0 14px;
+}
+
+.rendered-markdown ul,
+.rendered-markdown ol {
+  margin: 0 0 14px;
+  padding-left: 24px;
+}
+
+.rendered-markdown li {
+  margin-bottom: 5px;
+}
+
+.rendered-markdown li p {
+  margin: 0;
+}
+
+.rendered-markdown strong {
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), 0.95);
+}
+
+.rendered-markdown em {
+  font-style: italic;
+  color: rgba(var(--v-theme-on-surface), 0.7);
+}
+
+.rendered-markdown code {
+  background: rgba(var(--v-theme-on-surface), 0.07);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.87em;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+.rendered-markdown pre {
+  background: rgba(var(--v-theme-on-surface), 0.05);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin: 0 0 14px;
+  overflow-x: auto;
+}
+
+.rendered-markdown pre code {
+  background: none;
+  padding: 0;
+  font-size: 13px;
+}
+
+.rendered-markdown blockquote {
+  border-left: 3px solid rgba(var(--v-theme-primary), 0.4);
+  padding-left: 16px;
+  margin: 0 0 14px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+.rendered-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+  margin: 24px 0;
+}
+
+.rendered-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 14px;
+  font-size: 13px;
+}
+
+.rendered-markdown th,
+.rendered-markdown td {
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.rendered-markdown th {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+  font-weight: 600;
+}
+
+.rendered-markdown a {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+}
+
+.rendered-markdown a:hover {
+  text-decoration: underline;
+}
+
+/* ── Empty state ───────────────────────────────── */
+.section-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px;
+  color: rgba(var(--v-theme-on-surface), 0.35);
+  font-size: 14px;
+}
+
+.section-empty .v-icon {
+  opacity: 0.35;
+}
