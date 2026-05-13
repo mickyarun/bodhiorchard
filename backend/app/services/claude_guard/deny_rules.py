@@ -104,6 +104,42 @@ INLINE_DENY_LIST: list[str] = [
     "Bash(pip3 install:*)",
     "Bash(uvx:*)",
     "Bash(pipx install:*)",
+    # --- Reverse shells / pivots -----------------------------------------
+    "Bash(mkfifo:*)",
+    # --- Cryptominers ----------------------------------------------------
+    "Bash(xmrig:*)",
+    "Bash(minerd:*)",
+    "Bash(cgminer:*)",
+    "Bash(ethminer:*)",
+    "Bash(t-rex:*)",
+    "Bash(nbminer:*)",
+    # --- macOS Keychain extractor ----------------------------------------
+    "Bash(security find-generic-password:*)",
+    "Bash(security find-internet-password:*)",
+    "Bash(security dump-keychain:*)",
+    "Bash(security unlock-keychain:*)",
+    # --- Container escape primitives -------------------------------------
+    "Bash(nsenter:*)",
+    "Bash(unshare:*)",
+    "Bash(chroot:*)",
+    # --- Debugger-attach process injection -------------------------------
+    "Bash(gdb -p:*)",
+    "Bash(strace -p:*)",
+    "Bash(ltrace -p:*)",
+    # --- Persistence -----------------------------------------------------
+    "Bash(crontab -e:*)",
+    "Bash(launchctl load:*)",
+    "Bash(systemctl enable:*)",
+    # --- Data destruction beyond rm --------------------------------------
+    "Bash(dd if=/dev/:*)",
+    "Bash(dd of=/dev/:*)",
+    "Bash(shred:*)",
+    "Bash(wipefs:*)",
+    "Bash(mkfs:*)",
+    # --- Additional DB tools ---------------------------------------------
+    "Bash(mongodump:*)",
+    "Bash(mongorestore:*)",
+    "Bash(mysqldump:*)",
     # --- Secret reads ----------------------------------------------------
     "Read(./.env)",
     "Read(./.env.*)",
@@ -119,6 +155,26 @@ INLINE_DENY_LIST: list[str] = [
     "Read(/etc/**)",
     "Read(/proc/**)",
     "Read(/sys/**)",
+    # --- Shell history (leaks prior commands incl. ad-hoc tokens) -------
+    "Read(~/.bash_history)",
+    "Read(~/.zsh_history)",
+    "Read(~/.python_history)",
+    "Read(~/.node_repl_history)",
+    # --- macOS Keychain / browser cookies / Apple cred stores -----------
+    "Read(~/Library/Keychains/**)",
+    "Read(~/Library/Cookies/**)",
+    "Read(~/Library/Application Support/Google/Chrome/**)",
+    "Read(~/Library/Application Support/Firefox/**)",
+    "Read(~/Library/Application Support/BraveSoftware/**)",
+    "Read(~/Library/Application Support/Microsoft Edge/**)",
+    # --- Cloud / package-manager credential stores ----------------------
+    "Read(~/.config/gcloud/**)",
+    "Read(~/.kube/**)",
+    "Read(~/.azure/**)",
+    "Read(~/.config/1Password/**)",
+    "Read(~/.docker/config.json)",
+    "Read(~/.gnupg/**)",
+    "Read(~/.pgpass)",
     # --- Engine-config writes (hook persistence — CVE-2026-25725 class) -
     "Edit(.git/**)",
     "Edit(.husky/**)",
@@ -146,7 +202,117 @@ BASH_DENY_RULES: list[tuple[str, re.Pattern[str]]] = [
     (
         "pipe_to_shell",
         re.compile(
-            r"(curl|wget|fetch)\b[^|;]*\|\s*(bash|sh|zsh|ksh|python\d?|perl|ruby|node)\b",
+            # Classic curl|bash plus base64-decode-into-shell and
+            # printf-decode-into-shell (encoded-payload obfuscation).
+            # Canonicalization collapses ``$(...)`` so ``eval $(cat x)``
+            # arrives here as ``eval cat x``; match accordingly.
+            r"(curl|wget|fetch)\b[^|;]*\|\s*(bash|sh|zsh|ksh|python\d?|perl|ruby|node)\b|"
+            r"\bbase64\s+-?d[^|;]*\|\s*(bash|sh|zsh|ksh|python\d?|perl|ruby|node)\b|"
+            r"\bprintf\s+['\"][^|;]*\|\s*(bash|sh|zsh|ksh|python\d?|perl|ruby|node)\b|"
+            r"\beval\s+(curl|wget|cat|base64|echo|cat\b)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "reverse_shell",
+        # Classic ``bash -i >& /dev/tcp/host/port`` family plus the
+        # python / perl / ruby socket-based forms and any redirection
+        # involving ``/dev/tcp/`` or ``/dev/udp/``. ``mkfifo`` and
+        # ``nc -e`` are also dead-giveaway primitives.
+        re.compile(
+            r"\bbash\s+-[a-zA-Z]*i[a-zA-Z]*\b(?=[^|]*(>|/dev/tcp))|"
+            r"/dev/(tcp|udp)/|"
+            r"\b(python\d?|perl|ruby)\s+-[ce]\s+[^;]*\bsocket(?!\.io)\b|"
+            r"\b(python\d?|perl|ruby)\s+-[ce]\s+[^;]*\bSocket\b|"
+            r"\b(nc|ncat)\s+-[a-zA-Z]*e[a-zA-Z]*\s+/|"
+            r"\bmkfifo\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "cryptominer",
+        # Common miner binary names + stratum pool URLs. False-positive
+        # risk is near zero — no legitimate skill spawns these names.
+        re.compile(
+            r"\b(xmrig|minerd|cgminer|ethminer|t-rex|trex|nbminer|nicehash|gminer|"
+            r"phoenixminer|lolminer|teamredminer|bzminer|kawpow)\b|"
+            r"\bstratum\+(tcp|ssl)://",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "keychain_dump",
+        # macOS ``security`` CLI is the canonical keychain extractor.
+        # Also covers ``dscl`` password reads.
+        re.compile(
+            r"\bsecurity\s+(find-(generic|internet|certificate)-password|"
+            r"dump-(keychain|trust-settings)|export|unlock-keychain)\b|"
+            r"\bdscl\s+.*\s+-read.*\b(passwd|password|shadowhash)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "container_escape",
+        # Patterns used to break out of a container into the host
+        # namespaces / filesystem.
+        re.compile(
+            r"\bnsenter\b|"
+            r"\bunshare\s+[^;]*(--pid|--mount-proc|--user)|"
+            r"/proc/1/(root|exe|environ|cwd)|"
+            r"\bdocker\s+exec\s+|"
+            r"\bkubectl\s+exec\s+|"
+            r"\bchroot\s+/",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "process_injection",
+        # Debugger-attach used to inject code into another running
+        # process. Local ``gdb ./mybin`` style (no -p) is allowed.
+        re.compile(
+            r"\bgdb\s+(-p|--pid)\b|"
+            r"\bstrace\s+(-p|--attach)\b|"
+            r"\bltrace\s+-p\b|"
+            r"\bdtrace\s+-p\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "persistence",
+        # Cron / launchd / systemd handles that establish persistence
+        # outside the workspace. ``crontab -l`` (read-only) is allowed.
+        re.compile(
+            r"\bcrontab\s+(-e|-)\s*($|[<>|&])|"
+            r"\blaunchctl\s+(load|bootstrap|enable)\b|"
+            r"\bsystemctl\s+(enable|start)\s+|"
+            r"\bat\s+(now|\+|noon|midnight)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "recon",
+        # Setuid scan and namespace reconnaissance — telegraphic of
+        # privilege-escalation prep. ``find . -name foo`` stays fine
+        # because it has no ``-perm`` argument with setuid bits.
+        # Symbolic form ``-perm -u+s`` and octal ``-4000`` both caught.
+        re.compile(
+            r"\bfind\s+/\S*\s.*-perm\s+(-?0?[24-7]?[0-7]{3}|[-+/]?[ug]?\+?s)\b|"
+            r"\bgetcap\s+-r\s+/",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "data_destruction",
+        # Sibling of ``filesystem_nuke`` aimed at low-level disk /
+        # secure-erase tools that ``rm -rf`` doesn't cover. ``dd`` is
+        # matched on EITHER side (``if=/dev/sda`` source-dump exfil OR
+        # ``of=/dev/sda`` destructive overwrite). ``mkfs.ext4`` is the
+        # filesystem-typed variant of ``mkfs``.
+        re.compile(
+            r"\bdd\s+[^|;]*\b(if|of)=/dev/(sd|nvme|disk|hd|mmcblk|sda|nvme0)|"
+            r"\bshred\s+-?[a-zA-Z]*[uz]|"
+            r"\bwipefs\s+-a|"
+            r"\bmkfs(\.\w+)?\s+",
             re.IGNORECASE,
         ),
     ),
@@ -179,7 +345,13 @@ BASH_DENY_RULES: list[tuple[str, re.Pattern[str]]] = [
             r"\bDROP\s+(TABLE|DATABASE|SCHEMA|INDEX)\b|"
             r"\bTRUNCATE\s+(TABLE\s+)?\w+|"
             r"\bDELETE\s+FROM\s+\w+\s+WHERE\s+1\s*=\s*1\b|"
-            r"\bpsql\b|\bpg_dump\b|\bredis-cli\b",
+            r"\bpsql\b|\bpg_dump\b|\bredis-cli\b|"
+            # Additional DB dump / destruction tools — Mongo / MySQL /
+            # SQLite. The agent has no legitimate reason to invoke any
+            # of these against shared databases.
+            r"\bmongodump\b|\bmongorestore\b|\bmongoexport\b|"
+            r"\bmysqldump\b|"
+            r"\bsqlite3?\s+[^;|]*\.(dump|backup|read)\b",
             re.IGNORECASE,
         ),
     ),
@@ -203,9 +375,22 @@ BASH_DENY_RULES: list[tuple[str, re.Pattern[str]]] = [
             r"\brm\s+-[a-zA-Z]*[rfRF][a-zA-Z]*\s+(/(\s|$)|/\*|~|\$HOME|\.\./)|"
             r"\bsudo\b|"
             r"\bchmod\s+777\b|"
-            # Bash-side mirror of the Read deny rule: ``cat /etc/passwd``
-            # via the Bash tool would otherwise bypass the path gate.
-            r"\b(cat|less|more|head|tail|nl|od|xxd|hexdump)\s+/(etc|proc|sys)/",
+            # Bash-side mirror of the Read deny rules: ``cat /etc/passwd``
+            # or ``cat ~/.ssh/id_rsa`` via the Bash tool would otherwise
+            # bypass the path gate (which only fires for Read / Edit).
+            r"\b(cat|less|more|head|tail|nl|od|xxd|hexdump|base64|grep)\s+"
+            # Optional intervening tokens (flags, line numbers, sed scripts
+            # like ``1p`` or ``{print $1}``) between the verb and the
+            # target path. We accept anything that does NOT start with the
+            # sensitive-path roots so the trailing alternation still
+            # anchors the match.
+            r"(?:[^/~$\s][^\s]*\s+)*"
+            r"(/(etc|proc|sys)/|"
+            r"(~|\$HOME|/Users/[^/]+|/home/[^/]+)/\."
+            r"(ssh|aws|netrc|gnupg|kube|azure|pgpass|"
+            r"bash_history|zsh_history|python_history|node_repl_history|"
+            r"claude/\.credentials|claude/settings|config/gh|"
+            r"config/gcloud|config/1Password|docker/config))",
             re.IGNORECASE,
         ),
     ),
@@ -269,6 +454,55 @@ READ_DENY_RULES: list[tuple[str, re.Pattern[str]]] = [
         re.compile(rf"{_HOME_ANCHOR}/\.netrc(/|$)"),
     ),
     (
+        "shell_history",
+        # ``cat ~/.bash_history`` style. Bash history, zsh history,
+        # python REPL history, node REPL, ruby IRB.
+        re.compile(rf"{_HOME_ANCHOR}/\.(bash|zsh|sh|python|node|irb)_history(/|$)"),
+    ),
+    (
+        "macos_keychain",
+        re.compile(r"/Library/Keychains(/|$)"),
+    ),
+    (
+        "browser_cookies",
+        # Chrome / Brave / Edge / Firefox / Safari cookie stores. All
+        # are session-bearer caches that, once leaked, hand authentic-
+        # session access to every site the user is logged into.
+        re.compile(
+            r"/Library/Cookies(/|$)|"
+            r"/Library/Application Support/("
+            r"Google/Chrome|Firefox|BraveSoftware|Microsoft Edge|"
+            r"com\.operasoftware\.Opera|Arc|Vivaldi)/.*(/Cookies($|/)|"
+            r"/Login Data($|-)|/Local State$)"
+        ),
+    ),
+    (
+        "cloud_creds",
+        # GCP / kube / Azure / 1Password / Docker / GPG / Postgres creds.
+        # ``~/.config/gcloud`` may legitimately exist on a dev host; the
+        # threat is reading the credentials.db / *.json key store inside.
+        re.compile(
+            rf"{_HOME_ANCHOR}/("
+            r"\.config/gcloud|"
+            r"\.kube|"
+            r"\.config/1Password|"
+            r"\.azure|"
+            r"\.docker/config\.json|"
+            r"\.docker/.*\.key|"
+            r"\.pgpass|"
+            r"\.gnupg"
+            r")(/|$)"
+        ),
+    ),
+    (
+        "secret_extensions",
+        # Generic key / certificate / vault file extensions. False-
+        # positive risk on workspace files (.key in a frontend project),
+        # mitigated by Phase A ``--add-dir`` (the file must already be
+        # inside the workspace and survive the read tool's own checks).
+        re.compile(r"\.(pem|p12|pfx|jks|keystore|kdbx)$"),
+    ),
+    (
         "system_paths",
         re.compile(r"^/(etc|proc|sys)(/|$)"),
     ),
@@ -304,6 +538,18 @@ def canonicalize_bash(command: str) -> str:
     out = out.replace("\\", "")
     # Drop wrapping single/double quotes around individual tokens
     out = re.sub(r"['\"]", "", out)
+    # Inline variable assignments and their references: ``X=curl; $X foo``
+    # / ``CMD=wget;${CMD} foo`` → ``X=curl; curl foo``. We capture
+    # NAME=VALUE pairs (single-token values), then substitute every
+    # ``$NAME`` / ``${NAME}`` further along in the line with the value.
+    # Only a single pass — chained indirection (``A=B; B=curl; $A``) is
+    # accepted residual risk.
+    assignments: dict[str, str] = {}
+    for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)=([^\s;|&]+)", out):
+        assignments[m.group(1)] = m.group(2)
+    for name, value in assignments.items():
+        out = re.sub(rf"\$\{{{name}\}}", value, out)
+        out = re.sub(rf"\${name}\b", value, out)
     # Squeeze multi-spaces
     return re.sub(r"\s+", " ", out).strip()
 
