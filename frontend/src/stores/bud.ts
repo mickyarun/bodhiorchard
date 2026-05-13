@@ -311,6 +311,20 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function dismissPhaseFailure(budId: string): Promise<void> {
+    // Stamp the BUD's acknowledged-at timestamp so the next GET /buds/{id}
+    // returns `last_phase_failure: null`. We optimistically clear the
+    // local field so the banner hides without waiting for a refetch.
+    try {
+      await api.post(`/v1/buds/${budId}/phase-failure/dismiss`)
+      if (currentBUD.value?.id === budId) {
+        currentBUD.value = { ...currentBUD.value, last_phase_failure: null }
+      }
+    } catch {
+      error.value = 'Failed to dismiss phase failure'
+    }
+  }
+
   async function retryAgentTask(budId: string, taskId: string): Promise<void> {
     try {
       await api.post(`/v1/buds/${budId}/agent-tasks/${taskId}/retry`)
@@ -393,6 +407,7 @@ export const useBUDStore = defineStore('bud', () => {
     fetchCodeReviewStatus,
     overrideCodeReview,
     requestReassignment,
+    dismissPhaseFailure,
     retryAgentTask,
     cancelAgentTask,
     fetchEstimates,

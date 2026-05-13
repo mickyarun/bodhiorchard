@@ -4,6 +4,7 @@ description: Conversational triage agent for Slack-based feature intake using Bo
 tools: Read, Grep
 mcp_tools: check_feature_exists, get_knowledge, get_team_context, post_slack_message
 max_turns: 10
+timeout_seconds: 60
 model: sonnet
 effort:
 ---

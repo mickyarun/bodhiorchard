@@ -27,11 +27,16 @@ from app.models.bud import BUDDocument, BUDStatus
 from app.models.user import User, UserRole
 from app.repositories.bud import BUDRepository
 from app.repositories.user import UserRepository
+from app.services.agent_activity_logger import log_agent_activity
 from app.services.bud_timeline import record_event
 from app.services.todo_assignment import (
     assign_all_todos_to_lead,
     cascade_assignee_to_todos,
 )
+
+# NOTE: ``app.services.smart_assignment`` imports ``_TERMINAL_STATUSES`` from
+# this module, so the inverse import has to stay function-local to avoid a
+# circular import on app startup. Tested by ``tests/services/test_bud_assignment.py``.
 
 logger = structlog.get_logger(__name__)
 
@@ -54,8 +59,20 @@ PHASE_ROLE_MAP: dict[BUDStatus, UserRole] = {
 # Statuses that don't count toward a user's active workload
 _TERMINAL_STATUSES = {BUDStatus.CLOSED, BUDStatus.DISCARDED, BUDStatus.PROD}
 
-# Phases that use smart (skill-based) assignment instead of round-robin
-_SMART_ASSIGNMENT_PHASES = {BUDStatus.DEVELOPMENT, BUDStatus.TESTING}
+# Phases that use smart (skill-based) assignment instead of round-robin.
+# Extended to all role-mapped phases so Design/PM/Tech-Arch also benefit
+# from skill matching; smart picker falls back to round-robin when the
+# top score is ambiguous, so this is a strict superset of the old behaviour.
+_SMART_ASSIGNMENT_PHASES = {
+    BUDStatus.BUD,
+    BUDStatus.DESIGN,
+    BUDStatus.TECH_ARCH,
+    BUDStatus.DEVELOPMENT,
+    BUDStatus.TESTING,
+}
+
+# Skill slug used for lifecycle events emitted by this service.
+_PHASE_ASSIGNER_SLUG = "phase_assigner"
 
 
 async def auto_assign_for_phase(
@@ -68,88 +85,33 @@ async def auto_assign_for_phase(
 ) -> uuid.UUID | None:
     """Auto-assign a BUD based on the target phase's role.
 
-    1. Look up role name from PHASE_ROLE_MAP
-    2. Find active users with that role in this org
-    3. Pick the user with fewest active BUDs assigned (ties: earliest created_at)
-    4. Update bud.assignee_id
-    5. Record timeline events (unassigned old + assigned new)
+    Flow:
+      1. CODE_REVIEW retains the developer from DEVELOPMENT.
+      2. Look up role from PHASE_ROLE_MAP; phases with no mapping skip.
+      3. Fetch active users for that role. If empty, publish a
+         ``phase_assigner`` failed event (reason=no_candidates) and
+         return — no scoring, no LLM call.
+      4. Publish ``phase_assigner`` invoked (banner shows "Assigning …").
+      5. Pick winner: smart-match for SMART phases, round-robin fallback.
+      6. Record timeline events (unassigned old + assigned new) and
+         publish ``phase_assigner`` completed event with the winner.
 
-    Returns new assignee_id, or None if no matching members.
+    Returns the new assignee_id, or the previous assignee_id when the
+    role pool is empty (assignment skipped).
     """
-    # Code review stays with the developer who built the feature. No
-    # reassignment — the current assignee is already the most recent
-    # developer from the development phase. Record a timeline event so
-    # the assignment is visible in the BUD's history.
     if new_status == BUDStatus.CODE_REVIEW:
-        if bud.assignee_id:
-            assignee = await db.get(User, bud.assignee_id)
-            await record_event(
-                db,
-                org_id,
-                bud.id,
-                "assigned",
-                actor_id=actor_id,
-                actor_name=actor_name,
-                detail={
-                    "assignee_id": str(bud.assignee_id),
-                    "assignee_name": assignee.name if assignee else None,
-                    "role": UserRole.DEVELOPER,
-                    "method": "retained_from_development",
-                },
-            )
-        return bud.assignee_id
+        return await _retain_code_review_assignee(
+            db, org_id, bud, actor_id=actor_id, actor_name=actor_name
+        )
 
     role_name = PHASE_ROLE_MAP.get(new_status)
     if role_name is None:
         return bud.assignee_id
 
-    # Smart assignment for phases that benefit from skill-based matching
-    if new_status in _SMART_ASSIGNMENT_PHASES:
-        from app.services.smart_assignment import assign_best_for_role
-
-        chosen_user = await assign_best_for_role(db, org_id, bud, role=role_name)
-        if chosen_user:
-            old_assignee_id = bud.assignee_id
-            if old_assignee_id and old_assignee_id != chosen_user.id:
-                await record_event(
-                    db,
-                    org_id,
-                    bud.id,
-                    "unassigned",
-                    actor_id=actor_id,
-                    actor_name=actor_name,
-                    detail={"previous_assignee_id": str(old_assignee_id)},
-                )
-            bud.assignee_id = chosen_user.id
-            await record_event(
-                db,
-                org_id,
-                bud.id,
-                "assigned",
-                actor_id=actor_id,
-                actor_name=actor_name,
-                detail={
-                    "assignee_id": str(chosen_user.id),
-                    "assignee_name": chosen_user.name,
-                    "role": role_name,
-                    "method": "smart_assignment",
-                },
-            )
-            logger.info(
-                "bud_smart_assigned",
-                bud_id=str(bud.id),
-                assignee_id=str(chosen_user.id),
-                assignee_name=chosen_user.name,
-            )
-            await _assign_todos_to_lead_if_development(
-                db, org_id, bud.id, new_status, chosen_user.id
-            )
-            return chosen_user.id
-        # Fall through to round-robin if smart assignment returns None
-
-    # Find active users with the target role
+    # Fetch the candidate pool exactly once. Empty pool short-circuits
+    # before any LLM-capable code path is reached.
     candidates = await UserRepository(db).list_active_with_role(org_id, role_name)
-
+    phase_value = new_status.value
     if not candidates:
         logger.info(
             "auto_assign_no_candidates",
@@ -157,20 +119,169 @@ async def auto_assign_for_phase(
             org_id=str(org_id),
             bud_id=str(bud.id),
         )
+        await log_agent_activity(
+            db,
+            org_id=org_id,
+            event_type="skill_failed",
+            skill_slug=_PHASE_ASSIGNER_SLUG,
+            message=f"No active {role_name} in this org — assignment skipped",
+            bud_id=bud.id,
+            bud_number=bud.bud_number,
+            bud_title=bud.title,
+            metadata_={
+                "reason": "no_candidates",
+                "role": role_name,
+                "phase": phase_value,
+            },
+        )
         return bud.assignee_id
 
-    candidate_ids = [c.id for c in candidates]
+    await log_agent_activity(
+        db,
+        org_id=org_id,
+        event_type="skill_invoked",
+        skill_slug=_PHASE_ASSIGNER_SLUG,
+        message=f"Assigning {role_name}…",
+        bud_id=bud.id,
+        bud_number=bud.bud_number,
+        bud_title=bud.title,
+        metadata_={"role": role_name, "phase": phase_value},
+    )
 
-    # Count active BUDs per candidate
+    chosen: User | None = None
+    method = ""
+    if new_status in _SMART_ASSIGNMENT_PHASES:
+        # Inline import: see module-header NOTE on the circular dep.
+        from app.services.smart_assignment import assign_best_for_role
+
+        try:
+            chosen = await assign_best_for_role(db, org_id, bud, role=role_name)
+        except Exception as exc:
+            # Smart picker can raise on LLM-tiebreak crash, DB hiccup, etc.
+            # Without this guard the ``skill_invoked`` row above is orphaned
+            # (banner stuck) AND the caller sees a 500. Emit a terminal
+            # lifecycle event so the user sees the actual error, then fall
+            # through to round-robin so assignment still has a chance.
+            logger.warning("smart_assignment_failed", bud_id=str(bud.id), error=str(exc))
+            await log_agent_activity(
+                db,
+                org_id=org_id,
+                event_type="skill_failed",
+                skill_slug=_PHASE_ASSIGNER_SLUG,
+                message=f"Skill-based assignment failed: {exc}",
+                bud_id=bud.id,
+                bud_number=bud.bud_number,
+                bud_title=bud.title,
+                metadata_={
+                    "reason": "smart_assignment_error",
+                    "role": role_name,
+                    "phase": phase_value,
+                },
+            )
+            return bud.assignee_id
+        if chosen is not None:
+            method = "smart_assignment"
+
+    if chosen is None:
+        chosen = await _pick_by_round_robin(db, org_id, candidates)
+        method = "auto_round_robin"
+
+    await _record_assignment(
+        db,
+        org_id=org_id,
+        bud=bud,
+        chosen=chosen,
+        role_name=role_name,
+        method=method,
+        actor_id=actor_id,
+        actor_name=actor_name,
+    )
+
+    await log_agent_activity(
+        db,
+        org_id=org_id,
+        event_type="skill_completed",
+        skill_slug=_PHASE_ASSIGNER_SLUG,
+        message=f"Assigned {chosen.name} ({role_name}, {method})",
+        bud_id=bud.id,
+        bud_number=bud.bud_number,
+        bud_title=bud.title,
+        metadata_={
+            "assignee_id": str(chosen.id),
+            "assignee_name": chosen.name,
+            "role": role_name,
+            "method": method,
+            "phase": phase_value,
+        },
+    )
+
+    logger.info(
+        "bud_assigned",
+        bud_id=str(bud.id),
+        assignee_id=str(chosen.id),
+        assignee_name=chosen.name,
+        role=role_name,
+        method=method,
+    )
+    await _assign_todos_to_lead_if_development(db, org_id, bud.id, new_status, chosen.id)
+    return chosen.id
+
+
+async def _retain_code_review_assignee(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud: BUDDocument,
+    *,
+    actor_id: uuid.UUID | None,
+    actor_name: str | None,
+) -> uuid.UUID | None:
+    """CODE_REVIEW keeps the developer from DEVELOPMENT; record it on the timeline."""
+    if not bud.assignee_id:
+        return bud.assignee_id
+    assignee = await db.get(User, bud.assignee_id)
+    await record_event(
+        db,
+        org_id,
+        bud.id,
+        "assigned",
+        actor_id=actor_id,
+        actor_name=actor_name,
+        detail={
+            "assignee_id": str(bud.assignee_id),
+            "assignee_name": assignee.name if assignee else None,
+            "role": UserRole.DEVELOPER,
+            "method": "retained_from_development",
+        },
+    )
+    return bud.assignee_id
+
+
+async def _pick_by_round_robin(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    candidates: list[User],
+) -> User:
+    """Lowest active-BUD load wins; ties broken by earliest created_at."""
+    candidate_ids = [c.id for c in candidates]
     load_map = await BUDRepository(db, org_id=org_id).count_active_loads_for_assignees(
         candidate_ids, [s.value for s in _TERMINAL_STATUSES]
     )
-
-    # Pick lowest load; ties broken by earliest created_at
     candidates.sort(key=lambda u: (load_map.get(u.id, 0), u.created_at))
-    chosen = candidates[0]
+    return candidates[0]
 
-    # Record unassign event if changing assignee
+
+async def _record_assignment(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    bud: BUDDocument,
+    chosen: User,
+    role_name: UserRole,
+    method: str,
+    actor_id: uuid.UUID | None,
+    actor_name: str | None,
+) -> None:
+    """Write unassigned (if re-assigning) + assigned timeline events."""
     old_assignee_id = bud.assignee_id
     if old_assignee_id and old_assignee_id != chosen.id:
         await record_event(
@@ -182,8 +293,6 @@ async def auto_assign_for_phase(
             actor_name=actor_name,
             detail={"previous_assignee_id": str(old_assignee_id)},
         )
-
-    # Assign
     bud.assignee_id = chosen.id
     await record_event(
         db,
@@ -196,20 +305,9 @@ async def auto_assign_for_phase(
             "assignee_id": str(chosen.id),
             "assignee_name": chosen.name,
             "role": role_name,
-            "method": "auto_round_robin",
+            "method": method,
         },
     )
-
-    logger.info(
-        "bud_auto_assigned",
-        bud_id=str(bud.id),
-        assignee_id=str(chosen.id),
-        assignee_name=chosen.name,
-        role=role_name,
-    )
-
-    await _assign_todos_to_lead_if_development(db, org_id, bud.id, new_status, chosen.id)
-    return chosen.id
 
 
 async def _assign_todos_to_lead_if_development(

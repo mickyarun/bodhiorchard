@@ -23,8 +23,12 @@ import structlog
 
 from app.database import AsyncSessionLocal
 from app.repositories.bud import BUDChatMessageRepository, BUDRepository
+from app.services.event_bus import publish
+from app.services.tech_planner_patch import apply_tech_spec_edit
 
 logger = structlog.get_logger(__name__)
+
+_TECH_SPEC_SECTION = "tech_spec_md"
 
 
 async def persist_chat_message(
@@ -60,16 +64,51 @@ async def persist_chat_update(
 ) -> None:
     """Write updated chat content to the BUD in the database.
 
-    Todo regeneration and re-estimation are intentionally NOT triggered
-    here. The tech spec stays mutable through chat / manual / agent
-    re-runs during planning; todos crystallize from the *approved* plan
-    at the DEVELOPMENT-phase transition — see
-    ``services/bud_development.on_bud_development_started``.
+    For ``tech_spec_md`` edits on a BUD already in DEVELOPMENT, the
+    Implementation TODO section is refreshed (LLM patch on body changes,
+    no-op when the diff is purely inside the section) and BUDTodo rows
+    are re-derived. The reconciler preserves in-flight developer work
+    via :func:`sync_todos_for_bud`. Pre-DEVELOPMENT spec edits write
+    through unchanged — TODOs crystallize at the dev-phase transition.
     """
+    org_uuid = uuid_mod.UUID(org_id)
+    bud_uuid = uuid_mod.UUID(bud_id)
     async with AsyncSessionLocal() as db:
-        bud_repo = BUDRepository(db, org_id=uuid_mod.UUID(org_id))
-        bud = await bud_repo.get_by_id(uuid_mod.UUID(bud_id))
-        if bud is not None:
-            setattr(bud, section, content)
+        bud_repo = BUDRepository(db, org_id=org_uuid)
+        bud = await bud_repo.get_by_id(bud_uuid)
+        if bud is None:
+            return
+
+        old_value = getattr(bud, section, None)
+        setattr(bud, section, content)
+        await db.commit()
+        logger.info("chat_content_persisted", bud_id=bud_id, section=section)
+
+        if section != _TECH_SPEC_SECTION:
+            return
+
+        # Second phase: refresh the Implementation TODO section + BUDTodo
+        # rows. Failures here must NOT abandon the already-committed spec
+        # edit — log + publish a banner event but let the chat job carry
+        # on with its own follow-up writes (the user still sees their
+        # edited spec; only the TODO refresh is missing).
+        try:
+            await apply_tech_spec_edit(
+                bud=bud,
+                old_spec=old_value,
+                new_spec=content,
+                db=db,
+                org_id=org_uuid,
+            )
             await db.commit()
-            logger.info("chat_content_persisted", bud_id=bud_id, section=section)
+        except Exception as exc:
+            await db.rollback()
+            logger.warning(
+                "chat_tech_spec_todo_refresh_failed",
+                bud_id=bud_id,
+                error=str(exc),
+            )
+            publish(
+                f"todo:{bud_id}",
+                {"event": "generating_failed", "error": str(exc)},
+            )

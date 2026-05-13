@@ -97,25 +97,25 @@ export const useBUDTodosStore = defineStore('budTodos', () => {
   }
 
   /**
-   * Trigger an async regenerate of all TODOs via the `todo-generator`
-   * agent. Returns 202 immediately; the WS topic carries the progress
-   * events. In-flight TODOs (claimed / in-progress / completed) are
-   * always preserved.
-   *
-   * On 409 (`already running`) we leave `regenerating` true — the
-   * existing task will fire the terminal event that clears it.
+   * Synchronously re-derive TODOs from the current tech spec. The
+   * backend parses the spec, reconciles BUDTodo rows (in-flight items
+   * are preserved), and returns the fresh list directly. Other tabs
+   * viewing the same BUD still pick up the change via the
+   * `todos_regenerated` WS event.
    */
   async function regenerate(budId: string): Promise<void> {
     regenerating.value = true
     try {
-      await api.post(`/v1/buds/${budId}/todos/regenerate`)
-    } catch (e: unknown) {
-      const msg = extractApiError(e, 'Failed to start regenerate')
-      // 409 = already running; let the existing task complete.
-      if (!msg.toLowerCase().includes('already')) {
-        regenerating.value = false
-        error.value = msg
+      const { data } = await api.post<BUDTodo[]>(
+        `/v1/buds/${budId}/todos/regenerate`,
+      )
+      if (currentBudId.value === budId) {
+        todos.value = data
       }
+    } catch (e: unknown) {
+      error.value = extractApiError(e, 'Failed to regenerate TODOs')
+    } finally {
+      regenerating.value = false
     }
   }
 

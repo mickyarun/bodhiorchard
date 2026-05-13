@@ -39,7 +39,7 @@ from app.services.job_utils import (
     record_agent_timeline,
     resolve_repo_path,
 )
-from app.services.skill_loader import load_skill
+from app.services.skill_loader import load_skill, load_skill_for_org
 
 logger = structlog.get_logger(__name__)
 
@@ -102,11 +102,19 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
 
     from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
 
-    # Read config from the designer skill
+    # Read config from the per-org designer skill row so admin edits to
+    # model / max_turns in Settings → Agent Prompts take effect without a
+    # redeploy. Fall back to the file default if the DB row is missing.
     try:
-        designer_skill = load_skill("designer")
-    except FileNotFoundError:
-        designer_skill = None
+        async with AsyncSessionLocal() as _skill_db:
+            designer_skill = await load_skill_for_org(
+                "designer", uuid_mod.UUID(payload.org_id), _skill_db
+            )
+    except (ValueError, LookupError):
+        try:
+            designer_skill = load_skill("designer")
+        except FileNotFoundError:
+            designer_skill = None
 
     _skill_uuid = uuid_mod.UUID(payload.skill_id) if payload.skill_id else None
     _task_uuid = uuid_mod.UUID(payload.task_id) if payload.task_id else None

@@ -15,6 +15,7 @@
 """BUD workflow endpoints: tech arch approval, rejection, and reassignment."""
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,31 @@ from app.schemas.bud import BUDRead, ReassignmentRequest, RejectTechArchRequest
 from app.services.bud_development import on_bud_development_started
 
 router = APIRouter()
+
+
+@router.post(
+    "/phase-failure/dismiss",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def dismiss_phase_failure(
+    bud_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Acknowledge the BUD's last phase-worker failure banner.
+
+    Stamps ``phase_failure_acknowledged_at = now()`` on the BUD row, so
+    :func:`_bud_response` stops surfacing any ``skill_failed`` event
+    older than this timestamp. The next genuine failure (any
+    ``skill_failed`` written after now) will re-trigger the banner.
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+    bud.phase_failure_acknowledged_at = datetime.now(UTC)
+    await db.flush()
 
 
 @router.post(
@@ -162,25 +188,24 @@ async def approve_tech_arch(
         detail={"from": BUDStatus.TECH_ARCH.value, "to": BUDStatus.DEVELOPMENT.value},
     )
 
-    # Crystallize the approved plan: enqueue the todo-generator agent.
-    # The worker (job_todo_generate) handles TODO sync, re-estimation, AND
-    # assigning TODOs to the BUD's phase lead — which is set by
-    # ``auto_assign_for_phase`` below. The worker reads ``bud.assignee_id``
-    # AFTER the ~30s agent run, by which time this PATCH has committed.
-    await on_bud_development_started(
-        db,
-        current_user.org_id,
-        bud,
-        actor_id=current_user.id,
-        actor_name=current_user.name,
-    )
-
-    # Smart assignment for development
+    # Smart assignment for development — sets bud.assignee_id, which the
+    # dev-transition hook below reads to assign newly-synced TODOs to
+    # the lead in the same transaction.
     new_assignee_id = await auto_assign_for_phase(
         db,
         current_user.org_id,
         bud,
         BUDStatus.DEVELOPMENT,
+        actor_id=current_user.id,
+        actor_name=current_user.name,
+    )
+
+    # Crystallize the approved plan: parse the spec into BUDTodo rows,
+    # assign to the lead, kick off background PERT re-estimation.
+    await on_bud_development_started(
+        db,
+        current_user.org_id,
+        bud,
         actor_id=current_user.id,
         actor_name=current_user.name,
     )

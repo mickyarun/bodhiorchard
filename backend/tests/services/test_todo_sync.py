@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the reconciliation rules in ``todo_sync._reconcile``.
+"""Reconciliation rules in ``todo_sync._reconcile``.
 
-The agent-call path is exercised by ``test_todo_generator.py``; here we
-cover only the diff logic that decides insert / update / preserve / delete
-per sequence — the part most likely to nuke in-flight developer work.
+The parser-call path is exercised by ``test_todo_parser.py``; here we
+cover only the diff logic that decides insert / update / preserve /
+delete per sequence — the part most likely to nuke in-flight developer
+work.
 """
 
 import uuid
@@ -24,23 +25,23 @@ import uuid
 import pytest
 
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
-from app.schemas.bud_todo_generator import TodoGeneratorItem
+from app.services.todo_parser import ParsedTodo
 from app.services.todo_sync import _is_preserved, _reconcile
 
 
-def _item(sequence: int, **overrides: object) -> TodoGeneratorItem:
+def _parsed(sequence: int, **overrides: object) -> ParsedTodo:
     base: dict[str, object] = {
         "sequence": sequence,
         "title": f"Task {sequence}",
+        "is_checkpoint": False,
+        "phase": "development",
+        "context_md": None,
         "description": None,
         "repo_name": None,
         "code_locations": [],
-        "context_md": None,
-        "is_checkpoint": False,
-        "phase": "development",
     }
     base.update(overrides)
-    return TodoGeneratorItem.model_validate(base)
+    return ParsedTodo(**base)  # type: ignore[arg-type]
 
 
 def _existing(
@@ -66,7 +67,7 @@ def _existing(
 
 
 class _RecordingSession:
-    """Minimal stand-in for AsyncSession used by `_reconcile`."""
+    """Minimal stand-in for AsyncSession used by ``_reconcile``."""
 
     def __init__(self) -> None:
         self.added: list[BUDTodo] = []
@@ -108,7 +109,7 @@ async def test_new_sequence_is_inserted() -> None:
         db,  # type: ignore[arg-type]
         org_id=uuid.uuid4(),
         bud_id=uuid.uuid4(),
-        agent_items=[_item(1, title="fresh")],
+        parsed_items=[_parsed(1, title="fresh")],
         existing={},
     )
     assert (ins, upd, pres, dlt) == (1, 0, 0, 0)
@@ -124,7 +125,7 @@ async def test_existing_fresh_sequence_is_updated_in_place() -> None:
         db,  # type: ignore[arg-type]
         org_id=uuid.uuid4(),
         bud_id=uuid.uuid4(),
-        agent_items=[_item(1, title="refreshed")],
+        parsed_items=[_parsed(1, title="refreshed")],
         existing=existing,
     )
     assert (ins, upd) == (0, 1)
@@ -141,21 +142,21 @@ async def test_update_writes_empty_list_not_null_for_code_locations() -> None:
         db,  # type: ignore[arg-type]
         org_id=uuid.uuid4(),
         bud_id=uuid.uuid4(),
-        agent_items=[_item(1, code_locations=[])],
+        parsed_items=[_parsed(1, code_locations=[])],
         existing=existing,
     )
     assert existing[1].code_locations == []
 
 
 @pytest.mark.asyncio
-async def test_preserved_existing_is_left_alone_even_when_agent_emits_same_seq() -> None:
+async def test_preserved_existing_is_left_alone_even_when_parser_emits_same_seq() -> None:
     existing = {1: _existing(1, status=BUDTodoStatus.IN_PROGRESS, title="claimed")}
     db = _RecordingSession()
     _ins, upd, pres, _dlt = await _reconcile(
         db,  # type: ignore[arg-type]
         org_id=uuid.uuid4(),
         bud_id=uuid.uuid4(),
-        agent_items=[_item(1, title="agent-rewrite")],
+        parsed_items=[_parsed(1, title="parser-rewrite")],
         existing=existing,
     )
     assert (upd, pres) == (0, 1)
@@ -164,14 +165,14 @@ async def test_preserved_existing_is_left_alone_even_when_agent_emits_same_seq()
 
 
 @pytest.mark.asyncio
-async def test_pending_unassigned_dropped_when_agent_no_longer_emits_it() -> None:
-    stale = _existing(2, title="agent dropped me")
+async def test_pending_unassigned_dropped_when_parser_no_longer_emits_it() -> None:
+    stale = _existing(2, title="parser dropped me")
     db = _RecordingSession()
     _ins, _upd, _pres, dlt = await _reconcile(
         db,  # type: ignore[arg-type]
         org_id=uuid.uuid4(),
         bud_id=uuid.uuid4(),
-        agent_items=[],
+        parsed_items=[],
         existing={2: stale},
     )
     assert dlt == 1
@@ -179,14 +180,14 @@ async def test_pending_unassigned_dropped_when_agent_no_longer_emits_it() -> Non
 
 
 @pytest.mark.asyncio
-async def test_preserved_existing_kept_when_agent_drops_the_sequence() -> None:
+async def test_preserved_existing_kept_when_parser_drops_the_sequence() -> None:
     claimed = _existing(2, assignee_id=uuid.uuid4(), title="being worked")
     db = _RecordingSession()
     _ins, _upd, pres, dlt = await _reconcile(
         db,  # type: ignore[arg-type]
         org_id=uuid.uuid4(),
         bud_id=uuid.uuid4(),
-        agent_items=[],
+        parsed_items=[],
         existing={2: claimed},
     )
     assert (pres, dlt) == (1, 0)

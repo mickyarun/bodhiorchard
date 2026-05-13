@@ -3,6 +3,7 @@ name: Triage Analyst
 description: Analyzes incoming issues and routes them to appropriate teams/agents
 tools: Read, Grep
 mcp_tools: search_bugs, get_knowledge, get_team_context, check_feature_exists
+timeout_seconds: 60
 model: sonnet
 effort:
 ---

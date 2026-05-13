@@ -3,6 +3,7 @@ name: DevOps
 description: Monitors deployment status, infrastructure health, and CI/CD pipelines
 tools: Read, Bash, WebFetch
 mcp_tools: post_slack_message, get_team_context
+timeout_seconds: 600
 model: sonnet
 effort:
 ---

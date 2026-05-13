@@ -26,6 +26,26 @@ from app.models.tracked_repository import TrackedRepository
 from app.repositories.base import BaseRepository
 
 
+async def list_basic_info_by_ids(
+    db: AsyncSession, bud_ids: set[uuid.UUID] | list[uuid.UUID]
+) -> dict[uuid.UUID, tuple[int, str]]:
+    """Cross-tenant lookup of (bud_number, title) keyed by BUD UUID.
+
+    Module-level (not a repo method) because the only caller —
+    ``agent_activity_logger.reconcile_orphan_phase_workers`` — runs cross
+    -tenant at app startup, before any org-scoped session is available.
+    Mirrors the same module-level pattern as ``list_orphan_phase_workers``
+    in ``repositories/agent_activity.py``.
+    """
+    if not bud_ids:
+        return {}
+    stmt = select(BUDDocument.id, BUDDocument.bud_number, BUDDocument.title).where(
+        BUDDocument.id.in_(bud_ids)
+    )
+    result = await db.execute(stmt)
+    return {row.id: (row.bud_number, row.title) for row in result.all()}
+
+
 class BUDRepository(BaseRepository[BUDDocument]):
     """Repository for BUDDocument queries, scoped to an organization."""
 

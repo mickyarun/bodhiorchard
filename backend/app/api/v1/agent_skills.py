@@ -65,6 +65,7 @@ def _skill_to_read(slug: str, skill_row: AgentSkill) -> AgentSkillRead:
         mcp_tools=skill_row.mcp_tools,
         prompt=skill_row.prompt,
         max_turns=getattr(skill_row, "max_turns", 0) or 0,
+        timeout_seconds=getattr(skill_row, "timeout_seconds", 0) or 0,
         model=getattr(skill_row, "model", "") or "",
         iteration_model=getattr(skill_row, "iteration_model", "") or "",
         effort=getattr(skill_row, "effort", "") or "",
@@ -216,6 +217,11 @@ async def update_agent_skill(
         mcp_tools = body.mcp_tools if body.mcp_tools is not None else existing.mcp_tools
         prompt = body.prompt if body.prompt is not None else existing.prompt
         max_turns = body.max_turns if body.max_turns is not None else (existing.max_turns or 0)
+        timeout_seconds = (
+            body.timeout_seconds
+            if body.timeout_seconds is not None
+            else (getattr(existing, "timeout_seconds", 0) or 0)
+        )
         model = body.model if body.model is not None else (getattr(existing, "model", "") or "")
         iteration_model = (
             body.iteration_model
@@ -233,6 +239,11 @@ async def update_agent_skill(
         mcp_tools = body.mcp_tools if body.mcp_tools is not None else file_skill.mcp_tools
         prompt = body.prompt if body.prompt is not None else file_skill.prompt
         max_turns = body.max_turns if body.max_turns is not None else file_skill.max_turns
+        timeout_seconds = (
+            body.timeout_seconds
+            if body.timeout_seconds is not None
+            else file_skill.timeout_seconds
+        )
         model = body.model if body.model is not None else file_skill.model
         iteration_model = (
             body.iteration_model
@@ -249,6 +260,7 @@ async def update_agent_skill(
         mcp_tools=mcp_tools,
         prompt=prompt,
         max_turns=max_turns,
+        timeout_seconds=timeout_seconds,
         model=model,
         iteration_model=iteration_model,
         effort=effort,
@@ -300,6 +312,7 @@ async def reset_agent_skill(
         mcp_tools=file_skill.mcp_tools,
         prompt=file_skill.prompt,
         max_turns=file_skill.max_turns,
+        timeout_seconds=file_skill.timeout_seconds,
         model=file_skill.model,
         iteration_model=file_skill.iteration_model,
         effort=file_skill.effort,

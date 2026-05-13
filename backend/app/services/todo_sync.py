@@ -12,15 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Sync ``BUDTodo`` rows from the agent-generated breakdown of a tech spec.
+"""Sync ``BUDTodo`` rows from the tech spec's Implementation TODO section.
 
-Runs the ``todo-generator`` agent, reconciles its JSON output against
-existing rows by sequence, and preserves in-flight developer work
-(anything claimed, completed, or annotated with a summary stays put).
+Runs the deterministic :mod:`todo_parser` against ``bud.tech_spec_md``
+and reconciles the result against existing rows by sequence. In-flight
+developer work (anything claimed, completed, or annotated with a
+summary) is preserved verbatim.
 
 The reconciler is the only writer of ``description`` / ``repo_name`` /
 ``code_locations`` / ``context_md`` / ``title`` / ``is_checkpoint`` —
-those are derived from the agent. ``status`` / ``assignee_id`` /
+those are derived from the parsed spec. ``status`` / ``assignee_id`` /
 ``summary`` / ``taken_at`` are user-owned and never touched here.
 """
 
@@ -33,8 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bud import BUDDocument
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.repositories.bud_todo import BUDTodoRepository
-from app.schemas.bud_todo_generator import TodoGeneratorItem
-from app.services.todo_generator import TodoGenerationError, generate_todos_for_bud
+from app.services.todo_parser import ParsedTodo, parse_implementation_todos
 
 logger = structlog.get_logger(__name__)
 
@@ -48,26 +48,25 @@ async def sync_todos_for_bud(
     *,
     mode: SyncMode = "initial",
 ) -> int:
-    """Generate TODOs for a BUD via the agent and reconcile them in DB.
+    """Re-derive BUDTodo rows for a BUD from its tech spec.
 
     ``mode`` distinguishes dev-phase transition from user-triggered
     regenerate; both follow identical reconciliation rules and the label
-    is forwarded to the agent + logged. Returns the agent's item count,
-    or 0 if the agent fails (BUD falls back to single-assignee flow).
+    is forwarded to the log. Returns the count of items the parser
+    produced (zero when the spec has no Implementation TODO section).
     Flushes but does not commit — the caller owns the transaction.
     """
-    impacted = _impacted_repo_pairs(bud)
-    try:
-        agent_items = await generate_todos_for_bud(bud, impacted, reason=mode)
-    except TodoGenerationError as exc:
-        logger.warning(
-            "todo_sync_agent_failed",
+    known_repo_names = _known_repo_names(bud)
+    parsed_items = parse_implementation_todos(
+        bud.tech_spec_md,
+        known_repo_names=known_repo_names,
+    )
+    if not parsed_items:
+        logger.info(
+            "bud_todos_no_section",
             bud_id=str(bud.id),
             mode=mode,
-            error=str(exc),
         )
-        return 0
-    if not agent_items:
         return 0
 
     existing = await _load_existing_by_sequence(db, org_id, bud.id)
@@ -75,7 +74,7 @@ async def sync_todos_for_bud(
         db,
         org_id=org_id,
         bud_id=bud.id,
-        agent_items=agent_items,
+        parsed_items=parsed_items,
         existing=existing,
     )
 
@@ -84,28 +83,28 @@ async def sync_todos_for_bud(
         "bud_todos_synced",
         bud_id=str(bud.id),
         mode=mode,
-        agent_count=len(agent_items),
+        parsed_count=len(parsed_items),
         inserted=inserted,
         updated=updated,
         preserved=preserved,
         deleted=deleted,
     )
-    return len(agent_items)
+    return len(parsed_items)
 
 
-def _impacted_repo_pairs(bud: BUDDocument) -> list[tuple[uuid.UUID, str]]:
-    """Project ``bud.impacted_repos`` into the (repo_id, repo_name) shape."""
-    pairs: list[tuple[uuid.UUID, str]] = []
+def _known_repo_names(bud: BUDDocument) -> list[str]:
+    """Project ``bud.impacted_repos`` into a flat list of repo names.
+
+    The parser uses this list to validate ``— repo: <name>`` suffixes —
+    a name not in the list resolves to ``None`` (cross-cutting) rather
+    than silently binding the TODO to a typo'd repo.
+    """
+    names: list[str] = []
     for entry in bud.impacted_repos or []:
-        repo_id = entry.get("repo_id") if isinstance(entry, dict) else None
         repo_name = entry.get("repo_name") if isinstance(entry, dict) else None
-        if not repo_id or not repo_name:
-            continue
-        try:
-            pairs.append((uuid.UUID(str(repo_id)), str(repo_name)))
-        except (ValueError, TypeError):
-            continue
-    return pairs
+        if repo_name:
+            names.append(str(repo_name))
+    return names
 
 
 async def _load_existing_by_sequence(
@@ -129,14 +128,14 @@ async def _reconcile(
     *,
     org_id: uuid.UUID,
     bud_id: uuid.UUID,
-    agent_items: list[TodoGeneratorItem],
+    parsed_items: list[ParsedTodo],
     existing: dict[int, BUDTodo],
 ) -> tuple[int, int, int, int]:
     """Apply insert/update/delete rules and return ``(ins, upd, pres, del)``."""
     inserted = updated = preserved = deleted = 0
-    agent_seqs = {item.sequence for item in agent_items}
+    parsed_seqs = {item.sequence for item in parsed_items}
 
-    for item in agent_items:
+    for item in parsed_items:
         current = existing.get(item.sequence)
         if current is None:
             db.add(_build_new_todo(org_id, bud_id, item))
@@ -144,11 +143,11 @@ async def _reconcile(
         elif _is_preserved(current):
             preserved += 1
         else:
-            _apply_agent_fields(current, item)
+            _apply_parsed_fields(current, item)
             updated += 1
 
     for seq, todo in existing.items():
-        if seq in agent_seqs:
+        if seq in parsed_seqs:
             continue
         if _is_preserved(todo):
             preserved += 1
@@ -162,7 +161,7 @@ async def _reconcile(
 def _build_new_todo(
     org_id: uuid.UUID,
     bud_id: uuid.UUID,
-    item: TodoGeneratorItem,
+    item: ParsedTodo,
 ) -> BUDTodo:
     return BUDTodo(
         org_id=org_id,
@@ -180,8 +179,8 @@ def _build_new_todo(
     )
 
 
-def _apply_agent_fields(current: BUDTodo, item: TodoGeneratorItem) -> None:
-    """Refresh agent-derived fields; never touch user-owned columns."""
+def _apply_parsed_fields(current: BUDTodo, item: ParsedTodo) -> None:
+    """Refresh parser-derived fields; never touch user-owned columns."""
     current.title = item.title
     current.description = item.description
     current.phase = item.phase

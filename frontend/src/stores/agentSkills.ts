@@ -25,6 +25,7 @@ export interface AgentSkill {
   mcpTools: string[]
   prompt: string
   maxTurns: number
+  timeoutSeconds: number
   model: string
   iterationModel: string
   effort: string
@@ -39,6 +40,7 @@ interface AgentSkillApi {
   mcp_tools: string[]
   prompt: string
   max_turns: number
+  timeout_seconds: number
   model: string
   iteration_model: string
   effort: string
@@ -54,6 +56,7 @@ function fromApi(raw: AgentSkillApi): AgentSkill {
     mcpTools: raw.mcp_tools,
     prompt: raw.prompt,
     maxTurns: raw.max_turns,
+    timeoutSeconds: raw.timeout_seconds ?? 0,
     model: raw.model ?? '',
     iterationModel: raw.iteration_model ?? '',
     effort: raw.effort ?? '',
@@ -92,7 +95,7 @@ export const useAgentSkillsStore = defineStore('agentSkills', () => {
 
   async function updateSkill(
     slug: string,
-    updates: Partial<Pick<AgentSkill, 'name' | 'description' | 'tools' | 'mcpTools' | 'prompt' | 'maxTurns' | 'model' | 'iterationModel' | 'effort'>>,
+    updates: Partial<Pick<AgentSkill, 'name' | 'description' | 'tools' | 'mcpTools' | 'prompt' | 'maxTurns' | 'timeoutSeconds' | 'model' | 'iterationModel' | 'effort'>>,
   ): Promise<boolean> {
     saving.value = true
     error.value = null
@@ -105,6 +108,7 @@ export const useAgentSkillsStore = defineStore('agentSkills', () => {
       if (updates.mcpTools !== undefined) payload.mcp_tools = updates.mcpTools
       if (updates.prompt !== undefined) payload.prompt = updates.prompt
       if (updates.maxTurns !== undefined) payload.max_turns = updates.maxTurns
+      if (updates.timeoutSeconds !== undefined) payload.timeout_seconds = updates.timeoutSeconds
       if (updates.model !== undefined) payload.model = updates.model
       if (updates.iterationModel !== undefined) payload.iteration_model = updates.iterationModel
       if (updates.effort !== undefined) payload.effort = updates.effort

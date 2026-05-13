@@ -57,6 +57,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
         mcp_tools: list[str],
         prompt: str,
         max_turns: int = 0,
+        timeout_seconds: int = 0,
         model: str = "",
         iteration_model: str = "",
         effort: str = "",
@@ -71,6 +72,8 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             mcp_tools: List of MCP tools.
             prompt: Full markdown prompt body.
             max_turns: Max Claude CLI turns (0 = unlimited).
+            timeout_seconds: Wall-clock cap on the Claude subprocess
+                (0 = caller's hard-coded fallback).
             model: Claude model alias or ID (empty = CLI default).
             iteration_model: Faster model for chat-iteration paths
                 (empty = fall back to ``model``).
@@ -87,6 +90,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             existing.mcp_tools = mcp_tools
             existing.prompt = prompt
             existing.max_turns = max_turns
+            existing.timeout_seconds = timeout_seconds
             existing.model = model
             existing.iteration_model = iteration_model
             existing.effort = effort
@@ -103,6 +107,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             mcp_tools=mcp_tools,
             prompt=prompt,
             max_turns=max_turns,
+            timeout_seconds=timeout_seconds,
             model=model,
             iteration_model=iteration_model,
             effort=effort,

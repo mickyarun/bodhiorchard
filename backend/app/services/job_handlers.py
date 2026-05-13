@@ -41,12 +41,10 @@ from app.services.job_queue import (
     JOB_JIRA_IMPORT,
     JOB_PR_MERGE_UPDATE,
     JOB_REPO_BULK_ONBOARD,
-    JOB_TODO_GENERATE,
     JOB_TRIAGE,
     register_job_type,
 )
 from app.services.job_repo_bulk_clone import handle_bulk_onboard_job
-from app.services.job_todo_generate import handle_todo_generate_job
 from app.services.scan.pr_merge_update import handle_pr_merge_update
 
 # Re-export all handlers so existing imports continue to work
@@ -96,9 +94,6 @@ def setup_job_handlers() -> None:
     # Unified BUD agent handler (PRD, tech arch, code review, testing)
     bud_agent_workers = int(os.environ.get("JOB_BUD_AGENT_WORKERS", "2"))
     register_job_type(JOB_BUD_AGENT, handle_bud_agent_job, worker_count=bud_agent_workers)
-
-    # TODO-generator agent (dev-phase transition + user Regenerate button)
-    register_job_type(JOB_TODO_GENERATE, handle_todo_generate_job, worker_count=2)
 
     # Jira import pipeline
     register_job_type(JOB_JIRA_DISCOVERY, handle_discovery_job, worker_count=1)

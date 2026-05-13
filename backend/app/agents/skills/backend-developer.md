@@ -3,6 +3,7 @@ name: Backend Developer
 description: Implements backend features following FastAPI and SQLAlchemy patterns
 tools: Read, Write, Edit, Glob, Grep, Bash
 mcp_tools: get_bud_context
+timeout_seconds: 600
 model: sonnet
 effort:
 ---

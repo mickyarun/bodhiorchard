@@ -34,6 +34,7 @@ from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
 from app.models.user import User
+from app.repositories.agent_activity import AgentActivityLogRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_agent_task import BUDAgentTaskRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
@@ -59,6 +60,7 @@ from app.schemas.dev_activity import (
     DevStatsRead,
     UntrackedRepoRead,
 )
+from app.services.agent_activity_logger import PHASE_WORKER_SLUGS
 
 logger = structlog.get_logger(__name__)
 
@@ -92,6 +94,41 @@ async def _bud_response(
     bud_data = BUDRead.model_validate(bud)
     if active_task:
         bud_data.active_agent_task = BUDAgentTaskRead.model_validate(active_task)
+
+    # Re-attach the phase-progress banner for synthetic workers (assignment
+    # / todo-gen / estimation) that don't have BUDAgentTask rows. Without
+    # this the banner only catches events that fire AFTER mount, so the
+    # whole chain is invisible if the user navigates away and back.
+    # Uses the single source of truth ``PHASE_WORKER_SLUGS`` from
+    # agent_activity_logger so adding a new worker touches exactly one
+    # list.
+    activity_repo = AgentActivityLogRepository(db, org_id=org_id)
+    active_phase = await activity_repo.get_active_phase_worker(bud.id, PHASE_WORKER_SLUGS)
+    if active_phase is not None:
+        bud_data.active_phase_worker = {
+            "skill_slug": active_phase.skill_slug or "",
+            "message": active_phase.message or "",
+        }
+
+    # Sticky failure banner: most recent skill_failed newer than the
+    # user's dismissal timestamp. Covers the restart-recovery and
+    # missed-WS-event cases without any client-side reconnect logic —
+    # if the failure happened, the next BUD load surfaces it; the user
+    # dismisses, the column updates, the banner is gone for good.
+    latest_failure = await activity_repo.get_latest_skill_failed(
+        bud.id,
+        skill_slugs=PHASE_WORKER_SLUGS,
+        since=bud.phase_failure_acknowledged_at,
+    )
+    if latest_failure is not None:
+        bud_data.last_phase_failure = {
+            "skill_slug": latest_failure.skill_slug or "",
+            "message": latest_failure.message or "",
+            "failed_at": latest_failure.created_at.isoformat()
+            if latest_failure.created_at
+            else None,
+            "metadata": latest_failure.metadata_ or {},
+        }
     return bud_data
 
 
@@ -442,25 +479,14 @@ async def update_bud(
             detail={"from": old_status.value, "to": new_status.value},
         )
 
-        # Same dev-transition side effects fired by approve_tech_arch — see
-        # backend/app/services/bud_development.py. The hook only enqueues a
-        # JOB_TODO_GENERATE job; the worker assigns TODOs to the BUD's
-        # phase lead after the agent finishes, reading bud.assignee_id
-        # (set by ``auto_assign_for_phase`` below) from the committed
-        # transaction. Apply ``bud.status`` early so the worker sees the
-        # right phase when it later refreshes.
+        # Apply the status before the side effects so downstream hooks
+        # and assignment policy see the correct phase.
         if old_status != BUDStatus.DEVELOPMENT and new_status == BUDStatus.DEVELOPMENT:
-            from app.services.bud_development import on_bud_development_started
-
             bud.status = new_status
-            await on_bud_development_started(
-                db,
-                current_user.org_id,
-                bud,
-                actor_id=current_user.id,
-                actor_name=current_user.name,
-            )
 
+        # auto_assign_for_phase sets ``bud.assignee_id`` — must run before
+        # the dev-transition hook so the hook can assign newly-synced
+        # TODOs to that lead in the same transaction.
         await auto_assign_for_phase(
             db,
             current_user.org_id,
@@ -469,6 +495,21 @@ async def update_bud(
             actor_id=current_user.id,
             actor_name=current_user.name,
         )
+
+        # Same dev-transition side effects fired by approve_tech_arch — see
+        # backend/app/services/bud_development.py. Synchronously parses
+        # the tech spec into BUDTodo rows + assigns to the lead; spawns
+        # a background task for PERT estimation.
+        if old_status != BUDStatus.DEVELOPMENT and new_status == BUDStatus.DEVELOPMENT:
+            from app.services.bud_development import on_bud_development_started
+
+            await on_bud_development_started(
+                db,
+                current_user.org_id,
+                bud,
+                actor_id=current_user.id,
+                actor_name=current_user.name,
+            )
 
     # Record title change
     if "title" in update_data and update_data["title"] != old_title:
@@ -484,11 +525,32 @@ async def update_bud(
             detail={"section": "title", "old_title": old_title, "new_title": update_data["title"]},
         )
 
+    old_tech_spec_md = bud.tech_spec_md if "tech_spec_md" in update_data else None
+
     for field, value in update_data.items():
         setattr(bud, field, value)
 
     await db.flush()
     await db.refresh(bud)
+
+    # If the developer edited tech_spec_md on a DEVELOPMENT-phase BUD,
+    # refresh the Implementation TODO section (LLM patch when the diff
+    # extends beyond the section) and re-derive BUDTodo rows. The
+    # reconciler preserves in-flight developer work.
+    if "tech_spec_md" in update_data and update_data["tech_spec_md"] != old_tech_spec_md:
+        from app.services.tech_planner_patch import apply_tech_spec_edit
+
+        # apply_tech_spec_edit mutates ``bud.tech_spec_md`` in place when
+        # the patch flow rewrites the section, so the caller's commit
+        # persists it without a second write here. ``sync_todos_for_bud``
+        # already flushes newly-inserted BUDTodo rows.
+        await apply_tech_spec_edit(
+            bud=bud,
+            old_spec=old_tech_spec_md,
+            new_spec=update_data["tech_spec_md"],
+            db=db,
+            org_id=current_user.org_id,
+        )
 
     # Award XP for BUD completion (prod or closed with assignee)
     if "status" in update_data:

@@ -26,6 +26,7 @@
 import { ref, onUnmounted } from 'vue'
 import api from '@/services/api'
 import { subscribe, unsubscribe } from '@/services/socket'
+import { onSocketReconnect } from '@/services/wsReconnect'
 import type {
   DevActivity,
   DevActivityResponse,
@@ -105,12 +106,23 @@ export function useBudActivity(budId: string, roleFilter?: BudActivityRoleFilter
     }
   }
 
+  let unregisterReconnect: (() => void) | null = null
+
   function startListening(): void {
     subscribe(topic, onMessage)
+    // Events fired while the socket was dropped (backend restart,
+    // browser sleep) are not buffered. Re-fetch on every reconnect so
+    // the activity feed catches up — REST is the source of truth and
+    // WS is just live notification on top.
+    unregisterReconnect = onSocketReconnect(() => load())
   }
 
   function stopListening(): void {
     unsubscribe(topic, onMessage)
+    if (unregisterReconnect) {
+      unregisterReconnect()
+      unregisterReconnect = null
+    }
   }
 
   onUnmounted(stopListening)

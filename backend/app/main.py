@@ -150,6 +150,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("agent_task_recovery_failed", exc_info=True)
 
+    # 6a. Recover orphan phase workers (assignment / todo / estimation).
+    # Sister to step 6: synthetic skills don't have BUDAgentTask rows, so
+    # this scans AgentActivityLog for skill_invoked entries with no
+    # matching terminal event and emits skill_failed for each — clears the
+    # progress banner on any open session and stops re-attachment on
+    # fresh mounts via active_phase_worker.
+    from app.services.agent_activity_logger import reconcile_orphan_phase_workers
+
+    try:
+        async with AsyncSessionLocal() as session:
+            recovered_phases = await reconcile_orphan_phase_workers(session)
+        # Always log — without this you can't tell from the startup
+        # output whether recovery actually ran or silently skipped. The
+        # ``count`` lets you confirm the orphan-cancellation pipeline
+        # against a live scenario.
+        logger.info("phase_worker_recovery_complete", count=recovered_phases)
+    except Exception:
+        logger.warning("phase_worker_recovery_failed", exc_info=True)
+
     # 6b. Recover stuck Jira import sessions from prior crash/restart
     from app.repositories.jira_import import recover_stuck_import_sessions
 

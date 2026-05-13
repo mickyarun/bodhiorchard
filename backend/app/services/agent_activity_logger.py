@@ -19,6 +19,7 @@ across bud_agent_handler, job_chat, job_design, and job_agents.
 """
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -27,7 +28,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_activity import AgentActivityLog
 from app.models.tracked_repository import TrackedRepository
+from app.repositories.agent_activity import list_orphan_phase_workers
+from app.repositories.bud import list_basic_info_by_ids
 from app.services.event_bus import publish
+
+# Skill slugs the dev-mode chain emits. Centralised here so both the
+# emitter (bud_development, bud_assignment) and the startup reconciler
+# stay in sync — adding a new phase worker requires touching exactly one
+# list.
+PHASE_WORKER_SLUGS: list[str] = ["phase_assigner", "pert_estimator"]
 
 logger = structlog.get_logger(__name__)
 
@@ -120,7 +129,20 @@ async def _write_and_publish(
     bud_number: int | None,
     bud_title: str | None,
 ) -> None:
-    """Write the DB row and publish the WebSocket event."""
+    """Write the DB row and publish the WebSocket event.
+
+    ``created_at`` is set Python-side rather than via the column's
+    ``server_default=func.now()``. Postgres ``now()`` returns the
+    transaction-start time, which means consecutive lifecycle events
+    written in the same transaction (e.g. ``auto_assign_for_phase``
+    writing ``skill_invoked`` then ``skill_completed`` on either side
+    of a 10-second LLM call) tie on the microsecond — and
+    ``get_active_phase_worker``'s ``func.max(created_at)`` then can't
+    distinguish them, leaving the progress banner forever stuck on the
+    invoked row. Using ``datetime.now`` resolves each call to wall
+    time, which advances within a transaction.
+    """
+    now = datetime.now(UTC)
     log = AgentActivityLog(
         org_id=org_id,
         skill_id=skill_id,
@@ -133,6 +155,8 @@ async def _write_and_publish(
         source="backend",
         skill_slug=skill_slug,
         metadata_=metadata_,
+        created_at=now,
+        updated_at=now,
     )
     db.add(log)
     await db.flush()
@@ -160,11 +184,13 @@ async def _write_and_publish(
             "skill_slug": skill_slug,
             "actor_name": skill_slug,
             "task_id": str(task_id) if task_id else None,
+            "bud_id": str(bud_id) if bud_id else None,
             "repo_name": repo_name,
             "bud_number": bud_number,
             "bud_title": bud_title,
             "impacted_repo_names": [],
             "created_at": log.created_at.isoformat() if log.created_at else "",
+            "metadata": metadata_,
         },
     )
 
@@ -174,3 +200,60 @@ _STATUS_MAP: dict[str, str] = {
     "skill_completed": "completed",
     "skill_failed": "failed",
 }
+
+
+async def reconcile_orphan_phase_workers(db: AsyncSession) -> int:
+    """Emit ``skill_failed`` for every phase-worker still marked in-flight.
+
+    Called once on startup to recover from a backend crash or restart that
+    happened mid-chain. Mirrors ``recover_stuck_agent_tasks`` in
+    ``bud_agent_task.py`` for synthetic skills that don't have a
+    ``BUDAgentTask`` row.
+
+    For each orphan ``(org_id, bud_id, skill_slug)`` whose latest
+    lifecycle event is ``skill_invoked``:
+      1. Look up ``bud_number`` / ``bud_title`` so the published banner
+         copy matches what the live event carried.
+      2. Call ``log_agent_activity`` with ``event_type='skill_failed'``
+         and ``metadata.reason='server_restart'``. The publish on
+         ``agent_activity:{org_id}`` decrements the live banner's
+         in-flight counter; the new audit row makes
+         ``get_active_phase_worker`` return ``None`` on the next mount.
+      3. Each emit uses its own fresh session (db=None) so a single
+         broken row can't poison the whole recovery loop.
+
+    Returns the number of orphans reconciled.
+    """
+    orphans = await list_orphan_phase_workers(db, PHASE_WORKER_SLUGS)
+    if not orphans:
+        return 0
+
+    bud_ids = {row.bud_id for row in orphans if row.bud_id is not None}
+    bud_info = await list_basic_info_by_ids(db, bud_ids)
+
+    reconciled = 0
+    for row in orphans:
+        if row.bud_id is None or row.skill_slug is None:
+            continue
+        info = bud_info.get(row.bud_id)
+        try:
+            await log_agent_activity(
+                None,
+                org_id=row.org_id,
+                event_type="skill_failed",
+                skill_slug=row.skill_slug,
+                message="Server restarted while task was in progress",
+                bud_id=row.bud_id,
+                bud_number=info[0] if info else None,
+                bud_title=info[1] if info else None,
+                metadata_={"reason": "server_restart"},
+            )
+            reconciled += 1
+        except Exception:
+            logger.warning(
+                "phase_worker_recovery_emit_failed",
+                bud_id=str(row.bud_id),
+                skill_slug=row.skill_slug,
+                exc_info=True,
+            )
+    return reconciled

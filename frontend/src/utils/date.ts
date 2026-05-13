@@ -35,3 +35,19 @@ export function formatDateTime(iso: string | null | undefined): string {
     minute: '2-digit',
   })
 }
+
+/**
+ * Format an ISO-8601 date string into a date-only label (no time).
+ * Returns empty string for null/undefined; falls back to the raw
+ * string if parsing fails.
+ */
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}

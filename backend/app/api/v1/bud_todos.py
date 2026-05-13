@@ -31,10 +31,9 @@ from app.schemas.bud_todos import (
     BUDTodoRead,
     BUDTodoUpdate,
 )
-from app.schemas.jobs import TodoGenerateJobPayload
 from app.services.bud_timeline import record_event
 from app.services.event_bus import publish
-from app.services.job_queue import JOB_TODO_GENERATE, create_job, is_job_active
+from app.services.todo_sync import sync_todos_for_bud
 
 logger = structlog.get_logger(__name__)
 
@@ -174,17 +173,22 @@ async def claim_todo(
 
 @router.post(
     "/{bud_id}/todos/regenerate",
-    status_code=status.HTTP_202_ACCEPTED,
+    response_model=list[BUDTodoRead],
     dependencies=[Depends(require_permissions("buds:edit"))],
 )
 async def regenerate_todos(
     bud_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> dict[str, str]:
-    """Fire-and-forget TODO regenerate; subscribe to ``topic`` for events.
+) -> list[BUDTodoRead]:
+    """Re-derive TODOs from the current tech spec and return the new list.
 
-    Agent runs in a background task (30-120s). In-flight TODOs preserved.
+    Synchronous: the deterministic parser runs in-request, the reconciler
+    preserves any claimed / completed rows, and the response carries the
+    fresh state. Concurrent calls for the same BUD are safe — the
+    sequence-keyed reconciler is idempotent; the worst case is one
+    request hitting a unique-constraint conflict and the client
+    refreshing.
     """
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
@@ -195,27 +199,16 @@ async def regenerate_todos(
             status.HTTP_400_BAD_REQUEST,
             f"BUD must be in development phase (currently {bud.status}).",
         )
-    if is_job_active(JOB_TODO_GENERATE, {"bud_id": str(bud_id)}):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Regeneration already in progress for this BUD.",
-        )
 
-    payload = TodoGenerateJobPayload(
-        org_id=str(current_user.org_id),
-        bud_id=str(bud_id),
-        mode="regenerate",
-        actor_id=str(current_user.id),
-        actor_name=current_user.name,
+    count = await sync_todos_for_bud(db, current_user.org_id, bud, mode="regenerate")
+    publish(
+        f"todo:{bud_id}",
+        {
+            "event": "todos_regenerated",
+            "bud_id": str(bud_id),
+            "todo_count": count,
+        },
     )
-    job = create_job(
-        JOB_TODO_GENERATE,
-        payload=payload.model_dump(),
-        user_id=str(current_user.id),
-    )
-    publish(f"todo:{bud_id}", {"event": "regenerate_scheduled", "job_id": job.job_id})
-    return {
-        "topic": f"todo:{bud_id}",
-        "job_id": job.job_id,
-        "status": "scheduled",
-    }
+    todo_repo = BUDTodoRepository(db, org_id=current_user.org_id)
+    todos = await todo_repo.list_for_bud(bud_id)
+    return [_to_read(t) for t in todos]
