@@ -459,17 +459,13 @@ def _validate_working_dir(working_dir: str | Path | None) -> str:
 
     allowed = _allowed_cwd_roots()
     if not any(raw.startswith(root) for root in allowed):
-        raise ValueError(
-            f"run_claude_code working_dir not under an allowed root: {raw!r}"
-        )
+        raise ValueError(f"run_claude_code working_dir not under an allowed root: {raw!r}")
 
     # Belt-and-braces: even if a future allowed root contained a
     # credential subdir, refuse the substring.
     for cred in ("/.ssh", "/.aws", "/.gnupg", "/.kube", "/.claude/.credentials"):
         if cred in raw:
-            raise ValueError(
-                f"run_claude_code refuses to spawn inside a credential dir: {raw!r}"
-            )
+            raise ValueError(f"run_claude_code refuses to spawn inside a credential dir: {raw!r}")
 
     # Past the allowlist gate the value is considered sanitized.
     resolved = Path(raw).resolve()
