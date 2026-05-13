@@ -314,85 +314,7 @@
 
               <!-- Closed / Discarded -->
               <v-tabs-window-item v-if="isClosed" value="closed">
-                <div class="pa-4">
-                  <v-alert
-                    :type="bud.status === 'discarded' ? 'error' : 'info'"
-                    variant="tonal"
-                    density="compact"
-                    class="mb-5"
-                  >
-                    <div class="d-flex align-center ga-2">
-                      <v-icon :icon="bud.status === 'discarded' ? 'mdi-delete-outline' : 'mdi-check-circle-outline'" />
-                      <div class="flex-grow-1">
-                        <div class="font-weight-medium">
-                          {{ bud.status === 'discarded' ? 'This BUD was discarded' : 'This BUD is closed' }}
-                        </div>
-                        <div v-if="closedEvent" class="text-caption text-medium-emphasis">
-                          {{ closedEvent.actor_name || 'System' }} &middot; {{ formatClosedDate(closedEvent.created_at) }}
-                        </div>
-                      </div>
-                    </div>
-                  </v-alert>
-
-                  <!-- Release / closure date -->
-                  <div v-if="closedEvent" class="mb-5">
-                    <div class="text-overline text-medium-emphasis mb-2">
-                      {{ bud.status === 'discarded' ? 'Discarded on' : 'Completed on' }}
-                    </div>
-                    <div class="d-flex align-center ga-2">
-                      <v-icon icon="mdi-calendar-check" size="18" color="success" />
-                      <span class="text-body-1 font-weight-medium">
-                        {{ formatClosedDate(closedEvent.created_at) }}
-                      </span>
-                    </div>
-                  </div>
-
-                  <!-- Closure reason (from status_override or status_change detail) -->
-                  <div v-if="closedReason" class="mb-5">
-                    <div class="text-overline text-medium-emphasis mb-2">Reason</div>
-                    <v-card variant="outlined" class="pa-3">
-                      <div class="text-body-2">{{ closedReason }}</div>
-                    </v-card>
-                  </div>
-
-                  <!-- Previous status before closure -->
-                  <div v-if="closedFrom" class="mb-5">
-                    <div class="text-overline text-medium-emphasis mb-2">Closed from</div>
-                    <v-chip variant="tonal" :color="BUD_STATUS_COLORS[closedFrom as BUDStatus] || 'grey'" size="small">
-                      {{ BUD_STATUS_LABELS[closedFrom as BUDStatus] || closedFrom }}
-                    </v-chip>
-                  </div>
-
-                  <!-- Closure timeline events -->
-                  <div v-if="closedTimelineEvents.length" class="mb-5">
-                    <div class="text-overline text-medium-emphasis mb-2">Timeline</div>
-                    <div class="d-flex flex-column ga-2">
-                      <div
-                        v-for="event in closedTimelineEvents"
-                        :key="event.id"
-                        class="d-flex align-center ga-2 pa-2 rounded"
-                        style="border: 1px solid rgba(255,255,255,0.08)"
-                      >
-                        <v-icon
-                          :icon="event.event_type === 'status_change' ? 'mdi-swap-horizontal' : 'mdi-information-outline'"
-                          size="18"
-                          color="primary"
-                        />
-                        <div class="flex-grow-1">
-                          <span class="text-body-2">
-                            {{ event.event_type === 'status_change'
-                              ? `Status changed: ${event.detail?.from || '?'} → ${event.detail?.to || '?'}`
-                              : event.event_type.replace(/_/g, ' ')
-                            }}
-                          </span>
-                          <div class="text-caption text-medium-emphasis">
-                            {{ event.actor_name || 'System' }} &middot; {{ formatClosedDate(event.created_at) }}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <BUDClosedTab v-if="bud" :bud="bud" :timeline-events="timelineEvents" />
               </v-tabs-window-item>
 
               <!-- Test Plan tab removed — test plan content is now part of QA tab -->
@@ -600,7 +522,7 @@ import { onSocketReconnect } from '@/services/wsReconnect'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
-import type { BUDSectionKey, BUDStatus, TimelineEvent } from '@/types'
+import type { BUDSectionKey, TimelineEvent } from '@/types'
 import ChatPanel from '@/components/buds/ChatPanel.vue'
 import BUDEstimationSection from '@/components/buds/BUDEstimationSection.vue'
 import BUDActivitySection from '@/components/buds/BUDActivitySection.vue'
@@ -616,9 +538,9 @@ import BUDReleaseStagePanel from '@/components/buds/BUDReleaseStagePanel.vue'
 import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
 import BUDTechSpecTab from '@/components/buds/BUDTechSpecTab.vue'
+import BUDClosedTab from '@/components/buds/BUDClosedTab.vue'
 import { useBudLinkedFeaturesStore } from '@/stores/budLinkedFeatures'
 import { useSettingsStore } from '@/stores/settings'
-import { formatDateTime } from '@/utils/date'
 
 const route = useRoute()
 const router = useRouter()
@@ -645,30 +567,6 @@ const uatStageEnabled = computed(
 const isClosed = computed(
   () => bud.value?.status === 'closed' || bud.value?.status === 'discarded',
 )
-const closedEvent = computed(() => {
-  const events = timelineEvents.value.filter(
-    (e) =>
-      e.event_type === 'status_change' &&
-      (e.detail?.to === 'closed' || e.detail?.to === 'discarded'),
-  )
-  return events.length > 0 ? events[events.length - 1] : null
-})
-const closedReason = computed(() => {
-  const evt = closedEvent.value
-  return (evt?.detail?.reason as string) || null
-})
-const closedFrom = computed(() => {
-  const evt = closedEvent.value
-  return (evt?.detail?.from as string) || null
-})
-const closedTimelineEvents = computed(() =>
-  timelineEvents.value.filter(
-    (e) =>
-      e.event_type === 'status_change' &&
-      (e.detail?.to === 'closed' || e.detail?.to === 'discarded'),
-  ),
-)
-const formatClosedDate = formatDateTime
 
 // "Read-only" tabs hide the section toolbar (Edit/Export/Import).
 const READ_ONLY_TABS = new Set([
