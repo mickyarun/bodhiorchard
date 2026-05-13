@@ -21,6 +21,7 @@
  */
 import { onMounted, onUnmounted } from 'vue'
 import { subscribe, unsubscribe } from '@/services/socket'
+import { onSocketReconnect } from '@/services/wsReconnect'
 import { useNotificationStore } from '@/stores/notifications'
 import type { AppNotification } from '@/types'
 
@@ -33,6 +34,10 @@ export function useNotificationSocket(userId: string) {
   }
 
   subscribe(topic, handler)
+  // Refetch on every WS reconnect — notifications fired during the
+  // dropped-socket window aren't replayed, so the list would silently
+  // miss entries until the next visibility change.
+  const unregisterReconnect = onSocketReconnect(() => store.fetchAll())
 
   const onVisibility = () => {
     if (document.visibilityState === 'visible') {
@@ -46,6 +51,7 @@ export function useNotificationSocket(userId: string) {
 
   onUnmounted(() => {
     unsubscribe(topic, handler)
+    unregisterReconnect()
     document.removeEventListener('visibilitychange', onVisibility)
   })
 }

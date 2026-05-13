@@ -19,6 +19,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useBUDTodosStore } from '@/stores/bud_todos'
 import { useAuthStore } from '@/stores/auth'
 import { subscribe, unsubscribe } from '@/services/socket'
+import { onSocketReconnect } from '@/services/wsReconnect'
 import BUDTodoRow from './BUDTodoRow.vue'
 import type { BUDTodo, BUDTodoStatus } from '@/types'
 
@@ -41,6 +42,14 @@ const progress = computed(() => {
 
 // Last `generating_tool_use` event — surfaced as a hint while regenerating.
 const lastTool = ref<string | null>(null)
+// Latest agent-stage label (set on `generating_start`, cleared on terminal).
+// Bridges the 5–15 s gap between the regenerate click and the first tool_use
+// event so the user sees "Agent starting…" instead of an unlabelled spinner.
+const agentStageLabel = ref<string | null>(null)
+// Persistent failure message — set when the agent emits `generating_failed`
+// (e.g. the hard-coded 90s timeout). Surfaces in an alert until the user
+// triggers another regenerate or navigates away.
+const lastFailure = ref<string | null>(null)
 const confirmRegenerate = ref(false)
 
 async function reload() {
@@ -51,10 +60,15 @@ async function reload() {
 // on the `todo:{budId}` topic.
 let currentTopic: string | null = null
 let currentHandler: ((data: unknown) => void) | null = null
+let unregisterReconnect: (() => void) | null = null
 
 function bindSocket(budId: string) {
   if (currentTopic && currentHandler) {
     unsubscribe(currentTopic, currentHandler)
+  }
+  if (unregisterReconnect) {
+    unregisterReconnect()
+    unregisterReconnect = null
   }
   if (!budId) {
     currentTopic = null
@@ -63,19 +77,47 @@ function bindSocket(budId: string) {
   }
   const topic = `todo:${budId}`
   const handler = (data: unknown) => {
-    const event = (data as { event?: string } | null)?.event
-    if (event === 'generating_tool_use') {
-      lastTool.value = (data as { tool?: string }).tool ?? null
+    const payload = data as { event?: string; tool?: string; error?: string } | null
+    const event = payload?.event
+    if (event === 'generating_start') {
+      agentStageLabel.value = 'Starting…'
+      lastFailure.value = null
       return
     }
-    if (event === 'todos_regenerated' || event === 'generating_failed') {
+    if (event === 'generating_tool_use') {
+      agentStageLabel.value = null
+      lastTool.value = payload?.tool ?? null
+      return
+    }
+    if (event === 'generating_failed') {
       lastTool.value = null
+      agentStageLabel.value = null
+      lastFailure.value = payload?.error ?? 'Agent failed without a message'
+      // Belt-and-suspenders: a failure event MUST clear the regenerate
+      // spinner. `handleRemoteEvent` does this too, but it gates on
+      // `currentBudId.value === budId`, which a navigation race can
+      // miss. Flipping the flag here unconditionally guarantees the
+      // spinner hides whenever a failure is surfaced in this panel.
+      todosStore.regenerating = false
+    }
+    if (event === 'todos_regenerated') {
+      lastTool.value = null
+      agentStageLabel.value = null
+      lastFailure.value = null
     }
     void todosStore.handleRemoteEvent(budId, event)
   }
   subscribe(topic, handler)
   currentTopic = topic
   currentHandler = handler
+
+  // Refetch on every WS reconnect — events fired while the socket was
+  // dropped (backend restart, network blip) are not buffered, so a
+  // `todos_regenerated` or `generating_failed` issued during the gap
+  // would leave the board stale + the regenerating spinner stuck.
+  // Pulling fresh todos resyncs both the row list and the regenerating
+  // flag (cleared inside `handleRemoteEvent` on terminal events).
+  unregisterReconnect = onSocketReconnect(() => todosStore.fetchTodos(budId))
 }
 
 onMounted(() => {
@@ -92,6 +134,10 @@ watch(
 onUnmounted(() => {
   if (currentTopic && currentHandler) {
     unsubscribe(currentTopic, currentHandler)
+  }
+  if (unregisterReconnect) {
+    unregisterReconnect()
+    unregisterReconnect = null
   }
   todosStore.reset()
 })
@@ -129,6 +175,10 @@ async function doRegenerate() {
           v-if="todosStore.regenerating && lastTool"
           class="todo-board__tool-hint"
         >Agent using {{ lastTool }}…</span>
+        <span
+          v-else-if="todosStore.regenerating && agentStageLabel"
+          class="todo-board__tool-hint"
+        >Agent {{ agentStageLabel.toLowerCase() }}</span>
         <v-btn
           size="small"
           variant="text"
@@ -139,6 +189,15 @@ async function doRegenerate() {
         >Regenerate</v-btn>
       </div>
     </div>
+
+    <v-alert
+      v-if="lastFailure"
+      type="error"
+      variant="tonal"
+      class="ma-3"
+      closable
+      @click:close="lastFailure = null"
+    >{{ lastFailure }}</v-alert>
 
     <v-progress-linear
       v-if="progress.total"

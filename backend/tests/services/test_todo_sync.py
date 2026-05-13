@@ -20,12 +20,16 @@ per sequence — the part most likely to nuke in-flight developer work.
 """
 
 import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.schemas.bud_todo_generator import TodoGeneratorItem
-from app.services.todo_sync import _is_preserved, _reconcile
+from app.services import todo_sync
+from app.services.todo_generator import TodoGenerationError
+from app.services.todo_sync import _is_preserved, _reconcile, sync_todos_for_bud
 
 
 def _item(sequence: int, **overrides: object) -> TodoGeneratorItem:
@@ -191,3 +195,31 @@ async def test_preserved_existing_kept_when_agent_drops_the_sequence() -> None:
     )
     assert (pres, dlt) == (1, 0)
     assert db.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_agent_failure_propagates_to_caller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: agent timeout / crash must NOT be silently swallowed.
+
+    Previously ``sync_todos_for_bud`` caught ``TodoGenerationError`` and
+    returned 0, causing the worker to emit ``todos_regenerated`` +
+    ``skill_completed`` for an agent that never ran — the user saw
+    "Generated 0 TODOs" instead of the real timeout error. The fix
+    propagates so the worker's _fail() path runs.
+    """
+    bud = SimpleNamespace(
+        id=uuid.uuid4(),
+        bud_number=1,
+        title="Test BUD",
+        impacted_repos=[],
+    )
+    monkeypatch.setattr(
+        todo_sync,
+        "generate_todos_for_bud",
+        AsyncMock(side_effect=TodoGenerationError("agent timed out after 180s")),
+    )
+
+    with pytest.raises(TodoGenerationError, match="timed out"):
+        await sync_todos_for_bud(MagicMock(), uuid.uuid4(), bud, mode="regenerate")  # type: ignore[arg-type]

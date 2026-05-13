@@ -126,6 +126,21 @@ export interface BUDDocument extends BUDListItem {
   estimated_dates: Record<string, PhaseEstimateData> | null
   code_review_comments: CodeReviewComment[] | null
   active_agent_task: BUDAgentTask | null
+  // Mid-flight phase worker (assignment / todo-gen / estimation). Returned
+  // by GET /buds/{id} so the progress banner re-attaches after a route
+  // change — synthetic skills don't have BUDAgentTask rows, so this is
+  // the only signal the banner has for phase chains on remount.
+  active_phase_worker: { skill_slug: string; message: string } | null
+  // Sticky last-failed-phase banner. Most recent unresolved skill_failed
+  // event for this BUD (later skill_completed for same slug clears it),
+  // newer than the user's last dismissal. Cleared by POSTing to
+  // /buds/{id}/phase-failure/dismiss.
+  last_phase_failure: {
+    skill_slug: string
+    message: string
+    failed_at: string | null
+    metadata: Record<string, unknown>
+  } | null
 }
 
 // ── BUD TODO Types ────────────────────────────────────────

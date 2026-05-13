@@ -3,6 +3,7 @@ name: Technical Writer
 description: Generates documentation, learning materials, and knowledge base entries
 tools: Read, Write, Glob, Grep
 mcp_tools: get_bud_context
+timeout_seconds: 600
 model: sonnet
 effort:
 ---

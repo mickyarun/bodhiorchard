@@ -53,6 +53,14 @@ class AgentSkill(BaseModel):
     mcp_tools: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     max_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Wall-clock cap on the Claude subprocess call for this skill. ``0`` means
+    # "use the agent code's hard-coded fallback" (each agent picks something
+    # sensible for its work — e.g. 180 s for todo-generator's single-turn
+    # JSON emission, 600 s for multi-turn PRD writing). Per-org admins can
+    # bump this when a slow tech spec / large repo causes spurious timeouts.
+    timeout_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     model: Mapped[str] = mapped_column(String(100), nullable=False, default="", server_default="")
     # Optional override used on chat-iteration paths (e.g. BUD design chat
     # follow-ups). Empty falls back to ``model``. A faster model here

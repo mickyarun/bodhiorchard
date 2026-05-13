@@ -15,16 +15,16 @@
 """Tests for the ``todo-generator`` agent wrapper.
 
 Stubs ``run_claude_code`` so the suite never spawns the real Claude CLI
-subprocess; exercises the JSON extraction, Pydantic validation, and
+subprocess; exercises the YAML extraction, Pydantic validation, and
 progress-event side effects of ``generate_todos_for_bud``.
 """
 
-import json
 import uuid
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+import yaml
 
 from app.models.bud import BUDDocument
 from app.services import todo_generator
@@ -58,8 +58,8 @@ def _good_payload(items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return {"items": items}
 
 
-def _wrap_json(data: dict[str, Any]) -> str:
-    return f"```json\n{json.dumps(data)}\n```"
+def _wrap_yaml(data: dict[str, Any]) -> str:
+    return f"```yaml\n{yaml.safe_dump(data, sort_keys=False)}```"
 
 
 def _published_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
@@ -96,7 +96,7 @@ def _stub_runner(
 @pytest.mark.asyncio
 async def test_happy_path_returns_validated_items(monkeypatch: pytest.MonkeyPatch) -> None:
     events = _published_events(monkeypatch)
-    _stub_runner(monkeypatch, output=_wrap_json(_good_payload()))
+    _stub_runner(monkeypatch, output=_wrap_yaml(_good_payload()))
 
     items = await generate_todos_for_bud(_stub_bud(), [(uuid.uuid4(), "repo-a")])
 
@@ -128,9 +128,11 @@ async def test_runner_failure_raises_and_emits_failed(monkeypatch: pytest.Monkey
 @pytest.mark.asyncio
 async def test_unparseable_output_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     _published_events(monkeypatch)
-    _stub_runner(monkeypatch, output="not json at all")
+    # Bare string is valid YAML (loads to a scalar) — but the parser
+    # rejects non-dict roots, so it still surfaces as unparseable.
+    _stub_runner(monkeypatch, output="not yaml at all")
 
-    with pytest.raises(TodoGenerationError, match="no parseable JSON"):
+    with pytest.raises(TodoGenerationError, match="no parseable YAML"):
         await generate_todos_for_bud(_stub_bud(), [])
 
 
@@ -138,7 +140,7 @@ async def test_unparseable_output_raises(monkeypatch: pytest.MonkeyPatch) -> Non
 async def test_missing_title_field_fails_schema(monkeypatch: pytest.MonkeyPatch) -> None:
     _published_events(monkeypatch)
     bad = {"items": [{"sequence": 1, "phase": "development"}]}
-    _stub_runner(monkeypatch, output=_wrap_json(bad))
+    _stub_runner(monkeypatch, output=_wrap_yaml(bad))
 
     with pytest.raises(TodoGenerationError, match="schema validation"):
         await generate_todos_for_bud(_stub_bud(), [])
@@ -156,7 +158,7 @@ async def test_oversized_title_rejected(monkeypatch: pytest.MonkeyPatch) -> None
             },
         ]
     )
-    _stub_runner(monkeypatch, output=_wrap_json(oversized))
+    _stub_runner(monkeypatch, output=_wrap_yaml(oversized))
 
     with pytest.raises(TodoGenerationError, match="schema validation"):
         await generate_todos_for_bud(_stub_bud(), [])
@@ -169,7 +171,7 @@ async def test_validation_error_publishes_generating_failed(
     """Pydantic validation failure must clear the UI spinner, not just raise."""
     events = _published_events(monkeypatch)
     bad = {"items": [{"sequence": 1, "phase": "development"}]}  # missing title
-    _stub_runner(monkeypatch, output=_wrap_json(bad))
+    _stub_runner(monkeypatch, output=_wrap_yaml(bad))
 
     with pytest.raises(TodoGenerationError):
         await generate_todos_for_bud(_stub_bud(), [])
@@ -185,7 +187,7 @@ async def test_progress_callback_forwards_tool_use_events(
     events = _published_events(monkeypatch)
     _stub_runner(
         monkeypatch,
-        output=_wrap_json(_good_payload()),
+        output=_wrap_yaml(_good_payload()),
         invoke_callback_with=["Read", "Grep"],
     )
 
@@ -208,7 +210,7 @@ async def test_too_many_code_locations_rejected(monkeypatch: pytest.MonkeyPatch)
             },
         ]
     )
-    _stub_runner(monkeypatch, output=_wrap_json(oversized))
+    _stub_runner(monkeypatch, output=_wrap_yaml(oversized))
 
     with pytest.raises(TodoGenerationError, match="schema validation"):
         await generate_todos_for_bud(_stub_bud(), [])

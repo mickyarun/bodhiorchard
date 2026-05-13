@@ -52,13 +52,20 @@ async def sync_todos_for_bud(
 
     ``mode`` distinguishes dev-phase transition from user-triggered
     regenerate; both follow identical reconciliation rules and the label
-    is forwarded to the agent + logged. Returns the agent's item count,
-    or 0 if the agent fails (BUD falls back to single-assignee flow).
-    Flushes but does not commit — the caller owns the transaction.
+    is forwarded to the agent + logged. Returns the agent's item count.
+    Raises :class:`TodoGenerationError` when the agent fails (timeout,
+    crash, unparseable output) — the caller is responsible for surfacing
+    the failure via the job-state / WS pipeline. Previously this swallowed
+    the error and returned 0, but that produced a misleading "success with
+    0 TODOs" state where the worker emitted ``todos_regenerated`` and
+    ``skill_completed`` even though nothing ran. Flushes but does not
+    commit — the caller owns the transaction.
     """
     impacted = _impacted_repo_pairs(bud)
     try:
-        agent_items = await generate_todos_for_bud(bud, impacted, reason=mode)
+        agent_items = await generate_todos_for_bud(
+            bud, impacted, reason=mode, db=db, org_id=org_id
+        )
     except TodoGenerationError as exc:
         logger.warning(
             "todo_sync_agent_failed",
@@ -66,7 +73,10 @@ async def sync_todos_for_bud(
             mode=mode,
             error=str(exc),
         )
-        return 0
+        # Propagate so the worker's _fail() runs: marks the job FAILED,
+        # publishes skill_failed (banner clears with the real error), and
+        # the user sees "Agent timed out" instead of "Generated 0 TODOs".
+        raise
     if not agent_items:
         return 0
 

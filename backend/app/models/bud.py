@@ -129,6 +129,16 @@ class BUDDocument(BaseModel):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
 
+    # Timestamp the user last clicked "Dismiss" on the phase-failure
+    # banner. Any ``skill_failed`` event in ``agent_activity_logs`` newer
+    # than this is shown on the BUD detail; older ones are hidden. NULL
+    # means "no dismissal yet, show any failure". Lets the recovery
+    # banner survive backend restarts without re-popping after the user
+    # acknowledges it.
+    phase_failure_acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     assignee = relationship("User", foreign_keys=[assignee_id], lazy="joined")
     designs: Mapped[list["BUDDesign"]] = relationship(
         back_populates="bud", cascade="all, delete-orphan", lazy="selectin"

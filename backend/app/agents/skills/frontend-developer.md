@@ -3,6 +3,7 @@ name: Frontend Developer
 description: Implements frontend features following existing patterns and design system
 tools: Read, Write, Edit, Glob, Grep, Bash
 mcp_tools: get_bud_context
+timeout_seconds: 600
 model: sonnet
 effort:
 ---

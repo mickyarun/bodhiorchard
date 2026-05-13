@@ -26,6 +26,54 @@ from app.models.tracked_repository import TrackedRepository
 from app.repositories.base import BaseRepository
 
 
+async def list_orphan_phase_workers(
+    db: AsyncSession, skill_slugs: list[str]
+) -> list[AgentActivityLog]:
+    """Return every cross-org phase-worker row left in the ``skill_invoked``
+    state with no matching terminal event.
+
+    Used once at app startup to reconcile orphans from a previous crash or
+    restart — see ``agent_activity_logger.reconcile_orphan_phase_workers``.
+    Module-level (not a repo method) because recovery is cross-tenant and
+    runs before any org-scoped requests are served, mirroring
+    ``recover_stuck_agent_tasks`` in ``bud_agent_task.py``.
+    """
+    if not skill_slugs:
+        return []
+    lifecycle_events = ("skill_invoked", "skill_completed", "skill_failed")
+    # Latest lifecycle event per (org_id, bud_id, skill_slug).
+    latest_per_triple = (
+        select(
+            AgentActivityLog.org_id,
+            AgentActivityLog.bud_id,
+            AgentActivityLog.skill_slug,
+            func.max(AgentActivityLog.created_at).label("max_at"),
+        )
+        .where(AgentActivityLog.bud_id.isnot(None))
+        .where(AgentActivityLog.skill_slug.in_(skill_slugs))
+        .where(AgentActivityLog.event_type.in_(lifecycle_events))
+        .group_by(
+            AgentActivityLog.org_id,
+            AgentActivityLog.bud_id,
+            AgentActivityLog.skill_slug,
+        )
+        .subquery()
+    )
+    stmt = (
+        select(AgentActivityLog)
+        .join(
+            latest_per_triple,
+            (AgentActivityLog.org_id == latest_per_triple.c.org_id)
+            & (AgentActivityLog.bud_id == latest_per_triple.c.bud_id)
+            & (AgentActivityLog.skill_slug == latest_per_triple.c.skill_slug)
+            & (AgentActivityLog.created_at == latest_per_triple.c.max_at),
+        )
+        .where(AgentActivityLog.event_type == "skill_invoked")
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
 class AgentActivityLogRepository(BaseRepository[AgentActivityLog]):
     """Repository for agent activity logs, scoped to an organization."""
 
@@ -48,6 +96,103 @@ class AgentActivityLogRepository(BaseRepository[AgentActivityLog]):
         )
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
+
+    async def get_latest_skill_failed(
+        self,
+        bud_id: uuid.UUID,
+        *,
+        skill_slugs: list[str] | None = None,
+        since: datetime | None = None,
+    ) -> AgentActivityLog | None:
+        """Return the most recent unresolved ``skill_failed`` row for a BUD.
+
+        "Unresolved" means the LATEST lifecycle event for that slug on
+        this BUD is ``skill_failed`` — if a ``skill_completed`` arrived
+        after (e.g. the user retried and it succeeded), the failure is
+        stale and we return nothing. Same shape as
+        :meth:`get_active_phase_worker` but flipped: that one keeps rows
+        where the latest is ``skill_invoked``; this one keeps rows where
+        the latest is ``skill_failed``.
+
+        ``since`` is the BUD's ``phase_failure_acknowledged_at`` — rows
+        at or before the user's last dismissal are excluded so an
+        acknowledged failure doesn't re-pop on refresh.
+        """
+        slug_filter = skill_slugs or []
+        lifecycle_events = ("skill_invoked", "skill_completed", "skill_failed")
+        latest_select = (
+            select(
+                AgentActivityLog.skill_slug,
+                func.max(AgentActivityLog.created_at).label("max_at"),
+            )
+            .where(AgentActivityLog.bud_id == bud_id)
+            .where(AgentActivityLog.event_type.in_(lifecycle_events))
+        )
+        if slug_filter:
+            latest_select = latest_select.where(AgentActivityLog.skill_slug.in_(slug_filter))
+        latest_per_slug = latest_select.group_by(AgentActivityLog.skill_slug).subquery()
+
+        stmt = self._scoped(
+            select(AgentActivityLog)
+            .join(
+                latest_per_slug,
+                (AgentActivityLog.skill_slug == latest_per_slug.c.skill_slug)
+                & (AgentActivityLog.created_at == latest_per_slug.c.max_at),
+            )
+            .where(AgentActivityLog.bud_id == bud_id)
+            .where(AgentActivityLog.event_type == "skill_failed")
+        )
+        if since is not None:
+            stmt = stmt.where(AgentActivityLog.created_at > since)
+        stmt = stmt.order_by(AgentActivityLog.created_at.desc()).limit(1)
+        result = await self._db.execute(stmt)
+        return result.scalars().first()
+
+    async def get_active_phase_worker(
+        self,
+        bud_id: uuid.UUID,
+        skill_slugs: list[str],
+    ) -> AgentActivityLog | None:
+        """Return the most recent in-flight phase-worker event for a BUD.
+
+        "In-flight" means the latest event for the given ``skill_slugs`` on
+        this BUD is a ``skill_invoked`` row — i.e. no matching
+        ``skill_completed`` or ``skill_failed`` arrived afterwards. Used by
+        the BUD detail page to re-attach the progress banner after the
+        user navigates away and back; the WS subscriber alone only sees
+        events that fire AFTER mount, so without this seed the chain is
+        invisible until the next stage starts.
+        """
+        if not skill_slugs:
+            return None
+        # Pick the latest lifecycle event for each skill_slug, then keep
+        # only the rows where that latest event is `skill_invoked`.
+        lifecycle_events = ("skill_invoked", "skill_completed", "skill_failed")
+        latest_per_slug = (
+            select(
+                AgentActivityLog.skill_slug,
+                func.max(AgentActivityLog.created_at).label("max_at"),
+            )
+            .where(AgentActivityLog.bud_id == bud_id)
+            .where(AgentActivityLog.skill_slug.in_(skill_slugs))
+            .where(AgentActivityLog.event_type.in_(lifecycle_events))
+            .group_by(AgentActivityLog.skill_slug)
+            .subquery()
+        )
+        stmt = self._scoped(
+            select(AgentActivityLog)
+            .join(
+                latest_per_slug,
+                (AgentActivityLog.skill_slug == latest_per_slug.c.skill_slug)
+                & (AgentActivityLog.created_at == latest_per_slug.c.max_at),
+            )
+            .where(AgentActivityLog.bud_id == bud_id)
+            .where(AgentActivityLog.event_type == "skill_invoked")
+            .order_by(AgentActivityLog.created_at.desc())
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalars().first()
 
     async def list_for_skill(
         self,

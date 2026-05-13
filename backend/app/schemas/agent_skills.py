@@ -29,6 +29,10 @@ class AgentSkillRead(BaseModel):
     mcp_tools: list[str]
     prompt: str
     max_turns: int = Field(0, description="Max Claude CLI turns (0 = unlimited)")
+    timeout_seconds: int = Field(
+        0,
+        description="Wall-clock cap in seconds for the Claude call (0 = use agent's fallback)",
+    )
     model: str = Field("", description="Claude model alias or ID (empty = CLI default)")
     iteration_model: str = Field(
         "",
@@ -59,6 +63,7 @@ class AgentSkillRead(BaseModel):
             mcp_tools=skill.mcp_tools,
             prompt=skill.prompt,
             max_turns=skill.max_turns,
+            timeout_seconds=skill.timeout_seconds,
             model=skill.model,
             iteration_model=skill.iteration_model,
             effort=skill.effort,
@@ -78,6 +83,12 @@ class AgentSkillUpdate(BaseModel):
     mcp_tools: list[str] | None = None
     prompt: str | None = Field(None, min_length=1, max_length=100_000)
     max_turns: int | None = Field(None, ge=0, le=100, description="0 = unlimited")
+    timeout_seconds: int | None = Field(
+        None,
+        ge=0,
+        le=3600,
+        description="Wall-clock cap in seconds; 0 = use code-side fallback. Max 1 hour.",
+    )
     model: str | None = Field(None, max_length=100, description="Claude model alias or ID")
     iteration_model: str | None = Field(
         None, max_length=100, description="Faster model for chat iteration (empty = use model)"
@@ -96,6 +107,7 @@ class AgentSkillUpdate(BaseModel):
                 self.mcp_tools,
                 self.prompt,
                 self.max_turns,
+                self.timeout_seconds,
                 self.model,
                 self.iteration_model,
                 self.effort,

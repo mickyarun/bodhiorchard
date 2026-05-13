@@ -34,6 +34,7 @@ from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
 from app.models.user import User
+from app.repositories.agent_activity import AgentActivityLogRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_agent_task import BUDAgentTaskRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
@@ -59,6 +60,7 @@ from app.schemas.dev_activity import (
     DevStatsRead,
     UntrackedRepoRead,
 )
+from app.services.agent_activity_logger import PHASE_WORKER_SLUGS
 
 logger = structlog.get_logger(__name__)
 
@@ -92,6 +94,41 @@ async def _bud_response(
     bud_data = BUDRead.model_validate(bud)
     if active_task:
         bud_data.active_agent_task = BUDAgentTaskRead.model_validate(active_task)
+
+    # Re-attach the phase-progress banner for synthetic workers (assignment
+    # / todo-gen / estimation) that don't have BUDAgentTask rows. Without
+    # this the banner only catches events that fire AFTER mount, so the
+    # whole chain is invisible if the user navigates away and back.
+    # Uses the single source of truth ``PHASE_WORKER_SLUGS`` from
+    # agent_activity_logger so adding a new worker touches exactly one
+    # list.
+    activity_repo = AgentActivityLogRepository(db, org_id=org_id)
+    active_phase = await activity_repo.get_active_phase_worker(bud.id, PHASE_WORKER_SLUGS)
+    if active_phase is not None:
+        bud_data.active_phase_worker = {
+            "skill_slug": active_phase.skill_slug or "",
+            "message": active_phase.message or "",
+        }
+
+    # Sticky failure banner: most recent skill_failed newer than the
+    # user's dismissal timestamp. Covers the restart-recovery and
+    # missed-WS-event cases without any client-side reconnect logic —
+    # if the failure happened, the next BUD load surfaces it; the user
+    # dismisses, the column updates, the banner is gone for good.
+    latest_failure = await activity_repo.get_latest_skill_failed(
+        bud.id,
+        skill_slugs=PHASE_WORKER_SLUGS,
+        since=bud.phase_failure_acknowledged_at,
+    )
+    if latest_failure is not None:
+        bud_data.last_phase_failure = {
+            "skill_slug": latest_failure.skill_slug or "",
+            "message": latest_failure.message or "",
+            "failed_at": latest_failure.created_at.isoformat()
+            if latest_failure.created_at
+            else None,
+            "metadata": latest_failure.metadata_ or {},
+        }
     return bud_data
 
 

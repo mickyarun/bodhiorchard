@@ -82,7 +82,21 @@ def _spies(
         "assign_all_todos_to_lead",
         assign or AsyncMock(return_value=0),
     )
+    # Lifecycle event publish is exercised by its own suite — stub here so
+    # the SimpleNamespace fixtures don't need to mock the full SQLAlchemy
+    # session that `log_agent_activity` writes through.
+    monkeypatch.setattr(job_todo_generate, "log_agent_activity", AsyncMock(return_value=None))
     return publish, update_job
+
+
+def _make_bud(bud_id: uuid.UUID, *, assignee_id: uuid.UUID | None = None) -> SimpleNamespace:
+    """Mock BUD with the fields the worker reads (id, assignee_id, bud_number, title)."""
+    return SimpleNamespace(
+        id=bud_id,
+        assignee_id=assignee_id,
+        bud_number=42,
+        title="Test BUD",
+    )
 
 
 # ── happy path ─────────────────────────────────────────────────────
@@ -97,7 +111,7 @@ async def test_happy_path_publishes_and_completes(
     fake_db = _patch_session(monkeypatch)
     fake_db.refresh = AsyncMock()
     # No lead set — assignment branch is skipped.
-    bud = SimpleNamespace(id=bud_id, assignee_id=None)
+    bud = _make_bud(bud_id)
     _patch_repo(monkeypatch, bud)
     sync = AsyncMock(return_value=7)
     monkeypatch.setattr(job_todo_generate, "sync_todos_for_bud", sync)
@@ -128,7 +142,7 @@ async def test_initial_mode_assigns_todos_to_lead_after_sync(
     fake_db = _patch_session(monkeypatch)
     fake_db.refresh = AsyncMock()
     lead_id = uuid.uuid4()
-    bud = SimpleNamespace(id=bud_id, assignee_id=lead_id)
+    bud = _make_bud(bud_id, assignee_id=lead_id)
     _patch_repo(monkeypatch, bud)
     monkeypatch.setattr(job_todo_generate, "sync_todos_for_bud", AsyncMock(return_value=4))
     assign = AsyncMock(return_value=4)
@@ -151,7 +165,7 @@ async def test_regenerate_mode_skips_lead_assignment(
     """Regenerate (user-triggered) must not steal TODOs from developers."""
     fake_db = _patch_session(monkeypatch)
     fake_db.refresh = AsyncMock()
-    bud = SimpleNamespace(id=bud_id, assignee_id=uuid.uuid4())
+    bud = _make_bud(bud_id, assignee_id=uuid.uuid4())
     _patch_repo(monkeypatch, bud)
     monkeypatch.setattr(job_todo_generate, "sync_todos_for_bud", AsyncMock(return_value=4))
     assign = AsyncMock()
@@ -196,7 +210,7 @@ async def test_sync_exception_rolls_back_and_publishes_failed(
     bud_id: uuid.UUID,
 ) -> None:
     fake_db = _patch_session(monkeypatch)
-    bud = SimpleNamespace(id=bud_id)
+    bud = _make_bud(bud_id)
     _patch_repo(monkeypatch, bud)
     monkeypatch.setattr(
         job_todo_generate,

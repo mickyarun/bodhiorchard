@@ -47,6 +47,11 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let watchdogTimer: ReturnType<typeof setInterval> | null = null
 let retryCount = 0
 let _dead = false // true after all retries exhausted (until watchdog/visibility resets it)
+/** True once the WS has opened successfully at least once. Drives the
+ *  ``bodhiorchard:socket-reconnected`` event below — the very first
+ *  ``onopen`` is the initial connect, not a reconnect, so consumers that
+ *  re-seed REST state shouldn't fire on it. */
+let _hasEverOpened = false
 
 /** topic → set of callbacks */
 const listeners: Map<string, Set<(data: unknown) => void>> = new Map()
@@ -130,6 +135,16 @@ export function connect(): void {
     retryCount = 0
     _dead = false
     resubscribeAll()
+    // Fire a custom event on EVERY open after the first. Consumers
+    // (see `wsReconnect.onSocketReconnect`) use this to refetch state
+    // they may have missed while the socket was dropped — events
+    // emitted during the gap are not buffered server-side. Skipping
+    // the very first open keeps the contract "reconnect" not "initial
+    // connect" so refetch callbacks don't double-fire on page load.
+    if (_hasEverOpened) {
+      window.dispatchEvent(new CustomEvent('bodhiorchard:socket-reconnected'))
+    }
+    _hasEverOpened = true
   }
 
   ws.onmessage = (event: MessageEvent) => {

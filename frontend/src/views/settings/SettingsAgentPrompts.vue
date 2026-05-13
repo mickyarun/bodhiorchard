@@ -191,6 +191,18 @@
                   persistent-hint
                   style="max-width: 140px"
                 />
+                <v-text-field
+                  v-model.number="editForm.timeoutSeconds"
+                  label="Timeout (seconds)"
+                  type="number"
+                  variant="outlined"
+                  density="compact"
+                  :min="0"
+                  :max="3600"
+                  hint="0 = agent default"
+                  persistent-hint
+                  style="max-width: 170px"
+                />
               </div>
 
               <!-- Preview toggle -->
@@ -325,6 +337,7 @@ const editForm = ref({
   mcpTools: [] as string[],
   prompt: '',
   maxTurns: 0,
+  timeoutSeconds: 0,
   model: '',
   iterationModel: '',
   effort: '',
@@ -346,6 +359,7 @@ function toggle(slug: string): void {
       mcpTools: [...skill.mcpTools],
       prompt: skill.prompt,
       maxTurns: skill.maxTurns,
+      timeoutSeconds: skill.timeoutSeconds ?? 0,
       model: skill.model ?? '',
       iterationModel: skill.iterationModel ?? '',
       effort: skill.effort ?? '',
@@ -367,6 +381,7 @@ async function saveSkill(slug: string): Promise<void> {
     mcpTools: editForm.value.mcpTools,
     prompt: editForm.value.prompt,
     maxTurns: editForm.value.maxTurns,
+    timeoutSeconds: editForm.value.timeoutSeconds,
     model: editForm.value.model,
     iterationModel: editForm.value.iterationModel,
     effort: editForm.value.effort,

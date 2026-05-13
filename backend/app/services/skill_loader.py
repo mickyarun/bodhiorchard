@@ -47,6 +47,7 @@ class Skill:
     mcp_tools: list[str]
     prompt: str  # Full markdown body (after frontmatter)
     max_turns: int = 0  # 0 = unlimited (omit --max-turns flag)
+    timeout_seconds: int = 0  # 0 = caller's hard-coded fallback (see Skill.timeout_or_default)
     model: str = ""  # empty = use CLI default. Values: "opus", "sonnet", full model ID
     # Optional override for chat-iteration paths (e.g. BUD design chat
     # follow-ups). When empty, falls back to ``model``. Use this to put a
@@ -54,6 +55,15 @@ class Skill:
     # higher-quality model (Sonnet) for the initial agent run.
     iteration_model: str = ""
     effort: str = ""  # empty = use CLI default. Values: "low", "medium", "high", "max"
+
+    def timeout_or_default(self, fallback: int) -> int:
+        """Resolve the runtime timeout for this skill.
+
+        Returns the per-skill DB override when set (>0), otherwise the
+        caller's hard-coded fallback. Centralised so each agent's
+        ``_build_config`` reads the same value the settings UI writes.
+        """
+        return self.timeout_seconds if self.timeout_seconds > 0 else fallback
 
 
 def load_skill(skill_name: str) -> Skill:
@@ -84,6 +94,7 @@ def load_skill(skill_name: str) -> Skill:
         mcp_tools=_parse_list(frontmatter.get("mcp_tools", "")),
         prompt=body.strip(),
         max_turns=int(frontmatter.get("max_turns", 0)),
+        timeout_seconds=int(frontmatter.get("timeout_seconds", 0)),
         model=str(frontmatter.get("model", "") or ""),
         iteration_model=str(frontmatter.get("iteration_model", "") or ""),
         effort=str(frontmatter.get("effort", "") or ""),
@@ -133,6 +144,7 @@ async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSessio
         mcp_tools=skill_row.mcp_tools,
         prompt=skill_row.prompt,
         max_turns=skill_row.max_turns or 0,
+        timeout_seconds=skill_row.timeout_seconds or 0,
         model=skill_row.model or "",
         iteration_model=skill_row.iteration_model or "",
         effort=skill_row.effort or "",
@@ -159,20 +171,33 @@ async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
 
     repo = AgentSkillRepository(db, org_id=org_id)
 
-    # Single query to get existing slugs instead of N get_by_slug calls
+    # Single query to get existing rows so we can both skip already-seeded
+    # slugs and backfill columns that landed after the initial seed (e.g.
+    # ``timeout_seconds`` — added later; existing rows ship with the DB
+    # default ``0`` until we copy the file frontmatter onto them once).
     existing_skills = await repo.list_all()
-    existing_slugs = {s.skill_slug for s in existing_skills}
+    existing_by_slug = {s.skill_slug: s for s in existing_skills}
 
     available = list_available_skills()
     seeded = 0
+    backfilled = 0
     for slug in available:
-        if slug in existing_slugs:
-            continue
         try:
             skill = load_skill(slug)
         except (FileNotFoundError, ValueError, OSError):
             logger.warning("seed_skill_load_failed", skill=slug, exc_info=True)
             continue
+
+        existing = existing_by_slug.get(slug)
+        if existing is not None:
+            # Idempotent backfill: only fill columns that are still at
+            # their post-migration default. Never clobber values an admin
+            # has tuned (non-zero / non-empty wins).
+            if existing.timeout_seconds == 0 and skill.timeout_seconds > 0:
+                existing.timeout_seconds = skill.timeout_seconds
+                backfilled += 1
+            continue
+
         try:
             await repo.upsert(
                 skill_slug=slug,
@@ -182,6 +207,7 @@ async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
                 mcp_tools=skill.mcp_tools,
                 prompt=skill.prompt,
                 max_turns=skill.max_turns,
+                timeout_seconds=skill.timeout_seconds,
                 model=skill.model,
                 iteration_model=skill.iteration_model,
                 effort=skill.effort,
@@ -190,6 +216,10 @@ async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
         except SQLAlchemyError:
             logger.warning("seed_skill_db_failed", skill=slug, exc_info=True)
             continue
+
+    if backfilled:
+        await db.flush()
+        logger.info("skill_timeouts_backfilled", org_id=str(org_id), count=backfilled)
     logger.info("skills_seeded", org_id=str(org_id), count=seeded)
     return seeded
 

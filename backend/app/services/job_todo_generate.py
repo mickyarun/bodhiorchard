@@ -26,10 +26,13 @@ import uuid as uuid_mod
 from typing import Any
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
+from app.models.bud import BUDDocument
 from app.repositories.bud import BUDRepository
 from app.schemas.jobs import JobState, TodoGenerateJobPayload
+from app.services.agent_activity_logger import log_agent_activity
 from app.services.bud_estimation import estimate_bud_dates
 from app.services.event_bus import publish
 from app.services.job_queue import update_job
@@ -37,6 +40,13 @@ from app.services.todo_assignment import assign_all_todos_to_lead
 from app.services.todo_sync import sync_todos_for_bud
 
 logger = structlog.get_logger(__name__)
+
+# Synthetic skill slugs for the two Claude calls this worker drives.
+# Frontend keys off these via the agent_activity:{org_id} topic to show
+# stage-specific banner copy ("Generating implementation TODOs…",
+# "Re-estimating phase dates…").
+_TODO_SLUG = "todo_generator"
+_ESTIMATOR_SLUG = "pert_estimator"
 
 
 async def handle_todo_generate_job(job_id: str, raw_payload: dict[str, Any]) -> None:
@@ -56,8 +66,19 @@ async def handle_todo_generate_job(job_id: str, raw_payload: dict[str, Any]) -> 
     async with AsyncSessionLocal() as db:
         bud = await BUDRepository(db, org_id=org_id).get_by_id(bud_id)
         if bud is None:
-            _fail(job_id, topic, f"BUD {bud_id} not found")
+            await _fail(
+                job_id,
+                topic,
+                org_id,
+                bud_id,
+                None,
+                None,
+                _TODO_SLUG,
+                f"BUD {bud_id} not found",
+            )
             return
+
+        await _emit_invoked(org_id, bud, _TODO_SLUG, "Generating implementation TODOs…")
 
         try:
             count = await sync_todos_for_bud(db, org_id, bud, mode=payload.mode)
@@ -65,7 +86,16 @@ async def handle_todo_generate_job(job_id: str, raw_payload: dict[str, Any]) -> 
         except Exception as exc:
             await db.rollback()
             logger.exception("todo_generate_job_failed", bud_id=str(bud_id))
-            _fail(job_id, topic, str(exc))
+            await _fail(
+                job_id,
+                topic,
+                org_id,
+                bud_id,
+                bud.bud_number,
+                bud.title,
+                _TODO_SLUG,
+                str(exc),
+            )
             return
 
         # Assign TODOs to the BUD's phase lead after the sync has
@@ -89,6 +119,13 @@ async def handle_todo_generate_job(job_id: str, raw_payload: dict[str, Any]) -> 
                 "todo_count": count,
             },
         )
+        await _emit_completed(
+            org_id,
+            bud,
+            _TODO_SLUG,
+            f"Generated {count} TODOs",
+            metadata={"count": count, "mode": payload.mode},
+        )
         update_job(
             job_id,
             state=JobState.RUNNING,
@@ -109,13 +146,14 @@ async def handle_todo_generate_job(job_id: str, raw_payload: dict[str, Any]) -> 
 
 
 async def _reestimate(
-    db: Any,
+    db: AsyncSession,
     org_id: uuid_mod.UUID,
-    bud: Any,
+    bud: BUDDocument,
     payload: TodoGenerateJobPayload,
 ) -> None:
     """Run the PERT estimator. Non-fatal: errors are logged + swallowed."""
     actor_id = uuid_mod.UUID(payload.actor_id) if payload.actor_id else None
+    await _emit_invoked(org_id, bud, _ESTIMATOR_SLUG, "Re-estimating phase dates…")
     try:
         await estimate_bud_dates(
             db,
@@ -126,6 +164,7 @@ async def _reestimate(
             actor_name=payload.actor_name,
         )
         await db.commit()
+        await _emit_completed(org_id, bud, _ESTIMATOR_SLUG, "Phase dates updated")
     except Exception as exc:
         await db.rollback()
         logger.warning(
@@ -133,8 +172,99 @@ async def _reestimate(
             bud_id=str(bud.id),
             error=str(exc),
         )
+        await log_agent_activity(
+            None,
+            org_id=org_id,
+            event_type="skill_failed",
+            skill_slug=_ESTIMATOR_SLUG,
+            message=f"Estimation failed: {exc}",
+            bud_id=bud.id,
+            bud_number=bud.bud_number,
+            bud_title=bud.title,
+            metadata_={"error": str(exc)},
+        )
 
 
-def _fail(job_id: str, topic: str, error: str) -> None:
+async def _emit_invoked(
+    org_id: uuid_mod.UUID,
+    bud: BUDDocument,
+    skill_slug: str,
+    message: str,
+) -> None:
+    """Publish a ``skill_invoked`` lifecycle event for the BUD banner.
+
+    Always uses a fresh DB session so the audit row commits independently
+    of the calling worker's transaction. Otherwise a later rollback in the
+    worker (e.g. failed estimation) would silently discard already-published
+    invoked/completed rows, leaving the WS event stream out of sync with
+    the audit trail.
+    """
+    await log_agent_activity(
+        None,
+        org_id=org_id,
+        event_type="skill_invoked",
+        skill_slug=skill_slug,
+        message=message,
+        bud_id=bud.id,
+        bud_number=bud.bud_number,
+        bud_title=bud.title,
+    )
+
+
+async def _emit_completed(
+    org_id: uuid_mod.UUID,
+    bud: BUDDocument,
+    skill_slug: str,
+    message: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Publish a ``skill_completed`` lifecycle event for the BUD banner.
+
+    Same fresh-session rationale as ``_emit_invoked``.
+    """
+    await log_agent_activity(
+        None,
+        org_id=org_id,
+        event_type="skill_completed",
+        skill_slug=skill_slug,
+        message=message,
+        bud_id=bud.id,
+        bud_number=bud.bud_number,
+        bud_title=bud.title,
+        metadata_=metadata,
+    )
+
+
+async def _fail(
+    job_id: str,
+    topic: str,
+    org_id: uuid_mod.UUID,
+    bud_id: uuid_mod.UUID,
+    bud_number: int | None,
+    bud_title: str | None,
+    skill_slug: str,
+    error: str,
+) -> None:
+    """Mark the job failed; banner event first so the order matches the user-visible state."""
+    # Publish the banner event first: BUDWorkflowActions decrements the
+    # in-flight counter on `skill_failed`, which is the correct end-state
+    # before BUDTodoBoard sees `generating_failed` and clears its hints.
+    # Swallow logging exceptions — a DB hiccup writing the audit row must
+    # never block the job-state update below; the user sees a stuck
+    # RUNNING badge forever otherwise.
+    try:
+        await log_agent_activity(
+            None,
+            org_id=org_id,
+            event_type="skill_failed",
+            skill_slug=skill_slug,
+            message=error,
+            bud_id=bud_id,
+            bud_number=bud_number,
+            bud_title=bud_title,
+            metadata_={"error": error},
+        )
+    except Exception:
+        logger.warning("job_fail_skill_failed_log_failed", job_id=job_id, exc_info=True)
     publish(topic, {"event": "generating_failed", "error": error})
     update_job(job_id, state=JobState.FAILED, error=error)

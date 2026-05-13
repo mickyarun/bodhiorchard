@@ -3,6 +3,7 @@ name: Testing
 description: Generates structured automation and manual test cases with full coverage categories
 tools: Read, Glob, Grep, Bash
 mcp_tools: code_query, code_context, get_bud_context, get_bud_designs
+timeout_seconds: 600
 model: sonnet
 effort: high
 max_turns: 15

@@ -829,6 +829,7 @@ import { useMembersStore } from '@/stores/members'
 import { useJobSocket } from '@/composables/useJobSocket'
 import { friendlyAgentError } from '@/types/agentErrors'
 import { subscribe, unsubscribe } from '@/services/socket'
+import { onSocketReconnect } from '@/services/wsReconnect'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
@@ -1062,7 +1063,13 @@ const isEditing = computed(() => {
 
 const agentLocked = computed(() => {
   const t = bud.value?.active_agent_task
-  return !!t && (t.status === 'pending' || t.status === 'running')
+  const taskActive = !!t && (t.status === 'pending' || t.status === 'running')
+  // Phase chain (assignment → todo → estimation) emits agent_activity
+  // events the workflow component aggregates into a counter. While any
+  // stage is in flight, treat the BUD as locked so the status menu and
+  // every other gated control are disabled, just like task-active.
+  const phaseActive = !!workflowRef.value?.phaseInFlight
+  return taskActive || phaseActive
 })
 
 const isJiraImported = computed(() => {
@@ -1090,6 +1097,18 @@ function renderMarkdown(md: string | null): string {
   const raw = marked.parse(md, { async: false }) as string
   return DOMPurify.sanitize(raw)
 }
+
+// Top-level cleanup target for the BUD-activity subscription. Populated
+// from inside onMounted once the route id is known; fired by the
+// synchronous onUnmounted below. We can't call `onUnmounted` from
+// inside the async onMounted callback — Vue 3 warns "no active
+// component instance" because setup() has long since returned by then.
+let budActivityCleanup: (() => void) | null = null
+
+onUnmounted(() => {
+  budActivityCleanup?.()
+  budActivityCleanup = null
+})
 
 onMounted(async () => {
   const tabParam = route.query.tab as string | undefined
@@ -1125,7 +1144,19 @@ onMounted(async () => {
     loadEstimates()
   }
   subscribe(budActivityTopic, handleBudActivity)
-  onUnmounted(() => unsubscribe(budActivityTopic, handleBudActivity))
+  // Also resync on WS reconnect — webhook-driven activity events that
+  // landed while we were disconnected (backend restart, browser sleep)
+  // are not buffered. Refetching state on reconnect mirrors what a
+  // page-refresh does and keeps the timeline / PR-status banners
+  // accurate without the user knowing they were briefly offline.
+  const unregisterReconnect = onSocketReconnect(handleBudActivity)
+  // Stash cleanup so the top-level onUnmounted (registered synchronously
+  // in setup) can fire it. Calling onUnmounted from inside an async
+  // onMounted callback warns "no active component instance" in Vue 3.
+  budActivityCleanup = () => {
+    unsubscribe(budActivityTopic, handleBudActivity)
+    unregisterReconnect()
+  }
 })
 
 // Single source of truth for status → tab mapping
@@ -1150,16 +1181,47 @@ watch(
   },
 )
 
-// Track active agent task. Watches both the task data and the component ref
-// so tracking starts as soon as both are available (covers any mount order).
+// Track active agent task. We watch the primitive `job_id` (not the full
+// task object) so the watcher fires only when the *identity* of the
+// running task changes — every `fetchBUD` produces a fresh
+// `active_agent_task` object reference, and watching the object would
+// re-run `trackAgentTask` → `startTracking` → one `/v1/jobs/{id}/status`
+// REST call per refetch. That was the source of the status-API loop
+// observed when reconnect handlers refetched the BUD.
+const activeAgentJobId = computed(() => {
+  const t = bud.value?.active_agent_task
+  if (!t?.job_id) return null
+  if (t.status !== 'pending' && t.status !== 'running') return null
+  return t.job_id
+})
 watch(
-  [() => bud.value?.active_agent_task, workflowRef],
-  ([task, wf]) => {
-    if (!task?.job_id || (task.status !== 'pending' && task.status !== 'running')) return
-    if (wf) wf.trackAgentTask(task)
+  [activeAgentJobId, workflowRef],
+  ([jobId, wf]) => {
+    if (!jobId || !wf) return
+    const task = bud.value?.active_agent_task
+    if (task) wf.trackAgentTask(task)
   },
   { immediate: true },
 )
+
+// Subscribe to the org-scoped agent_activity channel as soon as the BUD
+// is loaded (or the workflow component mounts). This is the universal
+// "any AI worker for this BUD is running" stream — covers phases that
+// don't create a BUDAgentTask row (assignment, todo, estimation) and
+// keeps the banner + agentLocked accurate end-to-end. The workflow
+// component dedupes on bud-id so re-firing the watch is safe.
+watch(
+  [() => bud.value?.id, () => authStore.user?.org_id, workflowRef],
+  ([budId, orgId, wf]) => {
+    if (!budId || !orgId || !wf) return
+    wf.trackAgentActivity(orgId, budId)
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  workflowRef.value?.stopAgentActivity()
+})
 
 // Auto-close chat panel when agent starts; reload timeline when agent finishes
 watch(agentLocked, (locked, wasLocked) => {

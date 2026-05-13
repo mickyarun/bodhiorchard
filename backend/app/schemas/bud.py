@@ -155,6 +155,22 @@ class BUDRead(BaseModel):
     assignee_id: uuid.UUID | None = None
     assignee_name: str | None = None
     active_agent_task: BUDAgentTaskRead | None = None
+    # In-flight phase-worker event (assignment / todo-gen / estimation).
+    # Set when the BUD has an outstanding ``skill_invoked`` event with no
+    # matching terminal row — lets the frontend re-attach the progress
+    # banner after navigating away and back. ``None`` when nothing is
+    # running. Synthetic skills don't have ``BUDAgentTask`` rows, so this
+    # is the only signal the banner has for phase chains on remount.
+    active_phase_worker: dict[str, str] | None = None
+    # Sticky last-failed-phase banner. Populated from the most recent
+    # ``skill_failed`` row in ``agent_activity_logs`` newer than the
+    # BUD's ``phase_failure_acknowledged_at``. ``None`` once the user
+    # dismisses the banner (POST /buds/{id}/phase-failure/dismiss). This
+    # is the durable channel for restart-recovery messages — the live
+    # in-flight counter clears when the WS event fires, but if the
+    # event was missed (backend restart, dropped socket), the failure
+    # is still surfaced here on next REST fetch.
+    last_phase_failure: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 
