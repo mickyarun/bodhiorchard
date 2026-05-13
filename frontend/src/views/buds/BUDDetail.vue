@@ -56,27 +56,11 @@
             @reload-timeline="loadTimeline(); reloadEstimates()"
           />
 
-          <!-- Status change progress -->
-          <div
-            v-if="statusChanging"
-            class="agent-banner mx-12 mb-3"
-          >
-            <div class="d-flex align-center ga-3">
-              <v-icon icon="mdi-swap-horizontal" size="20" color="primary" />
-              <div class="d-flex flex-column agent-banner__text">
-                <span class="text-body-2 font-weight-medium">Updating status...</span>
-                <span class="text-caption text-medium-emphasis">Assigning {{ PHASE_ROLE_LABELS[statusChangeTarget] || 'team member' }}</span>
-              </div>
-              <v-spacer />
-              <v-progress-linear
-                indeterminate
-                color="primary"
-                height="3"
-                rounded
-                class="agent-banner__progress"
-              />
-            </div>
-          </div>
+          <!-- Status-change banner + guard dialogs + backend-error snackbar.
+               Banner renders inline here; dialogs and the snackbar are
+               teleported out by Vuetify, so mounting them all from one
+               spot has no layout impact. -->
+          <BUDStatusDialogs :controller="statusController" />
 
           <!-- Agent generating banner (unified for PRD, tech arch, code review) -->
           <div
@@ -308,136 +292,6 @@
           <!-- Linked Bugs -->
           <BUDBugsPanel :bud-id="bud.id" :bud-status="bud.status" class="mt-4" />
 
-          <!-- Status Override Reason Dialog -->
-          <v-dialog v-model="overrideReasonDialog" max-width="420">
-            <v-card color="surface" class="pa-5">
-              <div class="text-subtitle-1 font-weight-medium mb-3">
-                Advance to Testing
-              </div>
-              <div class="text-body-2 text-medium-emphasis mb-3">
-                Some PRs aren't merged yet. Please explain why you're manually
-                advancing to QA.
-              </div>
-              <v-textarea
-                v-model="overrideReasonText"
-                label="Reason (required)"
-                rows="3"
-                :rules="[v => !!v?.trim() || 'Reason is required']"
-              />
-              <v-card-actions class="pa-0 mt-2">
-                <v-spacer />
-                <v-btn variant="text" @click="overrideReasonDialog = false">Cancel</v-btn>
-                <v-btn
-                  color="warning"
-                  variant="flat"
-                  :disabled="!overrideReasonText.trim()"
-                  @click="confirmOverrideStatus"
-                >
-                  Advance
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-dialog>
-
-          <!-- No Open PR Warning Dialog -->
-          <v-dialog v-model="showNoPRWarningDialog" max-width="420">
-            <v-card color="surface" class="pa-5">
-              <div class="text-subtitle-1 font-weight-medium mb-3">
-                No PR is open to review
-              </div>
-              <div class="text-body-2 text-medium-emphasis mb-4">
-                All PRs are merged or no PR has been raised yet. Code review
-                will start only after a PR is raised on GitHub.
-              </div>
-              <v-card-actions class="pa-0">
-                <v-spacer />
-                <v-btn variant="text" @click="showNoPRWarningDialog = false">Cancel</v-btn>
-                <v-btn color="primary" variant="flat" @click="confirmNoPRWarning">
-                  Proceed
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-dialog>
-
-          <!-- Pending manual test cases dialog.
-               Triggered when the tester tries to advance testing → uat
-               (or testing → prod on a UAT-disabled org) while any manual
-               case is still in pending state. Hard gate — no Proceed
-               button, the user must go resolve the cases first. -->
-          <v-dialog v-model="showPendingCasesDialog" max-width="500">
-            <v-card color="surface" class="pa-5">
-              <div class="d-flex align-center ga-2 mb-3">
-                <v-icon icon="mdi-clipboard-alert-outline" color="warning" />
-                <div class="text-subtitle-1 font-weight-medium">
-                  Manual test cases still pending
-                </div>
-              </div>
-              <div class="text-body-2 text-medium-emphasis mb-3">
-                Cannot advance to
-                <strong>{{ pendingCasesTarget }}</strong> —
-                {{ pendingCasesList.length }} manual test case{{ pendingCasesList.length === 1 ? '' : 's' }}
-                {{ pendingCasesList.length === 1 ? 'is' : 'are' }} still awaiting a result.
-              </div>
-              <div class="pending-cases-list mb-4">
-                <div
-                  v-for="tc in pendingCasesList.slice(0, 8)"
-                  :key="tc.id"
-                  class="pending-case-row"
-                >
-                  <v-icon icon="mdi-circle-outline" size="14" class="mr-2 opacity-60" />
-                  <strong class="mr-1">{{ tc.id }}</strong>
-                  <span class="text-truncate">{{ tc.title }}</span>
-                </div>
-                <div
-                  v-if="pendingCasesList.length > 8"
-                  class="text-caption text-medium-emphasis mt-1 pl-6"
-                >
-                  and {{ pendingCasesList.length - 8 }} more…
-                </div>
-              </div>
-              <div class="text-caption text-medium-emphasis mb-4">
-                Open the QA tab, mark each case as pass, fail, blocked, or
-                skipped, then try again.
-              </div>
-              <v-card-actions class="pa-0">
-                <v-spacer />
-                <v-btn variant="text" @click="showPendingCasesDialog = false">
-                  Close
-                </v-btn>
-                <v-btn
-                  color="primary"
-                  variant="flat"
-                  prepend-icon="mdi-clipboard-check-outline"
-                  @click="openQATab"
-                >
-                  Open QA tab
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-dialog>
-
-          <!-- Snackbar surfaces backend rejections (permission denied,
-               race conditions where the frontend preempt didn't catch
-               a pending case, etc.) so the user sees WHY the PATCH was
-               rejected instead of a blank failure. -->
-          <v-snackbar
-            v-model="statusErrorSnackbar"
-            color="error"
-            location="bottom"
-            :timeout="6000"
-            multi-line
-          >
-            {{ statusErrorMessage }}
-            <template #actions>
-              <v-btn
-                variant="text"
-                @click="statusErrorSnackbar = false"
-              >
-                Dismiss
-              </v-btn>
-            </template>
-          </v-snackbar>
-
           <!-- Activity Timeline (collapsible) -->
           <BUDActivitySection :events="timelineEvents" :loading="timelineLoading" />
 
@@ -484,7 +338,7 @@ import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
 import { useBudChat } from '@/composables/useBudChat'
-import { useBudStatusTransitions, PHASE_ROLE_LABELS } from '@/composables/useBudStatusTransitions'
+import { useBudStatusTransitions } from '@/composables/useBudStatusTransitions'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { onSocketReconnect } from '@/services/wsReconnect'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
@@ -508,6 +362,7 @@ import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
 import BUDTechSpecTab from '@/components/buds/BUDTechSpecTab.vue'
 import BUDClosedTab from '@/components/buds/BUDClosedTab.vue'
 import BUDSectionToolbar from '@/components/buds/BUDSectionToolbar.vue'
+import BUDStatusDialogs from '@/components/buds/BUDStatusDialogs.vue'
 import { useBudLinkedFeaturesStore } from '@/stores/budLinkedFeatures'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -586,22 +441,17 @@ const workflowRef = ref<InstanceType<typeof BUDWorkflowActions> | null>(null)
 // Status-transition orchestration: guards (code_review PR check,
 // testing → uat/prod pending-cases check, manual-merge override),
 // in-flight banner, backend-error snackbar, cancel-running-agent.
-// All dialog/banner/snackbar state lives in this composable; the
-// template binds directly to the returned refs.
-const {
-  statusChanging, statusChangeTarget, cancellingAgent,
-  showNoPRWarningDialog, overrideReasonDialog, overrideReasonText,
-  showPendingCasesDialog, pendingCasesTarget, pendingCasesList,
-  statusErrorSnackbar, statusErrorMessage,
-  cancelRunningAgent, updateStatus, openQATab,
-  confirmNoPRWarning, confirmOverrideStatus,
-} = useBudStatusTransitions({
+// All dialog/banner/snackbar state lives in the composable; the
+// view hands the whole controller to <BUDStatusDialogs> for the UI
+// and pulls out only the bits the header / agent-banner need.
+const statusController = useBudStatusTransitions({
   getBud: () => bud.value,
   setActiveTab: (tab) => { activeTab.value = tab },
   getStatusTabMap: () => STATUS_TAB_MAP,
   triggerDesignGeneration: () => designPanelRef.value?.triggerDesignGeneration(),
   reloadTimeline: () => loadTimeline(),
 })
+const { updateStatus, cancelRunningAgent, cancellingAgent } = statusController
 
 const canApprove = computed(() => {
   const role = authStore.user?.role
@@ -941,48 +791,6 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
 </script>
 
 <style scoped>
-/* ── Pending cases dialog ────────────────────── */
-.pending-cases-list {
-  max-height: 240px;
-  overflow-y: auto;
-  padding: 8px 12px;
-  background: rgba(var(--v-theme-on-surface), 0.04);
-  border-radius: 6px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-}
-
-.pending-case-row {
-  display: flex;
-  align-items: center;
-  font-size: 13px;
-  padding: 3px 0;
-  color: rgba(var(--v-theme-on-surface), 0.85);
-}
-
-.pending-case-row .text-truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1;
-}
-
-/* ── Agent banner ────────────────────────────── */
-.agent-banner {
-  padding: 10px 16px;
-  border-radius: 8px;
-  border: 1px solid rgba(var(--v-theme-primary), 0.25);
-  background: rgba(var(--v-theme-primary), 0.06);
-}
-
-.agent-banner__text {
-  min-width: 0;
-}
-
-.agent-banner__progress {
-  max-width: 120px;
-}
-
 /* ── Layout ──────────────────────────────────── */
 .bud-detail-layout {
   display: flex;
@@ -1030,3 +838,5 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
   opacity: 0;
 }
 </style>
+
+<style src="@/components/buds/agent-banner.css"></style>
