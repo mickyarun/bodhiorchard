@@ -209,8 +209,13 @@ async def build_tech_arch_prompt(
     if repo_context:
         prompt += repo_context
 
-    has_designs = bool(design_directive or has_design_system)
-    prompt += _build_tech_arch_instructions(bud, repo_pairs, has_designs)
+    # Static instructions come from the skill row (admin-editable via
+    # Settings → Agent Prompts). The Python builder only owns per-BUD
+    # data (requirements, repos, designs, linked features) and the
+    # data-driven JSON fence requirement that lists the BUD's actual
+    # impacted_repos by name.
+    prompt += f"\n---\n\n{skill.prompt}\n"
+    prompt += _build_impacted_repos_fence(bud, repo_pairs)
 
     return prompt, working_dir
 
@@ -275,55 +280,16 @@ async def build_code_review_prompt(
         ),
     )
 
+    # Static review instructions (scope, rules, workflow, checklist,
+    # output schema) come from the ``code-reviewer`` skill row in DB.
+    # The Python builder owns only per-BUD data: BUD reference, repo
+    # diff sections, design references, linked-feature surfaces.
     prompt = (
         f"Code review for {bud_ref}: {bud.title}.\n\n"
         f"## Repos\n\n{repo_list}\n\n"
         f"{design_refs}"
         f"{linked_section}"
-        "## Scope\n\n"
-        "**Review only what this diff changes. Do NOT flag pre-existing "
-        "code that is unchanged.**\n\n"
-        "- Only comment on lines added or modified in the diff.\n"
-        "- You may read unchanged code to UNDERSTAND context, but do not "
-        "  flag issues you find in unchanged lines.\n"
-        "- Exception: if `code_impact` reveals d=1 callers/dependents "
-        "  that the diff failed to update, you MUST flag those even though "
-        "  the caller files are unchanged — the diff is incomplete.\n"
-        "- Exception: if the diff adds a new call to a pre-existing buggy "
-        "  function, flag the call site (not the function) only if the bug "
-        "  materially affects the new usage.\n"
-        "- Do NOT re-review the entire file. Do NOT propose refactors of "
-        "  untouched code. Do NOT critique style of lines the author "
-        "  didn't write.\n\n"
-        "## Steps\n\n"
-        "1. `get_bud_context` → fetch tech spec + PRD ACs\n"
-        "2. `git diff` in each repo — this is your scope of review\n"
-        "3. Read modified files ONLY as much as needed to understand the diff\n"
-        "4. `code_impact` on key symbols — flag d=1 dependents not updated\n"
-        "5. Verify each PRD AC has implementation in the diff\n\n"
-        "## Quality Checklist (apply to changed lines only)\n\n"
-        "| Check | Rule |\n"
-        "|-------|------|\n"
-        "| Bugs | Logic errors, null refs, race conditions |\n"
-        "| Security | OWASP top 10, org_id scoping, input validation |\n"
-        "| Modularity | Functions <50 lines, files <300 (BE) / <250 (FE) |\n"
-        "| Reuse | Existing patterns used, no duplicated code |\n"
-        "| No hacks | No hardcoded values, TODO/FIXME, bypassed checks |\n"
-        "| Standards | Type hints, docstrings on public funcs, lint clean |\n"
-        "| Spec match | Changes match tech arch + PRD acceptance criteria |\n"
-        "| Impact | code_impact blast radius — d=1 dependents updated |\n\n"
-        "## Output (JSON only, no wrapper)\n\n"
-        "```json\n"
-        "{\n"
-        '  "code_review_comments": [\n'
-        '    {"repo": "name", "file": "path", "line": 42,\n'
-        '     "severity": "error|warning|suggestion",\n'
-        '     "comment": "...", "deviates_from_spec": false}\n'
-        "  ],\n"
-        '  "automation_test_plan_md": "...",\n'
-        '  "manual_test_plan_md": "..."\n'
-        "}\n"
-        "```\n"
+        f"---\n\n{skill.prompt}\n"
     )
 
     return prompt, working_dir
@@ -401,116 +367,39 @@ async def build_testing_prompt(
         f"## Repositories\n\n{repo_list}\n\n"
         f"{design_refs}"
         f"{linked_section}"
-        "## How to Get Context\n\n"
-        "1. Use `get_bud_context` MCP tool to fetch the full tech spec\n"
-        "2. Run `git diff` in each repo to see code changes\n"
-        "3. Read the modified files to understand what was implemented\n"
-        "4. Use bodhi code-intel MCP tools to explore the codebase structure\n\n"
     )
     if draft_context:
         prompt += draft_context
 
-    # Framework-specific instructions block. When automation is on we tell
-    # the agent to write scenarios for the org's chosen framework; when off
-    # we tell it to produce manual-only cases and explicitly emit an empty
-    # automation list (the handler also enforces this as a backstop).
-    if qa.enabled:
-        instructions_block = (
-            "## Instructions\n\n"
-            "You are a QA engineer, NOT a developer. Write test cases to cover "
-            "all scenarios based on the requirements and code changes — as many "
-            "as needed, no padding.\n\n"
-            f"**Automation cases** = {framework} tests. Write each as a scenario "
-            "with Given/When/Then steps that a developer can hand to Claude Code "
-            f"to produce a working {framework} test file. Cover: functional flows, "
-            "negative paths, boundary values, regression checks.\n\n"
-            "**Manual cases** = ONLY things automation cannot verify: visual "
-            "design parity (comparing to wireframe with human eyes), screen "
-            "reader/VoiceOver testing, physical device behavior, subjective UX "
-            f"feel. Do NOT put functional tests here — if {framework} can drive it "
-            "and assert the result, it belongs in automation.\n\n"
-            "Do NOT generate unit tests, integration tests, or store/composable "
-            "tests — those are the developer's responsibility, not QA's.\n\n"
-        )
-        output_format_block = (
-            "## Output Format (JSON only, no wrapper)\n\n"
-            "```json\n"
-            "{\n"
-            '  "automation_test_cases": [\n'
-            '    {"id": "TC-001", "title": "Bell icon switches to filled on unread",\n'
-            '     "type": "e2e",\n'
-            '     "gherkin": "Given the user has 3 unread notifications\\n'
-            "When the page loads\\n"
-            "Then the bell icon should be the filled variant\\n"
-            'And the badge should show 3",\n'
-            '     "input": "3 unread notifications in DB",\n'
-            '     "expected_output": "Filled bell SVG + badge showing 3",\n'
-            '     "priority": "high",\n'
-            '     "tags": ["smoke", "regression"]}\n'
-            "  ],\n"
-            '  "manual_test_cases": [\n'
-            '    {"id": "TC-021", "title": "Panel matches wireframe visual design",\n'
-            '     "description": "Compare rendered panel against approved wireframe",\n'
-            '     "preconditions": "Wireframe open side-by-side",\n'
-            '     "steps": ["Open notification panel", "Compare layout to wireframe"],\n'
-            '     "expected_result": "Panel matches wireframe spacing and colors",\n'
-            '     "priority": "medium",\n'
-            '     "category": "usability"}\n'
-            "  ],\n"
-            '  "test_execution_plan": "## Phases\\n\\n'
-            f"1. **{framework}** — run on every PR...\\n"
-            '2. **Manual visual/a11y** — run before release..."\n'
-            "}\n"
-            "```\n"
-        )
-    else:
-        instructions_block = (
-            "## Instructions\n\n"
-            "You are a QA engineer, NOT a developer. Write test cases to cover "
-            "all scenarios based on the requirements and code changes — as many "
-            "as needed, no padding.\n\n"
-            "**This organization has automation DISABLED.** Produce **manual "
-            "test cases only** — do not populate `automation_test_cases`. "
-            "Return an empty list for that field.\n\n"
-            "Cover the full test surface in manual cases: functional flows, "
-            "negative paths, boundary values, regression scenarios, visual "
-            "design parity, accessibility, and any scenarios that require "
-            "human judgement. Each case must be executable by a human tester "
-            "without needing an automation framework.\n\n"
-            "Do NOT generate unit tests, integration tests, or store/composable "
-            "tests — those are the developer's responsibility, not QA's.\n\n"
-        )
-        output_format_block = (
-            "## Output Format (JSON only, no wrapper)\n\n"
-            "```json\n"
-            "{\n"
-            '  "automation_test_cases": [],\n'
-            '  "manual_test_cases": [\n'
-            '    {"id": "TC-001", "title": "Unread notification shows filled bell",\n'
-            '     "description": "Verify bell icon updates when unread count > 0",\n'
-            '     "preconditions": "User has at least 1 unread notification",\n'
-            '     "steps": ["Log in", "Observe bell icon in header"],\n'
-            '     "expected_result": "Bell icon is filled and shows numeric badge",\n'
-            '     "priority": "high",\n'
-            '     "category": "functional"},\n'
-            '    {"id": "TC-021", "title": "Panel matches wireframe visual design",\n'
-            '     "description": "Compare rendered panel against approved wireframe",\n'
-            '     "preconditions": "Wireframe open side-by-side",\n'
-            '     "steps": ["Open notification panel", "Compare layout to wireframe"],\n'
-            '     "expected_result": "Panel matches wireframe spacing and colors",\n'
-            '     "priority": "medium",\n'
-            '     "category": "usability"}\n'
-            "  ],\n"
-            '  "test_execution_plan": "## Phases\\n\\n'
-            "1. **Manual functional pass** — run before merge...\\n"
-            '2. **Manual regression** — run before release..."\n'
-            "}\n"
-            "```\n"
-        )
-
-    prompt += instructions_block + output_format_block
+    # Static instructions (rules, categories, workflow, output format)
+    # come from the ``testing`` skill row in DB. Python only owns per-BUD
+    # data (repos, designs, linked features, draft test plans) and the
+    # org-level QA mode toggle that decides whether to emit automation
+    # cases for ``framework`` or set ``automation_test_cases: []``.
+    prompt += f"\n---\n\n{skill.prompt}\n"
+    prompt += _build_qa_mode_block(qa.enabled, framework)
 
     return prompt, working_dir
+
+
+def _build_qa_mode_block(enabled: bool, framework: str) -> str:
+    """Per-org QA mode override appended after the skill's static body."""
+    if enabled:
+        return (
+            "\n## QA Mode\n\n"
+            f"`enabled` — write automation cases for **{framework}**. "
+            "Gherkin scenarios that a developer can hand to Claude Code to "
+            f"produce a working {framework} test file. Cover functional "
+            "flows, negative paths, boundary values, regression checks.\n"
+        )
+    return (
+        "\n## QA Mode\n\n"
+        "`disabled` — this organization has automation off. Return "
+        "`automation_test_cases: []` and cover the full test surface "
+        "(functional, negative, boundary, regression, visual, accessibility) "
+        "in manual cases. Each manual case must be executable by a human "
+        "tester without an automation framework.\n"
+    )
 
 
 # ── Shared helpers ────────────────────────────────────────────────
@@ -594,72 +483,19 @@ def _build_repo_context(repo_pairs: list[tuple[str, str]]) -> str:
     )
 
 
-def _build_tech_arch_instructions(
+def _build_impacted_repos_fence(
     bud: BUDDocument,
     repo_pairs: list[tuple[str, str]],
-    has_designs: bool,
 ) -> str:
-    """Build the instructions section for tech arch prompt."""
-    instructions = "\n## Instructions\n\n"
-    instructions += (
-        "**Target 3,000-6,000 characters.** Developers use Claude Code and generate "
-        "implementation from this plan. No code examples, no CSS tokens, no template "
-        "pseudocode, no function signatures. Every sentence must carry new information.\n\n"
-    )
+    """Data-driven tail: branch convention + impacted-repos JSON fence.
 
-    if has_designs:
-        instructions += (
-            "Align with the designs: READ the wireframe HTML file paths listed in the "
-            "**Design Wireframes & Notes** section above (use the Read tool with the "
-            "full path). Map wireframe screens to files/routes. Reference design system "
-            "tokens by name (not values).\n"
-            "**Include the wireframe file paths in your output** under a "
-            "'Design References' section so developers can find them.\n\n"
-        )
-
-    sections_list = (
-        "Sections (strict format):\n"
-        "- **Executive Summary**: 2-3 sentences.\n"
-        "- **Architecture Approach**: Key decisions, 1 paragraph max.\n"
-        "- **Files to Create or Modify**: Table (action | path | notes).\n"
-        "- **API Changes**: Table (verb | path | description). Only if endpoints change.\n"
-        "- **Data Model Changes**: One sentence per change. Only if schema changes.\n"
-    )
-    if has_designs:
-        sections_list += "- **Design References**: List wireframe file paths you read.\n"
-    sections_list += (
-        "- **Dependencies & Risks**: Bullet points, real blockers only.\n"
-        "- **Development Workflow**: Branch name + implementation order.\n"
-        "- **Code Review Standards**: Include this exact checklist at the end — "
-        "developers must verify at each phase:\n"
-        "  - [ ] Modularity: each function <50 lines, each file <300 lines\n"
-        "  - [ ] Security: org-scoped queries, auth on endpoints, no PII leaks, "
-        "input validation at boundaries\n"
-        "  - [ ] Reusability: reuse existing patterns/utilities, no duplicated code\n"
-        "  - [ ] No large files: split if >300 lines backend / >250 lines frontend\n"
-        "  - [ ] No hacks: no hardcoded values, no TODO/FIXME left behind, "
-        "no bypassed validations\n"
-        "  - [ ] Standards: type hints, docstrings on public functions, "
-        "lint clean (ruff/eslint)\n\n"
-    )
-    instructions += sections_list
-
-    if repo_pairs:
-        steps = []
-        if has_designs:
-            steps.append("Read wireframe files from the Design section.")
-        steps.append("Call `code_stats(repo_id)` for codebase overview.")
-        steps.append("Use `code_query` to find related code.")
-        steps.append("Use `code_context` on key symbols.")
-        steps.append("Output the plan as clean markdown.")
-        for i, step in enumerate(steps, 1):
-            instructions += f"{i}. {step}\n"
-        instructions += "\nUse bodhi code-intel MCP tools, NOT bash find/grep/ls.\n"
-
+    Lives in Python because both ``bud.bud_number`` and the actual list
+    of impacted repo names are per-BUD. The static instructions (rules,
+    sections, format, example) live in the ``tech-planner`` skill row.
+    """
     repo_names = [name for _, name in repo_pairs]
     repo_names_str = ", ".join(f'"{n}"' for n in repo_names)
-
-    instructions += (
+    return (
         f"\nBranch: `bud-{bud.bud_number:03d}/<description>`\n"
         "\n## REQUIRED: Impacted Repos JSON\n\n"
         "End your response with a fenced JSON block listing repos that need changes.\n\n"
@@ -669,4 +505,3 @@ def _build_tech_arch_instructions(
         "```\n\n"
         "Only repos with actual code changes. Parsed programmatically — do NOT omit.\n"
     )
-    return instructions

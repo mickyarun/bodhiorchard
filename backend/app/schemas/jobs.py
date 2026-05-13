@@ -16,7 +16,7 @@
 
 import uuid
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -122,22 +122,6 @@ class DesignAgentJobPayload(BaseModel):
     design_id: str | None = None
     skill_id: str | None = None
     task_id: str | None = None
-
-
-class TodoGenerateJobPayload(BaseModel):
-    """Payload for the ``todo_generate`` job — runs the todo-generator agent.
-
-    Triggered on dev-phase transition (``mode="initial"``) or user
-    "Regenerate" button (``mode="regenerate"``). Both follow identical
-    reconciliation rules in ``todo_sync.sync_todos_for_bud`` — the label
-    is forwarded to the agent + logged.
-    """
-
-    org_id: str
-    bud_id: str
-    mode: Literal["initial", "regenerate"] = "initial"
-    actor_id: str | None = None
-    actor_name: str | None = None
 
 
 class TechArchJobPayload(BaseModel):

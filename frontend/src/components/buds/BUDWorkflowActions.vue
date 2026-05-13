@@ -17,7 +17,7 @@
 <template>
   <div>
     <!-- Sticky last-phase-failure banner. Surfaces the most recent
-         unresolved `skill_failed` event for this BUD (e.g. todo-generator
+         unresolved `skill_failed` event for this BUD (e.g. pert_estimator
          timeout, server-restart recovery). Dismiss persists server-side
          so the banner stays gone across refreshes. Using an explicit
          close button (not v-alert's `closable`) so the click goes
@@ -129,7 +129,6 @@ const taskStatusMessage = ref('')
 // Synthetic skill slugs published by the backend services.
 // agent_activity:{org_id} envelopes use these as `skill_slug`.
 const PHASE_ASSIGNER_SLUG = 'phase_assigner'
-const TODO_GENERATOR_SLUG = 'todo_generator'
 const PERT_ESTIMATOR_SLUG = 'pert_estimator'
 
 const AGENT_CONFIG: Record<string, { name: string; label: string }> = {
@@ -140,7 +139,6 @@ const AGENT_CONFIG: Record<string, { name: string; label: string }> = {
   testing: { name: 'QA Agent', label: 'Generating test cases...' },
   development: { name: 'Development Lead', label: 'Setting up the development phase...' },
   [PHASE_ASSIGNER_SLUG]: { name: 'Assignment', label: 'Assigning role…' },
-  [TODO_GENERATOR_SLUG]: { name: 'TODO Generator', label: 'Generating implementation TODOs…' },
   [PERT_ESTIMATOR_SLUG]: { name: 'Estimator', label: 'Re-estimating phase dates…' },
 }
 

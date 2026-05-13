@@ -19,6 +19,7 @@ across bud_agent_handler, job_chat, job_design, and job_agents.
 """
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -32,10 +33,10 @@ from app.repositories.bud import list_basic_info_by_ids
 from app.services.event_bus import publish
 
 # Skill slugs the dev-mode chain emits. Centralised here so both the
-# emitter (job_todo_generate, bud_assignment) and the startup reconciler
+# emitter (bud_development, bud_assignment) and the startup reconciler
 # stay in sync — adding a new phase worker requires touching exactly one
 # list.
-PHASE_WORKER_SLUGS: list[str] = ["phase_assigner", "todo_generator", "pert_estimator"]
+PHASE_WORKER_SLUGS: list[str] = ["phase_assigner", "pert_estimator"]
 
 logger = structlog.get_logger(__name__)
 
@@ -128,7 +129,20 @@ async def _write_and_publish(
     bud_number: int | None,
     bud_title: str | None,
 ) -> None:
-    """Write the DB row and publish the WebSocket event."""
+    """Write the DB row and publish the WebSocket event.
+
+    ``created_at`` is set Python-side rather than via the column's
+    ``server_default=func.now()``. Postgres ``now()`` returns the
+    transaction-start time, which means consecutive lifecycle events
+    written in the same transaction (e.g. ``auto_assign_for_phase``
+    writing ``skill_invoked`` then ``skill_completed`` on either side
+    of a 10-second LLM call) tie on the microsecond — and
+    ``get_active_phase_worker``'s ``func.max(created_at)`` then can't
+    distinguish them, leaving the progress banner forever stuck on the
+    invoked row. Using ``datetime.now`` resolves each call to wall
+    time, which advances within a transaction.
+    """
+    now = datetime.now(UTC)
     log = AgentActivityLog(
         org_id=org_id,
         skill_id=skill_id,
@@ -141,6 +155,8 @@ async def _write_and_publish(
         source="backend",
         skill_slug=skill_slug,
         metadata_=metadata_,
+        created_at=now,
+        updated_at=now,
     )
     db.add(log)
     await db.flush()

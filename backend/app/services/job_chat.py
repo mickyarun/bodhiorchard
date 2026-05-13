@@ -26,6 +26,7 @@ from typing import Any
 import structlog
 
 from app.agents.skill_mapping import SECTION_SKILL_MAP
+from app.database import AsyncSessionLocal
 from app.schemas.bud import SECTION_LABELS
 from app.schemas.jobs import ChatJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
@@ -41,7 +42,7 @@ from app.services.job_utils import (
     save_image_temp,
     section_locks,
 )
-from app.services.skill_loader import load_skill
+from app.services.skill_loader import load_skill, load_skill_for_org
 
 logger = structlog.get_logger(__name__)
 
@@ -195,11 +196,18 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         bud_id=uuid_mod.UUID(payload.bud_id),
     )
 
-    # Read config from the skill definition
+    # Read config from the per-org skill row so admin edits to model /
+    # max_turns / iteration_model in Settings → Agent Prompts take effect
+    # without a redeploy. Fall back to the file default if the DB row is
+    # missing (e.g. a fresh-install org that hasn't been seeded yet).
     try:
-        skill = load_skill(skill_name)
-    except FileNotFoundError:
-        skill = None
+        async with AsyncSessionLocal() as _skill_db:
+            skill = await load_skill_for_org(skill_name, uuid_mod.UUID(_chat_org_id), _skill_db)
+    except (ValueError, LookupError):
+        try:
+            skill = load_skill(skill_name)
+        except FileNotFoundError:
+            skill = None
 
     # Design section needs a longer timeout (matches design agent job)
     chat_timeout = 900 if payload.section == "design" else 300

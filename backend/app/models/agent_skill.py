@@ -55,9 +55,9 @@ class AgentSkill(BaseModel):
     max_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # Wall-clock cap on the Claude subprocess call for this skill. ``0`` means
     # "use the agent code's hard-coded fallback" (each agent picks something
-    # sensible for its work — e.g. 180 s for todo-generator's single-turn
-    # JSON emission, 600 s for multi-turn PRD writing). Per-org admins can
-    # bump this when a slow tech spec / large repo causes spurious timeouts.
+    # sensible for its work — e.g. 600 s for multi-turn PRD writing, 90 s for
+    # the tech-planner patch-mode touch-up). Per-org admins can bump this
+    # when a slow tech spec / large repo causes spurious timeouts.
     timeout_seconds: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )

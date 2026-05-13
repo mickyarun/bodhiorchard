@@ -39,7 +39,7 @@ def fake_db() -> MagicMock:
 
 
 def _orphan_row(
-    org_id: uuid.UUID, bud_id: uuid.UUID, slug: str = "todo_generator"
+    org_id: uuid.UUID, bud_id: uuid.UUID, slug: str = "pert_estimator"
 ) -> SimpleNamespace:
     """Stand-in for an AgentActivityLog row returned by the orphan query."""
     return SimpleNamespace(org_id=org_id, bud_id=bud_id, skill_slug=slug)
@@ -69,7 +69,7 @@ async def test_single_orphan_emits_skill_failed(
 ) -> None:
     org_id = uuid.uuid4()
     bud_id = uuid.uuid4()
-    orphan = _orphan_row(org_id, bud_id, "todo_generator")
+    orphan = _orphan_row(org_id, bud_id, "pert_estimator")
     monkeypatch.setattr(
         agent_activity_logger,
         "list_orphan_phase_workers",
@@ -91,7 +91,7 @@ async def test_single_orphan_emits_skill_failed(
     log_call.assert_awaited_once()
     kwargs = log_call.await_args.kwargs
     assert kwargs["event_type"] == "skill_failed"
-    assert kwargs["skill_slug"] == "todo_generator"
+    assert kwargs["skill_slug"] == "pert_estimator"
     assert kwargs["bud_id"] == bud_id
     assert kwargs["bud_number"] == 42
     assert kwargs["bud_title"] == "Test BUD"
@@ -106,7 +106,7 @@ async def test_multiple_orphans_across_orgs_each_emit(
     org_a, org_b = uuid.uuid4(), uuid.uuid4()
     bud_a, bud_b = uuid.uuid4(), uuid.uuid4()
     orphans = [
-        _orphan_row(org_a, bud_a, "todo_generator"),
+        _orphan_row(org_a, bud_a, "pert_estimator"),
         _orphan_row(org_a, bud_a, "pert_estimator"),
         _orphan_row(org_b, bud_b, "phase_assigner"),
     ]
@@ -136,7 +136,7 @@ async def test_multiple_orphans_across_orgs_each_emit(
         (c.kwargs["org_id"], c.kwargs["bud_id"], c.kwargs["skill_slug"])
         for c in log_call.await_args_list
     ]
-    assert (org_a, bud_a, "todo_generator") in emit_keys
+    assert (org_a, bud_a, "pert_estimator") in emit_keys
     assert (org_a, bud_a, "pert_estimator") in emit_keys
     assert (org_b, bud_b, "phase_assigner") in emit_keys
 
@@ -149,7 +149,7 @@ async def test_single_bad_emit_does_not_block_others(
     org_id = uuid.uuid4()
     bud_a, bud_b = uuid.uuid4(), uuid.uuid4()
     orphans = [
-        _orphan_row(org_id, bud_a, "todo_generator"),
+        _orphan_row(org_id, bud_a, "pert_estimator"),
         _orphan_row(org_id, bud_b, "phase_assigner"),
     ]
     monkeypatch.setattr(
@@ -178,7 +178,7 @@ async def test_orphan_without_bud_id_is_skipped(
     """Defensive: rows missing bud_id can't address the WS topic — skip."""
     org_id = uuid.uuid4()
     # bud_id None means we can't form bud:{id}, so the row is unusable.
-    orphan = SimpleNamespace(org_id=org_id, bud_id=None, skill_slug="todo_generator")
+    orphan = SimpleNamespace(org_id=org_id, bud_id=None, skill_slug="pert_estimator")
     monkeypatch.setattr(
         agent_activity_logger,
         "list_orphan_phase_workers",

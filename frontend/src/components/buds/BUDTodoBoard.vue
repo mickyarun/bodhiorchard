@@ -229,7 +229,7 @@ async function doRegenerate() {
     <div
       v-else-if="todosStore.todos.length === 0"
       class="pa-4 text-center text-medium-emphasis"
-    >No TODOs yet — click Regenerate to run the todo-generator agent.</div>
+    >No TODOs yet — click Regenerate to re-derive them from the current tech spec.</div>
 
     <div v-else class="todo-board__list">
       <BUDTodoRow
@@ -247,9 +247,8 @@ async function doRegenerate() {
       <v-card>
         <v-card-title class="text-h6">Regenerate TODOs?</v-card-title>
         <v-card-text class="text-body-2">
-          The todo-generator agent will re-split the tech spec.
+          TODOs will be re-derived from the current tech spec.
           In-flight TODOs (claimed, in-progress, or completed) are preserved.
-          This takes 30–120 seconds.
         </v-card-text>
         <v-card-actions>
           <v-spacer />
