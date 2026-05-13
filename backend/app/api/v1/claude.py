@@ -52,15 +52,22 @@ async def test_claude(
 @router.post("/run")
 async def run_claude_task(
     prompt: str,
-    working_dir: str | None = None,
     max_turns: int = 20,
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Trigger a Claude Code CLI task directly (for testing/development).
 
+    The subprocess always runs in the backend's own working directory.
+    Allowing the caller to choose ``working_dir`` from request input was
+    removed because (a) no production code path uses it (grep across the
+    repo finds zero callers of this endpoint), and (b) it created a
+    direct user-input → path syscall flow that CodeQL flagged. Internal
+    callers that legitimately need a per-job cwd go through the typed
+    service functions (job_design, bud_agent_handler, scan/synthesis),
+    NOT this endpoint.
+
     Args:
         prompt: The prompt to send to Claude Code.
-        working_dir: Optional working directory for codebase context.
         max_turns: Maximum number of agent turns.
         current_user: The authenticated user.
 
@@ -68,11 +75,7 @@ async def run_claude_task(
         The Claude Code execution result.
     """
     config = ClaudeRunnerConfig(max_turns=max_turns)
-    result = await run_claude_code(
-        prompt=prompt,
-        working_dir=working_dir,
-        config=config,
-    )
+    result = await run_claude_code(prompt=prompt, config=config)
     return {
         "success": result.success,
         "output": result.output,

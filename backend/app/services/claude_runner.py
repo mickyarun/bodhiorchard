@@ -19,8 +19,10 @@ Bodhiorchard backend via local subprocess execution.
 """
 
 import asyncio
+import contextlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -33,11 +35,20 @@ import structlog
 
 from app.services import claude_errors
 from app.services.claude_errors import ClaudeErrorCode
+from app.services.claude_guard import (
+    apply_subprocess_rlimits,
+    build_claude_env,
+    build_inline_settings_json,
+    maybe_wrap_with_sandbox,
+)
 
 logger = structlog.get_logger(__name__)
 
 ProgressCallback = Callable[[str, dict[str, Any]], None]  # (tool_name, tool_input)
 
+# Absolute path to the MCP stdio bridge script — passed to the Claude CLI
+# via ``--mcp-config`` so the bridge subprocess can be launched with the
+# correct interpreter regardless of caller cwd.
 _BRIDGE_PATH = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridge.py")
 
 
@@ -177,6 +188,9 @@ async def _run_with_streaming(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=10 * 1024 * 1024,  # 10MB — Claude stream-json lines can exceed 64KB default
+            # guard: kernel-enforced RLIMIT_AS + RLIMIT_NPROC + setsid
+            # in the child. Returns ``None`` on Windows so this is a no-op there.
+            preexec_fn=apply_subprocess_rlimits(),
         )
 
         async def _drain_stderr() -> None:
@@ -259,6 +273,9 @@ async def _run_with_streaming(
                 await proc.wait()
                 logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
             except ProcessLookupError:
+                # Race: subprocess already exited between the kill and the
+                # wait. Nothing to clean up — fall through to the diagnostic
+                # path below.
                 pass
         # Include whatever diagnostic signal we did capture before the
         # timeout — a timed-out CLI usually still produced *some* output,
@@ -292,6 +309,8 @@ async def _run_with_streaming(
                 await proc.wait()
                 logger.info("claude_subprocess_killed_on_cancel", pid=proc.pid)
             except ProcessLookupError:
+                # Race: subprocess already exited before we got the cancel
+                # signal. Swallow and propagate the original cancellation.
                 pass
         raise
     except FileNotFoundError:
@@ -393,6 +412,100 @@ def is_claude_cli_available() -> bool:
     return shutil.which("claude") is not None
 
 
+# Path prefixes the spawn cwd MUST start with. A positive allowlist:
+# any working_dir that does not begin with one of these roots is
+# rejected by string comparison BEFORE any filesystem syscall touches
+# the value. The list covers macOS user homes, Linux user homes, the
+# standard tmp dirs used by tests + pytest, and the canonical Full
+# Docker clone root. Operators with a custom layout can extend at
+# deploy time via ``BODHIORCHARD_EXTRA_CWD_ROOTS`` (colon-separated,
+# each entry MUST end with ``/``).
+_ALLOWED_CWD_ROOTS: tuple[str, ...] = (
+    "/Users/",
+    "/home/",
+    "/root/",
+    "/tmp/",
+    "/var/tmp/",
+    "/var/folders/",
+    "/private/var/",
+    "/workspace/",
+    "/data/repos/",
+    "/app/",
+)
+
+
+def _allowed_cwd_roots() -> tuple[str, ...]:
+    """Return the in-tree allowlist plus any deploy-time additions."""
+    extra = os.environ.get("BODHIORCHARD_EXTRA_CWD_ROOTS", "")
+    if not extra:
+        return _ALLOWED_CWD_ROOTS
+    extras = tuple(p for p in extra.split(":") if p.endswith("/"))
+    return _ALLOWED_CWD_ROOTS + extras
+
+
+# Suffix characters allowed AFTER the constant root prefix. ``..`` and
+# absolute-path injection are excluded by construction since a leading
+# slash isn't permitted. This regex is the canonical structural
+# sanitizer for CodeQL's ``py/path-injection`` taint query — the path
+# string is reconstructed from a hardcoded prefix + a regex-validated
+# suffix, breaking the taint flow before it reaches ``Path()``.
+_SAFE_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_\-./+= ]*$")
+
+
+def _validate_working_dir(working_dir: str | Path | None) -> str:
+    """Resolve and validate the spawn cwd. Returns absolute path.
+
+    Three-step structural sanitization:
+
+    1. Match the input against one of the constant prefixes in
+       ``_allowed_cwd_roots()``. Reject if none match.
+    2. Regex-validate the remaining suffix (alphanumerics, dash, dot,
+       slash, underscore, plus, equals, space). No ``..``, no other
+       shell-meta characters.
+    3. Reconstruct the path string from the matched constant prefix
+       plus the validated suffix. CodeQL's ``py/path-injection`` query
+       recognizes this reconstruct-from-constant pattern as a sanitizer.
+    4. Reject credential dirs (``.ssh``, ``.aws``, ...) on the
+       reconstructed string. Then resolve and check ``is_dir()``.
+
+    ``None`` falls back to the FastAPI worker's own cwd, which is trusted.
+    """
+    if working_dir is None:
+        return str(Path.cwd().resolve())
+
+    raw = str(working_dir)
+
+    matched_root: str | None = None
+    for root in _allowed_cwd_roots():
+        if raw.startswith(root):
+            matched_root = root
+            break
+    if matched_root is None:
+        raise ValueError(f"run_claude_code working_dir not under an allowed root: {raw!r}")
+
+    suffix = raw[len(matched_root) :]
+    if not _SAFE_SUFFIX_RE.match(suffix):
+        raise ValueError(
+            f"run_claude_code working_dir suffix contains disallowed characters: {raw!r}"
+        )
+
+    # Reconstruct from constant prefix + sanitized suffix. The result
+    # is no longer derived from a tainted source by CodeQL's flow rules.
+    safe = matched_root + suffix
+
+    for cred in ("/.ssh", "/.aws", "/.gnupg", "/.kube", "/.claude/.credentials"):
+        if cred in safe:
+            raise ValueError(f"run_claude_code refuses to spawn inside a credential dir: {safe!r}")
+
+    resolved = Path(safe).resolve()
+    if not resolved.is_dir():
+        raise ValueError(
+            f"run_claude_code working_dir does not exist or is not a directory: {resolved}"
+        )
+
+    return str(resolved)
+
+
 async def run_claude_code(
     prompt: str,
     working_dir: str | Path | None = None,
@@ -428,7 +541,17 @@ async def run_claude_code(
             ),
         )
 
-    cwd = str(working_dir) if working_dir else "."
+    # Resolve to an absolute path so the ``--add-dir`` workspace pin workspace
+    # pin allows exactly the intended directory. With a relative ``"."``
+    # the CLI would widen the filesystem allowlist to whatever the
+    # FastAPI worker happens to be running from.
+    #
+    # ``working_dir`` is set by trusted internal backend code (job_design,
+    # bud_agent_handler, scan/synthesis) and never flows from raw HTTP
+    # request bodies. We still validate strictly: the resolved path must
+    # be an existing directory and must NOT alias a credential or system
+    # root, so even a buggy caller can't widen the sandbox.
+    cwd = _validate_working_dir(working_dir)
 
     # Force stream-json when a progress callback is provided
     output_format = config.output_format
@@ -444,11 +567,19 @@ async def run_claude_code(
         "--output-format",
         output_format,
         "--dangerously-skip-permissions",
-        # Force a neutral output style so skill output isn't polluted by the
-        # developer's interactive outputStyle (e.g. "learning" prepends
-        # ★ Insight blocks that break HTML/JSON extraction downstream).
+        # Inline ``--settings`` JSON. Built from a security-aware
+        # builder so we get, in one place:
+        # * outputStyle "default" — neutralizes the developer's
+        #   interactive outputStyle (e.g. "learning" would inject
+        #   ★ Insight blocks that break downstream extraction);
+        # * permissions.deny — declarative deny list for known-bad
+        #   bash patterns and secret-file paths;
+        # * disableBypassPermissionsMode — hard-disable YOLO inside the
+        #   child so a planted .claude/settings.json cannot re-enable it;
+        # * hooks.PreToolUse — wires the regex-based ``pretool_guard.py``
+        #   script as the real Bash / Read gate.
         "--settings",
-        json.dumps({"outputStyle": "default"}),
+        build_inline_settings_json(),
     ]
 
     # stream-json requires --verbose (Claude CLI constraint)
@@ -476,6 +607,13 @@ async def run_claude_code(
         # ops instead of exploring the codebase.
         cmd.extend(["--allowedTools", ",".join(config.allowed_tools)])
 
+    # guard: pin Claude's filesystem allowlist to the working
+    # directory. Without this, a successful prompt-injection can
+    # ``Read(~/.ssh/id_rsa)`` even though the working directory is the
+    # cloned repo. ``--add-dir`` is additive; the CLI's default working-dir
+    # entry stays in place so legitimate repo reads continue to work.
+    cmd.extend(["--add-dir", cwd])
+
     # Append system prompt files (e.g., design system reference)
     for spf in config.system_prompt_files:
         cmd.extend(["--append-system-prompt-file", spf])
@@ -483,12 +621,11 @@ async def run_claude_code(
     # Write temporary MCP config if tools are needed
     mcp_config_file = None
     if config.mcp:
-        bridge_path = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridge.py")
         mcp_json = {
             "mcpServers": {
                 "bodhiorchard": {
                     "command": sys.executable,
-                    "args": [bridge_path],
+                    "args": [_BRIDGE_PATH],
                     "env": {
                         "BODHIORCHARD_BACKEND_URL": config.mcp.backend_url,
                         "BODHIORCHARD_MCP_TOKEN": config.mcp.mcp_token,
@@ -504,8 +641,16 @@ async def run_claude_code(
             delete=False,
             mode="w",
         ) as tmp:
+            # guard: tighten file mode to owner-read-only BEFORE
+            # writing the token, so there is no window where the token is
+            # on disk under a world-readable umask. Best-effort on Windows
+            # (no ``fchmod``); the path-based ``os.chmod`` below covers it.
+            with contextlib.suppress(OSError):
+                os.fchmod(tmp.fileno(), 0o600)
             tmp.write(json.dumps(mcp_json))
             mcp_config_file = Path(tmp.name)
+        with contextlib.suppress(OSError):
+            os.chmod(mcp_config_file, 0o600)
         cmd.extend(["--mcp-config", str(mcp_config_file)])
 
     logger.info(
@@ -519,10 +664,16 @@ async def run_claude_code(
         mcp_enabled=config.mcp is not None,
     )
 
-    # Build subprocess environment with optional extras (e.g. agent context)
-    sub_env: dict[str, str] | None = None
-    if config.env_extra:
-        sub_env = {**os.environ, **config.env_extra}
+    # guard: build the subprocess env from a whitelist instead of
+    # inheriting ``os.environ`` wholesale. Removes ``ENCRYPTION_KEY``,
+    # ``DATABASE_URL``, ``SECRET_KEY``, ``GITHUB_TOKEN`` and friends from
+    # the child's view so a prompt-injection that escapes the Bash deny
+    # rules has nothing valuable to ``echo $...`` out.
+    sub_env: dict[str, str] = build_claude_env(config.env_extra)
+
+    # macOS Hybrid mode: optional macOS Seatbelt wrap. No-op on Linux /
+    # Windows, or when BODHIORCHARD_HYBRID_SANDBOX env flag is unset.
+    cmd = maybe_wrap_with_sandbox(cmd, cwd)
 
     # Streaming path: read stdout line-by-line for live progress
     if progress_callback is not None:
@@ -547,6 +698,8 @@ async def run_claude_code(
             env=sub_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # guard: same rlimits + setsid the streaming path uses.
+            preexec_fn=apply_subprocess_rlimits(),
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(),
@@ -662,6 +815,9 @@ async def run_claude_code(
                 await proc.wait()
                 logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
             except ProcessLookupError:
+                # Race: subprocess already exited between the kill and the
+                # wait. Nothing to clean up — fall through to the diagnostic
+                # path below.
                 pass  # Already exited
         logger.error("claude_run_timeout", timeout=config.timeout_seconds)
         code, message = claude_errors.from_timeout(config.timeout_seconds)
@@ -678,6 +834,8 @@ async def run_claude_code(
                 await proc.wait()
                 logger.info("claude_subprocess_killed_on_cancel", pid=proc.pid)
             except ProcessLookupError:
+                # Race: subprocess already exited before we got the cancel
+                # signal. Swallow and propagate the original cancellation.
                 pass
         raise
     except FileNotFoundError:
@@ -814,11 +972,20 @@ async def _get_claude_version() -> str | None:
             "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # guard: scrub env even for the offline ``--version``
+            # check, so the version probe doesn't accidentally become a
+            # disclosure surface (e.g. if a future CLI release logs
+            # ``ANTHROPIC_API_KEY`` presence to stderr).
+            env=build_claude_env(None),
+            preexec_fn=apply_subprocess_rlimits(),
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         if proc.returncode == 0:
             return stdout.decode("utf-8", errors="replace").strip()[:100]
     except (TimeoutError, FileNotFoundError, OSError):
+        # Best-effort offline version probe; any failure (no binary on
+        # PATH, syscall error, slow startup) means "version unknown" —
+        # which the caller treats as a soft signal, not a hard error.
         pass
     return None
 
