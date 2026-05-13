@@ -12,7 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Claude Code CLI endpoints for testing and running tasks."""
+"""Claude Code CLI connectivity endpoint.
+
+Production agent flows go through typed service functions
+(``job_design``, ``bud_agent_handler``, ``scan/synthesis``), not via
+HTTP. The single endpoint here is a read-only smoke test for the CLI
+install. The previous ``/run`` endpoint accepted an arbitrary prompt
++ ``max_turns`` from any authenticated caller and had zero in-repo
+callers; it was deleted to remove the attack surface (an authenticated
+tenant could otherwise spend API credits driving the agent in the
+backend's working directory).
+"""
 
 from typing import Any
 
@@ -21,11 +31,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.services.claude_runner import (
-    ClaudeRunnerConfig,
-    run_claude_code,
-    test_claude_connection,
-)
+from app.services.claude_runner import test_claude_connection
 
 logger = structlog.get_logger(__name__)
 
@@ -39,6 +45,7 @@ async def test_claude(
     """Test Claude Code CLI availability and connectivity.
 
     Runs a simple prompt to verify the CLI is installed and the API key works.
+    No user input flows into the subprocess.
 
     Args:
         current_user: The authenticated user.
@@ -47,39 +54,3 @@ async def test_claude(
         Test results including cli_available, test_passed, output.
     """
     return await test_claude_connection()
-
-
-@router.post("/run")
-async def run_claude_task(
-    prompt: str,
-    max_turns: int = 20,
-    current_user: User = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Trigger a Claude Code CLI task directly (for testing/development).
-
-    The subprocess always runs in the backend's own working directory.
-    Allowing the caller to choose ``working_dir`` from request input was
-    removed because (a) no production code path uses it (grep across the
-    repo finds zero callers of this endpoint), and (b) it created a
-    direct user-input → path syscall flow that CodeQL flagged. Internal
-    callers that legitimately need a per-job cwd go through the typed
-    service functions (job_design, bud_agent_handler, scan/synthesis),
-    NOT this endpoint.
-
-    Args:
-        prompt: The prompt to send to Claude Code.
-        max_turns: Maximum number of agent turns.
-        current_user: The authenticated user.
-
-    Returns:
-        The Claude Code execution result.
-    """
-    config = ClaudeRunnerConfig(max_turns=max_turns)
-    result = await run_claude_code(prompt=prompt, config=config)
-    return {
-        "success": result.success,
-        "output": result.output,
-        "cost_usd": result.cost_usd,
-        "turns_used": result.turns_used,
-        "error": result.error,
-    }

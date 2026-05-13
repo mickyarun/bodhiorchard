@@ -110,10 +110,28 @@ ALLOWED_DOMAINS=(
 )
 
 # Caller-supplied extras (per-deployment customer tenants etc.) appended
-# without modifying the in-tree default list.
+# without modifying the in-tree default list. Each entry is validated
+# against a domain-shape regex before being added — a malformed value
+# silently no-ops at ``getent`` resolution anyway, but loud rejection
+# at config time saves the operator an hour of debugging.
 if [[ -n "${BODHIORCHARD_EXTRA_ALLOWED_DOMAINS:-}" ]]; then
     IFS=',' read -r -a extra_domains <<< "$BODHIORCHARD_EXTRA_ALLOWED_DOMAINS"
-    ALLOWED_DOMAINS+=("${extra_domains[@]}")
+    for d in "${extra_domains[@]}"; do
+        # Trim whitespace.
+        d="${d##[[:space:]]}"
+        d="${d%%[[:space:]]}"
+        if [[ -z "$d" ]]; then
+            continue
+        fi
+        # Domain-name shape: labels of letters/digits/hyphens separated
+        # by dots, total length 1-253. Anything else (shell metas,
+        # protocols, paths) is rejected with a loud warning.
+        if [[ "$d" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]]; then
+            ALLOWED_DOMAINS+=("$d")
+        else
+            echo "init-firewall: rejecting malformed extra domain: '$d'" >&2
+        fi
+    done
 fi
 
 resolve_and_allow() {

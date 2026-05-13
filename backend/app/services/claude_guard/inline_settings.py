@@ -21,10 +21,11 @@ three things:
 * ``outputStyle: "default"`` — neutralizes a developer's interactive
   outputStyle (e.g. ``learning``) that would inject ``★ Insight`` blocks
   into skill output (see ``project_claude_subprocess_isolation`` memory).
-* ``permissions.deny`` — the inline deny list, evaluated by
-  Claude's prefix matcher before any tool runs. Bypassable, but cheap.
-* ``hooks.PreToolUse`` — invokes ``pretool_guard.py`` for every Bash /
-  Read / Edit / Write event, the real gate.
+* ``permissions.deny`` — the inline deny list, evaluated by Claude's
+  prefix matcher before any tool runs. Bypassable, but cheap.
+* ``hooks.PreToolUse`` / ``hooks.PostToolUse`` — invoke the guard
+  scripts on Bash / Read / Edit / Write events; the real gate plus the
+  audit-log writer.
 
 Because the value is passed via the CLI flag, a malicious
 ``.claude/settings.json`` planted in a scanned repo cannot override us
@@ -62,9 +63,22 @@ def build_inline_settings_json() -> str:
         "outputStyle": "default",
         "permissions": {
             "deny": INLINE_DENY_LIST,
-            # Hard-disable bypassPermissions inside the subprocess so a
-            # planted ``.claude/settings.json`` cannot re-enable YOLO mode.
-            "disableBypassPermissionsMode": "disable",
+            # NOTE: ``disableBypassPermissionsMode`` is intentionally NOT
+            # set. When combined with ``--dangerously-skip-permissions``
+            # it forces the subprocess into normal permission mode where
+            # every MCP tool needs an explicit allow rule — and we have
+            # none, so every ``mcp__bodhiorchard__write_bud`` call gets
+            # denied. The PM agent reported this as "write_bud /
+            # get_bud_context MCP tools are not available in this
+            # session" and emitted markdown without persisting.
+            #
+            # Defense against planted ``.claude/settings.json`` files
+            # re-enabling YOLO still holds because:
+            # (a) the inline ``--settings`` flag passed here takes
+            #     precedence over any repo-local ``.claude/settings.json``;
+            # (b) the deny list above still applies regardless of mode;
+            # (c) the PreToolUse hook gates Bash / Read / Edit / Write
+            #     regardless of the permission-mode toggle.
         },
         "hooks": {
             "PreToolUse": [

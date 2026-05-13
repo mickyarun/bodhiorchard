@@ -443,13 +443,38 @@ def _allowed_cwd_roots() -> tuple[str, ...]:
     return _ALLOWED_CWD_ROOTS + extras
 
 
-# Suffix characters allowed AFTER the constant root prefix. ``..`` and
-# absolute-path injection are excluded by construction since a leading
-# slash isn't permitted. This regex is the canonical structural
-# sanitizer for CodeQL's ``py/path-injection`` taint query — the path
-# string is reconstructed from a hardcoded prefix + a regex-validated
-# suffix, breaking the taint flow before it reaches ``Path()``.
-_SAFE_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_\-./+= ]*$")
+# Suffix characters allowed AFTER the constant root prefix.
+#
+# Permitted set covers the real-world repo + workspace path universe:
+#   * ASCII alphanumerics, ``_ - . / + =`` and space — basic filesystem
+#   * ``@`` — npm scopes (``@org/pkg`` in node_modules paths, scoped
+#     monorepo clones), some PyPI alternates, email-in-path patterns
+#   * ``~`` — operators with custom layouts that include ``~`` literally
+#   * Unicode letters / marks via ``\w`` with ``re.UNICODE`` — handles
+#     accented usernames (``/Users/José``), CJK home dirs, etc.
+#
+# Deliberately EXCLUDED even though they appear in some legitimate
+# paths, because they are shell-metas under some context and we'd
+# rather force a rename than ship a future injection vector:
+#   * ``&``, ``|``, ``;``, ``$``, backtick, newline — shell separators
+#     and substitution operators
+#   * ``(``, ``)``, ``{``, ``}``, ``[``, ``]`` — subshells / globs
+#   * ``'``, ``"`` — quote characters
+#   * ``,`` — common in shell tooling
+#
+# What's also rejected by construction:
+#   * Leading ``/`` — would be a new absolute path (taint-injection risk)
+#   * ``..`` — path traversal (checked separately after the regex)
+#
+# Operators with paths containing rejected characters (rare: e.g.
+# ``Tom & Jerry/repo`` org names from GitHub) should clone under a
+# path-safe parent and symlink if needed.
+#
+# This regex is the canonical structural sanitizer for CodeQL's
+# ``py/path-injection`` taint query — the path string is reconstructed
+# from a hardcoded prefix + a regex-validated suffix, breaking the taint
+# flow before it reaches ``Path()``.
+_SAFE_SUFFIX_RE = re.compile(r"^[\w\-./+=@ ~]*$", re.UNICODE)
 
 
 def _validate_working_dir(working_dir: str | Path | None) -> str:
@@ -488,6 +513,11 @@ def _validate_working_dir(working_dir: str | Path | None) -> str:
         raise ValueError(
             f"run_claude_code working_dir suffix contains disallowed characters: {raw!r}"
         )
+    # Path-traversal hard reject after the character-class gate: even
+    # though ``.`` is allowed (for filenames and current-dir refs), the
+    # literal ``..`` segment is path traversal and must not appear.
+    if ".." in suffix.split("/"):
+        raise ValueError(f"run_claude_code working_dir contains a path-traversal segment: {raw!r}")
 
     # Reconstruct from constant prefix + sanitized suffix. The result
     # is no longer derived from a tainted source by CodeQL's flow rules.
@@ -573,11 +603,21 @@ async def run_claude_code(
         #   interactive outputStyle (e.g. "learning" would inject
         #   ★ Insight blocks that break downstream extraction);
         # * permissions.deny — declarative deny list for known-bad
-        #   bash patterns and secret-file paths;
-        # * disableBypassPermissionsMode — hard-disable YOLO inside the
-        #   child so a planted .claude/settings.json cannot re-enable it;
-        # * hooks.PreToolUse — wires the regex-based ``pretool_guard.py``
-        #   script as the real Bash / Read gate.
+        #   bash patterns and secret-file paths (applies even under
+        #   ``--dangerously-skip-permissions``);
+        # * hooks.PreToolUse / PostToolUse — wire the regex-based
+        #   ``pretool_guard.py`` script as the real Bash / Read /
+        #   Edit / Write gate plus the audit-log writer.
+        #
+        # Defense against a planted ``.claude/settings.json`` re-enabling
+        # YOLO comes from the inline ``--settings`` flag taking precedence
+        # over repo-local files, plus the deny list and PreToolUse hook
+        # both applying regardless of permission mode. We intentionally
+        # do NOT set ``disableBypassPermissionsMode`` — that toggle
+        # cancels ``--dangerously-skip-permissions`` and forces every
+        # MCP tool to need an explicit allow rule (which we don't ship),
+        # so every ``mcp__bodhiorchard__*`` call would be denied and PM
+        # agents emit markdown without persisting.
         "--settings",
         build_inline_settings_json(),
     ]

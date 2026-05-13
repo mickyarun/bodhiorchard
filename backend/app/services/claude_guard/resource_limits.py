@@ -16,15 +16,38 @@
 
 The wall-clock ``timeout_seconds`` knob on ``ClaudeRunnerConfig`` kills the
 subprocess if it runs too long, but it does nothing about a compromised
-subprocess that allocates 64 GiB of RAM or forks 100k workers before the
-timeout fires (classic crypto-miner / fork-bomb patterns seen in real
-prompt-injection incidents).
+subprocess that allocates 64 GiB of RAM before the timeout fires
+(classic crypto-miner pattern seen in prompt-injection incidents). This
+module returns a ``preexec_fn`` callable that runs between ``fork`` and
+``exec`` and applies ``RLIMIT_AS`` to cap that.
 
-This module returns a ``preexec_fn`` callable that runs between ``fork``
-and ``exec`` and applies ``RLIMIT_AS`` (address space) plus ``RLIMIT_NPROC``
-(per-user process count). Limits are intentionally generous — they are
-last-line insurance, not tight policy — and only fire on pathological
-behavior.
+Caveat on ``RLIMIT_NPROC`` — read before tuning
+------------------------------------------------
+The Linux/macOS ``RLIMIT_NPROC`` rlimit is **per-user**, not per-
+subprocess-tree. The kernel counts the calling user's *total* process
+count against this cap, including unrelated apps (Claude Desktop
+helpers, Chrome renderers, Slack, Docker, etc.). On a developer
+workstation that count sits at 600–1500 easily, and a tight cap blows
+up the first ``fork()`` our subprocess attempts (e.g. spawning the MCP
+stdio bridge), with no diagnostic that points at the rlimit — the
+subprocess silently fails to register MCP tools and the agent reports
+them as "not available".
+
+The cap here is therefore set high enough that legitimate dev hosts
+never trip it; it is **not** an effective fork-bomb defense. The real
+bound on runaway behavior is ``timeout_seconds``. Genuine per-tree
+process containment requires one of:
+
+  * cgroups v2 (Linux only) via ``systemd-run --user --scope --slice=...``
+  * macOS ``launchctl limit`` quotas in a dedicated session
+  * Running the subprocess as a separate UID under a low-NPROC user
+
+None of those are wired in here; they belong in the deployment layer
+(Layer 6 firewall + container limits / Layer 7 Seatbelt profile).
+
+``setsid`` IS the load-bearing call in this preexec — it gives the
+parent a clean ``killpg`` target so timeout enforcement actually
+terminates the whole subprocess tree instead of leaking workers.
 """
 
 from __future__ import annotations
@@ -40,11 +63,15 @@ from collections.abc import Callable
 # after observing real-world memory profiles.
 _DEFAULT_ADDRESS_SPACE_BYTES: int = 8 * 1024 * 1024 * 1024
 
-# Per-user process cap. Fork-bomb defense: if the subprocess goes feral and
-# starts spawning workers, the kernel refuses past this count. 512 is well
-# above any legitimate ``claude`` workload (it occasionally spawns Node for
-# MCP plus a handful of git invocations).
-_DEFAULT_PROCESS_CAP: int = 512
+# Per-USER process cap. The kernel counts the CALLING USER's TOTAL process
+# count against this limit, not just the subprocess tree we control. On a
+# dev workstation with Claude Desktop, Chrome, Slack, Docker etc. the user
+# easily sits at 600+ processes — a tight cap blows up the very first
+# ``fork()`` the ``claude`` child needs (e.g. to spawn the MCP bridge), and
+# the subprocess silently fails to start its MCP server. Set high enough
+# that legitimate developer workstations don't trip; the wall-clock
+# ``timeout_seconds`` knob is the real bound on runaway behavior.
+_DEFAULT_PROCESS_CAP: int = 16384
 
 
 def apply_subprocess_rlimits(
