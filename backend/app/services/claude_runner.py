@@ -45,6 +45,9 @@ logger = structlog.get_logger(__name__)
 
 ProgressCallback = Callable[[str, dict[str, Any]], None]  # (tool_name, tool_input)
 
+# Absolute path to the MCP stdio bridge script — passed to the Claude CLI
+# via ``--mcp-config`` so the bridge subprocess can be launched with the
+# correct interpreter regardless of caller cwd.
 _BRIDGE_PATH = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridge.py")
 
 
@@ -269,6 +272,9 @@ async def _run_with_streaming(
                 await proc.wait()
                 logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
             except ProcessLookupError:
+                # Race: subprocess already exited between the kill and the
+                # wait. Nothing to clean up — fall through to the diagnostic
+                # path below.
                 pass
         # Include whatever diagnostic signal we did capture before the
         # timeout — a timed-out CLI usually still produced *some* output,
@@ -302,6 +308,8 @@ async def _run_with_streaming(
                 await proc.wait()
                 logger.info("claude_subprocess_killed_on_cancel", pid=proc.pid)
             except ProcessLookupError:
+                # Race: subprocess already exited before we got the cancel
+                # signal. Swallow and propagate the original cancellation.
                 pass
         raise
     except FileNotFoundError:
@@ -512,12 +520,11 @@ async def run_claude_code(
     # Write temporary MCP config if tools are needed
     mcp_config_file = None
     if config.mcp:
-        bridge_path = str(Path(__file__).resolve().parent.parent / "mcp" / "stdio_bridge.py")
         mcp_json = {
             "mcpServers": {
                 "bodhiorchard": {
                     "command": sys.executable,
-                    "args": [bridge_path],
+                    "args": [_BRIDGE_PATH],
                     "env": {
                         "BODHIORCHARD_BACKEND_URL": config.mcp.backend_url,
                         "BODHIORCHARD_MCP_TOKEN": config.mcp.mcp_token,
@@ -707,6 +714,9 @@ async def run_claude_code(
                 await proc.wait()
                 logger.info("claude_subprocess_killed_on_timeout", pid=proc.pid)
             except ProcessLookupError:
+                # Race: subprocess already exited between the kill and the
+                # wait. Nothing to clean up — fall through to the diagnostic
+                # path below.
                 pass  # Already exited
         logger.error("claude_run_timeout", timeout=config.timeout_seconds)
         code, message = claude_errors.from_timeout(config.timeout_seconds)
@@ -723,6 +733,8 @@ async def run_claude_code(
                 await proc.wait()
                 logger.info("claude_subprocess_killed_on_cancel", pid=proc.pid)
             except ProcessLookupError:
+                # Race: subprocess already exited before we got the cancel
+                # signal. Swallow and propagate the original cancellation.
                 pass
         raise
     except FileNotFoundError:
@@ -870,6 +882,9 @@ async def _get_claude_version() -> str | None:
         if proc.returncode == 0:
             return stdout.decode("utf-8", errors="replace").strip()[:100]
     except (TimeoutError, FileNotFoundError, OSError):
+        # Best-effort offline version probe; any failure (no binary on
+        # PATH, syscall error, slow startup) means "version unknown" —
+        # which the caller treats as a soft signal, not a hard error.
         pass
     return None
 
