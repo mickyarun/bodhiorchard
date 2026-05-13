@@ -17,37 +17,54 @@
 Centralises the "join a caller-supplied path component under a trusted
 root without letting it escape" primitive. Every service that resolves
 a user-controlled string into a real filesystem path should go through
-``safe_join`` so the traversal check (``Path.is_relative_to``) is in one
-place — CodeQL's ``py/path-injection`` query recognises this pattern as
-a sanitiser, and centralising it keeps future call sites from
-re-implementing a weaker variant (e.g. ``str.startswith``, which is
-suffix-bypassable on symlinked or normalised paths).
+``safe_join`` so the traversal check is in one place; future call sites
+can't re-implement a weaker variant.
 """
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 class PathTraversalError(ValueError):
     """Raised when a caller-supplied path resolves outside its root."""
 
 
+def _has_traversal_components(relative: str) -> bool:
+    """Return True when ``relative`` contains ``..`` or is absolute.
+
+    Pure string-level inspection — no filesystem I/O. This runs BEFORE
+    any ``Path.resolve()`` call so symlink-following never happens on
+    unsanitised input. Uses ``PurePosixPath`` to split on both ``/``
+    and ``\\`` independent of the host platform.
+    """
+    if relative.startswith(("/", "\\")):
+        return True
+    parts = PurePosixPath(relative.replace("\\", "/")).parts
+    return any(part == ".." for part in parts)
+
+
 def safe_join(root: Path | str, relative: str) -> Path:
     """Join ``relative`` under ``root`` and verify the result stays inside.
 
-    Resolves both sides to absolute, symlink-collapsed paths and asserts
-    ``Path.is_relative_to(root)``. Raises :class:`PathTraversalError`
-    when the joined path escapes — including via leading ``/`` (which
-    would make ``Path(...)`` discard ``root``), ``..`` segments that
-    climb above ``root``, or symlinks that point outside.
+    Two layered guards:
+
+      1. String-level ``..`` / leading-``/`` rejection BEFORE any
+         filesystem touch — this is the path-injection sanitiser that
+         static analysers (incl. CodeQL ``py/path-injection``)
+         recognise on the data-flow path.
+      2. Post-resolve ``Path.is_relative_to(root)`` — catches symlink
+         escapes that survive step 1 (e.g. a directory entry inside
+         ``root`` that symlinks outside it).
 
     Returns the resolved ``Path`` so callers can do file I/O against it
     without re-resolving.
 
-    The ``relative`` argument must NOT be empty; callers that mean
-    "the root itself" should pass ``root`` directly.
+    The ``relative`` argument must NOT be empty; callers meaning "the
+    root itself" should use ``root`` directly.
     """
     if not relative:
         raise PathTraversalError("relative path must not be empty")
+    if _has_traversal_components(relative):
+        raise PathTraversalError(f"path {relative!r} contains traversal components")
 
     base = Path(root).resolve()
     candidate = (base / relative).resolve()
