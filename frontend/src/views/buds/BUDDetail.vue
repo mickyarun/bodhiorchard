@@ -478,12 +478,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
 import { useBudChat } from '@/composables/useBudChat'
+import { useBudStatusTransitions, PHASE_ROLE_LABELS } from '@/composables/useBudStatusTransitions'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { onSocketReconnect } from '@/services/wsReconnect'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
@@ -522,7 +523,6 @@ const bud = computed(() => budStore.currentBUD)
 
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)
-const showNoPRWarningDialog = ref(false)
 
 // Org-level UAT toggle. Hidden when false: the UAT tab disappears, and
 // any active session that's currently on the UAT tab falls back to Prod.
@@ -578,22 +578,30 @@ watch(uatStageEnabled, (enabled) => {
   }
 })
 
-// Pending-manual-test-cases dialog state (testing → uat/prod guard).
-// Populated from bud.value.qa_manual_cases when the user attempts a
-// forward transition out of testing with pending cases still open.
-const showPendingCasesDialog = ref(false)
-const pendingCasesTarget = ref<string>('')
-const pendingCasesList = ref<{ id: string; title: string }[]>([])
-
-// Snackbar surfaces backend PATCH failures (the store now extracts
-// detail strings verbatim from 400/403/500 responses).
-const statusErrorSnackbar = ref(false)
-const statusErrorMessage = ref('')
-
 // Child component refs
 const designPanelRef = ref<InstanceType<typeof BUDDesignPanel> | null>(null)
 const devPanelRef = ref<InstanceType<typeof BUDDevelopmentPanel> | null>(null)
 const workflowRef = ref<InstanceType<typeof BUDWorkflowActions> | null>(null)
+
+// Status-transition orchestration: guards (code_review PR check,
+// testing → uat/prod pending-cases check, manual-merge override),
+// in-flight banner, backend-error snackbar, cancel-running-agent.
+// All dialog/banner/snackbar state lives in this composable; the
+// template binds directly to the returned refs.
+const {
+  statusChanging, statusChangeTarget, cancellingAgent,
+  showNoPRWarningDialog, overrideReasonDialog, overrideReasonText,
+  showPendingCasesDialog, pendingCasesTarget, pendingCasesList,
+  statusErrorSnackbar, statusErrorMessage,
+  cancelRunningAgent, updateStatus, openQATab,
+  confirmNoPRWarning, confirmOverrideStatus,
+} = useBudStatusTransitions({
+  getBud: () => bud.value,
+  setActiveTab: (tab) => { activeTab.value = tab },
+  getStatusTabMap: () => STATUS_TAB_MAP,
+  triggerDesignGeneration: () => designPanelRef.value?.triggerDesignGeneration(),
+  reloadTimeline: () => loadTimeline(),
+})
 
 const canApprove = computed(() => {
   const role = authStore.user?.role
@@ -864,146 +872,6 @@ watch(activeTab, () => {
 async function handleSaveTitle(title: string): Promise<void> {
   if (!bud.value) return
   await budStore.updateBUD(bud.value.id, { title })
-  await loadTimeline()
-}
-
-const statusChanging = ref(false)
-const statusChangeTarget = ref('')
-const cancellingAgent = ref(false)
-
-async function cancelRunningAgent(): Promise<void> {
-  const taskId = bud.value?.active_agent_task?.id
-  if (!taskId || !bud.value) return
-  cancellingAgent.value = true
-  try {
-    await budStore.cancelAgentTask(bud.value.id, taskId)
-  } finally {
-    cancellingAgent.value = false
-  }
-}
-
-const PHASE_ROLE_LABELS: Record<string, string> = {
-  bud: 'product manager',
-  design: 'designer',
-  tech_arch: 'tech lead',
-  development: 'developer',
-  code_review: 'developer',
-  testing: 'QA engineer',
-  uat: 'product manager',
-}
-
-// Override reason dialog state
-const overrideReasonDialog = ref(false)
-const overrideReasonText = ref('')
-const pendingOverrideStatus = ref('')
-
-async function updateStatus(newStatus: string): Promise<void> {
-  if (!bud.value) return
-
-  // Intercept code_review transition: warn if no PRs are open
-  if (newStatus === 'code_review') {
-    const repoStatuses = await budStore.fetchCodeReviewStatus(bud.value.id)
-    const hasOpenPR = repoStatuses.some(r => r.pr_state === 'open')
-    if (!hasOpenPR) {
-      showNoPRWarningDialog.value = true
-      return
-    }
-  }
-
-  // Manual advance code_review → testing:
-  //   - If every impacted repo already has a merged PR, there's nothing to
-  //     "override" — the code is approved on GitHub and we just advance
-  //     straight through, same outcome as the webhook auto-transition.
-  //   - Otherwise the user is bypassing PR merges (e.g. docs-only change
-  //     or unusual workflow), so we still prompt for a reason so the
-  //     bypass is recorded on the timeline.
-  if (bud.value.status === 'code_review' && newStatus === 'testing') {
-    const repoStatuses = await budStore.fetchCodeReviewStatus(bud.value.id)
-    const allMerged = repoStatuses.length > 0
-      && repoStatuses.every(r => r.pr_state === 'merged')
-    if (!allMerged) {
-      pendingOverrideStatus.value = newStatus
-      overrideReasonText.value = ''
-      overrideReasonDialog.value = true
-      return
-    }
-  }
-
-  // Guard: testing → uat (or → prod when UAT is disabled) must have
-  // every manual test case in a terminal state. Preempt the backend
-  // guard client-side so the user sees the list of blocking cases in a
-  // modal instead of hitting a 400 and seeing a snackbar. The backend
-  // guard still fires as the authoritative check.
-  //
-  // Re-fetch the BUD first so qa_manual_cases reflects results saved
-  // in the QA tab. The test runner composable (useQATestCases) updates
-  // its own local ref but doesn't refresh the store's currentBUD, so
-  // bud.value.qa_manual_cases can be stale after marking cases as pass.
-  if (bud.value.status === 'testing' && (newStatus === 'uat' || newStatus === 'prod')) {
-    await budStore.fetchBUD(bud.value.id)
-    const pending = (bud.value.qa_manual_cases ?? []).filter(
-      tc => tc.result === 'pending',
-    )
-    if (pending.length > 0) {
-      pendingCasesTarget.value = newStatus
-      pendingCasesList.value = pending.map(tc => ({ id: tc.id, title: tc.title }))
-      showPendingCasesDialog.value = true
-      return
-    }
-  }
-
-  await _executeStatusChange(newStatus)
-}
-
-function openQATab(): void {
-  showPendingCasesDialog.value = false
-  activeTab.value = 'testing'
-}
-
-async function confirmNoPRWarning(): Promise<void> {
-  showNoPRWarningDialog.value = false
-  await _executeStatusChange('code_review')
-}
-
-async function confirmOverrideStatus(): Promise<void> {
-  if (!bud.value || !overrideReasonText.value.trim()) return
-  overrideReasonDialog.value = false
-  await _executeStatusChange(pendingOverrideStatus.value, overrideReasonText.value.trim())
-}
-
-async function _executeStatusChange(newStatus: string, reason?: string): Promise<void> {
-  if (!bud.value) return
-  statusChangeTarget.value = newStatus
-  statusChanging.value = true
-  try {
-    const payload: Record<string, unknown> = { status: newStatus }
-    if (reason) payload.status_override_reason = reason
-    const result = await budStore.updateBUD(bud.value.id, payload as never)
-    // When the store returns null, the backend rejected the PATCH. The
-    // store has already captured the detail string into budStore.error
-    // via extractApiError — surface it in the snackbar so the user sees
-    // exactly why (e.g. the backend manual-cases guard catching a race
-    // the client-side preempt missed).
-    if (result === null && budStore.error) {
-      statusErrorMessage.value = budStore.error
-      statusErrorSnackbar.value = true
-      return
-    }
-  } finally {
-    statusChanging.value = false
-  }
-
-  // Switch tab to match the new status phase
-  const targetTab = STATUS_TAB_MAP[newStatus]
-  if (targetTab) activeTab.value = targetTab
-
-  // If entering design phase, open repo picker for generation
-  if (budStore.designAvailable) {
-    budStore.designAvailable = false
-    await nextTick()
-    designPanelRef.value?.triggerDesignGeneration()
-  }
-
   await loadTimeline()
 }
 
