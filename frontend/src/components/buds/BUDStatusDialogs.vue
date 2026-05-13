@@ -16,7 +16,6 @@
 
 <script setup lang="ts">
 import type { useBudStatusTransitions } from '@/composables/useBudStatusTransitions'
-import { PHASE_ROLE_LABELS } from '@/composables/useBudStatusTransitions'
 
 type StatusController = ReturnType<typeof useBudStatusTransitions>
 
@@ -38,7 +37,6 @@ const props = defineProps<{ controller: StatusController }>()
 // to `props.controller.x` template access if that becomes a real
 // requirement.
 const {
-  statusChanging, statusChangeTarget,
   showNoPRWarningDialog, overrideReasonDialog, overrideReasonText,
   showPendingCasesDialog, pendingCasesTarget, pendingCasesList,
   statusErrorSnackbar, statusErrorMessage,
@@ -48,26 +46,11 @@ const {
 
 <template>
   <div class="bud-status-dialogs">
-    <!-- Status change progress banner -->
-    <div v-if="statusChanging" class="agent-banner mx-12 mb-3">
-      <div class="d-flex align-center ga-3">
-        <v-icon icon="mdi-swap-horizontal" size="20" color="primary" />
-        <div class="d-flex flex-column agent-banner__text">
-          <span class="text-body-2 font-weight-medium">Updating status...</span>
-          <span class="text-caption text-medium-emphasis">
-            Assigning {{ PHASE_ROLE_LABELS[statusChangeTarget] || 'team member' }}
-          </span>
-        </div>
-        <v-spacer />
-        <v-progress-linear
-          indeterminate
-          color="primary"
-          height="3"
-          rounded
-          class="agent-banner__progress"
-        />
-      </div>
-    </div>
+    <!-- Note: the "Updating status…" progress banner that used to live
+         here was redundant with the WS-driven "Assignment / Assigning
+         {role}…" banner emitted by BUDWorkflowActions on `skill_invoked`.
+         Both fired for the same ~10s window and showed identical copy.
+         Keeping only the richer, agent-named WS banner. -->
 
     <!-- Status Override Reason Dialog (code_review → testing with unmerged PRs) -->
     <v-dialog v-model="overrideReasonDialog" max-width="420">
@@ -224,5 +207,3 @@ const {
   flex: 1;
 }
 </style>
-
-<style src="./agent-banner.css"></style>

@@ -17,9 +17,13 @@
  *
  * Owns the guard logic (code_review → testing PR-merge check, testing
  * → uat/prod manual-cases check, no-open-PR warning for entering code
- * review), the three guard dialogs' state, the running-status banner,
- * the snackbar surfacing backend rejections, and the cancel-running-
- * agent handler.
+ * review), the three guard dialogs' state, the snackbar surfacing
+ * backend rejections, and the cancel-running-agent handler.
+ *
+ * The "running status" banner that previously lived here was redundant
+ * with the WS-driven "Assignment / Assigning {role}…" banner from
+ * BUDWorkflowActions (skill_invoked) and was removed; only the guard
+ * dialogs and the error snackbar render UI from this composable.
  *
  * Cross-cutting view dependencies (active tab switching, design-
  * generation trigger, timeline reload) come in as hooks; the
@@ -45,22 +49,8 @@ export interface BudStatusHooks {
   reloadTimeline: () => Promise<void>
 }
 
-export const PHASE_ROLE_LABELS: Record<string, string> = {
-  bud: 'product manager',
-  design: 'designer',
-  tech_arch: 'tech lead',
-  development: 'developer',
-  code_review: 'developer',
-  testing: 'QA engineer',
-  uat: 'product manager',
-}
-
 export function useBudStatusTransitions(hooks: BudStatusHooks) {
   const budStore = useBUDStore()
-
-  // In-flight banner
-  const statusChanging = ref(false)
-  const statusChangeTarget = ref('')
 
   // Guard dialogs
   const showNoPRWarningDialog = ref(false)
@@ -171,25 +161,19 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
   async function executeStatusChange(newStatus: string, reason?: string): Promise<void> {
     const bud = hooks.getBud()
     if (!bud) return
-    statusChangeTarget.value = newStatus
-    statusChanging.value = true
-    try {
-      const payload: Record<string, unknown> = { status: newStatus }
-      if (reason) payload.status_override_reason = reason
-      const result = await budStore.updateBUD(bud.id, payload as never)
-      // When the store returns null, the backend rejected the PATCH.
-      // The store has already captured the detail string into
-      // budStore.error via extractApiError — surface it in the
-      // snackbar so the user sees exactly why (e.g. the backend
-      // manual-cases guard catching a race the client-side preempt
-      // missed).
-      if (result === null && budStore.error) {
-        statusErrorMessage.value = budStore.error
-        statusErrorSnackbar.value = true
-        return
-      }
-    } finally {
-      statusChanging.value = false
+    const payload: Record<string, unknown> = { status: newStatus }
+    if (reason) payload.status_override_reason = reason
+    const result = await budStore.updateBUD(bud.id, payload as never)
+    // When the store returns null, the backend rejected the PATCH.
+    // The store has already captured the detail string into
+    // budStore.error via extractApiError — surface it in the
+    // snackbar so the user sees exactly why (e.g. the backend
+    // manual-cases guard catching a race the client-side preempt
+    // missed).
+    if (result === null && budStore.error) {
+      statusErrorMessage.value = budStore.error
+      statusErrorSnackbar.value = true
+      return
     }
 
     // Switch tab to match the new status phase.
@@ -207,9 +191,6 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
   }
 
   return {
-    // banner state
-    statusChanging,
-    statusChangeTarget,
     cancellingAgent,
     // guard-dialog state
     showNoPRWarningDialog,
