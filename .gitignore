@@ -50,6 +50,9 @@ logs.txt
 *.sqlite3
 *.db
 .gitnexus
+# Local Postgres dumps written by scripts/db/db_snapshot.sh.
+# May contain real customer data; never check in.
+.db-snapshots/
 
 # Colyseus dev mode state (may contain JWTs)
 .devmode.json
