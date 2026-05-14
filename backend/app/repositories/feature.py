@@ -215,7 +215,8 @@ class FeatureRepository(BaseRepository[Feature]):
     ) -> None:
         """Flip a soft-deleted row back to active.
 
-        Cleared fields: ``deactivated_at`` and (re)stamps
+        Clears both ``deactivated_at`` and ``deactivated_at_sha`` so the
+        revived row reads as if it had never been deactivated; stamps
         ``last_seen_sha``. Field updates from the new synthesis go
         through :meth:`update_in_place` separately so a revival is
         always paired with fresh content.
@@ -223,11 +224,26 @@ class FeatureRepository(BaseRepository[Feature]):
         await self._db.execute(
             sql_update(Feature)
             .where(Feature.org_id == self._org_id, Feature.id == feature_id)
-            .values(is_active=True, deactivated_at=None, last_seen_sha=last_seen_sha)
+            .values(
+                is_active=True,
+                deactivated_at=None,
+                deactivated_at_sha=None,
+                last_seen_sha=last_seen_sha,
+            )
         )
 
-    async def mark_inactive(self, feature_ids: list[uuid.UUID]) -> int:
+    async def mark_inactive(
+        self,
+        feature_ids: list[uuid.UUID],
+        *,
+        head_sha: str | None = None,
+    ) -> int:
         """Bulk soft-delete: ``is_active=False`` + stamp ``deactivated_at``.
+
+        When ``head_sha`` is supplied (reconciler / PR-merge path), it is
+        recorded in ``deactivated_at_sha`` so the deactivating commit is
+        attributable in the UI. Left NULL for callers without a commit
+        context (e.g. BUD discarded).
 
         BACKEND junctions on each feature stay intact (reads filter
         by parent ``is_active`` so they're invisible until a revive).
@@ -243,7 +259,11 @@ class FeatureRepository(BaseRepository[Feature]):
                 Feature.id.in_(feature_ids),
                 Feature.is_active.is_(True),
             )
-            .values(is_active=False, deactivated_at=datetime.now(UTC))
+            .values(
+                is_active=False,
+                deactivated_at=datetime.now(UTC),
+                deactivated_at_sha=head_sha,
+            )
         )
         rowcount = getattr(result, "rowcount", 0) or 0
         return max(int(rowcount), 0)

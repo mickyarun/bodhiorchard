@@ -182,7 +182,7 @@ async def reconcile_features_for_repo(
         c.feature_id for c in candidates if c.is_active and c.feature_id not in matched_ids
     ]
     if unmatched_active:
-        result.inactivated = await feat_repo.mark_inactive(unmatched_active)
+        result.inactivated = await feat_repo.mark_inactive(unmatched_active, head_sha=head_sha)
     logger.info(
         "reconcile_done",
         org_id=str(org_id),

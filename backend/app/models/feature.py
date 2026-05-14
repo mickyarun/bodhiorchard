@@ -118,13 +118,23 @@ class Feature(BaseModel):
         Boolean, nullable=False, default=True, server_default=text("true")
     )
     deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Commit SHA at which this row was marked inactive (when known — set by
+    # the PR-merge / scan reconciler path; left NULL when inactivation has
+    # no associated commit, e.g. BUD discarded). Cleared on revive. Drives
+    # the "BUD-021 deactivated by commit abc123" surface in the UI.
+    deactivated_at_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Latest head SHA at which the reconciler confirmed this feature is
     # still present. Drives the "still alive?" audit without a join.
     last_seen_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Provenance discriminator: 'scan' (indexer/synthesis), 'bud'
-    # (BUD lifecycle), 'mcp' (Claude-authored). Reconciler scopes
-    # inactivation to ``source='scan'`` so BUD-authored rows are not
-    # affected by a scan run.
+    # (BUD lifecycle), 'mcp' (Claude-authored). The reconciler does NOT
+    # filter by ``source``; BUD-authored rows are excluded from the
+    # reconcile pool *structurally* — ``bulk_load_for_reconcile``
+    # INNER-JOINs ``FeatureToRepo`` with ``role=PRIMARY``, and BUD rows
+    # intentionally have no PRIMARY junction (see
+    # ``feature_lifecycle.create_or_update_planned_feature``). When a
+    # row IS in the pool and gets soft-deleted, ``deactivated_at_sha``
+    # records the deactivating commit.
     source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Free-form provenance reference: BUD-XXX, cluster id at synthesis
     # time, PR number, etc. Surfaced in MCP responses for traceability.
