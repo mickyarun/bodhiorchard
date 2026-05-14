@@ -26,10 +26,18 @@ regular scan pipeline:
 3. If no clusters are affected (very common: PRs touching only
    ``README.md`` / configs / tests fall here), log the skip and return.
    No LLM cost is incurred.
-4. Otherwise enqueue a regular scan via :func:`start_scan`. The scan
-   pipeline is SHA-gated, so unchanged stages are reused; the synthesise
-   stage runs LLM only against the affected clusters' communities and
-   the reconciler applies incremental CRUD as designed.
+4. Otherwise dispatch the reconcile work based on how many clusters
+   were affected:
+
+   * ``len(affected) <= NARROW_CAP`` → enqueue a ``JOB_PR_NARROW_SYNTHESIS``
+     job. The narrow handler runs Claude over those clusters only and
+     reconciles with a signature-scoped ``candidate_filter`` so out-of-
+     scope features are immune from soft-delete.
+   * ``len(affected) > NARROW_CAP`` → enqueue a regular scan via
+     :func:`start_scan`. The scan pipeline is SHA-gated, so unchanged
+     stages are reused; the synthesise stage runs LLM only against
+     the affected clusters' communities and the reconciler applies
+     incremental CRUD as designed.
 
 Concurrency: ``start_scan`` raises :class:`ScanAlreadyActiveError`
 when an org-level scan is in flight. That's an expected branch — the
@@ -58,10 +66,16 @@ from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.jobs import JobState
 from app.services.github_app_auth import get_installation_token
 from app.services.github_client import GitHubClient
-from app.services.job_queue import update_job
+from app.services.job_queue import JOB_PR_NARROW_SYNTHESIS, create_job, update_job
 from app.services.scan.runner import ScanAlreadyActiveError, start_scan
 
 logger = structlog.get_logger(__name__)
+
+# Cap on the number of affected clusters that go through the narrow
+# synthesis job. Above this, fall back to today's full-repo scan path —
+# at that point the prompt savings stop justifying a second LLM run vs.
+# letting the standard pipeline's stage cache shortcut what it can.
+NARROW_CAP = 10
 
 
 async def handle_pr_merge_update(job_id: str, payload: dict[str, Any]) -> None:
@@ -148,16 +162,80 @@ async def handle_pr_merge_update(job_id: str, payload: dict[str, Any]) -> None:
             repo_id=str(repo_id),
             pr_number=pr_number,
             affected_count=len(affected),
+            narrow_cap=NARROW_CAP,
         )
+        if len(affected) <= NARROW_CAP:
+            _enqueue_narrow_synthesis(
+                job_id,
+                org_id=org_id,
+                repo_id=repo_id,
+                pr_number=pr_number,
+                base_sha=base_sha,
+                head_sha=head_sha,
+                full_name=full_name,
+                affected=affected,
+            )
+            return
         await _trigger_repo_scan(
             job_id,
             org_id=org_id,
             repo_id=repo_id,
-            reason=f"{len(affected)} clusters affected",
+            reason=f"{len(affected)} clusters affected (above narrow cap {NARROW_CAP})",
         )
     except Exception as exc:
         logger.exception("pr_merge_update_failed", job_id=job_id, repo_id=str(repo_id))
         update_job(job_id, state=JobState.FAILED, error=str(exc))
+
+
+def _enqueue_narrow_synthesis(
+    job_id: str,
+    *,
+    org_id: uuid.UUID,
+    repo_id: uuid.UUID,
+    pr_number: int,
+    base_sha: str,
+    head_sha: str,
+    full_name: str,
+    affected: set[str],
+) -> None:
+    """Enqueue the narrow synthesis job and mark this dispatcher job complete.
+
+    If ``create_job`` raises, the exception propagates to the parent
+    ``try``/``except`` in :func:`handle_pr_merge_update` and surfaces
+    as ``state=FAILED`` — correct because the child was never queued.
+
+    The trailing ``update_job(COMPLETED)`` is best-effort: the narrow
+    child is already queued by then, so a failure to flip the
+    dispatcher row's status only costs us telemetry, not correctness.
+    Raising here would mask the success and trigger the outer FAILED
+    path even though the work is in flight.
+    """
+    create_job(
+        JOB_PR_NARROW_SYNTHESIS,
+        payload={
+            "org_id": str(org_id),
+            "repo_id": str(repo_id),
+            "pr_number": pr_number,
+            "base_sha": base_sha,
+            "head_sha": head_sha,
+            "full_name": full_name,
+            "affected_cluster_ids": sorted(affected),
+        },
+        user_id=None,
+    )
+    try:
+        update_job(
+            job_id,
+            state=JobState.COMPLETED,
+            status_message=f"Enqueued narrow synth for {len(affected)} cluster(s)",
+        )
+    except Exception:  # noqa: BLE001 — telemetry-only, not correctness
+        logger.warning(
+            "pr_merge_update_dispatcher_complete_log_failed",
+            job_id=job_id,
+            repo_id=str(repo_id),
+            exc_info=True,
+        )
 
 
 async def _load_repo_and_org(
