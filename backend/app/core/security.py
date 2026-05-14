@@ -24,30 +24,24 @@ from app.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# bcrypt raises ValueError for inputs > 72 bytes (since bcrypt 4.1).
+# Truncate at the UTF-8 byte boundary on both hash AND verify so existing
+# hashes — created when bcrypt silently truncated — continue to validate.
+BCRYPT_MAX_BYTES = 72
+
+
+def _normalize_for_bcrypt(secret: str) -> str:
+    return secret.encode("utf-8")[:BCRYPT_MAX_BYTES].decode("utf-8", errors="ignore")
+
 
 def hash_password(password: str) -> str:
-    """Hash a plaintext password using bcrypt.
-
-    Args:
-        password: The plaintext password to hash.
-
-    Returns:
-        The bcrypt hash string.
-    """
-    return cast(str, pwd_context.hash(password))
+    """Hash a plaintext password using bcrypt."""
+    return cast(str, pwd_context.hash(_normalize_for_bcrypt(password)))
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plaintext password against a bcrypt hash.
-
-    Args:
-        plain_password: The plaintext password to verify.
-        hashed_password: The stored bcrypt hash.
-
-    Returns:
-        True if the password matches, False otherwise.
-    """
-    return cast(bool, pwd_context.verify(plain_password, hashed_password))
+    """Verify a plaintext password against a bcrypt hash."""
+    return cast(bool, pwd_context.verify(_normalize_for_bcrypt(plain_password), hashed_password))
 
 
 def create_access_token(
