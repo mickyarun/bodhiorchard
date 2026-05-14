@@ -25,7 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from app.models.permission import Role
+    from app.models.role import Role
 
 
 class UserRole(StrEnum):

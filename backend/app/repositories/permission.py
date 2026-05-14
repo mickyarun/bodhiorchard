@@ -19,7 +19,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.permission import Permission, PermissionCategory, RolePermission
+from app.models.permission import Permission, PermissionCategory
+from app.models.role import RolePermission
 from app.repositories.base import BaseRepository
 
 

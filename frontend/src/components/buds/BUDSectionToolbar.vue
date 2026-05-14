@@ -16,13 +16,21 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import PhaseLockedBtn from './PhaseLockedBtn.vue'
 
-const props = defineProps<{
-  isEditing: boolean
-  agentLocked: boolean
-  activeTab: string
-  currentSection: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    isEditing: boolean
+    agentLocked: boolean
+    activeTab: string
+    currentSection: string
+    // True only when the BUD's status matches the section's owning phase.
+    // When false, the Edit / Import buttons disable and explain why via tooltip.
+    editable?: boolean
+    editLockTooltip?: string
+  }>(),
+  { editable: true, editLockTooltip: '' },
+)
 
 const emit = defineEmits<{
   'toggle-edit': []
@@ -52,18 +60,17 @@ function onFileChange(event: Event): void {
 
 <template>
   <div class="toolbar-actions">
-    <v-btn
-      variant="text"
-      size="small"
-      class="toolbar-btn"
-      :disabled="agentLocked"
+    <PhaseLockedBtn
+      :disabled="agentLocked || !editable"
+      :tooltip="props.editLockTooltip"
+      :tooltip-disabled="editable || agentLocked"
       @click="emit('toggle-edit')"
     >
       <v-icon size="15" class="mr-1">
         {{ isEditing ? 'mdi-eye-outline' : 'mdi-pencil-outline' }}
       </v-icon>
       {{ isEditing ? 'Preview' : 'Edit' }}
-    </v-btn>
+    </PhaseLockedBtn>
     <span class="toolbar-sep" />
     <v-btn
       variant="text"
@@ -75,17 +82,16 @@ function onFileChange(event: Event): void {
       <v-icon size="15" class="mr-1">mdi-tray-arrow-down</v-icon>
       Export
     </v-btn>
-    <v-btn
+    <PhaseLockedBtn
       v-if="activeTab !== 'design'"
-      variant="text"
-      size="small"
-      class="toolbar-btn"
-      :disabled="agentLocked"
+      :disabled="agentLocked || !editable"
+      :tooltip="props.editLockTooltip"
+      :tooltip-disabled="editable || agentLocked"
       @click="pickFile"
     >
       <v-icon size="15" class="mr-1">mdi-tray-arrow-up</v-icon>
       Import
-    </v-btn>
+    </PhaseLockedBtn>
     <input
       ref="fileInput"
       type="file"

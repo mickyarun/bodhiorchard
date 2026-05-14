@@ -34,8 +34,8 @@
           <div class="text-body-2 font-weight-medium">
             {{ phaseFailureTitle }}
           </div>
-          <div v-if="bud.last_phase_failure.message" class="text-body-2 mt-1">
-            {{ bud.last_phase_failure.message }}
+          <div v-if="phaseFailureMessage" class="text-body-2 mt-1">
+            {{ phaseFailureMessage }}
           </div>
         </div>
         <v-btn
@@ -102,7 +102,8 @@ import { useBUDStore } from '@/stores/bud'
 import { useJobSocket } from '@/composables/useJobSocket'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { friendlyAgentError } from '@/types/agentErrors'
-import type { BUDDocument } from '@/types'
+import { ROLE_LABELS } from '@/types'
+import type { BUDDocument, UserRoleName } from '@/types'
 
 const props = defineProps<{
   bud: BUDDocument
@@ -177,6 +178,56 @@ const phaseFailureTitle = computed(() => {
   if (!f) return ''
   const friendly = AGENT_CONFIG[f.skill_slug]?.name
   return friendly ? `${friendly} failed` : 'Last agent run failed'
+})
+
+// Humanize raw role names (e.g. ``tech_lead``) in the failure message
+// so users see "Tech Lead" instead of the enum literal. Falls back to the
+// raw message if no role is mentioned.
+const phaseFailureMessage = computed(() => {
+  const f = props.bud.last_phase_failure
+  if (!f) return ''
+  const meta = (f.metadata || {}) as {
+    role?: string
+    primary_role?: string
+    chain?: string[]
+    reason?: string
+    capacity?: number
+    count?: number
+  }
+  // No-candidates failure: surface ONLY the primary role. The backend
+  // walks past empty/full fallbacks before reaching this state, but the
+  // user-facing cause is the missing primary — "no Designer" is the
+  // signal an admin needs, not "no Designer / PM / Org Owner" which
+  // implies they all need filling. The full ``chain`` stays in metadata
+  // for debugging via the timeline / structured logs.
+  if (meta.reason === 'no_candidates') {
+    const primary = meta.primary_role ?? meta.role ?? meta.chain?.[0]
+    if (primary) {
+      const label = ROLE_LABELS[primary as UserRoleName] ?? primary
+      return `No active ${label} in this org — assignment skipped.`
+    }
+  }
+  // Capacity-exhausted failure — every member of the role is at the
+  // per-role active-BUD limit. Tell the admin which role + the cap so
+  // they know whether to wait, reassign manually, or raise the limit.
+  if (meta.reason === 'all_at_capacity' && meta.role) {
+    const label = ROLE_LABELS[meta.role as UserRoleName] ?? meta.role
+    const cap = meta.capacity
+    const count = meta.count ?? 0
+    const plural = count === 1 ? '' : 's'
+    return (
+      `All ${count} ${label}${plural} are at capacity `
+      + `(${cap} active BUDs each). Assignment skipped — reassign manually or wait `
+      + 'for one to free up.'
+    )
+  }
+  // Generic case: replace any UserRole literal with its label.
+  let msg = f.message ?? ''
+  for (const [role, label] of Object.entries(ROLE_LABELS)) {
+    // Word-boundary replace so "developer" doesn't match inside "code_review".
+    msg = msg.replace(new RegExp(`\\b${role}\\b`, 'g'), label)
+  }
+  return msg
 })
 
 // Local "request in flight" flag so the dismiss button shows a spinner

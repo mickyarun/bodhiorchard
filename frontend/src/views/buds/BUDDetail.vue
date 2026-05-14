@@ -148,6 +148,8 @@
               :agent-locked="agentLocked"
               :active-tab="activeTab"
               :current-section="currentSection"
+              :editable="currentSectionEditable"
+              :edit-lock-tooltip="editLockTooltip"
               @toggle-edit="toggleEdit"
               @export-section="downloadSection"
               @import-section="handleImportSection"
@@ -178,6 +180,7 @@
                 <BUDDesignPanel
                   ref="designPanelRef"
                   :bud-id="bud.id"
+                  :editable="bud.status === 'design'"
                   @chat-message="msg => chatMessages.push(msg)"
                   @switch-to-design="activeTab = 'design'"
                   @design-tab-change="loadChatHistory"
@@ -344,7 +347,15 @@ import { subscribe, unsubscribe } from '@/services/socket'
 import { onSocketReconnect } from '@/services/wsReconnect'
 import { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
-import { BUD_STATUS_ORDER, BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_SECTIONS, VALID_BUD_TABS, TAB_TO_SECTION } from '@/types'
+import {
+  BUD_STATUS_ORDER,
+  BUD_STATUS_LABELS,
+  BUD_STATUS_COLORS,
+  BUD_SECTIONS,
+  VALID_BUD_TABS,
+  TAB_TO_SECTION,
+  isSectionEditable,
+} from '@/types'
 import type { BUDSectionKey, TimelineEvent } from '@/types'
 import ChatPanel from '@/components/buds/ChatPanel.vue'
 import BUDEstimationSection from '@/components/buds/BUDEstimationSection.vue'
@@ -555,6 +566,32 @@ const currentSectionLabel = computed(() =>
   BUD_SECTIONS[currentSection.value].label,
 )
 
+// Edit is allowed only when the BUD's current status owns the active
+// section. e.g. requirements is locked the moment we move out of `bud`.
+// Backend enforces the same rule (HTTP 409) — see
+// backend/app/services/bud_edit_policy.py.
+const currentSectionEditable = computed(() =>
+  isSectionEditable(currentSection.value, bud.value?.status),
+)
+
+// Section → human label for the "Move the BUD to <X> to edit" tooltip.
+// ``development`` is here only to keep TypeScript happy — it's in
+// READ_ONLY_TABS, so the toolbar (and this tooltip) never renders on
+// that tab.
+const EDIT_LOCK_PHASE_LABEL: Record<BUDSectionKey, string | null> = {
+  requirements_md: 'BUD',
+  design: 'Design',
+  tech_spec_md: 'Tech Architecture',
+  testing: 'Testing',
+  code_review: 'Code Review',
+  development: null,
+}
+const editLockTooltip = computed(() => {
+  const required = EDIT_LOCK_PHASE_LABEL[currentSection.value]
+  if (!required) return 'This section is read-only'
+  return `Move the BUD to ${required} to edit this section`
+})
+
 const isEditing = computed(() => {
   if (activeTab.value === 'tech-spec') return editingTechSpec.value
   if (activeTab.value === 'test-plan') return editingTestPlan.value
@@ -726,8 +763,11 @@ async function handleSaveTitle(title: string): Promise<void> {
   await loadTimeline()
 }
 
-// Unified toggle for whichever tab is active
+// Unified toggle for whichever tab is active. Guarded by
+// currentSectionEditable so keyboard shortcuts and programmatic toggles
+// honor the same phase rule as the toolbar's Edit button.
 function toggleEdit(): void {
+  if (!currentSectionEditable.value) return
   if (activeTab.value === 'tech-spec') toggleTechSpecEdit()
   else if (activeTab.value === 'test-plan') toggleTestPlanEdit()
   else if (activeTab.value === 'design') designPanelRef.value?.toggleDesignEdit()

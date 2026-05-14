@@ -84,6 +84,43 @@ export const TAB_TO_SECTION: Record<string, BUDSectionKey> = Object.fromEntries(
   Object.entries(BUD_SECTIONS).map(([k, v]) => [v.tab, k]),
 ) as Record<string, BUDSectionKey>
 
+// Phase that owns each section — only when bud.status equals this value
+// is the section editable. Sections without an entry (development) have
+// no markdown editor at all. Backend mirror lives in
+// backend/app/services/bud_edit_policy.py and the two MUST stay in sync.
+export const SECTION_EDIT_STATUS: Partial<Record<BUDSectionKey, BUDStatus>> = {
+  requirements_md: 'bud',
+  design: 'design',
+  tech_spec_md: 'tech_arch',
+  code_review: 'code_review',
+  testing: 'testing',
+}
+
+export function isSectionEditable(
+  section: BUDSectionKey,
+  status: BUDStatus | undefined | null,
+): boolean {
+  const required = SECTION_EDIT_STATUS[section]
+  if (!required) return false
+  return status === required
+}
+
+// Human-readable labels for UserRoleName — single source of truth so
+// banners, member dropdowns, and invite views all render the same
+// string. Keep keys in sync with UserRoleName above.
+export const ROLE_LABELS: Record<UserRoleName, string> = {
+  org_owner: 'Org Owner',
+  admin: 'Admin',
+  pm: 'Product Manager',
+  tech_lead: 'Tech Lead',
+  manager: 'Manager',
+  developer: 'Developer',
+  designer: 'Designer',
+  qa: 'QA',
+  support: 'Support',
+  viewer: 'Viewer',
+}
+
 export interface BUDListItem {
   id: string
   bud_number: number

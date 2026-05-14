@@ -15,18 +15,17 @@
 """User data access repository."""
 
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from sqlalchemy import Select, func, select, true
+from sqlalchemy import Select, and_, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.developer_xp import DeveloperXP
+from app.models.role import Role, RoleScopeType
 from app.models.skill_profile import SkillProfile
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
 from app.repositories.base import BaseRepository, SelectT
-
-if TYPE_CHECKING:
-    from app.models.user import UserRole
 
 
 class UserRepository(BaseRepository[User]):
@@ -116,7 +115,7 @@ class UserRepository(BaseRepository[User]):
 
     async def get_by_slack_id_with_role(
         self, org_id: uuid.UUID, slack_id: str
-    ) -> tuple[User, "UserRole | None"] | None:
+    ) -> tuple[User, UserRole | None] | None:
         """Look up an org member by Slack ID and return ``(user, role)``."""
         stmt = (
             select(User, OrgToUser.role)
@@ -133,15 +132,43 @@ class UserRepository(BaseRepository[User]):
         return (row[0], row[1])
 
     async def list_active_with_role(self, org_id: uuid.UUID, role: UserRole) -> list[User]:
-        """Active org members whose ``OrgToUser.role`` equals ``role``."""
+        """Active org members **explicitly** assigned a role whose identity equals ``role``.
+
+        Resolution rules (discriminated on ``Role.scope_type``):
+          - SYSTEM role  → match by ``Role.name`` (which IS the canonical
+            UserRole value, e.g. "tech_lead").
+          - CUSTOM role  → join through ``Role.base_role_id`` to its
+            inherited system role and match that parent's name.
+
+        Requiring ``OrgToUser.role_id IS NOT NULL`` (via inner join) keeps
+        members who were imported through scan / Slack / GitHub paths
+        without an explicit role assignment out of the candidate pool —
+        the SQLAlchemy ORM default of ``OrgToUser.role = developer`` would
+        otherwise silently make them eligible for every development BUD
+        despite the org admin never granting them a role.
+        """
+        # Alias the parent system role so we can join self-referentially.
+        base_role = aliased(Role)
         stmt = (
             select(User)
             .join(OrgToUser, OrgToUser.user_id == User.id)
+            .join(Role, Role.id == OrgToUser.role_id)
+            .outerjoin(base_role, base_role.id == Role.base_role_id)
             .where(
                 OrgToUser.org_id == org_id,
-                OrgToUser.role == role,
                 User.is_active == true(),
+                or_(
+                    and_(
+                        Role.scope_type == RoleScopeType.SYSTEM,
+                        Role.name == role.value,
+                    ),
+                    and_(
+                        Role.scope_type == RoleScopeType.CUSTOM,
+                        base_role.name == role.value,
+                    ),
+                ),
             )
+            .distinct()
         )
         result = await self._db.execute(stmt)
         return list(result.scalars().all())

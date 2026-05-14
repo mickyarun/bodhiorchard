@@ -131,6 +131,18 @@
                 >
                   manual
                 </v-chip>
+                <v-chip
+                  v-else-if="event.detail?.method === 'continuity'"
+                  size="x-small"
+                  color="primary"
+                  variant="tonal"
+                  label
+                  class="tl-badge"
+                  :title="continuityTooltip(event.detail)"
+                >
+                  <v-icon start size="10">mdi-restart</v-icon>
+                  continuity
+                </v-chip>
               </div>
             </template>
 
@@ -388,6 +400,15 @@ function statusLabel(s: string): string {
 
 function formatRole(role: string): string {
   return ROLE_LABELS[role] ?? role
+}
+
+function continuityTooltip(detail: Record<string, unknown> | null | undefined): string {
+  if (!detail) return 'Carried over from a previous phase'
+  const from = detail.continuity_from_role
+  if (typeof from === 'string' && from) {
+    return `Carried over from previous ${formatRole(from)}`
+  }
+  return 'Carried over from a previous phase'
 }
 
 function formatSection(section: string): string {

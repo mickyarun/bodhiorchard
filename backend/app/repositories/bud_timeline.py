@@ -95,3 +95,69 @@ class BUDTimelineRepository(BaseRepository[BUDTimelineEvent]):
         )
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
+
+    async def latest_assignee_for_roles(
+        self, bud_id: uuid.UUID, role_values: list[str]
+    ) -> tuple[uuid.UUID, datetime, str] | None:
+        """Return the most recent ``assigned`` event whose ``detail.role`` matches.
+
+        Used for continuity on phase re-entry — when a BUD comes back to
+        a phase, prefer the previous assignee whose role belongs to the
+        new phase's chain. Returns ``(assignee_id, created_at, role)``
+        so callers can compare against any later ``unassigned`` event.
+        Returns ``None`` when no matching event exists.
+        """
+        if not role_values:
+            return None
+        stmt = self._scoped(
+            select(
+                BUDTimelineEvent.detail["assignee_id"].astext,
+                BUDTimelineEvent.created_at,
+                BUDTimelineEvent.detail["role"].astext,
+            )
+            .where(
+                BUDTimelineEvent.bud_id == bud_id,
+                BUDTimelineEvent.event_type == "assigned",
+                BUDTimelineEvent.detail["role"].astext.in_(role_values),
+                BUDTimelineEvent.detail["assignee_id"].astext.isnot(None),
+            )
+            .order_by(BUDTimelineEvent.created_at.desc())
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        row = result.first()
+        if row is None or row[0] is None:
+            return None
+        try:
+            return (uuid.UUID(row[0]), row[1], row[2])
+        except ValueError:
+            return None
+
+    # System-emitted unassign reasons. A user-triggered unassign has
+    # neither of these (or any other value the human picks up on) — so we
+    # treat anything outside this set as a deliberate "don't bring them
+    # back" signal that suppresses continuity.
+    _SYSTEM_UNASSIGN_REASONS: frozenset[str] = frozenset({"auto_assign_skipped", "reassigned"})
+
+    async def latest_user_unassign_after(self, bud_id: uuid.UUID, since: datetime) -> bool:
+        """Return ``True`` if a user-triggered ``unassigned`` event exists after ``since``.
+
+        System unassigns are stamped with ``detail.reason`` (see
+        :data:`_SYSTEM_UNASSIGN_REASONS`); anything else is treated as a
+        human action.
+        """
+        stmt = self._scoped(
+            select(BUDTimelineEvent.detail)
+            .where(
+                BUDTimelineEvent.bud_id == bud_id,
+                BUDTimelineEvent.event_type == "unassigned",
+                BUDTimelineEvent.created_at > since,
+            )
+            .order_by(BUDTimelineEvent.created_at.desc())
+        )
+        result = await self._db.execute(stmt)
+        for (detail,) in result.all():
+            reason = (detail or {}).get("reason")
+            if reason not in self._SYSTEM_UNASSIGN_REASONS:
+                return True
+        return False
