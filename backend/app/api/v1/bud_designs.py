@@ -27,6 +27,7 @@ from app.models.user import User
 from app.repositories.bud import BUDDesignRepository, BUDRepository
 from app.schemas.bud import BUDDesignRead, DesignGenerateRequest, DesignHtmlUpdate
 from app.schemas.jobs import DesignAgentJobPayload
+from app.services.bud_edit_policy import assert_design_editable
 from app.services.job_queue import JOB_DESIGN_AGENT, create_job
 
 logger = structlog.get_logger(__name__)
@@ -65,6 +66,7 @@ async def generate_designs(
     bud = await bud_repo.get_by_id(bud_id)
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+    assert_design_editable(bud)
 
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
     repo_ids: list[uuid.UUID | None] = list(body.repo_ids) if body.repo_ids else [None]
@@ -169,6 +171,12 @@ async def update_design_html(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Manually edit a design wireframe's HTML or notes."""
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+    assert_design_editable(bud)
+
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
     design = await design_repo.get_by_id(design_id)
     if design is None or design.bud_id != bud_id:
@@ -204,6 +212,7 @@ async def regenerate_design(
     bud = await bud_repo.get_by_id(bud_id)
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+    assert_design_editable(bud)
 
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
     design = await design_repo.get_by_id(design_id)

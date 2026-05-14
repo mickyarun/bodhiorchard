@@ -58,6 +58,8 @@
         <v-btn
           variant="text"
           size="small"
+          :disabled="!props.editable"
+          :title="!props.editable ? 'Move the BUD to Design to add wireframes' : ''"
           @click="triggerDesignGeneration"
         >
           <v-icon size="15" class="mr-1">mdi-plus</v-icon>
@@ -87,7 +89,14 @@
             style="max-width: 480px"
           />
           <div v-else>Design generation failed</div>
-          <v-btn variant="tonal" size="small" class="mt-3" @click="handleRegenerate(d.id)">
+          <v-btn
+            variant="tonal"
+            size="small"
+            class="mt-3"
+            :disabled="!props.editable"
+            :title="!props.editable ? 'Move the BUD to Design to retry generation' : ''"
+            @click="handleRegenerate(d.id)"
+          >
             <v-icon start size="15">mdi-refresh</v-icon>
             Retry
           </v-btn>
@@ -117,14 +126,16 @@
             :srcdoc="designSrcdoc(d.design_html)"
             class="design-iframe"
           />
-          <!-- Notes / Figma links -->
+          <!-- Notes / Figma links — locked outside Design phase so
+               accidental edits during dev/review don't slip through. -->
           <div class="design-notes-row">
             <v-text-field
               :model-value="d.notes || ''"
               variant="outlined"
               density="compact"
-              placeholder="Add notes, Figma link, or design references..."
+              :placeholder="props.editable ? 'Add notes, Figma link, or design references...' : 'Notes are read-only outside the Design phase'"
               hide-details
+              :readonly="!props.editable"
               prepend-inner-icon="mdi-link-variant"
               class="design-notes-input"
               @update:model-value="(v: string) => debouncedSaveNotes(d.id, v)"
@@ -171,7 +182,8 @@
     <v-btn
       variant="tonal"
       size="small"
-      :disabled="extractingRepos.length > 0 && designSystemStore.items.length === 0"
+      :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
+      :title="!props.editable ? 'Move the BUD to Design to generate wireframes' : ''"
       @click="triggerDesignGeneration"
     >
       <v-icon start size="15">mdi-creation-outline</v-icon>
@@ -231,9 +243,16 @@ import { friendlyAgentError } from '@/types/agentErrors'
 import AgentErrorMessage from '@/components/common/AgentErrorMessage.vue'
 import type { BUDDesign, RepoInfo } from '@/types'
 
-const props = defineProps<{
-  budId: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    budId: string
+    // True only when the BUD is in the `design` status. When false, Add /
+    // Edit / Regenerate / notes are disabled. Backend mirrors this in
+    // bud_designs.py with HTTP 409.
+    editable?: boolean
+  }>(),
+  { editable: true },
+)
 
 const emit = defineEmits<{
   (e: 'chat-message', msg: { role: 'ai'; text: string }): void
@@ -315,6 +334,10 @@ function refreshDesignPreview(): void {
 }
 
 function debouncedSaveNotes(designId: string, value: string): void {
+  // Out-of-phase BUDs get the read-only treatment on the input, but a
+  // programmatic v-model update could still call this — short-circuit so
+  // we never round-trip a save the backend will 409 on.
+  if (!props.editable) return
   if (notesSaveTimer) clearTimeout(notesSaveTimer)
   notesSaveTimer = setTimeout(async () => {
     await budStore.updateDesignNotes(props.budId, designId, value)
@@ -428,10 +451,14 @@ async function saveDesignById(designId: string): Promise<void> {
 }
 
 function toggleDesignEdit(): void {
+  // Always allow leaving edit mode (save) even if the BUD just transitioned
+  // out of Design — otherwise the user's in-flight edit would be stranded.
+  // Entering edit mode is gated.
   if (designs.value.length > 0 && activeDesignTab.value) {
     if (editingDesignId.value === activeDesignTab.value) {
       saveDesignById(activeDesignTab.value)
     } else {
+      if (!props.editable) return
       const d = designs.value.find(dd => dd.id === activeDesignTab.value)
       editDesign.value = d?.design_html || ''
       editingDesignId.value = activeDesignTab.value

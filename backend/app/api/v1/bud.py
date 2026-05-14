@@ -61,6 +61,7 @@ from app.schemas.dev_activity import (
     UntrackedRepoRead,
 )
 from app.services.agent_activity_logger import PHASE_WORKER_SLUGS
+from app.services.bud_edit_policy import assert_section_editable
 
 logger = structlog.get_logger(__name__)
 
@@ -349,6 +350,13 @@ async def update_bud(
                 f"Cannot change status of a {bud.status.value} BUD. Create a new BUD instead."
             ),
         )
+
+    # Phase-edit policy: section-owning fields are only writable while the
+    # BUD is in their owning phase. Frontend mirrors this rule in
+    # SECTION_EDIT_STATUS; backend rejects with HTTP 409 here as
+    # defense-in-depth against direct API calls.
+    for field in update_data:
+        assert_section_editable(bud, field)
 
     if "status" in update_data:
         from app.services.feature_lifecycle import transition_feature_for_bud
@@ -1402,6 +1410,11 @@ async def import_bud_section(
     bud = await bud_repo.get_by_id(bud_id)
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+
+    # Same phase-edit policy as PATCH /buds/{id} — uploading a markdown
+    # file to ``requirements_md`` while the BUD is in development must
+    # also be rejected, not just the JSON PATCH path.
+    assert_section_editable(bud, section)
 
     raw = await file.read()
     try:
