@@ -23,7 +23,7 @@ from sqlalchemy import Select, String, and_, case, cast, func, or_, select, upda
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dev_activity import DevActivityLog
-from app.models.permission import Role
+from app.models.role import Role
 from app.models.tracked_repository import TrackedRepository
 from app.models.user import OrgToUser
 from app.repositories.base import BaseRepository

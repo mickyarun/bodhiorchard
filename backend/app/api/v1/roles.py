@@ -20,47 +20,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db, require_permissions
-from app.models.permission import (
-    Permission,
-    Role,
-    RoleScopeType,
-)
+from app.models.role import Role, RoleScopeType
 from app.models.user import User
 from app.repositories.permission import PermissionRepository
 from app.repositories.role import RoleRepository
-from app.schemas.permission import (
-    PermissionCategoryRead,
-    PermissionRead,
-    RoleCreate,
-    RoleRead,
-    RoleUpdate,
-)
+from app.schemas.permission import PermissionCategoryRead, PermissionRead
+from app.schemas.role import RoleCreate, RoleRead, RoleUpdate
+from app.services.role_validation import assert_valid_base_role, read_or_404
 
 router = APIRouter(tags=["roles"])
-
-
-def _permission_to_read(perm: Permission) -> PermissionRead:
-    """Convert a Permission ORM instance to its read schema."""
-    return PermissionRead(
-        id=perm.id,
-        name=perm.name,
-        resource_id=perm.resource_id,
-        description=perm.description,
-        category_key=perm.category.key,
-        display_order=perm.display_order,
-    )
-
-
-def _role_to_read(role: Role) -> RoleRead:
-    """Convert a Role ORM instance (with loaded role_permissions) to its read schema."""
-    return RoleRead(
-        id=role.id,
-        name=role.name,
-        description=role.description,
-        scope_type=role.scope_type.value,
-        is_active=role.is_active,
-        permissions=[_permission_to_read(rp.permission) for rp in role.role_permissions],
-    )
 
 
 @router.get("/permissions", response_model=list[PermissionCategoryRead])
@@ -71,7 +39,6 @@ async def list_permissions(
     """List all permission categories with their nested permissions."""
     perm_repo = PermissionRepository(db)
     categories = await perm_repo.list_categories_ordered()
-
     return [
         PermissionCategoryRead(
             key=cat.key,
@@ -79,7 +46,14 @@ async def list_permissions(
             description=cat.description,
             display_order=cat.display_order,
             permissions=[
-                _permission_to_read(p)
+                PermissionRead(
+                    id=p.id,
+                    name=p.name,
+                    resource_id=p.resource_id,
+                    description=p.description,
+                    category_key=cat.key,
+                    display_order=p.display_order,
+                )
                 for p in sorted(cat.permissions, key=lambda x: x.display_order)
             ],
         )
@@ -92,10 +66,8 @@ async def list_roles(
     _user: User = Depends(require_permissions("team:view")),
     db: AsyncSession = Depends(get_db),
 ) -> list[RoleRead]:
-    """List all roles (system + org custom)."""
-    role_repo = RoleRepository(db)
-    roles = await role_repo.list_active()
-    return [_role_to_read(r) for r in roles]
+    """List all active roles (system + org custom)."""
+    return await RoleRepository(db).read_active()
 
 
 @router.get("/roles/{role_id}", response_model=RoleRead)
@@ -105,11 +77,7 @@ async def get_role(
     db: AsyncSession = Depends(get_db),
 ) -> RoleRead:
     """Get a single role with its permissions."""
-    role_repo = RoleRepository(db)
-    role = await role_repo.get_by_id(role_id)
-    if role is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
-    return _role_to_read(role)
+    return await read_or_404(RoleRepository(db), role_id)
 
 
 @router.post("/roles", response_model=RoleRead, status_code=status.HTTP_201_CREATED)
@@ -118,18 +86,23 @@ async def create_role(
     current_user: User = Depends(require_permissions("team:assign_roles")),
     db: AsyncSession = Depends(get_db),
 ) -> RoleRead:
-    """Create a custom org role."""
+    """Create a custom org role.
+
+    ``base_role_id`` must point at an ACTIVE SYSTEM role — the
+    inheritance contract for phase auto-assignment. Anything else
+    (custom role, inactive, missing) is rejected with 400.
+    """
     role_repo = RoleRepository(db)
+    await assert_valid_base_role(role_repo, body.base_role_id)
     role = Role(
         name=body.name,
         description=body.description,
         org_id=current_user.org_id,
         scope_type=RoleScopeType.CUSTOM,
         is_active=True,
+        base_role_id=body.base_role_id,
     )
     await role_repo.create(role)
-
-    # Validate and attach permissions
     try:
         await role_repo.replace_permissions(role.id, body.permission_ids)
     except ValueError as exc:
@@ -137,9 +110,7 @@ async def create_role(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-
-    await db.refresh(role)
-    return _role_to_read(role)
+    return await read_or_404(role_repo, role.id)
 
 
 @router.put("/roles/{role_id}", response_model=RoleRead)
@@ -149,7 +120,10 @@ async def update_role(
     _user: User = Depends(require_permissions("team:assign_roles")),
     db: AsyncSession = Depends(get_db),
 ) -> RoleRead:
-    """Update a role's name, description, or permissions. System roles cannot be modified."""
+    """Update a role's name, description, base_role_id, or permissions.
+
+    System roles cannot be modified.
+    """
     role_repo = RoleRepository(db)
     role = await role_repo.get_by_id(role_id)
     if role is None:
@@ -164,6 +138,9 @@ async def update_role(
         role.name = body.name
     if body.description is not None:
         role.description = body.description
+    if body.base_role_id is not None:
+        await assert_valid_base_role(role_repo, body.base_role_id)
+        role.base_role_id = body.base_role_id
 
     if body.permission_ids is not None:
         try:
@@ -175,8 +152,7 @@ async def update_role(
             ) from exc
 
     await db.flush()
-    await db.refresh(role)
-    return _role_to_read(role)
+    return await read_or_404(role_repo, role.id)
 
 
 @router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)

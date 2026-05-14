@@ -54,18 +54,13 @@ from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBud
 from app.models.jwt_token import JWTToken
 from app.models.notification import Notification, NotificationType
 from app.models.organization import Organization
-from app.models.permission import (
-    Permission,
-    PermissionCategory,
-    Role,
-    RolePermission,
-    RoleScopeType,
-)
+from app.models.permission import Permission, PermissionCategory
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.qa_test_evidence import QATestEvidence
 from app.models.race_result import RaceResult
 from app.models.repo_graph_cache import RepoGraphCache
 from app.models.repo_layer import RepoLayer
+from app.models.role import Role, RolePermission, RoleScopeType
 from app.models.scan import ACTIVE_SCAN_STATUSES, Scan, ScanAggregateStatus
 from app.models.scan_phase import (
     PHASE_SCOPE,

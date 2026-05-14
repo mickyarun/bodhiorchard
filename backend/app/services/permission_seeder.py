@@ -18,13 +18,8 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import DEFAULT_SYSTEM_ROLES, PERMISSION_CATEGORIES
-from app.models.permission import (
-    Permission,
-    PermissionCategory,
-    Role,
-    RolePermission,
-    RoleScopeType,
-)
+from app.models.permission import Permission, PermissionCategory
+from app.models.role import Role, RolePermission, RoleScopeType
 from app.repositories.permission import PermissionRepository
 from app.repositories.role import RoleRepository
 
@@ -78,7 +73,11 @@ async def seed_permissions(db: AsyncSession) -> None:
                 logger.info("seeded_permission", resource_id=perm_def.resource_id)
             permission_map[perm_def.resource_id] = perm
 
-    # 3. Seed system roles and role-permission mappings
+    # 3. Seed system roles and role-permission mappings.
+    # System roles leave ``base_role`` NULL — their ``name`` is the
+    # canonical UserRole value, so the phase auto-assigner falls back to
+    # ``Role.name`` for system-scoped rows. Only custom roles (created
+    # via POST /v1/roles) declare ``base_role`` explicitly.
     for role_def in DEFAULT_SYSTEM_ROLES:
         role = await role_repo.get_by_name_system(role_def.name)
         if role is None:
@@ -110,4 +109,30 @@ async def seed_permissions(db: AsyncSession) -> None:
 
         await db.flush()
 
+    await _warn_on_orphan_custom_roles(role_repo)
+
     logger.info("permission_seed_complete")
+
+
+async def _warn_on_orphan_custom_roles(role_repo: RoleRepository) -> None:
+    """Log one warning per CUSTOM role missing a ``base_role_id``.
+
+    Members of such roles are invisible to ``list_active_with_role`` —
+    auto-assignment skips them until an admin sets a base role through
+    MembersView. The migration auto-fixes custom roles whose ``name``
+    happens to match a seeded system role; the rest (e.g. "Senior
+    Architect") need admin attention, which this warning surfaces on
+    every backend boot.
+    """
+    orphans = await role_repo.list_orphan_custom_roles()
+    for role_id, name, org_id in orphans:
+        logger.warning(
+            "custom_role_missing_base_role",
+            role_id=str(role_id),
+            role_name=name,
+            org_id=str(org_id) if org_id else None,
+            remediation=(
+                "Set base_role_id via MembersView so phase auto-assignment "
+                "picks up members of this role."
+            ),
+        )

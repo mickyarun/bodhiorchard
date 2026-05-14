@@ -529,6 +529,20 @@
           <v-btn icon="mdi-close" variant="text" size="small" @click="roleDialog = false" />
         </v-card-title>
         <v-card-text>
+          <!-- Dialog-scoped error display. The page-level alert is hidden
+               behind the modal, so we mirror the store's last error here
+               and clear it on dismiss. -->
+          <v-alert
+            v-if="roleSubmitError"
+            type="error"
+            variant="tonal"
+            density="compact"
+            closable
+            class="mb-3"
+            @click:close="roleSubmitError = ''"
+          >
+            {{ roleSubmitError }}
+          </v-alert>
           <v-text-field
             v-model="roleForm.name"
             label="Role Name"
@@ -542,10 +556,38 @@
             label="Description (optional)"
             variant="outlined"
             density="compact"
-            class="mb-4"
+            class="mb-3"
           />
 
-          <div class="text-subtitle-2 mb-2">Permissions</div>
+          <!-- Base role determines which phase chain this role
+               participates in. A custom "Senior Architect" pointing at
+               the Tech Lead system role is picked by the Tech
+               Architecture auto-assignment. System roles can't change
+               their base — they ARE the base. -->
+          <v-select
+            v-if="roleForm.scopeType !== 'SYSTEM'"
+            v-model="roleForm.baseRoleId"
+            :items="baseRoleOptions"
+            item-title="title"
+            item-value="value"
+            label="Base role (for auto-assignment)"
+            variant="outlined"
+            density="compact"
+            class="mb-4"
+            hint="Members with this role participate in phases owned by the selected base role."
+            persistent-hint
+            :rules="[v => !!v || 'Base role is required']"
+          />
+
+          <div class="d-flex align-center justify-space-between mb-2">
+            <div class="text-subtitle-2">Permissions</div>
+            <div
+              class="text-caption"
+              :class="roleForm.permissionIds.length === 0 ? 'text-error' : 'text-medium-emphasis'"
+            >
+              {{ roleForm.permissionIds.length }} selected
+            </div>
+          </div>
           <v-expansion-panels variant="accordion" multiple>
             <v-expansion-panel
               v-for="cat in store.permissionCategories"
@@ -594,7 +636,8 @@
           <v-btn
             color="primary"
             :loading="savingRole"
-            :disabled="!roleForm.name"
+            :disabled="!canSubmitRole"
+            :title="canSubmitRole ? '' : 'Pick at least one permission to save this role.'"
             @click="submitRole"
           >
             {{ roleForm.id ? 'Save' : 'Create' }}
@@ -789,8 +832,23 @@ import { computed, onMounted, ref } from 'vue'
 import { useMembersStore, type Member, type RoleOption } from '@/stores/members'
 import { useSettingsStore } from '@/stores/settings'
 import api from '@/services/api'
+import { ROLE_LABELS } from '@/types'
+import type { UserRoleName } from '@/types'
 
 const store = useMembersStore()
+
+// The Base role dropdown lists every SYSTEM role from the API; admins
+// pick which one a new custom role inherits from. Phase auto-assignment
+// joins through ``Role.base_role_id`` to resolve members. Computed
+// (not const) so it stays in sync when roles load.
+const baseRoleOptions = computed(() =>
+  store.roles
+    .filter(r => r.scopeType === 'SYSTEM')
+    .map(r => ({
+      value: r.id,
+      title: ROLE_LABELS[r.name as UserRoleName] ?? r.name,
+    })),
+)
 const settingsStore = useSettingsStore()
 
 // ─── Visibility filter ────────────────────────
@@ -1069,17 +1127,54 @@ async function sendViaSlack() {
 // ─── Create / Edit Role ──────────────────────────────
 const roleDialog = ref(false)
 const savingRole = ref(false)
-const roleForm = ref({ id: '', name: '', description: '', permissionIds: [] as string[] })
+// Dialog-scoped copy of the most recent submit error. The store's
+// page-level ``error`` is hidden behind the modal, so we surface the
+// failure inline here too. Cleared whenever the user re-opens the
+// dialog or hits Save again.
+const roleSubmitError = ref('')
+// ``baseRole`` defaults to 'viewer' — the least-permissive enum. Admins
+// must pick a meaningful value before save (UI requires it via :rules),
+// but having a default keeps the dropdown out of an undefined state.
+const roleForm = ref({
+  id: '',
+  name: '',
+  description: '',
+  baseRoleId: '',
+  scopeType: 'CUSTOM',
+  permissionIds: [] as string[],
+})
+
+// Pre-pick the Developer system role so the dropdown isn't empty by
+// default — admins can change it before saving.
+function defaultBaseRoleId(): string {
+  return store.roles.find(r => r.scopeType === 'SYSTEM' && r.name === 'developer')?.id ?? ''
+}
 
 function countCategorySelected(cat: { permissions: { id: string }[] }): number {
   return cat.permissions.filter(p => roleForm.value.permissionIds.includes(p.id)).length
 }
 
+// Submit gate: the Save button is disabled until the admin has typed a
+// name AND picked at least one permission. Mirrors the backend rules
+// (``RoleCreate.name`` min_length=1, ``permission_ids`` min_length=1)
+// so the user can't reach a 422 with a clearly-empty form.
+const canSubmitRole = computed(
+  () => !!roleForm.value.name.trim() && roleForm.value.permissionIds.length > 0,
+)
+
 function openCreateRole() {
-  roleForm.value = { id: '', name: '', description: '', permissionIds: [] }
+  roleForm.value = {
+    id: '',
+    name: '',
+    description: '',
+    baseRoleId: defaultBaseRoleId(),
+    scopeType: 'CUSTOM',
+    permissionIds: [],
+  }
   if (store.permissionCategories.length === 0) {
     store.fetchPermissions()
   }
+  roleSubmitError.value = ''
   roleDialog.value = true
 }
 
@@ -1088,26 +1183,45 @@ function openEditRole(role: RoleOption) {
     id: role.id,
     name: role.name,
     description: role.description || '',
+    baseRoleId: role.baseRoleId ?? '',
+    scopeType: role.scopeType,
     permissionIds: role.permissions.map(p => p.id),
   }
   if (store.permissionCategories.length === 0) {
     store.fetchPermissions()
   }
+  roleSubmitError.value = ''
   roleDialog.value = true
 }
 
 async function submitRole() {
   savingRole.value = true
-  const payload = {
-    name: roleForm.value.name,
-    description: roleForm.value.description || undefined,
-    permission_ids: roleForm.value.permissionIds,
-  }
+  roleSubmitError.value = ''
   const ok = roleForm.value.id
-    ? await store.updateRole(roleForm.value.id, payload)
-    : await store.createRole(payload)
+    ? await store.updateRole(roleForm.value.id, {
+        name: roleForm.value.name,
+        description: roleForm.value.description || undefined,
+        // Only send base_role_id for custom roles — system roles
+        // shouldn't have it changed (backend rejects, but don't even ask).
+        base_role_id: roleForm.value.scopeType === 'SYSTEM'
+          ? undefined
+          : roleForm.value.baseRoleId,
+        permission_ids: roleForm.value.permissionIds,
+      })
+    : await store.createRole({
+        name: roleForm.value.name,
+        description: roleForm.value.description || undefined,
+        base_role_id: roleForm.value.baseRoleId,
+        permission_ids: roleForm.value.permissionIds,
+      })
   savingRole.value = false
-  if (ok) roleDialog.value = false
+  if (ok) {
+    roleDialog.value = false
+  } else {
+    // Surface the store's last error inside the dialog — the page-level
+    // alert is occluded by the modal.
+    roleSubmitError.value = store.error ?? 'Failed to save role.'
+  }
 }
 
 // ─── Delete Role ──────────────────────────────

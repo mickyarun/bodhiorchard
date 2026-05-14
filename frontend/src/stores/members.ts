@@ -39,6 +39,15 @@ export interface RoleOption {
   name: string
   description: string | null
   scopeType: string
+  // FK to the SYSTEM role this role inherits from. Required for
+  // CUSTOM roles (their name is arbitrary). ``null`` for SYSTEM roles —
+  // their name already equals a UserRole value, so the backend
+  // resolves them by name directly.
+  baseRoleId: string | null
+  // Convenience: name of the inherited system role (e.g. "tech_lead").
+  // Server-resolved so the UI can render "Inherits from Tech Lead"
+  // without a second roundtrip.
+  baseRoleName: string | null
   permissions: PermissionItem[]
 }
 
@@ -85,6 +94,11 @@ export const useMembersStore = defineStore('members', () => {
         name: r.name as string,
         description: (r.description as string | null) ?? null,
         scopeType: ((r.scopeType as string) ?? (r.scope_type as string) ?? 'system').toUpperCase(),
+        // Backend serializes as snake_case. May be ``null`` for system
+        // roles (their ``name`` IS the canonical UserRole). The UI shows
+        // the picker disabled in that case.
+        baseRoleId: ((r.baseRoleId ?? r.base_role_id) as string | null) ?? null,
+        baseRoleName: ((r.baseRoleName ?? r.base_role_name) as string | null) ?? null,
         permissions: (r.permissions as PermissionItem[]) ?? [],
       }))
     } catch (err) {
@@ -164,6 +178,7 @@ export const useMembersStore = defineStore('members', () => {
   async function createRole(payload: {
     name: string
     description?: string
+    base_role_id: string
     permission_ids: string[]
   }): Promise<boolean> {
     error.value = null
@@ -179,7 +194,12 @@ export const useMembersStore = defineStore('members', () => {
 
   async function updateRole(
     roleId: string,
-    payload: { name?: string; description?: string; permission_ids?: string[] },
+    payload: {
+      name?: string
+      description?: string
+      base_role_id?: string
+      permission_ids?: string[]
+    },
   ): Promise<boolean> {
     error.value = null
     try {

@@ -27,23 +27,46 @@ should never need a parallel update elsewhere. Keep it sorted to match
 
 from app.models.user import UserRole
 
-# Why "prod → DEVELOPER": there is no DEVOPS role in ``UserRole`` today;
-# the developer pool handles deploys until that's introduced. When a
-# DEVOPS enum value lands, change this single line.
+# Ordered fallback chain per phase. The PRIMARY role is the canonical
+# owner; subsequent entries are degrade-by-adjacency fallbacks for orgs
+# that haven't filled every working role (a small team often has
+# developers but no dedicated tech lead, designer, or QA — the BUD
+# should still flow, not stall with a red banner). When auto-assignment
+# uses a fallback, the workflow banner shows "No active <primary> —
+# assigned to <fallback>" so the user sees the substitution rather than
+# a silent re-routing.
+#
+# ``ORG_OWNER`` is deliberately ABSENT from every chain. The owner is
+# the admin, not a worker — silently auto-assigning their inbox would
+# hide the workload problem (the org hasn't filled a real working role)
+# rather than surfacing it. When the chain exhausts the BUD is left
+# unassigned with an "all at capacity" / "no candidates" banner so the
+# admin can fill the gap or reassign manually.
+#
+# Why "prod → DEVELOPER" first: there is no DEVOPS role in ``UserRole``
+# today; the developer pool handles deploys until that's introduced.
+# When a DEVOPS enum value lands, prepend it to the prod chain.
+PHASE_ROLE_CHAIN: dict[str, tuple[UserRole, ...]] = {
+    "bud": (UserRole.PM, UserRole.MANAGER),
+    "design": (UserRole.DESIGNER, UserRole.PM),
+    "tech_arch": (UserRole.TECH_LEAD, UserRole.DEVELOPER),
+    "development": (UserRole.DEVELOPER, UserRole.TECH_LEAD),
+    "code_review": (UserRole.DEVELOPER, UserRole.TECH_LEAD),
+    "testing": (UserRole.QA, UserRole.DEVELOPER),
+    "uat": (UserRole.PM, UserRole.MANAGER),
+    "prod": (UserRole.DEVELOPER, UserRole.TECH_LEAD),
+}
+
+# Backwards-compatible single-role view. Consumers that only need the
+# canonical role (capacity_provider, estimation helpers) read this; the
+# auto-assigner reads ``PHASE_ROLE_CHAIN`` directly.
 PHASE_ROLE_MAP: dict[str, UserRole] = {
-    "bud": UserRole.PM,
-    "design": UserRole.DESIGNER,
-    "tech_arch": UserRole.TECH_LEAD,
-    "development": UserRole.DEVELOPER,
-    "code_review": UserRole.DEVELOPER,
-    "testing": UserRole.QA,
-    "uat": UserRole.PM,
-    "prod": UserRole.DEVELOPER,
+    phase: chain[0] for phase, chain in PHASE_ROLE_CHAIN.items()
 }
 
 
 def get_role_for_phase(phase: str) -> UserRole | None:
-    """Return the role that owns this phase, or None for unknown phases.
+    """Return the canonical role that owns this phase, or None for unknown phases.
 
     Returning None (rather than raising) lets callers in the estimation
     pipeline degrade gracefully — an unknown phase produces capacity 1.0
