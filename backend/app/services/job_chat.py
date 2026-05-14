@@ -27,7 +27,7 @@ import structlog
 
 from app.agents.skill_mapping import SECTION_SKILL_MAP
 from app.database import AsyncSessionLocal
-from app.schemas.bud import SECTION_LABELS
+from app.schemas.bud_constants import SECTION_LABELS
 from app.schemas.jobs import ChatJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
 from app.services.chat_persistence import persist_chat_message, persist_chat_update
@@ -42,9 +42,16 @@ from app.services.job_utils import (
     save_image_temp,
     section_locks,
 )
+from app.services.json_parser import parse_chat_response
+from app.services.section_session import bump_chat_session_count, resolve_chat_session
 from app.services.skill_loader import load_skill, load_skill_for_org
 
 logger = structlog.get_logger(__name__)
+
+# Error code returned in the job result when the agent's output can't be
+# parsed into a structured reply. The frontend auto-retries once on this
+# code with the same session id, then shows a manual-retry banner.
+CHAT_REPLY_UNPARSEABLE = "chat_reply_unparseable"
 
 # A small-edit chat needs at most: fetch prior wireframe, optionally fetch
 # design system, write back. Four turns is the comfortable ceiling — the
@@ -78,19 +85,6 @@ def _should_resume_session(history: list[dict[str, str]] | None) -> bool:
         return False
     total = sum(len(m.get("message") or "") + _RESUME_HISTORY_MSG_OVERHEAD for m in history)
     return total <= RESUME_HISTORY_BYTE_CAP
-
-
-def _is_subsequent_iteration(history: list[dict[str, str]] | None) -> bool:
-    """Return True if a prior AI reply exists for this chat thread.
-
-    First message in a thread → no prior AI message → ``False`` →
-    caller should use ``--session-id`` to claim the namespace. Once an
-    AI reply lands, subsequent calls use ``--resume`` to load the same
-    CLI session from disk and warm the Anthropic prompt cache.
-    """
-    if not history:
-        return False
-    return any(m.get("role") == "ai" for m in history)
 
 
 async def handle_chat_job(job_id: str, raw_payload: dict[str, Any]) -> None:
@@ -228,16 +222,21 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     iteration_model = skill_iteration_model if is_design_iteration else skill_model
     iteration_turns = DESIGN_ITERATION_MAX_TURNS if is_design_iteration else skill_turns
 
-    # CLI session wiring for prompt-cache warmth across iterations.
-    # First message in a thread → no prior AI reply → claim the namespace
-    # with ``--session-id <uuid>``. Subsequent messages → ``--resume <uuid>``
-    # so the CLI loads the prior session file and Anthropic returns a cache
-    # hit on the stable prefix.
-    cli_session_id: str | None = None
-    is_resume = False
-    if is_design_iteration and payload.session_id and _should_resume_session(history):
-        cli_session_id = payload.session_id
-        is_resume = _is_subsequent_iteration(history)
+    # CLI session wiring is now section-agnostic. The originating agent
+    # claimed a session id when it authored the section; chat resumes
+    # that id every turn until the per-section cap rotates it. History
+    # byte size is still inspected as a safety net so a runaway thread
+    # can't churn the Anthropic prompt cache.
+    _section_design_id = uuid_mod.UUID(payload.design_id) if payload.design_id else None
+    resolved = await resolve_chat_session(
+        org_id=uuid_mod.UUID(_chat_org_id),
+        bud_id=uuid_mod.UUID(payload.bud_id),
+        section=payload.section,
+        design_id=_section_design_id,
+    )
+    cli_session_id: str | None = str(resolved.session_id)
+    is_resume = resolved.is_resume and _should_resume_session(history)
+    rotated_session = resolved.rotated
 
     def _build_config(*, session_id: str | None, resume: bool) -> ClaudeRunnerConfig:
         return ClaudeRunnerConfig(
@@ -308,32 +307,47 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
 
     update_job(job_id, status_message="Processing response...", progress_pct=80)
 
+    # Tag persisted chat rows with the resolved session id so chat
+    # history filtered by ``session_id`` keeps grouping correctly across
+    # rotations. The job result echoes ``session_id`` back so the UI
+    # can update its tracked thread id transparently.
+    persist_session_id = resolved.session_id
+
     response = _parse_chat_response(result.output)
     if response is None:
-        reply_text = result.output[:3000]
-        await persist_chat_message(
-            payload.bud_id,
-            payload.org_id,
-            payload.section,
-            "ai",
-            reply_text,
-            payload.design_id,
-            session_id=payload.session_id,
+        # The agent emitted something we can't safely surface as a reply
+        # (e.g. plain prose, structured log JSON that got into stdout, or
+        # a half-parsed object). Log the full output server-side at WARN
+        # so ops can inspect, fail the job with a retryable error code,
+        # and let the frontend auto-retry once with the same session id.
+        # Critically: we do NOT persist ``result.output`` as the AI reply.
+        logger.warning(
+            "chat_reply_unparseable",
+            bud_id=payload.bud_id,
+            section=payload.section,
+            session_id=str(persist_session_id),
+            output_length=len(result.output or ""),
+            output_preview=result.output[:500] if result.output else "",
         )
         await log_agent_activity(
             None,
             org_id=uuid_mod.UUID(_chat_org_id),
-            event_type="skill_completed",
+            event_type="skill_failed",
             skill_slug=skill_name,
-            message=f"Chat '{skill_name}' completed for {payload.section}",
+            message="Reply was malformed — retrying.",
             bud_id=uuid_mod.UUID(payload.bud_id),
         )
         update_job(
             job_id,
-            state=JobState.COMPLETED,
-            result={"reply": reply_text, "updated_content": None},
-            progress_pct=100,
-            status_message="Complete",
+            state=JobState.FAILED,
+            result={
+                "session_id": str(persist_session_id),
+                "rotated_session": rotated_session,
+                "retryable": True,
+            },
+            error="Reply was malformed.",
+            error_code=CHAT_REPLY_UNPARSEABLE,
+            status_message="Retrying...",
         )
         return
 
@@ -354,7 +368,7 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         "ai",
         reply_text,
         payload.design_id,
-        session_id=payload.session_id,
+        session_id=str(persist_session_id),
     )
 
     await log_agent_activity(
@@ -366,10 +380,22 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         bud_id=uuid_mod.UUID(payload.bud_id),
     )
 
+    await bump_chat_session_count(
+        org_id=uuid_mod.UUID(_chat_org_id),
+        bud_id=uuid_mod.UUID(payload.bud_id),
+        section=payload.section,
+        design_id=_section_design_id,
+    )
+
     update_job(
         job_id,
         state=JobState.COMPLETED,
-        result={"reply": reply_text, "updated_content": updated},
+        result={
+            "reply": reply_text,
+            "updated_content": updated,
+            "session_id": str(persist_session_id),
+            "rotated_session": rotated_session,
+        },
         status_message="Complete",
         progress_pct=100,
     )
@@ -390,7 +416,5 @@ def _parse_chat_response(output: str) -> dict[str, Any] | None:
     Uses Pydantic validation to ensure response only contains
     ``reply`` and ``updated_content`` — rejects unexpected fields.
     """
-    from app.services.json_parser import parse_chat_response
-
     validated = parse_chat_response(output)
     return validated.model_dump() if validated else None

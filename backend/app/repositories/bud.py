@@ -403,7 +403,15 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         job_id: str | None = None,
         notes: str | None = None,
     ) -> BUDDesign:
-        """Create or update a design for a (bud, repo) pair."""
+        """Create or update a design for a (bud, repo) pair.
+
+        The select takes a row-level lock via ``with_for_update`` so two
+        concurrent ``upsert`` calls against the same ``(bud_id, repo_id)``
+        serialize at the row level — the in-process ``asyncio.Lock`` in
+        ``job_utils.section_locks`` only covers the same Python process,
+        which is not enough once multiple workers run. The lock is
+        released when the surrounding transaction commits.
+        """
         stmt = self._scoped(
             select(BUDDesign)
             .where(BUDDesign.bud_id == bud_id)
@@ -412,6 +420,7 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
                 if repo_id is not None
                 else BUDDesign.repo_id.is_(None)
             )
+            .with_for_update()
         )
         result = await self._db.execute(stmt)
         existing = result.scalar_one_or_none()

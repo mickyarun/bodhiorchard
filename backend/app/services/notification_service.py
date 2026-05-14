@@ -26,7 +26,7 @@ from typing import Any
 
 import structlog
 
-from app.schemas.bud import SECTION_TO_TAB
+from app.schemas.bud_constants import SECTION_TO_TAB
 from app.schemas.jobs import JobState, JobStatusRead
 
 logger = structlog.get_logger(__name__)

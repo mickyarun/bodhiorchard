@@ -105,6 +105,27 @@ export function isSectionEditable(
   return status === required
 }
 
+// Phase that owns each section for chat. Mirrors backend
+// SECTION_REQUIRED_STAGES in app/schemas/bud_constants.py. Sections
+// absent from this map are not chattable at any stage (code_review,
+// test_plan_md). Slightly tighter than SECTION_EDIT_STATUS because
+// code_review is read-only by design.
+export const SECTION_CHAT_STAGES: Partial<Record<BUDSectionKey, BUDStatus>> = {
+  requirements_md: 'bud',
+  tech_spec_md: 'tech_arch',
+  design: 'design',
+  testing: 'testing',
+}
+
+export function isSectionChatable(
+  section: BUDSectionKey,
+  status: BUDStatus | undefined | null,
+): boolean {
+  const required = SECTION_CHAT_STAGES[section]
+  if (!required) return false
+  return status === required
+}
+
 // Human-readable labels for UserRoleName — single source of truth so
 // banners, member dropdowns, and invite views all render the same
 // string. Keep keys in sync with UserRoleName above.

@@ -28,6 +28,11 @@ const props = defineProps<{
   isClosed: boolean
   agentLocked: boolean
   chatOpen: boolean
+  // ``false`` when the active section isn't chattable in the current
+  // BUD stage (mirrors the backend 409 gate). Locks the AI button so
+  // the user can't even open the panel for a section that would be
+  // rejected on first send.
+  chatable: boolean
 }>()
 
 const emit = defineEmits<{
@@ -178,7 +183,10 @@ function saveTitle(): void {
           :color="chatOpen ? 'primary' : 'default'"
           size="x-small"
           class="ai-chat-btn"
-          :disabled="agentLocked"
+          :disabled="agentLocked || !chatable"
+          :title="!chatable && !agentLocked
+            ? 'Chat is not available for this section in the current stage.'
+            : ''"
           @click="emit('update:chatOpen', !chatOpen)"
         >
           <v-icon start size="14">mdi-creation-outline</v-icon>

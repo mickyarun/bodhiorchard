@@ -38,10 +38,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 async def run_analysis(output_file: str | None = None) -> None:
     """Run all diagnostic checks and print/write results."""
+    from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
     from sqlalchemy import select
 
     from app.database import AsyncSessionLocal
-    from app.models.knowledge_item import KnowledgeItem, KnowledgeRepoLink
     from app.models.skill_profile import SkillProfile
     from app.models.tracked_repository import TrackedRepository
     from app.models.user import User

@@ -16,16 +16,17 @@ left over from the dropped cross-repo-merge phase (see memory note
 migration; this revision is scoped to the new column only.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "2c0717fc1c90"
-down_revision: Union[str, None] = "de27cc187d79"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "de27cc187d79"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

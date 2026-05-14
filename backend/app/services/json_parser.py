@@ -32,19 +32,62 @@ class ChatAIResponse(BaseModel):
     updated_content: str | None = None
 
 
+def _extract_first_balanced_object(text: str) -> str | None:
+    """Return the substring of the first balanced top-level ``{...}`` object.
+
+    Walks the string tracking brace depth and string-literal state (with
+    escape handling) so a quoted ``}`` inside a string literal does not
+    end the object. Returns the substring spanning the first ``{`` and
+    its matching ``}``. Returns ``None`` if no balanced object exists.
+
+    This replaces the previous greedy ``find('{') ... rfind('}')`` slice,
+    which happily glued a real reply onto a trailing log-line object —
+    the bug that put ``{"event": "claude_run_complete", ...}`` into a
+    user-facing chat reply.
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
 def parse_json_response(output: str) -> dict[str, Any] | None:
     """Parse an AI response that should contain a JSON object.
 
-    Tries three strategies in order:
-    1. Direct JSON parse of the trimmed output.
-    2. Extract from a ```json markdown code fence.
-    3. Extract the first top-level ``{...}`` block.
+    Tries three strategies in order, stopping at the first that yields a
+    valid ``dict``:
 
-    Args:
-        output: Raw text output from the AI model.
+    1. Direct ``json.loads`` of the trimmed output.
+    2. Extract from a ```` ```json ... ``` ```` markdown code fence.
+    3. First **balanced** top-level ``{...}`` object via a single-pass
+       brace-depth scanner (see :func:`_extract_first_balanced_object`).
 
-    Returns:
-        Parsed dict if JSON was found, else None.
+    Returns ``None`` when no strategy succeeds. A caller that observes
+    ``None`` must surface a retryable error rather than dumping the raw
+    output as a user-facing reply.
     """
     text = output.strip()
 
@@ -67,12 +110,11 @@ def parse_json_response(output: str) -> dict[str, Any] | None:
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # 3. First {...} block
-    brace_start = text.find("{")
-    brace_end = text.rfind("}")
-    if brace_start != -1 and brace_end > brace_start:
+    # 3. First balanced ``{...}`` block — brace-balanced, string-literal aware.
+    candidate = _extract_first_balanced_object(text)
+    if candidate is not None:
         try:
-            parsed = json.loads(text[brace_start : brace_end + 1])
+            parsed = json.loads(candidate)
             if isinstance(parsed, dict):
                 return cast(dict[str, Any], parsed)
         except json.JSONDecodeError:

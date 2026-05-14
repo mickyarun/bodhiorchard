@@ -34,7 +34,7 @@ from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_feature_link import BUDFeatureLinkRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
-from app.schemas.bud import (
+from app.schemas.bud_linked_features import (
     LinkedFeatureRead,
     LinkFeaturesRequest,
     LinkFeaturesResponse,

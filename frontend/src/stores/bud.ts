@@ -136,6 +136,13 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  /**
+   * POST a chat request. Returns the job descriptor on 202, or a
+   * ``{ stageGateError }`` envelope on 409 so the caller can surface
+   * the stage-mismatch banner without optimistically pushing the
+   * user message into the visible chat. Returns ``null`` for any
+   * other failure (network, 5xx).
+   */
   async function chatBUD(
     id: string,
     message: string,
@@ -143,7 +150,7 @@ export const useBUDStore = defineStore('bud', () => {
     designId?: string,
     sessionId?: string,
     images?: string[],
-  ): Promise<ChatJobCreatedResponse | null> {
+  ): Promise<ChatJobCreatedResponse | { stageGateError: string } | null> {
     error.value = ''
     try {
       const body: Record<string, unknown> = { message, section }
@@ -152,7 +159,12 @@ export const useBUDStore = defineStore('bud', () => {
       if (images?.length) body.images = images
       const { data } = await api.post<ChatJobCreatedResponse>(`/v1/buds/${id}/chat`, body)
       return data
-    } catch {
+    } catch (e) {
+      const err = e as { response?: { status?: number, data?: { detail?: string } } }
+      if (err.response?.status === 409) {
+        const detail = err.response?.data?.detail ?? 'Section is locked for this BUD stage.'
+        return { stageGateError: detail }
+      }
       return null
     }
   }
@@ -223,12 +235,13 @@ export const useBUDStore = defineStore('bud', () => {
     section: string,
     designId?: string,
     sessionId?: string,
+    signal?: AbortSignal,
   ): Promise<ChatMessageRead[]> {
     try {
       const params: Record<string, string> = { section }
       if (designId) params.design_id = designId
       if (sessionId) params.session_id = sessionId
-      const { data } = await api.get(`/v1/buds/${budId}/chat-history`, { params })
+      const { data } = await api.get(`/v1/buds/${budId}/chat-history`, { params, signal })
       return data
     } catch {
       return []

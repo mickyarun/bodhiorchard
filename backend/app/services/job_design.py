@@ -31,7 +31,7 @@ from app.repositories.bud import BUDDesignRepository
 from app.schemas.jobs import DesignAgentJobPayload, DesignExtractJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
 from app.services.chat_prompts import build_design_prompt
-from app.services.job_chat import _parse_chat_response
+from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
 from app.services.job_queue import update_job
 from app.services.job_utils import (
     build_mcp_config,
@@ -39,6 +39,8 @@ from app.services.job_utils import (
     record_agent_timeline,
     resolve_repo_path,
 )
+from app.services.json_parser import parse_chat_response
+from app.services.section_session import mint_session_id, record_originating_session
 from app.services.skill_loader import load_skill, load_skill_for_org
 
 logger = structlog.get_logger(__name__)
@@ -100,8 +102,6 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         progress_pct=20,
     )
 
-    from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
-
     # Read config from the per-org designer skill row so admin edits to
     # model / max_turns in Settings → Agent Prompts take effect without a
     # redeploy. Fall back to the file default if the DB row is missing.
@@ -135,6 +135,10 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         bud_title=payload.title,
     )
 
+    # Mint a CLI session id so subsequent design-tab chats on this exact
+    # (bud, design) row can ``--resume`` and keep the prompt cache warm.
+    originating_session_id = mint_session_id()
+
     result = await run_claude_code(
         prompt=prompt,
         working_dir=repo_path,
@@ -144,6 +148,8 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
             mcp=mcp_config,
             model=(designer_skill.model or None) if designer_skill else None,
             effort=(designer_skill.effort or None) if designer_skill else None,
+            cli_session_id=str(originating_session_id),
+            is_resume=False,
         ),
         progress_callback=make_progress_callback(
             job_id,
@@ -186,9 +192,9 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
     wireframe_saved = await _design_was_saved(design_id, payload.org_id) if design_id else False
 
     reply = "Design wireframe generated."
-    response = _parse_chat_response(result.output)
-    if response and response.get("reply"):
-        reply = response["reply"]
+    response = parse_chat_response(result.output)
+    if response and response.reply:
+        reply = response.reply
 
     if not wireframe_saved and design_id:
         await _update_design_status(design_id, payload.org_id, "failed")
@@ -216,6 +222,17 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         bud_number=payload.bud_number,
         bud_title=payload.title,
     )
+
+    # Persist the originating-agent CLI session id (per-design row) so
+    # design-tab chats on this wireframe can ``--resume`` against it.
+    if wireframe_saved and design_id:
+        await record_originating_session(
+            org_id=_org_uuid,
+            bud_id=uuid_mod.UUID(payload.bud_id),
+            section="design",
+            session_id=originating_session_id,
+            design_id=uuid_mod.UUID(design_id),
+        )
 
     # Re-estimate with design complexity context
     if wireframe_saved:

@@ -31,7 +31,7 @@ import pytest
 from app.services import chat_prompts
 from app.services.claude_runner import _coerce_token_count, _extract_cache_usage
 from app.services.design_system_extractor import _extraction_instructions
-from app.services.job_chat import _is_subsequent_iteration, _should_resume_session
+from app.services.job_chat import _should_resume_session
 from app.services.platforms import PlatformKind
 
 
@@ -101,20 +101,12 @@ def test_should_resume_session_blocks_large_byte_count() -> None:
     assert _should_resume_session(history) is False
 
 
-def test_is_subsequent_iteration_detects_prior_ai_reply() -> None:
-    """First message → no AI reply yet → False. After AI replies → True."""
-    assert _is_subsequent_iteration([]) is False
-    assert _is_subsequent_iteration([{"role": "user", "message": "hi"}]) is False
-    assert (
-        _is_subsequent_iteration(
-            [
-                {"role": "user", "message": "hi"},
-                {"role": "ai", "message": "done"},
-                {"role": "user", "message": "tweak"},
-            ]
-        )
-        is True
-    )
+# ``_is_subsequent_iteration`` was removed when chat session resume moved
+# from history-shape inference to the ``bud_section_sessions`` table —
+# the worker now consults ``BUDSectionSessionRepository`` to decide
+# ``--session-id`` vs ``--resume``. See ``test_section_session.py`` for
+# the new rules. Long-history short-circuit lives on as
+# ``_should_resume_session`` above.
 
 
 def _fake_platform(kind: PlatformKind) -> SimpleNamespace:

@@ -14,16 +14,17 @@ note ``project_phase5_dropped``). That cleanup belongs in its own
 migration; this revision is scoped to the new column only.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "de27cc187d79"
-down_revision: Union[str, None] = "db71468736e3"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "db71468736e3"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

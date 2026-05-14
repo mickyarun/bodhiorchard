@@ -25,7 +25,7 @@ from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDesignStatus
 from app.models.user import User
 from app.repositories.bud import BUDDesignRepository, BUDRepository
-from app.schemas.bud import BUDDesignRead, DesignGenerateRequest, DesignHtmlUpdate
+from app.schemas.bud_design import BUDDesignRead, DesignGenerateRequest, DesignHtmlUpdate
 from app.schemas.jobs import DesignAgentJobPayload
 from app.services.bud_edit_policy import assert_design_editable
 from app.services.job_queue import JOB_DESIGN_AGENT, create_job

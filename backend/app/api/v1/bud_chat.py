@@ -25,7 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.user import User
 from app.repositories.bud import BUDChatMessageRepository, BUDDesignRepository, BUDRepository
-from app.schemas.bud import SECTION_PATTERN, ChatMessageRead
+from app.repositories.bud_section_session import BUDSectionSessionRepository
+from app.schemas.bud import ChatMessageRead
+from app.schemas.bud_constants import SECTION_PATTERN, SECTION_REQUIRED_STAGES
 from app.schemas.jobs import ChatJobCreatedResponse, ChatJobPayload
 from app.services.job_queue import JOB_BUD_CHAT, create_job
 
@@ -47,8 +49,21 @@ async def get_chat_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    """Load persisted chat messages for a BUD section (and optional design/session)."""
+    """Load persisted chat messages for a BUD section (and optional design/session).
+
+    When ``session_id`` is omitted, resolve the *active* session for the
+    ``(bud, section[, design])`` thread from ``bud_section_sessions`` so the
+    client sees the originating agent's history on first open. Without
+    this, ``list_messages`` would filter ``session_id IS NULL`` and return
+    nothing — every message now carries a real session id since the
+    originating agent claims one before the first chat turn.
+    """
     chat_repo = BUDChatMessageRepository(db, org_id=current_user.org_id)
+    if session_id is None:
+        section_session_repo = BUDSectionSessionRepository(db, org_id=current_user.org_id)
+        active = await section_session_repo.get_active(bud_id, section, design_id)
+        if active is not None:
+            session_id = active.session_id
     messages = await chat_repo.list_messages(bud_id, section, design_id, session_id)
     return [
         {
@@ -95,26 +110,56 @@ async def chat_bud(
 ) -> ChatJobCreatedResponse:
     """Submit a BUD chat request for async AI processing.
 
-    For the ``design`` section, generates ``session_id`` server-side when
-    the client omits one so the worker can pass it to ``--session-id`` /
-    ``--resume`` and keep the Anthropic prompt cache warm across
-    iterations of the same chat thread. The id is returned to the
-    client so subsequent messages carry it forward.
+    The CLI ``session_id`` is owned by the backend now: the worker looks
+    up (or rotates) the per-section row in ``bud_section_sessions`` and
+    resumes the originating agent's thread. The client-provided
+    ``body.session_id`` is accepted for backwards compatibility but is
+    no longer authoritative — the worker echoes back the resolved id
+    via the job result so the UI can keep its display continuity.
 
-    Other sections don't benefit from session affinity today (their
-    workers don't pass ``--resume``), so we honour the client-provided
-    id when present but don't manufacture one — avoiding a UUID churn
-    that no consumer uses.
+    Stage gate (409): if the BUD's current ``status`` is not in
+    :data:`SECTION_REQUIRED_STAGES` for the requested section, the
+    request is rejected with no DB write and no job enqueue. This
+    prevents wireframe / spec edits from landing while the BUD is in
+    the wrong lifecycle phase.
     """
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
 
-    if body.section == "design":
-        session_id: uuid.UUID | None = body.session_id or uuid.uuid4()
-    else:
-        session_id = body.session_id
+    allowed_stages = SECTION_REQUIRED_STAGES.get(body.section)
+    if allowed_stages is None:
+        # Section is locked at every stage (e.g. ``test_plan_md``,
+        # ``code_review``). Don't recommend a stage to move to — there
+        # isn't one; chat is simply not available for this section.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Chat is not available for the '{body.section}' section.",
+        )
+    if bud.status not in allowed_stages:
+        # Use the first allowed stage as the recommended target —
+        # frontend renders this verbatim as the banner copy.
+        target_stage = next(iter(sorted(allowed_stages)))
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Move BUD to '{target_stage}' before chatting in this section. "
+                f"BUD is currently in '{bud.status}'."
+            ),
+        )
+
+    # Backend owns session_id resolution. Look up the originating-agent
+    # session row for this (bud, section[, design_id]); the worker will
+    # rotate / mint as needed and the response carries the *resolved*
+    # id back so the UI can keep its display continuity. Tagging the
+    # user-message row with the same id keeps chat history filterable
+    # by session_id across rotations.
+    session_repo = BUDSectionSessionRepository(db, org_id=current_user.org_id)
+    section_session = await session_repo.get_active(bud_id, body.section, design_id=body.design_id)
+    session_id: uuid.UUID | None = (
+        section_session.session_id if section_session is not None else body.session_id
+    )
 
     # Resolve repo scope for the design section so the worker can pass
     # ``repo_id`` to ``get_design_system`` / ``write_bud_design`` MCP calls.
