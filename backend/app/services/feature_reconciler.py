@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import math
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -93,6 +94,7 @@ async def reconcile_features_for_repo(
     synthesised: list[FeatureWrite],
     jaccard_threshold: float = JACCARD_THRESHOLD,
     cosine_threshold: float = COSINE_THRESHOLD,
+    candidate_filter: Callable[[ReconcilerCandidate], bool] | None = None,
 ) -> ReconcileResult:
     """Apply ``synthesised`` to ``repo_id`` via incremental CRUD.
 
@@ -107,11 +109,24 @@ async def reconcile_features_for_repo(
        PRIMARY junction. If not: ``insert`` + create PRIMARY junction.
     4. Mark every active row that nothing matched as inactive.
 
+    ``candidate_filter`` (optional) narrows BOTH the matching pool and
+    the inactivation pool to a subset of the loaded candidates. The
+    full-scan caller leaves it ``None`` (default behaviour preserved);
+    the PR-merge narrow-synthesis caller passes a predicate that admits
+    only features whose ``cluster_signature`` is in the affected
+    signatures set — so features outside the scope are immune from
+    soft-delete even if they don't appear in ``synthesised``.
+
     Returns counts so the caller can surface "+5 added, 2 revived,
     1 removed" telemetry.
     """
     reads = FeatureReadRepository(db, org_id=org_id)
-    candidates = await reads.bulk_load_for_reconcile(repo_id, include_inactive=True)
+    all_candidates = await reads.bulk_load_for_reconcile(repo_id, include_inactive=True)
+    candidates = (
+        [c for c in all_candidates if candidate_filter(c)]
+        if candidate_filter is not None
+        else all_candidates
+    )
     by_signature: dict[str, ReconcilerCandidate] = {c.cluster_signature: c for c in candidates}
     matched_ids: set[uuid.UUID] = set()
     feat_repo = FeatureRepository(db, org_id=org_id)

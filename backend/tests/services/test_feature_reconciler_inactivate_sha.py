@@ -111,6 +111,50 @@ async def test_revive_clears_deactivated_at_sha() -> None:
     assert values["last_seen_sha"] == "newhead"
 
 
+class _FakeFeatureRepo:
+    """Captures ``mark_inactive`` invocations from the reconciler."""
+
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def mark_inactive(
+        self, ids: list[uuid.UUID], *, head_sha: str | None = None
+    ) -> int:
+        self.calls.append({"ids": list(ids), "head_sha": head_sha})
+        return len(ids)
+
+
+class _FakeReads:
+    """Returns a fixed candidate list from ``bulk_load_for_reconcile``."""
+
+    def __init__(self, candidates: list[feature_reconciler.ReconcilerCandidate]) -> None:
+        self._candidates = candidates
+
+    async def bulk_load_for_reconcile(
+        self, _repo_id: uuid.UUID, *, include_inactive: bool = True
+    ) -> list[feature_reconciler.ReconcilerCandidate]:
+        return list(self._candidates)
+
+
+class _NoopSession:
+    async def execute(self, *_a: Any, **_kw: Any) -> Any:
+        return None
+
+
+def _make_candidate(
+    *, signature: str, is_active: bool = True
+) -> feature_reconciler.ReconcilerCandidate:
+    return feature_reconciler.ReconcilerCandidate(
+        feature_id=uuid.uuid4(),
+        feature_title=f"feat-{signature}",
+        cluster_signature=signature,
+        code_locations={"frontend": [f"{signature}.ts"]},
+        embedding=None,
+        is_active=is_active,
+        tags=[],
+    )
+
+
 async def test_reconciler_forwards_head_sha_to_mark_inactive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -118,44 +162,13 @@ async def test_reconciler_forwards_head_sha_to_mark_inactive(
     candidate and assert the resulting ``mark_inactive`` call carries
     ``head_sha`` from the parent invocation.
     """
-    captured: dict[str, Any] = {}
-
-    class _FakeFeatureRepo:
-        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-            pass
-
-        async def mark_inactive(
-            self, ids: list[uuid.UUID], *, head_sha: str | None = None
-        ) -> int:
-            captured["ids"] = list(ids)
-            captured["head_sha"] = head_sha
-            return len(ids)
-
-    class _FakeReads:
-        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-            pass
-
-        async def bulk_load_for_reconcile(
-            self, _repo_id: uuid.UUID, *, include_inactive: bool = True
-        ) -> list[Any]:
-            return [
-                feature_reconciler.ReconcilerCandidate(
-                    feature_id=uuid.uuid4(),
-                    feature_title="orphan",
-                    cluster_signature="sig-orphan",
-                    code_locations={"frontend": ["a.ts"]},
-                    embedding=None,
-                    is_active=True,
-                    tags=[],
-                )
-            ]
-
-    monkeypatch.setattr(feature_reconciler, "FeatureRepository", _FakeFeatureRepo)
-    monkeypatch.setattr(feature_reconciler, "FeatureReadRepository", _FakeReads)
-
-    class _NoopSession:
-        async def execute(self, *_a: Any, **_kw: Any) -> Any:
-            return None
+    fake_repo = _FakeFeatureRepo()
+    monkeypatch.setattr(feature_reconciler, "FeatureRepository", lambda *a, **k: fake_repo)
+    monkeypatch.setattr(
+        feature_reconciler,
+        "FeatureReadRepository",
+        lambda *a, **k: _FakeReads([_make_candidate(signature="sig-orphan")]),
+    )
 
     result = await feature_reconciler.reconcile_features_for_repo(
         db=_NoopSession(),  # type: ignore[arg-type]
@@ -166,4 +179,70 @@ async def test_reconciler_forwards_head_sha_to_mark_inactive(
     )
 
     assert result.inactivated == 1
-    assert captured["head_sha"] == "HEADSHA1"
+    assert len(fake_repo.calls) == 1
+    assert fake_repo.calls[0]["head_sha"] == "HEADSHA1"
+
+
+async def test_candidate_filter_keeps_out_of_scope_features_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The PR-merge narrow path passes a filter scoping the reconcile
+    pool to features whose signature is in the affected set. Features
+    outside the scope must NOT be inactivated even though they have no
+    matching ``FeatureWrite`` in the synthesis batch.
+    """
+    in_scope_orphan = _make_candidate(signature="sig-in-scope")
+    out_of_scope = _make_candidate(signature="sig-out-of-scope")
+
+    fake_repo = _FakeFeatureRepo()
+    monkeypatch.setattr(feature_reconciler, "FeatureRepository", lambda *a, **k: fake_repo)
+    monkeypatch.setattr(
+        feature_reconciler,
+        "FeatureReadRepository",
+        lambda *a, **k: _FakeReads([in_scope_orphan, out_of_scope]),
+    )
+
+    affected = {"sig-in-scope"}
+    result = await feature_reconciler.reconcile_features_for_repo(
+        db=_NoopSession(),  # type: ignore[arg-type]
+        org_id=uuid.uuid4(),
+        repo_id=uuid.uuid4(),
+        head_sha="HEAD-NARROW",
+        synthesised=[],
+        candidate_filter=lambda c: c.cluster_signature in affected,
+    )
+
+    assert result.inactivated == 1
+    # Exactly one mark_inactive call, scoped to the in-scope row only.
+    assert len(fake_repo.calls) == 1
+    assert fake_repo.calls[0]["ids"] == [in_scope_orphan.feature_id]
+    assert fake_repo.calls[0]["head_sha"] == "HEAD-NARROW"
+
+
+async def test_candidate_filter_none_preserves_default_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No filter → both unmatched active candidates inactivate, matching
+    today's full-scan reconciler contract.
+    """
+    orphan_a = _make_candidate(signature="sig-a")
+    orphan_b = _make_candidate(signature="sig-b")
+
+    fake_repo = _FakeFeatureRepo()
+    monkeypatch.setattr(feature_reconciler, "FeatureRepository", lambda *a, **k: fake_repo)
+    monkeypatch.setattr(
+        feature_reconciler,
+        "FeatureReadRepository",
+        lambda *a, **k: _FakeReads([orphan_a, orphan_b]),
+    )
+
+    result = await feature_reconciler.reconcile_features_for_repo(
+        db=_NoopSession(),  # type: ignore[arg-type]
+        org_id=uuid.uuid4(),
+        repo_id=uuid.uuid4(),
+        head_sha="HEAD-FULL",
+        synthesised=[],
+    )
+
+    assert result.inactivated == 2
+    assert sorted(fake_repo.calls[0]["ids"]) == sorted([orphan_a.feature_id, orphan_b.feature_id])
