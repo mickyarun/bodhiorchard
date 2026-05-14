@@ -39,6 +39,7 @@
             :is-closed="isClosed"
             :agent-locked="agentLocked"
             :chat-open="chatOpen"
+            :chatable="currentSectionChatable"
             @back="router.push('/buds')"
             @update:chat-open="chatOpen = $event"
             @change-assignee="handleAssigneeChange"
@@ -175,8 +176,13 @@
                 />
               </v-tabs-window-item>
 
-              <!-- Design -->
-              <v-tabs-window-item value="design">
+              <!-- Design — eager so the panel's ``designAvailable``
+                   watcher subscribes on initial render. The watcher
+                   self-handles late-mount too (``immediate: true``),
+                   but eager mounting avoids a one-tab-switch delay on
+                   the auto-trigger when the user is on a non-Design
+                   tab and flips status straight to Design. -->
+              <v-tabs-window-item value="design" eager>
                 <BUDDesignPanel
                   ref="designPanelRef"
                   :bud-id="bud.id"
@@ -326,9 +332,12 @@
         :messages="chatMessages"
         :loading="chatLoading"
         :status-message="chatStatusMessage"
+        :stage-gate-message="stageGateMessage"
+        :retry-prompt="retryPrompt"
         @close="chatOpen = false"
         @send="handleChatSend"
         @new-session="startNewSession"
+        @retry="manualRetry"
       />
     </transition>
   </div>
@@ -355,6 +364,7 @@ import {
   VALID_BUD_TABS,
   TAB_TO_SECTION,
   isSectionEditable,
+  isSectionChatable,
 } from '@/types'
 import type { BUDSectionKey, TimelineEvent } from '@/types'
 import ChatPanel from '@/components/buds/ChatPanel.vue'
@@ -460,6 +470,9 @@ const statusController = useBudStatusTransitions({
   getBud: () => bud.value,
   setActiveTab: (tab) => { activeTab.value = tab },
   getStatusTabMap: () => STATUS_TAB_MAP,
+  // Kept only so manual call sites (none today) still work; the
+  // auto-trigger on status → design is panel-side via a watcher on
+  // budStore.designAvailable. No more parent→child ref-call race.
   triggerDesignGeneration: () => designPanelRef.value?.triggerDesignGeneration(),
   reloadTimeline: () => loadTimeline(),
 })
@@ -522,7 +535,8 @@ const { editing: editingTestPlan, toggle: toggleTestPlanEdit } =
 // resolve fine at call time.
 const {
   chatOpen, chatLoading, chatMessages, chatStatusMessage, currentSessionId,
-  loadChatHistory, startNewSession, handleChatSend, enrichWithAI,
+  stageGateMessage, retryPrompt,
+  loadChatHistory, startNewSession, handleChatSend, manualRetry, enrichWithAI,
 } = useBudChat({
   getBud: () => bud.value,
   getCurrentSection: () => currentSection.value,
@@ -572,6 +586,15 @@ const currentSectionLabel = computed(() =>
 // backend/app/services/bud_edit_policy.py.
 const currentSectionEditable = computed(() =>
   isSectionEditable(currentSection.value, bud.value?.status),
+)
+
+// Chat lock — mirrors the edit lock above, using the chat-specific
+// section/stage map (SECTION_CHAT_STAGES). Backend enforces the same
+// rule via HTTP 409; this predicate keeps the AI button consistent
+// with that contract so the user can't even open chat when the gate
+// would reject the first send.
+const currentSectionChatable = computed(() =>
+  isSectionChatable(currentSection.value, bud.value?.status),
 )
 
 // Section → human label for the "Move the BUD to <X> to edit" tooltip.
@@ -736,9 +759,20 @@ onUnmounted(() => {
   workflowRef.value?.stopAgentActivity()
 })
 
-// Auto-close chat panel when agent starts; reload timeline when agent finishes
+// Close the chat panel when the active section becomes non-chattable
+// (tab switch into a locked section, or a stage transition that locks
+// the currently-open section). Mirrors the AI button's disabled state
+// so the panel doesn't linger in a state where every send would 409.
+watch(currentSectionChatable, (chatable) => {
+  if (!chatable && chatOpen.value) chatOpen.value = false
+})
+
+// Auto-close chat panel when an OUTSIDE agent starts; reload timeline when
+// any agent finishes. Skip the close when the chat itself just kicked off the
+// run (``chatLoading`` is true) — otherwise the user loses the panel they're
+// actively chatting in the moment they send a message.
 watch(agentLocked, (locked, wasLocked) => {
-  if (locked && chatOpen.value) chatOpen.value = false
+  if (locked && !chatLoading.value && chatOpen.value) chatOpen.value = false
   if (!locked && wasLocked) {
     loadTimeline()
     reloadEstimates()

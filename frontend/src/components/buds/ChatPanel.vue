@@ -81,6 +81,27 @@
     </div>
 
     <div class="chat-input">
+      <!-- Stage-gate banner: BUD is in the wrong status for this section.
+           Input is disabled; no optimistic local push. -->
+      <v-alert
+        v-if="stageGateMessage"
+        type="warning"
+        density="compact"
+        variant="tonal"
+        class="mb-2"
+      >
+        {{ stageGateMessage }}
+      </v-alert>
+      <!-- Manual retry banner after a second consecutive parse-unparseable error. -->
+      <v-alert
+        v-else-if="retryPrompt"
+        type="error"
+        density="compact"
+        variant="tonal"
+        class="mb-2"
+      >
+        Reply was malformed. <a href="#" @click.prevent="$emit('retry')">Try again</a>
+      </v-alert>
       <!-- Image previews -->
       <div v-if="pastedImages.length" class="image-previews d-flex ga-2 mb-2">
         <div v-for="(img, idx) in pastedImages" :key="idx" class="image-thumb">
@@ -104,7 +125,7 @@
         max-rows="5"
         :placeholder="pastedImages.length ? 'Describe what you want done with the image...' : 'Ask AI to edit this section...'"
         hide-details
-        :disabled="loading"
+        :disabled="loading || !!stageGateMessage"
         @keydown.enter.exact.prevent="sendChat"
         @paste="handlePaste"
       >
@@ -115,7 +136,7 @@
             variant="text"
             color="primary"
             :loading="loading"
-            :disabled="!input.trim() && !pastedImages.length"
+            :disabled="!input.trim() && !pastedImages.length || !!stageGateMessage"
             @click="sendChat"
           />
         </template>
@@ -139,12 +160,17 @@ const props = defineProps<{
   messages: ChatMessage[]
   loading: boolean
   statusMessage: string
+  /** Non-empty when the section is locked by BUD stage (server 409). */
+  stageGateMessage?: string
+  /** Show the manual retry banner after a second parse failure. */
+  retryPrompt?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
   send: [message: string, images: string[]]
   'new-session': []
+  retry: []
 }>()
 
 const input = ref('')

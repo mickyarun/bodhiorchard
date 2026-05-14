@@ -29,6 +29,7 @@ from sqlalchemy import select
 from app.models.bud import BUDDocument
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.tracked_repository import TrackedRepository
+from app.schemas.bud_constants import BUD_AGENT_SECTIONS
 from app.schemas.jobs import BUDAgentTaskPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
 from app.services.agent_prompts import (
@@ -43,8 +44,10 @@ from app.services.agent_result_handlers import (
     handle_tech_arch_result,
     handle_testing_result,
 )
+from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
 from app.services.job_queue import update_job
-from app.services.job_utils import make_progress_callback, record_agent_timeline
+from app.services.job_utils import build_mcp_config, make_progress_callback, record_agent_timeline
+from app.services.section_session import mint_session_id, record_originating_session
 from app.services.skill_loader import Skill
 
 logger = structlog.get_logger(__name__)
@@ -247,13 +250,17 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             # Run Claude
             update_job(job_id, status_message="Running agent...", progress_pct=20)
 
-            from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
-            from app.services.job_utils import build_mcp_config
-
             mcp = build_mcp_config(
                 org_id=str(org_id),
                 tool_names=skill.mcp_tools if skill.mcp_tools else None,
             )
+
+            # Mint a CLI session id for this run when the agent owns a BUD
+            # section that chat will resume against. Sections not in
+            # ``BUD_AGENT_SECTIONS`` (e.g. ad-hoc tasks) get no session id
+            # and behave as before.
+            section_for_session = BUD_AGENT_SECTIONS.get(task.task_type)
+            originating_session_id = mint_session_id() if section_for_session is not None else None
 
             config = ClaudeRunnerConfig(
                 max_turns=max(skill.max_turns, 0),
@@ -261,6 +268,10 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 mcp=mcp,
                 model=skill.model or None,
                 effort=skill.effort or None,
+                cli_session_id=(
+                    str(originating_session_id) if originating_session_id is not None else None
+                ),
+                is_resume=False,
             )
 
             # Code review needs JSON output
@@ -394,6 +405,17 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             task.result_summary = result_summary
             task.error_message = None
             await db.commit()
+
+            # Persist the originating-agent CLI session id so subsequent
+            # user chats on the same section can ``--resume`` against it
+            # and warm the prompt cache.
+            if section_for_session is not None and originating_session_id is not None:
+                await record_originating_session(
+                    org_id=org_id,
+                    bud_id=bud_id,
+                    section=section_for_session,
+                    session_id=originating_session_id,
+                )
 
             logger.info(
                 "bud_agent_phase",

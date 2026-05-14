@@ -12,41 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pydantic schemas for BUD CRUD endpoints."""
+"""Pydantic schemas for BUD CRUD endpoints.
+
+Section + stage constants (``BUD_SECTIONS``, ``SECTION_REQUIRED_STAGES``,
+``BUD_AGENT_SECTIONS``, etc.) live in :mod:`app.schemas.bud_constants`.
+This module hosts only the request/response DTO classes.
+"""
 
 import uuid
 from datetime import datetime
-from typing import Any, NamedTuple
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-
-class BUDSectionInfo(NamedTuple):
-    """Metadata for a single BUD section."""
-
-    tab: str
-    label: str
-    exportable: bool
-
-
-# Canonical section config: DB field → (tab slug, UI label, exportable?)
-# Backend notification service, job handlers, and API validation all derive from this.
-# Frontend has a mirror in frontend/src/types/index.ts → BUD_SECTIONS.
-BUD_SECTIONS: dict[str, BUDSectionInfo] = {
-    "requirements_md": BUDSectionInfo("requirements", "Requirements", True),
-    "tech_spec_md": BUDSectionInfo("tech-spec", "Tech Spec", True),
-    "test_plan_md": BUDSectionInfo("test-plan", "Test Plan", True),
-    "testing": BUDSectionInfo("testing", "Testing", False),
-    "design": BUDSectionInfo("design", "Design", False),
-}
-
-# Derived helpers
-SECTION_TO_TAB: dict[str, str] = {k: v.tab for k, v in BUD_SECTIONS.items()}
-TAB_TO_SECTION: dict[str, str] = {v.tab: k for k, v in BUD_SECTIONS.items()}
-SECTION_LABELS: dict[str, str] = {k: v.label for k, v in BUD_SECTIONS.items()}
-VALID_SECTIONS: set[str] = set(BUD_SECTIONS)
-EXPORTABLE_SECTIONS: tuple[str, ...] = tuple(k for k, v in BUD_SECTIONS.items() if v.exportable)
-SECTION_PATTERN: str = "^(" + "|".join(BUD_SECTIONS) + ")$"
+# Re-export design schemas so legacy imports keep working; new code
+# should import directly from :mod:`app.schemas.bud_design`.
+from app.schemas.bud_design import (  # noqa: F401
+    BUDDesignRead,
+    DesignGenerateRequest,
+    DesignHtmlUpdate,
+)
 
 
 class BUDCreate(BaseModel):
@@ -73,36 +58,6 @@ class BUDUpdate(BaseModel):
     assignee_id: uuid.UUID | None = None
 
     model_config = {"populate_by_name": True}
-
-
-class BUDDesignRead(BaseModel):
-    """Schema for reading a BUD design wireframe."""
-
-    id: uuid.UUID
-    bud_id: uuid.UUID
-    repo_id: uuid.UUID | None = None
-    repo_name: str | None = None
-    design_html: str | None = None
-    notes: str | None = None
-    status: str
-    job_id: str | None = None
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class DesignGenerateRequest(BaseModel):
-    """Schema for requesting design generation for specific repos."""
-
-    repo_ids: list[uuid.UUID] = Field(default_factory=list)
-
-
-class DesignHtmlUpdate(BaseModel):
-    """Schema for manually editing a design's HTML or notes."""
-
-    design_html: str | None = None
-    notes: str | None = None
 
 
 class BUDAgentTaskRead(BaseModel):
@@ -155,21 +110,11 @@ class BUDRead(BaseModel):
     assignee_id: uuid.UUID | None = None
     assignee_name: str | None = None
     active_agent_task: BUDAgentTaskRead | None = None
-    # In-flight phase-worker event (assignment / todo-gen / estimation).
-    # Set when the BUD has an outstanding ``skill_invoked`` event with no
-    # matching terminal row — lets the frontend re-attach the progress
-    # banner after navigating away and back. ``None`` when nothing is
-    # running. Synthetic skills don't have ``BUDAgentTask`` rows, so this
-    # is the only signal the banner has for phase chains on remount.
+    # In-flight phase-worker event (assignment / todo-gen / estimation):
+    # see services/agent_activity_logger.py. ``None`` when nothing is running.
     active_phase_worker: dict[str, str] | None = None
-    # Sticky last-failed-phase banner. Populated from the most recent
-    # ``skill_failed`` row in ``agent_activity_logs`` newer than the
-    # BUD's ``phase_failure_acknowledged_at``. ``None`` once the user
-    # dismisses the banner (POST /buds/{id}/phase-failure/dismiss). This
-    # is the durable channel for restart-recovery messages — the live
-    # in-flight counter clears when the WS event fires, but if the
-    # event was missed (backend restart, dropped socket), the failure
-    # is still surfaced here on next REST fetch.
+    # Sticky last-failed-phase banner sourced from agent_activity_logs newer
+    # than ``phase_failure_acknowledged_at``; cleared via the dismiss endpoint.
     last_phase_failure: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
@@ -248,73 +193,3 @@ class TimelineEventRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
-
-
-class CodeReviewRepoStatus(BaseModel):
-    """Per-repo status row shown on the Code Review tab."""
-
-    repo_id: str
-    repo_name: str
-    pr_number: int | None = None
-    pr_state: str  # "not_raised" | "open" | "merged" | "closed"
-    pr_url: str | None = None
-    comment_count: int
-
-
-class CodeReviewStatusResponse(BaseModel):
-    """Response for GET /buds/{id}/code-review/status."""
-
-    repos: list[CodeReviewRepoStatus]
-
-
-class CodeReviewOverrideRequest(BaseModel):
-    """Body for POST /buds/{id}/code-review/override.
-
-    Forces a BUD from code_review → testing with a user-supplied reason
-    when the normal PR-merge-driven auto-transition doesn't apply (e.g.
-    docs-only changes, manual merges, or exceptional escalations).
-    """
-
-    reason: str = Field(..., min_length=10, max_length=2000)
-
-
-class LinkedFeatureRead(BaseModel):
-    """One feature linked to a BUD, with PRIMARY-repo metadata flattened.
-
-    Shape is camelCase via ``model_config`` aliases so the frontend can
-    consume it without renaming. ``code_locations`` is the JSONB blob
-    from the PRIMARY :class:`FeatureToRepo` row — null when no PRIMARY
-    junction exists (rare; happens for legacy or BUD-authored features).
-    """
-
-    id: uuid.UUID
-    title: str = Field(..., alias="title")
-    link_type: str = Field(..., alias="linkType")
-    source: str
-    repo_id: uuid.UUID | None = Field(default=None, alias="repoId")
-    repo_name: str | None = Field(default=None, alias="repoName")
-    code_locations: dict[str, list[str]] | None = Field(default=None, alias="codeLocations")
-
-    model_config = {"populate_by_name": True}
-
-
-class LinkFeaturesRequest(BaseModel):
-    """Body for POST /buds/{bud_id}/linked-features.
-
-    ``feature_ids`` is treated as a set — duplicates are dropped, and
-    ids that don't belong to the requesting org or are inactive are
-    silently filtered at the repository layer.
-    """
-
-    feature_ids: list[uuid.UUID] = Field(..., min_length=1, alias="featureIds")
-
-    model_config = {"populate_by_name": True}
-
-
-class LinkFeaturesResponse(BaseModel):
-    """Response for POST /buds/{bud_id}/linked-features."""
-
-    inserted_count: int = Field(..., alias="insertedCount")
-    inserted_feature_ids: list[uuid.UUID] = Field(..., alias="insertedFeatureIds")
-
-    model_config = {"populate_by_name": True}

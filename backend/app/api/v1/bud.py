@@ -40,17 +40,19 @@ from app.repositories.bud_agent_task import BUDAgentTaskRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.bug import BugRepository
 from app.schemas.bud import (
-    EXPORTABLE_SECTIONS,
     BUDAgentTaskRead,
     BUDCreate,
     BUDListItem,
     BUDRead,
     BUDUpdate,
+    TimelineEventRead,
+)
+from app.schemas.bud_code_review import (
     CodeReviewOverrideRequest,
     CodeReviewRepoStatus,
     CodeReviewStatusResponse,
-    TimelineEventRead,
 )
+from app.schemas.bud_constants import EXPORTABLE_SECTIONS
 from app.schemas.dev_activity import (
     CommitRepoRead,
     ContributorRead,

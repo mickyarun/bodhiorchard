@@ -75,7 +75,11 @@ async def persist_chat_update(
     bud_uuid = uuid_mod.UUID(bud_id)
     async with AsyncSessionLocal() as db:
         bud_repo = BUDRepository(db, org_id=org_uuid)
-        bud = await bud_repo.get_by_id(bud_uuid)
+        # Row-lock the BUD before mutating section content so a second
+        # concurrent chat on the same section serializes at the DB row
+        # level instead of racing on a read→setattr→commit window. The
+        # lock releases on commit below.
+        bud = await bud_repo.get_by_id_for_update(bud_uuid)
         if bud is None:
             return
 

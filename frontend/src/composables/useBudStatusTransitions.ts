@@ -30,7 +30,7 @@
  * composable doesn't reach into view-only refs directly.
  */
 
-import { nextTick, ref } from 'vue'
+import { ref } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import type { BUDDocument } from '@/types'
 
@@ -180,12 +180,10 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
     const targetTab = hooks.getStatusTabMap()[newStatus]
     if (targetTab) hooks.setActiveTab(targetTab)
 
-    // If entering design phase, open repo picker for generation.
-    if (budStore.designAvailable) {
-      budStore.designAvailable = false
-      await nextTick()
-      await hooks.triggerDesignGeneration()
-    }
+    // The design-phase auto-trigger lives in BUDDesignPanel.vue as a
+    // watcher on ``budStore.designAvailable`` (with ``immediate: true``)
+    // — placing it there removes the parent→child ref-call mount-order
+    // race we hit when the user flips status before the panel mounts.
 
     await hooks.reloadTimeline()
   }

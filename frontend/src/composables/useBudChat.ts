@@ -15,20 +15,21 @@
 /**
  * Chat-panel orchestration for the BUD detail page.
  *
- * Owns the chat-panel state (open flag, messages, loading, session id,
- * status line) and the round-trip with `budStore.chatBUD` + the job
- * tracker. The view stays a thin shell that wires the returned refs
- * into <ChatPanel> and emits events into the composable's methods.
+ * Owns the chat-panel state and the round-trip with `budStore.chatBUD`
+ * + the job tracker. Three peer modules own narrower responsibilities:
  *
- * Cross-cutting side effects (editor write-through, design refresh,
- * tab switching) are injected as accessor/callback hooks so the
- * composable doesn't reach into view-only state directly.
+ *   - ``useChatRetry`` — single-attempt auto-retry budget + banner.
+ *   - ``useChatHistoryLoader`` — AbortController-backed history fetch.
+ *   - ``chatJobSocket`` — job-socket callback bag (onComplete/onError).
  */
 
 import { nextTick, ref } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useJobSocket } from '@/composables/useJobSocket'
-import { friendlyAgentError } from '@/types/agentErrors'
+import { useChatRetry } from '@/composables/useChatRetry'
+import { useChatHistoryLoader } from '@/composables/useChatHistoryLoader'
+import { JIRA_ENRICH_PROMPT } from '@/composables/jiraEnrichPrompt'
+import { makeChatSocketCallbacks } from '@/composables/chatJobSocket'
 import type { BUDDocument, BUDSectionKey } from '@/types'
 
 export interface ChatMessage {
@@ -39,31 +40,13 @@ export interface ChatMessage {
 }
 
 export interface BudChatHooks {
-  /** Current BUD; null while the page is still loading. */
   getBud: () => BUDDocument | null
-  /** Active section that chat messages target (drives history + send). */
   getCurrentSection: () => BUDSectionKey
-  /** Active design tab id when the section is 'design'; undefined otherwise. */
   getDesignTabId: () => string | undefined
-  /** Switch the page's active tab — used by enrichWithAI. */
   setActiveTab: (tab: string) => void
-  /**
-   * Mirror chat-returned `updated_content` into any open markdown editor
-   * for non-design sections. The composable already writes the value
-   * into `budStore.currentBUD` so the preview re-renders; this is for
-   * the edit textarea that holds a separate ref.
-   */
   syncEditor: (section: string, content: string) => void
-  /** Design tab side effects when chat returns updated design content. */
   onDesignContentUpdated: () => void | Promise<void>
 }
-
-const JIRA_ENRICH_PROMPT
-  = 'This BUD was imported from Jira with minimal description. '
-  + 'DO NOT update the content yet. Instead, put your clarifying questions '
-  + 'directly in the "reply" field and set "updated_content" to null. '
-  + 'Ask me 2-3 questions about: what this feature does, who it\'s for, '
-  + 'acceptance criteria, and edge cases. I will answer, then you write the PRD.'
 
 export function useBudChat(hooks: BudChatHooks) {
   const budStore = useBUDStore()
@@ -74,16 +57,32 @@ export function useBudChat(hooks: BudChatHooks) {
   const chatMessages = ref<ChatMessage[]>([])
   const chatStatusMessage = ref('')
   const currentSessionId = ref<string | undefined>(undefined)
+  const stageGateMessage = ref('')
+
+  const history = useChatHistoryLoader({
+    getBudId: () => hooks.getBud()?.id ?? null,
+    getScope: () => {
+      const section = hooks.getCurrentSection()
+      return {
+        section,
+        designId: section === 'design' ? hooks.getDesignTabId() : undefined,
+      }
+    },
+    getSessionId: () => currentSessionId.value,
+    fetch: (budId, section, designId, sessionId, signal) =>
+      budStore.fetchChatHistory(budId, section, designId, sessionId, signal),
+  })
+
+  const retry = useChatRetry({
+    resend: (msg, images) => sendOnce(msg, images),
+    setStatus: (text) => { chatStatusMessage.value = text },
+    setLoading: (loading) => { chatLoading.value = loading },
+  })
 
   async function loadChatHistory(): Promise<void> {
-    const bud = hooks.getBud()
-    if (!bud) return
-    const section = hooks.getCurrentSection()
-    const designId = section === 'design' ? hooks.getDesignTabId() : undefined
-    const history = await budStore.fetchChatHistory(
-      bud.id, section, designId, currentSessionId.value,
-    )
-    chatMessages.value = history.map(m => ({
+    const loaded = await history.load()
+    if (loaded === null) return
+    chatMessages.value = loaded.map(m => ({
       role: m.role,
       text: m.message,
       userName: m.user_name,
@@ -91,21 +90,34 @@ export function useBudChat(hooks: BudChatHooks) {
   }
 
   function startNewSession(): void {
-    currentSessionId.value = crypto.randomUUID()
+    // Server owns the session id; undefined ⇒ next send is a fresh
+    // claim. Worker mints + echoes the new id via ``result.session_id``.
+    currentSessionId.value = undefined
     chatMessages.value = []
+    retry.resetBudget()
+    retry.lastUserMessage.value = null
+    stageGateMessage.value = ''
   }
 
-  async function handleChatSend(msg: string, images: string[] = []): Promise<void> {
-    const bud = hooks.getBud()
-    if (!bud || chatLoading.value) return
+  async function applyUpdatedContent(
+    section: BUDSectionKey,
+    content: string,
+  ): Promise<void> {
+    if (budStore.currentBUD) {
+      (budStore.currentBUD as Record<string, unknown>)[section] = content
+    }
+    if (section === 'design') {
+      await hooks.onDesignContentUpdated()
+    } else {
+      hooks.syncEditor(section, content)
+    }
+  }
 
-    chatMessages.value.push({
-      role: 'user',
-      text: msg,
-      images: images.length ? images : undefined,
-    })
-    chatLoading.value = true
-    chatStatusMessage.value = ''
+  async function sendOnce(msg: string, images: string[]): Promise<boolean> {
+    // Cancel any stale history fetch so it cannot clobber the push.
+    history.abortInflight()
+    const bud = hooks.getBud()
+    if (!bud) return false
 
     const section = hooks.getCurrentSection()
     const designId = section === 'design' ? hooks.getDesignTabId() : undefined
@@ -118,55 +130,53 @@ export function useBudChat(hooks: BudChatHooks) {
         text: 'Sorry, something went wrong. Please try again.',
       })
       chatLoading.value = false
-      return
+      return false
+    }
+    if ('stageGateError' in result) {
+      // 409: surface banner and roll back the optimistic user push.
+      stageGateMessage.value = result.stageGateError
+      const last = chatMessages.value[chatMessages.value.length - 1]
+      if (last && last.role === 'user') chatMessages.value.pop()
+      chatLoading.value = false
+      return false
     }
 
-    // Persist the server-generated session_id so the next message in
-    // this thread carries it forward — that's what lets the worker
-    // pass --resume <id> and hit the Anthropic prompt cache on
-    // iteration 2+.
     if (result.sessionId) currentSessionId.value = result.sessionId
+    startTracking(result.jobId, makeChatSocketCallbacks(section, {
+      pushMessage: (m) => chatMessages.value.push(m),
+      setStatus: (text) => { chatStatusMessage.value = text },
+      setLoading: (loading) => { chatLoading.value = loading },
+      setSessionId: (id) => { currentSessionId.value = id },
+      applyUpdatedContent,
+      maybeAutoRetry: () => retry.maybeAutoRetry(),
+    }))
+    return true
+  }
 
-    startTracking(result.jobId, {
-      onProgress(status) {
-        chatStatusMessage.value = status.statusMessage
-      },
-      async onComplete(data) {
-        chatLoading.value = false
-        const parsed = (data as unknown as Record<string, unknown>).result as
-          { reply: string; updated_content: string | null } | null
-        const reply = parsed?.reply || ''
-        const updatedContent = parsed?.updated_content ?? null
-        if (reply) chatMessages.value.push({ role: 'ai', text: reply })
-        if (updatedContent !== null) {
-          if (budStore.currentBUD) {
-            (budStore.currentBUD as Record<string, unknown>)[section] = updatedContent
-          }
-          if (section === 'design') {
-            await hooks.onDesignContentUpdated()
-          } else {
-            hooks.syncEditor(section, updatedContent)
-          }
-        }
-        // Linked-features refetch is handled by the agentLocked watcher
-        // (universal hook for any PM run, not just the chat-job path).
-      },
-      onError(err, errorCode) {
-        chatLoading.value = false
-        chatMessages.value.push({
-          role: 'ai',
-          text: friendlyAgentError(errorCode, err).headline,
-        })
-      },
+  async function handleChatSend(msg: string, images: string[] = []): Promise<void> {
+    const bud = hooks.getBud()
+    if (!bud || chatLoading.value) return
+    stageGateMessage.value = ''
+    retry.resetBudget()
+    retry.rememberTurn(msg, images)
+
+    chatMessages.value.push({
+      role: 'user',
+      text: msg,
+      images: images.length ? images : undefined,
     })
+    chatLoading.value = true
+    chatStatusMessage.value = ''
+
+    await sendOnce(msg, images)
   }
 
   function enrichWithAI(): void {
     hooks.setActiveTab('requirements')
     chatOpen.value = true
-    // Wait one flush so the tab switch lands before the seeded send —
-    // otherwise the chat history fetch (triggered by the activeTab
-    // watcher in the view) races with the user message push.
+    // Defer one tick so the tab switch lands before the seeded send —
+    // otherwise the chat history fetch (activeTab watcher in the view)
+    // races with the user push.
     void nextTick(() => {
       void handleChatSend(JIRA_ENRICH_PROMPT, [])
     })
@@ -178,9 +188,12 @@ export function useBudChat(hooks: BudChatHooks) {
     chatMessages,
     chatStatusMessage,
     currentSessionId,
+    stageGateMessage,
+    retryPrompt: retry.retryPrompt,
     loadChatHistory,
     startNewSession,
     handleChatSend,
+    manualRetry: retry.manualRetry,
     enrichWithAI,
   }
 }

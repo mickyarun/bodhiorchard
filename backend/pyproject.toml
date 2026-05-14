@@ -49,6 +49,11 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.7.0",
     "httpx>=0.27.0",
+    # Opt-in: integration tests that need a real Postgres spin up an
+    # ephemeral container via testcontainers. The default ``pytest``
+    # suite does NOT exercise these — run with ``-m integration`` to
+    # opt in, see ``tests/integration/conftest.py``.
+    "testcontainers[postgres]>=4.14.0",
 ]
 
 [tool.ruff]
@@ -76,9 +81,18 @@ module = [
     "jose.*",
     "passlib.*",
     "cachetools",
+    "testcontainers.*",
 ]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Heavy / Docker-dependent tests are gated behind the ``integration``
+# marker so the default ``pytest`` run stays fast and works without
+# Docker. Opt in with ``pytest -m integration`` once a Docker daemon
+# is reachable (see ``tests/integration/conftest.py``).
+markers = [
+    "integration: spins up a real Postgres container; needs Docker.",
+]
+addopts = "-m 'not integration'"

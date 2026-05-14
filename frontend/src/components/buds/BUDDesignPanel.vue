@@ -351,6 +351,26 @@ onMounted(() => {
   settingsStore.fetchRepos()
 })
 
+// Self-trigger the repo-picker flow when the backend signals a fresh
+// transition into the design phase. Owning the trigger here (rather
+// than as a parent → child ref call from useBudStatusTransitions)
+// removes the mount-order race that broke the auto-open: the panel
+// sits inside `<template v-else-if="bud">` + a Vuetify
+// `v-tabs-window-item`, so on a fresh page mount the parent's
+// template ref can still be null when the status PATCH completes.
+// ``immediate: true`` covers the late-mount path — if the flag was
+// already flipped before the panel mounted, the watcher fires once
+// on subscription and runs the trigger.
+watch(
+  () => budStore.designAvailable,
+  async (val) => {
+    if (!val) return
+    budStore.designAvailable = false
+    await triggerDesignGeneration()
+  },
+  { immediate: true },
+)
+
 async function loadDesigns(): Promise<void> {
   designs.value = await budStore.fetchDesigns(props.budId)
   designPreviewKey.value++

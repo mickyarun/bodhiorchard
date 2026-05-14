@@ -39,6 +39,7 @@ from app.models.bud_feature_link import (
     BUDFeatureLinkSource,
     BUDFeatureLinkType,
 )
+from app.models.bud_section_session import BUDSectionSession
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.cluster_cache import ClusterCache
@@ -105,6 +106,7 @@ __all__ = [
     "BUDFeatureLink",
     "BUDFeatureLinkSource",
     "BUDFeatureLinkType",
+    "BUDSectionSession",
     "BUDTodo",
     "BUDTodoStatus",
     "BUDStatus",
