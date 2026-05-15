@@ -15,7 +15,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { AxiosError } from 'axios'
-import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus } from '@/types'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus, JobStatusRead } from '@/types'
 import { BUD_STATUS_ORDER, CODE_REVIEW_OVERRIDE_REASON_MIN } from '@/types'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
@@ -258,6 +258,24 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function fetchActiveChatJob(
+    budId: string,
+    section: string,
+    designId?: string,
+  ): Promise<JobStatusRead | null> {
+    // Looks up an in-flight ``JOB_BUD_CHAT`` job for this BUD/section/design,
+    // so the AI Editor panel can re-subscribe to its progress on re-mount
+    // (e.g. when the user navigates away mid-chat and comes back).
+    try {
+      const params: Record<string, string> = { section }
+      if (designId) params.design_id = designId
+      const { data } = await api.get(`/v1/buds/${budId}/chat/active-job`, { params })
+      return data ?? null
+    } catch {
+      return null
+    }
+  }
+
   async function fetchTimeline(budId: string): Promise<TimelineEvent[]> {
     try {
       const { data } = await api.get(`/v1/buds/${budId}/timeline`)
@@ -445,6 +463,7 @@ export const useBUDStore = defineStore('bud', () => {
     updateDesignNotes,
     regenerateDesign,
     fetchChatHistory,
+    fetchActiveChatJob,
     fetchTimeline,
     fetchPRChecklist,
     fetchCodeReviewStatus,

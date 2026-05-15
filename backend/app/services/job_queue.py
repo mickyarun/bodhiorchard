@@ -301,6 +301,27 @@ def is_job_active(job_type: str, match_payload: dict[str, str]) -> bool:
     return False
 
 
+def find_active_job(job_type: str, match_payload: dict[str, Any]) -> JobStatusRead | None:
+    """Return the live status of any queued/running job matching the payload, else None.
+
+    Mirrors :func:`is_job_active`'s scan semantics but yields the matching
+    entry's :class:`JobStatusRead` instead of a bool. Used by re-entry
+    flows (e.g. the BUD AI Editor chat panel re-subscribing on remount)
+    that need the ``job_id`` to start a tracker. Returns the first match;
+    callers are expected to scope ``match_payload`` tightly enough
+    (e.g. ``{org_id, bud_id, section, design_id}``) that there is at most
+    one match.
+    """
+    for entry in _job_store.values():
+        if entry.status.job_type != job_type:
+            continue
+        if entry.status.state not in (JobState.QUEUED, JobState.RUNNING):
+            continue
+        if all(entry.payload.get(k) == v for k, v in match_payload.items()):
+            return entry.status
+    return None
+
+
 # ── Worker loop + lifecycle ────────────────────────────────────────
 
 

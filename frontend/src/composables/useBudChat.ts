@@ -87,6 +87,32 @@ export function useBudChat(hooks: BudChatHooks) {
       text: m.message,
       userName: m.user_name,
     }))
+    await resumeActiveChat()
+  }
+
+  async function resumeActiveChat(): Promise<void> {
+    // Re-subscribe to an in-flight chat job started in a previous mount of
+    // this BUD detail page. Without this, navigating away mid-chat and
+    // returning leaves the progress bar hidden until the next user turn,
+    // even though the LLM is still working. Lookup is the same job_id the
+    // original send-time ``startTracking`` used; the callback bag mirrors
+    // ``sendOnce`` so resume and originate share one code path.
+    const bud = hooks.getBud()
+    if (!bud) return
+    const section = hooks.getCurrentSection()
+    const designId = section === 'design' ? hooks.getDesignTabId() : undefined
+    const active = await budStore.fetchActiveChatJob(bud.id, section, designId)
+    if (!active) return
+    chatLoading.value = true
+    chatStatusMessage.value = active.statusMessage ?? ''
+    startTracking(active.jobId, makeChatSocketCallbacks(section, {
+      pushMessage: (m) => chatMessages.value.push(m),
+      setStatus: (text) => { chatStatusMessage.value = text },
+      setLoading: (loading) => { chatLoading.value = loading },
+      setSessionId: (id) => { currentSessionId.value = id },
+      applyUpdatedContent,
+      maybeAutoRetry: () => retry.maybeAutoRetry(),
+    }))
   }
 
   function startNewSession(): void {

@@ -28,8 +28,8 @@ from app.repositories.bud import BUDChatMessageRepository, BUDDesignRepository, 
 from app.repositories.bud_section_session import BUDSectionSessionRepository
 from app.schemas.bud import ChatMessageRead
 from app.schemas.bud_constants import SECTION_PATTERN, SECTION_REQUIRED_STAGES
-from app.schemas.jobs import ChatJobCreatedResponse, ChatJobPayload
-from app.services.job_queue import JOB_BUD_CHAT, create_job
+from app.schemas.jobs import ChatJobCreatedResponse, ChatJobPayload, JobStatusRead
+from app.services.job_queue import JOB_BUD_CHAT, create_job, find_active_job
 
 logger = structlog.get_logger(__name__)
 
@@ -77,6 +77,39 @@ async def get_chat_history(
         }
         for m in messages
     ]
+
+
+@router.get(
+    "/chat/active-job",
+    response_model=JobStatusRead | None,
+    dependencies=[Depends(require_permissions("buds:view"))],
+)
+async def get_active_chat_job(
+    bud_id: uuid.UUID,
+    section: str = Query("requirements_md"),
+    design_id: uuid.UUID | None = Query(None),
+    current_user: User = Depends(get_current_user),
+) -> JobStatusRead | None:
+    """Return the in-flight chat job for this BUD section/design, if any.
+
+    Used by the AI Editor chat panel on BUD-detail remount: it lets the
+    frontend re-subscribe to a still-running chat job that was started
+    in a previous mount of the same page, so the progress bar reappears
+    instead of vanishing the moment the user navigates away and back.
+
+    Org scope: the ``org_id`` is included in the payload match, so a
+    cross-org request returns ``None`` rather than a different org's
+    job — mirrors the silent-empty pattern of ``get_chat_history``.
+    """
+    return find_active_job(
+        JOB_BUD_CHAT,
+        {
+            "org_id": str(current_user.org_id),
+            "bud_id": str(bud_id),
+            "section": section,
+            "design_id": str(design_id) if design_id else None,
+        },
+    )
 
 
 class BUDChatRequest(BaseModel):

@@ -27,7 +27,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from app.api.v1.bud_chat import BUDChatRequest, chat_bud
+from app.api.v1.bud_chat import BUDChatRequest, chat_bud, get_active_chat_job
+from app.schemas.jobs import JobState, JobStatusRead
 from tests.api.v1._bud_chat_helpers import make_user
 
 
@@ -50,3 +51,106 @@ async def test_chat_bud_404_when_bud_missing() -> None:
             db=db,
         )
     assert ei.value.status_code == 404
+
+
+# ── GET /chat/active-job ────────────────────────────────────────────
+
+
+def _make_running_status(job_id: str | None = None) -> JobStatusRead:
+    return JobStatusRead(
+        job_id=job_id or str(uuid.uuid4()),
+        job_type="bud_chat",
+        state=JobState.RUNNING,
+        status_message="Reading file...",
+    )
+
+
+@pytest.mark.asyncio
+async def test_active_chat_job_returns_none_when_idle() -> None:
+    """No in-flight chat → endpoint returns None (renders as JSON ``null``)."""
+    user = make_user()
+    with patch("app.api.v1.bud_chat.find_active_job", return_value=None) as fn:
+        out = await get_active_chat_job(
+            bud_id=uuid.uuid4(),
+            section="requirements_md",
+            design_id=None,
+            current_user=user,
+        )
+    assert out is None
+    fn.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_active_chat_job_returns_status_when_running() -> None:
+    """Live chat job → endpoint returns its :class:`JobStatusRead` verbatim."""
+    user = make_user()
+    expected = _make_running_status()
+    with patch("app.api.v1.bud_chat.find_active_job", return_value=expected):
+        out = await get_active_chat_job(
+            bud_id=uuid.uuid4(),
+            section="requirements_md",
+            design_id=None,
+            current_user=user,
+        )
+    assert out is expected
+
+
+@pytest.mark.asyncio
+async def test_active_chat_job_scope_keys_no_design() -> None:
+    """Match-payload for a non-design section carries ``design_id=None``."""
+    user = make_user()
+    bud_id = uuid.uuid4()
+    with patch("app.api.v1.bud_chat.find_active_job", return_value=None) as fn:
+        await get_active_chat_job(
+            bud_id=bud_id,
+            section="requirements_md",
+            design_id=None,
+            current_user=user,
+        )
+    job_type, match = fn.call_args.args
+    assert job_type == "bud_chat"
+    assert match == {
+        "org_id": str(user.org_id),
+        "bud_id": str(bud_id),
+        "section": "requirements_md",
+        "design_id": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_active_chat_job_scope_keys_with_design() -> None:
+    """Match-payload for the design section carries the stringified ``design_id``."""
+    user = make_user()
+    bud_id = uuid.uuid4()
+    design_id = uuid.uuid4()
+    with patch("app.api.v1.bud_chat.find_active_job", return_value=None) as fn:
+        await get_active_chat_job(
+            bud_id=bud_id,
+            section="design",
+            design_id=design_id,
+            current_user=user,
+        )
+    _, match = fn.call_args.args
+    assert match["design_id"] == str(design_id)
+    assert match["section"] == "design"
+
+
+@pytest.mark.asyncio
+async def test_active_chat_job_cross_org_returns_none() -> None:
+    """A different org's request matches no job (silent-empty, same as ``get_chat_history``).
+
+    The underlying ``find_active_job`` filters by ``org_id`` in the
+    match payload, so an org-B user querying an org-A BUD's chat finds
+    nothing — exercised here by asserting the org_id key is the *caller*
+    user's org_id, not the BUD's.
+    """
+    user = make_user()
+    with patch("app.api.v1.bud_chat.find_active_job", return_value=None) as fn:
+        await get_active_chat_job(
+            bud_id=uuid.uuid4(),
+            section="requirements_md",
+            design_id=None,
+            current_user=user,
+        )
+    _, match = fn.call_args.args
+    assert match["org_id"] == str(user.org_id)

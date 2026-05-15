@@ -48,11 +48,13 @@ vi.mock('@/composables/useJobSocket', () => ({
 
 const chatBUD = vi.fn()
 const fetchChatHistory = vi.fn()
+const fetchActiveChatJob = vi.fn()
 
 vi.mock('@/stores/bud', () => ({
   useBUDStore: () => ({
     chatBUD,
     fetchChatHistory,
+    fetchActiveChatJob,
     currentBUD: ref<Record<string, unknown> | null>(null),
   }),
 }))
@@ -74,6 +76,9 @@ describe('useBudChat', () => {
     startTracking.mockReset()
     chatBUD.mockReset()
     fetchChatHistory.mockReset()
+    fetchActiveChatJob.mockReset()
+    // Default for tests that don't care about resume: no in-flight job.
+    fetchActiveChatJob.mockResolvedValue(null)
   })
 
   it('rolls back optimistic push and surfaces banner on 409', async () => {
@@ -171,6 +176,60 @@ describe('useBudChat', () => {
       // The first signal must be aborted by the second call's start.
       expect(seenSignals[0].aborted).toBe(true)
       expect(seenSignals[1].aborted).toBe(false)
+    })
+  })
+
+  it('does not start a job tracker when there is no active chat to resume', async () => {
+    fetchChatHistory.mockResolvedValue([])
+    fetchActiveChatJob.mockResolvedValue(null)
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.loadChatHistory()
+
+      expect(chat.chatLoading.value).toBe(false)
+      expect(startTracking).not.toHaveBeenCalled()
+    })
+  })
+
+  it('resumes job tracking when a chat job is still in flight on remount', async () => {
+    fetchChatHistory.mockResolvedValue([])
+    fetchActiveChatJob.mockResolvedValue({
+      jobId: 'job-resume-1',
+      jobType: 'bud_chat',
+      state: 'running',
+      statusMessage: 'Reading file...',
+      progressPct: 25,
+      result: null,
+      error: null,
+    })
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.loadChatHistory()
+
+      expect(chat.chatLoading.value).toBe(true)
+      expect(chat.chatStatusMessage.value).toBe('Reading file...')
+      expect(startTracking).toHaveBeenCalledTimes(1)
+      expect(startTracking.mock.calls[0][0]).toBe('job-resume-1')
+    })
+  })
+
+  it('passes the design id through to fetchActiveChatJob on the design tab', async () => {
+    fetchChatHistory.mockResolvedValue([])
+    fetchActiveChatJob.mockResolvedValue(null)
+
+    const hooks = {
+      ...makeHooks(),
+      getCurrentSection: () => 'design' as const,
+      getDesignTabId: () => 'design-abc',
+    }
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(hooks as never)
+      await chat.loadChatHistory()
+
+      expect(fetchActiveChatJob).toHaveBeenCalledWith('bud-1', 'design', 'design-abc')
     })
   })
 })
