@@ -371,28 +371,33 @@ async def _amain() -> int:
         # payload via mock_pr_webhook (which mints its own random id —
         # so we pass the chosen id through explicitly).
         github_pr_id = uuid.uuid4().int & ((1 << 31) - 1)
-        await _seed_clusters(
-            db,
-            org_id=repo.org_id,
-            repo_id=repo.id,
-            cluster_id=cluster_id,
-            base_sha=base_sha,
-            head_sha=head_sha,
-            files=[args.changed_file, "src/sibling_unchanged.py"],
-        )
-        await _seed_pull_request(
-            db,
-            org_id=repo.org_id,
-            repo_id=repo.id,
-            github_pr_id=github_pr_id,
-            pr_number=pr_number,
-            full_name=repo.github_repo_full_name,
-            head_sha=head_sha,
-            base_sha=base_sha,
-        )
-
-        baseline_offset = _log_size(args.log_file)
+        # Seeding lives INSIDE the try/finally so a failure in any
+        # ``_seed_*`` call after the first commit doesn't leak rows —
+        # the cleanup runs regardless. Cleanup is keyed on the
+        # synthetic ids generated at the top of this function and
+        # deletes whatever exists, so partial seeding is also safe.
         try:
+            await _seed_clusters(
+                db,
+                org_id=repo.org_id,
+                repo_id=repo.id,
+                cluster_id=cluster_id,
+                base_sha=base_sha,
+                head_sha=head_sha,
+                files=[args.changed_file, "src/sibling_unchanged.py"],
+            )
+            await _seed_pull_request(
+                db,
+                org_id=repo.org_id,
+                repo_id=repo.id,
+                github_pr_id=github_pr_id,
+                pr_number=pr_number,
+                full_name=repo.github_repo_full_name,
+                head_sha=head_sha,
+                base_sha=base_sha,
+            )
+
+            baseline_offset = _log_size(args.log_file)
             print("→ firing mock webhook…")
             rc = _fire_webhook(
                 repo_id=repo.id,
