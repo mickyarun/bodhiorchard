@@ -136,10 +136,16 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
   // ── Polling fallback ────────────────────────────────────
   async function poll(): Promise<void> {
     if (stopped || !currentId) return
+    // Capture the polled id; the tracker may be swapped or stopped
+    // while the request is in flight. Same guard as fetchInitialState
+    // — without it, a stale response would feed handleData with the
+    // new tracker's callbacks.
+    const requestId = currentId
     try {
       const { data: responseData } = await api.get<T>(
-        config.pollEndpoint(currentId),
+        config.pollEndpoint(requestId),
       )
+      if (stopped || currentId !== requestId) return
       handleData(responseData)
 
       // If handleData called stopTracking (terminal state), don't reschedule
@@ -152,20 +158,18 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
       }
       pollTimer = setTimeout(poll, pollIntervalMs)
     } catch (err) {
-      // 404 means the backend's in-memory entry was already cleaned up
-      // (e.g. jobs reaped 5 min after terminal). That's terminal
-      // information, not a failure — the UI's source of truth for the
-      // owning resource (BUD task row, scan row) lives elsewhere and
-      // will drive the final state. Stop tracking silently so we don't
-      // surface a confusing "Failed to check status" toast. We only
-      // swallow the 404 once we've seen at least one successful update
-      // (data.value !== null) — a 404 on the very first poll means the
-      // id was never valid, and we want the onError path to fire so
-      // the UI isn't left in a perpetual "tracking" limbo.
-      if (
-        (err as AxiosError).response?.status === 404
-        && data.value !== null
-      ) {
+      // 404 means the backend's in-memory entry is gone — either
+      // because the job was reaped after a successful terminal state
+      // (5-min TTL) OR because the backend restarted and wiped the
+      // in-memory ``_job_store`` while the owning DB row still
+      // carries the now-dead ``job_id``. In both cases the in-memory
+      // tracker can't recover useful state; the DB row is the source
+      // of truth and a fresh ``loadDesigns`` / ``fetchBUD`` will
+      // reflect it. Stop tracking silently — firing ``onError``
+      // would trigger callers like ``BUDDesignPanel.trackDesignJob``
+      // to reload designs and re-track, which on a stuck-generating
+      // row produces another 404 → another reload → a request loop.
+      if ((err as AxiosError).response?.status === 404) {
         stopTracking()
         return
       }
@@ -203,10 +207,20 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
   /** One-shot fetch so the UI shows current state immediately on subscribe. */
   async function fetchInitialState(): Promise<void> {
     if (stopped || !currentId) return
+    // Capture the id we're fetching for; if startTracking gets called
+    // again (different id) while this request is in flight, the
+    // response is stale and must not invoke callbacks. Without this
+    // guard, a terminal seed (e.g. a job that became "cancelled"
+    // between cancel-click and seed return) would fire onError on
+    // the *new* tracker's callbacks — which the design panel uses to
+    // call ``loadDesigns()`` → ``trackDesignJob()`` → another seed
+    // fetch, producing an unbounded request loop.
+    const requestId = currentId
     try {
       const { data: responseData } = await api.get<T>(
-        config.pollEndpoint(currentId),
+        config.pollEndpoint(requestId),
       )
+      if (stopped || currentId !== requestId) return
       // Only apply if we haven't received a WS message yet (avoid overwriting fresher data)
       if (data.value === null) {
         handleData(responseData)

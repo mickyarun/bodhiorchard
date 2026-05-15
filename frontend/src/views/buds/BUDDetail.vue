@@ -63,9 +63,56 @@
                spot has no layout impact. -->
           <BUDStatusDialogs :controller="statusController" />
 
-          <!-- Agent generating banner (unified for PRD, tech arch, code review) -->
+          <!-- Per-design generating banners. The design phase fans out
+               one Claude job per repo, each with its own job_id; a
+               task-level cancel can only kill one of them, so we
+               surface a banner per design with its own Cancel that
+               targets just that repo's run. Rendered alongside the
+               task-level banner so both PRD/tech-arch progress and
+               in-flight designs are visible during cross-phase work. -->
           <div
-            v-if="workflowRef?.agentGenerating"
+            v-for="design in generatingDesigns"
+            :key="design.id"
+            class="agent-banner mx-12 mb-3"
+          >
+            <div class="d-flex align-center ga-3">
+              <v-icon icon="mdi-palette-outline" size="20" color="primary" />
+              <div class="d-flex flex-column agent-banner__text">
+                <span class="text-body-2 font-weight-medium">
+                  Designer Agent
+                </span>
+                <span class="text-caption text-medium-emphasis text-truncate">
+                  Generating wireframe — {{ design.repo_name || 'default' }}
+                </span>
+              </div>
+              <v-spacer />
+              <v-progress-linear
+                indeterminate
+                color="primary"
+                height="3"
+                rounded
+                class="agent-banner__progress"
+              />
+              <v-btn
+                size="x-small"
+                variant="tonal"
+                color="warning"
+                prepend-icon="mdi-close-circle-outline"
+                :loading="cancellingDesignId === design.id"
+                @click="cancelDesign(design.id)"
+              >
+                Cancel
+              </v-btn>
+            </div>
+          </div>
+
+          <!-- Agent generating banner (PRD, tech arch, code review,
+               etc.). Suppressed during the design phase because the
+               per-design banners above already cover its only signal
+               — task.job_id only tracks the first design's worker
+               anyway, so the unified label would be misleading. -->
+          <div
+            v-if="workflowRef?.agentGenerating && bud.status !== 'design'"
             class="agent-banner mx-12 mb-3"
           >
             <div class="d-flex align-center ga-3">
@@ -334,10 +381,13 @@
         :status-message="chatStatusMessage"
         :stage-gate-message="stageGateMessage"
         :retry-prompt="retryPrompt"
+        :designs="chatDesignOptions"
+        :selected-design-id="activeDesignTabId"
         @close="chatOpen = false"
         @send="handleChatSend"
         @new-session="startNewSession"
         @retry="manualRetry"
+        @select-design="handleChatSelectDesign"
       />
     </transition>
   </div>
@@ -476,7 +526,43 @@ const statusController = useBudStatusTransitions({
   triggerDesignGeneration: () => designPanelRef.value?.triggerDesignGeneration(),
   reloadTimeline: () => loadTimeline(),
 })
-const { updateStatus, cancelRunningAgent, cancellingAgent } = statusController
+const {
+  updateStatus,
+  cancelRunningAgent,
+  cancellingAgent,
+  cancelDesign,
+  cancellingDesignId,
+} = statusController
+
+// Designs currently being generated. Rendered as one banner per row
+// during the design phase so each repo's wireframe gets its own
+// progress indicator + cancel button (each design owns a separate
+// Claude job id).
+const generatingDesigns = computed(
+  () => bud.value?.designs?.filter((d) => d.status === 'generating') ?? [],
+)
+
+// Repo picker for the chat panel — only surfaced when the user is
+// on the design section. The chat-panel itself renders the dropdown
+// only when there are 2+ entries, so we hand it the full list and
+// let it decide. The "active" id mirrors the design sub-tab inside
+// BUDDesignPanel so the dropdown selection and the visible tab stay
+// in sync.
+const chatDesignOptions = computed(() => {
+  if (currentSection.value !== 'design') return []
+  return (bud.value?.designs ?? []).map((d) => ({
+    id: d.id,
+    repoName: d.repo_name,
+  }))
+})
+const activeDesignTabId = computed(() => designPanelRef.value?.activeDesignTab ?? undefined)
+
+function handleChatSelectDesign(designId: string): void {
+  // Drive the design sub-tab through its exposed setter; the existing
+  // watch(activeDesignTab) → emit('design-tab-change') → loadChatHistory
+  // wiring then reloads the chat for the newly-selected design.
+  designPanelRef.value?.setActiveDesignTab(designId)
+}
 
 const canApprove = computed(() => {
   const role = authStore.user?.role
@@ -728,6 +814,18 @@ const activeAgentJobId = computed(() => {
   const t = bud.value?.active_agent_task
   if (!t?.job_id) return null
   if (t.status !== 'pending' && t.status !== 'running') return null
+  // During the design phase the per-design banners own job tracking
+  // — each design row carries its own job_id and the task row only
+  // records one of them ("first wins"). Tracking task.job_id here
+  // produces an infinite loop after a per-design cancel: the
+  // tracker receives the cancelled state, onError calls fetchBUD,
+  // fetchBUD toggles ``loading`` which unmounts/remounts the
+  // workflow ref, the watch re-fires with the same job id but a new
+  // ref instance, the tracker restarts on the still-cancelled job,
+  // and so on. Skipping the task-level tracker during design phase
+  // lets the per-design trackers in BUDDesignPanel — keyed on each
+  // design's real job_id — be the single source of truth.
+  if (bud.value?.status === 'design') return null
   return t.job_id
 })
 watch(

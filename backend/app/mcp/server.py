@@ -434,11 +434,13 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="get_bud_designs",
         description=(
-            "Fetch the approved wireframe HTML attached to a BUD. Call "
-            "this BEFORE iterating on a design — never assume the prior "
-            "wireframe content from your own context. Returns one row per "
-            "(bud, repo) design, each with the sanitized HTML and any "
-            "override notes."
+            "Fetch wireframe(s) attached to a BUD, one row per impacted "
+            "repo. Call this BEFORE iterating on a design — never assume "
+            "the prior wireframe content from your own context. By "
+            "default only ``status='ready'`` rows are returned; the "
+            "response reports a ``skipped_count`` for any non-ready rows "
+            "(still generating or failed) so you can flag the gap in "
+            "your output instead of reasoning over empty HTML."
         ),
         input_schema={
             "type": "object",
@@ -451,7 +453,19 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "type": "string",
                     "description": (
                         "Optional repo UUID to filter to a single design. "
-                        "Omit to get every per-repo design for the BUD."
+                        "Omit to get every per-repo design for the BUD. "
+                        "When supplied, the row is returned regardless "
+                        "of status (designer iteration reads its own "
+                        "in-flight row this way)."
+                    ),
+                },
+                "include_non_ready": {
+                    "type": "boolean",
+                    "description": (
+                        "When true (and no repo_id is supplied), return "
+                        "rows in every status — useful for debugging or "
+                        "tooling that needs to see in-flight state. "
+                        "Defaults to false: only ready rows."
                     ),
                 },
             },

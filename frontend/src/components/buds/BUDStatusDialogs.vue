@@ -40,6 +40,7 @@ const {
   showNoPRWarningDialog, overrideReasonDialog, overrideReasonText,
   showPendingCasesDialog, pendingCasesTarget, pendingCasesList,
   statusErrorSnackbar, statusErrorMessage,
+  statusInfoSnackbar, statusInfoMessage,
   confirmNoPRWarning, confirmOverrideStatus, openQATab,
 } = props.controller
 </script>
@@ -177,6 +178,19 @@ const {
           Dismiss
         </v-btn>
       </template>
+    </v-snackbar>
+
+    <!-- Transient info snackbar — used for non-error confirmations
+         like "Cancelled". No dismiss button; the :timeout auto-hides
+         it so the user gets a brief acknowledgement without UI to
+         click away. -->
+    <v-snackbar
+      v-model="statusInfoSnackbar"
+      color="success"
+      location="bottom"
+      :timeout="2500"
+    >
+      {{ statusInfoMessage }}
     </v-snackbar>
   </div>
 </template>

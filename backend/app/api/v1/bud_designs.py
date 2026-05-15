@@ -27,6 +27,10 @@ from app.models.user import User
 from app.repositories.bud import BUDDesignRepository, BUDRepository
 from app.schemas.bud_design import BUDDesignRead, DesignGenerateRequest, DesignHtmlUpdate
 from app.schemas.jobs import DesignAgentJobPayload
+from app.services.agent_task_cancel import (
+    AgentTaskCancelError,
+    cancel_design,
+)
 from app.services.bud_edit_policy import assert_design_editable
 from app.services.job_queue import JOB_DESIGN_AGENT, create_job
 
@@ -252,3 +256,44 @@ async def regenerate_design(
     await db.flush()
 
     return {"designId": str(design.id), "jobId": job.job_id}
+
+
+@router.post(
+    "/{design_id}/cancel",
+    response_model=BUDDesignRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def cancel_design_endpoint(
+    bud_id: uuid.UUID,
+    design_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BUDDesignRead:
+    """Cancel a single in-flight design generation.
+
+    Thin wrapper around :func:`app.services.agent_task_cancel.cancel_design`:
+    validates tenancy + status, delegates, translates a signal
+    failure into ``409`` so the user sees why their cancel didn't
+    land instead of a stale spinner.
+    """
+    design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
+    design = await design_repo.get_by_id(design_id)
+    if design is None or design.bud_id != bud_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
+    if design.status != BUDDesignStatus.GENERATING:
+        return BUDDesignRead.model_validate(design)
+
+    try:
+        updated = await cancel_design(
+            db,
+            org_id=current_user.org_id,
+            design=design,
+            reason=f"Cancelled by {current_user.email}",
+        )
+    except AgentTaskCancelError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Could not cancel: {exc}",
+        ) from exc
+    return BUDDesignRead.model_validate(updated)

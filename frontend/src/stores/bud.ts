@@ -347,14 +347,34 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function cancelDesign(budId: string, designId: string): Promise<void> {
+    // Per-design cancel: each design row owns its own job_id, so the
+    // backend signals only that one Claude run. Lets the user stop
+    // one repo's wireframe without affecting parallel repos in the
+    // same BUD. 409 detail (signal failed → Claude still running)
+    // flows through extractApiError into the snackbar.
+    error.value = ''
+    try {
+      await api.post(`/v1/buds/${budId}/designs/${designId}/cancel`)
+      await fetchBUD(budId)
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to cancel design')
+    }
+  }
+
   async function cancelAgentTask(budId: string, taskId: string): Promise<void> {
-    // Task-level cancel handles both the live-worker case (signal, worker
-    // cleans up) and the orphan case (no worker left, API flips the row).
+    // Task-level cancel: the API delegates to the agent_task_cancel
+    // service which signals the in-flight job (if alive) and flips
+    // the bud_agent_tasks + bud_designs rows. When the signal itself
+    // fails the API returns 409 with a detail message — surface that
+    // so the caller can render the real reason in a snackbar instead
+    // of a generic "Failed to cancel".
+    error.value = ''
     try {
       await api.post(`/v1/buds/${budId}/agent-tasks/${taskId}/cancel`)
       await fetchBUD(budId)
-    } catch {
-      error.value = 'Failed to cancel agent task'
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to cancel agent task')
     }
   }
 
@@ -423,6 +443,7 @@ export const useBUDStore = defineStore('bud', () => {
     dismissPhaseFailure,
     retryAgentTask,
     cancelAgentTask,
+    cancelDesign,
     fetchEstimates,
     recalculateEstimates,
     overrideEstimate,

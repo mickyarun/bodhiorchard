@@ -491,6 +491,18 @@ watch(activeDesignTab, (newVal) => {
   if (newVal) emit('design-tab-change', newVal)
 })
 
+// Switch which design row is active. Used by the chat-panel repo
+// dropdown so the dropdown selection drives both the visible sub-tab
+// and the chat target through a single source of truth — the
+// existing ``watch(activeDesignTab)`` fires ``design-tab-change``
+// which the parent wires to ``loadChatHistory()``, so callers get
+// the chat reload for free.
+function setActiveDesignTab(designId: string): void {
+  if (designs.value.some((d) => d.id === designId)) {
+    activeDesignTab.value = designId
+  }
+}
+
 defineExpose({
   designs,
   activeDesignTab,
@@ -500,6 +512,7 @@ defineExpose({
   toggleDesignEdit,
   refreshDesignPreview,
   triggerDesignGeneration,
+  setActiveDesignTab,
 })
 </script>
 

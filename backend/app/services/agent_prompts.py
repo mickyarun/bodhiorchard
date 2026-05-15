@@ -449,14 +449,26 @@ def _build_design_mcp_directive(bud: BUDDocument, *, purpose: str) -> str:
     Returns an empty string when the BUD has no design rows attached.
     ``purpose`` is a short verb phrase (e.g. ``"planning"``, ``"reviewing"``,
     ``"writing tests"``) used to make the instruction context-specific.
+
+    The directive is written for the multi-repo case from the start —
+    a BUD can carry one wireframe per impacted repo, so the agent
+    must iterate the returned ``designs[]`` array and produce a
+    section per repo rather than assuming a single wireframe.
     """
     if not bud.designs:
         return ""
     return (
         "\n## BUD Wireframes\n\n"
-        f'Call `get_bud_designs` with `bud_id: "{bud.id}"` to fetch the '
-        f"approved wireframe HTML and override notes before {purpose}. "
-        "Do NOT inline the wireframe content into other outputs — refer to "
+        f'Call `get_bud_designs` with `bud_id: "{bud.id}"` before {purpose}. '
+        "The response is `designs[]` with one entry per impacted repo — "
+        "iterate over every entry and match each row's `repo_name` to the "
+        "repos listed in the Available Repositories section, then produce "
+        "a per-repo subsection in your output covering that wireframe.\n\n"
+        'Only `status: "ready"` rows are returned; the response\'s '
+        "`skipped_count` field tells you how many designs are still being "
+        "prepared or have failed — if it is non-zero, flag this in your "
+        "output and DO NOT invent wireframe details for those repos.\n\n"
+        "Do NOT inline the wireframe HTML into other outputs — refer to "
         "the design only enough to confirm the implementation matches.\n"
     )
 
