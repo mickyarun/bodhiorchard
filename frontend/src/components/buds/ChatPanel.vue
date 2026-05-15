@@ -19,7 +19,27 @@
     <div class="chat-header">
       <v-icon icon="mdi-creation-outline" size="18" color="primary" />
       <span class="text-body-2 font-weight-medium flex-grow-1">AI Editor</span>
-      <v-chip size="x-small" variant="tonal" color="primary">
+      <!-- Repo picker — surfaced only when the user is on the design
+           section AND more than one design row exists for the BUD.
+           Selecting an entry switches both the chat target and the
+           visible design sub-tab through the parent (single state
+           lives in BUDDesignPanel.activeDesignTab). The chip below
+           hides while the picker is shown so the header stays
+           uncluttered — the picker label already conveys the
+           section context. -->
+      <v-select
+        v-if="showDesignPicker"
+        :model-value="selectedDesignId"
+        :items="designOptions"
+        item-title="label"
+        item-value="id"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="chat-design-picker"
+        @update:model-value="(id: string) => emit('select-design', id)"
+      />
+      <v-chip v-else size="x-small" variant="tonal" color="primary">
         {{ sectionLabel }}
       </v-chip>
       <v-btn
@@ -146,7 +166,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+import { computed, ref, nextTick, watch } from 'vue'
 
 export interface ChatMessage {
   role: 'user' | 'ai'
@@ -164,6 +184,15 @@ const props = defineProps<{
   stageGateMessage?: string
   /** Show the manual retry banner after a second parse failure. */
   retryPrompt?: boolean
+  /**
+   * Per-repo design rows for the active BUD. Supplied only when the
+   * user is on the design section; rendered as a header dropdown
+   * when there are 2+ entries so the user can switch which
+   * wireframe the chat targets without leaving the chat panel.
+   */
+  designs?: Array<{ id: string; repoName: string | null }>
+  /** Currently-active design row id (matches the design sub-tab). */
+  selectedDesignId?: string
 }>()
 
 const emit = defineEmits<{
@@ -171,7 +200,18 @@ const emit = defineEmits<{
   send: [message: string, images: string[]]
   'new-session': []
   retry: []
+  'select-design': [designId: string]
 }>()
+
+const showDesignPicker = computed(
+  () => (props.designs?.length ?? 0) >= 2 && !!props.selectedDesignId,
+)
+const designOptions = computed(() =>
+  (props.designs ?? []).map((d) => ({
+    id: d.id,
+    label: d.repoName ?? 'general',
+  })),
+)
 
 const input = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
@@ -246,6 +286,13 @@ watch(() => props.loading, () => scrollChat())
   gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+.chat-design-picker {
+  /* Constrain the picker so it doesn't push the close button off-screen
+     on the narrowest chat-panel width (~340px). */
+  max-width: 180px;
+  min-width: 120px;
 }
 
 .chat-messages {

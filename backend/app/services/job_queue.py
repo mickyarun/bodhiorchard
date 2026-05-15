@@ -276,6 +276,19 @@ def cancel_job(job_id: str, *, reason: str = "Cancelled by user") -> bool:
     return True
 
 
+def is_job_running(job_id: str) -> bool:
+    """Return True iff a handler task for ``job_id`` is currently in flight.
+
+    Distinct from the in-memory ``_job_store`` state — the store may say
+    RUNNING for a brief window after the handler task has already
+    finished. The asyncio Task in ``_running_tasks`` is the only honest
+    signal of "Claude is alive right now", which the cancel endpoint
+    needs to distinguish the live-signal path from the orphan path.
+    """
+    task = _running_tasks.get(job_id)
+    return task is not None and not task.done()
+
+
 def is_job_active(job_type: str, match_payload: dict[str, str]) -> bool:
     """Check if any active (queued/running) job of the given type matches the payload fields."""
     for entry in _job_store.values():

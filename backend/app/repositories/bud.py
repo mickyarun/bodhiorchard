@@ -17,13 +17,41 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, lazyload
 
 from app.models.bud import BUDChatMessage, BUDDesign, BUDDesignStatus, BUDDocument, BUDStatus
 from app.models.tracked_repository import TrackedRepository
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
+
+
+async def recover_stuck_designs(db: AsyncSession) -> int:
+    """Flip every orphan ``generating`` design row to ``failed``.
+
+    Sister to :func:`recover_stuck_agent_tasks` — that one only flips
+    the ``bud_agent_tasks`` row, but each design row carries its own
+    ``job_id`` pointing at an in-memory job that the restart wiped.
+    Left as-is, the frontend tracker polls the dead ``job_id``,
+    receives 404, fires ``onError`` → ``loadDesigns`` → tracker again
+    → unbounded loop.
+
+    **CROSS-TENANT, STARTUP ONLY.** Issues an unscoped UPDATE across
+    every org's designs — only safe inside the app lifespan, before
+    any org-scoped requests are served. Do not call from a request
+    handler; use :meth:`BUDDesignRepository.mark_failed_by_id` /
+    :meth:`mark_failed_by_job` for tenant-scoped flips.
+
+    Returns the number of rows updated.
+    """
+    stmt = (
+        update(BUDDesign)
+        .where(BUDDesign.status == BUDDesignStatus.GENERATING)
+        .values(status=BUDDesignStatus.FAILED)
+    )
+    result = await db.execute(stmt)
+    await db.flush()
+    return rowcount(result) or 0
 
 
 async def list_basic_info_by_ids(
@@ -392,6 +420,49 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         )
         result = await self._db.execute(stmt)
         return result.scalar_one()
+
+    async def mark_failed_by_id(self, design_id: uuid.UUID) -> int:
+        """Flip one ``generating`` design row to ``failed``.
+
+        Used by the per-design cancel path. Status-guarded so we don't
+        clobber a row that already raced to a terminal state.
+        ``notes`` is user-editable content and stays untouched.
+
+        Returns the number of rows updated (0 or 1).
+        """
+        stmt = (
+            update(BUDDesign)
+            .where(BUDDesign.org_id == self._org_id)
+            .where(BUDDesign.id == design_id)
+            .where(BUDDesign.status == BUDDesignStatus.GENERATING)
+            .values(status=BUDDesignStatus.FAILED)
+        )
+        result = await self._db.execute(stmt)
+        await self._db.flush()
+        return rowcount(result) or 0
+
+    async def mark_failed_by_job(self, job_id: str) -> int:
+        """Flip every ``generating`` design row tied to ``job_id`` to failed.
+
+        Used by the cancel-agent-task path: the design handler kills the
+        Claude subprocess on ``CancelledError`` but doesn't update its
+        own ``bud_designs`` row before unwinding, so the API has to
+        write the terminal state. Status-guarded so we don't clobber a
+        row that already raced to a terminal state. ``notes`` is left
+        untouched — it's user-editable content, not for system messages.
+
+        Returns the number of rows updated.
+        """
+        stmt = (
+            update(BUDDesign)
+            .where(BUDDesign.org_id == self._org_id)
+            .where(BUDDesign.job_id == job_id)
+            .where(BUDDesign.status == BUDDesignStatus.GENERATING)
+            .values(status=BUDDesignStatus.FAILED)
+        )
+        result = await self._db.execute(stmt)
+        await self._db.flush()
+        return rowcount(result) or 0
 
     async def upsert(
         self,

@@ -42,8 +42,22 @@ async def handle_get_bud_designs(
 ) -> dict[str, Any]:
     """Return the wireframe(s) attached to a BUD.
 
-    Filters to a single repo if ``repo_id`` is supplied — otherwise returns
-    every per-repo design row for the BUD, ordered by creation time.
+    Two call shapes:
+
+    * Scoped lookup — caller passes ``repo_id`` to fetch one specific
+      row regardless of status. Used by the designer agent during
+      iteration: it needs to read its own ``generating`` row to
+      refine the existing HTML, so we deliberately bypass the
+      ready-only filter here.
+    * Cross-repo lookup — caller omits ``repo_id``. By default only
+      ``status='ready'`` rows are returned (so tech-arch / code
+      review / testing don't accidentally reason over empty
+      ``design_html`` from a failed or in-flight row). The response
+      reports a ``skipped_count`` of excluded non-ready rows along
+      with their statuses, so callers can flag the gap in their
+      output instead of silently writing around it. Set
+      ``include_non_ready: true`` to opt back into the unfiltered
+      behaviour.
     """
     error = require_non_empty(params, "bud_id")
     if error:
@@ -61,34 +75,50 @@ async def handle_get_bud_designs(
         except (ValueError, TypeError):
             return {"success": False, "error": "repo_id is not a valid UUID"}
 
+    include_non_ready = bool(params.get("include_non_ready", False))
+
     repo = BUDDesignRepository(db, org_id=org.id)
     rows = await repo.list_with_repo_names(bud_uuid, repo_id=repo_filter)
 
-    designs = [
-        {
-            "design_id": str(row["id"]),
-            "repo_id": str(row["repo_id"]) if row["repo_id"] else None,
-            "repo_name": row["repo_name"] or "general",
-            "design_html": row["design_html"] or "",
-            "notes": row["notes"] or "",
-            "status": (
-                row["status"].value
-                if isinstance(row["status"], BUDDesignStatus)
-                else str(row["status"])
-            ),
-            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-        }
-        for row in rows
-    ]
+    skipped_statuses: list[str] = []
+    kept: list[dict[str, Any]] = []
+    apply_ready_filter = repo_filter is None and not include_non_ready
+
+    for row in rows:
+        raw_status = row["status"]
+        status_str = (
+            raw_status.value if isinstance(raw_status, BUDDesignStatus) else str(raw_status)
+        )
+        if apply_ready_filter and status_str != BUDDesignStatus.READY.value:
+            skipped_statuses.append(status_str)
+            continue
+        kept.append(
+            {
+                "design_id": str(row["id"]),
+                "repo_id": str(row["repo_id"]) if row["repo_id"] else None,
+                "repo_name": row["repo_name"] or "general",
+                "design_html": row["design_html"] or "",
+                "notes": row["notes"] or "",
+                "status": status_str,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            }
+        )
 
     logger.info(
         "mcp_get_bud_designs",
         org_id=str(org.id),
         bud_id=str(bud_uuid),
         repo_id=str(repo_filter) if repo_filter else None,
-        count=len(designs),
+        include_non_ready=include_non_ready,
+        count=len(kept),
+        skipped=len(skipped_statuses),
     )
-    return {"designs": designs, "count": len(designs)}
+    return {
+        "designs": kept,
+        "count": len(kept),
+        "skipped_count": len(skipped_statuses),
+        "skipped_statuses": skipped_statuses,
+    }
 
 
 async def handle_write_bud_design(

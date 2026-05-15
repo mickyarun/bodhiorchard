@@ -207,6 +207,23 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
     final_state = JobState.COMPLETED if wireframe_saved else JobState.FAILED
     final_error = None if wireframe_saved else "Agent did not call write_bud_design MCP"
 
+    # Roll up the parent ``bud_agent_tasks`` row state BEFORE emitting
+    # the ``skill_completed`` event. The frontend listener reacts to
+    # that event by calling ``fetchBUD`` — if the task row hasn't
+    # been flipped to COMPLETED/FAILED yet, the response carries a
+    # stale ``active_agent_task.status='running'`` and ``agentLocked``
+    # stays true (edit button greyed) until the next page load.
+    # Wrapped in try/except so a DB failure here doesn't skip the
+    # session/timeline/job-state writes below.
+    try:
+        await _maybe_complete_design_task(payload.bud_id, payload.org_id)
+    except Exception:
+        logger.warning(
+            "design_task_rollup_failed",
+            bud_id=payload.bud_id,
+            design_id=design_id,
+        )
+
     _final_event = "skill_completed" if wireframe_saved else "skill_failed"
     await log_agent_activity(
         None,
@@ -268,9 +285,6 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         progress_pct=100,
         error=final_error,
     )
-
-    # Check if all design jobs for this BUD are done — complete the tracking task
-    await _maybe_complete_design_task(payload.bud_id, payload.org_id)
 
 
 async def _maybe_complete_design_task(bud_id: str, org_id: str) -> None:

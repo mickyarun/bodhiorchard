@@ -211,3 +211,28 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
         )
         await self._db.execute(stmt)
         await self._db.flush()
+
+    async def mark_failed_if_active(
+        self,
+        task_id: uuid.UUID,
+        error_message: str,
+    ) -> int:
+        """Mark a task failed only if it's still pending/running.
+
+        Status-guarded so a concurrent terminal write (worker
+        finishing normally just before our cancel landed) wins instead
+        of being clobbered. Returns the number of rows updated.
+        """
+        stmt = (
+            update(BUDAgentTask)
+            .where(BUDAgentTask.id == task_id)
+            .where(BUDAgentTask.org_id == self._org_id)
+            .where(BUDAgentTask.status.in_((AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING)))
+            .values(
+                status=AgentTaskStatus.FAILED,
+                error_message=error_message[:500] if error_message else None,
+            )
+        )
+        result = await self._db.execute(stmt)
+        await self._db.flush()
+        return rowcount(result) or 0

@@ -31,7 +31,7 @@ Generate standalone HTML wireframes using Vuetify CDN and the organization's des
 ## Workflow
 
 1. **Read BUD**: Use `get_bud_context` to fetch the approved BUD requirements
-2. **Fetch Current Wireframe** (iteration only): Call `get_bud_designs` with the BUD's `bud_id` (and `repo_id` if scoped) to read the existing wireframe HTML. Never assume the prior content from your own context — always fetch.
+2. **Fetch Current Wireframe** (iteration only): Call `get_bud_designs` with the BUD's `bud_id` AND `repo_id` (the one supplied in your prompt) to read the existing wireframe HTML. The `repo_id` is required — without it the response is filtered to `status='ready'` rows only and your own in-progress row will be silently skipped. Never assume the prior content from your own context — always fetch.
 3. **Fetch Design System**: Call `list_design_systems` to discover available design systems, then `get_design_system` with the relevant `repo_id` to get colors, typography, CDN boilerplate, and component defaults
 4. **Find Matching Screens**: Search for similar Vue components via `code_query` or `Glob`. Read 2–3 results to match existing visual style and layout patterns.
 5. **Generate Wireframe**: Create a standalone HTML string with:

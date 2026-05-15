@@ -139,14 +139,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("claude_env_load_failed_at_startup", exc_info=True)
 
     # 6. Recover stuck agent tasks from prior crash/restart
+    from app.repositories.bud import recover_stuck_designs
     from app.repositories.bud_agent_task import recover_stuck_agent_tasks
 
     try:
         async with AsyncSessionLocal() as session:
             recovered = await recover_stuck_agent_tasks(session)
+            # Sister recovery: agent-task flip alone leaves ``bud_designs``
+            # rows stuck at ``generating`` with dead ``job_id`` values from
+            # the prior process. The frontend tracker polls those job ids,
+            # gets 404, fires onError → loadDesigns → re-tracker → loop.
+            # Flip the orphan design rows here so the next page load sees
+            # them as ``failed`` and the user can retry cleanly.
+            recovered_designs = await recover_stuck_designs(session)
             await session.commit()
         if recovered:
             logger.info("recovered_stuck_agent_tasks", count=recovered)
+        if recovered_designs:
+            logger.info("recovered_stuck_designs", count=recovered_designs)
     except Exception:
         logger.warning("agent_task_recovery_failed", exc_info=True)
 

@@ -65,8 +65,18 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
   const statusErrorSnackbar = ref(false)
   const statusErrorMessage = ref('')
 
+  // Transient info surface — used for non-error confirmations like
+  // "Cancelled". Auto-dismisses via the snackbar's :timeout so users
+  // see the result briefly without having to click Dismiss.
+  const statusInfoSnackbar = ref(false)
+  const statusInfoMessage = ref('')
+
   // Cancel agent task running in this phase
   const cancellingAgent = ref(false)
+  // Per-design cancel state — tracks which design row is mid-cancel
+  // so the matching banner can show a spinner without affecting the
+  // others. ``null`` when no cancel is in flight.
+  const cancellingDesignId = ref<string | null>(null)
 
   async function cancelRunningAgent(): Promise<void> {
     const bud = hooks.getBud()
@@ -75,8 +85,33 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
     cancellingAgent.value = true
     try {
       await budStore.cancelAgentTask(bud.id, taskId)
+      if (budStore.error) {
+        statusErrorMessage.value = budStore.error
+        statusErrorSnackbar.value = true
+      } else {
+        statusInfoMessage.value = 'Cancelled'
+        statusInfoSnackbar.value = true
+      }
     } finally {
       cancellingAgent.value = false
+    }
+  }
+
+  async function cancelDesign(designId: string): Promise<void> {
+    const bud = hooks.getBud()
+    if (!bud) return
+    cancellingDesignId.value = designId
+    try {
+      await budStore.cancelDesign(bud.id, designId)
+      if (budStore.error) {
+        statusErrorMessage.value = budStore.error
+        statusErrorSnackbar.value = true
+      } else {
+        statusInfoMessage.value = 'Cancelled'
+        statusInfoSnackbar.value = true
+      }
+    } finally {
+      cancellingDesignId.value = null
     }
   }
 
@@ -190,6 +225,7 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
 
   return {
     cancellingAgent,
+    cancellingDesignId,
     // guard-dialog state
     showNoPRWarningDialog,
     overrideReasonDialog,
@@ -200,8 +236,11 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
     // snackbar state
     statusErrorSnackbar,
     statusErrorMessage,
+    statusInfoSnackbar,
+    statusInfoMessage,
     // actions
     cancelRunningAgent,
+    cancelDesign,
     updateStatus,
     openQATab,
     confirmNoPRWarning,

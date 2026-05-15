@@ -722,7 +722,7 @@ export const BUD_STATUS_COLORS: Record<BUDStatus, string> = {
 }
 
 // ── Job Queue Types ───────────────────────────────────────────────
-export type JobState = 'queued' | 'running' | 'completed' | 'failed'
+export type JobState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface JobStatusRead {
   jobId: string

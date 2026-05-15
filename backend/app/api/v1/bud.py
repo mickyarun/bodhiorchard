@@ -32,10 +32,10 @@ from app.api.v1.bud_qa import router as qa_router
 from app.api.v1.bud_todos import router as todos_router
 from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
-from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
+from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus, BUDTimelineEvent
 from app.models.user import User
 from app.repositories.agent_activity import AgentActivityLogRepository
-from app.repositories.bud import BUDRepository
+from app.repositories.bud import BUDDesignRepository, BUDRepository
 from app.repositories.bud_agent_task import BUDAgentTaskRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.bug import BugRepository
@@ -53,6 +53,7 @@ from app.schemas.bud_code_review import (
     CodeReviewStatusResponse,
 )
 from app.schemas.bud_constants import EXPORTABLE_SECTIONS
+from app.schemas.bud_design import BUDDesignRead
 from app.schemas.dev_activity import (
     CommitRepoRead,
     ContributorRead,
@@ -63,6 +64,11 @@ from app.schemas.dev_activity import (
     UntrackedRepoRead,
 )
 from app.services.agent_activity_logger import PHASE_WORKER_SLUGS
+from app.services.agent_task_cancel import (
+    AgentTaskCancelError,
+    cancel_task,
+    is_task_terminal,
+)
 from app.services.bud_edit_policy import assert_section_editable
 
 logger = structlog.get_logger(__name__)
@@ -97,6 +103,18 @@ async def _bud_response(
     bud_data = BUDRead.model_validate(bud)
     if active_task:
         bud_data.active_agent_task = BUDAgentTaskRead.model_validate(active_task)
+
+    # ``BUDDesignRead`` declares ``repo_name`` but the ORM model has no
+    # column or relationship for it — ``from_attributes`` would leave
+    # it None. Refetch designs via the JOIN-backed list so the per-repo
+    # banners and chat-panel dropdown can render the actual repo name
+    # instead of falling back to "default". Skip the extra query when
+    # the BUD has no design rows (every non-design phase, plus design
+    # phase before the user clicks "Add").
+    if bud.designs:
+        design_repo = BUDDesignRepository(db, org_id=org_id)
+        design_rows = await design_repo.list_with_repo_names(bud.id)
+        bud_data.designs = [BUDDesignRead.model_validate(row) for row in design_rows]
 
     # Re-attach the phase-progress banner for synthetic workers (assignment
     # / todo-gen / estimation) that don't have BUDAgentTask rows. Without
@@ -352,6 +370,29 @@ async def update_bud(
                 f"Cannot change status of a {bud.status.value} BUD. Create a new BUD instead."
             ),
         )
+
+    # Guard: leaving the design phase while wireframe generation is still
+    # in flight produces a phase-overlap state where the design task and
+    # the next-phase task are both active. The per-design cancel path
+    # walks ``get_active_for_bud`` and can write terminal state to the
+    # wrong task in that window. Block the transition until every
+    # ``bud_designs`` row is out of ``generating``. Discard is exempt —
+    # abandoning the BUD entirely is a legitimate escape hatch.
+    if (
+        "status" in update_data
+        and bud.status == BUDStatus.DESIGN
+        and update_data["status"] not in (BUDStatus.DESIGN, BUDStatus.DISCARDED)
+    ):
+        design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
+        in_flight = await design_repo.count_by_status(bud.id, BUDDesignStatus.GENERATING)
+        if in_flight > 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"{in_flight} wireframe{'s' if in_flight > 1 else ''} still generating — "
+                    "cancel them or wait for completion before advancing the phase."
+                ),
+            )
 
     # Phase-edit policy: section-owning fields are only writable while the
     # BUD is in their owning phase. Frontend mirrors this rule in
@@ -921,64 +962,36 @@ async def cancel_agent_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BUDAgentTaskRead:
-    """Cancel a running or pending agent task.
+    """Cancel a pending/running agent task.
 
-    Two cases, one endpoint:
-
-    1. **Live job** — the paired ``asyncio.Task`` is still tracked by
-       the job queue. We signal it; the worker's ``CancelledError``
-       branch kills the Claude subprocess and marks the DB row
-       ``failed`` from its own fresh session. The API does NOT write
-       terminal state in this path — the execution plane owns it.
-
-    2. **Orphan row** — the in-memory job is gone (e.g. backend
-       restarted mid-run, or the 5-min cleanup TTL has elapsed), but
-       the ``bud_agent_tasks`` row is still stuck at ``pending`` /
-       ``running``. No worker exists to clean up, so the API flips the
-       row itself. This is the only case where the API writes terminal
-       state — because there is literally no-one else who can.
+    Thin wrapper around :func:`app.services.agent_task_cancel`: this
+    handler validates tenancy / state, then delegates the actual
+    signal + DB cleanup to the service. The service raises
+    :class:`AgentTaskCancelError` if signalling a live job fails;
+    we translate that into a ``409`` so the user sees why their
+    cancel didn't land.
     """
-    from sqlalchemy import update as sql_update
-
-    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
-    from app.services.job_queue import cancel_job as cancel_in_memory_job
-
     task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
     task = await task_repo.get_by_id(task_id)
     if not task or task.bud_id != bud_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    if task.status not in (AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING):
+    if is_task_terminal(task):
         return BUDAgentTaskRead.model_validate(task)
 
-    reason = f"Cancelled by {current_user.email}"
-    signalled = cancel_in_memory_job(task.job_id, reason=reason) if task.job_id else False
-
-    if not signalled:
-        # Orphan — no worker will ever clean this up, so we do it here.
-        # Tenant-scoped + status-guarded so we don't clobber a row that
-        # raced us to a terminal state.
-        await db.execute(
-            sql_update(BUDAgentTask)
-            .where(BUDAgentTask.id == task_id)
-            .where(BUDAgentTask.org_id == current_user.org_id)
-            .where(BUDAgentTask.status.in_(["pending", "running"]))
-            .values(status="failed", error_message=reason)
+    try:
+        updated = await cancel_task(
+            db,
+            org_id=current_user.org_id,
+            task=task,
+            reason=f"Cancelled by {current_user.email}",
         )
-        await db.commit()
-        fresh = await task_repo.get_by_id(task_id)
-        if fresh is not None:
-            task = fresh
+    except AgentTaskCancelError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Could not cancel: {exc}",
+        ) from exc
 
-    logger.info(
-        "agent_task_cancel",
-        task_id=str(task_id),
-        bud_id=str(bud_id),
-        job_id=task.job_id,
-        signalled=signalled,
-        by=current_user.email,
-    )
-
-    return BUDAgentTaskRead.model_validate(task)
+    return BUDAgentTaskRead.model_validate(updated)
 
 
 @router.post(
@@ -1041,8 +1054,6 @@ async def retry_agent_task(
 
     # Route to the correct job handler based on task type
     if old_task.task_type == "design":
-        from app.models.bud import BUDDesignStatus
-        from app.repositories.bud import BUDDesignRepository, BUDRepository
         from app.schemas.jobs import DesignAgentJobPayload
         from app.services.job_queue import JOB_DESIGN_AGENT
 

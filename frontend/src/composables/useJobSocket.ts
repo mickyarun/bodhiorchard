@@ -28,8 +28,16 @@ export function useJobSocket() {
   const tracker = useRealtimeTracker<JobStatusRead>({
     topicPrefix: 'job',
     pollEndpoint: (id) => `/v1/jobs/${id}/status`,
-    isTerminal: (d) =>
-      d.state === 'completed' ? 'completed' : d.state === 'failed' ? 'failed' : null,
+    isTerminal: (d) => {
+      if (d.state === 'completed') return 'completed'
+      // ``cancelled`` is terminal too — without this branch, cancelling
+      // a job leaves the tracker subscribed forever and any "agent
+      // running" banner driven by ``isActive`` stays mounted. Routing
+      // it through ``failed`` lets the existing onError path surface
+      // the "Cancelled by ..." message and refetch BUD state.
+      if (d.state === 'failed' || d.state === 'cancelled') return 'failed'
+      return null
+    },
     getError: (d) => d.error || null,
     getErrorCode: (d) => d.errorCode ?? null,
     getResult: (d) => d.result,
