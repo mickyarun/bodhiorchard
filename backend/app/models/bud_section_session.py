@@ -28,12 +28,26 @@ new session id (a fresh CLI namespace).
 """
 
 import uuid
+from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import ForeignKey, Index, Integer, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
+
+
+class ChatActiveJobStatus(StrEnum):
+    """Lifecycle state of the in-flight chat job on a section session row.
+
+    Only non-terminal states appear here — the worker clears the pointer
+    on COMPLETED / FAILED / CANCELLED so the DB column is always either
+    ``None`` (no job in flight) or one of these two values.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
 
 
 class BUDSectionSession(BaseModel):
@@ -63,6 +77,16 @@ class BUDSectionSession(BaseModel):
             unique=True,
             postgresql_where="design_id IS NOT NULL",
         ),
+        # Speeds up the boot-time orphan sweep ("which sessions still
+        # claim an in-flight chat job that no longer exists?") without
+        # paying full-table-scan cost on every startup.
+        Index(
+            "ix_bud_section_sessions_active_job",
+            "bud_id",
+            "section",
+            "design_id",
+            postgresql_where="active_job_id IS NOT NULL",
+        ),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -81,6 +105,29 @@ class BUDSectionSession(BaseModel):
     )
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # ── In-flight chat job pointer ──────────────────────────────────
+    # Set atomically when ``POST /chat`` enqueues a job (acts as the
+    # concurrency lock for the section) and cleared by the worker in
+    # the terminal-path finally block. A row whose pointer is non-NULL
+    # after a backend restart is an orphan and gets swept on startup.
+    active_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    active_job_status: Mapped[ChatActiveJobStatus | None] = mapped_column(
+        # ``values_callable`` makes SQLAlchemy send the StrEnum *values*
+        # (``"queued"``, ``"running"``) instead of the member names
+        # (``"QUEUED"``, ``"RUNNING"``), matching JobState and the rest
+        # of the codebase's enum convention.
+        Enum(
+            ChatActiveJobStatus,
+            name="chat_active_job_status",
+            native_enum=True,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=True,
+    )
+    active_job_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def __repr__(self) -> str:
         return (

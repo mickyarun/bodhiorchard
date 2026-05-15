@@ -112,6 +112,21 @@
       >
         {{ stageGateMessage }}
       </v-alert>
+      <!-- Chat-in-progress banner: another client is already chatting in
+           this section. Informational only — input stays enabled, and
+           the banner clears itself when the watched job ends. Chained
+           with ``v-else-if`` so the hard stage-gate alert wins when
+           both apply, and so the retry banner below stays mutually
+           exclusive with both. -->
+      <v-alert
+        v-else-if="chatInProgressBanner"
+        type="info"
+        density="compact"
+        variant="tonal"
+        class="mb-2"
+      >
+        {{ chatInProgressBanner }}
+      </v-alert>
       <!-- Manual retry banner after a second consecutive parse-unparseable error. -->
       <v-alert
         v-else-if="retryPrompt"
@@ -180,6 +195,7 @@ const props = defineProps<{
   messages: ChatMessage[]
   loading: boolean
   statusMessage: string
+  chatInProgressBanner?: string
   /** Non-empty when the section is locked by BUD stage (server 409). */
   stageGateMessage?: string
   /** Show the manual retry banner after a second parse failure. */

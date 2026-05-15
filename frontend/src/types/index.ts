@@ -747,6 +747,17 @@ export interface ChatJobCreatedResponse extends JobCreatedResponse {
   sessionId: string
 }
 
+// 409 detail shape returned by POST /v1/buds/{id}/chat when another
+// client already holds the section's active-job claim. Surfaced to the
+// chat panel as a "someone else is chatting here" banner rather than a
+// hard failure — the resume flow then subscribes to the winning job.
+export interface ChatInProgressDetail {
+  error: 'chat_in_progress'
+  message: string
+  active_job_id: string | null
+  started_at: string | null
+}
+
 // ── Chat Message Types ──────────────────────────────────────────
 export interface ChatMessageRead {
   id: string

@@ -30,6 +30,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+/** Drain microtasks long enough for fire-and-forget resume probes to settle. */
+async function flushMicrotasks(times = 5): Promise<void> {
+  for (let i = 0; i < times; i++) await Promise.resolve()
+}
 import { effectScope, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useBudChat } from './useBudChat'
@@ -230,6 +235,87 @@ describe('useBudChat', () => {
       await chat.loadChatHistory()
 
       expect(fetchActiveChatJob).toHaveBeenCalledWith('bud-1', 'design', 'design-abc')
+    })
+  })
+
+  it('rolls back optimistic push and surfaces a soft banner on chat_in_progress 409', async () => {
+    chatBUD.mockResolvedValue({
+      chatInProgressError: {
+        error: 'chat_in_progress',
+        message: 'A chat is already in progress for this section.',
+        active_job_id: 'job-rival',
+        started_at: '2026-05-15T12:00:00Z',
+      },
+    })
+    fetchActiveChatJob.mockResolvedValue({
+      jobId: 'job-rival',
+      jobType: 'bud_chat',
+      state: 'running',
+      statusMessage: 'Thinking...',
+      progressPct: 10,
+      result: null,
+      error: null,
+    })
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.handleChatSend('hi', [])
+      // Resume is fire-and-forget — drain microtasks so its fetch +
+      // startTracking observe.
+      await flushMicrotasks()
+
+      // Optimistic user push rolled back; stage-gate banner stays empty
+      // because chat_in_progress uses the *soft* banner channel that
+      // does NOT gate input.
+      expect(chat.chatMessages.value.length).toBe(0)
+      expect(chat.stageGateMessage.value).toBe('')
+      expect(chat.chatInProgressBanner.value).toMatch(/Another chat is already running/)
+      // Resume subscribed to the rival job.
+      expect(startTracking).toHaveBeenCalledTimes(1)
+      expect(startTracking.mock.calls[0][0]).toBe('job-rival')
+      // Spinner is on because the resumed job is live.
+      expect(chat.chatLoading.value).toBe(true)
+    })
+  })
+
+  it('clears chatInProgressBanner when the watched job terminates', async () => {
+    chatBUD.mockResolvedValue({
+      chatInProgressError: {
+        error: 'chat_in_progress',
+        message: 'busy',
+        active_job_id: 'job-rival',
+        started_at: '2026-05-15T12:00:00Z',
+      },
+    })
+    fetchActiveChatJob.mockResolvedValue({
+      jobId: 'job-rival',
+      jobType: 'bud_chat',
+      state: 'running',
+      statusMessage: '',
+      progressPct: 0,
+      result: null,
+      error: null,
+    })
+
+    let callbacks: SocketCallbacks | undefined
+    startTracking.mockImplementation((_jobId, cbs) => {
+      callbacks = cbs
+    })
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.handleChatSend('hi', [])
+      await flushMicrotasks()
+      expect(chat.chatInProgressBanner.value).not.toBe('')
+
+      // Simulate the rival job finishing — terminal frame flips loading
+      // off, which must also clear the soft banner.
+      await callbacks?.onComplete?.({
+        result: { reply: 'done', updated_content: null, session_id: 's' },
+      })
+
+      expect(chat.chatLoading.value).toBe(false)
+      expect(chat.chatInProgressBanner.value).toBe('')
     })
   })
 })

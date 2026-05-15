@@ -28,8 +28,12 @@ from app.repositories.bud import BUDChatMessageRepository, BUDDesignRepository, 
 from app.repositories.bud_section_session import BUDSectionSessionRepository
 from app.schemas.bud import ChatMessageRead
 from app.schemas.bud_constants import SECTION_PATTERN, SECTION_REQUIRED_STAGES
-from app.schemas.jobs import ChatJobCreatedResponse, ChatJobPayload, JobStatusRead
-from app.services.job_queue import JOB_BUD_CHAT, create_job, find_active_job
+from app.schemas.jobs import ChatJobCreatedResponse, ChatJobPayload, JobState, JobStatusRead
+from app.services.job_queue import (
+    JOB_BUD_CHAT,
+    create_job_with_id,
+    get_job,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -89,6 +93,7 @@ async def get_active_chat_job(
     section: str = Query("requirements_md"),
     design_id: uuid.UUID | None = Query(None),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> JobStatusRead | None:
     """Return the in-flight chat job for this BUD section/design, if any.
 
@@ -97,19 +102,32 @@ async def get_active_chat_job(
     in a previous mount of the same page, so the progress bar reappears
     instead of vanishing the moment the user navigates away and back.
 
-    Org scope: the ``org_id`` is included in the payload match, so a
-    cross-org request returns ``None`` rather than a different org's
-    job — mirrors the silent-empty pattern of ``get_chat_history``.
+    The lookup is anchored on the durable ``bud_section_sessions``
+    pointer (single source of truth for "is a chat in progress here?"),
+    then cross-checked against the in-memory ``_job_store`` for the
+    live progress frame. If the pointer references a job that is no
+    longer queued/running (worker crashed, backend restarted, terminal
+    state already published), the pointer is lazily cleared so the
+    next ``POST /chat`` isn't stuck at 409. The Phase-4 boot-time
+    orphan sweep is the durable backstop for the same situation.
+
+    Cross-org safety: ``BUDSectionSessionRepository`` is org-scoped on
+    construction, so a request from a different org never sees another
+    org's pointer.
     """
-    return find_active_job(
-        JOB_BUD_CHAT,
-        {
-            "org_id": str(current_user.org_id),
-            "bud_id": str(bud_id),
-            "section": section,
-            "design_id": str(design_id) if design_id else None,
-        },
-    )
+    session_repo = BUDSectionSessionRepository(db, org_id=current_user.org_id)
+    pointer = await session_repo.get_active_job_pointer(bud_id, section, design_id)
+    if pointer is None:
+        return None
+
+    live = get_job(pointer.job_id)
+    if live is None or live.state not in (JobState.QUEUED, JobState.RUNNING):
+        # Stale pointer: in-memory entry has been evicted or is already
+        # terminal. Release the claim so the next chat send can proceed.
+        await session_repo.clear_active_job(bud_id, section, design_id)
+        await db.commit()
+        return None
+    return live
 
 
 class BUDChatRequest(BaseModel):
@@ -190,9 +208,42 @@ async def chat_bud(
     # by session_id across rotations.
     session_repo = BUDSectionSessionRepository(db, org_id=current_user.org_id)
     section_session = await session_repo.get_active(bud_id, body.section, design_id=body.design_id)
-    session_id: uuid.UUID | None = (
+    fallback_session_id: uuid.UUID | None = (
         section_session.session_id if section_session is not None else body.session_id
     )
+
+    # Atomic concurrency claim: pre-mint the job_id and stake it on the
+    # ``bud_section_sessions`` row before anything else commits. The
+    # claim is the source of truth for "is a chat already running on
+    # this section?" — a second simultaneous POST loses the claim and
+    # gets 409 ``chat_in_progress``, falling into watcher mode on the
+    # frontend via the active-job endpoint. Persisting the user message
+    # and enqueuing the job are gated on a successful claim so a 409
+    # leaves no orphan rows in chat history.
+    job_id = str(uuid.uuid4())
+    claim = await session_repo.try_claim_active_job(
+        bud_id,
+        body.section,
+        body.design_id,
+        job_id,
+        fallback_session_id=fallback_session_id,
+    )
+    if not claim.won:
+        pointer = await session_repo.get_active_job_pointer(bud_id, body.section, body.design_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "chat_in_progress",
+                "message": "A chat is already in progress for this section.",
+                "active_job_id": pointer.job_id if pointer else None,
+                "started_at": pointer.started_at.isoformat() if pointer else None,
+            },
+        )
+    # The repo ensures the row exists with a valid session_id on the
+    # won path (preserved on update, freshly minted on insert), so the
+    # assert narrows ``uuid.UUID | None`` to ``uuid.UUID`` for mypy.
+    assert claim.session_id is not None, "won claim must carry a session_id"
+    session_id: uuid.UUID = claim.session_id
 
     # Resolve repo scope for the design section so the worker can pass
     # ``repo_id`` to ``get_design_system`` / ``write_bud_design`` MCP calls.
@@ -238,8 +289,24 @@ async def chat_bud(
         images=body.images,
     )
 
-    job = create_job(JOB_BUD_CHAT, payload=payload.model_dump(), user_id=str(current_user.id))
+    # Enqueue against the id we already claimed. If enqueue fails (queue
+    # full, shutdown, etc.) explicitly clear the claim. The surrounding
+    # request transaction will also roll back on raise — which already
+    # undoes the claim today — but the explicit clear keeps cleanup
+    # correct if the transactional boundary ever shifts (e.g. a future
+    # commit between claim and enqueue). No flush: rollback handles
+    # persistence either way.
+    try:
+        job = create_job_with_id(
+            job_id,
+            JOB_BUD_CHAT,
+            payload=payload.model_dump(),
+            user_id=str(current_user.id),
+        )
+    except Exception:
+        await session_repo.clear_active_job(bud_id, body.section, body.design_id)
+        raise
     return ChatJobCreatedResponse(
         job_id=job.job_id,
-        session_id=str(session_id) if session_id else "",
+        session_id=str(session_id),
     )

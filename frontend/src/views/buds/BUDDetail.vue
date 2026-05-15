@@ -380,6 +380,7 @@
         :loading="chatLoading"
         :status-message="chatStatusMessage"
         :stage-gate-message="stageGateMessage"
+        :chat-in-progress-banner="chatInProgressBanner"
         :retry-prompt="retryPrompt"
         :designs="chatDesignOptions"
         :selected-design-id="activeDesignTabId"
@@ -621,7 +622,7 @@ const { editing: editingTestPlan, toggle: toggleTestPlanEdit } =
 // resolve fine at call time.
 const {
   chatOpen, chatLoading, chatMessages, chatStatusMessage, currentSessionId,
-  stageGateMessage, retryPrompt,
+  stageGateMessage, chatInProgressBanner, retryPrompt,
   loadChatHistory, startNewSession, handleChatSend, manualRetry, enrichWithAI,
 } = useBudChat({
   getBud: () => bud.value,

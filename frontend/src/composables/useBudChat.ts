@@ -24,12 +24,14 @@
  */
 
 import { nextTick, ref } from 'vue'
+import type { Ref } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useJobSocket } from '@/composables/useJobSocket'
 import { useChatRetry } from '@/composables/useChatRetry'
 import { useChatHistoryLoader } from '@/composables/useChatHistoryLoader'
 import { JIRA_ENRICH_PROMPT } from '@/composables/jiraEnrichPrompt'
 import { makeChatSocketCallbacks } from '@/composables/chatJobSocket'
+import { makeResumeActiveChat } from '@/composables/chatResume'
 import type { BUDDocument, BUDSectionKey } from '@/types'
 
 export interface ChatMessage {
@@ -57,7 +59,14 @@ export function useBudChat(hooks: BudChatHooks) {
   const chatMessages = ref<ChatMessage[]>([])
   const chatStatusMessage = ref('')
   const currentSessionId = ref<string | undefined>(undefined)
+  // Hard stage-gate banner: BUD is in the wrong status for this section.
+  // Gates the textarea so the user can't push more messages until they
+  // advance the BUD or switch sections.
   const stageGateMessage = ref('')
+  // Soft banner: another client is already chatting in this section.
+  // Informational only — the resumed job's terminal frame clears it
+  // (via the wrapped setLoading hook) so the user can chat again.
+  const chatInProgressBanner = ref('')
 
   const history = useChatHistoryLoader({
     getBudId: () => hooks.getBud()?.id ?? null,
@@ -73,58 +82,6 @@ export function useBudChat(hooks: BudChatHooks) {
       budStore.fetchChatHistory(budId, section, designId, sessionId, signal),
   })
 
-  const retry = useChatRetry({
-    resend: (msg, images) => sendOnce(msg, images),
-    setStatus: (text) => { chatStatusMessage.value = text },
-    setLoading: (loading) => { chatLoading.value = loading },
-  })
-
-  async function loadChatHistory(): Promise<void> {
-    const loaded = await history.load()
-    if (loaded === null) return
-    chatMessages.value = loaded.map(m => ({
-      role: m.role,
-      text: m.message,
-      userName: m.user_name,
-    }))
-    await resumeActiveChat()
-  }
-
-  async function resumeActiveChat(): Promise<void> {
-    // Re-subscribe to an in-flight chat job started in a previous mount of
-    // this BUD detail page. Without this, navigating away mid-chat and
-    // returning leaves the progress bar hidden until the next user turn,
-    // even though the LLM is still working. Lookup is the same job_id the
-    // original send-time ``startTracking`` used; the callback bag mirrors
-    // ``sendOnce`` so resume and originate share one code path.
-    const bud = hooks.getBud()
-    if (!bud) return
-    const section = hooks.getCurrentSection()
-    const designId = section === 'design' ? hooks.getDesignTabId() : undefined
-    const active = await budStore.fetchActiveChatJob(bud.id, section, designId)
-    if (!active) return
-    chatLoading.value = true
-    chatStatusMessage.value = active.statusMessage ?? ''
-    startTracking(active.jobId, makeChatSocketCallbacks(section, {
-      pushMessage: (m) => chatMessages.value.push(m),
-      setStatus: (text) => { chatStatusMessage.value = text },
-      setLoading: (loading) => { chatLoading.value = loading },
-      setSessionId: (id) => { currentSessionId.value = id },
-      applyUpdatedContent,
-      maybeAutoRetry: () => retry.maybeAutoRetry(),
-    }))
-  }
-
-  function startNewSession(): void {
-    // Server owns the session id; undefined ⇒ next send is a fresh
-    // claim. Worker mints + echoes the new id via ``result.session_id``.
-    currentSessionId.value = undefined
-    chatMessages.value = []
-    retry.resetBudget()
-    retry.lastUserMessage.value = null
-    stageGateMessage.value = ''
-  }
-
   async function applyUpdatedContent(
     section: BUDSectionKey,
     content: string,
@@ -137,6 +94,85 @@ export function useBudChat(hooks: BudChatHooks) {
     } else {
       hooks.syncEditor(section, content)
     }
+  }
+
+  const retry = useChatRetry({
+    resend: (msg, images) => sendOnce(msg, images),
+    setStatus: (text) => { chatStatusMessage.value = text },
+    setLoading: (loading) => { chatLoading.value = loading },
+  })
+
+  // ``setLoading`` wrapper used by every job-socket subscription. When
+  // loading flips from true→false the watched chat has terminated, so
+  // also clear the soft "another chat is running" banner — without
+  // this the banner would linger past the watched job's end.
+  function setChatLoading(loading: boolean): void {
+    chatLoading.value = loading
+    if (!loading) chatInProgressBanner.value = ''
+  }
+
+  // Shared socket-callback bag — both the originate (``sendOnce``) and
+  // resume-on-remount paths feed this to ``makeChatSocketCallbacks`` so
+  // their terminal-frame handling is identical.
+  const socketCallbacks = {
+    pushMessage: (m: ChatMessage) => chatMessages.value.push(m),
+    setStatus: (text: string) => { chatStatusMessage.value = text },
+    setLoading: setChatLoading,
+    setSessionId: (id: string) => { currentSessionId.value = id },
+    applyUpdatedContent,
+    maybeAutoRetry: () => retry.maybeAutoRetry(),
+  }
+
+  const resumeActiveChat = makeResumeActiveChat({
+    getBud: () => {
+      const bud = hooks.getBud()
+      return bud ? { id: bud.id } : null
+    },
+    getCurrentSection: hooks.getCurrentSection,
+    getDesignTabId: hooks.getDesignTabId,
+    fetchActiveChatJob: (budId, section, designId) =>
+      budStore.fetchActiveChatJob(budId, section, designId),
+    startTracking,
+    setLoading: setChatLoading,
+    setStatus: (text) => { chatStatusMessage.value = text },
+    socketCallbacks,
+  })
+
+  /** Roll back the optimistic user push and surface a 409 banner.
+   *
+   * Target ref differs by 409 flavour: stage-gate locks the input via
+   * ``stageGateMessage``; chat-in-progress uses the softer
+   * ``chatInProgressBanner`` that does NOT gate input — when the
+   * watched chat ends, ``setChatLoading`` clears it and the user can
+   * resume sending.
+   */
+  function rollbackOptimisticUserPush(target: Ref<string>, banner: string): void {
+    target.value = banner
+    const last = chatMessages.value[chatMessages.value.length - 1]
+    if (last && last.role === 'user') chatMessages.value.pop()
+    chatLoading.value = false
+  }
+
+  async function loadChatHistory(): Promise<void> {
+    const loaded = await history.load()
+    if (loaded === null) return
+    chatMessages.value = loaded.map(m => ({
+      role: m.role,
+      text: m.message,
+      userName: m.user_name,
+    }))
+    await resumeActiveChat()
+  }
+
+  function startNewSession(): void {
+    // Server owns the session id; undefined ⇒ next send is a fresh
+    // claim. Worker mints + echoes the new id via ``result.session_id``.
+    currentSessionId.value = undefined
+    chatMessages.value = []
+    retry.resetBudget()
+    retry.lastUserMessage.value = null
+    stageGateMessage.value = ''
+    chatInProgressBanner.value = ''
   }
 
   async function sendOnce(msg: string, images: string[]): Promise<boolean> {
@@ -159,23 +195,23 @@ export function useBudChat(hooks: BudChatHooks) {
       return false
     }
     if ('stageGateError' in result) {
-      // 409: surface banner and roll back the optimistic user push.
-      stageGateMessage.value = result.stageGateError
-      const last = chatMessages.value[chatMessages.value.length - 1]
-      if (last && last.role === 'user') chatMessages.value.pop()
-      chatLoading.value = false
+      rollbackOptimisticUserPush(stageGateMessage, result.stageGateError)
+      return false
+    }
+    if ('chatInProgressError' in result) {
+      // Another client (or tab) holds the section's active-job claim.
+      // Subscribe to the winning job so the user sees its live progress
+      // in their panel instead of an empty thread.
+      rollbackOptimisticUserPush(
+        chatInProgressBanner,
+        'Another chat is already running for this section. Showing its progress.',
+      )
+      void resumeActiveChat()
       return false
     }
 
     if (result.sessionId) currentSessionId.value = result.sessionId
-    startTracking(result.jobId, makeChatSocketCallbacks(section, {
-      pushMessage: (m) => chatMessages.value.push(m),
-      setStatus: (text) => { chatStatusMessage.value = text },
-      setLoading: (loading) => { chatLoading.value = loading },
-      setSessionId: (id) => { currentSessionId.value = id },
-      applyUpdatedContent,
-      maybeAutoRetry: () => retry.maybeAutoRetry(),
-    }))
+    startTracking(result.jobId, makeChatSocketCallbacks(section, socketCallbacks))
     return true
   }
 
@@ -215,6 +251,7 @@ export function useBudChat(hooks: BudChatHooks) {
     chatStatusMessage,
     currentSessionId,
     stageGateMessage,
+    chatInProgressBanner,
     retryPrompt: retry.retryPrompt,
     loadChatHistory,
     startNewSession,

@@ -15,7 +15,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { AxiosError } from 'axios'
-import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus, JobStatusRead } from '@/types'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatInProgressDetail, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus, JobStatusRead } from '@/types'
 import { BUD_STATUS_ORDER, CODE_REVIEW_OVERRIDE_REASON_MIN } from '@/types'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
@@ -150,7 +150,12 @@ export const useBUDStore = defineStore('bud', () => {
     designId?: string,
     sessionId?: string,
     images?: string[],
-  ): Promise<ChatJobCreatedResponse | { stageGateError: string } | null> {
+  ): Promise<
+    | ChatJobCreatedResponse
+    | { stageGateError: string }
+    | { chatInProgressError: ChatInProgressDetail }
+    | null
+  > {
     error.value = ''
     try {
       const body: Record<string, unknown> = { message, section }
@@ -160,10 +165,27 @@ export const useBUDStore = defineStore('bud', () => {
       const { data } = await api.post<ChatJobCreatedResponse>(`/v1/buds/${id}/chat`, body)
       return data
     } catch (e) {
-      const err = e as { response?: { status?: number, data?: { detail?: string } } }
+      const err = e as {
+        response?: {
+          status?: number
+          data?: { detail?: string | ChatInProgressDetail }
+        }
+      }
       if (err.response?.status === 409) {
-        const detail = err.response?.data?.detail ?? 'Section is locked for this BUD stage.'
-        return { stageGateError: detail }
+        const detail = err.response?.data?.detail
+        // Backend uses two 409 shapes for ``POST /chat``:
+        // - chat_in_progress: ``detail`` is an object carrying the live
+        //   job pointer so the panel can subscribe via resume.
+        // - stage-gate: ``detail`` is a string the UI renders verbatim.
+        if (
+          detail && typeof detail === 'object' && detail.error === 'chat_in_progress'
+        ) {
+          return { chatInProgressError: detail }
+        }
+        const message = typeof detail === 'string'
+          ? detail
+          : 'Section is locked for this BUD stage.'
+        return { stageGateError: message }
       }
       return null
     }
