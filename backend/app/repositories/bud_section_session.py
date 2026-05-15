@@ -23,12 +23,21 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.bud import BUDChatMessage
 from app.models.bud_section_session import BUDSectionSession, ChatActiveJobStatus
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
+
+# AI-side note inserted into chat_history for every chat that was
+# in flight when the backend went down. Matches the friendly-error
+# headline format so the row reads the same as any other terminal
+# AI reply once the panel reloads.
+CHAT_INTERRUPTED_MESSAGE = (
+    "⚠️ This chat was interrupted by a server restart. Please retry your last message."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,3 +308,78 @@ class BUDSectionSessionRepository(BaseRepository[BUDSectionSession]):
             status=row.active_job_status,
             started_at=row.active_job_started_at,
         )
+
+
+async def recover_stuck_chats(db: AsyncSession) -> int:
+    """Mark every orphan in-flight chat as interrupted on startup.
+
+    Sister to :func:`app.repositories.bud.recover_stuck_designs`. Every
+    section row whose ``active_job_id`` survives a backend restart is
+    by definition an orphan — ``_job_store`` was wiped, the worker is
+    gone, the Claude subprocess died with uvicorn. Without this sweep
+    the next ``POST /chat`` for that section gets 409 ``chat_in_progress``
+    on the stale pointer (until the active-job endpoint's lazy clear
+    runs on remount), and the chat thread silently lacks any record
+    of the interruption.
+
+    The recovery is a three-step single-transaction routine:
+
+    1. SELECT the orphan rows so we know which (bud, section, design,
+       session) tuples to mark.
+    2. Bulk-INSERT one ``chat_history`` row per orphan with role=ai +
+       :data:`CHAT_INTERRUPTED_MESSAGE`, tagged with the same
+       ``session_id`` the user's prompt carries so the chat-history
+       filter groups them together.
+    3. Bulk-UPDATE clear ``active_job_id`` / ``active_job_status`` /
+       ``active_job_started_at`` on every row that still pointed at a
+       dead job.
+
+    **CROSS-TENANT, STARTUP ONLY.** Issues unscoped queries across
+    every org's sessions — only safe inside the app lifespan, before
+    any org-scoped request is served. Caller commits the surrounding
+    transaction (matches the pattern of ``recover_stuck_designs``).
+
+    Returns the number of orphan sessions recovered.
+    """
+    orphan_stmt = select(
+        BUDSectionSession.id,
+        BUDSectionSession.org_id,
+        BUDSectionSession.bud_id,
+        BUDSectionSession.section,
+        BUDSectionSession.design_id,
+        BUDSectionSession.session_id,
+    ).where(BUDSectionSession.active_job_id.is_not(None))
+    orphans = (await db.execute(orphan_stmt)).all()
+    if not orphans:
+        return 0
+
+    marker_rows = [
+        {
+            "org_id": o.org_id,
+            "bud_id": o.bud_id,
+            "section": o.section,
+            "design_id": o.design_id,
+            "session_id": o.session_id,
+            "role": "ai",
+            "message": CHAT_INTERRUPTED_MESSAGE,
+        }
+        for o in orphans
+    ]
+    await db.execute(insert(BUDChatMessage), marker_rows)
+
+    # Bound the UPDATE to the exact ids we just inserted markers for,
+    # not the broader ``active_job_id IS NOT NULL`` predicate. Keeps
+    # the two statements provably consistent if step 1's filter is
+    # ever tightened (e.g. age-based cleanup).
+    clear_stmt = (
+        update(BUDSectionSession)
+        .where(BUDSectionSession.id.in_([o.id for o in orphans]))
+        .values(
+            active_job_id=None,
+            active_job_status=None,
+            active_job_started_at=None,
+        )
+    )
+    result = await db.execute(clear_stmt)
+    await db.flush()
+    return rowcount(result) or 0

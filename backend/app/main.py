@@ -141,6 +141,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 6. Recover stuck agent tasks from prior crash/restart
     from app.repositories.bud import recover_stuck_designs
     from app.repositories.bud_agent_task import recover_stuck_agent_tasks
+    from app.repositories.bud_section_session import recover_stuck_chats
 
     try:
         async with AsyncSessionLocal() as session:
@@ -152,11 +153,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # Flip the orphan design rows here so the next page load sees
             # them as ``failed`` and the user can retry cleanly.
             recovered_designs = await recover_stuck_designs(session)
+            # Same shape for the AI Editor chat: any ``bud_section_sessions``
+            # row whose ``active_job_id`` survived the restart points at a
+            # dead job. Sweep persists an "interrupted" AI marker into
+            # ``bud_chat_messages`` so the thread reads cleanly on the
+            # next mount, then clears the pointer so the next POST /chat
+            # can claim the section without hitting 409.
+            recovered_chats = await recover_stuck_chats(session)
             await session.commit()
         if recovered:
             logger.info("recovered_stuck_agent_tasks", count=recovered)
         if recovered_designs:
             logger.info("recovered_stuck_designs", count=recovered_designs)
+        if recovered_chats:
+            logger.info("recovered_stuck_chats", count=recovered_chats)
     except Exception:
         logger.warning("agent_task_recovery_failed", exc_info=True)
 
