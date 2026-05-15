@@ -54,12 +54,14 @@ vi.mock('@/composables/useJobSocket', () => ({
 const chatBUD = vi.fn()
 const fetchChatHistory = vi.fn()
 const fetchActiveChatJob = vi.fn()
+const cancelActiveChat = vi.fn()
 
 vi.mock('@/stores/bud', () => ({
   useBUDStore: () => ({
     chatBUD,
     fetchChatHistory,
     fetchActiveChatJob,
+    cancelActiveChat,
     currentBUD: ref<Record<string, unknown> | null>(null),
   }),
 }))
@@ -82,8 +84,10 @@ describe('useBudChat', () => {
     chatBUD.mockReset()
     fetchChatHistory.mockReset()
     fetchActiveChatJob.mockReset()
+    cancelActiveChat.mockReset()
     // Default for tests that don't care about resume: no in-flight job.
     fetchActiveChatJob.mockResolvedValue(null)
+    cancelActiveChat.mockResolvedValue(true)
   })
 
   it('rolls back optimistic push and surfaces banner on 409', async () => {
@@ -338,6 +342,33 @@ describe('useBudChat', () => {
 
       expect(chat.chatLoading.value).toBe(false)
       expect(chat.chatInProgressBanner.value).toBe('')
+    })
+  })
+
+  it('handleChatCancel posts the cancel with the current section/design scope', async () => {
+    await effectScope().run(async () => {
+      const hooks = {
+        ...makeHooks(),
+        getCurrentSection: () => 'design' as const,
+        getDesignTabId: () => 'design-77',
+      }
+      const chat = useBudChat(hooks as never)
+      // Pre-condition: a chat is in flight (cancel only fires when loading).
+      chat.chatLoading.value = true
+
+      await chat.handleChatCancel()
+
+      expect(cancelActiveChat).toHaveBeenCalledWith('bud-1', 'design', 'design-77')
+    })
+  })
+
+  it('handleChatCancel is a no-op when no chat is in flight', async () => {
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      // chatLoading defaults to false — handler must early-return.
+      await chat.handleChatCancel()
+
+      expect(cancelActiveChat).not.toHaveBeenCalled()
     })
   })
 })

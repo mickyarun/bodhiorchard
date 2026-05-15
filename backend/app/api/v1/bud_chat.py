@@ -29,6 +29,7 @@ from app.repositories.bud_section_session import BUDSectionSessionRepository
 from app.schemas.bud import ChatMessageRead
 from app.schemas.bud_constants import SECTION_PATTERN, SECTION_REQUIRED_STAGES
 from app.schemas.jobs import ChatJobCreatedResponse, ChatJobPayload, JobState, JobStatusRead
+from app.services.bud_chat_cancel import BUDChatCancelError, cancel_chat
 from app.services.job_queue import (
     JOB_BUD_CHAT,
     create_job_with_id,
@@ -310,3 +311,59 @@ async def chat_bud(
         job_id=job.job_id,
         session_id=str(session_id),
     )
+
+
+class CancelChatResponse(BaseModel):
+    """Body for a successful ``POST /chat/cancel`` (200)."""
+
+    cancelled_job_id: str = Field(alias="cancelledJobId")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.post(
+    "/chat/cancel",
+    response_model=CancelChatResponse,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def cancel_active_chat(
+    bud_id: uuid.UUID,
+    section: str = Query("requirements_md"),
+    design_id: uuid.UUID | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CancelChatResponse:
+    """Cancel the in-flight chat job for this BUD section / design.
+
+    Surfaces a 404 when nothing is in flight so the frontend can fall
+    back to its idle state without a stuck spinner. On a live cancel
+    the worker's terminal ``CancelledError`` branch publishes the
+    final WS frame and ``handle_chat_job``'s ``finally`` hook clears
+    the ``active_job_id`` pointer — the response just acknowledges
+    that the signal landed.
+    """
+    try:
+        job_id = await cancel_chat(
+            db,
+            org_id=current_user.org_id,
+            bud_id=bud_id,
+            section=section,
+            design_id=design_id,
+            reason="Cancelled by user",
+        )
+    except BUDChatCancelError as exc:
+        # The cancel signal itself blew up while the subprocess was
+        # alive. Surface the underlying error so ops can grep, and
+        # 500 so the client can retry rather than assume the chat is
+        # gone.
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    if job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active chat to cancel.",
+        )
+    return CancelChatResponse(cancelled_job_id=job_id)

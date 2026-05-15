@@ -306,6 +306,28 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function cancelActiveChat(
+    budId: string,
+    section: string,
+    designId?: string,
+  ): Promise<boolean> {
+    // Signals the backend to stop the in-flight chat job for this thread.
+    // The worker's CancelledError branch publishes the terminal WS frame
+    // (which the panel's job-socket already listens to) and the finally
+    // hook clears the active-job pointer — so the store doesn't need to
+    // touch any reactive state itself. Returns true when the cancel
+    // landed, false on 404 (nothing to cancel) or any error so the UI
+    // can degrade gracefully.
+    try {
+      const params: Record<string, string> = { section }
+      if (designId) params.design_id = designId
+      await api.post(`/v1/buds/${budId}/chat/cancel`, undefined, { params })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   async function fetchTimeline(budId: string): Promise<TimelineEvent[]> {
     try {
       const { data } = await api.get(`/v1/buds/${budId}/timeline`)
@@ -494,6 +516,7 @@ export const useBUDStore = defineStore('bud', () => {
     regenerateDesign,
     fetchChatHistory,
     fetchActiveChatJob,
+    cancelActiveChat,
     fetchTimeline,
     fetchPRChecklist,
     fetchCodeReviewStatus,

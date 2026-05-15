@@ -222,6 +222,24 @@ export function useBudChat(hooks: BudChatHooks) {
     return true
   }
 
+  async function handleChatCancel(): Promise<void> {
+    const bud = hooks.getBud()
+    if (!bud || !chatLoading.value) return
+    const section = hooks.getCurrentSection()
+    const designId = section === 'design' ? hooks.getDesignTabId() : undefined
+    // Fire-and-forget — the worker's CancelledError branch publishes
+    // the terminal WS frame, which flips chatLoading=false through the
+    // shared socketCallbacks. If the POST itself fails (404 / 500 /
+    // network), swallow it: the spinner is left to time out naturally
+    // because the job may still be alive on the server, and we don't
+    // want a Vue click-handler unhandled-rejection warning.
+    try {
+      await budStore.cancelActiveChat(bud.id, section, designId)
+    } catch {
+      // intentional no-op — see comment above
+    }
+  }
+
   async function handleChatSend(msg: string, images: string[] = []): Promise<void> {
     const bud = hooks.getBud()
     if (!bud || chatLoading.value) return
@@ -263,6 +281,7 @@ export function useBudChat(hooks: BudChatHooks) {
     loadChatHistory,
     startNewSession,
     handleChatSend,
+    handleChatCancel,
     manualRetry: retry.manualRetry,
     enrichWithAI,
   }

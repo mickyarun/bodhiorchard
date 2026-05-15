@@ -95,6 +95,19 @@
           <div class="d-flex align-center ga-2">
             <v-progress-circular indeterminate size="14" width="2" color="primary" />
             <span class="text-caption">{{ statusMessage || 'Thinking...' }}</span>
+            <!-- Cancel button: signals the backend to stop the job.
+                 Disabled-on-click until the terminal WS frame flips
+                 ``loading`` off; that flip also clears ``cancelling``
+                 via the watcher below. -->
+            <v-btn
+              icon="mdi-close-circle"
+              size="x-small"
+              variant="text"
+              color="error"
+              :disabled="cancelling"
+              :aria-label="cancelling ? 'Cancelling…' : 'Cancel chat'"
+              @click="onCancelClick"
+            />
           </div>
         </div>
       </div>
@@ -216,8 +229,28 @@ const emit = defineEmits<{
   send: [message: string, images: string[]]
   'new-session': []
   retry: []
+  cancel: []
   'select-design': [designId: string]
 }>()
+
+// Local "cancel signal is in flight" flag — toggled true on click,
+// reset when the WS terminal frame flips ``loading`` to false. Keeps
+// the button disabled between click and terminal so a double-click
+// can't fire two POSTs.
+const cancelling = ref(false)
+
+function onCancelClick(): void {
+  if (cancelling.value) return
+  cancelling.value = true
+  emit('cancel')
+}
+
+watch(
+  () => props.loading,
+  (now) => {
+    if (!now) cancelling.value = false
+  },
+)
 
 const showDesignPicker = computed(
   () => (props.designs?.length ?? 0) >= 2 && !!props.selectedDesignId,

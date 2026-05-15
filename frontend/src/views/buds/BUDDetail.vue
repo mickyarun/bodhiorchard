@@ -386,6 +386,7 @@
         :selected-design-id="activeDesignTabId"
         @close="chatOpen = false"
         @send="handleChatSend"
+        @cancel="handleChatCancel"
         @new-session="startNewSession"
         @retry="manualRetry"
         @select-design="handleChatSelectDesign"
@@ -623,7 +624,7 @@ const { editing: editingTestPlan, toggle: toggleTestPlanEdit } =
 const {
   chatOpen, chatLoading, chatMessages, chatStatusMessage, currentSessionId,
   stageGateMessage, chatInProgressBanner, retryPrompt,
-  loadChatHistory, startNewSession, handleChatSend, manualRetry, enrichWithAI,
+  loadChatHistory, startNewSession, handleChatSend, handleChatCancel, manualRetry, enrichWithAI,
 } = useBudChat({
   getBud: () => bud.value,
   getCurrentSection: () => currentSection.value,
