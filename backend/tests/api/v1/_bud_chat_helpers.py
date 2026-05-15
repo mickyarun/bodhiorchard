@@ -25,6 +25,8 @@ import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+from app.repositories.bud_section_session import ActiveJobPointer, ClaimResult
+
 
 def make_bud(*, status: str = "design", bud_id: uuid.UUID | None = None) -> MagicMock:
     """Lightweight BUD stand-in — only the fields the handler reads."""
@@ -51,14 +53,38 @@ def patch_repos(
     bud: MagicMock,
     active_session: Any = None,
     add_message: AsyncMock | None = None,
+    claim_won: bool = True,
+    claim_session_id: uuid.UUID | None = None,
+    active_pointer: ActiveJobPointer | None = None,
 ) -> dict[str, MagicMock]:
-    """Build the patch chain the endpoint imports during a request."""
+    """Build the patch chain the endpoint imports during a request.
+
+    ``claim_won`` defaults to True so the happy-path tests don't need to
+    set up the claim explicitly. When ``False``, the handler raises 409
+    ``chat_in_progress`` and ``active_pointer`` is what
+    ``get_active_job_pointer`` returns for the response body.
+    """
     bud_repo = MagicMock()
     bud_repo.get_by_id = AsyncMock(return_value=bud)
     bud_repo_cls = MagicMock(return_value=bud_repo)
 
+    # When the claim wins, the repo returns the row's effective
+    # session_id — either ``active_session.session_id`` (preserved on
+    # update) or a freshly minted UUID (on insert).
+    if claim_won:
+        won_session_id = claim_session_id or (
+            active_session.session_id if active_session is not None else uuid.uuid4()
+        )
+        claim_result = ClaimResult(won=True, session_id=won_session_id)
+    else:
+        claim_result = ClaimResult(won=False, session_id=None)
+
     session_repo = MagicMock()
     session_repo.get_active = AsyncMock(return_value=active_session)
+    session_repo.try_claim_active_job = AsyncMock(return_value=claim_result)
+    session_repo.get_active_job_pointer = AsyncMock(return_value=active_pointer)
+    session_repo.clear_active_job = AsyncMock(return_value=None)
+    session_repo.mark_active_job_running = AsyncMock(return_value=None)
     session_repo_cls = MagicMock(return_value=session_repo)
 
     chat_repo = MagicMock()

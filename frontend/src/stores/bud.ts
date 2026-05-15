@@ -15,7 +15,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { AxiosError } from 'axios'
-import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus } from '@/types'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatInProgressDetail, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus, JobStatusRead } from '@/types'
 import { BUD_STATUS_ORDER, CODE_REVIEW_OVERRIDE_REASON_MIN } from '@/types'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
@@ -150,7 +150,13 @@ export const useBUDStore = defineStore('bud', () => {
     designId?: string,
     sessionId?: string,
     images?: string[],
-  ): Promise<ChatJobCreatedResponse | { stageGateError: string } | null> {
+  ): Promise<
+    | ChatJobCreatedResponse
+    | { stageGateError: string }
+    | { chatInProgressError: ChatInProgressDetail }
+    | { permissionError: string }
+    | null
+  > {
     error.value = ''
     try {
       const body: Record<string, unknown> = { message, section }
@@ -160,10 +166,34 @@ export const useBUDStore = defineStore('bud', () => {
       const { data } = await api.post<ChatJobCreatedResponse>(`/v1/buds/${id}/chat`, body)
       return data
     } catch (e) {
-      const err = e as { response?: { status?: number, data?: { detail?: string } } }
+      const err = e as {
+        response?: {
+          status?: number
+          data?: { detail?: string | ChatInProgressDetail }
+        }
+      }
+      const detail = err.response?.data?.detail
+      const detailString = typeof detail === 'string' ? detail : undefined
+      if (err.response?.status === 403) {
+        // ``buds:edit`` RBAC rejection. Surface the server's message
+        // verbatim when available so the user sees the specific reason
+        // ("missing role X", etc.) rather than a generic failure.
+        return {
+          permissionError:
+            detailString ?? "You don't have permission to chat in this section.",
+        }
+      }
       if (err.response?.status === 409) {
-        const detail = err.response?.data?.detail ?? 'Section is locked for this BUD stage.'
-        return { stageGateError: detail }
+        // Backend uses two 409 shapes for ``POST /chat``:
+        // - chat_in_progress: ``detail`` is an object carrying the live
+        //   job pointer so the panel can subscribe via resume.
+        // - stage-gate: ``detail`` is a string the UI renders verbatim.
+        if (
+          detail && typeof detail === 'object' && detail.error === 'chat_in_progress'
+        ) {
+          return { chatInProgressError: detail }
+        }
+        return { stageGateError: detailString ?? 'Section is locked for this BUD stage.' }
       }
       return null
     }
@@ -255,6 +285,46 @@ export const useBUDStore = defineStore('bud', () => {
       return data
     } catch {
       return []
+    }
+  }
+
+  async function fetchActiveChatJob(
+    budId: string,
+    section: string,
+    designId?: string,
+  ): Promise<JobStatusRead | null> {
+    // Looks up an in-flight ``JOB_BUD_CHAT`` job for this BUD/section/design,
+    // so the AI Editor panel can re-subscribe to its progress on re-mount
+    // (e.g. when the user navigates away mid-chat and comes back).
+    try {
+      const params: Record<string, string> = { section }
+      if (designId) params.design_id = designId
+      const { data } = await api.get(`/v1/buds/${budId}/chat/active-job`, { params })
+      return data ?? null
+    } catch {
+      return null
+    }
+  }
+
+  async function cancelActiveChat(
+    budId: string,
+    section: string,
+    designId?: string,
+  ): Promise<boolean> {
+    // Signals the backend to stop the in-flight chat job for this thread.
+    // The worker's CancelledError branch publishes the terminal WS frame
+    // (which the panel's job-socket already listens to) and the finally
+    // hook clears the active-job pointer — so the store doesn't need to
+    // touch any reactive state itself. Returns true when the cancel
+    // landed, false on 404 (nothing to cancel) or any error so the UI
+    // can degrade gracefully.
+    try {
+      const params: Record<string, string> = { section }
+      if (designId) params.design_id = designId
+      await api.post(`/v1/buds/${budId}/chat/cancel`, undefined, { params })
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -445,6 +515,8 @@ export const useBUDStore = defineStore('bud', () => {
     updateDesignNotes,
     regenerateDesign,
     fetchChatHistory,
+    fetchActiveChatJob,
+    cancelActiveChat,
     fetchTimeline,
     fetchPRChecklist,
     fetchCodeReviewStatus,

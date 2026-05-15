@@ -130,13 +130,43 @@ def create_job(
         RuntimeError: If the app is shutting down.
         asyncio.QueueFull: If the queue has hit backpressure limit.
     """
+    return create_job_with_id(str(uuid.uuid4()), job_type, payload=payload, user_id=user_id)
+
+
+def create_job_with_id(
+    job_id: str,
+    job_type: str,
+    *,
+    payload: dict[str, Any],
+    user_id: str | None = None,
+) -> JobStatusRead:
+    """Create a job using an externally-minted ``job_id`` and enqueue it.
+
+    Same contract as :func:`create_job`, but the caller supplies the id.
+    Used by flows that need to reserve the id *before* the job enters
+    ``_job_store`` — e.g. claiming a DB row keyed on the id in the same
+    transactional unit as the enqueue, so the DB pointer and the
+    in-memory entry can never disagree.
+
+    Raises:
+        ValueError: If ``job_type`` is not registered, ``job_id`` is
+            empty / blank, or ``job_id`` is already in use. Empty or
+            duplicate ids are rejected loudly because they would
+            silently collide on the ``job:{id}`` WS topic and clobber
+            in-flight entries in ``_job_store``.
+        RuntimeError: If the app is shutting down.
+        asyncio.QueueFull: If the queue has hit the backpressure limit.
+    """
     if _shutting_down:
         raise RuntimeError("Job queue is shutting down; not accepting new jobs")
     if job_type not in _registry:
         raise ValueError(f"Unknown job type: {job_type}")
+    if not job_id or not job_id.strip():
+        raise ValueError("job_id must be a non-empty string")
+    if job_id in _job_store:
+        raise ValueError(f"job_id already in use: {job_id}")
 
     _, _, queue = _registry[job_type]
-    job_id = str(uuid.uuid4())
 
     status = JobStatusRead(
         job_id=job_id,
@@ -299,6 +329,27 @@ def is_job_active(job_type: str, match_payload: dict[str, str]) -> bool:
         if all(entry.payload.get(k) == v for k, v in match_payload.items()):
             return True
     return False
+
+
+def find_active_job(job_type: str, match_payload: dict[str, Any]) -> JobStatusRead | None:
+    """Return the live status of any queued/running job matching the payload, else None.
+
+    Mirrors :func:`is_job_active`'s scan semantics but yields the matching
+    entry's :class:`JobStatusRead` instead of a bool. Used by re-entry
+    flows (e.g. the BUD AI Editor chat panel re-subscribing on remount)
+    that need the ``job_id`` to start a tracker. Returns the first match;
+    callers are expected to scope ``match_payload`` tightly enough
+    (e.g. ``{org_id, bud_id, section, design_id}``) that there is at most
+    one match.
+    """
+    for entry in _job_store.values():
+        if entry.status.job_type != job_type:
+            continue
+        if entry.status.state not in (JobState.QUEUED, JobState.RUNNING):
+            continue
+        if all(entry.payload.get(k) == v for k, v in match_payload.items()):
+            return entry.status
+    return None
 
 
 # ── Worker loop + lifecycle ────────────────────────────────────────

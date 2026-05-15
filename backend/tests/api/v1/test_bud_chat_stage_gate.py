@@ -47,7 +47,7 @@ async def test_chat_bud_409_when_design_section_outside_design_stage() -> None:
             "app.api.v1.bud_chat.BUDChatMessageRepository",
             patches["BUDChatMessageRepository"],
         ),
-        patch("app.api.v1.bud_chat.create_job") as create_job,
+        patch("app.api.v1.bud_chat.create_job_with_id") as create_job,
         pytest.raises(HTTPException) as ei,
     ):
         await chat_bud(
@@ -82,7 +82,7 @@ async def test_chat_bud_409_when_requirements_in_testing_stage() -> None:
             "app.api.v1.bud_chat.BUDChatMessageRepository",
             patches["BUDChatMessageRepository"],
         ),
-        patch("app.api.v1.bud_chat.create_job"),
+        patch("app.api.v1.bud_chat.create_job_with_id"),
         pytest.raises(HTTPException) as ei,
     ):
         await chat_bud(
@@ -116,7 +116,7 @@ async def test_chat_bud_409_when_requirements_in_design_stage() -> None:
             "app.api.v1.bud_chat.BUDChatMessageRepository",
             patches["BUDChatMessageRepository"],
         ),
-        patch("app.api.v1.bud_chat.create_job"),
+        patch("app.api.v1.bud_chat.create_job_with_id"),
         pytest.raises(HTTPException) as ei,
     ):
         await chat_bud(
@@ -146,7 +146,7 @@ async def test_chat_bud_409_when_tech_spec_outside_tech_arch_stage() -> None:
             "app.api.v1.bud_chat.BUDChatMessageRepository",
             patches["BUDChatMessageRepository"],
         ),
-        patch("app.api.v1.bud_chat.create_job"),
+        patch("app.api.v1.bud_chat.create_job_with_id"),
         pytest.raises(HTTPException) as ei,
     ):
         await chat_bud(
@@ -181,7 +181,7 @@ async def test_chat_bud_409_when_section_locked_at_every_stage() -> None:
             "app.api.v1.bud_chat.BUDChatMessageRepository",
             patches["BUDChatMessageRepository"],
         ),
-        patch("app.api.v1.bud_chat.create_job"),
+        patch("app.api.v1.bud_chat.create_job_with_id"),
         pytest.raises(HTTPException) as ei,
     ):
         await chat_bud(

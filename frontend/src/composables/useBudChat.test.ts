@@ -30,6 +30,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+/** Drain microtasks long enough for fire-and-forget resume probes to settle. */
+async function flushMicrotasks(times = 5): Promise<void> {
+  for (let i = 0; i < times; i++) await Promise.resolve()
+}
 import { effectScope, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useBudChat } from './useBudChat'
@@ -38,6 +43,7 @@ type SocketCallbacks = {
   onProgress?: (s: { statusMessage: string }) => void
   onComplete?: (data: unknown) => void | Promise<void>
   onError?: (err: string, errorCode?: string) => void | Promise<void>
+  onMissing?: () => void | Promise<void>
 }
 
 const startTracking = vi.fn<[string, SocketCallbacks], void>()
@@ -48,11 +54,15 @@ vi.mock('@/composables/useJobSocket', () => ({
 
 const chatBUD = vi.fn()
 const fetchChatHistory = vi.fn()
+const fetchActiveChatJob = vi.fn()
+const cancelActiveChat = vi.fn()
 
 vi.mock('@/stores/bud', () => ({
   useBUDStore: () => ({
     chatBUD,
     fetchChatHistory,
+    fetchActiveChatJob,
+    cancelActiveChat,
     currentBUD: ref<Record<string, unknown> | null>(null),
   }),
 }))
@@ -74,6 +84,11 @@ describe('useBudChat', () => {
     startTracking.mockReset()
     chatBUD.mockReset()
     fetchChatHistory.mockReset()
+    fetchActiveChatJob.mockReset()
+    cancelActiveChat.mockReset()
+    // Default for tests that don't care about resume: no in-flight job.
+    fetchActiveChatJob.mockResolvedValue(null)
+    cancelActiveChat.mockResolvedValue(true)
   })
 
   it('rolls back optimistic push and surfaces banner on 409', async () => {
@@ -171,6 +186,225 @@ describe('useBudChat', () => {
       // The first signal must be aborted by the second call's start.
       expect(seenSignals[0].aborted).toBe(true)
       expect(seenSignals[1].aborted).toBe(false)
+    })
+  })
+
+  it('does not start a job tracker when there is no active chat to resume', async () => {
+    fetchChatHistory.mockResolvedValue([])
+    fetchActiveChatJob.mockResolvedValue(null)
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.loadChatHistory()
+
+      expect(chat.chatLoading.value).toBe(false)
+      expect(startTracking).not.toHaveBeenCalled()
+    })
+  })
+
+  it('resumes job tracking when a chat job is still in flight on remount', async () => {
+    fetchChatHistory.mockResolvedValue([])
+    fetchActiveChatJob.mockResolvedValue({
+      jobId: 'job-resume-1',
+      jobType: 'bud_chat',
+      state: 'running',
+      statusMessage: 'Reading file...',
+      progressPct: 25,
+      result: null,
+      error: null,
+    })
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.loadChatHistory()
+
+      expect(chat.chatLoading.value).toBe(true)
+      expect(chat.chatStatusMessage.value).toBe('Reading file...')
+      expect(startTracking).toHaveBeenCalledTimes(1)
+      expect(startTracking.mock.calls[0][0]).toBe('job-resume-1')
+    })
+  })
+
+  it('passes the design id through to fetchActiveChatJob on the design tab', async () => {
+    fetchChatHistory.mockResolvedValue([])
+    fetchActiveChatJob.mockResolvedValue(null)
+
+    const hooks = {
+      ...makeHooks(),
+      getCurrentSection: () => 'design' as const,
+      getDesignTabId: () => 'design-abc',
+    }
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(hooks as never)
+      await chat.loadChatHistory()
+
+      expect(fetchActiveChatJob).toHaveBeenCalledWith('bud-1', 'design', 'design-abc')
+    })
+  })
+
+  it('rolls back optimistic push and locks input on a 403 permission error', async () => {
+    chatBUD.mockResolvedValue({
+      permissionError: "You don't have the 'buds:edit' permission.",
+    })
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.handleChatSend('hi', [])
+
+      // Optimistic user push rolled back — no orphan user message.
+      expect(chat.chatMessages.value.length).toBe(0)
+      // Hard-lock banner carries the server's specific reason (NOT the
+      // generic "Sorry, something went wrong" fallback).
+      expect(chat.stageGateMessage.value).toBe(
+        "You don't have the 'buds:edit' permission.",
+      )
+      expect(chat.chatLoading.value).toBe(false)
+      // Job tracker NOT engaged on a 403.
+      expect(startTracking).not.toHaveBeenCalled()
+    })
+  })
+
+  it('rolls back optimistic push and surfaces a soft banner on chat_in_progress 409', async () => {
+    chatBUD.mockResolvedValue({
+      chatInProgressError: {
+        error: 'chat_in_progress',
+        message: 'A chat is already in progress for this section.',
+        active_job_id: 'job-rival',
+        started_at: '2026-05-15T12:00:00Z',
+      },
+    })
+    fetchActiveChatJob.mockResolvedValue({
+      jobId: 'job-rival',
+      jobType: 'bud_chat',
+      state: 'running',
+      statusMessage: 'Thinking...',
+      progressPct: 10,
+      result: null,
+      error: null,
+    })
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.handleChatSend('hi', [])
+      // Resume is fire-and-forget — drain microtasks so its fetch +
+      // startTracking observe.
+      await flushMicrotasks()
+
+      // Optimistic user push rolled back; stage-gate banner stays empty
+      // because chat_in_progress uses the *soft* banner channel that
+      // does NOT gate input.
+      expect(chat.chatMessages.value.length).toBe(0)
+      expect(chat.stageGateMessage.value).toBe('')
+      expect(chat.chatInProgressBanner.value).toMatch(/Another chat is already running/)
+      // Resume subscribed to the rival job.
+      expect(startTracking).toHaveBeenCalledTimes(1)
+      expect(startTracking.mock.calls[0][0]).toBe('job-rival')
+      // Spinner is on because the resumed job is live.
+      expect(chat.chatLoading.value).toBe(true)
+    })
+  })
+
+  it('clears chatInProgressBanner when the watched job terminates', async () => {
+    chatBUD.mockResolvedValue({
+      chatInProgressError: {
+        error: 'chat_in_progress',
+        message: 'busy',
+        active_job_id: 'job-rival',
+        started_at: '2026-05-15T12:00:00Z',
+      },
+    })
+    fetchActiveChatJob.mockResolvedValue({
+      jobId: 'job-rival',
+      jobType: 'bud_chat',
+      state: 'running',
+      statusMessage: '',
+      progressPct: 0,
+      result: null,
+      error: null,
+    })
+
+    let callbacks: SocketCallbacks | undefined
+    startTracking.mockImplementation((_jobId, cbs) => {
+      callbacks = cbs
+    })
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.handleChatSend('hi', [])
+      await flushMicrotasks()
+      expect(chat.chatInProgressBanner.value).not.toBe('')
+
+      // Simulate the rival job finishing — terminal frame flips loading
+      // off, which must also clear the soft banner.
+      await callbacks?.onComplete?.({
+        result: { reply: 'done', updated_content: null, session_id: 's' },
+      })
+
+      expect(chat.chatLoading.value).toBe(false)
+      expect(chat.chatInProgressBanner.value).toBe('')
+    })
+  })
+
+  it('handleChatCancel posts the cancel with the current section/design scope', async () => {
+    await effectScope().run(async () => {
+      const hooks = {
+        ...makeHooks(),
+        getCurrentSection: () => 'design' as const,
+        getDesignTabId: () => 'design-77',
+      }
+      const chat = useBudChat(hooks as never)
+      // Pre-condition: a chat is in flight (cancel only fires when loading).
+      chat.chatLoading.value = true
+
+      await chat.handleChatCancel()
+
+      expect(cancelActiveChat).toHaveBeenCalledWith('bud-1', 'design', 'design-77')
+    })
+  })
+
+  it('handleChatCancel is a no-op when no chat is in flight', async () => {
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      // chatLoading defaults to false — handler must early-return.
+      await chat.handleChatCancel()
+
+      expect(cancelActiveChat).not.toHaveBeenCalled()
+    })
+  })
+
+  it('onMissing clears the spinner and reloads chat history after backend restart', async () => {
+    // Originate path: send a chat, capture the socket callbacks the
+    // tracker received so we can fire ``onMissing`` against them — that
+    // is what useRealtimeTracker does when the poll/seed gets a 404
+    // (the backend evicted the job from ``_job_store`` mid-chat).
+    chatBUD.mockResolvedValue({ jobId: 'job-evicted', sessionId: 'sess-1' })
+    let callbacks: SocketCallbacks | undefined
+    startTracking.mockImplementation((_jobId, cbs) => {
+      callbacks = cbs
+    })
+    fetchChatHistory.mockResolvedValue([
+      {
+        role: 'ai',
+        message: '⚠️ This chat was interrupted by a server restart. Please retry your last message.',
+        user_name: null,
+      },
+    ])
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.handleChatSend('rewrite this section', [])
+      expect(chat.chatLoading.value).toBe(true)
+
+      // Simulate the tracker's 404-recovery hook firing.
+      await callbacks?.onMissing?.()
+
+      expect(chat.chatLoading.value).toBe(false)
+      expect(chat.chatStatusMessage.value).toBe('')
+      // ``reloadHistory`` was wired to ``loadChatHistory``, which goes
+      // through the AbortController-backed history loader and ends up
+      // calling ``fetchChatHistory`` from the store mock.
+      expect(fetchChatHistory).toHaveBeenCalled()
     })
   })
 })

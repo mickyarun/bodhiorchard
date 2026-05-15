@@ -95,6 +95,19 @@
           <div class="d-flex align-center ga-2">
             <v-progress-circular indeterminate size="14" width="2" color="primary" />
             <span class="text-caption">{{ statusMessage || 'Thinking...' }}</span>
+            <!-- Cancel button: signals the backend to stop the job.
+                 Disabled-on-click until the terminal WS frame flips
+                 ``loading`` off; that flip also clears ``cancelling``
+                 via the watcher below. -->
+            <v-btn
+              icon="mdi-close-circle"
+              size="x-small"
+              variant="text"
+              color="error"
+              :disabled="cancelling"
+              :aria-label="cancelling ? 'Cancelling…' : 'Cancel chat'"
+              @click="onCancelClick"
+            />
           </div>
         </div>
       </div>
@@ -111,6 +124,21 @@
         class="mb-2"
       >
         {{ stageGateMessage }}
+      </v-alert>
+      <!-- Chat-in-progress banner: another client is already chatting in
+           this section. Informational only — input stays enabled, and
+           the banner clears itself when the watched job ends. Chained
+           with ``v-else-if`` so the hard stage-gate alert wins when
+           both apply, and so the retry banner below stays mutually
+           exclusive with both. -->
+      <v-alert
+        v-else-if="chatInProgressBanner"
+        type="info"
+        density="compact"
+        variant="tonal"
+        class="mb-2"
+      >
+        {{ chatInProgressBanner }}
       </v-alert>
       <!-- Manual retry banner after a second consecutive parse-unparseable error. -->
       <v-alert
@@ -180,6 +208,7 @@ const props = defineProps<{
   messages: ChatMessage[]
   loading: boolean
   statusMessage: string
+  chatInProgressBanner?: string
   /** Non-empty when the section is locked by BUD stage (server 409). */
   stageGateMessage?: string
   /** Show the manual retry banner after a second parse failure. */
@@ -200,8 +229,28 @@ const emit = defineEmits<{
   send: [message: string, images: string[]]
   'new-session': []
   retry: []
+  cancel: []
   'select-design': [designId: string]
 }>()
+
+// Local "cancel signal is in flight" flag — toggled true on click,
+// reset when the WS terminal frame flips ``loading`` to false. Keeps
+// the button disabled between click and terminal so a double-click
+// can't fire two POSTs.
+const cancelling = ref(false)
+
+function onCancelClick(): void {
+  if (cancelling.value) return
+  cancelling.value = true
+  emit('cancel')
+}
+
+watch(
+  () => props.loading,
+  (now) => {
+    if (!now) cancelling.value = false
+  },
+)
 
 const showDesignPicker = computed(
   () => (props.designs?.length ?? 0) >= 2 && !!props.selectedDesignId,

@@ -62,7 +62,7 @@ async def test_chat_bud_happy_path_uses_resolved_session_id() -> None:
             "app.api.v1.bud_chat.BUDDesignRepository",
             patches["BUDDesignRepository"],
         ),
-        patch("app.api.v1.bud_chat.create_job", return_value=fake_job),
+        patch("app.api.v1.bud_chat.create_job_with_id", return_value=fake_job),
     ):
         response = await chat_bud(
             bud_id=bud.id,
@@ -83,12 +83,12 @@ async def test_chat_bud_happy_path_uses_resolved_session_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_bud_first_message_falls_back_to_body_session_id() -> None:
-    """No active row + no body id → response carries empty session id.
+async def test_chat_bud_first_message_gets_session_from_claim() -> None:
+    """No active row → claim mints a fresh session_id, response echoes it.
 
-    The worker will mint one on first run; the endpoint accepts that the
-    user-message row may carry ``session_id=None`` for the very first
-    turn (the AI reply row will pick up the worker-resolved id).
+    With the Phase 2 atomic claim, the row is always created before the
+    job is enqueued, so the response always carries a real UUID — never
+    an empty string. The worker is free to rotate this id on first run.
     """
     user = make_user()
     bud = make_bud(status="design")
@@ -98,7 +98,12 @@ async def test_chat_bud_first_message_falls_back_to_body_session_id() -> None:
     fake_job = MagicMock()
     fake_job.job_id = "job-456"
 
-    patches = patch_repos(bud=bud, active_session=None)
+    claim_minted_session_id = uuid.uuid4()
+    patches = patch_repos(
+        bud=bud,
+        active_session=None,
+        claim_session_id=claim_minted_session_id,
+    )
 
     with (
         patch("app.api.v1.bud_chat.BUDRepository", patches["BUDRepository"]),
@@ -114,7 +119,7 @@ async def test_chat_bud_first_message_falls_back_to_body_session_id() -> None:
             "app.api.v1.bud_chat.BUDDesignRepository",
             patches["BUDDesignRepository"],
         ),
-        patch("app.api.v1.bud_chat.create_job", return_value=fake_job),
+        patch("app.api.v1.bud_chat.create_job_with_id", return_value=fake_job),
     ):
         response = await chat_bud(
             bud_id=bud.id,
@@ -123,4 +128,4 @@ async def test_chat_bud_first_message_falls_back_to_body_session_id() -> None:
             db=db,
         )
 
-    assert response.session_id == ""
+    assert response.session_id == str(claim_minted_session_id)

@@ -27,6 +27,7 @@ import structlog
 
 from app.agents.skill_mapping import SECTION_SKILL_MAP
 from app.database import AsyncSessionLocal
+from app.repositories.bud_section_session import BUDSectionSessionRepository
 from app.schemas.bud_constants import SECTION_LABELS
 from app.schemas.jobs import ChatJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
@@ -52,6 +53,12 @@ logger = structlog.get_logger(__name__)
 # parsed into a structured reply. The frontend auto-retries once on this
 # code with the same session id, then shows a manual-retry banner.
 CHAT_REPLY_UNPARSEABLE = "chat_reply_unparseable"
+
+# Persisted AI-side note for cancelled chats. Matches the in-flight
+# string the chat panel surfaces via the WS terminal frame
+# (``friendlyAgentError`` fallback) so the thread looks identical
+# whether the user is watching live or reopens the BUD after refresh.
+CHAT_CANCELLED_MESSAGE = "Cancelled by user"
 
 # A small-edit chat needs at most: fetch prior wireframe, optionally fetch
 # design system, write back. Four turns is the comfortable ceiling — the
@@ -96,17 +103,109 @@ async def handle_chat_job(job_id: str, raw_payload: dict[str, Any]) -> None:
     Uses a per-section lock to serialize concurrent chats on the same
     BUD section, preventing conflicting content overwrites when multiple
     users edit simultaneously.
+
+    Wraps the run with two durable-claim hooks against
+    ``bud_section_sessions``: flip QUEUED→RUNNING on entry so the
+    active-job endpoint reports live state, and clear the pointer in
+    ``finally`` so a fresh chat can claim the section once this one
+    ends. Both hooks are best-effort — the boot-time orphan sweep is
+    the backstop if either DB write fails.
     """
     payload = ChatJobPayload(**raw_payload)
+    org_uuid = uuid_mod.UUID(payload.org_id)
+    bud_uuid = uuid_mod.UUID(payload.bud_id)
+    design_uuid = uuid_mod.UUID(payload.design_id) if payload.design_id else None
 
-    # Serialize chat jobs per BUD + section to prevent conflicting edits
-    lock_key = f"{payload.bud_id}:{payload.section}"
-    if payload.design_id:
-        lock_key += f":{payload.design_id}"
-    lock = section_locks.setdefault(lock_key, asyncio.Lock())
+    await _mark_active_job_running(job_id, org_uuid, bud_uuid, payload.section, design_uuid)
 
-    async with lock:
-        await _run_chat_job(job_id, payload)
+    try:
+        # Serialize chat jobs per BUD + section to prevent conflicting edits
+        lock_key = f"{payload.bud_id}:{payload.section}"
+        if payload.design_id:
+            lock_key += f":{payload.design_id}"
+        lock = section_locks.setdefault(lock_key, asyncio.Lock())
+
+        async with lock:
+            await _run_chat_job(job_id, payload)
+    except asyncio.CancelledError:
+        # Persist a tombstone so the cancel is visible after a refresh.
+        # The in-flight UI already shows ``CHAT_CANCELLED_MESSAGE`` via
+        # the WS terminal frame; without this write the AI half of the
+        # thread would vanish on reload and the user's prompt would look
+        # orphaned. Re-raise so the worker's outer ``CancelledError``
+        # branch still publishes the terminal frame and clears state.
+        await _persist_cancel_marker(job_id, payload)
+        raise
+    finally:
+        await _clear_active_chat_claim(job_id, org_uuid, bud_uuid, payload.section, design_uuid)
+
+
+async def _mark_active_job_running(
+    job_id: str,
+    org_id: uuid_mod.UUID,
+    bud_id: uuid_mod.UUID,
+    section: str,
+    design_id: uuid_mod.UUID | None,
+) -> None:
+    """Flip the durable section-session claim from QUEUED to RUNNING.
+
+    Best-effort: a failure here is logged but does not block the job.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = BUDSectionSessionRepository(db, org_id=org_id)
+            await repo.mark_active_job_running(bud_id, section, design_id)
+            await db.commit()
+    except Exception:
+        logger.warning("mark_active_job_running_failed", job_id=job_id, exc_info=True)
+
+
+async def _persist_cancel_marker(job_id: str, payload: ChatJobPayload) -> None:
+    """Write an AI-side cancel tombstone so refresh sees the cancelled thread.
+
+    Best-effort: a DB failure here is logged but does not block the
+    worker's terminal-frame publish or claim cleanup. The user-message
+    row that was already persisted by ``POST /chat`` keeps the prompt
+    visible — the worst case if this insert fails is the same
+    orphaned-prompt UX we had before this fix.
+    """
+    try:
+        await persist_chat_message(
+            payload.bud_id,
+            payload.org_id,
+            payload.section,
+            "ai",
+            CHAT_CANCELLED_MESSAGE,
+            payload.design_id,
+            session_id=payload.session_id,
+        )
+    except Exception:
+        logger.warning("persist_cancel_marker_failed", job_id=job_id, exc_info=True)
+
+
+async def _clear_active_chat_claim(
+    job_id: str,
+    org_id: uuid_mod.UUID,
+    bud_id: uuid_mod.UUID,
+    section: str,
+    design_id: uuid_mod.UUID | None,
+) -> None:
+    """Release the durable section-session claim on terminal exit.
+
+    Called from ``handle_chat_job``'s ``finally`` so it runs whether
+    the job completed, failed via ``update_job``, was cancelled, or
+    raised an unhandled exception. Best-effort: any DB failure is
+    swallowed (after logging) so the user's terminal WS frame is still
+    the source of truth for their UI. The boot-time orphan sweep clears
+    anything we missed.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = BUDSectionSessionRepository(db, org_id=org_id)
+            await repo.clear_active_job(bud_id, section, design_id)
+            await db.commit()
+    except Exception:
+        logger.warning("clear_active_chat_claim_failed", job_id=job_id, exc_info=True)
 
 
 async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
