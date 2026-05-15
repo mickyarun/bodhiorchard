@@ -54,6 +54,12 @@ logger = structlog.get_logger(__name__)
 # code with the same session id, then shows a manual-retry banner.
 CHAT_REPLY_UNPARSEABLE = "chat_reply_unparseable"
 
+# Persisted AI-side note for cancelled chats. Matches the in-flight
+# string the chat panel surfaces via the WS terminal frame
+# (``friendlyAgentError`` fallback) so the thread looks identical
+# whether the user is watching live or reopens the BUD after refresh.
+CHAT_CANCELLED_MESSAGE = "Cancelled by user"
+
 # A small-edit chat needs at most: fetch prior wireframe, optionally fetch
 # design system, write back. Four turns is the comfortable ceiling — the
 # initial design agent keeps its 10-turn budget via the skill config.
@@ -121,6 +127,15 @@ async def handle_chat_job(job_id: str, raw_payload: dict[str, Any]) -> None:
 
         async with lock:
             await _run_chat_job(job_id, payload)
+    except asyncio.CancelledError:
+        # Persist a tombstone so the cancel is visible after a refresh.
+        # The in-flight UI already shows ``CHAT_CANCELLED_MESSAGE`` via
+        # the WS terminal frame; without this write the AI half of the
+        # thread would vanish on reload and the user's prompt would look
+        # orphaned. Re-raise so the worker's outer ``CancelledError``
+        # branch still publishes the terminal frame and clears state.
+        await _persist_cancel_marker(job_id, payload)
+        raise
     finally:
         await _clear_active_chat_claim(job_id, org_uuid, bud_uuid, payload.section, design_uuid)
 
@@ -143,6 +158,29 @@ async def _mark_active_job_running(
             await db.commit()
     except Exception:
         logger.warning("mark_active_job_running_failed", job_id=job_id, exc_info=True)
+
+
+async def _persist_cancel_marker(job_id: str, payload: ChatJobPayload) -> None:
+    """Write an AI-side cancel tombstone so refresh sees the cancelled thread.
+
+    Best-effort: a DB failure here is logged but does not block the
+    worker's terminal-frame publish or claim cleanup. The user-message
+    row that was already persisted by ``POST /chat`` keeps the prompt
+    visible — the worst case if this insert fails is the same
+    orphaned-prompt UX we had before this fix.
+    """
+    try:
+        await persist_chat_message(
+            payload.bud_id,
+            payload.org_id,
+            payload.section,
+            "ai",
+            CHAT_CANCELLED_MESSAGE,
+            payload.design_id,
+            session_id=payload.session_id,
+        )
+    except Exception:
+        logger.warning("persist_cancel_marker_failed", job_id=job_id, exc_info=True)
 
 
 async def _clear_active_chat_claim(

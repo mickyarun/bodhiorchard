@@ -113,7 +113,13 @@ async def test_clear_runs_when_inner_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_clear_runs_on_cancellation() -> None:
-    """Inner cancelled → clear still runs and ``CancelledError`` propagates."""
+    """Inner cancelled → clear runs, cancel marker persists, error propagates.
+
+    The persisted marker is what makes a cancel visible after a page
+    refresh: the user-prompt row already exists in chat_history (saved
+    by ``POST /chat``), and this AI-side row anchors the "Cancelled by
+    user" answer so the thread doesn't look orphaned on reload.
+    """
     repo, repo_ctx = _patch_section_repo()
     with (
         _patch_session(),
@@ -122,9 +128,41 @@ async def test_clear_runs_on_cancellation() -> None:
             "app.services.job_chat._run_chat_job",
             new=AsyncMock(side_effect=asyncio.CancelledError()),
         ),
+        patch("app.services.job_chat.persist_chat_message", new=AsyncMock()) as persist,
         pytest.raises(asyncio.CancelledError),
     ):
         await handle_chat_job("job-3", _payload())
+
+    repo.clear_active_job.assert_awaited_once()
+    persist.assert_awaited_once()
+    kwargs = persist.call_args.kwargs
+    args = persist.call_args.args
+    # Match against the positional contract used in _persist_cancel_marker.
+    assert args[3] == "ai"
+    assert args[4] == "Cancelled by user"
+    # session_id is forwarded from the payload so the row groups with the
+    # user's prompt under chat-history's session filter.
+    assert "session_id" in kwargs
+
+
+@pytest.mark.asyncio
+async def test_cancel_marker_failure_does_not_mask_cancelled_error() -> None:
+    """Persist marker failing is logged; CancelledError still propagates."""
+    repo, repo_ctx = _patch_section_repo()
+    with (
+        _patch_session(),
+        repo_ctx,
+        patch(
+            "app.services.job_chat._run_chat_job",
+            new=AsyncMock(side_effect=asyncio.CancelledError()),
+        ),
+        patch(
+            "app.services.job_chat.persist_chat_message",
+            new=AsyncMock(side_effect=RuntimeError("db hiccup")),
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await handle_chat_job("job-cancel-marker-fail", _payload())
 
     repo.clear_active_job.assert_awaited_once()
 
