@@ -130,9 +130,7 @@ def create_job(
         RuntimeError: If the app is shutting down.
         asyncio.QueueFull: If the queue has hit backpressure limit.
     """
-    return create_job_with_id(
-        str(uuid.uuid4()), job_type, payload=payload, user_id=user_id
-    )
+    return create_job_with_id(str(uuid.uuid4()), job_type, payload=payload, user_id=user_id)
 
 
 def create_job_with_id(
