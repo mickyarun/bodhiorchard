@@ -205,9 +205,17 @@ def _build_payload(
             "merged_at": merged_at,
             "merge_commit_sha": head_sha,
             "title": f"mock PR #{pr_number}",
+            # ``GitHubPullRequest`` requires ``html_url`` and ``state``; the
+            # backend's schema validation rejects payloads missing either
+            # field with HTTP 500 from the catch-all. Synthesise plausible
+            # values rather than hand-waving with empty strings so the
+            # dispatcher's later logging stays readable.
+            "html_url": f"https://github.com/{full_name}/pull/{pr_number}",
+            "state": "closed",
             "head": {"sha": head_sha, "ref": f"mock-pr-{pr_number}"},
             "base": {"sha": base_sha, "ref": base_ref},
-            "user": {"login": "mock-author"},
+            # ``user.id`` is required too — login alone is rejected.
+            "user": {"login": "mock-author", "id": 0},
         },
         "repository": {
             "id": secrets.randbits(31),

@@ -79,10 +79,33 @@ def test_payload_carries_fields_the_handler_reads(driver) -> None:  # type: igno
     assert pr["head"]["sha"] == "headsha"
     assert pr["base"]["sha"] == "basesha"
     assert pr["base"]["ref"] == "main"
+    # GitHubPullRequest required fields the smoke test surfaced via 500.
+    assert pr["html_url"]
+    assert pr["state"]
+    assert "id" in pr["user"]
     repo = payload["repository"]
     assert repo["full_name"] == "owner/example"
     assert repo["owner"]["login"] == "owner"
     assert repo["name"] == "example"
+
+
+def test_payload_passes_pydantic_schema_validation(driver) -> None:  # type: ignore[no-untyped-def]
+    """Round-trip the payload through the live ``GitHubPullRequest`` schema.
+
+    Catches future drift between mock-payload shape and the schema the
+    backend handler validates against — the same drift the smoke test
+    surfaced as a 500 in production.
+    """
+    from app.schemas.github import GitHubPullRequest
+
+    payload = driver._build_payload(
+        full_name="owner/example",
+        pr_number=42,
+        base_sha="basesha",
+        head_sha="headsha",
+        base_ref="main",
+    )
+    GitHubPullRequest.model_validate(payload["pull_request"])
 
 
 def test_fixture_writer_merges_into_existing_file(  # type: ignore[no-untyped-def]
