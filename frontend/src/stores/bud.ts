@@ -204,6 +204,16 @@ export const useBUDStore = defineStore('bud', () => {
   async function fetchDesigns(budId: string): Promise<BUDDesign[]> {
     try {
       const { data } = await api.get(`/v1/buds/${budId}/designs`)
+      // Mirror into the store so consumers reading ``bud.designs``
+      // (per-design banners, chat-panel repo dropdown) react to
+      // status transitions in real time. ``BUDDesignPanel.loadDesigns``
+      // already calls this on every job onComplete/onError, so the
+      // banners flip without needing a full ``fetchBUD``. Bud-id
+      // guard prevents a stale fetch from a previous BUD clobbering
+      // the now-current one.
+      if (currentBUD.value?.id === budId) {
+        currentBUD.value = { ...currentBUD.value, designs: data }
+      }
       return data
     } catch {
       return []
