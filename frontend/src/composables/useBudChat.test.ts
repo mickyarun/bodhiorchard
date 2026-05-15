@@ -43,6 +43,7 @@ type SocketCallbacks = {
   onProgress?: (s: { statusMessage: string }) => void
   onComplete?: (data: unknown) => void | Promise<void>
   onError?: (err: string, errorCode?: string) => void | Promise<void>
+  onMissing?: () => void | Promise<void>
 }
 
 const startTracking = vi.fn<[string, SocketCallbacks], void>()
@@ -369,6 +370,41 @@ describe('useBudChat', () => {
       await chat.handleChatCancel()
 
       expect(cancelActiveChat).not.toHaveBeenCalled()
+    })
+  })
+
+  it('onMissing clears the spinner and reloads chat history after backend restart', async () => {
+    // Originate path: send a chat, capture the socket callbacks the
+    // tracker received so we can fire ``onMissing`` against them — that
+    // is what useRealtimeTracker does when the poll/seed gets a 404
+    // (the backend evicted the job from ``_job_store`` mid-chat).
+    chatBUD.mockResolvedValue({ jobId: 'job-evicted', sessionId: 'sess-1' })
+    let callbacks: SocketCallbacks | undefined
+    startTracking.mockImplementation((_jobId, cbs) => {
+      callbacks = cbs
+    })
+    fetchChatHistory.mockResolvedValue([
+      {
+        role: 'ai',
+        message: '⚠️ This chat was interrupted by a server restart. Please retry your last message.',
+        user_name: null,
+      },
+    ])
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.handleChatSend('rewrite this section', [])
+      expect(chat.chatLoading.value).toBe(true)
+
+      // Simulate the tracker's 404-recovery hook firing.
+      await callbacks?.onMissing?.()
+
+      expect(chat.chatLoading.value).toBe(false)
+      expect(chat.chatStatusMessage.value).toBe('')
+      // ``reloadHistory`` was wired to ``loadChatHistory``, which goes
+      // through the AbortController-backed history loader and ends up
+      // calling ``fetchChatHistory`` from the store mock.
+      expect(fetchChatHistory).toHaveBeenCalled()
     })
   })
 })

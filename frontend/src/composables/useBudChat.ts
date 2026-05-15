@@ -121,6 +121,9 @@ export function useBudChat(hooks: BudChatHooks) {
     setSessionId: (id: string) => { currentSessionId.value = id },
     applyUpdatedContent,
     maybeAutoRetry: () => retry.maybeAutoRetry(),
+    // Hoisted reference — ``loadChatHistory`` is a function declaration
+    // defined below, so it's safe to read at lambda-invocation time.
+    reloadHistory: () => loadChatHistory(),
   }
 
   const resumeActiveChat = makeResumeActiveChat({

@@ -46,6 +46,13 @@ export interface SocketCallbackDeps {
   applyUpdatedContent: (section: BUDSectionKey, content: string) => void | Promise<void>
   /** Auto-retry hook for ``chat_reply_unparseable`` errors. */
   maybeAutoRetry: () => Promise<void>
+  /**
+   * Re-fetch persisted chat messages from the backend. Used by the
+   * 404-recovery hook below so the user sees the boot-time orphan
+   * marker (or any other newly-persisted row) without a manual
+   * refresh.
+   */
+  reloadHistory: () => Promise<void>
 }
 
 export function makeChatSocketCallbacks(section: BUDSectionKey, deps: SocketCallbackDeps) {
@@ -76,6 +83,17 @@ export function makeChatSocketCallbacks(section: BUDSectionKey, deps: SocketCall
         role: 'ai',
         text: friendlyAgentError(errorCode, err).headline,
       })
+    },
+    async onMissing() {
+      // Backend restarted (or terminal TTL reaped) mid-chat — the
+      // WS terminal frame never arrived, so the spinner is stuck.
+      // Drop loading and reload chat-history so the orphan-sweep
+      // marker (or the cancel marker, if cancel raced the eviction)
+      // shows in the thread automatically; the user doesn't need to
+      // refresh the page to see what happened.
+      deps.setLoading(false)
+      deps.setStatus('')
+      await deps.reloadHistory()
     },
   }
 }

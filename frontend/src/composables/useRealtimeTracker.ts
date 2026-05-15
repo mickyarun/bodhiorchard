@@ -36,6 +36,19 @@ export interface TrackerCallbacks<T> {
   onProgress?: (data: T) => void
   onComplete?: (data: T) => void
   onError?: (error: string, errorCode?: string | null) => void
+  /**
+   * Optional 404-recovery hook. Fires when the polling fallback or
+   * the initial REST seed receives a 404, meaning the backend's
+   * in-memory entry for this id is gone (terminal-TTL reap, evict
+   * after backend restart, etc.). When provided, it runs **instead
+   * of** ``onError`` for the 404 case — useful for trackers whose
+   * UI needs to reconcile reactive state (clear a spinner, reload
+   * server-of-truth rows) without surfacing a "Failed" banner that
+   * would feed the tracker→reload→re-tracker loop guarded against
+   * elsewhere. Trackers that don't supply this callback retain the
+   * pre-existing silent-stop semantics on 404.
+   */
+  onMissing?: () => void | Promise<void>
 }
 
 export interface TrackerConfig<T> {
@@ -170,6 +183,13 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
       // to reload designs and re-track, which on a stuck-generating
       // row produces another 404 → another reload → a request loop.
       if ((err as AxiosError).response?.status === 404) {
+        // Trackers that wire ``onMissing`` get the 404 surfaced so
+        // they can reconcile reactive state (e.g. clear a spinner
+        // and reload chat history). Trackers without it keep the
+        // pre-existing silent-stop behaviour so the design panel's
+        // tracker→reload→re-tracker loop stays guarded.
+        const fire = callbacks?.onMissing
+        if (fire) void fire()
         stopTracking()
         return
       }
@@ -225,8 +245,15 @@ export function useRealtimeTracker<T>(config: TrackerConfig<T>) {
       if (data.value === null) {
         handleData(responseData)
       }
-    } catch {
-      // Non-critical — WS or polling will pick up state
+    } catch (err) {
+      // A 404 on the seed means the in-memory entry was reaped before
+      // we could subscribe — same recovery hook as the polling path.
+      // Other errors stay non-critical so the WS / poll-retry path
+      // can still pick state up later.
+      if ((err as AxiosError).response?.status === 404) {
+        const fire = callbacks?.onMissing
+        if (fire) void fire()
+      }
     }
   }
 
