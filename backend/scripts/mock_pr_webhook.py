@@ -119,6 +119,17 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--github-pr-id",
+        type=int,
+        default=None,
+        help=(
+            "Override the synthetic ``pull_request.id`` (a 31-bit int). "
+            "Default: a random ``secrets.randbits(31)``. Set this when the "
+            "caller has pre-seeded a matching ``pull_requests`` row that "
+            "needs to be discovered by ``get_by_github_pr_id``."
+        ),
+    )
+    parser.add_argument(
         "--allow-non-localhost",
         action="store_true",
         help=(
@@ -186,6 +197,7 @@ def _build_payload(
     base_sha: str,
     head_sha: str,
     base_ref: str,
+    github_pr_id: int | None = None,
 ) -> dict[str, Any]:
     """Minimal ``pull_request`` closed+merged payload the handler accepts.
 
@@ -199,7 +211,7 @@ def _build_payload(
     return {
         "action": "closed",
         "pull_request": {
-            "id": secrets.randbits(31),
+            "id": github_pr_id if github_pr_id is not None else secrets.randbits(31),
             "number": pr_number,
             "merged": True,
             "merged_at": merged_at,
@@ -301,6 +313,7 @@ async def _amain() -> int:
         base_sha=args.base_sha,
         head_sha=args.head_sha,
         base_ref=args.base_ref,
+        github_pr_id=args.github_pr_id,
     )
     body = json.dumps(payload).encode()
     signature = _hmac_signature(secret, body)

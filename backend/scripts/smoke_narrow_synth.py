@@ -72,6 +72,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.database import AsyncSessionLocal  # noqa: E402
 from app.models.cluster_cache import ClusterCache  # noqa: E402
+from app.models.pull_request import PRReviewStatus, PRState, PullRequest  # noqa: E402
 from app.models.tracked_repository import TrackedRepository  # noqa: E402
 
 DEFAULT_LOG_FILE = "logs/bodhi.log"
@@ -137,7 +138,9 @@ async def _resolve_repo(db, repo_id_arg: str | None) -> TrackedRepository:  # ty
             sys.exit(f"error: repo {repo_id_arg} has no github_repo_full_name")
         return repo
     result = await db.execute(
-        select(TrackedRepository).where(TrackedRepository.github_repo_full_name.is_not(None)).limit(1)
+        select(TrackedRepository)
+        .where(TrackedRepository.github_repo_full_name.is_not(None))
+        .limit(1)
     )
     repo = result.scalars().first()
     if repo is None:
@@ -155,15 +158,18 @@ async def _seed_clusters(  # type: ignore[no-untyped-def]
     head_sha: str,
     files: list[str],
 ) -> None:
-    """Insert matching base/head ``cluster_cache`` rows so the dispatcher
-    routes the change through the narrow path.
+    """Insert ``cluster_cache`` rows so the dispatcher routes through narrow.
 
-    Both rows share a signature so ``_find_affected_clusters`` sees the
-    cluster as "modified" (signature unchanged across SHAs, but the
-    PR's changed paths intersect ``files``).
+    Same ``cluster_id`` at both SHAs but DIFFERENT signatures, so
+    ``_find_affected_clusters`` picks up the cluster via its ``added``
+    branch (signature present in head, not in base). Choosing this
+    over the ``modified`` branch sidesteps a dependency on the backend
+    having ``BODHI_MOCK_PR_FILES_PATH`` set — the ``modified`` branch
+    needs ``changed_paths`` to intersect the cluster's files, and
+    ``changed_paths`` comes from ``GitHubClient.list_pr_files`` which
+    would otherwise 404 on the synthetic PR and return ``[]``.
     """
-    signature = f"harness-sig-{cluster_id}"
-    for sha in (base_sha, head_sha):
+    for sha, sig_suffix in ((base_sha, "base"), (head_sha, "head")):
         db.add(
             ClusterCache(
                 org_id=org_id,
@@ -174,9 +180,47 @@ async def _seed_clusters(  # type: ignore[no-untyped-def]
                 symbol_count=1,
                 files=files,
                 symbols=[],
-                signature=signature,
+                signature=f"harness-sig-{cluster_id}-{sig_suffix}",
             )
         )
+    await db.commit()
+
+
+async def _seed_pull_request(  # type: ignore[no-untyped-def]
+    db,
+    *,
+    org_id: uuid.UUID,
+    repo_id: uuid.UUID,
+    github_pr_id: int,
+    pr_number: int,
+    full_name: str,
+    head_sha: str,
+    base_sha: str,
+) -> None:
+    """Insert a transient ``pull_requests`` row.
+
+    The webhook handler at ``github_webhook_handler.py`` early-bails
+    when ``get_by_github_pr_id`` finds nothing — synthetic PR ids never
+    have a matching DB row, so the dispatcher would never run. Seeding
+    a row keyed by ``github_pr_id`` makes the handler proceed; we
+    delete it again in cleanup.
+    """
+    db.add(
+        PullRequest(
+            org_id=org_id,
+            repo_id=repo_id,
+            github_pr_id=github_pr_id,
+            github_pr_number=pr_number,
+            github_repo_full_name=full_name,
+            title=f"smoke PR #{pr_number}",
+            html_url=f"https://github.com/{full_name}/pull/{pr_number}",
+            head_branch=f"smoke-pr-{pr_number}",
+            base_branch="main",
+            state=PRState.OPEN,
+            author_github_login="smoke-author",
+            review_status=PRReviewStatus.PENDING,
+        )
+    )
     await db.commit()
 
 
@@ -185,14 +229,28 @@ async def _cleanup(  # type: ignore[no-untyped-def]
     *,
     repo_id: uuid.UUID,
     cluster_id: str,
+    github_pr_id: int | None = None,
 ) -> None:
-    """Drop the seeded ``cluster_cache`` rows so the live DB is unchanged."""
+    """Drop the seeded fixtures so the live DB is unchanged.
+
+    Both deletes are scoped by uuid4-derived synthetic ids so even a
+    partial leak (e.g. SIGKILL'd mid-run) is uniquely identifiable
+    later via the ``cluster_cache.cluster_id`` and
+    ``pull_requests.github_pr_id`` columns.
+    """
     await db.execute(
         delete(ClusterCache).where(
             ClusterCache.repo_id == repo_id,
             ClusterCache.cluster_id == cluster_id,
         )
     )
+    if github_pr_id is not None:
+        await db.execute(
+            delete(PullRequest).where(
+                PullRequest.repo_id == repo_id,
+                PullRequest.github_pr_id == github_pr_id,
+            )
+        )
     await db.commit()
 
 
@@ -203,12 +261,17 @@ def _fire_webhook(
     base_sha: str,
     head_sha: str,
     changed_files: list[str],
+    github_pr_id: int,
 ) -> int:
     """Run ``mock_pr_webhook.py`` as a subprocess.
 
     Reuses the existing driver so the HMAC + payload shape stays in
-    one place. Returns the subprocess exit code; non-zero indicates a
-    failed POST (the harness aborts before scanning logs).
+    one place. ``github_pr_id`` is forwarded via ``--github-pr-id`` so
+    the synthetic payload's ``pull_request.id`` matches the
+    ``pull_requests`` row this harness has just seeded — without that,
+    the live webhook handler's ``get_by_github_pr_id`` early-bails.
+
+    Returns the subprocess exit code; non-zero indicates a failed POST.
     """
     script_path = Path(__file__).resolve().parent / "mock_pr_webhook.py"
     cmd = [
@@ -224,6 +287,8 @@ def _fire_webhook(
         head_sha,
         "--changed-files",
         ",".join(changed_files),
+        "--github-pr-id",
+        str(github_pr_id),
     ]
     print(f"  $ {' '.join(cmd)}")
     completed = subprocess.run(cmd, check=False)
@@ -300,6 +365,12 @@ async def _amain() -> int:
         print(f"Cluster id:    {cluster_id}")
         print(f"base/head SHA: {base_sha[:12]}.. / {head_sha[:12]}..")
 
+        # PR id is a random 31-bit int (must not collide with a real
+        # github_pr_id). Captured into ``github_pr_id`` here and used
+        # both for the ``pull_requests`` row and the synthetic webhook
+        # payload via mock_pr_webhook (which mints its own random id —
+        # so we pass the chosen id through explicitly).
+        github_pr_id = uuid.uuid4().int & ((1 << 31) - 1)
         await _seed_clusters(
             db,
             org_id=repo.org_id,
@@ -308,6 +379,16 @@ async def _amain() -> int:
             base_sha=base_sha,
             head_sha=head_sha,
             files=[args.changed_file, "src/sibling_unchanged.py"],
+        )
+        await _seed_pull_request(
+            db,
+            org_id=repo.org_id,
+            repo_id=repo.id,
+            github_pr_id=github_pr_id,
+            pr_number=pr_number,
+            full_name=repo.github_repo_full_name,
+            head_sha=head_sha,
+            base_sha=base_sha,
         )
 
         baseline_offset = _log_size(args.log_file)
@@ -319,6 +400,7 @@ async def _amain() -> int:
                 base_sha=base_sha,
                 head_sha=head_sha,
                 changed_files=[args.changed_file],
+                github_pr_id=github_pr_id,
             )
             if rc != 0:
                 print(f"{_RED}FAIL: mock_pr_webhook subprocess returned {rc}{_RESET}")
@@ -343,8 +425,13 @@ async def _amain() -> int:
             print(f"{_GREEN}PASS:{_RESET} narrow synth job event seen in log tail")
             return 0
         finally:
-            print("→ cleaning up seeded cluster_cache rows…")
-            await _cleanup(db, repo_id=repo.id, cluster_id=cluster_id)
+            print("→ cleaning up seeded cluster_cache + pull_requests rows…")
+            await _cleanup(
+                db,
+                repo_id=repo.id,
+                cluster_id=cluster_id,
+                github_pr_id=github_pr_id,
+            )
 
 
 def main() -> int:
