@@ -154,6 +154,7 @@ export const useBUDStore = defineStore('bud', () => {
     | ChatJobCreatedResponse
     | { stageGateError: string }
     | { chatInProgressError: ChatInProgressDetail }
+    | { permissionError: string }
     | null
   > {
     error.value = ''
@@ -171,8 +172,18 @@ export const useBUDStore = defineStore('bud', () => {
           data?: { detail?: string | ChatInProgressDetail }
         }
       }
+      const detail = err.response?.data?.detail
+      const detailString = typeof detail === 'string' ? detail : undefined
+      if (err.response?.status === 403) {
+        // ``buds:edit`` RBAC rejection. Surface the server's message
+        // verbatim when available so the user sees the specific reason
+        // ("missing role X", etc.) rather than a generic failure.
+        return {
+          permissionError:
+            detailString ?? "You don't have permission to chat in this section.",
+        }
+      }
       if (err.response?.status === 409) {
-        const detail = err.response?.data?.detail
         // Backend uses two 409 shapes for ``POST /chat``:
         // - chat_in_progress: ``detail`` is an object carrying the live
         //   job pointer so the panel can subscribe via resume.
@@ -182,10 +193,7 @@ export const useBUDStore = defineStore('bud', () => {
         ) {
           return { chatInProgressError: detail }
         }
-        const message = typeof detail === 'string'
-          ? detail
-          : 'Section is locked for this BUD stage.'
-        return { stageGateError: message }
+        return { stageGateError: detailString ?? 'Section is locked for this BUD stage.' }
       }
       return null
     }

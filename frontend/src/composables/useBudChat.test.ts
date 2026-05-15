@@ -238,6 +238,28 @@ describe('useBudChat', () => {
     })
   })
 
+  it('rolls back optimistic push and locks input on a 403 permission error', async () => {
+    chatBUD.mockResolvedValue({
+      permissionError: "You don't have the 'buds:edit' permission.",
+    })
+
+    await effectScope().run(async () => {
+      const chat = useBudChat(makeHooks() as never)
+      await chat.handleChatSend('hi', [])
+
+      // Optimistic user push rolled back — no orphan user message.
+      expect(chat.chatMessages.value.length).toBe(0)
+      // Hard-lock banner carries the server's specific reason (NOT the
+      // generic "Sorry, something went wrong" fallback).
+      expect(chat.stageGateMessage.value).toBe(
+        "You don't have the 'buds:edit' permission.",
+      )
+      expect(chat.chatLoading.value).toBe(false)
+      // Job tracker NOT engaged on a 403.
+      expect(startTracking).not.toHaveBeenCalled()
+    })
+  })
+
   it('rolls back optimistic push and surfaces a soft banner on chat_in_progress 409', async () => {
     chatBUD.mockResolvedValue({
       chatInProgressError: {

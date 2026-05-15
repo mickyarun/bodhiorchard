@@ -198,6 +198,13 @@ export function useBudChat(hooks: BudChatHooks) {
       rollbackOptimisticUserPush(stageGateMessage, result.stageGateError)
       return false
     }
+    if ('permissionError' in result) {
+      // 403: RBAC rejected the user. Surface the server's reason in the
+      // hard-lock banner so the input stays disabled — no point letting
+      // them keep typing when every send will be rejected.
+      rollbackOptimisticUserPush(stageGateMessage, result.permissionError)
+      return false
+    }
     if ('chatInProgressError' in result) {
       // Another client (or tab) holds the section's active-job claim.
       // Subscribe to the winning job so the user sees its live progress
