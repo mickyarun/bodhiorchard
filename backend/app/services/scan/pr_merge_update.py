@@ -364,11 +364,16 @@ async def _find_affected_clusters(
       * Load the cached cluster lists for both SHAs.
       * If either is missing entirely → return ``None`` (caller falls
         back to a full scan).
-      * Compute added (signature in head, not base) and removed
-        (signature in base, not head) signatures.
-      * For surviving signatures, mark a cluster as modified iff any of
-        its member files appears in ``changed_paths``.
-      * Return added ∪ modified.
+      * ``added``: signature present at head, absent at base.
+      * ``removed``: signature present at base, absent at head — the
+        cluster was deleted by this PR (e.g. an entire module
+        directory removed). Surfacing these is what lets the narrow
+        path's reconciler soft-delete the matching feature with a
+        commit-SHA stamp instead of leaving an orphan active row.
+      * ``modified``: surviving signatures whose member files
+        intersect ``changed_paths`` — the cluster's structure stayed
+        the same but at least one of its files was touched.
+      * Return added ∪ modified ∪ removed.
     """
     cache = ClusterCacheRepository(db, org_id=org_id)
     base_rows = await cache.list_for_repo_sha(repo_id=repo_id, head_sha=base_sha)
@@ -380,6 +385,7 @@ async def _find_affected_clusters(
     head_sigs = {row.signature: row.cluster_id for row in head_rows if row.signature}
 
     added = {cluster_id for sig, cluster_id in head_sigs.items() if sig not in base_sigs}
+    removed = {cluster_id for sig, cluster_id in base_sigs.items() if sig not in head_sigs}
 
     modified: set[str] = set()
     for row in head_rows:
@@ -389,7 +395,7 @@ async def _find_affected_clusters(
         if files & changed_paths:
             modified.add(row.cluster_id)
 
-    return added | modified
+    return added | modified | removed
 
 
 async def _trigger_repo_scan(

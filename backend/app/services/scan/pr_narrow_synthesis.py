@@ -113,6 +113,7 @@ async def handle_pr_narrow_synthesis(job_id: str, payload: dict[str, Any]) -> No
                 db,
                 org_id=params.org_id,
                 repo_id=params.repo_id,
+                base_sha=params.base_sha,
                 head_sha=params.head_sha,
                 cluster_ids=params.affected_cluster_ids,
             )
@@ -120,9 +121,11 @@ async def handle_pr_narrow_synthesis(job_id: str, payload: dict[str, Any]) -> No
                 db, org_id=params.org_id, repo_id=params.repo_id, signatures=signatures
             )
 
-        if not communities:
+        if not signatures:
+            # Nothing matched at base OR head — the dispatcher gave us
+            # cluster_ids that no scan has recorded. Treat as a no-op.
             logger.info(
-                "pr_narrow_synthesis_no_clusters_at_head",
+                "pr_narrow_synthesis_no_clusters_at_either_sha",
                 repo_id=str(params.repo_id),
                 head_sha=params.head_sha[:8],
                 requested=len(params.affected_cluster_ids),
@@ -130,7 +133,46 @@ async def handle_pr_narrow_synthesis(job_id: str, payload: dict[str, Any]) -> No
             update_job(
                 job_id,
                 state=JobState.COMPLETED,
-                status_message="No affected clusters present at head SHA",
+                status_message="No affected clusters present at base or head SHA",
+            )
+            return
+
+        if not communities:
+            # Pure-deletion branch: every affected cluster is in
+            # ``signatures`` from BASE_SHA only — nothing survives at
+            # head, so Claude has nothing to look at. Skip the LLM
+            # call and go straight to reconcile: the existing feature
+            # whose ``cluster_signature`` matches lands in the scoped
+            # candidate pool, no synthesised write claims it, and the
+            # reconciler soft-deletes it with ``deactivated_at_sha``.
+            logger.info(
+                "pr_narrow_synthesis_pure_deletion",
+                repo_id=str(params.repo_id),
+                head_sha=params.head_sha[:8],
+                removed_signatures=len(signatures),
+            )
+            summary = await _reconcile_narrow(
+                org_id=params.org_id,
+                repo_id=params.repo_id,
+                head_sha=params.head_sha,
+                signatures=signatures,
+            )
+            logger.info(
+                "pr_narrow_synthesis_done",
+                repo_id=str(params.repo_id),
+                head_sha=params.head_sha[:8],
+                **summary,
+            )
+            update_job(
+                job_id,
+                state=JobState.COMPLETED,
+                status_message=(
+                    f"narrow synth (deletion): "
+                    f"{summary['inserted']}+ "
+                    f"{summary['updated']}~ "
+                    f"{summary['revived']}↺ "
+                    f"{summary['inactivated']}-"
+                ),
             )
             return
 

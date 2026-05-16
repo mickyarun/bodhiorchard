@@ -49,29 +49,56 @@ async def load_scoped_communities(
     *,
     org_id: uuid.UUID,
     repo_id: uuid.UUID,
+    base_sha: str,
     head_sha: str,
     cluster_ids: list[str],
 ) -> tuple[list[Community], set[str]]:
-    """Read the affected ``cluster_cache`` rows at head SHA and convert to communities.
+    """Build the prompt input + the reconciler scope for the narrow path.
 
-    Returns ``(communities, signatures)``. The signatures set drives the
-    reconciler's ``candidate_filter`` downstream — only features whose
-    ``cluster_signature`` is in this set are eligible to be matched or
-    soft-deleted by the narrow pass.
+    Returns ``(communities, signatures)``:
+
+    * ``communities`` — one entry per requested cluster that EXISTS at
+      ``head_sha`` (i.e. the added / modified clusters). Claude needs
+      files to look at; a cluster that vanished has nothing to feed
+      into the prompt.
+    * ``signatures`` — the union of head-side signatures (added /
+      modified) AND base-side signatures for any requested cluster
+      that's no longer at head (removed). The reconciler's
+      ``candidate_filter`` uses this set, so an existing feature whose
+      ``cluster_signature`` matches a removed cluster's BASE signature
+      stays in the candidate pool and gets soft-deleted with a SHA
+      stamp when Claude doesn't re-emit it.
+
+    Without the base-side lookup, a pure-deletion PR would compute an
+    empty signature set, the reconciler would have no candidates to
+    inactivate, and the feature would persist as an orphan.
     """
     requested = set(cluster_ids)
-    rows = await ClusterCacheRepository(db, org_id=org_id).list_for_repo_sha(
-        repo_id=repo_id, head_sha=head_sha
-    )
+    cache = ClusterCacheRepository(db, org_id=org_id)
+    head_rows = await cache.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
+    base_rows = await cache.list_for_repo_sha(repo_id=repo_id, head_sha=base_sha)
+
     communities: list[Community] = []
     signatures: set[str] = set()
-    for row in rows:
-        if row.cluster_id not in requested:
-            continue
-        if not row.signature:
+    seen_at_head: set[str] = set()
+    for row in head_rows:
+        if row.cluster_id not in requested or not row.signature:
             continue
         communities.append(row_to_community(row))
         signatures.add(row.signature)
+        seen_at_head.add(row.cluster_id)
+
+    # Removed-cluster signatures: those at base_sha whose cluster_id
+    # the requested set asked about but that no longer exist at head.
+    # The reconciler needs these so the matching feature can be
+    # soft-deleted via the unmatched-active path.
+    for row in base_rows:
+        if row.cluster_id not in requested or row.cluster_id in seen_at_head:
+            continue
+        if not row.signature:
+            continue
+        signatures.add(row.signature)
+
     return communities, signatures
 
 

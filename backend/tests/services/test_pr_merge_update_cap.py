@@ -370,3 +370,100 @@ async def test_backfill_skipped_when_repo_has_no_path(
     assert indexer_calls == []  # indexer never invoked
     # Cache-miss fallback still runs.
     assert captured["scan_triggered"] is True
+
+
+# --- _find_affected_clusters algorithm: added / modified / removed -----------
+
+
+class _FakeClusterCacheRow:
+    """Minimal stand-in for a ``ClusterCache`` row used by the algorithm."""
+
+    def __init__(self, cluster_id: str, signature: str, files: list[str]) -> None:
+        self.cluster_id = cluster_id
+        self.signature = signature
+        self.files = files
+
+
+class _FakeClusterCacheRepo:
+    """Returns pre-canned rows per SHA without hitting Postgres."""
+
+    def __init__(self, by_sha: dict[str, list[_FakeClusterCacheRow]]) -> None:
+        self._by_sha = by_sha
+
+    @classmethod
+    def install(
+        cls,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        base_rows: list[_FakeClusterCacheRow],
+        head_rows: list[_FakeClusterCacheRow],
+    ) -> None:
+        repo = cls({"BASE": base_rows, "HEAD": head_rows})
+
+        def _factory(_db: Any, *, org_id: Any) -> Any:
+            return repo
+
+        monkeypatch.setattr(mod, "ClusterCacheRepository", _factory)
+
+    async def list_for_repo_sha(self, *, repo_id: uuid.UUID, head_sha: str):  # type: ignore[no-untyped-def]
+        return list(self._by_sha.get(head_sha, []))
+
+
+async def test_find_affected_clusters_detects_removed_cluster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cluster present at base but absent at head should appear in
+    the affected set so the narrow handler's reconciler can soft-
+    delete the matching feature with a SHA stamp.
+    """
+    base = [
+        _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
+        _FakeClusterCacheRow("c-reminders", "sig-reminders", ["src/reminders/x.py"]),
+    ]
+    head = [
+        # Reminders cluster is gone — only auth survives at head.
+        _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
+    ]
+    _FakeClusterCacheRepo.install(monkeypatch, base_rows=base, head_rows=head)
+    affected = await mod._find_affected_clusters(
+        db=object(),
+        org_id=uuid.uuid4(),
+        repo_id=uuid.uuid4(),
+        base_sha="BASE",
+        head_sha="HEAD",
+        changed_paths={"src/reminders/x.py"},
+    )
+    # Reminders was REMOVED at head — must be flagged.
+    assert affected == {"c-reminders"}
+
+
+async def test_find_affected_clusters_added_modified_removed_combine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All three branches fire in one PR — added, modified, removed."""
+    base = [
+        _FakeClusterCacheRow("c-auth", "sig-auth-old", ["src/auth/router.py"]),
+        _FakeClusterCacheRow("c-billing", "sig-billing", ["src/billing/router.py"]),
+        _FakeClusterCacheRow("c-old", "sig-old", ["src/old/legacy.py"]),
+    ]
+    head = [
+        # Auth's signature changed (modified — files match changed_paths)
+        _FakeClusterCacheRow("c-auth", "sig-auth-old", ["src/auth/router.py"]),
+        # Billing untouched
+        _FakeClusterCacheRow("c-billing", "sig-billing", ["src/billing/router.py"]),
+        # c-old was deleted — not in head
+        # c-new added with a brand-new signature
+        _FakeClusterCacheRow("c-new", "sig-new", ["src/search/router.py"]),
+    ]
+    _FakeClusterCacheRepo.install(monkeypatch, base_rows=base, head_rows=head)
+    affected = await mod._find_affected_clusters(
+        db=object(),
+        org_id=uuid.uuid4(),
+        repo_id=uuid.uuid4(),
+        base_sha="BASE",
+        head_sha="HEAD",
+        changed_paths={"src/auth/router.py", "src/search/router.py"},
+    )
+    # c-auth (modified — file touched), c-new (added), c-old (removed).
+    # c-billing untouched.
+    assert affected == {"c-auth", "c-new", "c-old"}

@@ -187,7 +187,13 @@ def _install_handler_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             return _FakeRepo()
 
     async def _fake_load_scoped(
-        _db: Any, *, org_id: uuid.UUID, repo_id: uuid.UUID, head_sha: str, cluster_ids: list[str]
+        _db: Any,
+        *,
+        org_id: uuid.UUID,
+        repo_id: uuid.UUID,
+        base_sha: str,
+        head_sha: str,
+        cluster_ids: list[str],
     ) -> tuple[list[Community], set[str]]:
         return [_community("sig-a"), _community("sig-b")], {"sig-a", "sig-b"}
 
@@ -284,7 +290,9 @@ async def test_handler_drops_when_no_clusters_resolve_at_head(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Affected ids resolved against ``cluster_cache`` may return empty
-    if the head SHA cache row was evicted between dispatch and run.
+    if the cache rows were evicted between dispatch and run. With
+    nothing at BASE or HEAD, the handler exits cleanly without
+    invoking Claude OR the reconciler.
     """
     captured = _install_handler_fakes(monkeypatch)
 
@@ -304,6 +312,56 @@ async def test_handler_drops_when_no_clusters_resolve_at_head(
     await handler_mod.handle_pr_narrow_synthesis(job_id="j2", payload=payload)
     assert captured["engine_called"] is False
     assert "No affected clusters" in (captured["job_status"] or "")
+
+
+async def test_handler_pure_deletion_skips_claude_and_inactivates_via_reconcile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the affected clusters exist only at BASE_SHA (deleted in this PR):
+
+    * communities is empty (nothing at head for Claude to read)
+    * signatures is non-empty (carried from base_sha for the reconciler)
+
+    The handler must skip the Claude run entirely (saves the LLM cost
+    and time on a deletion PR) and call ``_reconcile_narrow`` directly
+    — the existing feature's signature is in the candidate-filter
+    scope, no synth write matches it, so it lands in
+    ``unmatched_active`` and gets soft-deleted with the merge SHA.
+    """
+    captured = _install_handler_fakes(monkeypatch)
+
+    async def _deletion_only_scoped(
+        _db: Any,
+        *,
+        org_id: uuid.UUID,
+        repo_id: uuid.UUID,
+        base_sha: str,
+        head_sha: str,
+        cluster_ids: list[str],
+    ) -> tuple[list[Community], set[str]]:
+        # Communities empty (head has nothing for these clusters), but
+        # signatures populated from base — the deletion case.
+        return [], {"sig-removed-1"}
+
+    monkeypatch.setattr(handler_mod, "load_scoped_communities", _deletion_only_scoped)
+    payload = {
+        "org_id": str(uuid.uuid4()),
+        "repo_id": str(uuid.uuid4()),
+        "pr_number": 9,
+        "base_sha": "basedeletion",
+        "head_sha": "HEADDEL",
+        "affected_cluster_ids": ["c-removed"],
+        "full_name": "owner/example",
+    }
+    await handler_mod.handle_pr_narrow_synthesis(job_id="j-del", payload=payload)
+    # Claude was NOT called — pure deletion goes straight to reconcile.
+    assert captured["engine_called"] is False, "Claude must not run on a pure-deletion PR"
+    # Reconciler WAS called and received the deletion signature scope.
+    assert captured["reconcile"] is not None
+    assert captured["reconcile"].head_sha == "HEADDEL"
+    assert captured["reconcile"].candidate_filter == {"sig-removed-1"}
+    # Status message clearly marks this as the deletion branch.
+    assert "deletion" in (captured["job_status"] or "").lower()
 
 
 async def test_handler_failure_resets_accumulator(monkeypatch: pytest.MonkeyPatch) -> None:
