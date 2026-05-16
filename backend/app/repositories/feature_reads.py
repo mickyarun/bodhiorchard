@@ -214,6 +214,42 @@ class FeatureReadRepository:
                 out.append((title, paths, fid))
         return out
 
+    async def backend_repo_names_for_features(
+        self,
+        feature_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, list[str]]:
+        """``{feature_id: [backend_repo_name, …]}`` for a batch of features.
+
+        Reads BACKEND junction rows and resolves each ``repo_id`` to
+        ``TrackedRepository.name`` so callers that already key by repo
+        name (e.g. the dashboard tree's ``linked_repos``) don't need a
+        second lookup. Backend names within a feature are returned
+        sorted alphabetically so arc rendering and detail-panel listing
+        are deterministic across reloads.
+        """
+        if not feature_ids:
+            return {}
+        stmt = (
+            select(
+                FeatureToRepo.feature_id,
+                TrackedRepository.name.label("repo_name"),
+            )
+            .join(Feature, Feature.id == FeatureToRepo.feature_id)
+            .join(TrackedRepository, TrackedRepository.id == FeatureToRepo.repo_id)
+            .where(
+                Feature.org_id == self._org_id,
+                Feature.is_active.is_(True),
+                FeatureToRepo.feature_id.in_(feature_ids),
+                FeatureToRepo.role == FeatureToRepoRole.BACKEND,
+            )
+            .order_by(FeatureToRepo.feature_id, TrackedRepository.name)
+        )
+        result = await self._db.execute(stmt)
+        grouped: dict[uuid.UUID, list[str]] = {}
+        for fid, repo_name in result.all():
+            grouped.setdefault(fid, []).append(repo_name)
+        return grouped
+
     async def semantic_search(
         self,
         query_vector: list[float],

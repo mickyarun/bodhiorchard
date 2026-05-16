@@ -89,6 +89,10 @@ export interface FeatureItem {
   linked_repos: string[]
   code_locations: Record<string, string[]> | null
   repo_code_locations?: Record<string, Record<string, string[]>> | null
+  // "primary" — feature lives in repo_name. "backend" — shadow row
+  // placed under a repo this feature calls; consumers that key by
+  // repo_name (procedural tree, detail panels) should filter these out.
+  link_role?: 'primary' | 'backend'
 }
 
 export interface BUDItem {
@@ -106,6 +110,7 @@ export interface RelationshipArc {
   target_repo: string
   rel_type: string
   weight: number
+  feature_title?: string | null
 }
 
 export interface RepoLimbData {

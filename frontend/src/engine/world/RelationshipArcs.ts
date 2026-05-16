@@ -24,9 +24,17 @@ import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { EngineRelationship, RelType } from '../types'
 import { setTreeData } from './TreeNodeData'
 
-const ARC_HEIGHT = 8
 const ARC_SEGMENTS = 16
 const SEGMENT_THICKNESS = 0.06
+// When multiple arcs share the same (source_repo, target_repo), fan them
+// vertically so each feature has a visibly distinct curve. The first arc
+// sits at FAN_BASE_HEIGHT; each subsequent arc adds FAN_STEP. After
+// FAN_LINEAR_LIMIT arcs the step compresses to FAN_TAIL_STEP so a heavily
+// connected repo pair (20+ features) doesn't shoot arcs past the canopy.
+const FAN_BASE_HEIGHT = 4
+const FAN_STEP = 3
+const FAN_LINEAR_LIMIT = 8
+const FAN_TAIL_STEP = 0.5
 
 const REL_COLORS: Record<RelType, [number, number, number]> = {
   CALLS:      [0.3, 0.5, 0.9],
@@ -48,13 +56,25 @@ export class RelationshipArcs {
     this.root = new pc.Entity('RelationshipArcs')
     this.root.enabled = this.visible
 
+    // Group arcs by unordered repo pair so the per-pair index can spread
+    // overlapping arcs vertically (one feature → one curve at a unique
+    // height). Sorting the pair makes A↔B and B↔A share the same bucket.
+    const pairIndex = new Map<string, number>()
+
     for (const rel of relationships) {
       const srcPos = treePositions.get(rel.source_repo)
       const tgtPos = treePositions.get(rel.target_repo)
       if (!srcPos || !tgtPos) continue
       if (rel.source_repo === rel.target_repo) continue
 
-      this.createArc(materials, srcPos, tgtPos, rel)
+      const pairKey =
+        rel.source_repo < rel.target_repo
+          ? `${rel.source_repo}::${rel.target_repo}`
+          : `${rel.target_repo}::${rel.source_repo}`
+      const fanIndex = pairIndex.get(pairKey) ?? 0
+      pairIndex.set(pairKey, fanIndex + 1)
+
+      this.createArc(materials, srcPos, tgtPos, rel, fanIndex)
     }
 
     return this.root
@@ -65,6 +85,7 @@ export class RelationshipArcs {
     from: pc.Vec3,
     to: pc.Vec3,
     rel: EngineRelationship,
+    fanIndex: number,
   ): void {
     const color = REL_COLORS[rel.rel_type]
     const matKey = `arc_${rel.rel_type}`
@@ -74,7 +95,14 @@ export class RelationshipArcs {
       opacity: 0.7,
     })
 
-    const midY = ARC_HEIGHT * Math.min(rel.weight / 5, 2)
+    // Per-feature arcs always have weight=1, so heights are driven by
+    // the per-pair fan index — a single arc sits at FAN_BASE_HEIGHT, and
+    // additional arcs stack uniformly above it. After FAN_LINEAR_LIMIT
+    // the step compresses to keep the topmost arc within the canopy band.
+    // ``weight`` is retained on ``EngineRelationship`` for future use.
+    const linearArcs = Math.min(fanIndex, FAN_LINEAR_LIMIT)
+    const tailArcs = Math.max(0, fanIndex - FAN_LINEAR_LIMIT)
+    const midY = FAN_BASE_HEIGHT + linearArcs * FAN_STEP + tailArcs * FAN_TAIL_STEP
     const midX = (from.x + to.x) / 2
     const midZ = (from.z + to.z) / 2
 
@@ -98,6 +126,7 @@ export class RelationshipArcs {
       targetRepo: rel.target_repo,
       relType: rel.rel_type,
       weight: rel.weight,
+      featureTitle: rel.feature_title ?? null,
     })
 
     for (let i = 0; i < points.length - 1; i++) {

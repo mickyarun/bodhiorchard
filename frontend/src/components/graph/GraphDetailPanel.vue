@@ -299,7 +299,11 @@ function initials(name: string): string {
 /** All features belonging to the selected repo. */
 const repoFeatures = computed<FeatureItem[]>(() => {
   if (!props.repo || !props.treeData) return []
-  return props.treeData.features.filter(f => f.repo_name === props.repo!.repoName)
+  // Exclude backend-shadow rows so the "Features (N)" count reflects
+  // only features that actually live in this repo, not ones that call it.
+  return props.treeData.features.filter(f =>
+    f.repo_name === props.repo!.repoName && f.link_role !== 'backend',
+  )
 })
 
 /** Features filtered by search. */

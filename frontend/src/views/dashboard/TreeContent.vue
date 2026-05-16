@@ -110,6 +110,9 @@ const selectedFeatures = computed(() => {
   const repoName = selectedRepo.value.repo_name
   const branchNames = new Set(selectedRepo.value.branches.map(b => b.name))
   return props.displayData.features.filter(f => {
+    // Skip backend-shadow rows — they share the feature title with a
+    // primary row under another repo and would double-count "Features (N)".
+    if (f.link_role === 'backend') return false
     if (f.repo_name) return f.repo_name === repoName
     return f.branch_name && branchNames.has(f.branch_name)
   })

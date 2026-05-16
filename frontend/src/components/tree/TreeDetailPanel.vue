@@ -69,32 +69,6 @@
 
       <v-divider />
 
-      <!-- Active Branches -->
-      <div class="pa-3">
-        <div class="text-overline text-medium-emphasis mb-1">
-          Active Branches ({{ activeBranches.length }})
-        </div>
-        <div class="d-flex flex-wrap ga-1">
-          <v-chip
-            v-for="b in activeBranches"
-            :key="b.name"
-            size="small"
-            variant="tonal"
-            :color="branchColor(b.health)"
-          >
-            {{ b.name }}
-            <span class="text-caption ml-1 opacity-70">
-              {{ b.file_count }}
-            </span>
-          </v-chip>
-        </div>
-        <div v-if="activeBranches.length === 0" class="text-body-2 text-disabled">
-          No active branches
-        </div>
-      </div>
-
-      <v-divider />
-
       <!-- All Features -->
       <div class="pa-3">
         <div class="text-overline text-medium-emphasis mb-1">
@@ -192,23 +166,7 @@ const latestReleased = computed(() =>
     .slice(0, 3),
 )
 
-const activeBranches = computed(() =>
-  props.repo.branches.filter(
-    b => b.health !== 'dormant' || b.commit_count > 0,
-  ),
-)
-
 const repoFeatures = computed(() => props.features)
-
-function branchColor(health: string): string {
-  const map: Record<string, string> = {
-    thriving: 'green',
-    healthy: 'blue',
-    dormant: 'grey',
-    wilted: 'brown',
-  }
-  return map[health] ?? 'grey'
-}
 
 function statusIcon(status: string): string {
   const map: Record<string, string> = {
