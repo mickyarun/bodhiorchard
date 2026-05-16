@@ -40,7 +40,12 @@ from app.services.scan import pr_merge_update as mod
 
 @pytest.fixture
 def captured() -> dict[str, Any]:
-    return {"narrow_payload": None, "scan_triggered": False, "job_state": None}
+    return {
+        "narrow_payload": None,
+        "scan_triggered": False,
+        "job_state": None,
+        "backfill_calls": [],
+    }
 
 
 @pytest.fixture
@@ -70,11 +75,20 @@ def _patched(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> None:
     async def _fake_no_paths(*_a: Any, **_kw: Any) -> set[str]:
         return set()
 
+    async def _fake_index_and_cache(
+        *, org_id: Any, repo_id: Any, repo_path: str, head_sha: str
+    ) -> int:
+        captured["backfill_calls"].append(
+            {"repo_id": str(repo_id), "repo_path": repo_path, "head_sha": head_sha}
+        )
+        return 3  # arbitrary non-zero row count
+
     monkeypatch.setattr(mod, "create_job", _fake_create_job)
     monkeypatch.setattr(mod, "_trigger_repo_scan", _fake_trigger_scan)
     monkeypatch.setattr(mod, "update_job", _fake_update_job)
     monkeypatch.setattr(mod, "_load_repo_and_org", _fake_repo_and_org)
     monkeypatch.setattr(mod, "_fetch_changed_paths", _fake_no_paths)
+    monkeypatch.setattr(mod, "index_and_cache", _fake_index_and_cache)
 
 
 def test_enqueue_narrow_synthesis_payload_shape(
@@ -220,8 +234,139 @@ async def _fake_repo_and_org(
 
     class _Repo:
         github_repo_full_name = "owner/r"
+        path = "/tmp/repo"
 
     class _Org:
         id = org_id
 
     return _Repo(), _Org()
+
+
+# --- Phase 2: cluster_cache backfill pre-step --------------------------------
+
+
+async def test_backfill_runs_before_find_affected_clusters(
+    monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
+) -> None:
+    """Dispatcher must call ``index_and_cache`` before ``_find_affected_clusters``.
+
+    Without the backfill, ``head_rows`` is empty on every real-world PR
+    merge → cache-miss → full scan. With the backfill, ``head_rows`` is
+    populated and the existing algorithm runs as designed. We verify
+    *ordering* via a call-log so a refactor that swaps the steps can't
+    regress silently.
+    """
+    call_log: list[str] = []
+
+    async def _logged_find(*_a: Any, **_kw: Any) -> set[str] | None:
+        call_log.append("find_affected_clusters")
+        return {"c1"}
+
+    async def _logged_backfill(**kw: Any) -> int:
+        call_log.append("index_and_cache")
+        captured["backfill_calls"].append(kw)
+        return 5
+
+    monkeypatch.setattr(mod, "_find_affected_clusters", _logged_find)
+    monkeypatch.setattr(mod, "index_and_cache", _logged_backfill)
+
+    payload = {
+        "org_id": str(uuid.uuid4()),
+        "repo_id": str(uuid.uuid4()),
+        "pr_number": 7,
+        "base_sha": "b",
+        "head_sha": "h",
+        "full_name": "owner/r",
+    }
+    await mod.handle_pr_merge_update("j", payload)
+    assert call_log == ["index_and_cache", "find_affected_clusters"]
+    assert captured["backfill_calls"][0]["repo_path"] == "/tmp/repo"
+    assert captured["backfill_calls"][0]["head_sha"] == "h"
+
+
+async def test_backfill_failure_falls_through_to_cache_miss_full_scan(
+    monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
+) -> None:
+    """When the backfill raises, the dispatcher must not crash.
+
+    The downstream ``_find_affected_clusters`` will return ``None``
+    (since head_rows is still empty), and the existing cache-miss
+    branch then triggers a full scan. This preserves today's
+    correctness guarantee — the cost of a failed backfill is one extra
+    full scan, not data loss.
+    """
+
+    async def _exploding_backfill(**_kw: Any) -> int:
+        raise RuntimeError("synthetic: indexer crash")
+
+    async def _cache_miss(*_a: Any, **_kw: Any) -> set[str] | None:
+        return None  # mimics empty head_rows after a failed backfill
+
+    monkeypatch.setattr(mod, "index_and_cache", _exploding_backfill)
+    monkeypatch.setattr(mod, "_find_affected_clusters", _cache_miss)
+
+    payload = {
+        "org_id": str(uuid.uuid4()),
+        "repo_id": str(uuid.uuid4()),
+        "pr_number": 7,
+        "base_sha": "b",
+        "head_sha": "h",
+        "full_name": "owner/r",
+    }
+    await mod.handle_pr_merge_update("j", payload)
+    # The dispatcher did not crash → full-scan fallback fired.
+    assert captured["scan_triggered"] is True
+    assert "cache_miss" in (captured["scan_reason"] or "")
+    # And the narrow path did NOT fire.
+    assert captured["narrow_payload"] is None
+
+
+async def test_backfill_skipped_when_repo_has_no_path(
+    monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
+) -> None:
+    """A repo row without a ``path`` (never cloned) must not crash the dispatcher.
+
+    The helper logs ``pr_merge_update_backfill_skipped_no_path`` and
+    returns silently; ``_find_affected_clusters`` then runs as usual
+    (and probably hits the cache-miss branch). The point: the indexer
+    is never called against a None path, which would explode lower
+    down the stack.
+    """
+
+    async def _no_path_repo_and_org(
+        _db: Any, *, org_id: uuid.UUID, repo_id: uuid.UUID
+    ) -> tuple[Any, Any]:
+        class _Repo:
+            github_repo_full_name = "owner/r"
+            path = None  # ← the case under test
+
+        class _Org:
+            id = org_id
+
+        return _Repo(), _Org()
+
+    indexer_calls: list[Any] = []
+
+    async def _track_indexer(**_kw: Any) -> int:
+        indexer_calls.append(_kw)
+        return 0
+
+    async def _empty(*_a: Any, **_kw: Any) -> set[str] | None:
+        return None
+
+    monkeypatch.setattr(mod, "_load_repo_and_org", _no_path_repo_and_org)
+    monkeypatch.setattr(mod, "index_and_cache", _track_indexer)
+    monkeypatch.setattr(mod, "_find_affected_clusters", _empty)
+
+    payload = {
+        "org_id": str(uuid.uuid4()),
+        "repo_id": str(uuid.uuid4()),
+        "pr_number": 7,
+        "base_sha": "b",
+        "head_sha": "h",
+        "full_name": "owner/r",
+    }
+    await mod.handle_pr_merge_update("j", payload)
+    assert indexer_calls == []  # indexer never invoked
+    # Cache-miss fallback still runs.
+    assert captured["scan_triggered"] is True

@@ -52,6 +52,7 @@ GitHub's retry will re-attempt cleanly.
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
@@ -67,6 +68,7 @@ from app.schemas.jobs import JobState
 from app.services.github_app_auth import get_installation_token
 from app.services.github_client import GitHubClient
 from app.services.job_queue import JOB_PR_NARROW_SYNTHESIS, create_job, update_job
+from app.services.scan.cluster_index import index_and_cache
 from app.services.scan.runner import ScanAlreadyActiveError, start_scan
 
 logger = structlog.get_logger(__name__)
@@ -120,6 +122,21 @@ async def handle_pr_merge_update(job_id: str, payload: dict[str, Any]) -> None:
 
             changed_paths = await _fetch_changed_paths(org, full_name, pr_number)
             update_job(job_id, status_message=f"PR touched {len(changed_paths)} files")
+
+            # Backfill cluster_cache for the merge SHA. The merge commit
+            # is brand new — no scan has run against it — so without
+            # this pre-step ``head_rows`` in ``_find_affected_clusters``
+            # is empty and the narrow path is structurally unreachable.
+            # The helper runs only the indexer (no LLM, no synthesis);
+            # any failure falls through to the existing cache-miss
+            # branch below, which still triggers a full scan.
+            await _backfill_cluster_cache(
+                job_id=job_id,
+                org_id=org_id,
+                repo_id=repo_id,
+                repo_path=repo.path,
+                head_sha=head_sha,
+            )
 
             affected = await _find_affected_clusters(
                 db,
@@ -236,6 +253,69 @@ def _enqueue_narrow_synthesis(
             repo_id=str(repo_id),
             exc_info=True,
         )
+
+
+async def _backfill_cluster_cache(
+    *,
+    job_id: str,
+    org_id: uuid.UUID,
+    repo_id: uuid.UUID,
+    repo_path: str | None,
+    head_sha: str,
+) -> None:
+    """Run the indexer at ``head_sha`` and write ``cluster_cache`` rows.
+
+    Pre-step for the narrow path: without it, ``_find_affected_clusters``
+    hits the cache-miss branch on every real-world PR merge (the merge
+    commit has no prior cache rows). Any failure is swallowed and
+    logged — the cache-miss branch downstream still triggers a full
+    scan, so the only cost of a failed backfill is one extra full
+    scan instead of a narrow one.
+    """
+    if not repo_path:
+        logger.info(
+            "pr_merge_update_backfill_skipped_no_path",
+            repo_id=str(repo_id),
+            head_sha=head_sha[:8],
+        )
+        return
+    t0 = time.perf_counter()
+    try:
+        rows_written = await index_and_cache(
+            org_id=org_id,
+            repo_id=repo_id,
+            repo_path=repo_path,
+            head_sha=head_sha,
+        )
+    except Exception:
+        logger.exception(
+            "pr_merge_update_backfill_failed",
+            job_id=job_id,
+            repo_id=str(repo_id),
+            head_sha=head_sha[:8],
+        )
+        return
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    if rows_written == 0:
+        # Indexer ran without crashing but produced zero rows — repo has
+        # no source files, or the indexer's file collector filtered
+        # everything out. ``_find_affected_clusters`` will still hit the
+        # cache-miss branch downstream, so this surfaces the "ran but
+        # empty" case at WARN so it's distinguishable from a real crash.
+        logger.warning(
+            "pr_merge_update_backfill_zero_rows",
+            repo_id=str(repo_id),
+            head_sha=head_sha[:8],
+            elapsed_ms=elapsed_ms,
+        )
+        return
+    logger.info(
+        "pr_merge_update_backfill_done",
+        repo_id=str(repo_id),
+        head_sha=head_sha[:8],
+        rows_written=rows_written,
+        elapsed_ms=elapsed_ms,
+    )
 
 
 async def _load_repo_and_org(
