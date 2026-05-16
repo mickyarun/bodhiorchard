@@ -158,31 +158,33 @@ async def _seed_clusters(  # type: ignore[no-untyped-def]
     head_sha: str,
     files: list[str],
 ) -> None:
-    """Insert ``cluster_cache`` rows so the dispatcher routes through narrow.
+    """Insert a synthetic ``cluster_cache`` row for the BASE sha only.
 
-    Same ``cluster_id`` at both SHAs but DIFFERENT signatures, so
-    ``_find_affected_clusters`` picks up the cluster via its ``added``
-    branch (signature present in head, not in base). Choosing this
-    over the ``modified`` branch sidesteps a dependency on the backend
-    having ``BODHI_MOCK_PR_FILES_PATH`` set — the ``modified`` branch
-    needs ``changed_paths`` to intersect the cluster's files, and
-    ``changed_paths`` comes from ``GitHubClient.list_pr_files`` which
-    would otherwise 404 on the synthetic PR and return ``[]``.
+    Phase 2 makes the dispatcher backfill ``head_sha`` automatically via
+    ``cluster_index.index_and_cache``, so we no longer need (or want)
+    to pre-stage rows for the merge SHA — the helper's
+    ``replace_for_repo_sha`` would wipe them anyway when it runs the
+    real indexer. We only seed BASE_SHA so the
+    ``_find_affected_clusters`` comparison has a "before" snapshot
+    different from the real "after" snapshot the backfill writes —
+    that drift is what makes the ``added`` branch fire and routes the
+    PR through the narrow path. The ``head_sha`` arg is kept in the
+    signature for API stability but is intentionally unused.
     """
-    for sha, sig_suffix in ((base_sha, "base"), (head_sha, "head")):
-        db.add(
-            ClusterCache(
-                org_id=org_id,
-                repo_id=repo_id,
-                head_sha=sha,
-                cluster_id=cluster_id,
-                label="narrow-synth-harness",
-                symbol_count=1,
-                files=files,
-                symbols=[],
-                signature=f"harness-sig-{cluster_id}-{sig_suffix}",
-            )
+    del head_sha  # head_sha is now backfilled by the dispatcher
+    db.add(
+        ClusterCache(
+            org_id=org_id,
+            repo_id=repo_id,
+            head_sha=base_sha,
+            cluster_id=cluster_id,
+            label="narrow-synth-harness",
+            symbol_count=1,
+            files=files,
+            symbols=[],
+            signature=f"harness-sig-{cluster_id}-base",
         )
+    )
     await db.commit()
 
 
@@ -229,13 +231,23 @@ async def _cleanup(  # type: ignore[no-untyped-def]
     *,
     repo_id: uuid.UUID,
     cluster_id: str,
+    head_sha: str | None = None,
     github_pr_id: int | None = None,
 ) -> None:
     """Drop the seeded fixtures so the live DB is unchanged.
 
-    Both deletes are scoped by uuid4-derived synthetic ids so even a
-    partial leak (e.g. SIGKILL'd mid-run) is uniquely identifiable
-    later via the ``cluster_cache.cluster_id`` and
+    Two distinct sets of rows to remove:
+
+    * The base_sha synthetic cluster (keyed by ``cluster_id``) — what
+      we wrote in ``_seed_clusters``.
+    * The real cluster rows the dispatcher's Phase-2 backfill wrote
+      against the synthetic ``head_sha`` (keyed only by SHA — those
+      rows have *real* cluster_ids the indexer produced). Without this
+      delete, every smoke run leaks N rows into cluster_cache.
+
+    All deletes are scoped by uuid4-derived synthetic ids / SHAs so a
+    SIGKILL'd run's partial leak is uniquely identifiable later via
+    the ``cluster_cache.head_sha`` / ``cluster_cache.cluster_id`` /
     ``pull_requests.github_pr_id`` columns.
     """
     await db.execute(
@@ -244,6 +256,13 @@ async def _cleanup(  # type: ignore[no-untyped-def]
             ClusterCache.cluster_id == cluster_id,
         )
     )
+    if head_sha is not None:
+        await db.execute(
+            delete(ClusterCache).where(
+                ClusterCache.repo_id == repo_id,
+                ClusterCache.head_sha == head_sha,
+            )
+        )
     if github_pr_id is not None:
         await db.execute(
             delete(PullRequest).where(
@@ -435,6 +454,7 @@ async def _amain() -> int:
                 db,
                 repo_id=repo.id,
                 cluster_id=cluster_id,
+                head_sha=head_sha,
                 github_pr_id=github_pr_id,
             )
 
