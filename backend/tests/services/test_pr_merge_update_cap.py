@@ -115,7 +115,7 @@ def test_enqueue_narrow_synthesis_payload_shape(
     assert payload["head_sha"] == "headsha"
     assert payload["full_name"] == "owner/example"
     # Sorted for deterministic dedup keys downstream.
-    assert payload["affected_cluster_ids"] == ["c10", "c11", "c2"]
+    assert payload["affected_signatures"] == ["c10", "c11", "c2"]
 
 
 async def test_dispatcher_picks_narrow_under_cap(
@@ -140,7 +140,7 @@ async def test_dispatcher_picks_narrow_under_cap(
     await mod.handle_pr_merge_update("dispatcher-job-id", payload)
     assert captured["scan_triggered"] is False
     assert captured["narrow_payload"] is not None
-    assert len(captured["narrow_payload"][1]["affected_cluster_ids"]) == mod.NARROW_CAP
+    assert len(captured["narrow_payload"][1]["affected_signatures"]) == mod.NARROW_CAP
 
 
 async def test_dispatcher_falls_back_to_full_scan_above_cap(
@@ -437,8 +437,8 @@ async def test_find_affected_clusters_detects_removed_cluster(
     )
     assert result is not None
     affected, effective_base = result
-    # Reminders was REMOVED at head — must be flagged.
-    assert affected == {"c-reminders"}
+    # Reminders was REMOVED at head — its signature must be in affected.
+    assert affected == {"sig-reminders"}
     assert effective_base == "BASE"
 
 
@@ -471,9 +471,9 @@ async def test_find_affected_clusters_added_modified_removed_combine(
     )
     assert result is not None
     affected, _effective_base = result
-    # c-auth (modified — file touched), c-new (added), c-old (removed).
-    # c-billing untouched.
-    assert affected == {"c-auth", "c-new", "c-old"}
+    # Affected are SIGNATURES: sig-auth-old (modified — file touched),
+    # sig-new (added), sig-old (removed). sig-billing untouched.
+    assert affected == {"sig-auth-old", "sig-new", "sig-old"}
 
 
 async def test_find_affected_clusters_falls_back_to_tracked_head_sha(
@@ -530,11 +530,11 @@ async def test_find_affected_clusters_falls_back_to_tracked_head_sha(
     )
     assert result is not None
     affected, effective_base = result
-    # c-old is removed (in SHA_A's rows, not in SHA_C's). c-auth is
-    # unchanged (same sig). With the fallback, c-old gets surfaced —
-    # without the fallback, base_rows would be empty and the
-    # algorithm would return None (cache miss).
-    assert affected == {"c-old"}
+    # sig-old is removed (in SHA_A's rows, not in SHA_C's). sig-auth
+    # is unchanged. With the fallback, the removed signature gets
+    # surfaced — without the fallback, base_rows would be empty and
+    # the algorithm would return None (cache miss).
+    assert affected == {"sig-old"}
     # The returned effective_base_sha is the fallback, so the narrow
     # handler's loader looks up removed-cluster signatures there.
     assert effective_base == "SHA_A"

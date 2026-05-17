@@ -51,51 +51,53 @@ async def load_scoped_communities(
     repo_id: uuid.UUID,
     base_sha: str,
     head_sha: str,
-    cluster_ids: list[str],
+    affected_signatures: list[str],
 ) -> tuple[list[Community], set[str]]:
     """Build the prompt input + the reconciler scope for the narrow path.
 
+    The affected set is identified by ``signature`` (SHA-256 of cluster
+    member node-IDs), not ``cluster_id``. The indexer reassigns
+    cluster_ids when set membership changes (deleting a cluster
+    renumbers later ones), so cluster_ids are unstable across SHAs and
+    cause false matches. Signatures are content-derived and stable.
+
     Returns ``(communities, signatures)``:
 
-    * ``communities`` — one entry per requested cluster that EXISTS at
-      ``head_sha`` (i.e. the added / modified clusters). Claude needs
-      files to look at; a cluster that vanished has nothing to feed
-      into the prompt.
+    * ``communities`` — one entry per affected signature that EXISTS at
+      ``head_sha`` (added / modified clusters). Claude needs files to
+      look at; a cluster that vanished has nothing to feed into the
+      prompt.
     * ``signatures`` — the union of head-side signatures (added /
-      modified) AND base-side signatures for any requested cluster
-      that's no longer at head (removed). The reconciler's
-      ``candidate_filter`` uses this set, so an existing feature whose
+      modified) and base-side signatures for clusters that no longer
+      exist at head (removed). The reconciler's ``candidate_filter``
+      uses this set, so an existing feature whose
       ``cluster_signature`` matches a removed cluster's BASE signature
       stays in the candidate pool and gets soft-deleted with a SHA
       stamp when Claude doesn't re-emit it.
-
-    Without the base-side lookup, a pure-deletion PR would compute an
-    empty signature set, the reconciler would have no candidates to
-    inactivate, and the feature would persist as an orphan.
     """
-    requested = set(cluster_ids)
+    requested = set(affected_signatures)
     cache = ClusterCacheRepository(db, org_id=org_id)
     head_rows = await cache.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
     base_rows = await cache.list_for_repo_sha(repo_id=repo_id, head_sha=base_sha)
 
     communities: list[Community] = []
     signatures: set[str] = set()
-    seen_at_head: set[str] = set()
+    seen_at_head_sigs: set[str] = set()
     for row in head_rows:
-        if row.cluster_id not in requested or not row.signature:
+        if not row.signature or row.signature not in requested:
             continue
         communities.append(row_to_community(row))
         signatures.add(row.signature)
-        seen_at_head.add(row.cluster_id)
+        seen_at_head_sigs.add(row.signature)
 
-    # Removed-cluster signatures: those at base_sha whose cluster_id
-    # the requested set asked about but that no longer exist at head.
-    # The reconciler needs these so the matching feature can be
-    # soft-deleted via the unmatched-active path.
+    # Removed-cluster signatures: requested sigs present only at
+    # base_sha (the cluster was deleted by this PR). Adds them to the
+    # reconciler's scope so the matching feature can be soft-deleted
+    # via the unmatched-active path.
     for row in base_rows:
-        if row.cluster_id not in requested or row.cluster_id in seen_at_head:
+        if not row.signature or row.signature not in requested:
             continue
-        if not row.signature:
+        if row.signature in seen_at_head_sigs:
             continue
         signatures.add(row.signature)
 

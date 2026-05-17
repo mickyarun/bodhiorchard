@@ -193,7 +193,7 @@ def _install_handler_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         repo_id: uuid.UUID,
         base_sha: str,
         head_sha: str,
-        cluster_ids: list[str],
+        affected_signatures: list[str],
     ) -> tuple[list[Community], set[str]]:
         return [_community("sig-a"), _community("sig-b")], {"sig-a", "sig-b"}
 
@@ -261,7 +261,7 @@ async def test_handler_runs_engine_and_reconciles_scoped_to_signatures(
         "pr_number": 7,
         "base_sha": "base_sha_123",
         "head_sha": "HEADSHA1",
-        "affected_cluster_ids": ["c10", "c11"],
+        "affected_signatures": ["sig-c10", "sig-c11"],
         "full_name": "owner/example",
     }
     await handler_mod.handle_pr_narrow_synthesis(job_id="j1", payload=payload)
@@ -306,7 +306,7 @@ async def test_handler_drops_when_no_clusters_resolve_at_head(
         "pr_number": 7,
         "base_sha": "b",
         "head_sha": "h",
-        "affected_cluster_ids": ["c10"],
+        "affected_signatures": ["sig-c10"],
         "full_name": "owner/example",
     }
     await handler_mod.handle_pr_narrow_synthesis(job_id="j2", payload=payload)
@@ -337,7 +337,7 @@ async def test_handler_pure_deletion_skips_claude_and_inactivates_via_reconcile(
         repo_id: uuid.UUID,
         base_sha: str,
         head_sha: str,
-        cluster_ids: list[str],
+        affected_signatures: list[str],
     ) -> tuple[list[Community], set[str]]:
         # Communities empty (head has nothing for these clusters), but
         # signatures populated from base — the deletion case.
@@ -350,7 +350,7 @@ async def test_handler_pure_deletion_skips_claude_and_inactivates_via_reconcile(
         "pr_number": 9,
         "base_sha": "basedeletion",
         "head_sha": "HEADDEL",
-        "affected_cluster_ids": ["c-removed"],
+        "affected_signatures": ["sig-removed-cluster"],
         "full_name": "owner/example",
     }
     await handler_mod.handle_pr_narrow_synthesis(job_id="j-del", payload=payload)
@@ -384,7 +384,7 @@ async def test_handler_failure_resets_accumulator(monkeypatch: pytest.MonkeyPatc
         "pr_number": 7,
         "base_sha": "b",
         "head_sha": "h",
-        "affected_cluster_ids": ["c10"],
+        "affected_signatures": ["sig-c10"],
         "full_name": "owner/example",
     }
     await handler_mod.handle_pr_narrow_synthesis(job_id="j-fail", payload=payload)

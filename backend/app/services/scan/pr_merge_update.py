@@ -238,7 +238,11 @@ def _enqueue_narrow_synthesis(
             "base_sha": base_sha,
             "head_sha": head_sha,
             "full_name": full_name,
-            "affected_cluster_ids": sorted(affected),
+            # Signatures (not cluster_ids) — cluster_ids are unstable
+            # across SHAs because the indexer renumbers them when set
+            # membership changes; signatures are SHA-256 of cluster
+            # member node-IDs, stable for same content.
+            "affected_signatures": sorted(affected),
         },
         user_id=None,
     )
@@ -361,7 +365,7 @@ async def _find_affected_clusters(
     changed_paths: set[str],
     tracked_head_sha: str | None = None,
 ) -> tuple[set[str], str] | None:
-    """Cluster-level diff. Returns ``(affected, effective_base_sha)`` or ``None``.
+    """Cluster-level diff. Returns ``(affected_signatures, effective_base_sha)`` or ``None``.
 
     Algorithm:
       * Look up cluster_cache rows for the PR's ``base_sha``. If empty
@@ -405,11 +409,19 @@ async def _find_affected_clusters(
     if not base_rows or not head_rows:
         return None
 
-    base_sigs = {row.signature: row.cluster_id for row in base_rows if row.signature}
-    head_sigs = {row.signature: row.cluster_id for row in head_rows if row.signature}
+    # NOTE: identify affected clusters by SIGNATURE, not ``cluster_id``.
+    # The indexer reassigns numeric cluster_ids (c0, c1, …) when the set
+    # of clusters changes — e.g., deleting one cluster shifts every
+    # later cluster's id by one. ``cluster_id`` is therefore an
+    # unstable identity across SHAs. The cluster's structural
+    # ``signature`` (SHA-256 of its member node-IDs) IS stable: same
+    # cluster contents → same signature regardless of which numeric
+    # slot the indexer assigned it.
+    base_sigs = {row.signature for row in base_rows if row.signature}
+    head_sigs = {row.signature for row in head_rows if row.signature}
 
-    added = {cluster_id for sig, cluster_id in head_sigs.items() if sig not in base_sigs}
-    removed = {cluster_id for sig, cluster_id in base_sigs.items() if sig not in head_sigs}
+    added = head_sigs - base_sigs
+    removed = base_sigs - head_sigs
 
     modified: set[str] = set()
     for row in head_rows:
@@ -417,7 +429,7 @@ async def _find_affected_clusters(
             continue
         files = set(row.files or [])
         if files & changed_paths:
-            modified.add(row.cluster_id)
+            modified.add(row.signature)
 
     return (added | modified | removed, effective_base_sha)
 

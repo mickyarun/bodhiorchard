@@ -85,9 +85,14 @@ async def handle_pr_narrow_synthesis(job_id: str, payload: dict[str, Any]) -> No
             "pr_number":           int,
             "base_sha":            "<sha>",
             "head_sha":            "<sha>",
-            "affected_cluster_ids": ["<id>", ...],
+            "affected_signatures": ["<sha256_hex>", ...],
             "full_name":           "<owner/repo>",
         }
+
+    ``affected_signatures`` (not cluster_ids) — the indexer reassigns
+    cluster_ids when set membership changes, so they're unstable
+    identifiers across SHAs. Cluster signatures (SHA-256 of member
+    node-IDs) are the stable identity.
     """
     try:
         params = _parse_payload(payload)
@@ -115,7 +120,7 @@ async def handle_pr_narrow_synthesis(job_id: str, payload: dict[str, Any]) -> No
                 repo_id=params.repo_id,
                 base_sha=params.base_sha,
                 head_sha=params.head_sha,
-                cluster_ids=params.affected_cluster_ids,
+                affected_signatures=params.affected_signatures,
             )
             existing_by_sig = await load_existing_features_by_sig(
                 db, org_id=params.org_id, repo_id=params.repo_id, signatures=signatures
@@ -128,7 +133,7 @@ async def handle_pr_narrow_synthesis(job_id: str, payload: dict[str, Any]) -> No
                 "pr_narrow_synthesis_no_clusters_at_either_sha",
                 repo_id=str(params.repo_id),
                 head_sha=params.head_sha[:8],
-                requested=len(params.affected_cluster_ids),
+                requested=len(params.affected_signatures),
             )
             update_job(
                 job_id,
@@ -238,11 +243,20 @@ class _Params:
     base_sha: str
     head_sha: str
     full_name: str
-    affected_cluster_ids: list[str]
+    affected_signatures: list[str]
 
 
 def _parse_payload(payload: dict[str, Any]) -> _Params:
-    """Lift the payload dict into a typed value object; raises on bad input."""
+    """Lift the payload dict into a typed value object; raises on bad input.
+
+    Accepts either ``affected_signatures`` (new) or
+    ``affected_cluster_ids`` (legacy, pre-signature-refactor) for
+    backwards compatibility with any in-flight jobs that may have
+    been enqueued just before the dispatcher rolled forward.
+    """
+    sigs_raw = payload.get("affected_signatures") or payload.get("affected_cluster_ids")
+    if sigs_raw is None:
+        raise KeyError("affected_signatures (or legacy affected_cluster_ids)")
     return _Params(
         org_id=uuid.UUID(payload["org_id"]),
         repo_id=uuid.UUID(payload["repo_id"]),
@@ -250,7 +264,7 @@ def _parse_payload(payload: dict[str, Any]) -> _Params:
         base_sha=str(payload["base_sha"]),
         head_sha=str(payload["head_sha"]),
         full_name=str(payload["full_name"]),
-        affected_cluster_ids=[str(x) for x in payload["affected_cluster_ids"]],
+        affected_signatures=[str(x) for x in sigs_raw],
     )
 
 
