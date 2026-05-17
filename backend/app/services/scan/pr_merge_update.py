@@ -138,16 +138,17 @@ async def handle_pr_merge_update(job_id: str, payload: dict[str, Any]) -> None:
                 head_sha=head_sha,
             )
 
-            affected = await _find_affected_clusters(
+            affected_result = await _find_affected_clusters(
                 db,
                 org_id=org_id,
                 repo_id=repo_id,
                 base_sha=base_sha,
                 head_sha=head_sha,
                 changed_paths=changed_paths,
+                tracked_head_sha=repo.head_sha,
             )
 
-        if affected is None:
+        if affected_result is None:
             # cluster_cache miss for at least one of the SHAs — fall
             # through to a full scan rather than no-op so we don't leak
             # a real change.
@@ -160,6 +161,7 @@ async def handle_pr_merge_update(job_id: str, payload: dict[str, Any]) -> None:
             await _trigger_repo_scan(job_id, org_id=org_id, repo_id=repo_id, reason="cache_miss")
             return
 
+        affected, effective_base_sha = affected_result
         if not affected:
             logger.info(
                 "pr_merge_update_no_affected_clusters",
@@ -187,7 +189,7 @@ async def handle_pr_merge_update(job_id: str, payload: dict[str, Any]) -> None:
                 org_id=org_id,
                 repo_id=repo_id,
                 pr_number=pr_number,
-                base_sha=base_sha,
+                base_sha=effective_base_sha,
                 head_sha=head_sha,
                 full_name=full_name,
                 affected=affected,
@@ -357,26 +359,48 @@ async def _find_affected_clusters(
     base_sha: str,
     head_sha: str,
     changed_paths: set[str],
-) -> set[str] | None:
-    """Cluster-level diff. Returns affected ``cluster_id`` set or ``None`` on cache miss.
+    tracked_head_sha: str | None = None,
+) -> tuple[set[str], str] | None:
+    """Cluster-level diff. Returns ``(affected, effective_base_sha)`` or ``None``.
 
     Algorithm:
-      * Load the cached cluster lists for both SHAs.
-      * If either is missing entirely → return ``None`` (caller falls
-        back to a full scan).
+      * Look up cluster_cache rows for the PR's ``base_sha``. If empty
+        (most likely cause: main moved between the last scan and this
+        merge via PRs whose webhooks pre-dated Phase-2 backfill), fall
+        back to ``tracked_head_sha`` (the repo's last-scanned SHA the
+        baseline scan always populates). The returned
+        ``effective_base_sha`` tells the caller which SHA the diff was
+        actually computed against, so the narrow handler can fetch
+        removed-cluster signatures from the same SHA.
+      * ``head_sha`` rows must exist (the Phase-2 backfill writes them
+        immediately before this call). If they're missing, return
+        ``None`` and the caller falls back to a full scan.
       * ``added``: signature present at head, absent at base.
       * ``removed``: signature present at base, absent at head — the
-        cluster was deleted by this PR (e.g. an entire module
-        directory removed). Surfacing these is what lets the narrow
-        path's reconciler soft-delete the matching feature with a
-        commit-SHA stamp instead of leaving an orphan active row.
+        cluster was deleted by this PR. Surfacing these is what lets
+        the narrow path soft-delete the matching feature with a SHA
+        stamp instead of leaving an orphan active row.
       * ``modified``: surviving signatures whose member files
-        intersect ``changed_paths`` — the cluster's structure stayed
-        the same but at least one of its files was touched.
-      * Return added ∪ modified ∪ removed.
+        intersect ``changed_paths``.
+      * Return ``(added ∪ modified ∪ removed, effective_base_sha)``.
     """
     cache = ClusterCacheRepository(db, org_id=org_id)
     base_rows = await cache.list_for_repo_sha(repo_id=repo_id, head_sha=base_sha)
+    effective_base_sha = base_sha
+    if not base_rows and tracked_head_sha and tracked_head_sha != base_sha:
+        fallback_rows = await cache.list_for_repo_sha(
+            repo_id=repo_id, head_sha=tracked_head_sha
+        )
+        if fallback_rows:
+            base_rows = fallback_rows
+            effective_base_sha = tracked_head_sha
+            logger.info(
+                "pr_merge_update_base_sha_fallback",
+                repo_id=str(repo_id),
+                pr_base_sha=base_sha[:8],
+                fallback_sha=tracked_head_sha[:8],
+            )
+
     head_rows = await cache.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
     if not base_rows or not head_rows:
         return None
@@ -395,7 +419,7 @@ async def _find_affected_clusters(
         if files & changed_paths:
             modified.add(row.cluster_id)
 
-    return added | modified | removed
+    return (added | modified | removed, effective_base_sha)
 
 
 async def _trigger_repo_scan(

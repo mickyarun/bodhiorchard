@@ -124,8 +124,8 @@ async def test_dispatcher_picks_narrow_under_cap(
     """``len(affected) <= NARROW_CAP`` → narrow path, no full scan."""
     affected = {f"c{i}" for i in range(mod.NARROW_CAP)}  # exactly == cap
 
-    async def _resolved(*_a: Any, **_kw: Any) -> set[str] | None:
-        return affected
+    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
+        return (affected, "BASE")
 
     monkeypatch.setattr(mod, "_find_affected_clusters", _resolved)
 
@@ -149,8 +149,8 @@ async def test_dispatcher_falls_back_to_full_scan_above_cap(
     """``len(affected) > NARROW_CAP`` → full ``start_scan`` path, no narrow."""
     affected = {f"c{i}" for i in range(mod.NARROW_CAP + 1)}
 
-    async def _resolved(*_a: Any, **_kw: Any) -> set[str] | None:
-        return affected
+    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
+        return (affected, "BASE")
 
     monkeypatch.setattr(mod, "_find_affected_clusters", _resolved)
 
@@ -173,8 +173,8 @@ async def test_dispatcher_noop_when_no_clusters_affected(
 ) -> None:
     """``len(affected) == 0`` → neither path runs; job completes cleanly."""
 
-    async def _empty(*_a: Any, **_kw: Any) -> set[str] | None:
-        return set()
+    async def _empty(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
+        return (set(), "BASE")
 
     monkeypatch.setattr(mod, "_find_affected_clusters", _empty)
 
@@ -235,6 +235,7 @@ async def _fake_repo_and_org(
     class _Repo:
         github_repo_full_name = "owner/r"
         path = "/tmp/repo"
+        head_sha = "TRACKED_HEAD_SHA"
 
     class _Org:
         id = org_id
@@ -258,9 +259,9 @@ async def test_backfill_runs_before_find_affected_clusters(
     """
     call_log: list[str] = []
 
-    async def _logged_find(*_a: Any, **_kw: Any) -> set[str] | None:
+    async def _logged_find(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
         call_log.append("find_affected_clusters")
-        return {"c1"}
+        return ({"c1"}, "BASE")
 
     async def _logged_backfill(**kw: Any) -> int:
         call_log.append("index_and_cache")
@@ -339,6 +340,7 @@ async def test_backfill_skipped_when_repo_has_no_path(
         class _Repo:
             github_repo_full_name = "owner/r"
             path = None  # ← the case under test
+            head_sha = "TRACKED"
 
         class _Org:
             id = org_id
@@ -425,7 +427,7 @@ async def test_find_affected_clusters_detects_removed_cluster(
         _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
     ]
     _FakeClusterCacheRepo.install(monkeypatch, base_rows=base, head_rows=head)
-    affected = await mod._find_affected_clusters(
+    result = await mod._find_affected_clusters(
         db=object(),
         org_id=uuid.uuid4(),
         repo_id=uuid.uuid4(),
@@ -433,8 +435,11 @@ async def test_find_affected_clusters_detects_removed_cluster(
         head_sha="HEAD",
         changed_paths={"src/reminders/x.py"},
     )
+    assert result is not None
+    affected, effective_base = result
     # Reminders was REMOVED at head — must be flagged.
     assert affected == {"c-reminders"}
+    assert effective_base == "BASE"
 
 
 async def test_find_affected_clusters_added_modified_removed_combine(
@@ -456,7 +461,7 @@ async def test_find_affected_clusters_added_modified_removed_combine(
         _FakeClusterCacheRow("c-new", "sig-new", ["src/search/router.py"]),
     ]
     _FakeClusterCacheRepo.install(monkeypatch, base_rows=base, head_rows=head)
-    affected = await mod._find_affected_clusters(
+    result = await mod._find_affected_clusters(
         db=object(),
         org_id=uuid.uuid4(),
         repo_id=uuid.uuid4(),
@@ -464,6 +469,99 @@ async def test_find_affected_clusters_added_modified_removed_combine(
         head_sha="HEAD",
         changed_paths={"src/auth/router.py", "src/search/router.py"},
     )
+    assert result is not None
+    affected, _effective_base = result
     # c-auth (modified — file touched), c-new (added), c-old (removed).
     # c-billing untouched.
     assert affected == {"c-auth", "c-new", "c-old"}
+
+
+async def test_find_affected_clusters_falls_back_to_tracked_head_sha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``base_sha`` has no rows (main moved between scans), the
+    algorithm must fall back to ``tracked_head_sha`` so the narrow
+    path doesn't degrade into a full scan.
+
+    Sequence: baseline scan ran at SHA-A → cluster_cache populated for
+    SHA-A. Some chore commits landed on main moving to SHA-B (no
+    webhook delivered to Phase-2 backfill). A PR opens with
+    ``base_sha=SHA-B`` (no rows) and merges to ``head_sha=SHA-C``.
+    Effective base falls back to ``tracked_head_sha=SHA-A`` —
+    affected set is computed against that, and the returned
+    ``effective_base_sha`` is SHA-A so the narrow handler downstream
+    knows where to look up removed-cluster signatures.
+    """
+    # Repo rows are keyed by the simulated SHAs. ``base_sha="SHA_B"``
+    # is intentionally absent — the fake only returns rows for SHA_A
+    # and SHA_C below.
+    _FakeClusterCacheRepo.install(
+        monkeypatch,
+        base_rows=[],
+        head_rows=[
+            _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
+        ],
+    )
+
+    class _MultiShaRepo:
+        async def list_for_repo_sha(
+            self, *, repo_id: uuid.UUID, head_sha: str
+        ) -> list[_FakeClusterCacheRow]:
+            if head_sha == "SHA_A":  # baseline scan SHA
+                return [
+                    _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
+                    _FakeClusterCacheRow("c-old", "sig-old", ["src/old/x.py"]),
+                ]
+            if head_sha == "SHA_C":  # merge SHA, just-backfilled
+                return [
+                    _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
+                ]
+            return []  # SHA_B (chore-commit base) has no rows
+
+    monkeypatch.setattr(mod, "ClusterCacheRepository", lambda *_a, **_kw: _MultiShaRepo())
+    result = await mod._find_affected_clusters(
+        db=object(),
+        org_id=uuid.uuid4(),
+        repo_id=uuid.uuid4(),
+        base_sha="SHA_B",  # ← chore-commit base, no rows
+        head_sha="SHA_C",
+        changed_paths={"src/old/x.py"},
+        tracked_head_sha="SHA_A",  # ← baseline scan SHA
+    )
+    assert result is not None
+    affected, effective_base = result
+    # c-old is removed (in SHA_A's rows, not in SHA_C's). c-auth is
+    # unchanged (same sig). With the fallback, c-old gets surfaced —
+    # without the fallback, base_rows would be empty and the
+    # algorithm would return None (cache miss).
+    assert affected == {"c-old"}
+    # The returned effective_base_sha is the fallback, so the narrow
+    # handler's loader looks up removed-cluster signatures there.
+    assert effective_base == "SHA_A"
+
+
+async def test_find_affected_clusters_returns_none_when_both_shas_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When neither base_sha NOR tracked_head_sha has rows, the
+    fallback can't save us — must return None so the caller triggers
+    a full scan.
+    """
+
+    class _EmptyRepo:
+        async def list_for_repo_sha(
+            self, *, repo_id: uuid.UUID, head_sha: str
+        ) -> list[_FakeClusterCacheRow]:
+            return []
+
+    monkeypatch.setattr(mod, "ClusterCacheRepository", lambda *_a, **_kw: _EmptyRepo())
+    result = await mod._find_affected_clusters(
+        db=object(),
+        org_id=uuid.uuid4(),
+        repo_id=uuid.uuid4(),
+        base_sha="SHA_B",
+        head_sha="SHA_C",
+        changed_paths={"src/anything.py"},
+        tracked_head_sha="SHA_A",  # ← also empty per the fake
+    )
+    assert result is None
