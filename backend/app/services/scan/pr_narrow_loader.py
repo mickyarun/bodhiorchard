@@ -52,7 +52,7 @@ async def load_scoped_communities(
     base_sha: str,
     head_sha: str,
     affected_signatures: list[str],
-) -> tuple[list[Community], set[str]]:
+) -> tuple[list[Community], set[str], set[str]]:
     """Build the prompt input + the reconciler scope for the narrow path.
 
     The affected set is identified by ``signature`` (SHA-256 of cluster
@@ -61,19 +61,26 @@ async def load_scoped_communities(
     renumbers later ones), so cluster_ids are unstable across SHAs and
     cause false matches. Signatures are content-derived and stable.
 
-    Returns ``(communities, signatures)``:
+    Returns ``(communities, signatures, affected_files)``:
 
     * ``communities`` — one entry per affected signature that EXISTS at
       ``head_sha`` (added / modified clusters). Claude needs files to
       look at; a cluster that vanished has nothing to feed into the
       prompt.
-    * ``signatures`` — the union of head-side signatures (added /
-      modified) and base-side signatures for clusters that no longer
-      exist at head (removed). The reconciler's ``candidate_filter``
-      uses this set, so an existing feature whose
-      ``cluster_signature`` matches a removed cluster's BASE signature
-      stays in the candidate pool and gets soft-deleted with a SHA
-      stamp when Claude doesn't re-emit it.
+    * ``signatures`` — head-side signatures (added/modified) plus
+      base-side signatures for clusters that no longer exist at head
+      (removed). The reconciler's ``candidate_filter`` uses this set
+      so an existing feature whose ``cluster_signature`` matches a
+      removed cluster's BASE signature stays in the candidate pool
+      and gets soft-deleted via the unmatched-active path.
+    * ``affected_files`` — the union of file paths across every
+      affected cluster (at head_sha for added/modified, at base_sha
+      for removed). The reconciler's filter uses this as a Jaccard-
+      fallback identity when ``cluster_signature`` drift breaks the
+      direct match — the indexer's signature algorithm has changed
+      across releases, so old features have stale signatures even
+      though they still describe the same cluster files. The file
+      overlap lets the reconciler's Jaccard matcher reach them.
     """
     requested = set(affected_signatures)
     cache = ClusterCacheRepository(db, org_id=org_id)
@@ -82,6 +89,7 @@ async def load_scoped_communities(
 
     communities: list[Community] = []
     signatures: set[str] = set()
+    affected_files: set[str] = set()
     seen_at_head_sigs: set[str] = set()
     for row in head_rows:
         if not row.signature or row.signature not in requested:
@@ -89,19 +97,21 @@ async def load_scoped_communities(
         communities.append(row_to_community(row))
         signatures.add(row.signature)
         seen_at_head_sigs.add(row.signature)
+        affected_files.update(str(f) for f in (row.files or []) if isinstance(f, str))
 
-    # Removed-cluster signatures: requested sigs present only at
-    # base_sha (the cluster was deleted by this PR). Adds them to the
-    # reconciler's scope so the matching feature can be soft-deleted
-    # via the unmatched-active path.
+    # Removed-cluster signatures + files: requested sigs present only
+    # at base_sha (the cluster was deleted by this PR). Adds the
+    # signature to the reconciler's scope AND the cluster's files to
+    # the file-overlap scope.
     for row in base_rows:
         if not row.signature or row.signature not in requested:
             continue
         if row.signature in seen_at_head_sigs:
             continue
         signatures.add(row.signature)
+        affected_files.update(str(f) for f in (row.files or []) if isinstance(f, str))
 
-    return communities, signatures
+    return communities, signatures, affected_files
 
 
 def row_to_community(row: ClusterCache) -> Community:

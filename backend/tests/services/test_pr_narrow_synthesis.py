@@ -194,8 +194,12 @@ def _install_handler_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         base_sha: str,
         head_sha: str,
         affected_signatures: list[str],
-    ) -> tuple[list[Community], set[str]]:
-        return [_community("sig-a"), _community("sig-b")], {"sig-a", "sig-b"}
+    ) -> tuple[list[Community], set[str], set[str]]:
+        return (
+            [_community("sig-a"), _community("sig-b")],
+            {"sig-a", "sig-b"},
+            {"a.py", "b.py"},
+        )
 
     async def _fake_load_existing(
         _db: Any, *, org_id: uuid.UUID, repo_id: uuid.UUID, signatures: set[str]
@@ -215,6 +219,7 @@ def _install_handler_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         repo_id: uuid.UUID,
         head_sha: str,
         signatures: set[str],
+        affected_files: set[str],
     ) -> dict[str, int]:
         # Verify the filter the handler builds is shaped correctly by
         # exercising it against in-scope and out-of-scope candidates.
@@ -223,6 +228,7 @@ def _install_handler_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             candidate_filter=signatures,
             synthesised=[],
         )
+        captured["reconcile_files"] = affected_files
         return {"inserted": 2, "updated": 1, "revived": 0, "inactivated": 1}
 
     def _fake_update_job(_job_id: str, **kw: Any) -> None:
@@ -296,8 +302,8 @@ async def test_handler_drops_when_no_clusters_resolve_at_head(
     """
     captured = _install_handler_fakes(monkeypatch)
 
-    async def _empty_scoped(*_a: Any, **_kw: Any) -> tuple[list[Community], set[str]]:
-        return [], set()
+    async def _empty_scoped(*_a: Any, **_kw: Any) -> tuple[list[Community], set[str], set[str]]:
+        return [], set(), set()
 
     monkeypatch.setattr(handler_mod, "load_scoped_communities", _empty_scoped)
     payload = {
@@ -338,10 +344,10 @@ async def test_handler_pure_deletion_skips_claude_and_inactivates_via_reconcile(
         base_sha: str,
         head_sha: str,
         affected_signatures: list[str],
-    ) -> tuple[list[Community], set[str]]:
+    ) -> tuple[list[Community], set[str], set[str]]:
         # Communities empty (head has nothing for these clusters), but
-        # signatures populated from base — the deletion case.
-        return [], {"sig-removed-1"}
+        # signatures + base-side files populated — the deletion case.
+        return [], {"sig-removed-1"}, {"src/removed/file.py"}
 
     monkeypatch.setattr(handler_mod, "load_scoped_communities", _deletion_only_scoped)
     payload = {
@@ -390,3 +396,87 @@ async def test_handler_failure_resets_accumulator(monkeypatch: pytest.MonkeyPatc
     await handler_mod.handle_pr_narrow_synthesis(job_id="j-fail", payload=payload)
     assert reset_calls == [payload["org_id"]]
     assert captured["job_error"] == "boom"
+
+
+# --- Phase 3: candidate_filter file-overlap fallback -------------------------
+
+
+async def test_reconcile_filter_admits_features_via_file_overlap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``cluster_signature`` has drifted from current indexer output,
+    the filter must still admit the feature into the reconciler pool
+    via its ``code_locations`` overlap with the affected files.
+
+    Without this fallback, indexer algorithm changes across releases
+    silently leak legacy features that can never be soft-deleted via
+    the narrow path — the very bug the live A4 retest surfaced.
+    """
+    from app.services.scan import pr_narrow_synthesis as ns
+
+    captured_filter: dict[str, Any] = {}
+
+    async def _spy_reconcile(*, candidate_filter: Any, **kw: Any) -> Any:
+        captured_filter["fn"] = candidate_filter
+
+        class _Summary:
+            inserted = 0
+            updated = 0
+            revived = 0
+            inactivated = 0
+            match_log_rows: list[Any] = []
+
+        return _Summary()
+
+    class _NoopMatchLogRepo:
+        def __init__(self, *_a: Any, **_kw: Any) -> None:
+            pass
+
+        async def bulk_insert(self, _rows: list[Any]) -> None:
+            return None
+
+    class _NoopSessionCtx:
+        async def __aenter__(self) -> Any:
+            class _Db:
+                async def commit(self) -> None:
+                    return None
+
+            return _Db()
+
+        async def __aexit__(self, *_a: Any) -> None:
+            return None
+
+    monkeypatch.setattr(ns, "reconcile_features_for_repo", _spy_reconcile)
+    monkeypatch.setattr(ns, "FeatureMatchLogRepository", _NoopMatchLogRepo)
+    monkeypatch.setattr(ns, "AsyncSessionLocal", lambda: _NoopSessionCtx())
+    monkeypatch.setattr(ns, "drain", lambda *_a, **_kw: [])
+
+    await ns._reconcile_narrow(
+        org_id=uuid.uuid4(),
+        repo_id=uuid.uuid4(),
+        head_sha="HEAD",
+        signatures={"current-sig"},
+        affected_files={"reminders/scheduler.py", "reminders/__init__.py"},
+    )
+    fn = captured_filter["fn"]
+
+    class _Cand:
+        def __init__(self, sig: str, code_locations: dict[str, list[str]]) -> None:
+            self.cluster_signature = sig
+            self.code_locations = code_locations
+
+    # 1. Signature match — primary path.
+    assert fn(_Cand("current-sig", {})) is True
+
+    # 2. Signature DRIFTED (legacy) but code_locations files overlap an
+    #    affected cluster's files — fallback path admits it.
+    drifted = _Cand("stale-legacy-sig", {"backend": ["reminders/scheduler.py"]})
+    assert fn(drifted) is True, "file overlap fallback should admit"
+
+    # 3. Out-of-scope: drifted signature AND no file overlap → rejected.
+    unrelated = _Cand("other-sig", {"backend": ["billing/router.py"]})
+    assert fn(unrelated) is False
+
+    # 4. Empty code_locations + sig miss → rejected.
+    assert fn(_Cand("other-sig", {})) is False
+    assert fn(_Cand("other-sig", {"frontend": None})) is False  # type: ignore[arg-type]

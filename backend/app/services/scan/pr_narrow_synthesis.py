@@ -114,7 +114,7 @@ async def handle_pr_narrow_synthesis(job_id: str, payload: dict[str, Any]) -> No
                 update_job(job_id, state=JobState.COMPLETED, status_message="repo not tracked")
                 return
 
-            communities, signatures = await load_scoped_communities(
+            communities, signatures, affected_files = await load_scoped_communities(
                 db,
                 org_id=params.org_id,
                 repo_id=params.repo_id,
@@ -161,6 +161,7 @@ async def handle_pr_narrow_synthesis(job_id: str, payload: dict[str, Any]) -> No
                 repo_id=params.repo_id,
                 head_sha=params.head_sha,
                 signatures=signatures,
+                affected_files=affected_files,
             )
             logger.info(
                 "pr_narrow_synthesis_done",
@@ -211,6 +212,7 @@ async def handle_pr_narrow_synthesis(job_id: str, payload: dict[str, Any]) -> No
             repo_id=params.repo_id,
             head_sha=params.head_sha,
             signatures=signatures,
+            affected_files=affected_files,
         )
         logger.info(
             "pr_narrow_synthesis_done",
@@ -320,15 +322,40 @@ async def _reconcile_narrow(
     repo_id: uuid.UUID,
     head_sha: str,
     signatures: set[str],
+    affected_files: set[str],
 ) -> dict[str, int]:
-    """Drain the per-repo accumulator and reconcile scoped to ``signatures``.
+    """Drain the per-repo accumulator and reconcile scoped to the PR.
 
-    The ``candidate_filter`` admits only features whose
-    ``cluster_signature`` is in the affected set — features outside the
-    scope are immune to soft-delete even though they have no matching
-    ``FeatureWrite`` in this batch.
+    The ``candidate_filter`` admits a feature into the scope when
+    EITHER condition holds:
+
+    * its ``cluster_signature`` matches one of the affected signatures
+      (primary identity — the indexer's current view of the cluster);
+    * its ``code_locations`` files intersect any affected cluster's
+      files (Jaccard fallback — the indexer's signature algorithm has
+      changed across releases, so legacy features have stale
+      ``cluster_signature`` values that don't match the current
+      indexer output even though they still describe the same cluster
+      files). Without this fallback, a deletion PR can't reach the
+      legacy feature to soft-delete it, and orphan rows accumulate.
+
+    Features outside both checks stay immune to soft-delete — the
+    per-PR scoping property is preserved.
     """
     synthesised = drain(str(org_id), str(repo_id))
+
+    def _in_scope(c: Any) -> bool:
+        if c.cluster_signature in signatures:
+            return True
+        # Flatten ``{"frontend": [...], "backend": [...]}`` into a flat
+        # set of paths and check overlap with the affected file set.
+        cl = c.code_locations or {}
+        feat_files: set[str] = set()
+        for value in cl.values():
+            if isinstance(value, list):
+                feat_files.update(p for p in value if isinstance(p, str))
+        return bool(feat_files & affected_files)
+
     async with AsyncSessionLocal() as db:
         summary = await reconcile_features_for_repo(
             db=db,
@@ -336,7 +363,7 @@ async def _reconcile_narrow(
             repo_id=repo_id,
             head_sha=head_sha,
             synthesised=synthesised,
-            candidate_filter=lambda c: c.cluster_signature in signatures,
+            candidate_filter=_in_scope,
         )
         if summary.match_log_rows:
             await FeatureMatchLogRepository(db, org_id=org_id).bulk_insert(summary.match_log_rows)
