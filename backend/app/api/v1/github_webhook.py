@@ -179,11 +179,22 @@ async def github_webhook(request: Request) -> Response:
         #
         # PR-merge deliveries get the full replay shape so the
         # per-(org, repo) Redis-stream consumer can rebuild handler
-        # input from this row alone. Everything else gets an audit-
-        # only row (``status='skipped'``); the consumer never sees it.
+        # input from this row alone. Everything else (including PR
+        # merges to non-main branches like ``develop``, ``release/*``,
+        # or feature branches) gets an audit-only row
+        # (``status='skipped'``); the consumer never sees it.
+        #
+        # We intentionally gate the synth on ``base.ref ==
+        # repo.main_branch`` only — handling stage branches would
+        # require revert/promotion tracking that isn't worth the
+        # complexity for the current Features-tab surface (the BUD
+        # lifecycle already tracks "where is this in flight" via
+        # ``feature_status='in_progress'`` for BUD-authored rows).
         log_repo = WebhookLogRepository(db, org_id=org.id)
         replay_payload = (
-            _build_pr_merge_replay_payload(payload) if event_type == "pull_request" else None
+            _build_pr_merge_replay_payload(payload, main_branch=repo.main_branch)
+            if event_type == "pull_request"
+            else None
         )
         summary = {"repo": repo_full_name, "action": payload.get("action")}
         if replay_payload is not None:
@@ -253,13 +264,27 @@ async def github_webhook(request: Request) -> Response:
     return Response(status_code=200, content="OK")
 
 
-def _build_pr_merge_replay_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+def _build_pr_merge_replay_payload(
+    payload: dict[str, Any], *, main_branch: str | None
+) -> dict[str, Any] | None:
     """Extract the minimum replay shape for a PR-merge delivery.
 
-    Returns ``None`` for non-PR-merge ``pull_request`` events (opened,
-    synchronize, closed-without-merge) — those don't enqueue a
-    feature-reconcile job, so the picker should never see them as
-    ``pending`` either.
+    Returns ``None`` (skip synth) for:
+
+    * Non-merge ``pull_request`` events (``opened`` / ``synchronize`` /
+      ``closed`` without merge).
+    * Merges whose ``base.ref`` doesn't match ``main_branch`` — develop,
+      uat, release/*, hotfix/*, and feature-to-feature merges are all
+      intentionally ignored so the Features tab reflects the
+      production-side surface only. Stage tracking for BUD-authored
+      features is handled by ``feature_lifecycle`` via
+      ``feature_status='in_progress'``.
+    * ``main_branch is None`` (repo never had a main configured) — same
+      treatment: defer synth until the operator sets the branch.
+
+    The matched-but-non-main case still records an audit row via
+    ``record_delivery`` upstream (``status='skipped'``) so the
+    delivery isn't lost from the ledger.
     """
     if payload.get("action") != "closed":
         return None
@@ -267,6 +292,12 @@ def _build_pr_merge_replay_payload(payload: dict[str, Any]) -> dict[str, Any] | 
     if not pr.get("merged"):
         return None
     base = pr.get("base") or {}
+    base_ref = base.get("ref")
+    # No main_branch configured OR the merge target isn't main → skip.
+    # Both branches converge on the same outcome (audit row, no synth)
+    # so the caller's downstream code doesn't have to distinguish.
+    if not main_branch or base_ref != main_branch:
+        return None
     head = pr.get("head") or {}
     head_sha = pr.get("merge_commit_sha") or head.get("sha")
     base_sha = base.get("sha")

@@ -211,26 +211,41 @@ const capabilityList = computed<string[]>(() => {
   return caps.filter((c): c is string => typeof c === 'string')
 })
 
+// Color + label per status. Every card surfaces exactly ONE status
+// chip so an operator scanning the page can identify lifecycle stage
+// at a glance — the prior design left scan-authored rows (NULL
+// status) chipless and the user couldn't tell live from in-progress
+// just from the card grid.
 const STATUS_COLOR: Record<string, string> = {
   planned: 'info',
   in_progress: 'warning',
   implemented: 'success',
 }
+const STATUS_LABEL: Record<string, string> = {
+  planned: 'Planned',
+  in_progress: 'In progress',
+  implemented: 'Live',
+}
 
 const badges = computed(() => {
   const out: Array<{ key: string; label: string; color: string }> = []
-  // Deactivated badge sits first so it's the most visually obvious
-  // marker on a soft-deleted card — the rest of the chips read
-  // "what this used to be" against that context.
+  // Lifecycle chip — always present so scanning the grid for
+  // in-progress vs live is a first-glance read, not a "click and
+  // dig" exercise.
   if (!props.feature.isActive) {
-    out.push({ key: 'deactivated', label: 'deactivated', color: 'grey-darken-1' })
-  }
-  if (props.feature.featureStatus) {
+    out.push({ key: 'lifecycle', label: 'Deactivated', color: 'grey-darken-1' })
+  } else if (props.feature.featureStatus) {
     out.push({
-      key: 'status',
-      label: props.feature.featureStatus.replace('_', ' '),
+      key: 'lifecycle',
+      label: STATUS_LABEL[props.feature.featureStatus] ?? props.feature.featureStatus,
       color: STATUS_COLOR[props.feature.featureStatus] ?? 'grey',
     })
+  } else {
+    // Scan-authored rows have NULL feature_status — represent them
+    // as ``Live`` because the only way a scan-authored feature
+    // exists is if it was synthesised from code that landed on
+    // ``main_branch``.
+    out.push({ key: 'lifecycle', label: 'Live', color: 'success' })
   }
   if (props.feature.source === 'bud') {
     out.push({ key: 'bud', label: 'BUD', color: 'cyan' })

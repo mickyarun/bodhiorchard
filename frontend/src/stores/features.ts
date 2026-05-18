@@ -27,11 +27,14 @@ import type { Feature, FeaturePage, RepoContributor } from '@/types'
 
 export const PAGE_SIZE = 24
 
+// View-mode enum mirrors backend FeatureReadRepository.VIEW_MODE_*.
+export type FeatureViewMode = 'all' | 'active' | 'in_progress' | 'deactivated'
+
 interface FetchPageArgs {
   page?: number
   repoId?: string
   q?: string
-  includeInactive?: boolean
+  mode?: FeatureViewMode
 }
 
 export const useFeaturesStore = defineStore('features', () => {
@@ -46,7 +49,7 @@ export const useFeaturesStore = defineStore('features', () => {
     page = 1,
     repoId,
     q,
-    includeInactive = false,
+    mode = 'all',
   }: FetchPageArgs = {}): Promise<void> {
     loading.value = true
     error.value = null
@@ -57,10 +60,9 @@ export const useFeaturesStore = defineStore('features', () => {
       }
       if (repoId) params.repoId = repoId
       if (q) params.q = q
-      // Only send the flag when on — keeps the URL clean (and Network
-      // tab readable) for the default active-only case, which is by
-      // far the most common.
-      if (includeInactive) params.includeInactive = true
+      // Only send mode when it deviates from default — keeps the URL
+      // clean (and Network tab readable) for the most common case.
+      if (mode !== 'all') params.mode = mode
       const { data } = await api.get<FeaturePage>('/v1/features', { params })
       items.value = data.items
       total.value = data.total

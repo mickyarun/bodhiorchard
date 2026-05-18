@@ -16,14 +16,16 @@
 
 Replaces ``/v1/skills/knowledge`` (retired with the legacy
 ``knowledge_items`` table). All endpoints are org-scoped via the
-authenticated user, paginate via the existing ``limit`` / ``offset``
-convention, and by default never leak soft-deleted
-(``is_active=False``) rows.
+authenticated user and paginate via the existing ``limit`` /
+``offset`` convention.
 
-Callers opt in to seeing soft-deleted features via
-``?includeInactive=true`` — the UI's "Show deactivated" toggle uses
-this to surface the deactivation date + PR # alongside the rest of
-the feature card.
+The Features tab's visibility filter is driven by a single
+``?mode=<view_mode>`` query param:
+
+* ``all`` (default) — every active row, shipped or in-progress.
+* ``active`` — only shipped / live rows (excludes BUD WIP).
+* ``in_progress`` — only BUD work-in-progress rows.
+* ``deactivated`` — only soft-deleted rows.
 
 Mounted at ``/api/v1/features`` from :mod:`app.api.router`.
 """
@@ -198,30 +200,33 @@ async def list_features(
     q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=24, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    include_inactive: bool = Query(default=False, alias="includeInactive"),
+    mode: str = Query(default="all", pattern="^(all|active|in_progress|deactivated)$"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FeaturePage:
     """Paginated features for the authenticated user's org.
 
-    Filter shape mirrors the legacy ``/v1/skills/knowledge`` endpoint
-    so frontend pagination state translates one-to-one. Defaults to
-    active rows only; pass ``includeInactive=true`` to also surface
-    soft-deleted features so the UI can render their deactivation
-    date + PR # alongside live ones.
+    ``mode`` selects the view: ``all`` / ``active`` / ``in_progress``
+    / ``deactivated``. Pagination state translates one-to-one with the
+    legacy ``/v1/skills/knowledge`` shape. The regex on ``mode``
+    rejects unknown values at the FastAPI layer so bad clients get a
+    422 instead of falling through to the safety-default ``all``.
     """
     org = await OrganizationRepository(db).get_for_user(current_user)
     reads = FeatureReadRepository(db, org_id=org.id)
     title_query = q.strip() if q and q.strip() else None
-    only_active = not include_inactive
     features = await reads.list_with_links(
         repo_id=repo_id,
         q=title_query,
         limit=limit,
         offset=offset,
-        only_active=only_active,
+        view_mode=mode,
     )
-    total = await reads.count_with_links(repo_id=repo_id, q=title_query, only_active=only_active)
+    total = await reads.count_with_links(
+        repo_id=repo_id,
+        q=title_query,
+        view_mode=mode,
+    )
     repo_names = await _repo_name_lookup(db, org_id=org.id)
     pr_meta = await resolve_pr_meta_for_features(db, org_id=org.id, features=features)
     items = [
@@ -238,7 +243,7 @@ async def list_features(
 async def list_features_by_repo(
     repo_id: uuid.UUID | None = Query(default=None, alias="repoId"),
     q: str | None = Query(default=None, max_length=200),
-    include_inactive: bool = Query(default=False, alias="includeInactive"),
+    mode: str = Query(default="all", pattern="^(all|active|in_progress|deactivated)$"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[FeaturesByRepoRead]:
@@ -246,17 +251,20 @@ async def list_features_by_repo(
 
     No pagination — the redesigned UI is repo-grouped and lazy-loads
     the per-repo top contributors panel separately. Empty repos are
-    omitted from the response. ``includeInactive`` mirrors the flag
-    on the flat list endpoint above.
+    omitted from the response. ``mode`` mirrors the flat-list endpoint
+    above.
     """
     org = await OrganizationRepository(db).get_for_user(current_user)
     reads = FeatureReadRepository(db, org_id=org.id)
     title_query = q.strip() if q and q.strip() else None
-    only_active = not include_inactive
     # Fetch all matching features; the page-level cap is plenty for
     # the grouped view (the UI doesn't need pagination here).
     features = await reads.list_with_links(
-        repo_id=repo_id, q=title_query, limit=500, offset=0, only_active=only_active
+        repo_id=repo_id,
+        q=title_query,
+        limit=500,
+        offset=0,
+        view_mode=mode,
     )
     repo_names = await _repo_name_lookup(db, org_id=org.id)
     pr_meta = await resolve_pr_meta_for_features(db, org_id=org.id, features=features)
