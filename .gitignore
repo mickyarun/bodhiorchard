@@ -71,6 +71,12 @@ repoclone/
 # build artifact, not source.
 examples/*/graphify-out/
 
+# Local DB ops scripts (snapshot / restore / switch). Operationally
+# useful but contain assumptions about the developer's environment
+# (asyncpg URL parsing, snapshot dir conventions) that don't belong
+# in the parent repo's tracked set.
+scripts/db/
+
 # Example repos — tracked independently at github.com/mickyarun/taskflow-*.
 # Run `bash examples/setup-git-history.sh` after cloning to bootstrap.
 # Keeping them out of the parent repo's tracked set means FT-testing PR
