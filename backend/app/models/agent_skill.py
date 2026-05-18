@@ -35,19 +35,28 @@ if TYPE_CHECKING:
 
 
 class AgentType(StrEnum):
-    """The 12 Bodhiorchard agent types that own skills.
+    """Bodhiorchard agent types that own (or will own) a Claude-driven skill.
 
     Values must mirror the keys of ``app.agents.skill_mapping.AGENT_SKILL_MAP``;
     the seed flow uses that map to assign agent_type to each seeded row.
+
+    Three earlier enum values (``status``, ``standup``, ``reassignment``)
+    were dropped after audit confirmed nothing in the runtime ever
+    loaded their skill — standup is pure SQL aggregation, reassignment
+    is plain Python, status was never wired. Their stale rows are
+    removed by migration ``79884f63ba1a_drop_dead_agent_types``.
+
+    ``TRIAGE``, ``LEARNING``, and ``BUG_LINKER`` are also currently
+    unloaded by any runtime path, but kept as placeholders for planned
+    AI flows (BUD triage / learning recaps / bug-to-BUD linker). Their
+    seeded rows stay so an admin can pre-edit the prompts before the
+    wiring lands.
     """
 
     TRIAGE = "triage"
     BUD = "bud"
-    STATUS = "status"
-    STANDUP = "standup"
     LEARNING = "learning"
     BUG_LINKER = "bugLinker"
-    REASSIGNMENT = "reassignment"
     SKILL = "skill"
     TECH_PLAN = "techPlan"
     TEST_PLAN = "testPlan"

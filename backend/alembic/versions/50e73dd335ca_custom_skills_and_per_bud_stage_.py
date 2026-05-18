@@ -1,12 +1,20 @@
 """custom skills and per-bud stage overrides
 
 Adds three columns to ``agent_skills`` (``agent_type``, ``is_default``,
-``is_custom``) so each row is tied to exactly one of the 12 agent
-types, and at most one default per ``(org_id, agent_type)`` is
-enforceable. Backfill splits the two existing shared-slug seeds
-(``product-manager`` → bud/standup/reassignment, ``testing`` →
-bugLinker/testPlan) into one row per agent type so each can be
-customised independently.
+``is_custom``) so each row is tied to exactly one agent type, and at
+most one default per ``(org_id, agent_type)`` is enforceable. Backfill
+splits the one shared-slug seed (``testing`` → bugLinker/testPlan)
+into one row per agent type so each can be customised independently.
+
+Three agent types (``status``, ``standup``, ``reassignment``) were
+removed from the seed map after auditing the runtime — those agents
+don't load a Claude skill, so seeding rows for them only created
+misleading entries in Settings → Agent Prompts. They remain valid
+Postgres enum values for forward-compat but are never inserted.
+
+Three more (``triage``, ``learning``, ``bugLinker``) are kept as TODO
+placeholders: not exercised today, but planned, and an admin may want
+to pre-edit the prompts before the wiring lands.
 
 Adds ``bud_stage_skill_overrides`` for per-BUD stage skill choices set
 via the create-BUD "Advanced settings" section.
@@ -32,11 +40,15 @@ depends_on: str | Sequence[str] | None = None
 
 
 # Inverse of app.agents.skill_mapping.AGENT_SKILL_MAP. Frozen here so the
-# migration is independent of future code changes to that map.
+# migration is independent of future code changes to that map. Slugs
+# whose only consumer was a dead agent type (status → devops) are
+# dropped — rows for those slugs won't appear in normal-deployed DBs,
+# and if any leftover ``devops`` row exists, the defensive fallback
+# (step 4 below) tags it ``agent_type='bud', is_default=false`` so the
+# admin can re-target it via the UI.
 SLUG_TO_AGENT_TYPES: dict[str, list[str]] = {
     "triage-analyst": ["triage"],
-    "product-manager": ["bud", "standup", "reassignment"],
-    "devops": ["status"],
+    "product-manager": ["bud"],
     "technical-writer": ["learning"],
     "testing": ["bugLinker", "testPlan"],
     "code-reviewer": ["skill"],
@@ -45,6 +57,11 @@ SLUG_TO_AGENT_TYPES: dict[str, list[str]] = {
     "slack-triage": ["slackTriage"],
 }
 
+# Full Postgres enum value set — keeps ``status``, ``standup``, and
+# ``reassignment`` as valid enum members even though the seed map
+# above doesn't insert rows for them. Preserves forward-compat: if a
+# future feature wires one of those agents to Claude, the enum value
+# is already there and we won't need an enum-recreation migration.
 _AGENT_TYPE_VALUES = (
     "triage",
     "bud",

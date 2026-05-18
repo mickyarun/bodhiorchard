@@ -30,14 +30,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent_skill import AgentSkill, AgentType
 from app.models.bud import BUDStatus
 
+# Agent types that own (or will own) a Claude-driven skill. Three
+# entries were dropped after auditing the codebase — ``status``,
+# ``standup``, ``reassignment`` had no runtime path that ever loaded
+# their skill, so seeding rows for them only created misleading
+# entries in the Settings → Agent Prompts UI.
+#
+# ``triage``, ``learning``, and ``bugLinker`` are NOT exercised today
+# either, but kept as TODO placeholders for planned AI flows (BUD
+# triage / learning recap / bug-to-BUD linker). Their seeded rows are
+# preserved so an admin can pre-edit the prompts before the wiring
+# lands. Audit each before assuming it has a runtime caller.
 AGENT_SKILL_MAP: dict[str, str] = {
-    "triage": "triage-analyst",
+    "triage": "triage-analyst",  # TODO: wire into triage agent
     "bud": "product-manager",
-    "status": "devops",
-    "standup": "product-manager",
-    "learning": "technical-writer",
-    "bugLinker": "testing",
-    "reassignment": "product-manager",
+    "learning": "technical-writer",  # TODO: wire into learning recap
+    "bugLinker": "testing",  # TODO: wire into bug→BUD linker
     "skill": "code-reviewer",
     "techPlan": "tech-planner",
     "testPlan": "testing",
