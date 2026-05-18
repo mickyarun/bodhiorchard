@@ -38,6 +38,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.skill_mapping import resolve_skill_for_agent
+from app.models.agent_activity import AgentActivityLog
 from app.models.agent_skill import AgentSkill, AgentType
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.bud_stage_skill_override import BUDStageSkillOverride
@@ -46,7 +47,7 @@ from app.repositories.agent_skill import AgentSkillRepository
 from app.repositories.bud_stage_skill_override import (
     BUDStageSkillOverrideRepository,
 )
-from app.services.skill_loader import seed_skills_for_org
+from app.services.skill_loader import resolve_skill_for_org, seed_skills_for_org
 
 pytestmark = pytest.mark.integration
 
@@ -295,3 +296,118 @@ async def test_override_cleared_when_bud_deleted(
             )
         ).scalar_one()
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_resolve_skill_for_org_uses_fallback_slug_when_no_match(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """``fallback_slug`` is the last-resort shape for callers (job_design,
+    job_chat) that need a Skill object even when the agent-type-aware
+    chain comes up empty (e.g. on a fresh org before seed_skills_for_org
+    has finished, or for legacy section slugs not in the agent map)."""
+    org_id = await _seed_org(pg_session_factory)
+
+    async with pg_session_factory() as db:
+        await seed_skills_for_org(org_id, db)
+        await db.commit()
+
+    # Provoke a "no override, no default" miss by asking for an agent_type
+    # whose seed is present but is_default has been demoted (simulate by
+    # passing a bogus agent_name string that doesn't match any AgentType
+    # — the resolver returns None, fallback_slug kicks in).
+    async with pg_session_factory() as db:
+        skill = await resolve_skill_for_org(
+            "not-a-real-agent",
+            org_id,
+            db,
+            fallback_slug="designer",
+        )
+    assert skill is not None
+    assert skill.slug == "designer"
+
+
+@pytest.mark.asyncio
+async def test_delete_custom_skill_nulls_activity_log_skill_id(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Deleting a custom skill that has activity-log history must succeed.
+
+    Audit rows survive with ``skill_id = NULL`` and the denormalised
+    ``skill_slug`` text column intact. Without this, the NO-ACTION FK
+    would permanently lock any skill that's ever been invoked.
+    """
+    org_id = await _seed_org(pg_session_factory)
+
+    async with pg_session_factory() as db:
+        await seed_skills_for_org(org_id, db)
+        await db.commit()
+
+    async with pg_session_factory() as db:
+        repo = AgentSkillRepository(db, org_id=org_id)
+        custom = await repo.create_custom(
+            skill_slug="logged-pm",
+            agent_type=AgentType.BUD,
+            name="Logged PM",
+            description="",
+            tools=[],
+            mcp_tools=[],
+            prompt="x",
+        )
+        await db.commit()
+        custom_id = custom.id
+
+    # Insert a fake activity-log row pointing at the custom skill — the
+    # row that the runtime path would normally create on each invocation.
+    async with pg_session_factory() as db:
+        log = AgentActivityLog(
+            org_id=org_id,
+            skill_id=custom_id,
+            skill_slug="logged-pm",
+            event_type="skill_invoked",
+            source="test",
+            message="test log row",
+        )
+        db.add(log)
+        await db.commit()
+        log_id = log.id
+
+    # Delete the custom skill. Should succeed (no FK violation).
+    async with pg_session_factory() as db:
+        repo = AgentSkillRepository(db, org_id=org_id)
+        deleted = await repo.delete_custom(custom_id)
+        await db.commit()
+    assert deleted is True
+
+    # The audit row survives with skill_id nulled but skill_slug retained.
+    async with pg_session_factory() as db:
+        fetched = await db.get(AgentActivityLog, log_id)
+        assert fetched is not None
+        assert fetched.skill_id is None
+        assert fetched.skill_slug == "logged-pm"
+
+
+@pytest.mark.asyncio
+async def test_old_bud_without_override_resolves_to_org_default(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Pre-existing BUDs (no ``bud_stage_skill_overrides`` rows) must fall
+    through to the org default — proves the wiring doesn't regress old
+    data when the new resolver path replaces the legacy slug lookup."""
+    org_id = await _seed_org(pg_session_factory)
+
+    async with pg_session_factory() as db:
+        await seed_skills_for_org(org_id, db)
+        await db.commit()
+
+    bud_id = await _seed_bud(pg_session_factory, org_id)
+
+    # No override rows exist for this BUD — it represents the "released
+    # before custom-skills landed" cohort.
+    async with pg_session_factory() as db:
+        resolved = await resolve_skill_for_agent(
+            "design", org_id, db, bud_id=bud_id, bud_status=BUDStatus.DESIGN
+        )
+        assert resolved is not None
+        assert resolved.skill_slug == "designer"
+        assert resolved.is_default is True

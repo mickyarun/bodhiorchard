@@ -277,8 +277,13 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
 
     update_job(job_id, status_message="Waiting for AI response...", progress_pct=20)
 
+    from app.agents.skill_mapping import SECTION_AGENT_TYPE, SECTION_BUD_STATUS
+    from app.services.skill_loader import resolve_skill_for_org
+
     skill_name = SECTION_SKILL_MAP.get(payload.section, "product-manager")
     _chat_org_id = payload.org_id
+    _section_agent_type = SECTION_AGENT_TYPE.get(payload.section)
+    _section_bud_status = SECTION_BUD_STATUS.get(payload.section)
 
     await log_agent_activity(
         None,
@@ -289,18 +294,36 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
         bud_id=uuid_mod.UUID(payload.bud_id),
     )
 
-    # Read config from the per-org skill row so admin edits to model /
-    # max_turns / iteration_model in Settings → Agent Prompts take effect
-    # without a redeploy. Fall back to the file default if the DB row is
-    # missing (e.g. a fresh-install org that hasn't been seeded yet).
-    try:
-        async with AsyncSessionLocal() as _skill_db:
-            skill = await load_skill_for_org(skill_name, uuid_mod.UUID(_chat_org_id), _skill_db)
-    except (ValueError, LookupError):
+    # Resolve the chat skill via override > org default > slug fallback.
+    # When the BUD has an Advanced-Settings pick for this section's stage,
+    # follow-up chat runs the SAME custom skill — keeping the persona
+    # consistent across initial generation and editing iterations.
+    skill = None
+    if _section_agent_type is not None:
         try:
-            skill = load_skill(skill_name)
-        except FileNotFoundError:
+            async with AsyncSessionLocal() as _skill_db:
+                skill = await resolve_skill_for_org(
+                    _section_agent_type.value,
+                    uuid_mod.UUID(_chat_org_id),
+                    _skill_db,
+                    bud_id=uuid_mod.UUID(payload.bud_id),
+                    bud_status=_section_bud_status,
+                    fallback_slug=skill_name,
+                )
+        except (ValueError, LookupError):
             skill = None
+    if skill is None:
+        # Legacy fallback for sections outside SECTION_AGENT_TYPE.
+        try:
+            async with AsyncSessionLocal() as _skill_db:
+                skill = await load_skill_for_org(
+                    skill_name, uuid_mod.UUID(_chat_org_id), _skill_db
+                )
+        except (ValueError, LookupError):
+            try:
+                skill = load_skill(skill_name)
+            except FileNotFoundError:
+                skill = None
 
     # Design section needs a longer timeout (matches design agent job)
     chat_timeout = 900 if payload.section == "design" else 300

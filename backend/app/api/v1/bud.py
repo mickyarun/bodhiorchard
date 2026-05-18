@@ -390,6 +390,72 @@ async def get_bud_timeline(
     return await repo.list_for_bud(bud_id)
 
 
+@router.get(
+    "/{bud_id}/stage-skill-overrides",
+    response_model=dict[BUDStatus, uuid.UUID],
+    dependencies=[Depends(require_permissions("buds:view"))],
+)
+async def get_stage_skill_overrides(
+    bud_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[BUDStatus, uuid.UUID]:
+    """Return the per-stage skill overrides set on this BUD.
+
+    Used by the BUD detail page's "Skills" dialog to render the current
+    pinned skill for each stage (so the user can see what they previously
+    picked, plus the default for stages they didn't override).
+    """
+    from app.repositories.bud_stage_skill_override import (
+        BUDStageSkillOverrideRepository,
+    )
+
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+
+    override_repo = BUDStageSkillOverrideRepository(db, org_id=current_user.org_id)
+    rows = await override_repo.list_for_bud(bud_id)
+    return {row.bud_status: row.skill_id for row in rows}
+
+
+@router.put(
+    "/{bud_id}/stage-skill-overrides",
+    response_model=dict[BUDStatus, uuid.UUID],
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def set_stage_skill_overrides(
+    bud_id: uuid.UUID,
+    body: dict[BUDStatus, uuid.UUID],
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[BUDStatus, uuid.UUID]:
+    """Replace the BUD's per-stage skill overrides in one shot.
+
+    The body is the *full* desired map of stage → skill_id. Stages not
+    present in the body are cleared — that way the same call shape works
+    for "I added an override", "I changed one", and "I cleared one back
+    to the org default". Each (stage, skill) pair is validated against
+    the stage's expected agent type before persisting.
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+
+    await _persist_stage_skill_overrides(db, current_user.org_id, bud_id, body)
+    await db.commit()
+
+    logger.info(
+        "bud_stage_skill_overrides_updated",
+        bud_id=str(bud_id),
+        org_id=str(current_user.org_id),
+        count=len(body),
+    )
+    return body
+
+
 @router.patch(
     "/{bud_id}",
     response_model=BUDRead,

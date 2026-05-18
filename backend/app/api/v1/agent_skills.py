@@ -348,6 +348,30 @@ async def set_default_skill(
     return _skill_to_read(updated)
 
 
+def _format_blocker_message(
+    *,
+    pinned_buds: list[tuple[int, str]],
+    task_count: int,
+) -> str:
+    """Build a user-facing 409 message listing where the skill is still in use."""
+    parts: list[str] = []
+    if pinned_buds:
+        # Cap the rendered list so a skill used by 50 BUDs doesn't break the toast.
+        head = pinned_buds[:5]
+        rendered = ", ".join(f"BUD-{num:03d} ({title})" for num, title in head)
+        if len(pinned_buds) > len(head):
+            rendered += f", and {len(pinned_buds) - len(head)} more"
+        parts.append(
+            f"pinned as the override in {len(pinned_buds)} BUD(s): {rendered}. "
+            "Open each BUD's Advanced settings and pick a different skill, then retry"
+        )
+    if task_count:
+        parts.append(f"{task_count} agent task(s) reference this skill")
+    if not parts:
+        return "Skill is in use"
+    return "Can't delete: " + "; ".join(parts) + "."
+
+
 @router.delete(
     "/by-id/{skill_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -358,7 +382,15 @@ async def delete_custom_skill(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete a custom skill. Returns 409 for seeded skills."""
+    """Delete a custom skill. Returns 409 for seeded skills OR when the
+    skill is still referenced by a BUD override, a task, or an activity
+    log. The 409 ``detail`` tells the user which BUDs to re-point first.
+    """
+    from app.repositories.bud_agent_task import BUDAgentTaskRepository
+    from app.repositories.bud_stage_skill_override import (
+        BUDStageSkillOverrideRepository,
+    )
+
     repo = AgentSkillRepository(db, org_id=current_user.org_id)
     existing = await repo.get_by_id(skill_id)
     if existing is None:
@@ -368,6 +400,24 @@ async def delete_custom_skill(
             status_code=status.HTTP_409_CONFLICT,
             detail="Seeded skills cannot be deleted; use PUT to reset to file default",
         )
+
+    # Pre-check the FKs that would block the underlying DELETE. We
+    # surface BUD overrides + agent tasks because they're recoverable
+    # (the user re-points the BUD or waits for the task to finish);
+    # activity_logs are *not* blocked — ``delete_custom`` nulls those
+    # references in the same transaction so audit logs survive.
+    override_repo = BUDStageSkillOverrideRepository(db, org_id=current_user.org_id)
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+
+    pinned_buds = await override_repo.list_buds_using_skill(skill_id)
+    task_count = await task_repo.count_for_skill(skill_id)
+
+    if pinned_buds or task_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_format_blocker_message(pinned_buds=pinned_buds, task_count=task_count),
+        )
+
     deleted = await repo.delete_custom(skill_id)
     if not deleted:
         raise HTTPException(

@@ -379,8 +379,6 @@ const SECTION_LABELS: Record<string, string> = {
 const AGENT_LABELS: Record<string, string> = {
   'product-manager': 'PM Agent',
   'designer': 'Design Agent',
-  'backend-developer': 'Backend Agent',
-  'frontend-developer': 'Frontend Agent',
   'qa-engineer': 'QA Agent',
   'tech-planner': 'Tech Planner',
   'test-planner': 'Test Planner',

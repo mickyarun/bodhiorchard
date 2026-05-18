@@ -112,30 +112,8 @@ def list_available_skills() -> list[str]:
     return sorted(p.stem for p in SKILLS_DIR.glob("*.md"))
 
 
-async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSession) -> Skill:
-    """Load a skill from the DB for a given org.
-
-    Skills are seeded on startup so they should always exist in the DB.
-
-    Args:
-        skill_name: The skill slug (e.g., 'product-manager').
-        org_id: Organization UUID to look up the skill for.
-        db: Async database session.
-
-    Returns:
-        A Skill object from the DB.
-
-    Raises:
-        ValueError: If the skill is not found in the DB.
-    """
-    from app.repositories.agent_skill import AgentSkillRepository
-
-    repo = AgentSkillRepository(db, org_id=org_id)
-    skill_row = await repo.get_by_slug(skill_name)
-
-    if not skill_row:
-        raise ValueError(f"Skill not found in DB: {skill_name} (org_id={org_id})")
-
+def _skill_from_row(skill_row: Any) -> Skill:
+    """Adapter: build a :class:`Skill` dataclass from an ``AgentSkill`` ORM row."""
     return Skill(
         name=skill_row.name,
         slug=skill_row.skill_slug,
@@ -148,6 +126,80 @@ async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSessio
         model=skill_row.model or "",
         iteration_model=skill_row.iteration_model or "",
         effort=skill_row.effort or "",
+    )
+
+
+async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSession) -> Skill:
+    """Load a skill by slug. **Agent-type-blind**: for shared slugs
+    (``product-manager``, ``testing``) the first matching row is returned.
+    Use :func:`resolve_skill_for_org` to honour per-BUD overrides and the
+    org-level ``is_default`` flag.
+
+    Args:
+        skill_name: The skill slug (e.g. 'product-manager').
+        org_id: Organization UUID to scope the lookup.
+        db: Async database session.
+
+    Returns:
+        A Skill object from the DB.
+
+    Raises:
+        ValueError: If the slug doesn't resolve to any row.
+    """
+    from app.repositories.agent_skill import AgentSkillRepository
+
+    repo = AgentSkillRepository(db, org_id=org_id)
+    skill_row = await repo.get_by_slug(skill_name)
+    if not skill_row:
+        raise ValueError(f"Skill not found in DB: {skill_name} (org_id={org_id})")
+    return _skill_from_row(skill_row)
+
+
+async def resolve_skill_for_org(
+    agent_name: str,
+    org_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    bud_id: uuid.UUID | None = None,
+    bud_status: Any = None,
+    fallback_slug: str | None = None,
+) -> Skill:
+    """Resolve a Skill honouring per-BUD overrides and org defaults.
+
+    Priority order:
+    1. ``bud_stage_skill_overrides`` for (``bud_id``, ``bud_status``) — the
+       BUD's Advanced-settings pick.
+    2. ``agent_skills.is_default = true`` for the agent type — what an
+       admin promoted via "Set as default" in Settings → Agent Prompts.
+    3. ``AGENT_SKILL_MAP[agent_name]`` static fallback.
+    4. ``fallback_slug`` argument (last-resort lookup for legacy slugs).
+
+    Args:
+        agent_name: Agent key (e.g. 'bud', 'design', 'techPlan').
+        org_id: Org scope.
+        db: Async DB session.
+        bud_id: BUD context. Required for per-BUD override resolution.
+        bud_status: BUDStatus enum value paired with ``bud_id``.
+        fallback_slug: Last-resort slug if no agent-type match exists.
+
+    Returns:
+        A :class:`Skill` dataclass.
+
+    Raises:
+        ValueError: When no skill can be resolved.
+    """
+    from app.agents.skill_mapping import resolve_skill_for_agent
+
+    row = await resolve_skill_for_agent(
+        agent_name, org_id, db, bud_id=bud_id, bud_status=bud_status
+    )
+    if row is not None:
+        return _skill_from_row(row)
+    if fallback_slug:
+        return await load_skill_for_org(fallback_slug, org_id, db)
+    raise ValueError(
+        f"No skill resolved for agent {agent_name!r} "
+        f"(org_id={org_id}, bud_id={bud_id}, bud_status={bud_status})"
     )
 
 

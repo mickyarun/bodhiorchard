@@ -237,14 +237,11 @@
                   <v-select
                     v-model="stageSkillPicks[stage.value]"
                     :items="skillsForStage(stage.agentType)"
-                    item-title="name"
+                    item-title="label"
                     item-value="id"
-                    label="Skill"
                     density="compact"
                     variant="outlined"
                     hide-details
-                    clearable
-                    placeholder="(use default)"
                     class="flex-grow-1"
                   />
                 </div>
@@ -303,16 +300,48 @@ const advancedStages: StageConfig[] = [
   { value: 'testing' as BUDStatus, label: 'Test plan', agentType: 'testPlan' },
 ]
 
-function skillsForStage(agentType: AgentType): AgentSkill[] {
-  return skillsStore.skills.filter(s => s.agentType === agentType)
+interface StageSkillOption { id: string; label: string; isDefault: boolean }
+
+function skillsForStage(agentType: AgentType): StageSkillOption[] {
+  return skillsStore.skills
+    .filter((s): s is AgentSkill & { id: string } => s.agentType === agentType && s.id !== null)
+    .map(s => ({
+      id: s.id,
+      label: s.isDefault ? `${s.name} · default` : s.name,
+      isDefault: s.isDefault,
+    }))
 }
 
-// Lazy-load skills the first time the Advanced section opens.
-watch(advancedPanel, async open => {
-  if (open && skillsStore.skills.length === 0 && !skillsStore.loading) {
+function defaultSkillIdForAgent(agentType: AgentType): string | null {
+  const def = skillsStore.skills.find(s => s.agentType === agentType && s.isDefault)
+  return def?.id ?? null
+}
+
+function prefillStageDefaults(): void {
+  for (const stage of advancedStages) {
+    stageSkillPicks.value[stage.value] = defaultSkillIdForAgent(stage.agentType)
+  }
+}
+
+// Lazy-load skills the first time the dialog opens, then pre-fill each
+// stage dropdown with that agent type's current default — gives users a
+// clear "what would run if I change nothing" signal instead of an empty
+// "Skill" placeholder.
+watch(showCreateDialog, async open => {
+  if (!open) return
+  if (skillsStore.skills.length === 0 && !skillsStore.loading) {
     await skillsStore.fetchSkills()
   }
+  prefillStageDefaults()
 })
+
+// If the skills load AFTER the dialog opened (slow network), re-prefill.
+watch(
+  () => skillsStore.skills.length,
+  () => {
+    if (showCreateDialog.value) prefillStageDefaults()
+  },
+)
 
 onMounted(() => {
   budStore.fetchBUDs()
@@ -325,11 +354,16 @@ function openBUD(id: string): void {
 async function createBUD(): Promise<void> {
   if (!newTitle.value.trim()) return
   creating.value = true
-  // Pass only explicitly picked overrides; absent stages fall back to the
-  // org default at agent dispatch time.
+  // Only persist overrides where the user picked a NON-default skill.
+  // Matching-the-default picks are dropped so the BUD continues to
+  // follow whatever the org admin marks as default later, rather than
+  // being pinned to today's default skill_id.
   const overrides: Record<string, string> = {}
-  for (const [stage, skillId] of Object.entries(stageSkillPicks.value)) {
-    if (skillId) overrides[stage] = skillId
+  for (const stage of advancedStages) {
+    const picked = stageSkillPicks.value[stage.value]
+    if (!picked) continue
+    if (picked === defaultSkillIdForAgent(stage.agentType)) continue
+    overrides[stage.value] = picked
   }
   const bud = await budStore.createBUD(
     newTitle.value.trim(),

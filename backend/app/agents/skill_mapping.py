@@ -70,6 +70,25 @@ BUD_STAGE_AGENT_TYPE: dict[BUDStatus, AgentType] = {
     BUDStatus.TESTING: AgentType.TEST_PLAN,
 }
 
+# Maps a BUD section key to the agent type that handles chat for that
+# section. Used by ``job_chat`` to resolve the chat skill via the
+# override-aware resolver instead of the agent-type-blind
+# SECTION_SKILL_MAP slug lookup. Pair each section with the BUD stage
+# whose override should govern its chat.
+SECTION_AGENT_TYPE: dict[str, AgentType] = {
+    "requirements_md": AgentType.BUD,
+    "tech_spec_md": AgentType.TECH_PLAN,
+    "test_plan_md": AgentType.TEST_PLAN,
+    "design": AgentType.DESIGN,
+}
+
+SECTION_BUD_STATUS: dict[str, BUDStatus] = {
+    "requirements_md": BUDStatus.BUD,
+    "tech_spec_md": BUDStatus.TECH_ARCH,
+    "test_plan_md": BUDStatus.TESTING,
+    "design": BUDStatus.DESIGN,
+}
+
 
 async def resolve_skill_for_agent(
     agent_name: str,

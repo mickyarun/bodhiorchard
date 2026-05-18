@@ -70,6 +70,21 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
         """
         super().__init__(BUDAgentTask, db, org_id=org_id)
 
+    async def count_for_skill(self, skill_id: uuid.UUID) -> int:
+        """Total task rows (any status) that pin this skill.
+
+        Used by the custom-skill delete pre-check: a row here means the
+        ``bud_agent_tasks.skill_id`` FK (RESTRICT) will block the DB
+        DELETE, so we surface a 409 before the IntegrityError fires.
+        """
+        from sqlalchemy import func
+
+        stmt = self._scoped(
+            select(func.count(BUDAgentTask.id)).where(BUDAgentTask.skill_id == skill_id)
+        )
+        result = await self._db.execute(stmt)
+        return int(result.scalar() or 0)
+
     async def list_active_with_bud(self, *, limit: int = 20) -> list[BUDAgentTask]:
         """Pending or running tasks with the linked BUD eager-loaded.
 

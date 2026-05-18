@@ -41,7 +41,7 @@ from app.services.job_utils import (
 )
 from app.services.json_parser import parse_chat_response
 from app.services.section_session import mint_session_id, record_originating_session
-from app.services.skill_loader import load_skill, load_skill_for_org
+from app.services.skill_loader import load_skill
 
 logger = structlog.get_logger(__name__)
 
@@ -102,13 +102,23 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         progress_pct=20,
     )
 
-    # Read config from the per-org designer skill row so admin edits to
-    # model / max_turns in Settings → Agent Prompts take effect without a
-    # redeploy. Fall back to the file default if the DB row is missing.
+    # Resolve the designer skill via per-BUD override > org default > seed.
+    # The BUD's Advanced-Settings pick must follow the design through to
+    # the worker, not just the API/task row — otherwise the worker would
+    # load the seeded designer config (model, max_turns, prompt) even
+    # when the task itself was created with a custom designer skill_id.
+    from app.models.bud import BUDStatus
+    from app.services.skill_loader import resolve_skill_for_org
+
     try:
         async with AsyncSessionLocal() as _skill_db:
-            designer_skill = await load_skill_for_org(
-                "designer", uuid_mod.UUID(payload.org_id), _skill_db
+            designer_skill = await resolve_skill_for_org(
+                "design",
+                uuid_mod.UUID(payload.org_id),
+                _skill_db,
+                bud_id=uuid_mod.UUID(payload.bud_id),
+                bud_status=BUDStatus.DESIGN,
+                fallback_slug="designer",
             )
     except (ValueError, LookupError):
         try:

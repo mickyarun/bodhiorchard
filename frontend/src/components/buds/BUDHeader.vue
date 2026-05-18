@@ -42,6 +42,7 @@ const emit = defineEmits<{
   'update-status': [status: BUDStatus]
   delete: []
   'save-title': [title: string]
+  'open-skill-settings': []
 }>()
 
 const membersStore = useMembersStore()
@@ -164,6 +165,16 @@ function saveTitle(): void {
                 @click="emit('update-status', s.value)"
               />
             </template>
+            <v-divider class="my-1" />
+            <v-list-item
+              :disabled="isClosed"
+              @click="emit('open-skill-settings')"
+            >
+              <div class="d-flex align-center">
+                <v-icon icon="mdi-tune-variant" size="18" class="mr-2" />
+                AI skills…
+              </div>
+            </v-list-item>
             <v-divider class="my-1" />
             <v-list-item
               base-color="error"

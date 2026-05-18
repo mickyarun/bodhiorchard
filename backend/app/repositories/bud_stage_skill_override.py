@@ -58,6 +58,28 @@ class BUDStageSkillOverrideRepository(BaseRepository[BUDStageSkillOverride]):
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_buds_using_skill(self, skill_id: uuid.UUID) -> list[tuple[int, str]]:
+        """Return (bud_number, bud_title) for every BUD pinning this skill.
+
+        Used by the custom-skill delete endpoint so the 409 message can
+        tell the user exactly which BUDs still need to be re-pointed
+        before the skill can go away.
+        """
+        from app.models.bud import BUDDocument
+
+        stmt = (
+            select(BUDDocument.bud_number, BUDDocument.title)
+            .join(
+                BUDStageSkillOverride,
+                BUDStageSkillOverride.bud_id == BUDDocument.id,
+            )
+            .where(BUDStageSkillOverride.org_id == self._org_id)
+            .where(BUDStageSkillOverride.skill_id == skill_id)
+            .order_by(BUDDocument.bud_number)
+        )
+        result = await self._db.execute(stmt)
+        return [(row[0], row[1]) for row in result.all()]
+
     async def bulk_set_for_bud(
         self,
         bud_id: uuid.UUID,

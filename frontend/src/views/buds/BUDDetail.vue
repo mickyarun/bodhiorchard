@@ -46,6 +46,7 @@
             @update-status="updateStatus"
             @delete="confirmDelete = true"
             @save-title="handleSaveTitle"
+            @open-skill-settings="skillSettingsOpen = true"
           />
 
           <!-- Workflow banners, approval/reject/reassign dialogs, repo confirmation -->
@@ -354,6 +355,13 @@
         </div>
       </template>
 
+      <!-- Per-BUD AI skills picker -->
+      <BUDSkillSettingsDialog
+        v-if="bud"
+        v-model="skillSettingsOpen"
+        :bud-id="bud.id"
+      />
+
       <!-- Delete confirmation -->
       <v-dialog v-model="confirmDelete" max-width="400">
         <v-card color="surface" class="pa-6">
@@ -423,6 +431,7 @@ import ChatPanel from '@/components/buds/ChatPanel.vue'
 import BUDEstimationSection from '@/components/buds/BUDEstimationSection.vue'
 import BUDActivitySection from '@/components/buds/BUDActivitySection.vue'
 import BUDHeader from '@/components/buds/BUDHeader.vue'
+import BUDSkillSettingsDialog from '@/components/buds/BUDSkillSettingsDialog.vue'
 import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
 import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
 import BUDTodoBoard from '@/components/buds/BUDTodoBoard.vue'
@@ -452,6 +461,7 @@ const bud = computed(() => budStore.currentBUD)
 
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)
+const skillSettingsOpen = ref(false)
 
 // Org-level UAT toggle. Hidden when false: the UAT tab disappears, and
 // any active session that's currently on the UAT tab falls back to Prod.

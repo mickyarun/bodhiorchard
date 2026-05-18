@@ -12,7 +12,7 @@ Adds ``bud_stage_skill_overrides`` for per-BUD stage skill choices set
 via the create-BUD "Advanced settings" section.
 
 Revision ID: 50e73dd335ca
-Revises: zy_features_join_table
+Revises: 550e56ff912d
 Create Date: 2026-05-18 17:43:56.948839
 
 """
@@ -26,7 +26,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "50e73dd335ca"
-down_revision: str | None = "zy_features_join_table"
+down_revision: str | None = "550e56ff912d"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

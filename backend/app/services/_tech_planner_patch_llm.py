@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
 from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
-from app.services.skill_loader import Skill, load_skill, load_skill_for_org
+from app.services.skill_loader import Skill, load_skill
 
 logger = structlog.get_logger(__name__)
 
@@ -53,7 +53,7 @@ async def request_patched_section(
     ``None`` as "skip splice, the parser will work on the unchanged
     spec".
     """
-    skill = await _resolve_skill(db, org_id)
+    skill = await _resolve_skill(db, org_id, bud_id=bud.id)
     prompt = _build_prompt(skill, bud=bud, old_spec=old_spec, new_spec=new_spec)
     config = ClaudeRunnerConfig(
         max_turns=_AGENT_MAX_TURNS,
@@ -83,10 +83,28 @@ async def request_patched_section(
     return section
 
 
-async def _resolve_skill(db: AsyncSession, org_id: uuid.UUID) -> Skill:
-    """Load the org-customised tech-planner row; fall back to file default."""
+async def _resolve_skill(
+    db: AsyncSession, org_id: uuid.UUID, *, bud_id: uuid.UUID | None = None
+) -> Skill:
+    """Resolve the tech-planner skill: per-BUD override > org default >
+    seeded row > file default. Honouring the BUD's own override here
+    means the patch-mode "fix the Implementation TODO" pass uses the
+    SAME skill that wrote the original spec — otherwise an admin who
+    picks a custom tech-planner for the BUD would get the seeded one
+    re-summarising it.
+    """
+    from app.models.bud import BUDStatus
+    from app.services.skill_loader import resolve_skill_for_org
+
     try:
-        return await load_skill_for_org(_SKILL_SLUG, org_id, db)
+        return await resolve_skill_for_org(
+            "techPlan",
+            org_id,
+            db,
+            bud_id=bud_id,
+            bud_status=BUDStatus.TECH_ARCH,
+            fallback_slug=_SKILL_SLUG,
+        )
     except ValueError:
         return load_skill(_SKILL_SLUG)
 

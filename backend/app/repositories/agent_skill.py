@@ -138,10 +138,26 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
     async def delete_custom(self, skill_id: uuid.UUID) -> bool:
         """Delete a custom skill row. Refuses to delete seeded rows.
 
-        Returns True iff a row was deleted. Returns False both when the
-        skill doesn't exist and when it's a seeded (non-custom) row —
-        callers map that into a 4xx response.
+        Before issuing the DELETE we null out the ``skill_id`` FK on
+        any ``agent_activity_logs`` rows pointing at this skill. The
+        column is nullable and the table has a denormalised
+        ``skill_slug`` text column for audit display, so the
+        historical record survives — without this step the NO-ACTION
+        FK would permanently lock any skill that's ever been invoked,
+        even after every BUD has been re-pointed off it.
+
+        Returns True iff a row was deleted. Returns False both when
+        the skill doesn't exist and when it's a seeded (non-custom)
+        row — callers map that into a 4xx response.
         """
+        from app.models.agent_activity import AgentActivityLog
+
+        await self._db.execute(
+            update(AgentActivityLog)
+            .where(AgentActivityLog.org_id == self._org_id)
+            .where(AgentActivityLog.skill_id == skill_id)
+            .values(skill_id=None)
+        )
         stmt = (
             delete(AgentSkill)
             .where(AgentSkill.org_id == self._org_id)
