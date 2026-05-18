@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -77,7 +78,7 @@ def fake_indexer_success(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         repo_path: str, main_branch: str, *, skip_fetch: bool, org: Any
     ) -> str:
         captured["worktree_args"] = (repo_path, main_branch, skip_fetch)
-        return f"{repo_path}/.bodhiorchard/scan-test/{main_branch}"
+        return f"/tmp/scan-worktrees/{Path(repo_path).name}/{main_branch}"
 
     async def _run_git(args: list[str], *, cwd: str) -> tuple[str, str, int]:
         captured["rev_parse_path"] = cwd
@@ -93,7 +94,7 @@ def fake_indexer_success(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                     self.symbol_count = 3
                     self.cohesion = 0.5
                     self.files = [f"src/{cid}.py"]
-                    self.symbols = []
+                    self.symbols: list[str] = []
                     self.signature = f"sig-{cid}"
 
             self.success = True
@@ -181,7 +182,7 @@ async def test_index_and_cache_resolves_head_when_none(
     # repo. The worktree is what's been reset to ``origin/<main>``; the
     # source-repo HEAD could be on any feature branch in a dev loop.
     rev_parse_cwd = fake_indexer_success["rev_parse_path"]
-    assert rev_parse_cwd.endswith("/.bodhiorchard/scan-test/main")
+    assert rev_parse_cwd.endswith("/scan-worktrees/repo/main")
 
 
 async def test_index_and_cache_forwards_skip_fetch_to_worktree(

@@ -41,6 +41,7 @@ can tell which path was taken.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import structlog
@@ -173,3 +174,66 @@ def _extract_github_full_name(https_url: str) -> str | None:
     if not owner or not repo:
         return None
     return f"{owner}/{repo}"
+
+
+# ``git@github.com:owner/repo(.git)`` — the colon separates host from path.
+_SSH_FULL_NAME_RE = re.compile(r"^git@github\.com:(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?$")
+# ``ssh://git@github.com/owner/repo(.git)`` — same but scheme'd.
+_SSH_SCHEME_FULL_NAME_RE = re.compile(
+    r"^ssh://git@github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$"
+)
+
+
+def _extract_github_full_name_ssh(ssh_url: str) -> str | None:
+    """Pull ``owner/repo`` out of a github.com SSH URL.
+
+    Counterpart to :func:`_extract_github_full_name` (HTTPS) — needed
+    because the App-HTTPS fallback in :func:`build_app_https_url_for_origin`
+    has to compute the same identifier whether the origin is SSH or
+    HTTPS. Both forms (``git@…:…`` and ``ssh://git@…/…``) are common
+    enough that we accept both.
+    """
+    for pattern in (_SSH_FULL_NAME_RE, _SSH_SCHEME_FULL_NAME_RE):
+        m = pattern.match(ssh_url)
+        if m:
+            return f"{m.group('owner')}/{m.group('repo')}"
+    return None
+
+
+async def build_app_https_url_for_origin(
+    repo_path: str,
+    org: Organization | None,
+) -> str | None:
+    """Build a one-shot HTTPS-with-App-token URL for the repo's origin.
+
+    Returns ``None`` when any of the prerequisites is missing — no origin,
+    non-github host, org without a READY GitHub App, or token mint fails.
+
+    This is the fallback path the ingest fetcher uses when SSH-based
+    ``git fetch`` fails (deploy key not registered). The caller passes
+    the result to ``git -c remote.origin.url=<url> fetch …`` so the
+    persistent ``.git/config`` remote stays SSH and the user's own
+    ``git push`` workflow is untouched.
+
+    Never logs the URL or token.
+    """
+    origin_url = await _read_origin_url(repo_path)
+    if origin_url is None or org is None:
+        return None
+
+    if is_ssh_url(origin_url):
+        full_name = _extract_github_full_name_ssh(origin_url)
+    else:
+        full_name = _extract_github_full_name(origin_url)
+    if full_name is None:
+        return None
+
+    state, _ = resolve_app_install_state(org)
+    if state is not AppInstallState.READY:
+        return None
+
+    token = await get_installation_token(org)
+    if not token:
+        return None
+
+    return compose_app_clone_url(token, full_name)

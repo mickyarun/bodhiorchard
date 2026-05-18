@@ -219,7 +219,15 @@ async def _insert_new(
     head_sha: str,
     write: FeatureWrite,
 ) -> None:
-    """Insert a new feature row + PRIMARY junction in one transaction."""
+    """Insert a new feature row + PRIMARY junction in one transaction.
+
+    Stamps both ``last_seen_sha`` and ``created_at_sha`` to ``head_sha``
+    so the row carries its birth SHA forward. ``created_at_sha`` never
+    changes after this; ``last_seen_sha`` advances on every reconcile
+    that re-confirms the feature. The Features API joins both against
+    ``pull_requests.merge_commit_sha`` to surface "Created by PR #N"
+    and "Last touched by PR #M" on the card.
+    """
     feature = await feat_repo.insert(
         feature_title=write.feature_title,
         description=write.description,
@@ -232,6 +240,7 @@ async def _insert_new(
         source_ref=write.source_ref,
         feature_status=write.feature_status,
         last_seen_sha=head_sha,
+        created_at_sha=head_sha,
     )
     await upsert_primary(
         db,

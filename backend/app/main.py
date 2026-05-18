@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Bodhiorchard API application entry point."""
+# (reload trigger — FT-5 fix verification)
 
 import asyncio
 import os
@@ -28,6 +29,8 @@ from sqlalchemy import select
 from app.api.router import api_router
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
+from app.services.pr_merge_worker import WorkerPool, start_pr_merge_workers
+from app.services.scan.pr_merge_update import handle_pr_merge_delivery
 
 # Configure structured JSON logging before anything else
 setup_logging(
@@ -231,11 +234,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     embedding_warmup_task = asyncio.create_task(_warm_embedding_model())
 
+    # 9. PR-merge Redis-stream worker pool. One consumer per
+    # (org, repo) stream; supervisor task spawns consumers lazily as
+    # streams appear in the registry. Orphan recovery re-publishes
+    # ``running`` (mid-handler crash) and ``pending`` (XADD lost) rows
+    # before the supervisor starts so the new process picks them up
+    # cleanly. Returns ``None`` and skips silently when Redis is
+    # unreachable — the backend still boots and the next start, once
+    # Redis is healthy, recovers everything via the orphan path.
+    pr_merge_pool: WorkerPool | None = None
+    try:
+        pr_merge_pool = await start_pr_merge_workers(handler=handle_pr_merge_delivery)
+    except Exception:
+        logger.warning("pr_merge_worker_start_failed", exc_info=True)
+
     yield
 
     cleanup_task.cancel()
     presence_task.cancel()
     embedding_warmup_task.cancel()
+    if pr_merge_pool is not None:
+        await pr_merge_pool.stop()
     await stop_workers()
 
     from app.services.redis_client import close_redis

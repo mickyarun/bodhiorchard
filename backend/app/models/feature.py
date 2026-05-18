@@ -126,6 +126,13 @@ class Feature(BaseModel):
     # Latest head SHA at which the reconciler confirmed this feature is
     # still present. Drives the "still alive?" audit without a join.
     last_seen_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Commit SHA the reconciler was processing when this row was first
+    # inserted. Drives the "Created by PR #N" surface in the UI by
+    # joining against ``pull_requests.merge_commit_sha``. NULL on rows
+    # created before this column existed (treated as "from baseline
+    # scan" by the UI — semantically correct since pre-Phase-5 features
+    # were all created by full scans). Never updated after insert.
+    created_at_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Provenance discriminator: 'scan' (indexer/synthesis), 'bud'
     # (BUD lifecycle), 'mcp' (Claude-authored). The reconciler does NOT
     # filter by ``source``; BUD-authored rows are excluded from the

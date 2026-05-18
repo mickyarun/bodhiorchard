@@ -339,3 +339,11 @@ async def _clear_backend_links_with_trace(
         feature_title=feature_title,
         backend_repos=[],
     )
+
+
+# Public aliases for cross-module reuse. The PR-merge narrow refresh
+# (``backend_link/narrow_refresh.py``) needs the same index-build + clear
+# semantics as the global phase; importing under public names keeps the
+# call graph honest without disrupting the existing private callers above.
+build_backend_index_from_cache = _build_index_from_cache
+clear_backend_links_with_trace = _clear_backend_links_with_trace

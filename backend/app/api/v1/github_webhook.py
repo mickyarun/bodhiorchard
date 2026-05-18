@@ -38,6 +38,7 @@ from app.repositories.webhook_log import WebhookLogRepository
 from app.schemas.settings import GitHubAppStatus
 from app.services.event_bus import publish as event_publish
 from app.services.github_webhook_handler import handle_github_event
+from app.services.pr_merge_worker import publish_pr_merge_delivery
 
 logger = structlog.get_logger(__name__)
 
@@ -172,20 +173,35 @@ async def github_webhook(request: Request) -> Response:
 
         # Idempotency check: GitHub retries on any non-2xx, so a
         # successfully-dispatched delivery may arrive again. Recording
-        # the delivery before dispatch (and rolling back with the
-        # dispatch on error) gives "at-least-once with skip-on-success"
-        # semantics: retries after success short-circuit; retries after
-        # failure re-attempt.
+        # the delivery before dispatch gives "at-least-once with
+        # skip-on-success" semantics: retries after success short-
+        # circuit; retries after failure re-attempt.
+        #
+        # PR-merge deliveries get the full replay shape so the
+        # per-(org, repo) Redis-stream consumer can rebuild handler
+        # input from this row alone. Everything else gets an audit-
+        # only row (``status='skipped'``); the consumer never sees it.
         log_repo = WebhookLogRepository(db, org_id=org.id)
-        fresh = await log_repo.record_delivery(
-            delivery_id=delivery_id,
-            event_type=event_type,
-            org_id=org.id,
-            payload_summary={
-                "repo": repo_full_name,
-                "action": payload.get("action"),
-            },
+        replay_payload = (
+            _build_pr_merge_replay_payload(payload) if event_type == "pull_request" else None
         )
+        summary = {"repo": repo_full_name, "action": payload.get("action")}
+        if replay_payload is not None:
+            fresh = await log_repo.record_replay_row(
+                delivery_id=delivery_id,
+                event_type=event_type,
+                org_id=org.id,
+                repo_id=repo.id,
+                payload=replay_payload,
+                payload_summary=summary,
+            )
+        else:
+            fresh = await log_repo.record_delivery(
+                delivery_id=delivery_id,
+                event_type=event_type,
+                org_id=org.id,
+                payload_summary=summary,
+            )
         if not fresh:
             logger.info(
                 "webhook_duplicate_delivery",
@@ -198,7 +214,10 @@ async def github_webhook(request: Request) -> Response:
                 content={"status": "duplicate"},
             )
 
-        # Dispatch to handler
+        # PR-tracking bookkeeping (PR row state, BUD events, comments,
+        # release detection, XP/SP). Runs on every event; the
+        # PR-merge feature-reconcile work is now scheduled out-of-band
+        # via the Redis stream below, not from inside this handler.
         await handle_github_event(
             org_id=org.id,
             repo=repo,
@@ -207,7 +226,60 @@ async def github_webhook(request: Request) -> Response:
             db=db,
         )
 
+        # Commit the WebhookLog INSERT (and any PR-row updates the
+        # handler did) before publishing to Redis. If the XADD raced
+        # a process crash, the orphan-recovery path at next boot
+        # will re-publish the row.
+        await db.commit()
+
+    if replay_payload is not None:
+        # The replay row is now durable in Postgres. Publish to the
+        # per-(org, repo) Redis stream so the consumer picks up the
+        # delivery. Failure is non-fatal: the orphan-recovery path
+        # republishes ``pending`` rows on the next backend boot.
+        try:
+            await publish_pr_merge_delivery(
+                org_id=org.id,
+                repo_id=repo.id,
+                delivery_id=delivery_id,
+            )
+        except Exception:
+            logger.warning(
+                "pr_merge_publish_failed",
+                delivery_id=delivery_id,
+                exc_info=True,
+            )
+
     return Response(status_code=200, content="OK")
+
+
+def _build_pr_merge_replay_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract the minimum replay shape for a PR-merge delivery.
+
+    Returns ``None`` for non-PR-merge ``pull_request`` events (opened,
+    synchronize, closed-without-merge) — those don't enqueue a
+    feature-reconcile job, so the picker should never see them as
+    ``pending`` either.
+    """
+    if payload.get("action") != "closed":
+        return None
+    pr = payload.get("pull_request") or {}
+    if not pr.get("merged"):
+        return None
+    base = pr.get("base") or {}
+    head = pr.get("head") or {}
+    head_sha = pr.get("merge_commit_sha") or head.get("sha")
+    base_sha = base.get("sha")
+    if not head_sha or not base_sha:
+        return None
+    return {
+        "action": "closed",
+        "merged": True,
+        "pr_number": pr.get("number"),
+        "full_name": (payload.get("repository") or {}).get("full_name"),
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+    }
 
 
 async def _handle_install_event(

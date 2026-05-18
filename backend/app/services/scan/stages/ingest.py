@@ -17,10 +17,11 @@
 
 """Stage 0 — Ingest. Refresh a sandbox worktree and run the code indexer.
 
-Side-effectful: creates a worktree at ``<repo>/.bodhiorchard/scan-test/<branch>``
-(distinct from the production ``<repo>/.bodhiorchard/main`` worktree so live
-scans aren't affected), force-resets it to ``origin/<main_branch>``, then
-runs ``app.services.code_indexer.index_repo`` against it.
+Side-effectful: creates a worktree at
+``<data_dir>/scan-worktrees/<repo-slug>/<branch>`` (outside the tracked
+repo so graphify's dotfile filter doesn't skip every file under it),
+force-resets it to ``origin/<main_branch>``, then runs
+``app.services.code_indexer.index_repo`` against it.
 
 The indexer (a thin wrapper over the MIT-licensed ``graphifyy`` library)
 parses files with tree-sitter, builds a NetworkX call graph, and runs
@@ -61,6 +62,26 @@ from app.services.scan.stages._skip_predicates import (
 from app.services.scan.stages.ingest_worktree import ensure_scan_test_worktree
 
 logger = structlog.get_logger(__name__)
+
+# The indexer reports this exact string when its file walk finds zero
+# files under the worktree root. Almost always means ``git fetch`` left
+# the worktree empty due to missing repo access. Surface a hint pointing
+# at the GitHub App permissions instead of the bare message.
+_EMPTY_WORKTREE_INDEXER_ERROR = "no source files found in repo"
+
+
+def _format_indexer_failure(repo_name: str, worktree_path: str, raw: str | None) -> str:
+    """Wrap the indexer's terse error with operator-actionable guidance."""
+    base = f"code_indexer failed for {repo_name!r}: {raw}"
+    if raw and _EMPTY_WORKTREE_INDEXER_ERROR in raw:
+        return (
+            f"{base}\n"
+            f"Hint: the worktree at {worktree_path!r} is empty, which usually means "
+            "`git fetch origin` did not pull any files. Reinstall the GitHub App "
+            "for this organisation and confirm the repo is selected in the App's "
+            "Repository access list, then re-trigger the scan."
+        )
+    return base
 
 
 async def run(
@@ -172,7 +193,7 @@ async def run(
     if not result.success:
         # Indexer reported a controlled failure (oversized repo, parse
         # error, etc.). Surface as a stage error so the scan stops.
-        raise RuntimeError(f"code_indexer failed for {ctx.repo_name!r}: {result.error}")
+        raise RuntimeError(_format_indexer_failure(ctx.repo_name, worktree_path, result.error))
 
     # Persist results to both caches when we have a context.
     cache_written = 0
@@ -228,5 +249,3 @@ async def run(
         edges=stats["edges"],
     )
     return StageOutput(communities=[], dropped=[], extras=extras)
-
-

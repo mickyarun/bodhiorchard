@@ -212,3 +212,84 @@ async def test_set_url_failure_does_not_raise(monkeypatch: pytest.MonkeyPatch) -
     _patch_token(monkeypatch, "ghs_FAKE")
     result = await mod.refresh_origin_auth("/repo", _as_org(_FakeOrg()))
     assert result is None
+
+
+# ---- build_app_https_url_for_origin ---------------------------------
+
+
+async def test_app_fallback_ssh_origin_returns_https_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SSH origin + READY App + token → composed HTTPS URL."""
+    _patch_run_git(monkeypatch, origin_url="git@github.com:owner/repo.git")
+    _patch_app_state(monkeypatch, AppInstallState.READY)
+    _patch_token(monkeypatch, "ghs_FALLBACK")
+
+    url = await mod.build_app_https_url_for_origin("/repo", _as_org(_FakeOrg()))
+
+    assert url == "https://x-access-token:ghs_FALLBACK@github.com/owner/repo.git"
+
+
+async def test_app_fallback_ssh_scheme_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ssh://git@github.com/owner/repo.git`` parses too."""
+    _patch_run_git(monkeypatch, origin_url="ssh://git@github.com/owner/repo.git")
+    _patch_app_state(monkeypatch, AppInstallState.READY)
+    _patch_token(monkeypatch, "ghs_T")
+
+    url = await mod.build_app_https_url_for_origin("/repo", _as_org(_FakeOrg()))
+
+    assert url == "https://x-access-token:ghs_T@github.com/owner/repo.git"
+
+
+async def test_app_fallback_https_origin_returns_https_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_run_git(monkeypatch, origin_url="https://github.com/owner/repo.git")
+    _patch_app_state(monkeypatch, AppInstallState.READY)
+    _patch_token(monkeypatch, "ghs_T")
+
+    url = await mod.build_app_https_url_for_origin("/repo", _as_org(_FakeOrg()))
+
+    assert url == "https://x-access-token:ghs_T@github.com/owner/repo.git"
+
+
+async def test_app_fallback_no_origin_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_run_git(monkeypatch, origin_url=None)
+    url = await mod.build_app_https_url_for_origin("/repo", _as_org(_FakeOrg()))
+    assert url is None
+
+
+async def test_app_fallback_no_org_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_run_git(monkeypatch, origin_url="git@github.com:owner/repo.git")
+    url = await mod.build_app_https_url_for_origin("/repo", None)
+    assert url is None
+
+
+async def test_app_fallback_app_not_ready_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_run_git(monkeypatch, origin_url="git@github.com:owner/repo.git")
+    _patch_app_state(monkeypatch, AppInstallState.NO_INSTALL)
+    url = await mod.build_app_https_url_for_origin("/repo", _as_org(_FakeOrg()))
+    assert url is None
+
+
+async def test_app_fallback_token_unavailable_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_run_git(monkeypatch, origin_url="git@github.com:owner/repo.git")
+    _patch_app_state(monkeypatch, AppInstallState.READY)
+    _patch_token(monkeypatch, None)
+    url = await mod.build_app_https_url_for_origin("/repo", _as_org(_FakeOrg()))
+    assert url is None
+
+
+async def test_app_fallback_non_github_ssh_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SSH URL whose host isn't github.com — we don't rewrite arbitrary remotes."""
+    _patch_run_git(monkeypatch, origin_url="git@gitlab.com:owner/repo.git")
+    _patch_app_state(monkeypatch, AppInstallState.READY)
+    _patch_token(monkeypatch, "ghs_T")
+    url = await mod.build_app_https_url_for_origin("/repo", _as_org(_FakeOrg()))
+    assert url is None

@@ -50,6 +50,15 @@
           class="features-view__select"
           :disabled="activeRepos.length === 0"
         />
+        <v-switch
+          v-model="showDeactivated"
+          color="primary"
+          density="compact"
+          hide-details
+          inset
+          class="features-view__toggle"
+          label="Show deactivated"
+        />
       </div>
     </header>
 
@@ -129,6 +138,10 @@ const searchQuery = ref('')
 const debouncedQuery = ref('')
 const page = ref(1)
 const hasLoadedOnce = ref(false)
+// Off by default — the Features tab is normally a "what exists today"
+// surface. Operators flip this on to audit what was removed and by
+// whom; the toggle drives both the API filter and per-card styling.
+const showDeactivated = ref(false)
 
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -165,6 +178,7 @@ async function reload(): Promise<void> {
     page: page.value,
     repoId: selectedRepoId.value || undefined,
     q: debouncedQuery.value || undefined,
+    includeInactive: showDeactivated.value,
   })
   if (selectedRepoId.value) {
     void store.fetchTopContributors(selectedRepoId.value)
@@ -184,7 +198,7 @@ watch(searchQuery, (q) => {
 })
 
 // Filter changes reset to page 1; the page watcher fires the reload.
-watch([selectedRepoId, debouncedQuery], () => {
+watch([selectedRepoId, debouncedQuery, showDeactivated], () => {
   if (page.value === 1) {
     void reload()
   } else {
@@ -248,6 +262,18 @@ onMounted(() => {
 }
 .features-view__select {
   min-width: 200px;
+}
+.features-view__toggle {
+  /* Vuetify's v-switch has aggressive default margin/padding that
+     ruin the rest of the header — strip them so the switch lines up
+     with the other compact inputs. */
+  margin: 0;
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+}
+:deep(.features-view__toggle .v-label) {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .features-view__progress {

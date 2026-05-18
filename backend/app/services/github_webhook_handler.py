@@ -33,7 +33,6 @@ from app.repositories.pull_request import PullRequestRepository
 from app.repositories.user import UserRepository
 from app.schemas.github import GitHubComment, GitHubPullRequest, GitHubReview
 from app.services.bud_timeline import record_event
-from app.services.job_queue import JOB_PR_MERGE_UPDATE, create_job
 from app.services.pr_auto_transition import (
     check_all_prs_merged,
     check_all_repos_have_prs,
@@ -53,7 +52,13 @@ async def handle_github_event(
     payload: dict[str, Any],
     db: AsyncSession,
 ) -> None:
-    """Dispatch a GitHub webhook event to the appropriate handler."""
+    """Dispatch a GitHub webhook event to the appropriate handler.
+
+    PR-merge feature reconciliation is scheduled by the caller via
+    the Redis-stream worker, NOT from this handler — the only
+    side effects here are PR-row bookkeeping (state, BUD events,
+    XP/SP awards, release detection).
+    """
     action = payload.get("action", "")
 
     if event_type == "pull_request":
@@ -165,7 +170,13 @@ async def _handle_pr_closed(
     pr_data: GitHubPullRequest,
     db: AsyncSession,
 ) -> None:
-    """Update PR state on close/merge. Check if all PRs merged."""
+    """Update PR state on close/merge. Check if all PRs merged.
+
+    Feature reconciliation (cluster diff + narrow synthesis) is
+    triggered by the webhook entry's XADD onto the per-(org, repo)
+    Redis stream, NOT from here. This handler only touches PR-row
+    state, release detection, and XP/SP awards.
+    """
     is_merged = pr_data.merged or False
 
     # Setup-PR state lives on ``tracked_repository``, not ``pull_requests``.
@@ -279,43 +290,6 @@ async def _handle_pr_closed(
         pr_number=pr_data.number,
         merged=is_merged,
     )
-
-    # Feature-reconcile fan-out (purely additive). On a successful
-    # merge, enqueue a cluster-scoped feature-reconcile job so the
-    # Features tab tracks merged work without waiting for the next
-    # scheduled scan. Wrapped in try/except so a queueing failure
-    # never breaks the existing PR-tracking flow above.
-    if is_merged and pr_data.merge_commit_sha:
-        _enqueue_pr_merge_feature_reconcile(org_id, repo, pr_data)
-
-
-def _enqueue_pr_merge_feature_reconcile(
-    org_id: uuid.UUID,
-    repo: TrackedRepository,
-    pr_data: GitHubPullRequest,
-) -> None:
-    """Enqueue the PR-merge feature-reconcile job. Failures are logged, never raised."""
-    try:
-        merge_head = pr_data.merge_commit_sha or pr_data.head.sha
-        create_job(
-            JOB_PR_MERGE_UPDATE,
-            payload={
-                "org_id": str(org_id),
-                "repo_id": str(repo.id),
-                "pr_number": pr_data.number,
-                "base_sha": pr_data.base.sha,
-                "head_sha": merge_head,
-                "full_name": repo.github_repo_full_name or "",
-            },
-            user_id=None,
-        )
-    except Exception:
-        logger.warning(
-            "pr_merge_feature_reconcile_enqueue_failed",
-            repo_id=str(repo.id),
-            pr_number=pr_data.number,
-            exc_info=True,
-        )
 
 
 async def _maybe_detect_release_promotion(

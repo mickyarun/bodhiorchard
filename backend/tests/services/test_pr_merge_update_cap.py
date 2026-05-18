@@ -12,45 +12,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dispatcher cap on ``pr_merge_update``.
+"""Dispatcher cap on ``handle_pr_merge_delivery``.
 
-When the PR-merge feature reconcile job identifies *N* affected
-clusters:
+When the PR-merge dispatcher identifies *N* affected clusters:
 
-* ``N == 0`` → today's no-op path (no narrow job, no full scan).
-* ``0 < N <= NARROW_CAP`` → ``_enqueue_narrow_synthesis`` enqueues a
-  ``JOB_PR_NARROW_SYNTHESIS`` job with the affected cluster ids on
-  the payload; the dispatcher job is marked COMPLETED.
-* ``N > NARROW_CAP`` → fall back to today's ``_trigger_repo_scan``
-  (full-repo scan path); narrow job is NOT enqueued.
+* ``N == 0`` → no-op (no narrow synth, no full scan).
+* ``0 < N <= NARROW_CAP`` → :func:`run_narrow_synthesis` is called
+  inline with the affected signatures.
+* ``N > NARROW_CAP`` → :func:`_trigger_repo_scan` is called and the
+  narrow path is skipped.
 
-Tests target the dispatcher branch points only — the narrow handler's
-own behaviour is covered by ``test_pr_narrow_synthesis``.
+Tests target the dispatcher branch points only — the narrow synth
+itself is covered by ``test_pr_narrow_synthesis``.
 """
 
 from __future__ import annotations
 
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
 
 from app.services.scan import pr_merge_update as mod
+from app.services.scan.pr_narrow_synthesis import (
+    NarrowSynthesisOutcome,
+    NarrowSynthesisParams,
+)
 
 
 @pytest.fixture
 def captured() -> dict[str, Any]:
     return {
-        "narrow_payload": None,
+        "narrow_params": None,
         "scan_triggered": False,
-        "job_state": None,
+        "scan_reason": None,
         "backfill_calls": [],
     }
 
 
 @pytest.fixture
 def _patched(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> None:
-    """Stub every IO entry-point the dispatcher reaches, plus the two
+    """Stub every IO entry-point the dispatcher reaches plus the two
     sinks (narrow + scan).
 
     Per-test overrides of ``_find_affected_clusters`` are still required
@@ -60,17 +63,9 @@ def _patched(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> None:
     or the GitHub API.
     """
 
-    def _fake_create_job(job_type: str, *, payload: dict[str, Any], user_id: Any) -> str:
-        captured["narrow_payload"] = (job_type, payload)
-        return "narrow-job-id"
-
-    async def _fake_trigger_scan(_job_id: str, **kw: Any) -> None:
+    async def _fake_trigger_scan(**kw: Any) -> None:
         captured["scan_triggered"] = True
         captured["scan_reason"] = kw.get("reason")
-
-    def _fake_update_job(_job_id: str, **kw: Any) -> None:
-        if "state" in kw:
-            captured["job_state"] = kw["state"]
 
     async def _fake_no_paths(*_a: Any, **_kw: Any) -> set[str]:
         return set()
@@ -83,46 +78,63 @@ def _patched(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> None:
         )
         return 3  # arbitrary non-zero row count
 
-    monkeypatch.setattr(mod, "create_job", _fake_create_job)
+    async def _fake_run_narrow(params: NarrowSynthesisParams) -> NarrowSynthesisOutcome:
+        captured["narrow_params"] = params
+        return NarrowSynthesisOutcome(
+            branch="synthesised", inserted=1, updated=0, revived=0, inactivated=0
+        )
+
     monkeypatch.setattr(mod, "_trigger_repo_scan", _fake_trigger_scan)
-    monkeypatch.setattr(mod, "update_job", _fake_update_job)
     monkeypatch.setattr(mod, "_load_repo_and_org", _fake_repo_and_org)
     monkeypatch.setattr(mod, "_fetch_changed_paths", _fake_no_paths)
     monkeypatch.setattr(mod, "index_and_cache", _fake_index_and_cache)
+    monkeypatch.setattr(mod, "run_narrow_synthesis", _fake_run_narrow)
 
 
-def test_enqueue_narrow_synthesis_payload_shape(
-    _patched: None, captured: dict[str, Any]
-) -> None:
-    org_id = uuid.uuid4()
-    repo_id = uuid.uuid4()
-    mod._enqueue_narrow_synthesis(
-        "dispatcher-job-id",
-        org_id=org_id,
-        repo_id=repo_id,
-        pr_number=42,
-        base_sha="basesha",
-        head_sha="headsha",
-        full_name="owner/example",
-        affected={"c10", "c2", "c11"},
-    )
-    job_type, payload = captured["narrow_payload"]
-    assert job_type == "pr_narrow_synthesis"
-    assert payload["org_id"] == str(org_id)
-    assert payload["repo_id"] == str(repo_id)
-    assert payload["pr_number"] == 42
-    assert payload["base_sha"] == "basesha"
-    assert payload["head_sha"] == "headsha"
-    assert payload["full_name"] == "owner/example"
-    # Sorted for deterministic dedup keys downstream.
-    assert payload["affected_signatures"] == ["c10", "c11", "c2"]
+def _install_replay_row(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> None:
+    """Stub :func:`handle_pr_merge_delivery`'s WebhookLog lookup to
+    return a row with the given payload — sidesteps the DB.
+    """
+    org_id = uuid.UUID(payload["org_id"])
+    repo_id = uuid.UUID(payload["repo_id"])
+
+    class _FakeRow:
+        delivery_id = "d1"
+
+        def __init__(self) -> None:
+            self.org_id = org_id
+            self.repo_id = repo_id
+            self.payload = {
+                "pr_number": payload["pr_number"],
+                "base_sha": payload["base_sha"],
+                "head_sha": payload["head_sha"],
+                "full_name": payload.get("full_name", "owner/r"),
+            }
+
+    class _FakeRepo:
+        def __init__(self, *_a: Any, **_kw: Any) -> None:
+            pass
+
+        async def find_by_delivery_id(self, _did: str) -> Any:
+            return _FakeRow()
+
+    @asynccontextmanager
+    async def _fake_session() -> Any:
+        yield object()
+
+    monkeypatch.setattr(mod, "WebhookLogRepository", _FakeRepo)
+    # Two AsyncSessionLocal contexts are opened in handle_pr_merge_delivery
+    # → _run_dispatch. A single stub works for both because nothing
+    # touches the yielded session beyond passing it to the patched
+    # repo factories.
+    monkeypatch.setattr(mod, "AsyncSessionLocal", _fake_session)
 
 
 async def test_dispatcher_picks_narrow_under_cap(
     monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
 ) -> None:
     """``len(affected) <= NARROW_CAP`` → narrow path, no full scan."""
-    affected = {f"c{i}" for i in range(mod.NARROW_CAP)}  # exactly == cap
+    affected = {f"sig-{i}" for i in range(mod.NARROW_CAP)}  # exactly == cap
 
     async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
         return (affected, "BASE")
@@ -137,17 +149,21 @@ async def test_dispatcher_picks_narrow_under_cap(
         "head_sha": "h",
         "full_name": "owner/r",
     }
-    await mod.handle_pr_merge_update("dispatcher-job-id", payload)
+    _install_replay_row(monkeypatch, payload)
+    await mod.handle_pr_merge_delivery("d1")
     assert captured["scan_triggered"] is False
-    assert captured["narrow_payload"] is not None
-    assert len(captured["narrow_payload"][1]["affected_signatures"]) == mod.NARROW_CAP
+    assert captured["narrow_params"] is not None
+    params: NarrowSynthesisParams = captured["narrow_params"]
+    assert len(params.affected_signatures) == mod.NARROW_CAP
+    # Affected signatures are sorted for deterministic comparison.
+    assert params.affected_signatures == sorted(affected)
 
 
 async def test_dispatcher_falls_back_to_full_scan_above_cap(
     monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
 ) -> None:
     """``len(affected) > NARROW_CAP`` → full ``start_scan`` path, no narrow."""
-    affected = {f"c{i}" for i in range(mod.NARROW_CAP + 1)}
+    affected = {f"sig-{i}" for i in range(mod.NARROW_CAP + 1)}
 
     async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
         return (affected, "BASE")
@@ -162,16 +178,17 @@ async def test_dispatcher_falls_back_to_full_scan_above_cap(
         "head_sha": "h",
         "full_name": "owner/r",
     }
-    await mod.handle_pr_merge_update("dispatcher-job-id", payload)
+    _install_replay_row(monkeypatch, payload)
+    await mod.handle_pr_merge_delivery("d1")
     assert captured["scan_triggered"] is True
-    assert captured["narrow_payload"] is None
-    assert "above narrow cap" in captured["scan_reason"]
+    assert captured["narrow_params"] is None
+    assert "above narrow cap" in (captured["scan_reason"] or "")
 
 
 async def test_dispatcher_noop_when_no_clusters_affected(
     monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
 ) -> None:
-    """``len(affected) == 0`` → neither path runs; job completes cleanly."""
+    """``len(affected) == 0`` → neither path runs."""
 
     async def _empty(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
         return (set(), "BASE")
@@ -186,51 +203,71 @@ async def test_dispatcher_noop_when_no_clusters_affected(
         "head_sha": "h",
         "full_name": "owner/r",
     }
-    await mod.handle_pr_merge_update("dispatcher-job-id", payload)
+    _install_replay_row(monkeypatch, payload)
+    await mod.handle_pr_merge_delivery("d1")
     assert captured["scan_triggered"] is False
-    assert captured["narrow_payload"] is None
+    assert captured["narrow_params"] is None
 
 
-def test_enqueue_swallows_terminal_update_job_failure(
-    monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]
+async def test_dispatcher_raises_when_narrow_synthesis_fails(
+    monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
 ) -> None:
-    """Final ``update_job(COMPLETED)`` is best-effort.
-
-    If the dispatcher row update fails AFTER the narrow child is
-    already queued, raising would let the outer ``except`` flip the
-    dispatcher to FAILED — telling GitHub's retry that nothing happened
-    while the child is mid-flight. Swallowing the failure (with a
-    warning log) keeps the contract: enqueue success = success.
+    """A failed Claude run inside narrow synth must propagate so the
+    worker flips the WebhookLog row to ``failed``. Phase 4 swallowed
+    this; Phase 5 surfaces it.
     """
+    affected = {"sig-1"}
 
-    def _fake_create_job(_jt: str, *, payload: dict[str, Any], user_id: Any) -> str:
-        captured["narrow_payload"] = ("pr_narrow_synthesis", payload)
-        return "narrow-job-id"
+    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
+        return (affected, "BASE")
 
-    def _flaky_update(_job_id: str, **_kw: Any) -> None:
-        raise RuntimeError("simulated job-row update failure")
+    async def _failed_narrow(params: NarrowSynthesisParams) -> NarrowSynthesisOutcome:
+        captured["narrow_params"] = params
+        return NarrowSynthesisOutcome(branch="synthesised", error="claude boom")
 
-    monkeypatch.setattr(mod, "create_job", _fake_create_job)
-    monkeypatch.setattr(mod, "update_job", _flaky_update)
+    monkeypatch.setattr(mod, "_find_affected_clusters", _resolved)
+    monkeypatch.setattr(mod, "run_narrow_synthesis", _failed_narrow)
 
-    # Must NOT raise.
-    mod._enqueue_narrow_synthesis(
-        "dispatcher-job-id",
-        org_id=uuid.uuid4(),
-        repo_id=uuid.uuid4(),
-        pr_number=1,
-        base_sha="b",
-        head_sha="h",
-        full_name="o/r",
-        affected={"c1"},
-    )
-    assert captured["narrow_payload"] is not None  # child WAS queued
+    payload = {
+        "org_id": str(uuid.uuid4()),
+        "repo_id": str(uuid.uuid4()),
+        "pr_number": 7,
+        "base_sha": "b",
+        "head_sha": "h",
+        "full_name": "owner/r",
+    }
+    _install_replay_row(monkeypatch, payload)
+    with pytest.raises(RuntimeError, match="claude boom"):
+        await mod.handle_pr_merge_delivery("d1")
+
+
+async def test_dispatcher_raises_when_replay_row_missing(
+    monkeypatch: pytest.MonkeyPatch, _patched: None
+) -> None:
+    """Worker hands us a delivery_id with no row → typed exception."""
+
+    class _MissingRepo:
+        def __init__(self, *_a: Any, **_kw: Any) -> None:
+            pass
+
+        async def find_by_delivery_id(self, _did: str) -> Any:
+            return None
+
+    @asynccontextmanager
+    async def _fake_session() -> Any:
+        yield object()
+
+    monkeypatch.setattr(mod, "WebhookLogRepository", _MissingRepo)
+    monkeypatch.setattr(mod, "AsyncSessionLocal", _fake_session)
+
+    with pytest.raises(mod.PrMergeDeliveryMissingError):
+        await mod.handle_pr_merge_delivery("gone")
 
 
 async def _fake_repo_and_org(
     _db: Any, *, org_id: uuid.UUID, repo_id: uuid.UUID
 ) -> tuple[Any, Any]:
-    """Minimal stand-in returning truthy repo + org for the handler's early gate."""
+    """Minimal stand-in returning truthy repo + org for the dispatcher's early gate."""
 
     class _Repo:
         github_repo_full_name = "owner/r"
@@ -243,7 +280,7 @@ async def _fake_repo_and_org(
     return _Repo(), _Org()
 
 
-# --- Phase 2: cluster_cache backfill pre-step --------------------------------
+# --- cluster_cache backfill pre-step ----------------------------------------
 
 
 async def test_backfill_runs_before_find_affected_clusters(
@@ -261,7 +298,7 @@ async def test_backfill_runs_before_find_affected_clusters(
 
     async def _logged_find(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
         call_log.append("find_affected_clusters")
-        return ({"c1"}, "BASE")
+        return ({"sig-1"}, "BASE")
 
     async def _logged_backfill(**kw: Any) -> int:
         call_log.append("index_and_cache")
@@ -279,7 +316,8 @@ async def test_backfill_runs_before_find_affected_clusters(
         "head_sha": "h",
         "full_name": "owner/r",
     }
-    await mod.handle_pr_merge_update("j", payload)
+    _install_replay_row(monkeypatch, payload)
+    await mod.handle_pr_merge_delivery("d1")
     assert call_log == ["index_and_cache", "find_affected_clusters"]
     assert captured["backfill_calls"][0]["repo_path"] == "/tmp/repo"
     assert captured["backfill_calls"][0]["head_sha"] == "h"
@@ -300,7 +338,7 @@ async def test_backfill_failure_falls_through_to_cache_miss_full_scan(
     async def _exploding_backfill(**_kw: Any) -> int:
         raise RuntimeError("synthetic: indexer crash")
 
-    async def _cache_miss(*_a: Any, **_kw: Any) -> set[str] | None:
+    async def _cache_miss(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
         return None  # mimics empty head_rows after a failed backfill
 
     monkeypatch.setattr(mod, "index_and_cache", _exploding_backfill)
@@ -314,25 +352,17 @@ async def test_backfill_failure_falls_through_to_cache_miss_full_scan(
         "head_sha": "h",
         "full_name": "owner/r",
     }
-    await mod.handle_pr_merge_update("j", payload)
-    # The dispatcher did not crash → full-scan fallback fired.
+    _install_replay_row(monkeypatch, payload)
+    await mod.handle_pr_merge_delivery("d1")
     assert captured["scan_triggered"] is True
     assert "cache_miss" in (captured["scan_reason"] or "")
-    # And the narrow path did NOT fire.
-    assert captured["narrow_payload"] is None
+    assert captured["narrow_params"] is None
 
 
 async def test_backfill_skipped_when_repo_has_no_path(
     monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
 ) -> None:
-    """A repo row without a ``path`` (never cloned) must not crash the dispatcher.
-
-    The helper logs ``pr_merge_update_backfill_skipped_no_path`` and
-    returns silently; ``_find_affected_clusters`` then runs as usual
-    (and probably hits the cache-miss branch). The point: the indexer
-    is never called against a None path, which would explode lower
-    down the stack.
-    """
+    """A repo row without a ``path`` (never cloned) must not crash the dispatcher."""
 
     async def _no_path_repo_and_org(
         _db: Any, *, org_id: uuid.UUID, repo_id: uuid.UUID
@@ -353,7 +383,7 @@ async def test_backfill_skipped_when_repo_has_no_path(
         indexer_calls.append(_kw)
         return 0
 
-    async def _empty(*_a: Any, **_kw: Any) -> set[str] | None:
+    async def _empty(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
         return None
 
     monkeypatch.setattr(mod, "_load_repo_and_org", _no_path_repo_and_org)
@@ -368,10 +398,10 @@ async def test_backfill_skipped_when_repo_has_no_path(
         "head_sha": "h",
         "full_name": "owner/r",
     }
-    await mod.handle_pr_merge_update("j", payload)
+    _install_replay_row(monkeypatch, payload)
+    await mod.handle_pr_merge_delivery("d1")
     assert indexer_calls == []  # indexer never invoked
-    # Cache-miss fallback still runs.
-    assert captured["scan_triggered"] is True
+    assert captured["scan_triggered"] is True  # cache-miss fallback still runs
 
 
 # --- _find_affected_clusters algorithm: added / modified / removed -----------
@@ -414,16 +444,14 @@ class _FakeClusterCacheRepo:
 async def test_find_affected_clusters_detects_removed_cluster(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A cluster present at base but absent at head should appear in
-    the affected set so the narrow handler's reconciler can soft-
-    delete the matching feature with a SHA stamp.
+    """A cluster present at base but absent at head should appear in the
+    affected set so the narrow handler can soft-delete it.
     """
     base = [
         _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
         _FakeClusterCacheRow("c-reminders", "sig-reminders", ["src/reminders/x.py"]),
     ]
     head = [
-        # Reminders cluster is gone — only auth survives at head.
         _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
     ]
     _FakeClusterCacheRepo.install(monkeypatch, base_rows=base, head_rows=head)
@@ -437,7 +465,6 @@ async def test_find_affected_clusters_detects_removed_cluster(
     )
     assert result is not None
     affected, effective_base = result
-    # Reminders was REMOVED at head — its signature must be in affected.
     assert affected == {"sig-reminders"}
     assert effective_base == "BASE"
 
@@ -452,12 +479,8 @@ async def test_find_affected_clusters_added_modified_removed_combine(
         _FakeClusterCacheRow("c-old", "sig-old", ["src/old/legacy.py"]),
     ]
     head = [
-        # Auth's signature changed (modified — files match changed_paths)
         _FakeClusterCacheRow("c-auth", "sig-auth-old", ["src/auth/router.py"]),
-        # Billing untouched
         _FakeClusterCacheRow("c-billing", "sig-billing", ["src/billing/router.py"]),
-        # c-old was deleted — not in head
-        # c-new added with a brand-new signature
         _FakeClusterCacheRow("c-new", "sig-new", ["src/search/router.py"]),
     ]
     _FakeClusterCacheRepo.install(monkeypatch, base_rows=base, head_rows=head)
@@ -471,8 +494,6 @@ async def test_find_affected_clusters_added_modified_removed_combine(
     )
     assert result is not None
     affected, _effective_base = result
-    # Affected are SIGNATURES: sig-auth-old (modified — file touched),
-    # sig-new (added), sig-old (removed). sig-billing untouched.
     assert affected == {"sig-auth-old", "sig-new", "sig-old"}
 
 
@@ -480,73 +501,44 @@ async def test_find_affected_clusters_falls_back_to_tracked_head_sha(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When ``base_sha`` has no rows (main moved between scans), the
-    algorithm must fall back to ``tracked_head_sha`` so the narrow
-    path doesn't degrade into a full scan.
-
-    Sequence: baseline scan ran at SHA-A → cluster_cache populated for
-    SHA-A. Some chore commits landed on main moving to SHA-B (no
-    webhook delivered to Phase-2 backfill). A PR opens with
-    ``base_sha=SHA-B`` (no rows) and merges to ``head_sha=SHA-C``.
-    Effective base falls back to ``tracked_head_sha=SHA-A`` —
-    affected set is computed against that, and the returned
-    ``effective_base_sha`` is SHA-A so the narrow handler downstream
-    knows where to look up removed-cluster signatures.
+    algorithm must fall back to ``tracked_head_sha``.
     """
-    # Repo rows are keyed by the simulated SHAs. ``base_sha="SHA_B"``
-    # is intentionally absent — the fake only returns rows for SHA_A
-    # and SHA_C below.
-    _FakeClusterCacheRepo.install(
-        monkeypatch,
-        base_rows=[],
-        head_rows=[
-            _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
-        ],
-    )
 
     class _MultiShaRepo:
         async def list_for_repo_sha(
             self, *, repo_id: uuid.UUID, head_sha: str
         ) -> list[_FakeClusterCacheRow]:
-            if head_sha == "SHA_A":  # baseline scan SHA
+            if head_sha == "SHA_A":
                 return [
                     _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
                     _FakeClusterCacheRow("c-old", "sig-old", ["src/old/x.py"]),
                 ]
-            if head_sha == "SHA_C":  # merge SHA, just-backfilled
+            if head_sha == "SHA_C":
                 return [
                     _FakeClusterCacheRow("c-auth", "sig-auth", ["src/auth/router.py"]),
                 ]
-            return []  # SHA_B (chore-commit base) has no rows
+            return []
 
     monkeypatch.setattr(mod, "ClusterCacheRepository", lambda *_a, **_kw: _MultiShaRepo())
     result = await mod._find_affected_clusters(
         db=object(),
         org_id=uuid.uuid4(),
         repo_id=uuid.uuid4(),
-        base_sha="SHA_B",  # ← chore-commit base, no rows
+        base_sha="SHA_B",
         head_sha="SHA_C",
         changed_paths={"src/old/x.py"},
-        tracked_head_sha="SHA_A",  # ← baseline scan SHA
+        tracked_head_sha="SHA_A",
     )
     assert result is not None
     affected, effective_base = result
-    # sig-old is removed (in SHA_A's rows, not in SHA_C's). sig-auth
-    # is unchanged. With the fallback, the removed signature gets
-    # surfaced — without the fallback, base_rows would be empty and
-    # the algorithm would return None (cache miss).
     assert affected == {"sig-old"}
-    # The returned effective_base_sha is the fallback, so the narrow
-    # handler's loader looks up removed-cluster signatures there.
     assert effective_base == "SHA_A"
 
 
 async def test_find_affected_clusters_returns_none_when_both_shas_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When neither base_sha NOR tracked_head_sha has rows, the
-    fallback can't save us — must return None so the caller triggers
-    a full scan.
-    """
+    """When neither base_sha NOR tracked_head_sha has rows, return None."""
 
     class _EmptyRepo:
         async def list_for_repo_sha(
@@ -562,6 +554,6 @@ async def test_find_affected_clusters_returns_none_when_both_shas_empty(
         base_sha="SHA_B",
         head_sha="SHA_C",
         changed_paths={"src/anything.py"},
-        tracked_head_sha="SHA_A",  # ← also empty per the fake
+        tracked_head_sha="SHA_A",
     )
     assert result is None

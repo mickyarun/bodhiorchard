@@ -17,7 +17,13 @@
 Replaces ``/v1/skills/knowledge`` (retired with the legacy
 ``knowledge_items`` table). All endpoints are org-scoped via the
 authenticated user, paginate via the existing ``limit`` / ``offset``
-convention, and never leak soft-deleted (``is_active=False``) rows.
+convention, and by default never leak soft-deleted
+(``is_active=False``) rows.
+
+Callers opt in to seeing soft-deleted features via
+``?includeInactive=true`` — the UI's "Show deactivated" toggle uses
+this to surface the deactivation date + PR # alongside the rest of
+the feature card.
 
 Mounted at ``/api/v1/features`` from :mod:`app.api.router`.
 """
@@ -50,6 +56,7 @@ from app.schemas.feature import (
     PrimaryLinkRead,
     RepoContributorRead,
 )
+from app.services.feature_presentation import resolve_pr_meta_for_features
 
 logger = structlog.get_logger(__name__)
 
@@ -60,12 +67,20 @@ def _build_feature_read(
     feature: Feature,
     *,
     repo_names: dict[uuid.UUID, str],
+    pr_meta_by_sha: dict[str, tuple[int, str | None]] | None = None,
 ) -> FeatureRead | None:
     """Assemble a ``FeatureRead`` from the ORM row + a repo-name lookup.
 
     Returns ``None`` when the feature has no PRIMARY junction — that
     is a data-integrity violation that the audit will surface; the
     API simply skips it so a single bad row does not blank the page.
+
+    ``pr_meta_by_sha`` is an optional bulk-resolved lookup table from
+    any merge SHA on the feature (created / last-seen / deactivated)
+    to ``(github_pr_number, html_url)``. The caller pre-builds this
+    in one query so a page of N features renders without N+1 PR
+    lookups. SHAs without a tracked PR fall back to null PR fields;
+    the UI then renders the bare short SHA.
     """
     primary_row: FeatureToRepo | None = None
     backend_rows: list[FeatureToRepo] = []
@@ -95,6 +110,9 @@ def _build_feature_read(
         )
         for row in backend_rows
     ]
+    created_pr = _lookup_pr(feature.created_at_sha, pr_meta_by_sha)
+    last_seen_pr = _lookup_pr(feature.last_seen_sha, pr_meta_by_sha)
+    deactivated_pr = _lookup_pr(feature.deactivated_at_sha, pr_meta_by_sha)
     return FeatureRead(
         id=feature.id,
         featureTitle=feature.feature_title,
@@ -108,7 +126,63 @@ def _build_feature_read(
         synthesizedAt=feature.synthesized_at,
         primary=primary,
         backendLinks=backend_links,
+        createdAt=feature.created_at,
+        createdAtSha=feature.created_at_sha,
+        createdPrNumber=created_pr[0],
+        createdPrUrl=created_pr[1],
+        creationMode=_derive_creation_mode(feature, created_pr_number=created_pr[0]),
+        updatedAt=feature.updated_at,
+        lastSeenSha=feature.last_seen_sha,
+        lastSeenPrNumber=last_seen_pr[0],
+        lastSeenPrUrl=last_seen_pr[1],
+        isActive=feature.is_active,
+        deactivatedAt=feature.deactivated_at,
+        deactivatedAtSha=feature.deactivated_at_sha,
+        deactivatedPrNumber=deactivated_pr[0],
+        deactivatedPrUrl=deactivated_pr[1],
     )
+
+
+def _lookup_pr(
+    sha: str | None,
+    pr_meta_by_sha: dict[str, tuple[int, str | None]] | None,
+) -> tuple[int | None, str | None]:
+    """Resolve one SHA against the bulk-loaded PR dict.
+
+    Returns ``(None, None)`` when the SHA is null or absent from the
+    lookup. Pulled out so each FeatureRead field doesn't repeat the
+    null/missing dance inline. Returns an explicit 2-tuple rather than
+    the source tuple so a future broadening of ``map_shas_to_pr_meta``'s
+    value shape doesn't silently widen this function's return type.
+    """
+    if not sha or not pr_meta_by_sha:
+        return None, None
+    meta = pr_meta_by_sha.get(sha)
+    if meta is None:
+        return None, None
+    return meta[0], meta[1]
+
+
+def _derive_creation_mode(feature: Feature, *, created_pr_number: int | None) -> str:
+    """Label the row's creation context for the UI chip.
+
+    * ``bud`` — BUD-lifecycle authored the row (no PRIMARY junction
+      involvement, but ``source`` carries the marker).
+    * ``narrow_synth`` — ``created_at_sha`` resolves to a tracked PR
+      → a PR-merge narrow synthesis created it.
+    * ``full_scan`` — ``created_at_sha`` is set but doesn't match any
+      tracked PR → a baseline full scan walked the repo and Claude
+      synthesised it (the scan ran against a SHA that wasn't a PR
+      merge, e.g. the initial onboard).
+    * ``unknown`` — ``created_at_sha`` is null. Either the row predates
+      this column (all pre-Phase-5-fix features) or the BUD path
+      didn't carry one.
+    """
+    if feature.source == "bud":
+        return "bud"
+    if feature.created_at_sha is None:
+        return "unknown"
+    return "narrow_synth" if created_pr_number is not None else "full_scan"
 
 
 async def _repo_name_lookup(db: AsyncSession, *, org_id: uuid.UUID) -> dict[uuid.UUID, str]:
@@ -124,24 +198,39 @@ async def list_features(
     q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=24, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    include_inactive: bool = Query(default=False, alias="includeInactive"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FeaturePage:
-    """Paginated active features for the authenticated user's org.
+    """Paginated features for the authenticated user's org.
 
     Filter shape mirrors the legacy ``/v1/skills/knowledge`` endpoint
-    so frontend pagination state translates one-to-one. Only
-    ``is_active=True`` rows are returned.
+    so frontend pagination state translates one-to-one. Defaults to
+    active rows only; pass ``includeInactive=true`` to also surface
+    soft-deleted features so the UI can render their deactivation
+    date + PR # alongside live ones.
     """
     org = await OrganizationRepository(db).get_for_user(current_user)
     reads = FeatureReadRepository(db, org_id=org.id)
     title_query = q.strip() if q and q.strip() else None
+    only_active = not include_inactive
     features = await reads.list_with_links(
-        repo_id=repo_id, q=title_query, limit=limit, offset=offset
+        repo_id=repo_id,
+        q=title_query,
+        limit=limit,
+        offset=offset,
+        only_active=only_active,
     )
-    total = await reads.count_with_links(repo_id=repo_id, q=title_query)
+    total = await reads.count_with_links(repo_id=repo_id, q=title_query, only_active=only_active)
     repo_names = await _repo_name_lookup(db, org_id=org.id)
-    items = [r for r in (_build_feature_read(f, repo_names=repo_names) for f in features) if r]
+    pr_meta = await resolve_pr_meta_for_features(db, org_id=org.id, features=features)
+    items = [
+        r
+        for r in (
+            _build_feature_read(f, repo_names=repo_names, pr_meta_by_sha=pr_meta) for f in features
+        )
+        if r
+    ]
     return FeaturePage(items=items, total=total)
 
 
@@ -149,6 +238,7 @@ async def list_features(
 async def list_features_by_repo(
     repo_id: uuid.UUID | None = Query(default=None, alias="repoId"),
     q: str | None = Query(default=None, max_length=200),
+    include_inactive: bool = Query(default=False, alias="includeInactive"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[FeaturesByRepoRead]:
@@ -156,18 +246,23 @@ async def list_features_by_repo(
 
     No pagination — the redesigned UI is repo-grouped and lazy-loads
     the per-repo top contributors panel separately. Empty repos are
-    omitted from the response.
+    omitted from the response. ``includeInactive`` mirrors the flag
+    on the flat list endpoint above.
     """
     org = await OrganizationRepository(db).get_for_user(current_user)
     reads = FeatureReadRepository(db, org_id=org.id)
     title_query = q.strip() if q and q.strip() else None
-    # Fetch all matching active features; the page-level cap is plenty
-    # for the grouped view (the UI doesn't need pagination here).
-    features = await reads.list_with_links(repo_id=repo_id, q=title_query, limit=500, offset=0)
+    only_active = not include_inactive
+    # Fetch all matching features; the page-level cap is plenty for
+    # the grouped view (the UI doesn't need pagination here).
+    features = await reads.list_with_links(
+        repo_id=repo_id, q=title_query, limit=500, offset=0, only_active=only_active
+    )
     repo_names = await _repo_name_lookup(db, org_id=org.id)
+    pr_meta = await resolve_pr_meta_for_features(db, org_id=org.id, features=features)
     grouped: dict[uuid.UUID, list[FeatureRead]] = defaultdict(list)
     for f in features:
-        read = _build_feature_read(f, repo_names=repo_names)
+        read = _build_feature_read(f, repo_names=repo_names, pr_meta_by_sha=pr_meta)
         if read is not None:
             grouped[read.primary.repo_id].append(read)
     return [
@@ -272,7 +367,8 @@ async def get_feature(
             detail="Feature not found.",
         )
     repo_names = await _repo_name_lookup(db, org_id=org.id)
-    read = _build_feature_read(feature, repo_names=repo_names)
+    pr_meta = await resolve_pr_meta_for_features(db, org_id=org.id, features=[feature])
+    read = _build_feature_read(feature, repo_names=repo_names, pr_meta_by_sha=pr_meta)
     if read is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

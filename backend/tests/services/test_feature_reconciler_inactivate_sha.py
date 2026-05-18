@@ -117,9 +117,7 @@ class _FakeFeatureRepo:
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def mark_inactive(
-        self, ids: list[uuid.UUID], *, head_sha: str | None = None
-    ) -> int:
+    async def mark_inactive(self, ids: list[uuid.UUID], *, head_sha: str | None = None) -> int:
         self.calls.append({"ids": list(ids), "head_sha": head_sha})
         return len(ids)
 

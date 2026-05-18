@@ -147,9 +147,8 @@ def _round_or_none(value: float | None) -> float | None:
 
 
 _NARROW_PROMPT_TEMPLATE = (
-    'You are reconciling features for repository "{repo_name}" after a PR merge.\n'
-    "\n"
-) + """Only the clusters listed below were affected by this PR (their file
+    ('You are reconciling features for repository "{repo_name}" after a PR merge.\n\n')
+    + """Only the clusters listed below were affected by this PR (their file
 membership changed, they appeared, or they disappeared). For each one,
 decide whether the existing feature still describes the cluster's
 reality, and emit exactly one ``write_synthesis_feature`` call per
@@ -205,3 +204,4 @@ Affected clusters ({cluster_count}, JSON):
 Do not invent clusters not in the list above; do not emit two features
 for the same signature; do not emit for BUD-sourced existing features.
 """
+)

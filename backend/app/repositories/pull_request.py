@@ -62,6 +62,31 @@ class PullRequestRepository(BaseRepository[PullRequest]):
         result = await self._db.execute(stmt)
         return {row[0]: row[1] for row in result.all() if row[0] and row[1]}
 
+    async def map_shas_to_pr_meta(self, shas: list[str]) -> dict[str, tuple[int, str | None]]:
+        """Resolve a batch of merge SHAs to ``(pr_number, html_url)`` tuples.
+
+        Used by the Features API to surface the PR that soft-deleted a
+        feature (``features.deactivated_at_sha``) — a single bulk lookup
+        instead of one query per feature.
+
+        SHAs with no matching PR are absent from the returned dict so
+        the caller can render the bare commit SHA as a fallback.
+        """
+        if not shas:
+            return {}
+        stmt = self._scoped(
+            select(
+                PullRequest.merge_commit_sha,
+                PullRequest.github_pr_number,
+                PullRequest.html_url,
+            ).where(
+                PullRequest.merge_commit_sha.in_(shas),
+                PullRequest.github_pr_number.is_not(None),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return {row[0]: (row[1], row[2]) for row in result.all() if row[0] and row[1] is not None}
+
     async def count_opened_by_author_in_window(
         self, since: datetime, until: datetime
     ) -> dict[uuid.UUID, int]:

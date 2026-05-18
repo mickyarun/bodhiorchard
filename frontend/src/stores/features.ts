@@ -31,6 +31,7 @@ interface FetchPageArgs {
   page?: number
   repoId?: string
   q?: string
+  includeInactive?: boolean
 }
 
 export const useFeaturesStore = defineStore('features', () => {
@@ -41,16 +42,25 @@ export const useFeaturesStore = defineStore('features', () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  async function fetchPage({ page = 1, repoId, q }: FetchPageArgs = {}): Promise<void> {
+  async function fetchPage({
+    page = 1,
+    repoId,
+    q,
+    includeInactive = false,
+  }: FetchPageArgs = {}): Promise<void> {
     loading.value = true
     error.value = null
     try {
-      const params: Record<string, string | number> = {
+      const params: Record<string, string | number | boolean> = {
         limit: PAGE_SIZE,
         offset: (page - 1) * PAGE_SIZE,
       }
       if (repoId) params.repoId = repoId
       if (q) params.q = q
+      // Only send the flag when on — keeps the URL clean (and Network
+      // tab readable) for the default active-only case, which is by
+      // far the most common.
+      if (includeInactive) params.includeInactive = true
       const { data } = await api.get<FeaturePage>('/v1/features', { params })
       items.value = data.items
       total.value = data.total

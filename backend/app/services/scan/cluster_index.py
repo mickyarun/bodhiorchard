@@ -180,9 +180,7 @@ async def index_and_cache(
     """
     main_branch = await _detect_main_branch(repo_path)
     if not main_branch:
-        raise RuntimeError(
-            f"cluster_index: cannot detect main branch for {repo_path!r}"
-        )
+        raise RuntimeError(f"cluster_index: cannot detect main branch for {repo_path!r}")
 
     async with with_session(org_id) as db:
         org = await OrganizationRepository(db).get_by_id(org_id)
@@ -200,15 +198,11 @@ async def index_and_cache(
         if rc == 0:
             resolved_sha = stdout.strip()
     if not resolved_sha:
-        raise RuntimeError(
-            f"cluster_index: cannot resolve HEAD sha at {worktree_path!r}"
-        )
+        raise RuntimeError(f"cluster_index: cannot resolve HEAD sha at {worktree_path!r}")
 
     result = await index_repo(worktree_path, head_sha=resolved_sha, max_files=max_files)
     if not result.success:
-        raise RuntimeError(
-            f"cluster_index: indexer failed at {resolved_sha[:8]}: {result.error}"
-        )
+        raise RuntimeError(_indexer_error_message(resolved_sha, worktree_path, result.error))
 
     rows_written, _graph_written, cluster_err, _graph_err = await persist_index_result(
         org_id=org_id,
@@ -217,9 +211,7 @@ async def index_and_cache(
         result=result,
     )
     if cluster_err is not None:
-        raise RuntimeError(
-            f"cluster_index: cluster_cache write failed: {cluster_err}"
-        )
+        raise RuntimeError(f"cluster_index: cluster_cache write failed: {cluster_err}")
     logger.info(
         "cluster_index_backfill_done",
         repo_id=str(repo_id),
@@ -228,3 +220,24 @@ async def index_and_cache(
         indexer_elapsed_s=result.elapsed_s,
     )
     return rows_written
+
+
+# The indexer reports this exact string when its file walk finds zero
+# files under the worktree root. Almost always means ``git fetch`` in
+# ``ensure_scan_test_worktree`` silently failed (auth) leaving an empty
+# checkout — bare "no source files" buries the actionable signal.
+_EMPTY_WORKTREE_INDEXER_ERROR = "no source files found in repo"
+
+
+def _indexer_error_message(resolved_sha: str, worktree_path: str, raw: str | None) -> str:
+    """Wrap the indexer's terse error with operator-actionable guidance."""
+    base = f"cluster_index: indexer failed at {resolved_sha[:8]}: {raw}"
+    if raw and _EMPTY_WORKTREE_INDEXER_ERROR in raw:
+        return (
+            f"{base}\n"
+            f"Hint: the worktree at {worktree_path!r} is empty, which usually means "
+            "`git fetch origin` did not pull any files. Check the GitHub App's repo "
+            "access — reinstall the App for this org and confirm the repo is "
+            "selected in the App's Repository access list, then re-trigger the merge."
+        )
+    return base

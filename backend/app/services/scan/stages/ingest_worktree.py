@@ -16,30 +16,56 @@
 
 Mirrors ``app/services/repo_setup.py::ensure_repo_worktrees`` semantics
 so ingest behaves the same way the live scan does, just under a
-distinct parent dir (``<repo>/.bodhiorchard/scan-test``) so the two
-pipelines don't share state.
+distinct parent dir so the two pipelines don't share state.
+
+The sandbox worktree lives at
+``<data_dir>/scan-worktrees/<repo-slug>/<branch>`` — **outside** the
+tracked repo. Earlier iterations parked it at
+``<repo>/.bodhiorchard/scan-test/<branch>`` for "everything-in-one-tree"
+ergonomics, but graphify's file collector filters out any path with a
+component starting with ``.`` (its dotfile rule), so the leading
+``.bodhiorchard`` made every file under that worktree invisible to the
+indexer → empty file list → ``"no source files found in repo"``.
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
 
+from app.config import settings
 from app.services.git_operations import run_git
-from app.services.scan.stages._origin_auth import refresh_origin_auth
+from app.services.scan.stages._origin_auth import (
+    build_app_https_url_for_origin,
+    refresh_origin_auth,
+)
 
 if TYPE_CHECKING:
     from app.models.organization import Organization
 
 logger = structlog.get_logger(__name__)
 
-# Sandbox worktree parent — kept under ``<repo>/.bodhiorchard/`` for
-# parity with the production scan but under a distinct subdir so the
-# two never collide.
-WORKTREE_PARENT = ".bodhiorchard/scan-test"
+# Slug helper for the repo-disambiguating dir name. Strips anything that
+# isn't a safe filesystem character; collisions between repos with the
+# same basename are vanishingly rare for typical orgs and tolerable for
+# a sandbox worktree (worst case: one extra ``git worktree add`` fails
+# because the branch is already checked out, then the caller resets).
+_SLUG_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _scan_worktree_parent(repo_path: str) -> Path:
+    """Return the dot-free parent dir for this repo's sandbox worktrees.
+
+    ``<data_dir>/scan-worktrees/<basename>``. The data_dir is resolved
+    at call time so tests overriding ``BODHIORCHARD_DATA_DIR`` take
+    effect without a module reload.
+    """
+    repo_slug = _SLUG_UNSAFE_RE.sub("-", Path(repo_path).name) or "repo"
+    return Path(settings.storage.data_dir) / "scan-worktrees" / repo_slug
 
 
 async def _has_origin_remote(repo_path: str) -> bool:
@@ -63,9 +89,12 @@ async def ensure_scan_test_worktree(
       ``repo_path`` directly. Git refuses to ``worktree add`` a branch
       that's already checked out elsewhere, so materialising a separate
       worktree would fail.
-    * Otherwise, materialise (or adopt) ``<repo>/.bodhiorchard/scan-test/<branch>``,
-      then fetch + hard-reset it to ``origin/<main_branch>`` (or the local
-      branch ref if there's no ``origin`` remote — e.g. local-path imports).
+    * Otherwise, materialise (or adopt)
+      ``<data_dir>/scan-worktrees/<repo-slug>/<branch>``, then fetch +
+      hard-reset it to ``origin/<main_branch>`` (or the local branch ref
+      if there's no ``origin`` remote — e.g. local-path imports). The
+      worktree path lives outside the repo and outside any dot-prefixed
+      directory so graphify's dotfile filter doesn't skip every file.
     * If a stale registration points to a missing dir, prune and recreate.
 
     Returns the absolute path of the worktree to operate on.
@@ -82,13 +111,18 @@ async def ensure_scan_test_worktree(
             await fetch_and_reset(repo_path, main_branch, has_origin=has_origin, org=org)
         return repo_path
 
-    repo = Path(repo_path)
-    parent = repo / WORKTREE_PARENT
+    parent = _scan_worktree_parent(repo_path)
     parent.mkdir(parents=True, exist_ok=True)
     wt_path = parent / main_branch.replace("/", "-")
     wt_str = str(wt_path)
 
     await run_git(["worktree", "prune"], cwd=repo_path)
+    # If a worktree on ``main_branch`` is still registered at a path
+    # that isn't ours (e.g. a stale ``<repo>/.bodhiorchard/scan-test/main``
+    # from before the dot-prefix-bug fix moved worktrees to ``<data_dir>``),
+    # remove it so the subsequent ``worktree add`` doesn't trip on
+    # "branch already used elsewhere".
+    await _remove_conflicting_worktree(repo_path, main_branch, keep=wt_str)
 
     if not wt_path.exists():
         _, stderr, rc = await run_git(
@@ -153,6 +187,31 @@ async def fetch_and_reset(
         )
         if rc != 0:
             logger.warning("scan_ingest_fetch_failed", error=stderr[:200])
+            # SSH fetch can fail when the per-repo deploy key isn't
+            # registered. The org's GitHub App token covers every
+            # selected repo over HTTPS, so retry once with a one-shot
+            # ``-c remote.origin.url=...`` override. The persistent
+            # SSH remote stays in ``.git/config`` so the user's
+            # ``git push`` workflow is unaffected.
+            override_url = await build_app_https_url_for_origin(repo_path, org)
+            if override_url is not None:
+                _, stderr2, rc2 = await run_git(
+                    [
+                        "-c",
+                        f"remote.origin.url={override_url}",
+                        "fetch",
+                        "origin",
+                        "--prune",
+                    ],
+                    cwd=repo_path,
+                )
+                if rc2 == 0:
+                    logger.info("scan_ingest_fetch_succeeded_via_app_fallback")
+                else:
+                    logger.warning(
+                        "scan_ingest_fetch_failed_after_app_fallback",
+                        error=stderr2[:200],
+                    )
         reset_ref = f"origin/{main_branch}"
     else:
         reset_ref = main_branch
@@ -177,3 +236,50 @@ async def fetch_and_reset(
     )
     if rc2 != 0:
         raise RuntimeError(f"failed to refresh worktree: {stderr[:200]} / {stderr2[:200]}")
+
+
+async def _remove_conflicting_worktree(repo_path: str, main_branch: str, *, keep: str) -> None:
+    """Drop any worktree on ``main_branch`` whose path isn't ``keep``.
+
+    Git refuses ``worktree add`` for a branch that's already checked out
+    elsewhere. This commonly happens after the dot-prefix fix: the old
+    ``<repo>/.bodhiorchard/scan-test/main`` worktree still registers
+    ``main`` even though we're trying to materialise the new
+    ``<data_dir>/scan-worktrees/<slug>/main``. Without this cleanup the
+    new ``worktree add`` fails on every webhook until the operator
+    removes the stale registration by hand.
+    """
+    stdout, _, rc = await run_git(
+        ["worktree", "list", "--porcelain"],
+        cwd=repo_path,
+    )
+    if rc != 0:
+        return
+    # ``--porcelain`` yields blocks separated by blank lines:
+    #   worktree /abs/path
+    #   HEAD <sha>
+    #   branch refs/heads/<name>
+    keep_norm = str(Path(keep))
+    branch_ref = f"refs/heads/{main_branch}"
+    for block in stdout.split("\n\n"):
+        path_line: str | None = None
+        branch_line: str | None = None
+        for line in block.splitlines():
+            if line.startswith("worktree "):
+                path_line = line[len("worktree ") :].strip()
+            elif line.startswith("branch "):
+                branch_line = line[len("branch ") :].strip()
+        if not path_line or branch_line != branch_ref:
+            continue
+        if str(Path(path_line)) == keep_norm:
+            continue
+        logger.info(
+            "scan_ingest_removing_stale_worktree",
+            stale_path=path_line,
+            branch=main_branch,
+        )
+        await run_git(
+            ["worktree", "remove", path_line, "--force"],
+            cwd=repo_path,
+        )
+    await run_git(["worktree", "prune"], cwd=repo_path)

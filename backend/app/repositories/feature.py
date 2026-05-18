@@ -47,6 +47,27 @@ from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.repositories.base import BaseRepository
 
 
+def _code_locations_overlap(
+    code_locations: dict[str, Any] | None,
+    affected_files: set[str],
+) -> bool:
+    """Return ``True`` iff any file in ``code_locations`` is in ``affected_files``.
+
+    ``code_locations`` is JSONB shaped like ``{"frontend": [...],
+    "backend": [...]}`` but the schema isn't strictly enforced — some
+    rows have ``None`` values, some have non-list values. The predicate
+    mirrors the reconciler's ``candidate_filter`` so the two layers
+    agree on what "feature touched by these files" means.
+    """
+    if not code_locations:
+        return False
+    feat_files: set[str] = set()
+    for value in code_locations.values():
+        if isinstance(value, list):
+            feat_files.update(p for p in value if isinstance(p, str))
+    return bool(feat_files & affected_files)
+
+
 class FeatureRepository(BaseRepository[Feature]):
     """Repository for ``features`` rows, org-scoped.
 
@@ -128,6 +149,7 @@ class FeatureRepository(BaseRepository[Feature]):
         source_ref: str | None = None,
         feature_status: str | None = None,
         last_seen_sha: str | None = None,
+        created_at_sha: str | None = None,
     ) -> Feature:
         """Insert one feature row.
 
@@ -139,6 +161,12 @@ class FeatureRepository(BaseRepository[Feature]):
         ``cluster_signature`` is required (NOT NULL on the column) — it
         is the reconciler's primary identity key and must be present
         before the row participates in any reconcile pass.
+
+        ``created_at_sha`` (the head_sha the reconciler was processing
+        at insert time) is optional for backwards compatibility — the
+        BUD lifecycle writer doesn't have one. The reconciler always
+        passes it so newly-scan-authored features carry their birth
+        SHA forward.
         """
         assert self._org_id is not None, "org_id required for writes"
         row = Feature(
@@ -154,6 +182,7 @@ class FeatureRepository(BaseRepository[Feature]):
             source_ref=source_ref,
             feature_status=feature_status,
             last_seen_sha=last_seen_sha,
+            created_at_sha=created_at_sha,
             synthesized_at=datetime.now(UTC),
         )
         self._db.add(row)
@@ -267,6 +296,77 @@ class FeatureRepository(BaseRepository[Feature]):
         )
         rowcount = getattr(result, "rowcount", 0) or 0
         return max(int(rowcount), 0)
+
+    async def list_active_ids_by_signatures(
+        self,
+        repo_id: uuid.UUID,
+        signatures: set[str],
+        *,
+        affected_files: set[str] | None = None,
+    ) -> list[uuid.UUID]:
+        """Active feature ids matching by ``cluster_signature`` OR file overlap.
+
+        Used by the narrow PR-merge backend-link refresh to scope its
+        work to the features just touched by the reconciler. Inactive
+        rows are excluded — a soft-deleted feature has no cross-layer
+        link to refresh.
+
+        When ``affected_files`` is provided, the lookup widens to also
+        admit features whose PRIMARY junction's ``code_locations``
+        intersects that file set. This mirrors the file-overlap
+        fallback :func:`_reconcile_narrow`'s ``candidate_filter`` uses,
+        and closes the gap where a feature's stored
+        ``cluster_signature`` drifts from the current indexer output
+        across releases: the reconciler updates the feature via
+        file-overlap, but the cross-layer refresh used to miss it
+        because its lookup was signature-only.
+
+        The signature path stays in SQL (cheap index hit). The
+        file-overlap path loads candidate rows + their JSONB
+        ``code_locations`` and filters in Python — ``code_locations``
+        is heterogeneous JSONB (per-role arrays, sometimes null) and
+        the in-Python predicate matches the reconciler's exactly,
+        avoiding ``jsonb_typeof`` gymnastics for what's a sub-ms
+        filter on a bounded feature count.
+        """
+        if not signatures and not affected_files:
+            return []
+
+        matched: set[uuid.UUID] = set()
+        if signatures:
+            sig_result = await self._db.execute(
+                self._scoped(
+                    select(Feature.id)
+                    .join(FeatureToRepo, FeatureToRepo.feature_id == Feature.id)
+                    .where(
+                        Feature.is_active.is_(True),
+                        Feature.cluster_signature.in_(signatures),
+                        FeatureToRepo.repo_id == repo_id,
+                        FeatureToRepo.role == FeatureToRepoRole.PRIMARY,
+                    )
+                )
+            )
+            matched.update(row[0] for row in sig_result.all())
+
+        if affected_files:
+            file_result = await self._db.execute(
+                self._scoped(
+                    select(Feature.id, FeatureToRepo.code_locations)
+                    .join(FeatureToRepo, FeatureToRepo.feature_id == Feature.id)
+                    .where(
+                        Feature.is_active.is_(True),
+                        FeatureToRepo.repo_id == repo_id,
+                        FeatureToRepo.role == FeatureToRepoRole.PRIMARY,
+                    )
+                )
+            )
+            for fid, code_locations in file_result.all():
+                if fid in matched:
+                    continue
+                if _code_locations_overlap(code_locations, affected_files):
+                    matched.add(fid)
+
+        return list(matched)
 
     async def find_by_signature(
         self,
@@ -484,6 +584,27 @@ class FeatureRepository(BaseRepository[Feature]):
             )
         )
         return list(result.scalars().all())
+
+    async def find_primary_link(self, feature_id: uuid.UUID) -> FeatureToRepo | None:
+        """Return the PRIMARY ``feature_to_repo`` row for one feature.
+
+        Powers the narrow PR-merge backend-link refresh, which works one
+        feature at a time and needs the PRIMARY junction's
+        ``code_locations`` to drive path extraction. Scoped to the
+        repo's organisation per the standard ``_scoped`` helper.
+        """
+        result = await self._db.execute(
+            self._scoped(
+                select(FeatureToRepo)
+                .join(Feature, Feature.id == FeatureToRepo.feature_id)
+                .where(
+                    FeatureToRepo.feature_id == feature_id,
+                    FeatureToRepo.role == FeatureToRepoRole.PRIMARY,
+                )
+                .limit(1)
+            )
+        )
+        return result.scalar_one_or_none()
 
     async def list_primary_pairs_for_repo(
         self, repo_id: uuid.UUID

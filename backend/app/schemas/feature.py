@@ -65,7 +65,30 @@ class BackendLinkRead(BaseModel):
 
 
 class FeatureRead(BaseModel):
-    """One feature for the Features-tab API."""
+    """One feature for the Features-tab API.
+
+    Lineage fields fall into three groups:
+
+    * **Creation** — ``created_at`` / ``created_at_sha`` /
+      ``created_pr_number`` / ``created_pr_url`` / ``creation_mode``.
+      Where the feature was born. ``creation_mode`` is the derived
+      label the UI uses for the card chip:
+      ``narrow_synth`` (PR-merge created it), ``full_scan`` (a baseline
+      scan walked the repo and Claude synthesised it), ``bud`` (a BUD
+      was opened and pre-created the row), or ``unknown`` (legacy
+      pre-this-column row).
+    * **Last touched** — ``updated_at`` / ``last_seen_sha`` /
+      ``last_seen_pr_number`` / ``last_seen_pr_url``. When the
+      reconciler last confirmed the feature still exists. Equal to the
+      creation fields for fresh, never-touched-again rows.
+    * **Lifecycle / soft-delete** — ``is_active`` / ``deactivated_at``
+      / ``deactivated_at_sha`` / ``deactivated_pr_number`` /
+      ``deactivated_pr_url``. All null on active rows.
+
+    PR-number resolution is best-effort for ALL three SHA columns: a
+    SHA with no tracked PR in ``pull_requests`` leaves the matching
+    PR fields null and the UI falls back to the bare short SHA.
+    """
 
     id: uuid.UUID
     feature_title: str = Field(alias="featureTitle")
@@ -79,6 +102,23 @@ class FeatureRead(BaseModel):
     synthesized_at: datetime = Field(alias="synthesizedAt")
     primary: PrimaryLinkRead
     backend_links: list[BackendLinkRead] = Field(default_factory=list, alias="backendLinks")
+    # Creation lineage
+    created_at: datetime = Field(alias="createdAt")
+    created_at_sha: str | None = Field(default=None, alias="createdAtSha")
+    created_pr_number: int | None = Field(default=None, alias="createdPrNumber")
+    created_pr_url: str | None = Field(default=None, alias="createdPrUrl")
+    creation_mode: str = Field(default="unknown", alias="creationMode")
+    # Last-touched lineage
+    updated_at: datetime = Field(alias="updatedAt")
+    last_seen_sha: str | None = Field(default=None, alias="lastSeenSha")
+    last_seen_pr_number: int | None = Field(default=None, alias="lastSeenPrNumber")
+    last_seen_pr_url: str | None = Field(default=None, alias="lastSeenPrUrl")
+    # Soft-delete lifecycle
+    is_active: bool = Field(default=True, alias="isActive")
+    deactivated_at: datetime | None = Field(default=None, alias="deactivatedAt")
+    deactivated_at_sha: str | None = Field(default=None, alias="deactivatedAtSha")
+    deactivated_pr_number: int | None = Field(default=None, alias="deactivatedPrNumber")
+    deactivated_pr_url: str | None = Field(default=None, alias="deactivatedPrUrl")
 
     model_config = _BASE_CONFIG
 
