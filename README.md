@@ -518,33 +518,47 @@ The database is the same shape either way, so you can swap modes against the sam
 
 ### Try the included examples
 
-Bodhiorchard ships with **TaskFlow** — three deliberately wired-together sample repos (`taskflow-api`, `taskflow-worker`, `taskflow-web`) under [`examples/`](examples/). They share four features (Auth, Tasks, Notifications, Billing) implemented across all three repos by four fictional developers, so the very first scan exercises cross-repo feature detection, skill profiling, and BUD generation without you needing to wire up your own codebase.
+Bodhiorchard pairs with **TaskFlow** — four deliberately wired-together sample repos that exercise cross-repo feature detection, skill profiling, BUD generation, and PR-merge feature reconciliation without you needing to wire up your own codebase:
 
-**1. Seed the git history** (one-time, ~30s — creates four authors with realistic commit timelines):
+- `taskflow-api` — FastAPI backend (auth, tasks, notifications, billing)
+- `taskflow-web` — Vue + Vuetify frontend that calls into the API
+- `taskflow-worker` — async job worker (reminders, invoice generation)
+- `taskflow-qa` — Playwright BDD test suite
+
+The four repos share four features (Auth, Tasks, Notifications, Billing) implemented across them by four fictional developers, so the very first scan produces cross-repo features rather than four disconnected copies.
+
+The example repos are tracked **independently** at [`github.com/mickyarun/taskflow-*`](https://github.com/mickyarun?tab=repositories&q=taskflow) — they are NOT bundled into this repo. (The PR-merge testing flow merges PRs into them constantly, which would otherwise pollute the parent repo's `git status`.) The bootstrap script clones them on first run.
+
+**1. Bootstrap** (one-time, ~1 min — clones the four repos from GitHub and rebuilds their synthetic per-author commit history):
 
 ```bash
 cd examples
 bash setup-git-history.sh
 ```
 
-**2. In the Bodhiorchard UI, add the three repos under Settings → Repositories:**
+The script uses `gh repo clone` when available, falling back to `git clone` over SSH. To clone from a fork instead, export `BODHIORCHARD_EXAMPLES_OWNER=<your-username>` before running.
+
+**2. In the Bodhiorchard UI, add the four repos under Settings → Repositories:**
 
 ```
 /absolute/path/to/examples/taskflow-api
-/absolute/path/to/examples/taskflow-worker
 /absolute/path/to/examples/taskflow-web
+/absolute/path/to/examples/taskflow-worker
+/absolute/path/to/examples/taskflow-qa
 ```
 
 Map each to its `main` branch.
 
 **3. Click "Full Rescan"** in the Repositories settings. The scan finishes in ~1–2 minutes on a Mac Mini and you should see:
 
-- **~4–6 cross-repo features** in the Feature Registry (Authentication, Tasks, Notifications, Billing, Reminders) — each one linked to the repos that actually implement it, not three separate copies per repo.
-- **Skill profiles for 4 developers** under Settings → Developers, with per-module scores derived from real git history.
+- **~4–6 cross-repo features** in the Feature Registry (Authentication, Tasks, Notifications, Billing, Reminders) — each one linked to the repos that actually implement it, not four separate copies per repo.
+- **Skill profiles for 4 developers** under Settings → Developers, with per-module scores derived from the synthetic git history.
 - **A populated Living Tree dashboard** — one limb per repo, branches per feature, leaves coloured by git freshness.
-- **A pre-written `BUD-001-tech-spec.md`** in `examples/` you can paste into a new BUD via the UI to watch a realistic spec drive Tech Plan → Implementation.
+- **A pre-written `BUD-001-tech-spec.md`** alongside the example repos you can paste into a new BUD via the UI to watch a realistic spec drive Tech Plan → Implementation.
 
 The TaskFlow repos are intentionally small (Vue 3 frontend, FastAPI + worker backends; ~6 commits per author) so the whole loop completes fast enough to demo. Read [`examples/README.md`](examples/README.md) for the full feature map, SQL verification queries, and author-to-skill mapping.
+
+You can also use the example repos to exercise the **PR-merge feature-reconcile flow**: open a PR on (e.g.) `mickyarun/taskflow-web`, merge it, and watch the backend's `webhook_logs` row transition from `pending` to `running` to `done` as the Redis-stream consumer processes the merge. The affected feature's `last_seen_sha` advances to the merge SHA and any new fetch calls materialise as BACKEND junctions in `feature_to_repo`.
 
 ### Environment Variables
 

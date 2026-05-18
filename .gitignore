@@ -79,6 +79,8 @@ examples/taskflow-api/
 examples/taskflow-web/
 examples/taskflow-worker/
 examples/taskflow-qa/
+# The example BUD spec ships with the example repos, not bodhiorchard core.
+examples/BUD-001-tech-spec.md
 
 # Plan and experiment artefacts. These tend to accumulate snapshots of
 # real-world tuning data (customer repo names, dataset measurements) that
