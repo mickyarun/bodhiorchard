@@ -71,6 +71,15 @@ repoclone/
 # build artifact, not source.
 examples/*/graphify-out/
 
+# Example repos — tracked independently at github.com/mickyarun/taskflow-*.
+# Run `bash examples/setup-git-history.sh` after cloning to bootstrap.
+# Keeping them out of the parent repo's tracked set means FT-testing PR
+# merges don't appear as bodhiorchard-side changes in `git status`.
+examples/taskflow-api/
+examples/taskflow-web/
+examples/taskflow-worker/
+examples/taskflow-qa/
+
 # Plan and experiment artefacts. These tend to accumulate snapshots of
 # real-world tuning data (customer repo names, dataset measurements) that
 # don't belong in source control. Keep them local-only.
