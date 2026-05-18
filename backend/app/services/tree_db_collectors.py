@@ -429,18 +429,17 @@ async def collect_members(
     presence_settings = get_presence_settings(org_config)
 
     rows = await UserRepository(db).list_active_members_for_tree(org_id, limit=50)
-    if not rows:
-        return
-
     total_touches = sum(row.total_touches or 0 for row in rows)
-
     user_ids = [row.id for row in rows]
-    module_rows = await SkillProfileRepository(db, org_id=org_id).list_modules_for_users(user_ids)
     user_modules: dict[uuid.UUID, list[str]] = {}
-    for uid, module, _score in module_rows:
-        user_modules.setdefault(uid, [])
-        if len(user_modules[uid]) < 3:
-            user_modules[uid].append(module)
+    if user_ids:
+        module_rows = await SkillProfileRepository(db, org_id=org_id).list_modules_for_users(
+            user_ids
+        )
+        for uid, module, _score in module_rows:
+            user_modules.setdefault(uid, [])
+            if len(user_modules[uid]) < 3:
+                user_modules[uid].append(module)
 
     for row in rows:
         touches = row.total_touches or 0
@@ -466,3 +465,53 @@ async def collect_members(
                 house_level=row.house_level or 1,
             )
         )
+
+    # ─── Contributors (superset for detail-panel lookups) ──────────
+    # Distinct from ``tree.members`` because tree detail panels want
+    # commit-credited developers regardless of ``OrgToUser`` membership.
+    # Example-workspace authors (e.g. ``alice@taskflow.dev``) have skill
+    # profile rows but never become formal org members, so they'd be
+    # dropped if the panels keyed off ``members`` alone.
+    contrib_rows = await UserRepository(db).list_contributors_for_tree(org_id)
+    if contrib_rows:
+        contrib_total_touches = sum(row.total_touches or 0 for row in contrib_rows)
+        contrib_user_ids = [row.id for row in contrib_rows]
+        contrib_module_rows = await SkillProfileRepository(
+            db, org_id=org_id
+        ).list_modules_for_users(contrib_user_ids)
+        contrib_modules: dict[uuid.UUID, list[str]] = {}
+        for uid, module, _score in contrib_module_rows:
+            contrib_modules.setdefault(uid, [])
+            if len(contrib_modules[uid]) < 3:
+                contrib_modules[uid].append(module)
+
+        for row in contrib_rows:
+            touches = row.total_touches or 0
+            care_pct = round(
+                (touches / contrib_total_touches * 100) if contrib_total_touches > 0 else 0,
+                1,
+            )
+            tree.contributors.append(
+                MemberActivity(
+                    user_id=str(row.id),
+                    name=row.name or "",
+                    email=row.email or "",
+                    avatar_url=row.avatar_url,
+                    care_pct=care_pct,
+                    top_modules=contrib_modules.get(row.id, []),
+                    character_model=row.character_model,
+                    presence="active",
+                    level=row.level or 1,
+                    level_name=row.level_name or "seedling",
+                    house_level=row.house_level or 1,
+                )
+            )
+
+    logger.debug(
+        "tree_members_collected",
+        org_id=str(org_id),
+        members=len(tree.members),
+        member_names=[m.name for m in tree.members],
+        contributors=len(tree.contributors),
+        contributor_names=[c.name for c in tree.contributors],
+    )

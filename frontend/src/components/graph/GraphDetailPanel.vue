@@ -336,7 +336,12 @@ const members = computed<SkilledMember[]>(() => {
   )
 
   if (skillSummary && skillSummary.developers.length > 0) {
-    const memberMap = new Map(props.treeData.members.map(m => [m.user_id, m]))
+    // ``contributors`` includes non-OrgToUser users (synthetic example
+    // devs, etc.) so feature attribution surfaces even when the dev
+    // isn't a formal org member. Falls back to ``members`` for older
+    // payloads that pre-date the contributors field.
+    const pool = props.treeData.contributors ?? props.treeData.members
+    const memberMap = new Map(pool.map(m => [m.user_id, m]))
     return skillSummary.developers
       .map(uid => {
         const m = memberMap.get(uid)

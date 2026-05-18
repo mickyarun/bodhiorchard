@@ -21,10 +21,13 @@ before being called.
 
 import uuid
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.skill_profile import SkillProfileRepository
 from app.schemas.dashboard import FeatureSkillSummary, TreeData
+
+logger = structlog.get_logger(__name__)
 
 
 async def compute_feature_skills(
@@ -48,8 +51,15 @@ async def compute_feature_skills(
         org_id: Organization UUID.
         tree: The tree data; ``tree.features`` must be populated first.
     """
-    # 1. Load all skill profiles for this org (module → developers)
-    rows = await SkillProfileRepository(db, org_id=org_id).list_active_skill_devs()
+    # 1. Load all skill profiles for this org (module → developers).
+    # ``min_skill_score=0`` (default is 0.1) so contributors with a real
+    # but smaller share — 1-9% — still surface on the tree detail panel.
+    # The default suits high-confidence ownership lookups (routing,
+    # estimation) but is too strict for dashboard attribution where
+    # every code-credited dev should appear.
+    rows = await SkillProfileRepository(db, org_id=org_id).list_active_skill_devs(
+        min_skill_score=0.0,
+    )
 
     # Build module→developers lookup: module_lower → [(uid, name, score)]
     module_devs: dict[str, list[tuple[str, str, float]]] = {}
@@ -57,8 +67,17 @@ async def compute_feature_skills(
         key = module.lower()
         module_devs.setdefault(key, []).append((str(user_id), dev_name, float(score)))
 
+    logger.debug(
+        "feature_skills_modules_loaded",
+        org_id=str(org_id),
+        skill_rows=len(rows),
+        unique_modules=len(module_devs),
+        module_keys=list(module_devs.keys())[:30],
+    )
+
     # 2. For each unique feature title, find matching developers
     seen_titles: set[str] = set()
+    no_match_titles: list[str] = []
     for feat in tree.features:
         if feat.title in seen_titles:
             continue
@@ -75,24 +94,39 @@ async def compute_feature_skills(
         ]
 
         # Match by branch_name (module == branch/community name)
+        branch_hits: list[str] = []
         if feat.branch_name:
             branch_lower = feat.branch_name.lower()
             for mod_key, devs in module_devs.items():
                 if branch_lower in mod_key or mod_key in branch_lower:
+                    branch_hits.append(mod_key)
                     for uid, name, score in devs:
                         if uid not in matched or score > matched[uid][1]:
                             matched[uid] = (name, score)
 
         # Match by title keywords against module names (2+ keyword hits)
+        title_hits: list[str] = []
         if not matched and len(title_words) >= 2:
             for mod_key, devs in module_devs.items():
                 hits = sum(1 for w in title_words if w in mod_key)
                 if hits >= 2:
+                    title_hits.append(mod_key)
                     for uid, name, score in devs:
                         if uid not in matched or score > matched[uid][1]:
                             matched[uid] = (name, score)
 
+        logger.debug(
+            "feature_skill_match",
+            feature=feat.title,
+            branch_name=feat.branch_name,
+            title_words=title_words,
+            branch_hits=branch_hits,
+            title_hits=title_hits,
+            matched_devs=[name for _, (name, _) in matched.items()],
+        )
+
         if not matched:
+            no_match_titles.append(feat.title)
             continue
 
         sorted_devs = sorted(matched.items(), key=lambda x: x[1][1], reverse=True)
@@ -105,3 +139,11 @@ async def compute_feature_skills(
                 top_developer_name=sorted_devs[0][1][0] if sorted_devs else None,
             )
         )
+
+    logger.debug(
+        "feature_skills_computed",
+        org_id=str(org_id),
+        features_with_skills=len(tree.feature_skills),
+        features_without_matches=len(no_match_titles),
+        no_match_sample=no_match_titles[:10],
+    )

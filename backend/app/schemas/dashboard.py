@@ -199,8 +199,15 @@ class TreeData(BaseModel):
     features: list[FeatureItem] = []
     buds: list[BUDItem] = []
 
-    # Members
+    # Members — formal org members (drives village houses, header count,
+    # presence). Inner-joined on ``OrgToUser``.
     members: list[MemberActivity] = []
+
+    # Contributors — every user with feature-mapped skill profile rows
+    # in this org, regardless of ``OrgToUser`` membership. Used by the
+    # tree/graph detail panels' developer lists so commit-credited
+    # contributors (including example-workspace devs) still surface.
+    contributors: list[MemberActivity] = []
 
     # Security threats (termites)
     threats: list[SecurityThreat] = []

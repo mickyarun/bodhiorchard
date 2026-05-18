@@ -120,10 +120,45 @@ const selectedFeatures = computed(() => {
 
 const selectedDevelopers = computed(() => {
   if (!selectedRepo.value) return []
-  const branchNames = new Set(selectedRepo.value.branches.map(b => b.name))
-  return props.displayData.members.filter(m =>
-    m.top_modules.some(mod => branchNames.has(mod)),
+  // Drive the developer list from features that actually live in this
+  // repo (primary rows) → ``feature_skills`` mapping that the backend
+  // already computed via substring + keyword matching. The legacy
+  // ``branches[].name`` × ``top_modules`` set intersection compared two
+  // unrelated namespaces (directory buckets vs skill module slugs) and
+  // returned empty for almost every repo.
+  const repoName = selectedRepo.value.repo_name
+  const featureTitles = new Set(
+    props.displayData.features
+      .filter(f => f.repo_name === repoName && f.link_role !== 'backend')
+      .map(f => f.title),
   )
+  const developerIds = new Set<string>()
+  for (const fs of props.displayData.feature_skills) {
+    if (!featureTitles.has(fs.feature_title)) continue
+    for (const uid of fs.developers) developerIds.add(uid)
+  }
+  // Pull from ``contributors`` (skill-profile-attributed users) rather
+  // than ``members`` (formal OrgToUser members) so example-workspace
+  // developers and other code contributors who never went through
+  // onboarding still surface on the tree detail panel.
+  const pool = props.displayData.contributors ?? props.displayData.members
+  const result = pool.filter(m => developerIds.has(m.user_id))
+  // Diagnostic — remove once developer matching is verified end-to-end.
+  // eslint-disable-next-line no-console
+  console.debug('[tree-detail/developers]', {
+    repo: repoName,
+    featuresInRepo: Array.from(featureTitles),
+    featureSkillsCount: props.displayData.feature_skills.length,
+    matchingSkillEntries: props.displayData.feature_skills.filter(fs =>
+      featureTitles.has(fs.feature_title),
+    ),
+    developerIds: Array.from(developerIds),
+    poolSource: props.displayData.contributors ? 'contributors' : 'members',
+    poolSize: pool.length,
+    poolSample: pool.slice(0, 8).map(m => ({ uid: m.user_id, name: m.name })),
+    resultNames: result.map(m => m.name),
+  })
+  return result
 })
 
 // ─── Click Handlers ──────────────────────────────

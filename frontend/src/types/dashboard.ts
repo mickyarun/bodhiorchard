@@ -141,6 +141,11 @@ export interface TreeData {
   agent_activity: AgentActivityItem[]
   relationships: RelationshipArc[]
   feature_skills: FeatureSkillSummary[]
+  // Superset of ``members``: includes every user with a feature-mapped
+  // skill profile in this org, even non-OrgToUser contributors (e.g.
+  // example-workspace authors). Detail panels use this so a feature
+  // with real attribution still shows the developer who wrote it.
+  contributors?: MemberActivity[]
 }
 
 export interface FeatureSkillSummary {
