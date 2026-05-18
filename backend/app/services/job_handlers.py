@@ -39,13 +39,11 @@ from app.services.job_queue import (
     JOB_JIRA_DISCOVERY,
     JOB_JIRA_ENRICH,
     JOB_JIRA_IMPORT,
-    JOB_PR_MERGE_UPDATE,
     JOB_REPO_BULK_ONBOARD,
     JOB_TRIAGE,
     register_job_type,
 )
 from app.services.job_repo_bulk_clone import handle_bulk_onboard_job
-from app.services.scan.pr_merge_update import handle_pr_merge_update
 
 # Re-export all handlers so existing imports continue to work
 __all__ = [
@@ -100,8 +98,11 @@ def setup_job_handlers() -> None:
     register_job_type(JOB_JIRA_IMPORT, handle_import_job, worker_count=1)
     register_job_type(JOB_JIRA_ENRICH, handle_enrich_job, worker_count=1)
 
-    # PR-merge feature reconcile (GitHub webhook trigger)
-    register_job_type(JOB_PR_MERGE_UPDATE, handle_pr_merge_update, worker_count=2)
+    # PR-merge feature reconcile is no longer a job-queue type — it
+    # runs via the per-(org, repo) Redis-stream worker pool
+    # (``services/pr_merge_worker.py``) so dispatcher + narrow synth
+    # share one consumer task and the Phase-4 lock-handoff race is
+    # structurally eliminated.
 
     # Bulk GitHub-App repo onboard (Settings → Code "Bulk import" tab)
     register_job_type(JOB_REPO_BULK_ONBOARD, handle_bulk_onboard_job, worker_count=1)

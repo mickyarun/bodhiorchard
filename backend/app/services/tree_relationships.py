@@ -12,11 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Cross-repo relationship detection for the Living Tree Dashboard.
+"""Cross-repo relationship arcs from real ``feature_to_repo`` links.
 
-Creates inter-service arcs between repos that share branch/community
-names (e.g. "User" in a core-backend repo and "User" in a payment-service repo). Pure
-data transformation — no DB queries or subprocess calls.
+Previously this module emitted synthetic IMPORTS arcs whenever two repos
+shared a top-level directory name (e.g. both had ``src/``) as a fallback
+when the GitNexus pre-link path was active. That heuristic over-fired —
+every repo in a workspace touches generic directory names, so the garden
+filled with arcs that didn't correspond to any real dependency.
+
+The dropped pre-link stage has been replaced by the synthesis pipeline's
+``backend_link`` step, which writes PRIMARY + BACKEND rows into the
+``feature_to_repo`` junction. ``collect_features`` already surfaces those
+links as ``FeatureItem.linked_repos`` (primary first, then backends), so
+this module now derives arcs from that field — a pure data transform
+with no new DB queries.
 """
 
 import structlog
@@ -27,50 +36,64 @@ logger = structlog.get_logger(__name__)
 
 
 def collect_cross_repo_relationships(tree: TreeData) -> None:
-    """Create inter-service arcs between repos sharing community names.
+    """Emit one CALLS arc per unique cross-repo feature.
 
-    When two repos both have a community (branch) with the same name —
-    e.g. "User" in a core-backend repo and "User" in a payment-service repo — it signals a
-    shared domain concept. We emit a synthetic IMPORTS arc so the garden
-    draws a visible connection between those trees.
+    Reads ``tree.features`` (already populated by ``collect_features``)
+    and emits one ``RelationshipArc`` per ``(feature, primary_repo,
+    backend_repo)`` triple. The first entry of ``linked_repos`` is the
+    PRIMARY repo (where the feature lives); the rest are BACKEND repos
+    whose API routes the feature calls. The frontend fans multiple arcs
+    sharing the same repo pair into separate visible curves using
+    ``feature_title`` as the grouping key.
 
     Args:
-        tree: The tree data; ``tree.repos`` must be fully populated
-            (branches assigned) before this function runs.
+        tree: The tree data; ``tree.features`` and ``tree.repos`` must
+            be populated first (this runs in step 10 of ``tree_data``).
     """
     if len(tree.repos) < 2:
         return
 
-    # Map community name → list of repo names that contain it
-    comm_repos: dict[str, list[str]] = {}
+    # Build branch label per repo from the existing "first branch"
+    # convention so ``RelationshipArc.source_branch`` / ``target_branch``
+    # match how the rest of the tree describes a repo. Frontend
+    # ``REL_COLORS`` reads only ``rel_type`` so branch names are
+    # cosmetic for the arc itself but populate hover/inspect details.
+    branch_by_repo: dict[str, str] = {}
     for repo in tree.repos:
-        for branch in repo.branches:
-            comm_repos.setdefault(branch.name, []).append(repo.repo_name)
+        if repo.branches:
+            branch_by_repo[repo.repo_name] = repo.branches[0].name
 
-    cross_count = 0
-    shared_names: list[str] = []
-    for comm_name, repos in comm_repos.items():
-        if len(repos) < 2:
+    # Dedupe by title — ``tree.features`` contains a primary row plus one
+    # shadow row per backend repo for each feature; we only want to draw
+    # arcs from the single canonical view of each feature.
+    seen_titles: set[str] = set()
+    arc_count = 0
+    for feat in tree.features:
+        if feat.title in seen_titles:
             continue
-        shared_names.append(comm_name)
-        # Create arcs between each pair of repos sharing this community
-        for i in range(len(repos)):
-            for j in range(i + 1, len(repos)):
-                tree.relationships.append(
-                    RelationshipArc(
-                        source_branch=comm_name,
-                        target_branch=comm_name,
-                        source_repo=repos[i],
-                        target_repo=repos[j],
-                        rel_type="IMPORTS",
-                        weight=3,
-                    )
+        seen_titles.add(feat.title)
+        if len(feat.linked_repos) < 2:
+            continue
+
+        primary = feat.linked_repos[0]
+        for backend in feat.linked_repos[1:]:
+            if primary == backend:
+                continue
+            tree.relationships.append(
+                RelationshipArc(
+                    source_branch=branch_by_repo.get(primary, ""),
+                    target_branch=branch_by_repo.get(backend, ""),
+                    source_repo=primary,
+                    target_repo=backend,
+                    rel_type="CALLS",
+                    weight=1,
+                    feature_title=feat.title,
                 )
-                cross_count += 1
+            )
+            arc_count += 1
 
     logger.info(
         "cross_repo_relationships",
-        count=cross_count,
-        shared_communities=shared_names[:10],
-        total_relationships=len(tree.relationships),
+        arc_count=arc_count,
+        feature_count=len(seen_titles),
     )

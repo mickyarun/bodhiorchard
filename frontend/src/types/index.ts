@@ -483,6 +483,11 @@ export interface BackendLink {
   codeLocations: Record<string, string[]> | null
 }
 
+// Set of values the backend's _derive_creation_mode emits. The card
+// chip maps each to a label + color. ``unknown`` is the legacy-row
+// fallback (rows that predate the created_at_sha column).
+export type FeatureCreationMode = 'narrow_synth' | 'full_scan' | 'bud' | 'unknown'
+
 export interface Feature {
   id: string
   featureTitle: string
@@ -496,6 +501,30 @@ export interface Feature {
   synthesizedAt: string
   primary: PrimaryLink
   backendLinks: BackendLink[]
+  // Creation lineage — when + how + by-which-PR the row was born.
+  // ``createdAtSha`` is null only on legacy pre-column rows; PR fields
+  // are null when the SHA doesn't resolve to a tracked PR (force-push,
+  // baseline scan SHA).
+  createdAt: string
+  createdAtSha: string | null
+  createdPrNumber: number | null
+  createdPrUrl: string | null
+  creationMode: FeatureCreationMode
+  // Last-touched lineage. Equal to creation fields for never-re-touched
+  // rows. Advances on every reconciler write to this feature.
+  updatedAt: string
+  lastSeenSha: string | null
+  lastSeenPrNumber: number | null
+  lastSeenPrUrl: string | null
+  // Lifecycle / soft-delete context. ``isActive=true`` rows leave the
+  // four deactivated_* fields null; soft-deleted rows carry the merge
+  // SHA that retired them and, when resolvable, the PR number + URL
+  // for a clickable "Deactivated in PR #N" footer on the card.
+  isActive: boolean
+  deactivatedAt: string | null
+  deactivatedAtSha: string | null
+  deactivatedPrNumber: number | null
+  deactivatedPrUrl: string | null
 }
 
 export interface FeaturePage {

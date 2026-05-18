@@ -268,6 +268,31 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         )
         return list(result.scalars().all())
 
+    async def advance_head_sha(self, repo_id: uuid.UUID, head_sha: str) -> None:
+        """Bump ``head_sha`` + ``last_scanned_at`` after a narrow PR-merge update.
+
+        Unlike :meth:`update_after_scan`, this does NOT touch the
+        knowledge/feature counters — those are reconciled per feature
+        in the narrow path and don't roll up to repo-level counters
+        here. The semantic is "we have processed up to this commit",
+        which is needed so the BACKEND-route index builder
+        (``build_backend_index_from_cache``) — which keys cache lookups
+        on ``tracked_repositories.head_sha`` — picks up the cache rows
+        the narrow path just wrote at the merge SHA.
+
+        No-op if ``head_sha`` is unchanged so concurrent narrow merges
+        for the same repo don't churn ``last_scanned_at``.
+        """
+        await self._db.execute(
+            update(TrackedRepository)
+            .where(
+                TrackedRepository.org_id == self._org_id,
+                TrackedRepository.id == repo_id,
+                TrackedRepository.head_sha.is_distinct_from(head_sha),
+            )
+            .values(head_sha=head_sha, last_scanned_at=datetime.now(UTC))
+        )
+
     async def update_after_scan(
         self,
         repo_path: str,

@@ -50,6 +50,9 @@ logs.txt
 *.sqlite3
 *.db
 .gitnexus
+# Local Postgres dumps written by scripts/db/db_snapshot.sh.
+# May contain real customer data; never check in.
+.db-snapshots/
 
 # Colyseus dev mode state (may contain JWTs)
 .devmode.json
@@ -67,6 +70,23 @@ repoclone/
 # Graphify analyzer output dropped under example repos during scans —
 # build artifact, not source.
 examples/*/graphify-out/
+
+# Local DB ops scripts (snapshot / restore / switch). Operationally
+# useful but contain assumptions about the developer's environment
+# (asyncpg URL parsing, snapshot dir conventions) that don't belong
+# in the parent repo's tracked set.
+scripts/db/
+
+# Example repos — tracked independently at github.com/mickyarun/taskflow-*.
+# Run `bash examples/setup-git-history.sh` after cloning to bootstrap.
+# Keeping them out of the parent repo's tracked set means FT-testing PR
+# merges don't appear as bodhiorchard-side changes in `git status`.
+examples/taskflow-api/
+examples/taskflow-web/
+examples/taskflow-worker/
+examples/taskflow-qa/
+# The example BUD spec ships with the example repos, not bodhiorchard core.
+examples/BUD-001-tech-spec.md
 
 # Plan and experiment artefacts. These tend to accumulate snapshots of
 # real-world tuning data (customer repo names, dataset measurements) that

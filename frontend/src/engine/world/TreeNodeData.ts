@@ -71,6 +71,7 @@ export interface TreeRelNodeData {
   targetRepo: string
   relType: string
   weight: number
+  featureTitle: string | null
 }
 
 export interface TreeHouseNodeData {

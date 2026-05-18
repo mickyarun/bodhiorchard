@@ -263,3 +263,36 @@ async def inbound_link_counts(
     )
     result = await db.execute(stmt)
     return {row.repo_id: int(row.inbound) for row in result.all()}
+
+
+async def list_features_with_backend_link_to(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    backend_repo_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    """Active feature_ids whose BACKEND junction currently points at this repo.
+
+    Used by the backend-merge cross-layer refresh: when a backend repo's
+    PR merges and its route cache updates, only frontend features that
+    *already* have a junction here may need their api_paths shrunk
+    (route renamed/removed) or kept (route unchanged). Frontend
+    features with no existing junction to this backend are out of
+    scope — Phase 5 defers the "new fetch + new route, frontend
+    merges first" case to either a later merge or a full scan.
+
+    Filters out inactive features so a soft-deleted frontend feature
+    doesn't keep getting its junctions refreshed.
+    """
+    stmt = (
+        select(distinct(FeatureToRepo.feature_id))
+        .select_from(FeatureToRepo.__table__.join(Feature, Feature.id == FeatureToRepo.feature_id))
+        .where(
+            Feature.org_id == org_id,
+            Feature.is_active.is_(True),
+            FeatureToRepo.role == FeatureToRepoRole.BACKEND,
+            FeatureToRepo.repo_id == backend_repo_id,
+        )
+    )
+    result = await db.execute(stmt)
+    return [row[0] for row in result.all()]

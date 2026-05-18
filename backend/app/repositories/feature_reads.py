@@ -31,7 +31,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -67,6 +67,20 @@ class FeatureReadRepository:
         self._db = db
         self._org_id = org_id
 
+    # ``feature_status`` values that mean "BUD work-in-progress" — rows
+    # describing planned/in-flight work, not shipped capabilities. The
+    # ``in_progress`` view mode filters to *only* these; ``active``
+    # filters them out; ``all`` includes both. Single source of truth
+    # for the membership test.
+    _IN_PROGRESS_STATUSES: tuple[str, ...] = ("planned", "in_progress")
+
+    # Valid ``view_mode`` values. Unknown strings fall through to
+    # ``all`` (the safest default — never accidentally hides rows).
+    VIEW_MODE_ALL = "all"
+    VIEW_MODE_ACTIVE = "active"
+    VIEW_MODE_IN_PROGRESS = "in_progress"
+    VIEW_MODE_DEACTIVATED = "deactivated"
+
     async def list_with_links(
         self,
         *,
@@ -74,15 +88,28 @@ class FeatureReadRepository:
         q: str | None = None,
         limit: int = 24,
         offset: int = 0,
-        only_active: bool = True,
+        view_mode: str = VIEW_MODE_ALL,
     ) -> list[Feature]:
-        """Paginated active features with junctions eager-loaded.
+        """Paginated features with junctions eager-loaded.
 
-        Filter shape mirrors the legacy ``/v1/skills/knowledge``
-        endpoint: optional ``repo_id`` (PRIMARY junction match),
-        optional case-insensitive ``q`` substring on
-        ``feature_title``. ``only_active`` defaults to True so the API
-        never leaks soft-deleted rows.
+        ``view_mode`` is one of:
+
+        * ``"all"`` (default) — every active row regardless of
+          ``feature_status``. The Features tab's default; mixes
+          shipped + BUD work-in-progress together so a single page
+          answers "what does this codebase have right now?".
+        * ``"active"`` — only shipped / live rows
+          (``feature_status IS NULL OR feature_status='implemented'``).
+          Hides BUD work-in-progress.
+        * ``"in_progress"`` — only BUD work-in-progress rows
+          (``feature_status IN ('planned', 'in_progress')``).
+        * ``"deactivated"`` — only soft-deleted rows
+          (``is_active=false``).
+
+        Filter shape otherwise mirrors the legacy
+        ``/v1/skills/knowledge`` endpoint: optional ``repo_id``
+        (PRIMARY junction match), optional case-insensitive ``q``
+        substring on ``feature_title``.
         """
         stmt = (
             select(Feature)
@@ -92,8 +119,7 @@ class FeatureReadRepository:
             .limit(limit)
             .offset(offset)
         )
-        if only_active:
-            stmt = stmt.where(Feature.is_active.is_(True))
+        stmt = self._apply_view_mode(stmt, view_mode)
         if repo_id is not None:
             stmt = stmt.join(FeatureToRepo, FeatureToRepo.feature_id == Feature.id).where(
                 FeatureToRepo.repo_id == repo_id,
@@ -109,12 +135,16 @@ class FeatureReadRepository:
         *,
         repo_id: uuid.UUID | None = None,
         q: str | None = None,
-        only_active: bool = True,
+        view_mode: str = VIEW_MODE_ALL,
     ) -> int:
-        """Total row count matching the same filters as ``list_with_links``."""
+        """Total row count matching the same filters as ``list_with_links``.
+
+        Critically uses the same ``view_mode`` predicate so the
+        paginator's ``total`` agrees with the actual visible rows —
+        divergence here breaks the page-count UI.
+        """
         stmt = select(func.count(func.distinct(Feature.id))).where(Feature.org_id == self._org_id)
-        if only_active:
-            stmt = stmt.where(Feature.is_active.is_(True))
+        stmt = self._apply_view_mode(stmt, view_mode)
         if repo_id is not None:
             stmt = stmt.join(FeatureToRepo, FeatureToRepo.feature_id == Feature.id).where(
                 FeatureToRepo.repo_id == repo_id,
@@ -123,6 +153,38 @@ class FeatureReadRepository:
         if q:
             stmt = stmt.where(Feature.feature_title.ilike(f"%{q}%"))
         return int((await self._db.execute(stmt)).scalar_one() or 0)
+
+    def _apply_view_mode(self, stmt: Any, view_mode: str) -> Any:
+        """Single source of truth for the view-mode → SQL predicate.
+
+        Both ``list_with_links`` and ``count_with_links`` route through
+        here so the page can't show ``total=12`` while only 9 rows
+        materialise. Unknown ``view_mode`` strings fall through to
+        ``all`` as a safety default — better to show too much than to
+        silently hide everything.
+        """
+        if view_mode == self.VIEW_MODE_DEACTIVATED:
+            return stmt.where(Feature.is_active.is_(False))
+        if view_mode == self.VIEW_MODE_IN_PROGRESS:
+            return stmt.where(
+                Feature.is_active.is_(True),
+                Feature.feature_status.in_(self._IN_PROGRESS_STATUSES),
+            )
+        if view_mode == self.VIEW_MODE_ACTIVE:
+            # ``NULL NOT IN (...)`` evaluates to NULL in three-valued
+            # SQL, which would silently filter out scan-authored rows
+            # (their ``feature_status`` is null). Explicit ``IS NULL``
+            # branch keeps them visible while excluding rows whose
+            # status is *explicitly* one of the in-progress values.
+            return stmt.where(
+                Feature.is_active.is_(True),
+                or_(
+                    Feature.feature_status.is_(None),
+                    Feature.feature_status.notin_(self._IN_PROGRESS_STATUSES),
+                ),
+            )
+        # ``all`` (default + unknown fallback) — any active row.
+        return stmt.where(Feature.is_active.is_(True))
 
     async def get_with_links(self, feature_id: uuid.UUID) -> Feature | None:
         """Single feature with both PRIMARY + BACKEND junctions loaded."""
@@ -213,6 +275,42 @@ class FeatureReadRepository:
             if paths:
                 out.append((title, paths, fid))
         return out
+
+    async def backend_repo_names_for_features(
+        self,
+        feature_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, list[str]]:
+        """``{feature_id: [backend_repo_name, …]}`` for a batch of features.
+
+        Reads BACKEND junction rows and resolves each ``repo_id`` to
+        ``TrackedRepository.name`` so callers that already key by repo
+        name (e.g. the dashboard tree's ``linked_repos``) don't need a
+        second lookup. Backend names within a feature are returned
+        sorted alphabetically so arc rendering and detail-panel listing
+        are deterministic across reloads.
+        """
+        if not feature_ids:
+            return {}
+        stmt = (
+            select(
+                FeatureToRepo.feature_id,
+                TrackedRepository.name.label("repo_name"),
+            )
+            .join(Feature, Feature.id == FeatureToRepo.feature_id)
+            .join(TrackedRepository, TrackedRepository.id == FeatureToRepo.repo_id)
+            .where(
+                Feature.org_id == self._org_id,
+                Feature.is_active.is_(True),
+                FeatureToRepo.feature_id.in_(feature_ids),
+                FeatureToRepo.role == FeatureToRepoRole.BACKEND,
+            )
+            .order_by(FeatureToRepo.feature_id, TrackedRepository.name)
+        )
+        result = await self._db.execute(stmt)
+        grouped: dict[uuid.UUID, list[str]] = {}
+        for fid, repo_name in result.all():
+            grouped.setdefault(fid, []).append(repo_name)
+        return grouped
 
     async def semantic_search(
         self,

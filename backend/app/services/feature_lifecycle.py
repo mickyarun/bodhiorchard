@@ -21,9 +21,13 @@ soft-deletes them when BUDs are wilted or deleted.
 BUD-authored features live in the same ``features`` table as
 scan-authored ones but are tagged ``source='bud'`` and intentionally
 have no PRIMARY ``feature_to_repo`` junction (they describe planned
-work, not synthesised code). The reconciler scopes its sweep to
-``source='scan'`` so BUD-authored rows are never inactivated by a
-scan run; the orphan-feature audit is similarly scan-scoped.
+work, not synthesised code). That missing-junction property is what
+keeps BUD rows out of the reconciler's reach: ``bulk_load_for_reconcile``
+INNER-JOINs on PRIMARY junctions, so BUD-authored rows are excluded
+*structurally* — there is no ``source=`` predicate in the reconciler
+itself. The orphan-feature audit is a separate code path and DOES
+filter by ``source='scan'`` explicitly (see
+``FeatureRepository.find_orphan_active_feature_ids``).
 
 Identity for BUD-authored rows uses ``cluster_signature='bud:<ref>'``
 so a future scan that picks up the same source_ref doesn't collide

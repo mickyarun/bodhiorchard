@@ -21,7 +21,7 @@
         <h1 class="features-view__title">Features</h1>
         <p class="features-view__subtitle">
           <strong>{{ store.total }}</strong>
-          {{ store.total === 1 ? 'feature' : 'features' }}
+          {{ subtitleNoun }}
           {{ subtitleScope }}
         </p>
       </div>
@@ -49,6 +49,17 @@
           label="Repository"
           class="features-view__select"
           :disabled="activeRepos.length === 0"
+        />
+        <v-select
+          v-model="visibilityMode"
+          :items="VISIBILITY_OPTIONS"
+          item-title="label"
+          item-value="value"
+          variant="outlined"
+          density="compact"
+          hide-details
+          label="Show"
+          class="features-view__select"
         />
       </div>
     </header>
@@ -115,7 +126,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { PAGE_SIZE, useFeaturesStore } from '@/stores/features'
+import { PAGE_SIZE, useFeaturesStore, type FeatureViewMode } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
 import type { RepoContributor, RepoInfo } from '@/types'
 import FeatureCard from '@/components/features/FeatureCard.vue'
@@ -130,6 +141,27 @@ const debouncedQuery = ref('')
 const page = ref(1)
 const hasLoadedOnce = ref(false)
 
+// Exclusive view modes — pick ONE filter, not a cumulative widening.
+// Each mode answers a different question:
+//
+//   * ``all``         — default; the at-a-glance "what does this
+//                        codebase have?" view. Mixes shipped + BUD
+//                        work-in-progress, hides soft-deleted.
+//   * ``active``      — only shipped/live rows (excludes BUD WIP).
+//   * ``in_progress`` — only BUD work-in-progress rows. Use this
+//                        when you want to triage what's currently
+//                        being built.
+//   * ``deactivated`` — only soft-deleted rows. Audit surface.
+//
+// Backend mirrors these as ``mode=<value>``.
+const VISIBILITY_OPTIONS: Array<{ label: string; value: FeatureViewMode }> = [
+  { label: 'All (active + in progress)', value: 'all' },
+  { label: 'Active only', value: 'active' },
+  { label: 'In progress', value: 'in_progress' },
+  { label: 'Deactivated', value: 'deactivated' },
+]
+const visibilityMode = ref<FeatureViewMode>('all')
+
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
 const activeRepos = computed<RepoInfo[]>(() =>
@@ -142,6 +174,25 @@ const repoOptions = computed(() => [
 ])
 
 const pageCount = computed(() => Math.max(1, Math.ceil(store.total / PAGE_SIZE)))
+
+// Subtitle noun reflects the active view mode so the count number
+// always reads as "<N> <mode-specific noun>". Keeps the header
+// honest when the dropdown is on "Deactivated" and the page shows
+// historical rather than current features.
+const subtitleNoun = computed(() => {
+  const n = store.total
+  const plural = n !== 1
+  switch (visibilityMode.value) {
+    case 'active':
+      return plural ? 'active features' : 'active feature'
+    case 'in_progress':
+      return plural ? 'in-progress features' : 'in-progress feature'
+    case 'deactivated':
+      return plural ? 'deactivated features' : 'deactivated feature'
+    default:
+      return plural ? 'features' : 'feature'
+  }
+})
 
 // Header subtitle scopes the count to the active filter so a user
 // drilling into one repo doesn't see "12 features across 7 repos".
@@ -165,6 +216,7 @@ async function reload(): Promise<void> {
     page: page.value,
     repoId: selectedRepoId.value || undefined,
     q: debouncedQuery.value || undefined,
+    mode: visibilityMode.value,
   })
   if (selectedRepoId.value) {
     void store.fetchTopContributors(selectedRepoId.value)
@@ -184,7 +236,7 @@ watch(searchQuery, (q) => {
 })
 
 // Filter changes reset to page 1; the page watcher fires the reload.
-watch([selectedRepoId, debouncedQuery], () => {
+watch([selectedRepoId, debouncedQuery, visibilityMode], () => {
   if (page.value === 1) {
     void reload()
   } else {

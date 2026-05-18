@@ -265,12 +265,17 @@ const displayData = computed<TreeData | null>(() => {
   const filteredRelationships = (data.relationships ?? []).filter(r =>
     visibleSet.has(r.source_repo) && visibleSet.has(r.target_repo))
 
+  // Features count by distinct title — the backend emits one row per repo a
+  // feature touches (primary + linked backends) so the graph view can draw
+  // cross-repo arcs, but the user-facing total should count each feature once.
+  const uniqueFeatureTitles = new Set(filteredFeatures.map(f => f.title))
+
   return {
     ...data,
     repos: filteredRepos,
     branches: filteredRepos.flatMap(r => r.branches),
     features: filteredFeatures,
-    total_features: filteredFeatures.length,
+    total_features: uniqueFeatureTitles.size,
     buds: filteredBuds,
     threats: filteredThreats,
     relationships: filteredRelationships,

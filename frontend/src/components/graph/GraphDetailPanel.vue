@@ -299,7 +299,11 @@ function initials(name: string): string {
 /** All features belonging to the selected repo. */
 const repoFeatures = computed<FeatureItem[]>(() => {
   if (!props.repo || !props.treeData) return []
-  return props.treeData.features.filter(f => f.repo_name === props.repo!.repoName)
+  // Exclude backend-shadow rows so the "Features (N)" count reflects
+  // only features that actually live in this repo, not ones that call it.
+  return props.treeData.features.filter(f =>
+    f.repo_name === props.repo!.repoName && f.link_role !== 'backend',
+  )
 })
 
 /** Features filtered by search. */
@@ -332,7 +336,12 @@ const members = computed<SkilledMember[]>(() => {
   )
 
   if (skillSummary && skillSummary.developers.length > 0) {
-    const memberMap = new Map(props.treeData.members.map(m => [m.user_id, m]))
+    // ``contributors`` includes non-OrgToUser users (synthetic example
+    // devs, etc.) so feature attribution surfaces even when the dev
+    // isn't a formal org member. Falls back to ``members`` for older
+    // payloads that pre-date the contributors field.
+    const pool = props.treeData.contributors ?? props.treeData.members
+    const memberMap = new Map(pool.map(m => [m.user_id, m]))
     return skillSummary.developers
       .map(uid => {
         const m = memberMap.get(uid)

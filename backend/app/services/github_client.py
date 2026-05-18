@@ -18,6 +18,9 @@ Thin wrapper around httpx for GitHub REST API v3.
 Handles auth headers and response parsing.
 """
 
+import json
+import os
+from pathlib import Path
 from typing import Any, cast
 
 import structlog
@@ -27,6 +30,41 @@ logger = structlog.get_logger(__name__)
 
 _BASE_URL = "https://api.github.com"
 _API_VERSION = "2022-11-28"
+
+# Testing affordance: when this env var is set to a JSON file path, the
+# ``list_pr_files`` helper short-circuits the GitHub network call and
+# returns the file list for ``<owner_repo>:<pr_number>`` from that file.
+# Used by the local smoke-harness for the PR-merge narrow-synthesis flow
+# so synthetic webhooks can drive realistic ``changed_files`` without
+# needing a real GitHub PR. Unset in production; absence is a noop.
+_MOCK_PR_FILES_ENV = "BODHI_MOCK_PR_FILES_PATH"
+
+
+def _read_mock_pr_files(owner_repo: str, pr_number: int) -> list[str] | None:
+    """Look up mock PR files from the env-pointed JSON file.
+
+    Returns the file list when both the env var is set AND the file
+    contains a key matching ``<owner_repo>:<pr_number>``. Returns
+    ``None`` in every other case so the caller falls through to the
+    real GitHub API path — unrelated PRs in test runs are unaffected.
+    """
+    override = os.environ.get(_MOCK_PR_FILES_ENV)
+    if not override:
+        return None
+    try:
+        data = json.loads(Path(override).read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "github_pr_files_mock_unreadable",
+            path=override,
+            error=str(exc),
+        )
+        return None
+    key = f"{owner_repo}:{pr_number}"
+    files = data.get(key)
+    if not isinstance(files, list):
+        return None
+    return [p for p in files if isinstance(p, str)]
 
 
 class GitHubClient:
@@ -283,7 +321,24 @@ class GitHubClient:
         clusters can be skipped before any LLM cost is incurred. Paginates
         at 100 per page; caps at 30 pages (3000 files) — the same sanity
         ceiling :meth:`get_pr_commits` uses.
+
+        Testing affordance: when ``BODHI_MOCK_PR_FILES_PATH`` is set and
+        contains an entry for this ``owner_repo:pr_number`` key, the
+        network call is skipped and the mock list returned. See
+        :func:`_read_mock_pr_files`.
         """
+        mock = _read_mock_pr_files(owner_repo, pr_number)
+        if mock is not None:
+            # WARNING level so a stale env var leaking into a non-dev
+            # environment is loud in logs. Fall-through behaviour means
+            # absence of the var (or a non-matching key) is silent.
+            logger.warning(
+                "github_list_pr_files_mocked",
+                owner_repo=owner_repo,
+                pr_number=pr_number,
+                file_count=len(mock),
+            )
+            return mock
         url = f"{_BASE_URL}/repos/{owner_repo}/pulls/{pr_number}/files"
         out: list[str] = []
         page = 1

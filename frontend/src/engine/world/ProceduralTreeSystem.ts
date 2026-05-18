@@ -151,10 +151,14 @@ export class ProceduralTreeSystem implements RepoVisualization {
     const positions     = layout.getTreePositions(data.repos.length)
     const exclusionZones: ExclusionZone[] = []
 
-    // Pre-index features by repo_name for O(1) lookup
+    // Pre-index features by repo_name for O(1) lookup. Skip rows with
+    // ``link_role === "backend"`` — those are shadow features placed
+    // under repos that the feature only *calls*; growing leaves for
+    // them would imply the feature lives there.
     const featuresByRepo = new Map<string, EngineFeature[]>()
     for (const f of data.features) {
       if (!f.repo_name) continue
+      if (f.link_role === 'backend') continue
       const arr = featuresByRepo.get(f.repo_name)
       if (arr) arr.push(f); else featuresByRepo.set(f.repo_name, [f])
     }

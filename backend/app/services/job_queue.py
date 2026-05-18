@@ -41,7 +41,6 @@ JOB_JIRA_IMPORT = "jira_import"
 JOB_JIRA_ENRICH = "jira_enrich"
 JOB_SCAN = "scan"  # Future
 JOB_AGENT_RUN = "agent_run"  # Future
-JOB_PR_MERGE_UPDATE = "pr_merge_update"
 JOB_REPO_BULK_ONBOARD = "repo_bulk_onboard"
 
 _COMPLETED_TTL = 300  # seconds before cleanup

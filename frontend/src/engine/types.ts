@@ -65,6 +65,10 @@ export interface EngineFeature {
   from_bud: number | null
   linked_repos: string[]
   code_locations: Record<string, string[]> | null
+  // See ``FeatureItem.link_role`` — "backend" rows are shadow features
+  // that exist only to seed cross-repo arcs. Per-repo systems (the
+  // procedural tree, detail panels) must skip them.
+  link_role?: 'primary' | 'backend'
 }
 
 export interface EngineBUD {
@@ -134,6 +138,7 @@ export interface EngineRelationship {
   target_repo: string
   rel_type: RelType
   weight: number
+  feature_title?: string | null
 }
 
 // ─── Top-level Data Contract ────────────────────────

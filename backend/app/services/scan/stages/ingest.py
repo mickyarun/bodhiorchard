@@ -17,10 +17,11 @@
 
 """Stage 0 — Ingest. Refresh a sandbox worktree and run the code indexer.
 
-Side-effectful: creates a worktree at ``<repo>/.bodhiorchard/scan-test/<branch>``
-(distinct from the production ``<repo>/.bodhiorchard/main`` worktree so live
-scans aren't affected), force-resets it to ``origin/<main_branch>``, then
-runs ``app.services.code_indexer.index_repo`` against it.
+Side-effectful: creates a worktree at
+``<data_dir>/scan-worktrees/<repo-slug>/<branch>`` (outside the tracked
+repo so graphify's dotfile filter doesn't skip every file under it),
+force-resets it to ``origin/<main_branch>``, then runs
+``app.services.code_indexer.index_repo`` against it.
 
 The indexer (a thin wrapper over the MIT-licensed ``graphifyy`` library)
 parses files with tree-sitter, builds a NetworkX call graph, and runs
@@ -45,13 +46,12 @@ from typing import Any
 
 import structlog
 
-from app.repositories.cluster_cache import ClusterCacheRepository
 from app.repositories.organization import OrganizationRepository
-from app.repositories.repo_graph_cache import RepoGraphCacheRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
-from app.services.code_indexer import IndexResult, index_repo
+from app.services.code_indexer import index_repo
 from app.services.git_operations import _detect_main_branch, run_git
+from app.services.scan.cluster_index import persist_index_result
 from app.services.scan.stages import StageContext, StageOutput
 from app.services.scan.stages._runtime_context import resolve_runtime_context
 from app.services.scan.stages._skip import stage_output_for_skip
@@ -62,6 +62,26 @@ from app.services.scan.stages._skip_predicates import (
 from app.services.scan.stages.ingest_worktree import ensure_scan_test_worktree
 
 logger = structlog.get_logger(__name__)
+
+# The indexer reports this exact string when its file walk finds zero
+# files under the worktree root. Almost always means ``git fetch`` left
+# the worktree empty due to missing repo access. Surface a hint pointing
+# at the GitHub App permissions instead of the bare message.
+_EMPTY_WORKTREE_INDEXER_ERROR = "no source files found in repo"
+
+
+def _format_indexer_failure(repo_name: str, worktree_path: str, raw: str | None) -> str:
+    """Wrap the indexer's terse error with operator-actionable guidance."""
+    base = f"code_indexer failed for {repo_name!r}: {raw}"
+    if raw and _EMPTY_WORKTREE_INDEXER_ERROR in raw:
+        return (
+            f"{base}\n"
+            f"Hint: the worktree at {worktree_path!r} is empty, which usually means "
+            "`git fetch origin` did not pull any files. Reinstall the GitHub App "
+            "for this organisation and confirm the repo is selected in the App's "
+            "Repository access list, then re-trigger the scan."
+        )
+    return base
 
 
 async def run(
@@ -173,7 +193,7 @@ async def run(
     if not result.success:
         # Indexer reported a controlled failure (oversized repo, parse
         # error, etc.). Surface as a stage error so the scan stops.
-        raise RuntimeError(f"code_indexer failed for {ctx.repo_name!r}: {result.error}")
+        raise RuntimeError(_format_indexer_failure(ctx.repo_name, worktree_path, result.error))
 
     # Persist results to both caches when we have a context.
     cache_written = 0
@@ -187,7 +207,7 @@ async def run(
             graph_written,
             cluster_cache_error,
             graph_cache_error,
-        ) = await _persist_index_result(
+        ) = await persist_index_result(
             org_id=runtime.org_id,
             repo_id=repo_id,
             head_sha=head_sha,
@@ -229,82 +249,3 @@ async def run(
         edges=stats["edges"],
     )
     return StageOutput(communities=[], dropped=[], extras=extras)
-
-
-async def _persist_index_result(
-    *,
-    org_id: uuid.UUID,
-    repo_id: uuid.UUID,
-    head_sha: str,
-    result: IndexResult,
-) -> tuple[int, bool, str | None, str | None]:
-    """Write the indexer output to ``cluster_cache`` and ``repo_graph_cache``.
-
-    Returns:
-        ``(cluster_rows_written, graph_written, cluster_error,
-        graph_error)``. Cache write failures are caught and surfaced via
-        the error strings so the stage's ``extras`` can report the
-        partial state to the chip popover — the caches are a performance
-        optimisation and the scan should keep running, but operators
-        need to be able to tell silent-persistence-failure apart from a
-        deliberately-skipped run.
-    """
-    cluster_rows_written = 0
-    graph_written = False
-    cluster_error: str | None = None
-    graph_error: str | None = None
-
-    async with with_session(org_id) as db:
-        try:
-            cc_repo = ClusterCacheRepository(db, org_id=org_id)
-            rows = [
-                {
-                    "cluster_id": entry.cluster_id,
-                    "label": entry.label,
-                    "heuristic_label": entry.label,
-                    "symbol_count": entry.symbol_count,
-                    "cohesion": entry.cohesion,
-                    "files": entry.files,
-                    "symbols": entry.symbols,
-                    "signature": entry.signature,
-                }
-                for entry in result.clusters
-            ]
-            cluster_rows_written = await cc_repo.replace_for_repo_sha(
-                repo_id=repo_id,
-                head_sha=head_sha,
-                rows=rows,
-            )
-            await db.commit()
-        except Exception as exc:
-            await db.rollback()
-            cluster_error = type(exc).__name__
-            logger.error(
-                "scan_ingest_cluster_cache_write_failed",
-                repo_id=str(repo_id),
-                error=str(exc),
-                exc_info=True,
-            )
-
-    if result.graph is not None and result.graph.number_of_nodes() > 0:
-        async with with_session(org_id) as db:
-            try:
-                rg_repo = RepoGraphCacheRepository(db, org_id=org_id)
-                await rg_repo.upsert_for_sha(
-                    repo_id=repo_id,
-                    head_sha=head_sha,
-                    graph=result.graph,
-                )
-                await db.commit()
-                graph_written = True
-            except Exception as exc:
-                await db.rollback()
-                graph_error = type(exc).__name__
-                logger.error(
-                    "scan_ingest_graph_cache_write_failed",
-                    repo_id=str(repo_id),
-                    error=str(exc),
-                    exc_info=True,
-                )
-
-    return cluster_rows_written, graph_written, cluster_error, graph_error

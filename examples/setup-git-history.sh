@@ -17,8 +17,28 @@
 # Run this after cloning the main repo.
 #
 # Usage: cd examples && bash setup-git-history.sh
+#
+# The example repos are no longer tracked by the parent bodhiorchard
+# repository (see top-level .gitignore). Before rebuilding the synthetic
+# history we clone fresh copies from GitHub if the local directories
+# are missing — keeps the bootstrap a one-command operation for new
+# contributors and CI environments.
 
 set -e
+
+REPOS=(taskflow-api taskflow-web taskflow-worker taskflow-qa)
+GITHUB_OWNER="${BODHIORCHARD_EXAMPLES_OWNER:-mickyarun}"
+
+for repo in "${REPOS[@]}"; do
+  if [ ! -d "$repo" ]; then
+    echo "Cloning $repo from github.com/${GITHUB_OWNER}/$repo..."
+    if command -v gh >/dev/null 2>&1; then
+      gh repo clone "${GITHUB_OWNER}/$repo"
+    else
+      git clone "git@github.com:${GITHUB_OWNER}/$repo.git"
+    fi
+  fi
+done
 
 echo "Setting up taskflow-api git history..."
 cd taskflow-api

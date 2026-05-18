@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import math
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -93,6 +94,7 @@ async def reconcile_features_for_repo(
     synthesised: list[FeatureWrite],
     jaccard_threshold: float = JACCARD_THRESHOLD,
     cosine_threshold: float = COSINE_THRESHOLD,
+    candidate_filter: Callable[[ReconcilerCandidate], bool] | None = None,
 ) -> ReconcileResult:
     """Apply ``synthesised`` to ``repo_id`` via incremental CRUD.
 
@@ -107,11 +109,24 @@ async def reconcile_features_for_repo(
        PRIMARY junction. If not: ``insert`` + create PRIMARY junction.
     4. Mark every active row that nothing matched as inactive.
 
+    ``candidate_filter`` (optional) narrows BOTH the matching pool and
+    the inactivation pool to a subset of the loaded candidates. The
+    full-scan caller leaves it ``None`` (default behaviour preserved);
+    the PR-merge narrow-synthesis caller passes a predicate that admits
+    only features whose ``cluster_signature`` is in the affected
+    signatures set — so features outside the scope are immune from
+    soft-delete even if they don't appear in ``synthesised``.
+
     Returns counts so the caller can surface "+5 added, 2 revived,
     1 removed" telemetry.
     """
     reads = FeatureReadRepository(db, org_id=org_id)
-    candidates = await reads.bulk_load_for_reconcile(repo_id, include_inactive=True)
+    all_candidates = await reads.bulk_load_for_reconcile(repo_id, include_inactive=True)
+    candidates = (
+        [c for c in all_candidates if candidate_filter(c)]
+        if candidate_filter is not None
+        else all_candidates
+    )
     by_signature: dict[str, ReconcilerCandidate] = {c.cluster_signature: c for c in candidates}
     matched_ids: set[uuid.UUID] = set()
     feat_repo = FeatureRepository(db, org_id=org_id)
@@ -182,7 +197,7 @@ async def reconcile_features_for_repo(
         c.feature_id for c in candidates if c.is_active and c.feature_id not in matched_ids
     ]
     if unmatched_active:
-        result.inactivated = await feat_repo.mark_inactive(unmatched_active)
+        result.inactivated = await feat_repo.mark_inactive(unmatched_active, head_sha=head_sha)
     logger.info(
         "reconcile_done",
         org_id=str(org_id),
@@ -204,7 +219,15 @@ async def _insert_new(
     head_sha: str,
     write: FeatureWrite,
 ) -> None:
-    """Insert a new feature row + PRIMARY junction in one transaction."""
+    """Insert a new feature row + PRIMARY junction in one transaction.
+
+    Stamps both ``last_seen_sha`` and ``created_at_sha`` to ``head_sha``
+    so the row carries its birth SHA forward. ``created_at_sha`` never
+    changes after this; ``last_seen_sha`` advances on every reconcile
+    that re-confirms the feature. The Features API joins both against
+    ``pull_requests.merge_commit_sha`` to surface "Created by PR #N"
+    and "Last touched by PR #M" on the card.
+    """
     feature = await feat_repo.insert(
         feature_title=write.feature_title,
         description=write.description,
@@ -217,6 +240,7 @@ async def _insert_new(
         source_ref=write.source_ref,
         feature_status=write.feature_status,
         last_seen_sha=head_sha,
+        created_at_sha=head_sha,
     )
     await upsert_primary(
         db,

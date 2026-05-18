@@ -127,7 +127,8 @@ async def collect_features(
         tree: Mutable tree accumulator (appends to ``tree.features``).
         file_branch_map: File-to-branch mapping from repo_structure.
     """
-    rows = await FeatureReadRepository(db, org_id=org_id).list_features_with_repo_paths()
+    feature_reads = FeatureReadRepository(db, org_id=org_id)
+    rows = await feature_reads.list_features_with_repo_paths()
 
     features_by_id: dict[uuid.UUID, _FeatureGroup] = {}
     for ki_id, title, source_ref, feature_status, code_locs, repo_path in rows:
@@ -151,15 +152,24 @@ async def collect_features(
 
     tree.total_features = len(features_by_id)
 
+    backend_names_by_feature = await feature_reads.backend_repo_names_for_features(
+        list(features_by_id.keys())
+    )
+
     # Build a quick lookup: repo_path -> (repo_name, first_branch)
     repo_lookup: dict[str, tuple[str, str | None]] = {}
+    # Inverse keyed by name — used to place "backend-shadow" feature items
+    # under linked backend repos (the graph view detects cross-repo by
+    # spotting feature nodes that share a title across repos).
+    branch_by_repo_name: dict[str, str | None] = {}
     for repo in tree.repos:
         first_branch = repo.branches[0].name if repo.branches else None
         repo_lookup[repo.repo_path] = (repo.repo_name, first_branch)
+        branch_by_repo_name[repo.repo_name] = first_branch
 
     bud_pattern = re.compile(r"BUD-(\d+)")
 
-    for feat in features_by_id.values():
+    for fid, feat in features_by_id.items():
         title = feat["title"] or "Untitled feature"
         source_ref = feat["source_ref"]
         status = feat["feature_status"] or "implemented"
@@ -175,7 +185,13 @@ async def collect_features(
             if rp in repo_lookup:
                 matched_repos.append(repo_lookup[rp])
 
-        all_repo_names = [rn for rn, _ in matched_repos]
+        primary_repo_names = [rn for rn, _ in matched_repos]
+        # Primary first, then backend repos not already present — preserves
+        # "this feature lives here" as the lead name while still surfacing
+        # cross-repo dependencies for the arc renderer.
+        seen = set(primary_repo_names)
+        backend_extras = [rn for rn in backend_names_by_feature.get(fid, []) if rn not in seen]
+        all_repo_names = primary_repo_names + backend_extras
         code_locs = feat["code_locations"]
 
         repo_cl: dict[str, dict[str, list[str]]] = {
@@ -197,6 +213,51 @@ async def collect_features(
                         linked_repos=all_repo_names,
                         code_locations=code_locs,
                         repo_code_locations=repo_cl or None,
+                        link_role="primary",
+                    )
+                )
+            # Backend-shadow items: one extra FeatureItem per linked backend
+            # repo so the graph view's duplicate-title detector creates an
+            # arc to the backend node. code_locations are left empty because
+            # the source files don't live there — only the matched routes
+            # (which the graph doesn't render today) do. Per-repo consumers
+            # filter on ``link_role == "primary"`` to avoid double-counting.
+            for backend_name in backend_extras:
+                if backend_name not in branch_by_repo_name:
+                    continue
+                tree.features.append(
+                    FeatureItem(
+                        title=title,
+                        status=status,
+                        source_ref=source_ref,
+                        branch_name=branch_by_repo_name[backend_name],
+                        repo_name=backend_name,
+                        from_bud=from_bud,
+                        linked_repos=all_repo_names,
+                        code_locations=None,
+                        repo_code_locations=None,
+                        link_role="backend",
+                    )
+                )
+        elif backend_extras:
+            # PRIMARY repo exists in the DB but is not in ``repo_lookup``
+            # (untracked / inactive). Surface the feature anyway by
+            # treating the first reachable backend as the synthetic
+            # primary so the arc renderer still has 2+ entries to connect.
+            placeholder_repos = [b for b in backend_extras if b in branch_by_repo_name]
+            for backend_name in placeholder_repos:
+                tree.features.append(
+                    FeatureItem(
+                        title=title,
+                        status=status,
+                        source_ref=source_ref,
+                        branch_name=branch_by_repo_name[backend_name],
+                        repo_name=backend_name,
+                        from_bud=from_bud,
+                        linked_repos=placeholder_repos,
+                        code_locations=None,
+                        repo_code_locations=None,
+                        link_role="backend",
                     )
                 )
         else:
@@ -249,12 +310,15 @@ async def collect_bud_stages(
 
     bud_branch_map: dict[int, str] = {}
     bud_repo_map: dict[int, str] = {}
+    # ``setdefault`` so the first row wins — the collector appends primary
+    # repos before backend-shadow rows for the same feature, and we want
+    # the primary repo/branch in the BUD summary, not the backend it links.
     for feat in tree.features:
         if feat.from_bud is not None:
             if feat.branch_name:
-                bud_branch_map[feat.from_bud] = feat.branch_name
+                bud_branch_map.setdefault(feat.from_bud, feat.branch_name)
             if feat.repo_name:
-                bud_repo_map[feat.from_bud] = feat.repo_name
+                bud_repo_map.setdefault(feat.from_bud, feat.repo_name)
 
     summary_rows = await bud_repo.list_summaries_in_statuses(
         ["testing", "uat", "prod", "closed"], limit=50
@@ -365,18 +429,17 @@ async def collect_members(
     presence_settings = get_presence_settings(org_config)
 
     rows = await UserRepository(db).list_active_members_for_tree(org_id, limit=50)
-    if not rows:
-        return
-
     total_touches = sum(row.total_touches or 0 for row in rows)
-
     user_ids = [row.id for row in rows]
-    module_rows = await SkillProfileRepository(db, org_id=org_id).list_modules_for_users(user_ids)
     user_modules: dict[uuid.UUID, list[str]] = {}
-    for uid, module, _score in module_rows:
-        user_modules.setdefault(uid, [])
-        if len(user_modules[uid]) < 3:
-            user_modules[uid].append(module)
+    if user_ids:
+        module_rows = await SkillProfileRepository(db, org_id=org_id).list_modules_for_users(
+            user_ids
+        )
+        for uid, module, _score in module_rows:
+            user_modules.setdefault(uid, [])
+            if len(user_modules[uid]) < 3:
+                user_modules[uid].append(module)
 
     for row in rows:
         touches = row.total_touches or 0
@@ -402,3 +465,53 @@ async def collect_members(
                 house_level=row.house_level or 1,
             )
         )
+
+    # ─── Contributors (superset for detail-panel lookups) ──────────
+    # Distinct from ``tree.members`` because tree detail panels want
+    # commit-credited developers regardless of ``OrgToUser`` membership.
+    # Example-workspace authors (e.g. ``alice@taskflow.dev``) have skill
+    # profile rows but never become formal org members, so they'd be
+    # dropped if the panels keyed off ``members`` alone.
+    contrib_rows = await UserRepository(db).list_contributors_for_tree(org_id)
+    if contrib_rows:
+        contrib_total_touches = sum(row.total_touches or 0 for row in contrib_rows)
+        contrib_user_ids = [row.id for row in contrib_rows]
+        contrib_module_rows = await SkillProfileRepository(
+            db, org_id=org_id
+        ).list_modules_for_users(contrib_user_ids)
+        contrib_modules: dict[uuid.UUID, list[str]] = {}
+        for uid, module, _score in contrib_module_rows:
+            contrib_modules.setdefault(uid, [])
+            if len(contrib_modules[uid]) < 3:
+                contrib_modules[uid].append(module)
+
+        for row in contrib_rows:
+            touches = row.total_touches or 0
+            care_pct = round(
+                (touches / contrib_total_touches * 100) if contrib_total_touches > 0 else 0,
+                1,
+            )
+            tree.contributors.append(
+                MemberActivity(
+                    user_id=str(row.id),
+                    name=row.name or "",
+                    email=row.email or "",
+                    avatar_url=row.avatar_url,
+                    care_pct=care_pct,
+                    top_modules=contrib_modules.get(row.id, []),
+                    character_model=row.character_model,
+                    presence="active",
+                    level=row.level or 1,
+                    level_name=row.level_name or "seedling",
+                    house_level=row.house_level or 1,
+                )
+            )
+
+    logger.debug(
+        "tree_members_collected",
+        org_id=str(org_id),
+        members=len(tree.members),
+        member_names=[m.name for m in tree.members],
+        contributors=len(tree.contributors),
+        contributor_names=[c.name for c in tree.contributors],
+    )

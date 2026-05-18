@@ -46,9 +46,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Add the nullable self-FK + supporting index."""
     op.add_column("roles", sa.Column("base_role_id", sa.UUID(), nullable=True))
-    op.create_index(
-        op.f("ix_roles_base_role_id"), "roles", ["base_role_id"], unique=False
-    )
+    op.create_index(op.f("ix_roles_base_role_id"), "roles", ["base_role_id"], unique=False)
     op.create_foreign_key(
         "fk_roles_base_role_id_roles",
         "roles",

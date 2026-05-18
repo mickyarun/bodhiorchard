@@ -273,6 +273,65 @@ class UserRepository(BaseRepository[User]):
         result = await self._db.execute(stmt)
         return list(result.all())
 
+    async def list_contributors_for_tree(
+        self, org_id: uuid.UUID, *, limit: int = 100
+    ) -> list[Any]:
+        """All users with feature-mapped skill profiles in this org.
+
+        Unlike :meth:`list_active_members_for_tree`, this query does NOT
+        require an ``OrgToUser`` row — it returns every user with a
+        ``SkillProfile`` for this org's features, including synthetic /
+        example-workspace developers that the scan pipeline credits with
+        commits but who were never formally onboarded as org members.
+
+        Used by the dashboard tree's detail panel and the graph view's
+        feature-developer popover so a feature with real contributors
+        still surfaces them even when none are OrgToUser members.
+
+        Returns rows shaped like ``list_active_members_for_tree`` so the
+        same ``MemberActivity`` builder can consume both — DeveloperXP
+        columns come back ``None`` because contributors-not-members
+        typically have no XP record.
+        """
+        stmt = (
+            select(
+                User.id,
+                User.name,
+                User.email,
+                User.avatar_url,
+                User.character_model,
+                User.slack_id,
+                func.coalesce(func.sum(SkillProfile.touch_count), 0).label("total_touches"),
+                DeveloperXP.level,
+                DeveloperXP.level_name,
+                DeveloperXP.house_level,
+            )
+            .join(SkillProfile, SkillProfile.user_id == User.id)
+            .outerjoin(
+                DeveloperXP,
+                (DeveloperXP.user_id == User.id) & (DeveloperXP.org_id == org_id),
+            )
+            .where(SkillProfile.org_id == org_id)
+            .where(SkillProfile.feature_id.is_not(None))
+            .where(User.is_active.is_(True))
+            .where(~User.name.ilike("%[bot]%"))
+            .group_by(
+                User.id,
+                User.name,
+                User.email,
+                User.avatar_url,
+                User.character_model,
+                User.slack_id,
+                DeveloperXP.level,
+                DeveloperXP.level_name,
+                DeveloperXP.house_level,
+            )
+            .order_by(User.id)
+            .limit(limit)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.all())
+
     async def list_active_member_xp_summary(
         self, org_id: uuid.UUID
     ) -> list[tuple[uuid.UUID, str | None, str | None, int | None, str | None]]:

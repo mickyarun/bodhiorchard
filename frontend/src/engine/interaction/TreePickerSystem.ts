@@ -194,7 +194,7 @@ export class TreePickerSystem {
       case 'tree_feature': return `feat_${data.title}`
       case 'tree_bud': return `bud_${data.budNumber}`
       case 'tree_threat': return `threat_${data.id}`
-      case 'tree_relationship': return `rel_${data.sourceRepo}_${data.targetRepo}`
+      case 'tree_relationship': return `rel_${data.sourceRepo}_${data.targetRepo}_${data.featureTitle ?? ''}`
       case 'tree_house': return `house_${data.memberId}`
       case 'tree_agent': return `agent_${data.agentKey}`
     }
@@ -211,7 +211,9 @@ export class TreePickerSystem {
       case 'tree_threat':
         return `⚠ ${data.title} (${data.severity})`
       case 'tree_relationship':
-        return `${data.sourceRepo} → ${data.targetRepo} [${data.relType}]`
+        return data.featureTitle
+          ? `${data.featureTitle}\n${data.sourceRepo} → ${data.targetRepo}`
+          : `${data.sourceRepo} → ${data.targetRepo} [${data.relType}]`
       case 'tree_house':
         return `Enter ${data.memberName}'s house`
       case 'tree_agent':

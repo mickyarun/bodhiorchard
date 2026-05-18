@@ -14,6 +14,8 @@
 
 """Pydantic schemas for the Living Tree Dashboard API."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -106,6 +108,13 @@ class FeatureItem(BaseModel):
     linked_repos: list[str] = Field(default_factory=list)
     code_locations: dict[str, list[str]] | None = None
     repo_code_locations: dict[str, dict[str, list[str]]] | None = None
+    # "primary" — the row belongs to the repo where this feature was
+    # synthesised (has ``code_locations``). "backend" — a shadow row
+    # placed under a backend repo that the feature calls; carries no
+    # source files, exists only so the graph/garden can render arcs.
+    # Per-repo consumers (procedural tree, detail panel) must filter
+    # out backend rows to avoid double-counting.
+    link_role: Literal["primary", "backend"] = "primary"
 
 
 class BUDItem(BaseModel):
@@ -137,8 +146,19 @@ class RelationshipArc(BaseModel):
     target_branch: str
     source_repo: str
     target_repo: str
-    rel_type: str = Field(description="CALLS | IMPORTS | EXTENDS")
+    # Frontend ``RelType`` enumerates the same four values; keep this
+    # ``Literal`` in sync with ``frontend/src/engine/types.ts:RelType``.
+    # Today the in-tree pipeline emits only ``CALLS`` (from
+    # ``tree_relationships``); the other variants remain accepted so a
+    # future producer (e.g. a re-enabled GitNexus path) can populate
+    # them without a schema bump.
+    rel_type: Literal["CALLS", "IMPORTS", "EXTENDS", "IMPLEMENTS"]
     weight: int
+    # When set, identifies which cross-repo feature this arc represents.
+    # ``tree_relationships`` emits one arc per feature so the garden draws
+    # a distinct curve per linked feature; the renderer reads this to
+    # fan multiple arcs sharing the same (source_repo, target_repo).
+    feature_title: str | None = None
 
 
 class RepoLimbData(BaseModel):
@@ -179,8 +199,15 @@ class TreeData(BaseModel):
     features: list[FeatureItem] = []
     buds: list[BUDItem] = []
 
-    # Members
+    # Members — formal org members (drives village houses, header count,
+    # presence). Inner-joined on ``OrgToUser``.
     members: list[MemberActivity] = []
+
+    # Contributors — every user with feature-mapped skill profile rows
+    # in this org, regardless of ``OrgToUser`` membership. Used by the
+    # tree/graph detail panels' developer lists so commit-credited
+    # contributors (including example-workspace devs) still surface.
+    contributors: list[MemberActivity] = []
 
     # Security threats (termites)
     threats: list[SecurityThreat] = []

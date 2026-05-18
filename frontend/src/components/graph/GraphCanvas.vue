@@ -94,6 +94,7 @@ function adaptTreeData(data: TreeData): EngineData {
       from_bud: f.from_bud,
       linked_repos: f.linked_repos ?? [],
       code_locations: f.code_locations ?? null,
+      link_role: f.link_role,
     })),
     buds: data.buds.map(b => ({
       bud_number: b.bud_number,
@@ -140,6 +141,7 @@ function adaptTreeData(data: TreeData): EngineData {
       target_repo: r.target_repo,
       rel_type: r.rel_type as RelType,
       weight: r.weight,
+      feature_title: r.feature_title ?? null,
     })),
     feature_skills: (data.feature_skills ?? []).map((s): EngineFeatureSkill => ({
       feature_title: s.feature_title,
