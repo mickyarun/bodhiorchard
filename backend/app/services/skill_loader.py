@@ -152,47 +152,50 @@ async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSessio
 
 
 async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
-    """Seed all file-based skill defaults into DB for an org.
+    """Seed file-based skill defaults into DB for an org.
 
-    Skips any skill_slug that already has a DB row. Individual
-    skill failures (bad file or DB constraint violation) are logged
-    and skipped without aborting the entire seed.
+    Iterates ``AGENT_SKILL_MAP`` so each agent type gets its own row,
+    even when several types share a slug (e.g. ``product-manager`` →
+    bud/standup/reassignment). Re-runs are idempotent: missing rows
+    are inserted with ``is_default=True``, existing rows have empty
+    timeout-seconds backfilled but never clobber tuned values.
 
     Args:
         org_id: Organization UUID to seed for.
         db: Async database session.
 
     Returns:
-        Number of skills seeded (new rows created).
+        Number of (agent_type, slug) rows newly inserted.
     """
     from sqlalchemy.exc import SQLAlchemyError
 
+    from app.agents.skill_mapping import AGENT_SKILL_MAP
+    from app.models.agent_skill import AgentType
     from app.repositories.agent_skill import AgentSkillRepository
 
     repo = AgentSkillRepository(db, org_id=org_id)
 
-    # Single query to get existing rows so we can both skip already-seeded
-    # slugs and backfill columns that landed after the initial seed (e.g.
-    # ``timeout_seconds`` — added later; existing rows ship with the DB
-    # default ``0`` until we copy the file frontmatter onto them once).
     existing_skills = await repo.list_all()
-    existing_by_slug = {s.skill_slug: s for s in existing_skills}
+    existing_by_key: dict[tuple[str, AgentType], Any] = {
+        (s.skill_slug, s.agent_type): s for s in existing_skills
+    }
 
-    available = list_available_skills()
     seeded = 0
     backfilled = 0
-    for slug in available:
+    for agent_name, slug in AGENT_SKILL_MAP.items():
+        try:
+            agent_type = AgentType(agent_name)
+        except ValueError:
+            logger.warning("seed_skill_unknown_agent_type", agent=agent_name)
+            continue
         try:
             skill = load_skill(slug)
         except (FileNotFoundError, ValueError, OSError):
             logger.warning("seed_skill_load_failed", skill=slug, exc_info=True)
             continue
 
-        existing = existing_by_slug.get(slug)
+        existing = existing_by_key.get((slug, agent_type))
         if existing is not None:
-            # Idempotent backfill: only fill columns that are still at
-            # their post-migration default. Never clobber values an admin
-            # has tuned (non-zero / non-empty wins).
             if existing.timeout_seconds == 0 and skill.timeout_seconds > 0:
                 existing.timeout_seconds = skill.timeout_seconds
                 backfilled += 1
@@ -211,10 +214,14 @@ async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
                 model=skill.model,
                 iteration_model=skill.iteration_model,
                 effort=skill.effort,
+                agent_type=agent_type,
+                is_default=True,
             )
             seeded += 1
         except SQLAlchemyError:
-            logger.warning("seed_skill_db_failed", skill=slug, exc_info=True)
+            logger.warning(
+                "seed_skill_db_failed", skill=slug, agent_type=agent_name, exc_info=True
+            )
             continue
 
     if backfilled:

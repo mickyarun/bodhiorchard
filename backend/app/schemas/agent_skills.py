@@ -14,15 +14,22 @@
 
 """Pydantic schemas for agent skill override endpoints."""
 
+import uuid
+
 from pydantic import BaseModel, Field, model_validator
 
+from app.models.agent_skill import AgentType
 from app.services.skill_loader import Skill
 
 
 class AgentSkillRead(BaseModel):
-    """Schema for reading an agent skill (merged file default + DB override)."""
+    """Schema for reading an agent skill row (seeded or custom)."""
 
+    id: uuid.UUID | None = None
     skill_slug: str
+    agent_type: AgentType
+    is_default: bool = False
+    is_custom: bool = False
     name: str
     description: str
     tools: list[str]
@@ -52,11 +59,17 @@ class AgentSkillRead(BaseModel):
 
     @classmethod
     def from_skill(
-        cls, slug: str, skill: Skill, *, is_customized: bool = False
+        cls,
+        slug: str,
+        skill: Skill,
+        *,
+        agent_type: AgentType,
+        is_customized: bool = False,
     ) -> "AgentSkillRead":
         """Construct from a Skill dataclass to avoid scattered field mapping."""
         return cls(
             skill_slug=slug,
+            agent_type=agent_type,
             name=skill.name,
             description=skill.description,
             tools=skill.tools,
@@ -69,6 +82,29 @@ class AgentSkillRead(BaseModel):
             effort=skill.effort,
             is_customized=is_customized,
         )
+
+
+class CustomSkillCreate(BaseModel):
+    """Schema for adding a user-authored custom skill."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+    agent_type: AgentType
+    skill_slug: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-z0-9][a-z0-9-]*$",
+        description="kebab-case identifier; must be unique within (org, agent_type)",
+    )
+    description: str = Field("", max_length=5000)
+    prompt: str = Field(..., min_length=1, max_length=100_000)
+    tools: list[str] = Field(default_factory=list)
+    mcp_tools: list[str] = Field(default_factory=list)
+    max_turns: int = Field(0, ge=0, le=100)
+    timeout_seconds: int = Field(0, ge=0, le=3600)
+    model: str = Field("", max_length=100)
+    iteration_model: str = Field("", max_length=100)
+    effort: str = Field("", max_length=20)
 
 
 class AgentSkillUpdate(BaseModel):

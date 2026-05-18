@@ -25,9 +25,19 @@
             Customize the instructions given to each AI agent skill
           </div>
         </div>
-        <v-btn variant="text" prepend-icon="mdi-arrow-left" :to="{ name: 'settings' }">
-          Back to Settings
-        </v-btn>
+        <div class="d-flex ga-2 align-center">
+          <v-btn
+            color="primary"
+            variant="flat"
+            prepend-icon="mdi-plus"
+            @click="showCreateDialog = true"
+          >
+            Add Custom Skill
+          </v-btn>
+          <v-btn variant="text" prepend-icon="mdi-arrow-left" :to="{ name: 'settings' }">
+            Back to Settings
+          </v-btn>
+        </div>
       </div>
 
       <v-alert v-if="store.error" type="error" variant="tonal" class="mt-4" closable>
@@ -64,17 +74,17 @@
       <div v-else class="d-flex flex-column ga-3">
         <v-card
           v-for="skill in store.skills"
-          :key="skill.skillSlug"
+          :key="skillKey(skill)"
           variant="outlined"
           class="skill-card"
         >
           <!-- Collapsed header — always visible -->
           <v-card-text
             class="d-flex align-center ga-3 cursor-pointer"
-            @click="toggle(skill.skillSlug)"
+            @click="toggle(skill)"
           >
             <v-icon
-              :icon="expanded === skill.skillSlug ? 'mdi-chevron-down' : 'mdi-chevron-right'"
+              :icon="expanded === skillKey(skill) ? 'mdi-chevron-down' : 'mdi-chevron-right'"
               size="20"
             />
             <v-icon icon="mdi-robot-outline" size="20" color="secondary" />
@@ -82,7 +92,25 @@
               {{ skill.name }}
             </span>
             <v-chip
-              v-if="skill.isCustomized"
+              v-if="skill.isDefault"
+              color="primary"
+              variant="tonal"
+              size="x-small"
+              label
+            >
+              DEFAULT
+            </v-chip>
+            <v-chip
+              v-if="skill.isCustom"
+              color="secondary"
+              variant="tonal"
+              size="x-small"
+              label
+            >
+              CUSTOM
+            </v-chip>
+            <v-chip
+              v-if="skill.isCustomized && !skill.isCustom"
               color="warning"
               variant="tonal"
               size="x-small"
@@ -90,13 +118,16 @@
             >
               CUSTOMIZED
             </v-chip>
+            <v-chip variant="text" size="x-small" label>
+              {{ agentTypeLabel(skill.agentType) }}
+            </v-chip>
             <span class="text-caption text-medium-emphasis">
               {{ skill.skillSlug }}
             </span>
           </v-card-text>
 
           <!-- Expanded editor -->
-          <template v-if="expanded === skill.skillSlug">
+          <template v-if="expanded === skillKey(skill)">
             <v-divider />
             <v-card-text class="pt-4">
               <div class="d-flex ga-4 mb-4">
@@ -241,20 +272,40 @@
                   color="primary"
                   variant="flat"
                   :loading="store.saving"
-                  @click="saveSkill(skill.skillSlug)"
+                  @click="saveSkill(skill)"
                 >
                   Save
                 </v-btn>
                 <v-btn variant="text" @click="expanded = null">
                   Cancel
                 </v-btn>
+                <v-btn
+                  v-if="!skill.isDefault && skill.id"
+                  variant="tonal"
+                  color="primary"
+                  :loading="store.saving"
+                  @click="store.setDefault(skill.id)"
+                >
+                  <v-icon start size="16">mdi-star-outline</v-icon>
+                  Set as Default
+                </v-btn>
                 <v-spacer />
                 <v-btn
-                  v-if="skill.isCustomized"
+                  v-if="skill.isCustom && skill.id"
+                  variant="tonal"
+                  color="error"
+                  :loading="store.saving"
+                  @click="confirmDeleteId = skill.id"
+                >
+                  <v-icon start size="16">mdi-delete-outline</v-icon>
+                  Delete
+                </v-btn>
+                <v-btn
+                  v-else-if="skill.isCustomized"
                   variant="tonal"
                   color="warning"
                   :loading="store.saving"
-                  @click="confirmResetSlug = skill.skillSlug"
+                  @click="confirmResetTarget = { slug: skill.skillSlug, agentType: skill.agentType }"
                 >
                   <v-icon start size="16">mdi-restore</v-icon>
                   Reset to Default
@@ -272,37 +323,73 @@
         <div class="text-h6 mb-2">Reset to Default?</div>
         <div class="text-body-2 text-medium-emphasis mb-4">
           This will discard your customizations for
-          <strong>{{ confirmResetSlug }}</strong> and restore the original prompt.
+          <strong>{{ confirmResetTarget?.slug }}</strong> and restore the original prompt.
           This cannot be undone.
         </div>
         <v-card-actions class="pa-0">
           <v-spacer />
-          <v-btn variant="text" @click="confirmResetSlug = null">Cancel</v-btn>
+          <v-btn variant="text" @click="confirmResetTarget = null">Cancel</v-btn>
           <v-btn color="warning" variant="flat" :loading="store.saving" @click="doReset">
             Reset
           </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Delete-custom confirmation dialog -->
+    <v-dialog v-model="showDeleteDialog" max-width="400">
+      <v-card color="surface" class="pa-6">
+        <div class="text-h6 mb-2">Delete custom skill?</div>
+        <div class="text-body-2 text-medium-emphasis mb-4">
+          This permanently removes the custom skill. Any BUDs that referenced
+          it directly will fall back to the agent default.
+        </div>
+        <v-card-actions class="pa-0">
+          <v-spacer />
+          <v-btn variant="text" @click="confirmDeleteId = null">Cancel</v-btn>
+          <v-btn color="error" variant="flat" :loading="store.saving" @click="doDelete">
+            Delete
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <CustomSkillDialog v-model="showCreateDialog" @created="onCustomCreated" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useAgentSkillsStore } from '@/stores/agentSkills'
+import { useAgentSkillsStore, AGENT_TYPE_LABELS, type AgentSkill, type AgentType } from '@/stores/agentSkills'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import CustomSkillDialog from './CustomSkillDialog.vue'
 
 const store = useAgentSkillsStore()
 
 const expanded = ref<string | null>(null)
 const previewMode = ref<'edit' | 'preview'>('edit')
-const confirmResetSlug = ref<string | null>(null)
+const confirmResetTarget = ref<{ slug: string; agentType: AgentType } | null>(null)
+const confirmDeleteId = ref<string | null>(null)
+const showCreateDialog = ref(false)
 
 const showResetDialog = computed({
-  get: () => confirmResetSlug.value !== null,
-  set: (v: boolean) => { if (!v) confirmResetSlug.value = null },
+  get: () => confirmResetTarget.value !== null,
+  set: (v: boolean) => { if (!v) confirmResetTarget.value = null },
 })
+
+const showDeleteDialog = computed({
+  get: () => confirmDeleteId.value !== null,
+  set: (v: boolean) => { if (!v) confirmDeleteId.value = null },
+})
+
+function skillKey(skill: AgentSkill): string {
+  return `${skill.skillSlug}__${skill.agentType}`
+}
+
+function agentTypeLabel(at: AgentType): string {
+  return AGENT_TYPE_LABELS[at] ?? at
+}
 
 const modelOptions = [
   { title: 'Default', value: '' },
@@ -343,27 +430,25 @@ const editForm = ref({
   effort: '',
 })
 
-function toggle(slug: string): void {
-  if (expanded.value === slug) {
+function toggle(skill: AgentSkill): void {
+  const key = skillKey(skill)
+  if (expanded.value === key) {
     expanded.value = null
     return
   }
-  expanded.value = slug
+  expanded.value = key
   previewMode.value = 'edit'
-  const skill = store.skills.find(s => s.skillSlug === slug)
-  if (skill) {
-    editForm.value = {
-      name: skill.name,
-      description: skill.description,
-      tools: [...skill.tools],
-      mcpTools: [...skill.mcpTools],
-      prompt: skill.prompt,
-      maxTurns: skill.maxTurns,
-      timeoutSeconds: skill.timeoutSeconds ?? 0,
-      model: skill.model ?? '',
-      iterationModel: skill.iterationModel ?? '',
-      effort: skill.effort ?? '',
-    }
+  editForm.value = {
+    name: skill.name,
+    description: skill.description,
+    tools: [...skill.tools],
+    mcpTools: [...skill.mcpTools],
+    prompt: skill.prompt,
+    maxTurns: skill.maxTurns,
+    timeoutSeconds: skill.timeoutSeconds ?? 0,
+    model: skill.model ?? '',
+    iterationModel: skill.iterationModel ?? '',
+    effort: skill.effort ?? '',
   }
 }
 
@@ -373,8 +458,8 @@ const renderedPreview = computed(() => {
   return DOMPurify.sanitize(raw)
 })
 
-async function saveSkill(slug: string): Promise<void> {
-  await store.updateSkill(slug, {
+async function saveSkill(skill: AgentSkill): Promise<void> {
+  await store.updateSkill(skill.skillSlug, skill.agentType, {
     name: editForm.value.name,
     description: editForm.value.description,
     tools: editForm.value.tools,
@@ -389,13 +474,23 @@ async function saveSkill(slug: string): Promise<void> {
 }
 
 async function doReset(): Promise<void> {
-  if (!confirmResetSlug.value) return
-  const slug = confirmResetSlug.value
-  const ok = await store.resetSkill(slug)
-  confirmResetSlug.value = null
-  if (ok) {
-    expanded.value = null
-  }
+  const target = confirmResetTarget.value
+  if (!target) return
+  const ok = await store.resetSkill(target.slug, target.agentType)
+  confirmResetTarget.value = null
+  if (ok) expanded.value = null
+}
+
+async function doDelete(): Promise<void> {
+  const id = confirmDeleteId.value
+  if (!id) return
+  const ok = await store.deleteCustomSkill(id)
+  confirmDeleteId.value = null
+  if (ok) expanded.value = null
+}
+
+function onCustomCreated(): void {
+  showCreateDialog.value = false
 }
 
 onMounted(() => {

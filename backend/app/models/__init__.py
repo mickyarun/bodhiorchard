@@ -19,7 +19,7 @@ auto-generation of migration scripts.
 """
 
 from app.models.agent_activity import AgentActivityLog
-from app.models.agent_skill import AgentSkill
+from app.models.agent_skill import AgentSkill, AgentType
 from app.models.agent_skill_bud_stage import AgentSkillBudStage
 from app.models.backend_route_cache import BackendRouteCache
 from app.models.base import Base, BaseModel
@@ -40,6 +40,7 @@ from app.models.bud_feature_link import (
     BUDFeatureLinkType,
 )
 from app.models.bud_section_session import BUDSectionSession
+from app.models.bud_stage_skill_override import BUDStageSkillOverride
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.cluster_cache import ClusterCache
@@ -94,6 +95,7 @@ __all__ = [
     "AgentSkill",
     "AgentSkillBudStage",
     "AgentTaskStatus",
+    "AgentType",
     "BackendRouteCache",
     "BUDAgentTask",
     "Base",
@@ -107,6 +109,7 @@ __all__ = [
     "BUDFeatureLinkSource",
     "BUDFeatureLinkType",
     "BUDSectionSession",
+    "BUDStageSkillOverride",
     "BUDTodo",
     "BUDTodoStatus",
     "BUDStatus",
