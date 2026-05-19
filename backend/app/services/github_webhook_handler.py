@@ -688,5 +688,3 @@ async def _resolve_github_user(
 ) -> uuid.UUID | None:
     """Resolve a GitHub login to a user_id within the org."""
     return await UserRepository(db).get_id_by_github_login(org_id, github_login)
-
-
