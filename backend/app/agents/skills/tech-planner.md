@@ -56,14 +56,14 @@ Each numbered line follows this exact shape so the parser can extract `repo_name
 ```
 N. <title> — repo: <repo_name> — files: <path1>, <path2>
    - sub-bullet becomes context_md (acceptance criteria, edge cases)
-   - ⟐ Code Review: <phase-name>     <- own checkpoint TODO between phases
+N+1. Code review: <phase-name> — repo: <repo_name>     <- claimable review TODO
 ```
 
 Rules:
 - `<repo_name>` MUST be one of the BUD's `impacted_repos` names (case-sensitive). If a TODO is cross-cutting or not bound to a single repo, omit the `— repo: …` segment entirely.
 - `<path>` entries are repo-relative paths from the Files to Modify table; comma-separated; up to 10 per TODO. Omit the `— files: …` segment when the TODO is documentation-only.
 - Sub-bullets are free-form markdown; they become the TODO's `context_md`. Keep them tight — the executor also has the full tech spec via MCP.
-- A sub-bullet containing `⟐` or `Code Review` is hoisted into its own checkpoint TODO. Use one between every phase (schema → API → frontend → tests).
+- Emit a dedicated `Code review: <phase-name>` top-level TODO between every phase (schema → API → frontend → tests). It is a real, claimable work item — the developer (or Claude via the takeover_todo MCP tool) actually performs the review and calls complete_todo when done. Do NOT prefix it with `⟐` / `◆` / `◇` glyphs; those glyphs are reserved for visual sub-bullet markers and would block claim.
 - Order the TODOs in dependency order (migration before model, model before endpoint, etc.).
 
 ## Patch Mode
@@ -119,17 +119,17 @@ Order: migration → model → API → frontend route → component
    - Initialised by application code on first PATCH
 2. Add Pydantic schema for notification settings — repo: api-service — files: backend/app/schemas/organizations.py
    - Validates known channels (email, push, in_app) and frequency enum
-   - ⟐ Code Review: schema phase
-3. Add GET /orgs/me/notifications — repo: api-service — files: backend/app/api/v1/organizations.py
+3. Code review: schema phase — repo: api-service
+4. Add GET /orgs/me/notifications — repo: api-service — files: backend/app/api/v1/organizations.py
    - Reads from active org context (auth dependency)
-4. Add PATCH /orgs/me/notifications with JSONB merge semantics — repo: api-service — files: backend/app/api/v1/organizations.py
+5. Add PATCH /orgs/me/notifications with JSONB merge semantics — repo: api-service — files: backend/app/api/v1/organizations.py
    - Merge not replace; preserves keys the client did not send
-   - ⟐ Code Review: API phase
-5. Create OrgNotifications.vue — repo: web-app — files: src/views/OrgNotifications.vue
+6. Code review: API phase — repo: api-service
+7. Create OrgNotifications.vue — repo: web-app — files: src/views/OrgNotifications.vue
    - Form binds to GET response; submit triggers PATCH
-6. Wire route — repo: web-app — files: src/router/index.ts
+8. Wire route — repo: web-app — files: src/router/index.ts
    - Path `/org/notifications`, requires authenticated guard
-   - ⟐ Code Review: frontend phase
+9. Code review: frontend phase — repo: web-app
 
 ## Code Review Standards
 
