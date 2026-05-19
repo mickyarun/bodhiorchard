@@ -20,6 +20,7 @@ stored in a single unified dev_activity_logs table.
 """
 
 import asyncio
+import os
 import re
 import uuid
 
@@ -234,11 +235,26 @@ async def _resolve_repo_id(
     org_id: uuid.UUID,
     repo_path: str,
 ) -> uuid.UUID | None:
-    """Resolve a filesystem repo_path to a tracked_repositories.id."""
+    """Resolve a filesystem repo_path to a tracked_repositories.id.
+
+    Exact-path match is attempted first — that works when the hook fires
+    from the same machine the scan pipeline indexed (single-host dev).
+    When the developer's laptop path doesn't match the server's clone
+    path (the common case for remote teams talking to garden.atoa.me),
+    fall back to matching by the repo's basename within the org. The
+    repository lookups are org-scoped, so collisions across orgs that
+    happen to use the same repo basename don't matter.
+    """
     if not repo_path:
         return None
     repo_repo = TrackedRepoRepository(db, org_id=org_id)
     tracked = await repo_repo.get_by_path(repo_path)
+    if tracked:
+        return tracked.id
+    basename = os.path.basename(repo_path.rstrip("/"))
+    if not basename:
+        return None
+    tracked = await repo_repo.get_by_name(basename)
     return tracked.id if tracked else None
 
 
