@@ -35,6 +35,14 @@ logger = structlog.get_logger(__name__)
 
 SKILLS_DIR = Path(__file__).parent.parent / "agents" / "skills"
 
+# Skill slugs must be kebab-case ASCII so the filesystem lookup
+# ``SKILLS_DIR / f"{skill_name}.md"`` can never resolve outside the
+# skills directory. CodeQL flagged the unfiltered form as "uncontrolled
+# data used in path expression" — every caller already passes either
+# a literal or an API-validated slug, but the static analyser can't
+# see that, so the guard lives here at the entry of ``load_skill``.
+_SAFE_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,99}$")
+
 
 @dataclass(frozen=True)
 class Skill:
@@ -71,15 +79,35 @@ def load_skill(skill_name: str) -> Skill:
 
     Args:
         skill_name: The skill filename without extension (e.g., 'product-manager').
+            Must be a kebab-case ASCII slug — anything else is rejected
+            before it can reach the filesystem.
 
     Returns:
         A Skill object with parsed frontmatter and body.
 
     Raises:
+        ValueError: If ``skill_name`` is not a valid kebab-case slug or
+            the file has invalid frontmatter.
         FileNotFoundError: If the skill file doesn't exist.
-        ValueError: If the file has invalid frontmatter.
     """
-    skill_path = SKILLS_DIR / f"{skill_name}.md"
+    # Constrain the slug at the function entry so path traversal can't
+    # land here even if a future caller forgets to pre-validate. The
+    # ``_SAFE_SLUG`` regex rejects any character outside ``[a-z0-9-]``,
+    # which means no separators (``/``, ``\``), no leading dots, no
+    # parent-dir refs (``..``) — the constructed Path is guaranteed to
+    # be a single filename inside ``SKILLS_DIR``.
+    if not _SAFE_SLUG.fullmatch(skill_name):
+        raise ValueError(f"Invalid skill slug: {skill_name!r}")
+
+    skill_path = (SKILLS_DIR / f"{skill_name}.md").resolve()
+    # Belt-and-suspenders: refuse to read if the resolved path somehow
+    # ended up outside SKILLS_DIR. With the regex above this is
+    # unreachable on POSIX, but CodeQL recognises the containment
+    # check as a sanitiser and the cost is one stat() call.
+    skills_root = SKILLS_DIR.resolve()
+    if not skill_path.is_relative_to(skills_root):
+        raise ValueError(f"Skill slug escapes skills directory: {skill_name!r}")
+
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill not found: {skill_path}")
 
