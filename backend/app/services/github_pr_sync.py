@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
 from app.models.pull_request import PRState
+from app.repositories.bud import BUDRepository
 from app.repositories.pull_request import PullRequestRepository
 from app.services.github_app_auth import get_installation_token
 from app.services.github_client import GitHubClient
@@ -130,14 +131,40 @@ async def sync_review_comments_to_github(
             )
             continue
 
-        if result:
-            pr.metadata_ = {**(pr.metadata_ or {}), "review_synced": True}
-            await db.flush()
-            logger.info(
-                "github_review_posted",
+        if not result:
+            continue
+
+        # Tag the agent-stored entries with the GitHub review id so the
+        # webhook handler (``_handle_pr_review``) can recognise GitHub's
+        # echo of our own post and skip the duplicate store. Without
+        # this, every agent inline comment gets counted twice in
+        # ``bud.code_review_comments``: once by the agent path, once
+        # when GitHub fires ``pull_request_review`` back at us.
+        #
+        # If the API response is missing / wrong-shape, we MUST NOT set
+        # ``review_synced=True`` — the next run is our only path to
+        # recover the dedup tag (the flag would short-circuit it on
+        # line 112). Better to risk an extra post than to permanently
+        # leak duplicate comments into the BUD.
+        review_id_raw = result.get("id") if isinstance(result, dict) else None
+        if not isinstance(review_id_raw, int):
+            logger.error(
+                "github_review_id_missing",
                 pr_number=pr.github_pr_number,
-                comment_count=len(matching),
+                bud_id=str(bud_id),
+                result_keys=sorted(result.keys()) if isinstance(result, dict) else None,
             )
+            continue
+
+        await _tag_agent_review_id(db, org_id, bud_id, repo_name, review_id_raw)
+        pr.metadata_ = {**(pr.metadata_ or {}), "review_synced": True}
+        await db.flush()
+        logger.info(
+            "github_review_posted",
+            pr_number=pr.github_pr_number,
+            comment_count=len(matching),
+            review_id=review_id_raw,
+        )
 
 
 async def _store_agent_comments_in_bud(
@@ -160,8 +187,6 @@ async def _store_agent_comments_in_bud(
     runs. Human-authored entries (``source: "github"`` from webhooks and
     anything else) are untouched.
     """
-    from app.repositories.bud import BUDRepository
-
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id_for_update(bud_id)
     if not bud:
@@ -194,6 +219,49 @@ async def _store_agent_comments_in_bud(
 
     bud.code_review_comments = existing
     await db.flush()
+
+
+async def _tag_agent_review_id(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_id: uuid.UUID,
+    repo_name: str,
+    review_id: int,
+) -> None:
+    """Stamp ``review_id`` onto agent-stored entries for ``repo_name``.
+
+    Called from :func:`sync_review_comments_to_github` after
+    ``create_pr_review`` returns. The webhook handler
+    (``_handle_pr_review`` in ``github_webhook_handler``) uses the
+    presence of this field to recognise GitHub's echo of the agent's
+    own review and skip the duplicate inline / summary store that
+    otherwise inflates the BUD's ``code_review_comments`` count.
+
+    Only entries with ``source: "agent"`` AND matching ``repo`` are
+    touched; existing ``review_id`` values are not overwritten (a re-run
+    on the same repo shouldn't blast the prior correlation if for some
+    reason the post step was already done).
+    """
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id_for_update(bud_id)
+    if not bud:
+        return
+
+    updated: list[dict[str, Any]] = []
+    changed = False
+    for c in bud.code_review_comments or []:
+        is_agent_for_repo = (
+            c.get("source") == "agent" and c.get("repo") == repo_name and not c.get("review_id")
+        )
+        if is_agent_for_repo:
+            updated.append({**c, "review_id": review_id})
+            changed = True
+        else:
+            updated.append(c)
+
+    if changed:
+        bud.code_review_comments = updated
+        await db.flush()
 
 
 def _map_to_github_comments(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:

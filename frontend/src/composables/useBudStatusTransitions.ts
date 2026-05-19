@@ -121,8 +121,8 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
 
     // Intercept code_review transition: warn if no PRs are open.
     if (newStatus === 'code_review') {
-      const repoStatuses = await budStore.fetchCodeReviewStatus(bud.id)
-      const hasOpenPR = repoStatuses.some(r => r.pr_state === 'open')
+      const { repos } = await budStore.fetchCodeReviewStatus(bud.id)
+      const hasOpenPR = repos.some(r => r.pr_state === 'open')
       if (!hasOpenPR) {
         showNoPRWarningDialog.value = true
         return
@@ -137,9 +137,9 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
     //     or unusual workflow), so we still prompt for a reason so the
     //     bypass is recorded on the timeline.
     if (bud.status === 'code_review' && newStatus === 'testing') {
-      const repoStatuses = await budStore.fetchCodeReviewStatus(bud.id)
-      const allMerged = repoStatuses.length > 0
-        && repoStatuses.every(r => r.pr_state === 'merged')
+      const { repos } = await budStore.fetchCodeReviewStatus(bud.id)
+      const allMerged = repos.length > 0
+        && repos.every(r => r.pr_state === 'merged')
       if (!allMerged) {
         pendingOverrideStatus.value = newStatus
         overrideReasonText.value = ''

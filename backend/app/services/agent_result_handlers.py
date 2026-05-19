@@ -29,6 +29,7 @@ from app.models.bud_agent_task import BUDAgentTask
 from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.repositories.bud_feature_link import BUDFeatureLinkRepository
 from app.services.bud_timeline import record_event
+from app.services.json_parser import parse_json_response, strip_insight_blocks
 
 logger = structlog.get_logger(__name__)
 
@@ -256,17 +257,19 @@ async def handle_code_review_result(
 
     review_data = _parse_code_review_output(output)
     parse_ok = review_data.get("_parse_ok", True)
+    parse_failure_reason = review_data.get("_parse_failure_reason")
 
     if not parse_ok:
         # Agent output was unparseable — log loudly with BUD context so on-call
         # can triage. The handler still returns successfully so the task row is
         # marked COMPLETED (a FAILED task would auto-retry and likely hit the
-        # same parse failure), but the result_summary carries the parse_ok
-        # flag so the UI can surface a "re-run code review" banner.
+        # same parse failure), but the result_summary carries parse_ok plus a
+        # typed reason so the Code Review tab can render the right banner.
         logger.error(
             "code_review_parse_failed",
             bud_id=str(bud_id),
             task_id=str(task.id),
+            parse_failure_reason=parse_failure_reason,
         )
 
     bud_repo = BUDRepository(db, org_id=org_id)
@@ -301,6 +304,7 @@ async def handle_code_review_result(
         "section": "test_plan_md",
         "comment_count": comment_count,
         "parse_ok": parse_ok,
+        "parse_failure_reason": parse_failure_reason,
     }
 
 
@@ -471,14 +475,32 @@ def _extract_impacted_repos_json(output: str) -> tuple[list[str], str]:
 def _parse_code_review_output(output: str) -> dict[str, Any]:
     """Parse code review JSON output from Claude.
 
-    Returns the parsed dict on success, or a sentinel ``{"_parse_ok": False,
-    "code_review_comments": []}`` on failure so the caller can distinguish
-    "clean review with no issues" from "agent output was unparseable". A
-    parse failure is logged at error level with a prefix of the raw output
-    for forensics — silently treating unparseable output as "approved" is
-    a safety hole in a code-review pipeline.
+    Returns the parsed dict on success, or a sentinel
+    ``{"_parse_ok": False, "_parse_failure_reason": <reason>,
+    "code_review_comments": []}`` on failure so the caller can
+    distinguish "clean review with no issues" from "agent output was
+    unparseable". A parse failure is logged at error level with a prefix
+    of the raw output for forensics — silently treating unparseable
+    output as "approved" is a safety hole in a code-review pipeline.
+
+    Failure reasons (persisted to ``result_summary.parse_failure_reason``
+    and used by the Code Review tab banner):
+
+    * ``insight_contaminated`` — output contained ``★ Insight`` blocks
+      from a learning/explanatory output-style plugin. JSON could not be
+      recovered even after stripping. Root cause is config-side: the
+      ``claude`` subprocess is inheriting a plugin SessionStart hook
+      that overrides the inline ``outputStyle: "default"``.
+    * ``parse_exception`` — the JSON extractor itself raised.
+    * ``no_json`` — extractor returned ``None``; no balanced ``{...}``
+      object was found in the (cleaned) output.
+    * ``not_dict`` — extractor returned a non-dict (list, scalar, …).
     """
-    from app.services.json_parser import parse_json_response
+    # Detect learning-mode contamination up front so a failure later can
+    # be attributed precisely. The strip is also done inside
+    # ``parse_json_response`` for the happy-path recovery; we only use
+    # the flag here for the diagnostic.
+    _, was_contaminated = strip_insight_blocks(output or "")
 
     try:
         parsed = parse_json_response(output)
@@ -486,17 +508,44 @@ def _parse_code_review_output(output: str) -> dict[str, Any]:
         logger.error(
             "code_review_output_parse_exception",
             error=str(exc),
+            insight_contaminated=was_contaminated,
             output_preview=(output or "")[:500],
         )
-        return {"_parse_ok": False, "code_review_comments": []}
+        return {
+            "_parse_ok": False,
+            "_parse_failure_reason": "parse_exception",
+            "code_review_comments": [],
+        }
+
+    if parsed is None:
+        # No JSON object recovered. If the output was contaminated, that
+        # is the most actionable diagnosis to surface to the user (fix
+        # the plugin / subprocess config). Otherwise it's a generic
+        # "agent didn't emit JSON" failure.
+        reason = "insight_contaminated" if was_contaminated else "no_json"
+        logger.error(
+            "code_review_output_no_json",
+            reason=reason,
+            output_preview=(output or "")[:500],
+        )
+        return {
+            "_parse_ok": False,
+            "_parse_failure_reason": reason,
+            "code_review_comments": [],
+        }
 
     if not isinstance(parsed, dict):
         logger.error(
             "code_review_output_not_dict",
             parsed_type=type(parsed).__name__,
+            insight_contaminated=was_contaminated,
             output_preview=(output or "")[:500],
         )
-        return {"_parse_ok": False, "code_review_comments": []}
+        return {
+            "_parse_ok": False,
+            "_parse_failure_reason": "not_dict",
+            "code_review_comments": [],
+        }
 
     parsed["_parse_ok"] = True
     return parsed

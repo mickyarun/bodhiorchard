@@ -27,7 +27,12 @@ from app.services.json_parser import (
     _extract_first_balanced_object,
     parse_chat_response,
     parse_json_response,
+    strip_insight_blocks,
 )
+
+# A short stand-in for the long ─ run that real ★ Insight blocks ship with.
+# 30 chars is well above the ``─{5,}`` floor and matches plugin output.
+_DASH = "─" * 30
 
 
 def test_direct_parse_returns_dict() -> None:
@@ -106,3 +111,65 @@ def test_extract_first_balanced_object_handles_nested_objects() -> None:
     """Nested ``{...}`` braces are tracked by depth."""
     candidate = _extract_first_balanced_object('{"a": {"b": {"c": 1}}, "d": 2} trailing')
     assert candidate == '{"a": {"b": {"c": 1}}, "d": 2}'
+
+
+# ─── ★ Insight block stripping (learning-mode plugin contamination) ───
+
+
+def test_strip_insight_blocks_returns_unchanged_when_no_block() -> None:
+    """Clean text is returned verbatim with ``was_stripped=False``."""
+    cleaned, was_stripped = strip_insight_blocks('{"reply": "hi"}')
+    assert cleaned == '{"reply": "hi"}'
+    assert was_stripped is False
+
+
+def test_strip_insight_blocks_removes_single_block() -> None:
+    """A standalone ★ Insight block is removed; surrounding text preserved."""
+    text = f'`★ Insight {_DASH}`\nThe bug is X.\n`{_DASH}`\n\n{{"reply": "hi"}}'
+    cleaned, was_stripped = strip_insight_blocks(text)
+    assert was_stripped is True
+    assert "★ Insight" not in cleaned
+    assert '{"reply": "hi"}' in cleaned
+
+
+def test_strip_insight_blocks_removes_multiple_blocks() -> None:
+    """Two blocks bracketing JSON are both removed, JSON survives."""
+    text = (
+        f"`★ Insight {_DASH}`\nfirst note\n`{_DASH}`\n"
+        '{"reply": "hi"}\n'
+        f"`★ Insight {_DASH}`\nsecond note\n`{_DASH}`\n"
+    )
+    cleaned, was_stripped = strip_insight_blocks(text)
+    assert was_stripped is True
+    assert cleaned.count("★ Insight") == 0
+    assert '{"reply": "hi"}' in cleaned
+
+
+def test_parse_json_response_recovers_when_wrapped_in_insight_blocks() -> None:
+    """End-to-end: JSON between ★ Insight blocks parses correctly.
+
+    Reproduces the production bug where the code-review agent emitted
+    learning-mode prose that broke JSON extraction. The strip in
+    ``parse_json_response`` must make the inner JSON visible to the
+    three extraction strategies.
+    """
+    text = (
+        f"`★ Insight {_DASH}`\n"
+        "Here is my review.\n"
+        f"`{_DASH}`\n"
+        '{"code_review_comments": [{"file": "f.py", "line": 1, "comment": "x"}]}\n'
+    )
+    out = parse_json_response(text)
+    assert out is not None
+    assert out["code_review_comments"][0]["file"] == "f.py"
+
+
+def test_strip_insight_blocks_only_strips_anchored_blocks() -> None:
+    """A bare run of ─ outside an ★ Insight block is not stripped.
+
+    Defends against over-aggressive stripping of unrelated rules / dividers.
+    """
+    text = f"line one\n{_DASH}\nline two"
+    cleaned, was_stripped = strip_insight_blocks(text)
+    assert was_stripped is False
+    assert cleaned == text

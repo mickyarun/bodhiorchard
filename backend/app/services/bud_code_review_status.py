@@ -25,8 +25,20 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
+from app.models.bud_agent_task import AgentTaskStatus
 from app.models.pull_request import PRState, PullRequest
+from app.repositories.bud_agent_task import BUDAgentTaskRepository
 from app.repositories.pull_request import PullRequestRepository
+from app.schemas.bud_code_review import (
+    GENERIC_PARSE_FAILURE_MESSAGE,
+    PARSE_FAILURE_MESSAGES,
+    TASK_FAILED_MESSAGE,
+    CodeReviewRunStatus,
+)
+
+# task_type used by ``create_agent_task_for_stage`` for the code-review
+# stage skill. Mirrors the value stored on ``BUDAgentTask.task_type``.
+_CODE_REVIEW_TASK_TYPE = "code_review"
 
 # An OPEN PR is the most informative state for "what's still in progress",
 # so it should never be hidden by a later CLOSED/MERGED PR on the same repo.
@@ -113,3 +125,42 @@ async def get_pr_status_summary(
         )
 
     return result
+
+
+async def get_last_run_status(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_id: uuid.UUID,
+) -> tuple[CodeReviewRunStatus, str | None]:
+    """Return the last code-review task's status + a banner message.
+
+    Maps the most recent ``code_review`` agent task on the BUD to a
+    ``CodeReviewRunStatus`` and, when the run failed, a typed
+    user-facing message that explains *why* and what to do. Used by the
+    Code Review tab to render an alert above the per-repo PR list when
+    the agent produced no output.
+
+    Returns ``("never_run", None)`` if no task exists for this BUD.
+    """
+    task_repo = BUDAgentTaskRepository(db, org_id=org_id)
+    task = await task_repo.get_latest_for_type(bud_id, _CODE_REVIEW_TASK_TYPE)
+    if task is None:
+        return "never_run", None
+
+    if task.status in (AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING):
+        return "running", None
+
+    if task.status == AgentTaskStatus.FAILED:
+        return "failed", TASK_FAILED_MESSAGE
+
+    # COMPLETED — the parser may still have failed; the handler stores
+    # parse_ok=False with a typed reason in result_summary in that case.
+    summary = task.result_summary or {}
+    parse_ok = summary.get("parse_ok", True)
+    if parse_ok:
+        return "ok", None
+
+    reason_raw = summary.get("parse_failure_reason")
+    reason = reason_raw if isinstance(reason_raw, str) else ""
+    message = PARSE_FAILURE_MESSAGES.get(reason, GENERIC_PARSE_FAILURE_MESSAGE)
+    return "parse_failed", message

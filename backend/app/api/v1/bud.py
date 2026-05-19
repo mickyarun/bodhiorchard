@@ -945,7 +945,7 @@ async def get_code_review_status(
     db: AsyncSession = Depends(get_db),
 ) -> CodeReviewStatusResponse:
     """Return PR status + comment count per impacted repo for the Code Review tab."""
-    from app.services.bud_code_review_status import get_pr_status_summary
+    from app.services.bud_code_review_status import get_last_run_status, get_pr_status_summary
 
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
@@ -953,8 +953,11 @@ async def get_code_review_status(
         raise HTTPException(status_code=404, detail="BUD not found")
 
     rows = await get_pr_status_summary(db, current_user.org_id, bud)
+    last_run_status, last_run_message = await get_last_run_status(db, current_user.org_id, bud_id)
     return CodeReviewStatusResponse(
         repos=[CodeReviewRepoStatus(**r) for r in rows],
+        last_run_status=last_run_status,
+        last_run_message=last_run_message,
     )
 
 

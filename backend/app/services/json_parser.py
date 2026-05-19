@@ -20,9 +20,52 @@ triage agents, and any future handler that needs to parse LLM output.
 """
 
 import json
+import re
 from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
+
+# ``★ Insight ──────...─`` ... ``──────...─`` blocks are injected by a
+# Claude Code SessionStart hook from the ``learning-output-style`` /
+# ``explanatory-output-style`` plugins. The hook fires inside any
+# ``claude`` subprocess that inherits the developer's ``~/.claude/``,
+# overriding the inline ``--settings outputStyle: "default"`` we pass in
+# claude_guard. Stripping the block here is a defence-in-depth measure
+# for any handler that asks the agent for JSON — without it the model
+# wraps its reply in prose and ``parse_json_response`` fails.
+#
+# Pattern shape (one block):
+#
+#     `★ Insight ─────...─`
+#     prose body
+#     `─────...─`
+#
+# Backticks are optional. Opening line is anchored by the ``★ Insight``
+# prefix so we don't confuse it with a stand-alone ``─`` separator. The
+# body match is lazy so adjacent blocks are stripped independently.
+_INSIGHT_BLOCK_RE = re.compile(
+    # Opening line: ★ Insight + any trailing content (typically a long ─
+    # run, but we don't pin that — agents vary the glyph count) up to
+    # the newline. The ★ Insight token is the anchor that prevents a
+    # bare ─ rule (used as a section divider) from being mistaken for
+    # the opening of a block.
+    r"`?\s*★\s*Insight[^\n]*\n"
+    r"[\s\S]*?"  # body (lazy — stops at the first closing ─ run)
+    r"─{5,}[^\n]*\n?",  # closing line: run of ≥5 ─ + optional trailing
+)
+
+
+def strip_insight_blocks(text: str) -> tuple[str, bool]:
+    """Remove ``★ Insight ──...──`` decorative blocks from LLM output.
+
+    Returns:
+        Tuple of ``(cleaned_text, was_stripped)``. ``was_stripped`` is
+        True when at least one block was removed — useful for emitting a
+        specific log event so on-call can identify learning-mode
+        contamination vs. other parse failures.
+    """
+    cleaned, n = _INSIGHT_BLOCK_RE.subn("", text)
+    return cleaned, n > 0
 
 
 class ChatAIResponse(BaseModel):
@@ -88,8 +131,15 @@ def parse_json_response(output: str) -> dict[str, Any] | None:
     Returns ``None`` when no strategy succeeds. A caller that observes
     ``None`` must surface a retryable error rather than dumping the raw
     output as a user-facing reply.
+
+    Any ``★ Insight ──...──`` blocks injected by the learning/explanatory
+    output-style plugins are stripped first so the strategies below see a
+    clean substrate. Callers that need to *distinguish* contamination
+    from other parse failures should call :func:`strip_insight_blocks`
+    themselves before this and inspect the second return value.
     """
-    text = output.strip()
+    text, _ = strip_insight_blocks(output)
+    text = text.strip()
 
     # 1. Direct JSON
     try:

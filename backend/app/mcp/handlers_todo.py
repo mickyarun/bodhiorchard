@@ -43,6 +43,7 @@ from app.repositories.dev_activity import DevActivityLogRepository
 from app.repositories.pull_request import PullRequestRepository
 from app.services.bud_timeline import record_event
 from app.services.event_bus import publish
+from app.services.pr_auto_transition import check_all_repos_have_prs
 
 logger = structlog.get_logger(__name__)
 
@@ -292,6 +293,17 @@ async def handle_complete_todo(
     )
 
     remaining = await _count_remaining_todos(db, auth.org.id, bud.id)
+
+    # If this completion clears the TODO gate AND the BUD is still in
+    # development, the dev → code_review transition may now be eligible
+    # (PR-opened webhook may have already fired with TODOs pending and
+    # been deflected by ``check_all_repos_have_prs``'s gate). Re-running
+    # that check here is the natural trigger for "last TODO ticked off
+    # AFTER the PRs were already raised" — without it the BUD would
+    # stall in development indefinitely. The function is a no-op when
+    # the gate or any other precondition isn't met.
+    await check_all_repos_have_prs(db, auth.org.id, bud)
+
     return {"success": True, "remaining": remaining}
 
 

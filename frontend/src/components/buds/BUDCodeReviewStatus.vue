@@ -17,7 +17,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useBUDStore } from '@/stores/bud'
-import type { CodeReviewRepoStatus, CodeReviewPRState } from '@/types'
+import type { CodeReviewRepoStatus, CodeReviewPRState, CodeReviewRunStatus } from '@/types'
 import {
   CODE_REVIEW_OVERRIDE_REASON_MIN,
   CODE_REVIEW_OVERRIDE_REASON_MAX,
@@ -34,7 +34,17 @@ const emit = defineEmits<{
 const budStore = useBUDStore()
 
 const repos = ref<CodeReviewRepoStatus[]>([])
+const lastRunStatus = ref<CodeReviewRunStatus>('never_run')
+const lastRunMessage = ref<string | null>(null)
 const loading = ref(false)
+
+// Only surfaces parse_failed / failed states. The other states (running,
+// ok, never_run) communicate via the existing per-repo PR list and the
+// agent-running indicators elsewhere on the BUD page — a banner for
+// "ok" or "running" would be noisy duplication.
+const showRunBanner = computed(
+  () => lastRunStatus.value === 'parse_failed' || lastRunStatus.value === 'failed',
+)
 
 // Override dialog state
 const showOverrideDialog = ref(false)
@@ -56,7 +66,10 @@ const allMerged = computed(() =>
 
 async function loadStatus(): Promise<void> {
   loading.value = true
-  repos.value = await budStore.fetchCodeReviewStatus(props.budId)
+  const data = await budStore.fetchCodeReviewStatus(props.budId)
+  repos.value = data.repos
+  lastRunStatus.value = data.last_run_status
+  lastRunMessage.value = data.last_run_message
   loading.value = false
 }
 
@@ -144,6 +157,21 @@ function stateLabel(state: CodeReviewPRState): string {
         (docs-only changes, manual merges, etc.).
       </template>
     </div>
+
+    <!-- Last-run failure banner — only shown when the agent task itself
+         failed or its output was unparseable. The typed message comes
+         from the backend (bud_code_review_status._PARSE_FAILURE_MESSAGES)
+         so the user sees a *specific* fix hint, not generic prose. -->
+    <v-alert
+      v-if="showRunBanner && lastRunMessage"
+      type="error"
+      variant="tonal"
+      density="compact"
+      class="mb-3"
+      icon="mdi-alert-circle-outline"
+    >
+      {{ lastRunMessage }}
+    </v-alert>
 
     <!-- Per-repo status list -->
     <v-card v-if="repos.length > 0" variant="outlined" rounded="lg">

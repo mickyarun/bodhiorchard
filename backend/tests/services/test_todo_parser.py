@@ -96,6 +96,24 @@ def test_code_review_subbullet_hoisted_to_own_checkpoint_todo() -> None:
     assert flags == [False, True, False]
 
 
+def test_top_level_code_review_todo_is_a_real_work_item() -> None:
+    """A top-level "Code review" TODO is a regular claimable item.
+
+    Pins the rule introduced when code-review became a real TODO instead
+    of a checkpoint marker: a TODO whose title contains "code review"
+    without a ⟐/◆/◇ glyph is a normal work item — assignable, claimable
+    via ``takeover_todo``, and counted in the dev → code_review gate.
+    Only sub-bullets prefixed with a glyph remain as visual checkpoints.
+    """
+    spec = _section(
+        "1. Add endpoint — repo: api-service",
+        "2. Code review — repo: api-service",
+    )
+    todos = parse_implementation_todos(spec, known_repo_names=["api-service"])
+    assert [t.title for t in todos] == ["Add endpoint", "Code review"]
+    assert [t.is_checkpoint for t in todos] == [False, False]
+
+
 def test_checkpoint_dropped_from_parent_context_md() -> None:
     spec = _section(
         "1. Add column — repo: api-service",

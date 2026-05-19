@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDStatus
-from app.models.bud_todo import BUDTodo
+from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_todo import BUDTodoRepository
@@ -33,6 +33,7 @@ from app.schemas.bud_todos import (
 )
 from app.services.bud_timeline import record_event
 from app.services.event_bus import publish
+from app.services.pr_auto_transition import check_all_repos_have_prs
 from app.services.todo_sync import sync_todos_for_bud
 
 logger = structlog.get_logger(__name__)
@@ -95,6 +96,11 @@ async def update_todo(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
+    became_completed = (
+        new_status == BUDTodoStatus.COMPLETED.value
+        and todo.status != BUDTodoStatus.COMPLETED.value
+    )
+
     if new_status is not None:
         todo.status = new_status
     if body.assignee_id is not None or "assignee_id" in body.model_fields_set:
@@ -103,6 +109,18 @@ async def update_todo(
         todo.summary = body.summary
 
     await db.flush()
+
+    # Mirror of the MCP ``complete_todo`` re-check: if this PATCH was the
+    # one that flipped a TODO to completed, the BUD's dev → code_review
+    # gate may now be passable. Without this, a TODO completed via the
+    # UI (rather than ``complete_todo``) would leave the BUD stuck in
+    # development even though every precondition is met. The function
+    # is a no-op when the gate or any other precondition isn't met.
+    if became_completed:
+        bud = await BUDRepository(db, org_id=current_user.org_id).get_by_id(bud_id)
+        if bud is not None:
+            await check_all_repos_have_prs(db, current_user.org_id, bud)
+
     # Refresh to pick up any assignee relationship changes.
     refreshed = await repo.get_by_sequence(bud_id, todo.sequence)
     assert refreshed is not None
