@@ -90,21 +90,28 @@ def load_skill(skill_name: str) -> Skill:
             the file has invalid frontmatter.
         FileNotFoundError: If the skill file doesn't exist.
     """
-    # Constrain the slug at the function entry so path traversal can't
-    # land here even if a future caller forgets to pre-validate. The
-    # ``_SAFE_SLUG`` regex rejects any character outside ``[a-z0-9-]``,
-    # which means no separators (``/``, ``\``), no leading dots, no
-    # parent-dir refs (``..``) — the constructed Path is guaranteed to
-    # be a single filename inside ``SKILLS_DIR``.
+    # Three layers of path-traversal protection, in order of strength
+    # against CodeQL's ``py/path-injection`` rule:
+    #
+    # 1. Regex allowlist — semantic intent ("must be kebab-case").
+    #    CodeQL doesn't recognise regex checks as sanitisers, but this
+    #    is the human-readable guardrail.
+    # 2. ``Path(...).name`` — strips ANY directory component from the
+    #    constructed filename. Even if ``skill_name`` were
+    #    ``../../etc/passwd``, ``Path("../../etc/passwd.md").name``
+    #    returns just ``"passwd.md"``. This IS the canonical sanitiser
+    #    pattern CodeQL's path-injection rule recognises, so the alert
+    #    clears here.
+    # 3. ``is_relative_to`` containment check on the resolved path —
+    #    defence in depth, also a recognised sanitiser pattern.
     if not _SAFE_SLUG.fullmatch(skill_name):
         raise ValueError(f"Invalid skill slug: {skill_name!r}")
 
-    skill_path = (SKILLS_DIR / f"{skill_name}.md").resolve()
-    # Belt-and-suspenders: refuse to read if the resolved path somehow
-    # ended up outside SKILLS_DIR. With the regex above this is
-    # unreachable on POSIX, but CodeQL recognises the containment
-    # check as a sanitiser and the cost is one stat() call.
     skills_root = SKILLS_DIR.resolve()
+    # ``Path.name`` flattens any directory components a malicious slug
+    # might have smuggled past the regex on an unforeseen platform.
+    skill_filename = Path(f"{skill_name}.md").name
+    skill_path = (skills_root / skill_filename).resolve()
     if not skill_path.is_relative_to(skills_root):
         raise ValueError(f"Skill slug escapes skills directory: {skill_name!r}")
 
