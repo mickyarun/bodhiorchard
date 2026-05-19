@@ -130,7 +130,7 @@ async def _handle_pr_opened(
         await check_all_repos_have_prs(db, org_id, bud)
 
     # Award XP for opening a PR
-    author_user_id = await _resolve_github_user(db, org_id, pr_data.user.login)
+    author_user_id, resolved_via = await _resolve_pr_author(db, org_id, pr_data.user.login, bud_id)
     if author_user_id:
         try:
             from app.services.xp_service import award_xp
@@ -145,6 +145,15 @@ async def _handle_pr_opened(
             )
         except Exception:
             logger.warning("xp_award_failed_pr_opened", exc_info=True)
+    else:
+        logger.info(
+            "pr_author_unresolved",
+            event="pr_opened",
+            pr_id=pr_data.id,
+            github_login=pr_data.user.login,
+            on_bud_branch=bud_id is not None,
+            resolution_source=resolved_via,
+        )
 
     await db.commit()
 
@@ -232,7 +241,9 @@ async def _handle_pr_closed(
 
     # Award XP for merging a PR (author gets credit)
     if is_merged:
-        author_user_id = await _resolve_github_user(db, org_id, pr_data.user.login)
+        author_user_id, resolved_via = await _resolve_pr_author(
+            db, org_id, pr_data.user.login, pr.bud_id
+        )
         if author_user_id:
             try:
                 from app.services.xp_service import award_xp
@@ -265,6 +276,15 @@ async def _handle_pr_closed(
                     )
             except Exception:
                 logger.warning("sp_award_failed_pr_merged", exc_info=True)
+        else:
+            logger.info(
+                "pr_author_unresolved",
+                event="pr_merged",
+                pr_id=pr_data.id,
+                github_login=pr_data.user.login,
+                on_bud_branch=pr.bud_id is not None,
+                resolution_source=resolved_via,
+            )
 
     # Release-stage detection: if this PR was merged into a configured
     # uat / main branch, walk its commits and record merged_to_{stage}
@@ -517,6 +537,14 @@ async def _handle_review_submitted(
                     )
             except Exception:
                 logger.warning("sp_award_failed_review", exc_info=True)
+        else:
+            # Reviewers aren't BUD assignees, so no fallback applies — just
+            # log the skip so XP-not-crediting reports are diagnosable.
+            logger.info(
+                "review_author_unresolved",
+                pr_id=pr_data.id,
+                github_login=review.user.login,
+            )
 
     await db.commit()
 
@@ -684,3 +712,34 @@ async def _resolve_github_user(
 ) -> uuid.UUID | None:
     """Resolve a GitHub login to a user_id within the org."""
     return await UserRepository(db).get_id_by_github_login(org_id, github_login)
+
+
+async def _resolve_pr_author(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    github_login: str,
+    bud_id: uuid.UUID | None,
+) -> tuple[uuid.UUID | None, str]:
+    """Resolve a PR author to a bodhi user_id with a BUD-assignee fallback.
+
+    Primary path matches ``users.github_username`` — the prod case where
+    developers signed up via GitHub OAuth. The fallback credits the BUD
+    assignee when the PR is on a BUD branch and the assignee is set;
+    this covers test/mock setups where no GitHub identity is linked, and
+    cases where the human pushing the branch is a different bodhi user
+    from the one who owns the BUD work. The BUD lookup runs only on the
+    fallback path, so the prod case pays no extra query.
+
+    Returns ``(user_id, resolution_source)``. ``resolution_source`` is
+    one of ``"github_username"``, ``"bud_assignee"``, ``"unresolved"`` —
+    callers should log this so dashboards can surface which path is
+    crediting the most XP/SP.
+    """
+    user_id = await UserRepository(db).get_id_by_github_login(org_id, github_login)
+    if user_id:
+        return user_id, "github_username"
+    if bud_id:
+        bud = await BUDRepository(db, org_id=org_id).get_by_id(bud_id)
+        if bud and bud.assignee_id:
+            return bud.assignee_id, "bud_assignee"
+    return None, "unresolved"
