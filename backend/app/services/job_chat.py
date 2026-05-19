@@ -325,6 +325,15 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             except FileNotFoundError:
                 skill = None
 
+    # Append the resolved skill prompt so admin edits in Settings → Agent
+    # Prompts (and per-BUD overrides) drive chat iteration too. Matches the
+    # pattern in ``agent_prompts.build_tech_arch_prompt`` /
+    # ``build_code_review_prompt`` / ``build_testing_prompt``. The hardcoded
+    # section-specific rules in ``build_design_prompt`` / ``build_chat_prompt``
+    # remain the safety floor; ``skill.prompt`` is the editable layer on top.
+    if skill and skill.prompt:
+        prompt = f"{prompt}\n\n---\n\n{skill.prompt}\n"
+
     # Design section needs a longer timeout (matches design agent job)
     chat_timeout = 900 if payload.section == "design" else 300
 

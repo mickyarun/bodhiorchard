@@ -126,6 +126,15 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
         except FileNotFoundError:
             designer_skill = None
 
+    # Append the resolved skill prompt so admin edits in Settings → Agent
+    # Prompts (and per-BUD overrides) actually drive the run. Matches the
+    # pattern in ``agent_prompts.build_tech_arch_prompt`` / ``build_code_review_prompt``
+    # / ``build_testing_prompt``. The hardcoded strict rules in
+    # ``build_design_prompt`` remain the safety floor; ``skill.prompt`` is the
+    # editable layer on top.
+    if designer_skill and designer_skill.prompt:
+        prompt = f"{prompt}\n\n---\n\n{designer_skill.prompt}\n"
+
     _skill_uuid = uuid_mod.UUID(payload.skill_id) if payload.skill_id else None
     _task_uuid = uuid_mod.UUID(payload.task_id) if payload.task_id else None
     _repo_uuid = uuid_mod.UUID(repo_id) if repo_id else None
