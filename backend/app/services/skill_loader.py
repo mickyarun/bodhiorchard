@@ -95,14 +95,18 @@ def load_skill(skill_name: str) -> Skill:
     if not _SAFE_SLUG.fullmatch(skill_name):
         raise ValueError(f"Invalid skill slug: {skill_name!r}")
 
-    # Canonicalise to a filename-only path component via
-    # ``os.path.basename`` — the sanitiser CodeQL's
-    # ``py/path-injection`` rule documents explicitly. Any directory
-    # component a malicious slug might contain is stripped here, so
-    # the constructed path is structurally forced to be a single
-    # filename inside ``SKILLS_DIR``.
-    safe_filename = os.path.basename(skill_name + ".md")
-    skill_path = SKILLS_DIR / safe_filename
+    # Normalise the constructed path then verify it stays under the
+    # skills root. This is the exact pattern CodeQL's
+    # ``py/path-injection`` recommendation documents (the
+    # ``user_picture3`` example): ``normpath`` collapses any ``..``
+    # or absolute components, then ``startswith`` on the resolved
+    # root forces containment. The trailing ``os.sep`` on the prefix
+    # stops ``<root>foo`` from sneaking past a literal prefix match.
+    base_path = str(SKILLS_DIR.resolve())
+    fullpath = os.path.normpath(os.path.join(base_path, skill_name + ".md"))
+    if not fullpath.startswith(base_path + os.sep):
+        raise ValueError(f"Skill slug escapes skills directory: {skill_name!r}")
+    skill_path = Path(fullpath)
 
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill not found: {skill_path}")
