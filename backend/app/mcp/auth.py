@@ -76,10 +76,14 @@ class MCPAuthResult:
 
     Always contains an org. Contains a user when the token is
     a per-user token (UserMCPToken), None for org-level or internal tokens.
+    ``token_id`` is the UserMCPToken row id when the call was authenticated
+    by a per-user token — used by the audit log so an admin can trace any
+    recorded action back to a specific revocable credential.
     """
 
     org: Organization
     user: User | None = None
+    token_id: uuid.UUID | None = None
 
 
 def create_internal_mcp_token(org_id: uuid.UUID) -> str:
@@ -209,8 +213,9 @@ async def verify_mcp_token(
             "mcp_auth_user_token",
             org_id=str(ut.org_id),
             user_id=str(ut.user_id),
+            token_id=str(ut.id),
         )
-        return MCPAuthResult(org=ut.organization, user=ut.user)
+        return MCPAuthResult(org=ut.organization, user=ut.user, token_id=ut.id)
 
     # 3. Fall back to org-level token hashes.
     orgs = await org_repo.get_all_with_mcp_tokens()

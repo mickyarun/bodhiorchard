@@ -54,6 +54,7 @@ from app.models.feature_match_log import FeatureMatchLog
 from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
+from app.models.mcp_audit_log import MCPAuditLogEntry
 from app.models.notification import Notification, NotificationType
 from app.models.organization import Organization
 from app.models.permission import Permission, PermissionCategory
@@ -175,6 +176,7 @@ __all__ = [
     "User",
     "UserEmailAlias",
     "UserMCPToken",
+    "MCPAuditLogEntry",
     "UserRole",
     "WebhookLog",
     "RewardEvent",

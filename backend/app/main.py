@@ -234,6 +234,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     embedding_warmup_task = asyncio.create_task(_warm_embedding_model())
 
+    # 8a. Daily retention sweep for the MCP audit log. Single-instance:
+    # if Bodhiorchard grows multi-pod we'll move this behind a Redis lock
+    # so duplicate deletes don't race across pods.
+    from app.services.mcp_audit_cleanup import run_forever as run_audit_cleanup
+
+    mcp_audit_cleanup_task = asyncio.create_task(run_audit_cleanup())
+
     # 9. PR-merge Redis-stream worker pool. One consumer per
     # (org, repo) stream; supervisor task spawns consumers lazily as
     # streams appear in the registry. Orphan recovery re-publishes
@@ -253,6 +260,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cleanup_task.cancel()
     presence_task.cancel()
     embedding_warmup_task.cancel()
+    mcp_audit_cleanup_task.cancel()
     if pr_merge_pool is not None:
         await pr_merge_pool.stop()
     await stop_workers()

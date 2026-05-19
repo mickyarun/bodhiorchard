@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
+from app.mcp.audit import emit_audit
 from app.mcp.auth import MCPAuthResult, verify_mcp_token
 from app.mcp.handlers_agent_activity import handle_agent_activity
 from app.mcp.handlers_bud import (
@@ -66,6 +67,7 @@ from app.mcp.handlers_todo import (
     handle_get_bud_plan,
     handle_takeover_todo,
 )
+from app.mcp.rate_limit import enforce_rate_limit
 from app.mcp.synthesis_queue import (  # noqa: F401
     clear_synthesis_queue,
     get_queue_remaining,
@@ -702,14 +704,21 @@ async def list_tools() -> list[MCPToolDefinition]:
 async def call_tool(
     tool_name: str,
     body: MCPToolCallRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: MCPAuthResult = Depends(verify_mcp_token),
 ) -> dict[str, Any]:
     """Execute an MCP tool call from Claude Code.
 
+    Every call is rate-limited (per token, per IP) and recorded in the
+    ``mcp_audit_log`` table for incident response. Both checks are
+    transport-level cross-cutting concerns — neither knows or cares which
+    specific handler ends up running.
+
     Args:
         tool_name: The name of the tool to execute.
         body: Tool call parameters.
+        request: FastAPI request, used to derive client IP / user-agent.
         db: The async database session.
         auth: The authenticated org (and optional user) from MCP token.
 
@@ -724,19 +733,79 @@ async def call_tool(
         params=body.params,
     )
 
+    # Rate limit BEFORE dispatch so a spammed unknown tool also gets
+    # throttled (otherwise the 404 path is free-to-spam).
+    try:
+        await enforce_rate_limit(request=request, auth=auth, tool_name=tool_name)
+    except HTTPException as exc:
+        emit_audit(
+            request=request,
+            auth=auth,
+            org_id=auth.org.id,
+            token_id=auth.token_id,
+            tool_name=tool_name,
+            transport="http",
+            status_code=exc.status_code,
+        )
+        raise
+
     # Auth-aware handlers receive the full MCPAuthResult (needs user).
     auth_handler = AUTH_TOOL_HANDLERS.get(tool_name)
-    if auth_handler is not None:
-        return cast(dict[str, Any], await auth_handler(db, auth, body.params))
-
     handler = TOOL_HANDLERS.get(tool_name)
-    if handler is None:
+    if auth_handler is None and handler is None:
+        emit_audit(
+            request=request,
+            auth=auth,
+            org_id=auth.org.id,
+            token_id=auth.token_id,
+            tool_name=tool_name,
+            transport="http",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown tool: {tool_name}",
         )
 
-    return cast(dict[str, Any], await handler(db, auth.org, body.params))
+    try:
+        if auth_handler is not None:
+            result = cast(dict[str, Any], await auth_handler(db, auth, body.params))
+        else:
+            assert handler is not None  # checked above
+            result = cast(dict[str, Any], await handler(db, auth.org, body.params))
+    except HTTPException as exc:
+        emit_audit(
+            request=request,
+            auth=auth,
+            org_id=auth.org.id,
+            token_id=auth.token_id,
+            tool_name=tool_name,
+            transport="http",
+            status_code=exc.status_code,
+        )
+        raise
+    except Exception:
+        emit_audit(
+            request=request,
+            auth=auth,
+            org_id=auth.org.id,
+            token_id=auth.token_id,
+            tool_name=tool_name,
+            transport="http",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+        raise
+
+    emit_audit(
+        request=request,
+        auth=auth,
+        org_id=auth.org.id,
+        token_id=auth.token_id,
+        tool_name=tool_name,
+        transport="http",
+        status_code=status.HTTP_200_OK,
+    )
+    return result
 
 
 # --- Tool handler dispatch ---
