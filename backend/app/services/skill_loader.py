@@ -90,30 +90,21 @@ def load_skill(skill_name: str) -> Skill:
             the file has invalid frontmatter.
         FileNotFoundError: If the skill file doesn't exist.
     """
-    # Three layers of path-traversal protection, in order of strength
-    # against CodeQL's ``py/path-injection`` rule:
-    #
-    # 1. Regex allowlist — semantic intent ("must be kebab-case").
-    #    CodeQL doesn't recognise regex checks as sanitisers, but this
-    #    is the human-readable guardrail.
-    # 2. ``Path(...).name`` — strips ANY directory component from the
-    #    constructed filename. Even if ``skill_name`` were
-    #    ``../../etc/passwd``, ``Path("../../etc/passwd.md").name``
-    #    returns just ``"passwd.md"``. This IS the canonical sanitiser
-    #    pattern CodeQL's path-injection rule recognises, so the alert
-    #    clears here.
-    # 3. ``is_relative_to`` containment check on the resolved path —
-    #    defence in depth, also a recognised sanitiser pattern.
+    # Semantic guard: reject anything that isn't a kebab-case slug.
+    # CodeQL doesn't recognise regex checks as sanitisers but it's
+    # the readable contract for callers.
     if not _SAFE_SLUG.fullmatch(skill_name):
         raise ValueError(f"Invalid skill slug: {skill_name!r}")
 
+    # Canonicalise to a filename-only path component before joining.
+    # ``Path(...).name`` strips any directory component from user
+    # input — if ``skill_name`` were ``../../etc/passwd``, this
+    # returns just ``"passwd.md"``. CodeQL's ``py/path-injection``
+    # rule recognises this pattern as a sanitiser; the regex + this
+    # together are what the GitHub autofix proposed.
     skills_root = SKILLS_DIR.resolve()
-    # ``Path.name`` flattens any directory components a malicious slug
-    # might have smuggled past the regex on an unforeseen platform.
     skill_filename = Path(f"{skill_name}.md").name
     skill_path = (skills_root / skill_filename).resolve()
-    if not skill_path.is_relative_to(skills_root):
-        raise ValueError(f"Skill slug escapes skills directory: {skill_name!r}")
 
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill not found: {skill_path}")
