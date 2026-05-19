@@ -69,6 +69,7 @@ from app.services.agent_task_cancel import (
     cancel_task,
     is_task_terminal,
 )
+from app.services.bud_agent_trigger import create_agent_task_for_stage
 from app.services.bud_edit_policy import assert_section_editable
 
 logger = structlog.get_logger(__name__)
@@ -277,6 +278,7 @@ async def create_bud(
         status=BUDStatus.BUD,
         requirements_md=body.requirements_md,
         metadata_=body.metadata_,
+        auto_generate=body.auto_generate,
     )
     await bud_repo.create(bud)
 
@@ -337,19 +339,27 @@ async def create_bud(
         actor_name=current_user.name,
     )
 
-    logger.info("bud_created", bud_id=str(bud.id), bud_number=next_number, org_id=str(bud.org_id))
-
-    # Auto-trigger PM agent, same as the Slack approval flow
-    from app.services.bud_agent_trigger import create_agent_task_for_stage
-
-    await create_agent_task_for_stage(
-        bud,
-        "bud",
-        current_user.org_id,
-        db,
-        triggered_by=current_user.id,
-        force=True,
+    logger.info(
+        "bud_created",
+        bud_id=str(bud.id),
+        bud_number=next_number,
+        org_id=str(bud.org_id),
+        auto_generate=bud.auto_generate,
     )
+
+    # External-LLM mode: skip auto-triggering the PM agent. The user will
+    # drive PRD/design/tech-spec generation with their own local AI
+    # (connected via the remote MCP endpoint) and paste the result into the
+    # section editors. Stage-PATCH transitions are similarly gated.
+    if bud.auto_generate:
+        await create_agent_task_for_stage(
+            bud,
+            "bud",
+            current_user.org_id,
+            db,
+            triggered_by=current_user.id,
+            force=True,
+        )
 
     # Estimation deferred — triggers after PRD agent completes (via agent_result_handlers)
 
@@ -803,7 +813,18 @@ async def _trigger_status_jobs(
 
     # Data-driven agent triggering via stage mappings
     if new_status != old_status:
-        from app.services.bud_agent_trigger import create_agent_task_for_stage
+        # External-LLM mode: skip all stage-agent triggers. The user supplies
+        # PRD/design/tech-spec/test-plan content via the section editors. The
+        # status transition itself still happens in the caller; only the
+        # auto-agent spawn is suppressed.
+        if not bud.auto_generate:
+            logger.info(
+                "stage_agent_skip_auto_generate_off",
+                bud_id=str(bud.id),
+                from_status=str(old_status),
+                to_status=str(new_status),
+            )
+            return
 
         # Skip the code review agent if there are no open PRs. The agent's
         # only purpose is to post automated feedback to open PRs — if every
@@ -979,7 +1000,6 @@ async def override_code_review(
     the QA test-case agent. Blocked if an agent task is currently running on
     this BUD.
     """
-    from app.services.bud_agent_trigger import create_agent_task_for_stage
     from app.services.bud_timeline import record_event
 
     # Row lock serializes concurrent override requests — the second caller

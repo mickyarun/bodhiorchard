@@ -88,10 +88,11 @@ export const useBUDStore = defineStore('bud', () => {
     title: string,
     requirements_md?: string,
     stage_skill_overrides?: Record<string, string>,
+    auto_generate: boolean = true,
   ): Promise<BUDDocument | null> {
     error.value = ''
     try {
-      const payload: Record<string, unknown> = { title, requirements_md }
+      const payload: Record<string, unknown> = { title, requirements_md, auto_generate }
       if (stage_skill_overrides && Object.keys(stage_skill_overrides).length > 0) {
         payload.stage_skill_overrides = stage_skill_overrides
       }

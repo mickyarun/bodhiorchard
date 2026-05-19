@@ -217,9 +217,34 @@
               Advanced settings
             </v-expansion-panel-title>
             <v-expansion-panel-text>
+              <!-- BYO-AI toggle: when off, the BUD skips every auto-spawned
+                   stage agent (PM/Designer/TechPlan/Tester). The user drives
+                   PRD/design/tech-spec generation with their own local AI
+                   (typically via the remote MCP endpoint, see Settings →
+                   MCP Connect) and pastes the result into the section
+                   editors. The per-stage skill picker is meaningless in
+                   this mode so we dim it. -->
+              <div class="d-flex align-center ga-2 mb-3">
+                <v-switch
+                  v-model="autoGenerate"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  inset
+                  label="Auto-generate PRD, design and tech spec with our AI agents"
+                />
+              </div>
               <div class="text-caption text-medium-emphasis mb-3">
-                Pick which skill runs at each stage of this BUD. Leave the
-                default to use the org-wide default skill for that stage.
+                <template v-if="autoGenerate">
+                  Pick which skill runs at each stage of this BUD. Leave the
+                  default to use the org-wide default skill for that stage.
+                </template>
+                <template v-else>
+                  External-LLM mode is on. Stage agents will NOT run. Use your
+                  local AI via <strong>Settings → MCP Connect</strong> to
+                  generate PRD / design / tech-spec, then paste each section
+                  into the BUD editor tabs.
+                </template>
               </div>
               <v-progress-circular
                 v-if="skillsStore.loading"
@@ -227,7 +252,11 @@
                 size="20"
                 class="my-3"
               />
-              <div v-else class="d-flex flex-column ga-3">
+              <div
+                v-else
+                class="d-flex flex-column ga-3"
+                :style="{ opacity: autoGenerate ? 1 : 0.4 }"
+              >
                 <div
                   v-for="stage in advancedStages"
                   :key="stage.value"
@@ -242,6 +271,7 @@
                     density="compact"
                     variant="outlined"
                     hide-details
+                    :disabled="!autoGenerate"
                     class="flex-grow-1"
                   />
                 </div>
@@ -288,6 +318,7 @@ const newContent = ref('')
 const creating = ref(false)
 const advancedPanel = ref<string | null>(null)
 const stageSkillPicks = ref<Record<string, string | null>>({})
+const autoGenerate = ref(true)
 
 // Single source of truth for which stages get a dropdown — mirrors
 // BUD_STAGE_AGENT_TYPE in backend/app/agents/skill_mapping.py. If a new
@@ -369,6 +400,7 @@ async function createBUD(): Promise<void> {
     newTitle.value.trim(),
     newContent.value.trim() || undefined,
     Object.keys(overrides).length > 0 ? overrides : undefined,
+    autoGenerate.value,
   )
   creating.value = false
   if (bud) {
@@ -377,6 +409,7 @@ async function createBUD(): Promise<void> {
     newContent.value = ''
     stageSkillPicks.value = {}
     advancedPanel.value = null
+    autoGenerate.value = true
     router.push(`/buds/${bud.id}`)
   }
 }

@@ -47,6 +47,10 @@ class BUDCreate(BaseModel):
     # to the org's default skill for that stage's agent type. Validated in
     # the route handler against the caller's org.
     stage_skill_overrides: dict[BUDStatus, uuid.UUID] | None = None
+    # When False, no stage agent runs on create or transition — the user
+    # supplies PRD/design/tech-spec themselves (typically via their local
+    # AI driven through the remote MCP endpoint).
+    auto_generate: bool = True
 
     model_config = {"populate_by_name": True}
 
@@ -107,6 +111,7 @@ class BUDRead(BaseModel):
     qa_manual_cases: list[dict[str, Any]] | None = None
     qa_execution_plan_md: str | None = None
     code_review_comments: list[dict[str, Any]] | None = None
+    auto_generate: bool = True
     designs: list[BUDDesignRead] = []
     metadata: dict[str, Any] | None = Field(None, validation_alias="metadata_")
     impacted_repos: list[dict[str, Any]] | None = None

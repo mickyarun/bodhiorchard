@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -29,6 +30,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -127,6 +129,15 @@ class BUDDocument(BaseModel):
     )
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # When False, no stage agent (PM/Designer/TechPlanner/Tester) is auto-triggered
+    # on BUD create or stage transitions. The user drives PRD/design/tech-spec
+    # generation with their own local AI (via the remote MCP endpoint) and
+    # pastes the result into the section editors. Existing BUDs are migrated
+    # with server_default=true to preserve current auto-gen behaviour.
+    auto_generate: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
     )
 
     # Timestamp the user last clicked "Dismiss" on the phase-failure
