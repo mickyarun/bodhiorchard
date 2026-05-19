@@ -579,3 +579,49 @@ async def test_find_affected_clusters_returns_none_when_both_shas_empty(
         tracked_head_sha="SHA_A",
     )
     assert result is None
+
+
+# --- _advance_tracked_head_sha (the real helper, not the dispatcher mock) ----
+
+
+async def test_advance_tracked_head_sha_commits_advance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The helper must open a session, call ``advance_head_sha`` with the
+    bound org/repo/sha, and commit. The dispatcher tests stub this whole
+    helper out — this one pins the contract end-to-end.
+    """
+    advance_calls: list[dict[str, Any]] = []
+    commits: list[bool] = []
+
+    class _FakeRepo:
+        def __init__(self, _db: Any, *, org_id: uuid.UUID) -> None:
+            self.org_id = org_id
+
+        async def advance_head_sha(self, repo_id: uuid.UUID, head_sha: str) -> None:
+            advance_calls.append(
+                {"org_id": str(self.org_id), "repo_id": str(repo_id), "head_sha": head_sha}
+            )
+
+    class _FakeDb:
+        async def commit(self) -> None:
+            commits.append(True)
+
+    class _FakeSessionCtx:
+        async def __aenter__(self) -> _FakeDb:
+            return _FakeDb()
+
+        async def __aexit__(self, *_a: Any) -> None:
+            return None
+
+    monkeypatch.setattr(mod, "TrackedRepoRepository", _FakeRepo)
+    monkeypatch.setattr(mod, "AsyncSessionLocal", lambda: _FakeSessionCtx())
+
+    org_id = uuid.uuid4()
+    repo_id = uuid.uuid4()
+    await mod._advance_tracked_head_sha(org_id=org_id, repo_id=repo_id, head_sha="HEAD_SHA")
+
+    assert advance_calls == [
+        {"org_id": str(org_id), "repo_id": str(repo_id), "head_sha": "HEAD_SHA"}
+    ]
+    assert commits == [True]

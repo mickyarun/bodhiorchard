@@ -37,6 +37,7 @@ trigger.
 
 from __future__ import annotations
 
+import re
 import uuid
 
 import structlog
@@ -48,6 +49,13 @@ from app.services.git_operations import _detect_main_branch, run_git
 from app.services.pr_merge_worker import publish_pr_merge_delivery
 
 logger = structlog.get_logger(__name__)
+
+# Accepts both classic 40-char SHA-1 and 64-char SHA-256 object IDs so
+# git transitions on the remote don't silently break us. Anything else
+# from ``git ls-remote`` (HTML banners, proxy errors, ``warning:``
+# lines, ambiguous branch listings) is rejected before it reaches the
+# dispatcher.
+_GIT_SHA_RE = re.compile(r"\A[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 
 EVENT_TYPE_REPO_SCAN = "repo_scan"
 """``webhook_logs.event_type`` value for synthetic rescan deliveries.
@@ -77,6 +85,17 @@ class RescanHeadResolutionError(RuntimeError):
     """
 
 
+class RescanDeliveryIdCollisionError(RuntimeError):
+    """A freshly-generated ``rescan-{uuid4}`` delivery_id collided.
+
+    Structurally impossible with uuid4. If it ever fires, something is
+    badly wrong (clock-rewind cloning the same PRNG, or a corrupted
+    ``webhook_logs`` row pinned at our prefix) — surfacing the failure
+    is better than silently masking it as a no-op delivery the operator
+    would never see complete.
+    """
+
+
 async def enqueue_rescan_delivery(
     *,
     org_id: uuid.UUID,
@@ -90,6 +109,14 @@ async def enqueue_rescan_delivery(
     at a glance. The actual prefix has no semantic meaning to the
     consumer.
     """
+    # Two separate sessions are intentional: ``git ls-remote`` can take
+    # several seconds, and holding a Postgres transaction across the
+    # network round-trip would needlessly pin a connection. The race
+    # window between the two sessions (repo renamed/deleted by another
+    # caller) is bounded by the seconds-long ls-remote — acceptable for
+    # an operator-triggered rescan; the worst case is an orphan
+    # ``webhook_logs`` row that orphan-recovery will replay and the
+    # dispatcher will then no-op (``_load_repo_and_org`` returns None).
     async with with_session(org_id) as db:
         repo = await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id)
         if repo is None:
@@ -133,12 +160,20 @@ async def enqueue_rescan_delivery(
         await db.commit()
 
     if not inserted:
-        # uuid4 collision is structurally impossible; the only way this
-        # branch fires is a clock-skew clone of an existing row. Log
-        # and continue — publish_pr_merge_delivery is idempotent enough
-        # that a stray duplicate XADD is harmless.
-        logger.warning("rescan_delivery_id_collision", delivery_id=delivery_id)
+        # ``record_replay_row`` uses ``ON CONFLICT DO NOTHING`` — returning
+        # False means the delivery_id already exists. With uuid4 this is
+        # structurally impossible, so raise rather than silently masking:
+        # if it ever fires, a stray duplicate row would create a no-op
+        # delivery the operator would watch forever waiting for "done".
+        logger.error("rescan_delivery_id_collision", delivery_id=delivery_id)
+        raise RescanDeliveryIdCollisionError(f"webhook_logs already has a row for {delivery_id}")
 
+    # Insert-then-publish ordering is load-bearing: if XADD fails after
+    # commit, the durable row stays in ``pending`` status and the
+    # boot-time orphan-recovery loop in ``pr_merge_worker.recover_orphans_at_startup``
+    # re-publishes pending rows on the next backend start. The reverse
+    # order would lose the delivery on a Redis outage between XADD and
+    # commit.
     await publish_pr_merge_delivery(org_id=org_id, repo_id=repo_id, delivery_id=delivery_id)
     logger.info(
         "rescan_enqueued",
@@ -153,13 +188,29 @@ async def enqueue_rescan_delivery(
 
 
 async def _resolve_remote_head_sha(*, repo_path: str, branch: str) -> str:
-    """Resolve the remote HEAD SHA for ``branch`` via ``git ls-remote``."""
+    """Resolve the remote HEAD SHA for ``branch`` via ``git ls-remote``.
+
+    Validates that the response is a single ``<sha>\\t<ref>`` line whose
+    first token is a hex object ID. Refuses ambiguous matches (multiple
+    refs come back when the branch name is a glob or matches multiple
+    refs); refuses non-SHA tokens (HTML banners, proxy errors, etc.)
+    that would otherwise flow into ``payload["head_sha"]`` and surface
+    much later as a confusing indexer/git-checkout failure.
+    """
     stdout, stderr, rc = await run_git(["ls-remote", "origin", branch], cwd=repo_path)
     if rc != 0 or not stdout.strip():
         raise RescanHeadResolutionError(
             f"git ls-remote origin {branch} failed (rc={rc}): {stderr[:200]}"
         )
-    sha = stdout.split()[0].strip()
-    if not sha:
-        raise RescanHeadResolutionError(f"git ls-remote origin {branch} returned empty SHA")
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise RescanHeadResolutionError(
+            f"git ls-remote origin {branch} returned {len(lines)} refs "
+            f"(expected exactly one): {stdout[:200]!r}"
+        )
+    sha = lines[0].split()[0].strip().lower()
+    if not _GIT_SHA_RE.fullmatch(sha):
+        raise RescanHeadResolutionError(
+            f"git ls-remote origin {branch} returned non-SHA token: {sha[:80]!r}"
+        )
     return sha

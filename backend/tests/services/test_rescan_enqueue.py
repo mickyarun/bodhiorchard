@@ -94,7 +94,7 @@ def _reset_captures() -> None:
 def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     captured: dict[str, Any] = {
         "publish_calls": [],
-        "ls_remote_result": ("REMOTE_HEAD_SHA\trefs/heads/main\n", "", 0),
+        "ls_remote_result": ("abcdef0123456789abcdef0123456789abcdef01\trefs/heads/main\n", "", 0),
     }
 
     @asynccontextmanager
@@ -160,7 +160,7 @@ async def test_payload_shape_matches_pr_merge_dispatcher_contract(
     payload = call["payload"]
     assert payload["pr_number"] == 0
     assert payload["base_sha"] == "BASE_SHA_FROM_TRACKED"
-    assert payload["head_sha"] == "REMOTE_HEAD_SHA"
+    assert payload["head_sha"] == "abcdef0123456789abcdef0123456789abcdef01"
     assert payload["full_name"] == "owner/fakerepo"
     assert payload["trigger"] == "operator_button"
     assert call["event_type"] == mod.EVENT_TYPE_REPO_SCAN
@@ -215,6 +215,65 @@ async def test_raises_when_ls_remote_returns_empty_sha(
         await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
 
 
+async def test_raises_when_ls_remote_returns_non_sha_token(
+    _patched: dict[str, Any],
+) -> None:
+    """First token isn't a hex object id — reject before it reaches the dispatcher."""
+    _patched["ls_remote_result"] = ("<!doctype html><html>...\n", "", 0)
+
+    with pytest.raises(mod.RescanHeadResolutionError, match="non-SHA token"):
+        await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
+
+    assert _patched["publish_calls"] == []
+
+
+async def test_raises_when_ls_remote_returns_multiple_refs(
+    _patched: dict[str, Any],
+) -> None:
+    """Ambiguous branch name → multiple lines. Refuse rather than pick the first."""
+    _patched["ls_remote_result"] = (
+        "abcdef0123456789abcdef0123456789abcdef01\trefs/heads/main\n"
+        "1111111111111111111111111111111111111111\trefs/heads/main-2\n",
+        "",
+        0,
+    )
+
+    with pytest.raises(mod.RescanHeadResolutionError, match="2 refs"):
+        await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
+
+    assert _patched["publish_calls"] == []
+
+
+async def test_accepts_sha256_object_id(_patched: dict[str, Any]) -> None:
+    """64-char SHA-256 object IDs (git's transitional format) are accepted too."""
+    sha256 = "a" * 64
+    _patched["ls_remote_result"] = (f"{sha256}\trefs/heads/main\n", "", 0)
+
+    delivery_id = await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
+
+    assert delivery_id.startswith("rescan-")
+    assert _FakeWebhookLogRepo.last_call["payload"]["head_sha"] == sha256
+
+
+async def test_raises_collision_when_record_replay_row_returns_false(
+    _patched: dict[str, Any],
+) -> None:
+    """``ON CONFLICT DO NOTHING`` returning False = pre-existing row.
+
+    Structurally impossible with uuid4 but if it ever fires we want a
+    loud failure, not a silent no-op delivery the operator watches
+    forever waiting for "done".
+    """
+    _FakeWebhookLogRepo.inserted = False
+
+    with pytest.raises(mod.RescanDeliveryIdCollisionError):
+        await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
+
+    # And critically — no XADD landed on the stream for a delivery the
+    # consumer would never find a fresh row for.
+    assert _patched["publish_calls"] == []
+
+
 async def test_base_sha_empty_when_tracked_head_sha_null(
     _patched: dict[str, Any],
 ) -> None:
@@ -230,4 +289,7 @@ async def test_base_sha_empty_when_tracked_head_sha_null(
     await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
 
     assert _FakeWebhookLogRepo.last_call["payload"]["base_sha"] == ""
-    assert _FakeWebhookLogRepo.last_call["payload"]["head_sha"] == "REMOTE_HEAD_SHA"
+    assert (
+        _FakeWebhookLogRepo.last_call["payload"]["head_sha"]
+        == "abcdef0123456789abcdef0123456789abcdef01"
+    )
