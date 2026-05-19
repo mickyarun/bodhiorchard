@@ -45,6 +45,11 @@ from app.schemas.scan import (
     TrackedRepoCard,
     V2ConfigResponse,
 )
+from app.services.scan.rescan_enqueue import (
+    RescanHeadResolutionError,
+    RescanRepoNotFoundError,
+    enqueue_rescan_delivery,
+)
 from app.services.scan.runner import (
     ScanAlreadyActiveError,
     start_scan,
@@ -141,34 +146,69 @@ async def create_scan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StartScanResponse:
-    """Queue a scan across the selected repositories."""
+    """Queue a scan across the selected repositories.
+
+    Routes each repo by ``last_scanned_at``:
+
+    * ``NULL`` (never scanned) → existing full scan pipeline.
+    * Non-null (already scanned at least once) → synthetic
+      ``webhook_logs`` row + XADD onto the per-(org, repo) Redis
+      stream, where the PR-merge consumer picks it up and runs the
+      same diff-based path as a real PR merge.
+    """
     if not body.repo_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="repo_ids must be non-empty",
         )
     org_id = await _resolve_org_id(current_user, db)
-    try:
-        scan_id = await start_scan(org_id=org_id, repo_ids=body.repo_ids, config=body.config)
-    except ScanAlreadyActiveError as exc:
-        # 409 carries the in-flight scan_id so the frontend can switch
-        # the timeline view to it instead of starting a duplicate.
+    first_scan_ids, rescan_ids = await _split_by_scan_history(
+        db=db, org_id=org_id, repo_ids=body.repo_ids
+    )
+    if not first_scan_ids and not rescan_ids:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "scan_already_active",
-                "scan_id": str(exc.scan_id),
-                "status": exc.status,
-                "message": "A scan is already running for this org.",
-            },
-        ) from exc
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="None of the requested repo_ids are tracked by this organisation",
+        )
+    scan_id: uuid.UUID | None = None
+    if first_scan_ids:
+        try:
+            scan_id = await start_scan(org_id=org_id, repo_ids=first_scan_ids, config=body.config)
+        except ScanAlreadyActiveError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "scan_already_active",
+                    "scan_id": str(exc.scan_id),
+                    "status": exc.status,
+                    "message": "A scan is already running for this org.",
+                },
+            ) from exc
+
+    rescan_delivery_ids: list[str] = []
+    for repo_id in rescan_ids:
+        try:
+            delivery_id = await enqueue_rescan_delivery(org_id=org_id, repo_id=repo_id)
+        except RescanRepoNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except RescanHeadResolutionError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        rescan_delivery_ids.append(delivery_id)
+
     logger.info(
         "scan_create",
         org_id=str(org_id),
-        scan_id=str(scan_id),
-        repo_count=len(body.repo_ids),
+        scan_id=str(scan_id) if scan_id else None,
+        first_scan_count=len(first_scan_ids),
+        rescan_count=len(rescan_ids),
     )
-    return StartScanResponse(scan_id=scan_id, status="queued", repo_count=len(body.repo_ids))
+    return StartScanResponse(
+        scan_id=scan_id,
+        status="queued",
+        repo_count=len(body.repo_ids),
+        rescan_delivery_ids=rescan_delivery_ids,
+        rescan_repo_count=len(rescan_ids),
+    )
 
 
 @router.post(
@@ -309,3 +349,31 @@ async def _resolve_org_id(user: User, db: AsyncSession) -> uuid.UUID:
             detail="User is not a member of any organisation",
         )
     return org.id
+
+
+async def _split_by_scan_history(
+    *,
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    repo_ids: list[uuid.UUID],
+) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+    """Split requested repo ids into ``(first_scan, rescan)`` buckets.
+
+    Repos not found for this org are dropped from both buckets — the
+    request had ids the org can't see, and the downstream paths would
+    surface 404s anyway. The first-scan path then sees an empty list
+    and skips ``start_scan`` entirely; the rescan path skips its own
+    enqueue loop. The caller surfaces the empty-result case as a 404
+    only if BOTH buckets end up empty.
+    """
+    scanned = await TrackedRepoRepository(db, org_id=org_id).get_scanned_status_by_ids(repo_ids)
+    first_scan: list[uuid.UUID] = []
+    rescan: list[uuid.UUID] = []
+    for repo_id in repo_ids:
+        if repo_id not in scanned:
+            continue
+        if scanned[repo_id]:
+            rescan.append(repo_id)
+        else:
+            first_scan.append(repo_id)
+    return first_scan, rescan

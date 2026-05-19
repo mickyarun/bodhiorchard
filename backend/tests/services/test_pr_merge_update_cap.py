@@ -100,6 +100,7 @@ def _install_replay_row(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
 
     class _FakeRow:
         delivery_id = "d1"
+        event_type = payload.get("event_type", "pull_request")
 
         def __init__(self) -> None:
             self.org_id = org_id

@@ -147,6 +147,7 @@ async def handle_pr_merge_delivery(delivery_id: str) -> None:
     logger.info(
         "pr_merge_delivery_narrow_done",
         delivery_id=delivery_id,
+        event_type=row.event_type,
         repo_id=str(row.repo_id),
         branch=outcome.branch,
         inserted=outcome.inserted,
