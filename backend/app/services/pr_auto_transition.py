@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument, BUDStatus
 from app.repositories.bud import BUDRepository
+from app.repositories.bud_todo import BUDTodoRepository
 from app.repositories.pull_request import PullRequestRepository
 from app.services.bud_timeline import record_event
 
@@ -74,6 +75,27 @@ async def check_all_repos_have_prs(
         return
 
     if impacted_ids.issubset(repo_ids_with_prs):
+        # TODO gate: even with every impacted repo's PR up, the BUD must
+        # not advance to code_review until every TODO (including the
+        # code-review TODO that the tech-arch agent emits) is marked
+        # completed. The PR signal alone is "code is on GitHub"; the
+        # TODO signal is "the developer says the work is done". Both
+        # are required. Without this gate the agent code-review fires
+        # against half-finished work and produces noise.
+        #
+        # ``count_remaining_for_bud`` excludes the ⟐ / ◆ / ◇ visual
+        # checkpoint sub-bullets the parser emits — those are markers,
+        # not work items, and intentionally don't block the gate.
+        todo_repo = BUDTodoRepository(db, org_id=org_id)
+        remaining = await todo_repo.count_remaining_for_bud(bud.id)
+        if remaining > 0:
+            logger.info(
+                "dev_to_code_review_blocked_on_todos",
+                bud_id=str(bud.id),
+                remaining_todos=remaining,
+            )
+            return
+
         # Auto-populate confirmed_repos so code review agent has repo paths
         from app.repositories.tracked_repository import TrackedRepoRepository
 

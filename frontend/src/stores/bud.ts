@@ -15,7 +15,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { AxiosError } from 'axios'
-import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatInProgressDetail, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewRepoStatus, JobStatusRead } from '@/types'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatInProgressDetail, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewStatusResponse, JobStatusRead } from '@/types'
 import { BUD_STATUS_ORDER, CODE_REVIEW_OVERRIDE_REASON_MIN } from '@/types'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
@@ -354,12 +354,20 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
-  async function fetchCodeReviewStatus(budId: string): Promise<CodeReviewRepoStatus[]> {
+  async function fetchCodeReviewStatus(budId: string): Promise<CodeReviewStatusResponse> {
     try {
-      const { data } = await api.get(`/v1/buds/${budId}/code-review/status`)
-      return data?.repos ?? []
+      const { data } = await api.get<CodeReviewStatusResponse>(
+        `/v1/buds/${budId}/code-review/status`,
+      )
+      return {
+        repos: data?.repos ?? [],
+        last_run_status: data?.last_run_status ?? 'never_run',
+        last_run_message: data?.last_run_message ?? null,
+      }
     } catch {
-      return []
+      // Soft failure: keep the tab usable even if the status endpoint
+      // is down. The component should never block on a banner load.
+      return { repos: [], last_run_status: 'never_run', last_run_message: null }
     }
   }
 

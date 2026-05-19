@@ -870,6 +870,16 @@ export interface PRChecklistItem {
 
 export type CodeReviewPRState = 'not_raised' | 'open' | 'merged' | 'closed'
 
+// Mirror of backend ``CodeReviewRunStatus`` (see schemas/bud_code_review.py).
+// Drives the parse-failure banner on the Code Review tab — banner renders
+// only for ``parse_failed`` and ``failed``.
+export type CodeReviewRunStatus =
+  | 'never_run'
+  | 'running'
+  | 'ok'
+  | 'parse_failed'
+  | 'failed'
+
 export interface CodeReviewRepoStatus {
   repo_id: string
   repo_name: string
@@ -881,6 +891,8 @@ export interface CodeReviewRepoStatus {
 
 export interface CodeReviewStatusResponse {
   repos: CodeReviewRepoStatus[]
+  last_run_status: CodeReviewRunStatus
+  last_run_message: string | null
 }
 
 // Mirror of backend `CodeReviewOverrideRequest` Pydantic constraints in

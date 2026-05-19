@@ -354,6 +354,12 @@ async def _maybe_detect_release_promotion(
             stage = "uat"
     elif repo.main_branch and base_ref == repo.main_branch:
         stage = "prod"
+    elif repo.develop_branch and base_ref == repo.develop_branch:
+        # ``develop_branch`` is the opt-in for the develop stage. If the
+        # tracked repo hasn't set it, a merge into a branch named "develop"
+        # does NOT credit XP — the absence of the column is the signal that
+        # the org doesn't treat that branch as a release stage.
+        stage = "develop"
 
     if stage is None:
         return
@@ -597,6 +603,23 @@ async def _fetch_and_store_review_comments(
         return
 
     existing = list(bud.code_review_comments or [])
+
+    # GitHub echoes back ``pull_request_review`` events for reviews the
+    # BodhiOrchard agent itself just posted (via
+    # ``github_pr_sync.sync_review_comments_to_github``). Those agent
+    # entries are tagged with ``review_id`` matching the review's API
+    # id, so the presence of any such entry means we already covered
+    # this review locally and would otherwise double-count by storing
+    # the inline comments + summary again.
+    if any(c.get("review_id") == review.id for c in existing):
+        logger.info(
+            "review_echo_skipped",
+            bud_id=str(pr.bud_id),
+            review_id=review.id,
+            pr_number=pr_data.number,
+        )
+        return
+
     existing_ids = {c.get("github_comment_id") for c in existing if c.get("github_comment_id")}
     repo_name = (pr.github_repo_full_name or "").split("/")[-1]
 

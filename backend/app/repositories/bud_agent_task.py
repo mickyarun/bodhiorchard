@@ -160,6 +160,26 @@ class BUDAgentTaskRepository(BaseRepository[BUDAgentTask]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_latest_for_type(self, bud_id: uuid.UUID, task_type: str) -> BUDAgentTask | None:
+        """Get the most recent task of a given ``task_type`` for a BUD.
+
+        Used by the Code Review tab to surface the latest ``code_review``
+        run's ``result_summary`` (parse_ok / parse_failure_reason) so the
+        UI can render a "re-run review — agent output was unparseable"
+        banner when the parser failed. Returns any status (pending,
+        running, completed, failed) — the caller picks what to render
+        per status.
+        """
+        stmt = self._scoped(
+            select(BUDAgentTask)
+            .where(BUDAgentTask.bud_id == bud_id)
+            .where(BUDAgentTask.task_type == task_type)
+            .order_by(BUDAgentTask.created_at.desc())
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_for_bud(self, bud_id: uuid.UUID) -> list[BUDAgentTask]:
         """List all agent tasks for a BUD, most recent first."""
         stmt = self._scoped(

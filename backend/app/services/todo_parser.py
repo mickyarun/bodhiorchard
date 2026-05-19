@@ -42,7 +42,17 @@ from app.services._todo_parser_section import (
     strip_bullet_prefix,
 )
 
-_CHECKPOINT_RE = re.compile(r"[⟐◆◇]|\bcode\s+review\b", re.IGNORECASE)
+# Checkpoints are inline visual markers the tech-arch agent emits in the
+# implementation TODO section (using ⟐ / ◆ / ◇ glyphs) to delineate sub-
+# phases — e.g. "design review" before moving on. They are NOT work items:
+# they cannot be claimed (see ``handle_takeover_todo``) and don't show
+# up in the per-developer assignment / remaining-work counts.
+#
+# Code review is intentionally NOT in this regex any more. It is a real
+# TODO that a developer (or Claude via MCP) claims, executes, and
+# completes via the standard takeover/complete flow — and it counts
+# toward the dev → code_review transition gate just like any other TODO.
+_CHECKPOINT_RE = re.compile(r"[⟐◆◇]", re.IGNORECASE)
 
 _MAX_TITLE_LEN = 500
 _MAX_CONTEXT_LEN = 4000
