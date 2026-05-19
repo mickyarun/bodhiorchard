@@ -95,12 +95,21 @@ export function handleBridgePublish(req: Request, res: Response): void {
 
   const room = orgRooms.get(payload.orgId)
   if (!room) {
-    // Silent drop — no active room for this org. The event will take
-    // effect next time a client joins (via the snapshot endpoint).
+    // No active OrgRoom for this org — nobody is viewing the dashboard
+    // for that org right now, so the event has nowhere to go. The next
+    // client to join will pull the org-snapshot HTTP route and pick up
+    // current state; ephemeral events like dev_activity are not replayed.
+    console.log(
+      `[BridgeEndpoint] drop type=${payload.type} org=${payload.orgId} ` +
+      `reason=no_active_room registered=[${[...orgRooms.keys()].join(",")}]`,
+    )
     res.status(200).json({ delivered: false, reason: "no active room" })
     return
   }
 
+  console.log(
+    `[BridgeEndpoint] deliver type=${payload.type} org=${payload.orgId}`,
+  )
   try {
     room.handleBridgeEvent(payload.type, payload.data)
     res.status(200).json({ delivered: true })

@@ -225,10 +225,29 @@ export class DevActivitySim {
     event: DevActivityEvent,
   ): void {
     const member = this.findMember(members, event.user_id, event.actor_name)
-    if (!member) return
+    if (!member) {
+      console.log(
+        `[DevActivitySim] drop event=${event.event_type} user_id=${event.user_id} ` +
+        `actor=${event.actor_name} repo=${event.repo_name} reason=member_not_found ` +
+        `known_members=${members.size}`,
+      )
+      return
+    }
 
     // Skip for player-controlled characters
-    if (member.takeoverSessionId) return
+    if (member.takeoverSessionId) {
+      console.log(
+        `[DevActivitySim] skip event=${event.event_type} user_id=${event.user_id} ` +
+        `member=${member.name} reason=taken_over session=${member.takeoverSessionId}`,
+      )
+      return
+    }
+
+    console.log(
+      `[DevActivitySim] handle event=${event.event_type} status=${event.status} ` +
+      `user_id=${event.user_id} member=${member.name} repo=${event.repo_name} ` +
+      `known_repos=${[...this.repoPositions.keys()].join(",")}`,
+    )
 
     // Session end or completion → return to seat
     if (

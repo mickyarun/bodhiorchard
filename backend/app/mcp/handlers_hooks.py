@@ -203,6 +203,14 @@ async def handle_dev_activity(
         "file_path": body.file_path,
         "created_at": log.created_at.isoformat(),
     }
+    logger.info(
+        "dev_activity_colyseus_publish_scheduled",
+        event_type=body.event_type,
+        bud_number=bud_number,
+        user_id=str(user_id) if user_id else None,
+        repo_name=_pub_repo_name,
+        org_id=str(org.id),
+    )
     _publish_task = asyncio.create_task(
         publish_to_colyseus(org.id, "dev_activity", dev_activity_payload)
     )
