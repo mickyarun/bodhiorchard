@@ -539,11 +539,16 @@ async def _handle_review_submitted(
                 logger.warning("sp_award_failed_review", exc_info=True)
         else:
             # Reviewers aren't BUD assignees, so no fallback applies — just
-            # log the skip so XP-not-crediting reports are diagnosable.
+            # log the skip so XP-not-crediting reports are diagnosable. Field
+            # shape mirrors ``pr_author_unresolved`` so a single Loki query
+            # covers both miss paths.
             logger.info(
                 "review_author_unresolved",
+                event="review_submitted",
                 pr_id=pr_data.id,
                 github_login=review.user.login,
+                on_bud_branch=pr.bud_id is not None,
+                resolution_source="unresolved",
             )
 
     await db.commit()

@@ -109,6 +109,31 @@ async def test_returns_unresolved_when_bud_has_no_assignee() -> None:
 
 
 @pytest.mark.asyncio
+async def test_empty_github_login_falls_through_to_bud_assignee() -> None:
+    """Empty github_login (rare but possible) still routes to the fallback.
+
+    ``UserRepository.get_id_by_github_login`` short-circuits on empty
+    strings and returns ``None``, so the resolver continues to the
+    BUD-assignee path. Pinned here because the short-circuit is in
+    repo code; behavior would silently change if that contract moved.
+    """
+    assignee_id = uuid.uuid4()
+    bud = MagicMock(assignee_id=assignee_id)
+
+    with (
+        patch("app.services.github_webhook_handler.UserRepository") as mock_user_repo,
+        patch("app.services.github_webhook_handler.BUDRepository") as mock_bud_repo,
+    ):
+        mock_user_repo.return_value.get_id_by_github_login = AsyncMock(return_value=None)
+        mock_bud_repo.return_value.get_by_id = AsyncMock(return_value=bud)
+
+        result_id, source = await _resolve_pr_author(MagicMock(), uuid.uuid4(), "", uuid.uuid4())
+
+    assert result_id == assignee_id
+    assert source == "bud_assignee"
+
+
+@pytest.mark.asyncio
 async def test_returns_unresolved_when_bud_id_dangles() -> None:
     """Username miss + bud_id passed but BUD row gone → unresolved."""
     with (
