@@ -47,6 +47,7 @@ from app.api.v1.triage_sessions import router as triage_router
 from app.api.v1.ws import router as ws_router
 from app.api.v1.xp import router as xp_router
 from app.mcp.server import router as mcp_router
+from app.mcp.streamable import router as mcp_remote_router
 
 api_router = APIRouter()
 
@@ -77,6 +78,11 @@ api_router.include_router(ws_router, prefix="/api/v1")
 api_router.include_router(public_router, prefix="/api/v1/public")
 api_router.include_router(xp_router, prefix="/api/v1")
 api_router.include_router(mcp_router)
+# Remote MCP endpoint for external LLM clients (Claude Desktop / Cursor /
+# Continue). Shares /mcp/ prefix and Bearer auth with the existing tool
+# endpoint but enforces a hard-coded read-only tool allowlist at the
+# transport layer — see app/mcp/streamable.py for the rationale.
+api_router.include_router(mcp_remote_router)
 api_router.include_router(internal_colyseus_router, prefix="/api/v1")
 api_router.include_router(races_router, prefix="/api/v1/races")
 api_router.include_router(races_internal_router, prefix="/api/v1")
