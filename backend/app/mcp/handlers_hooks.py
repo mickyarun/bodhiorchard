@@ -42,6 +42,13 @@ logger = structlog.get_logger(__name__)
 
 _BUD_BRANCH_RE = re.compile(r"^bud-(\d+)/")
 
+# Strong references to in-flight Colyseus publish tasks. ``asyncio.create_task``
+# only holds a weak reference to the task it returns, so without an external
+# anchor the task can be garbage-collected mid-await — silently dropping the
+# HTTP POST and the character-movement event with it. Same pattern as
+# ``event_bus._transport_tasks`` and ``api.v1.bugs._background_tasks``.
+_publish_tasks: set[asyncio.Task[None]] = set()
+
 
 async def handle_dev_activity(
     db: AsyncSession,
@@ -196,7 +203,11 @@ async def handle_dev_activity(
         "file_path": body.file_path,
         "created_at": log.created_at.isoformat(),
     }
-    asyncio.create_task(publish_to_colyseus(org.id, "dev_activity", dev_activity_payload))
+    _publish_task = asyncio.create_task(
+        publish_to_colyseus(org.id, "dev_activity", dev_activity_payload)
+    )
+    _publish_tasks.add(_publish_task)
+    _publish_task.add_done_callback(_publish_tasks.discard)
 
     # Daily-streak XP only — individual commits no longer credit XP. The
     # outcome-based model awards XP at stage promotion (PR merged into a
