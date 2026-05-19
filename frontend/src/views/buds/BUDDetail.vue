@@ -49,6 +49,38 @@
             @open-skill-settings="skillSettingsOpen = true"
           />
 
+          <!-- External-LLM mode banner. When auto_generate is OFF, no
+               PM / Designer / TechPlanner agent will spawn for this
+               BUD — the user is expected to drive content with their
+               own local AI via the remote MCP endpoint and paste the
+               result into each section editor. -->
+          <v-alert
+            v-if="bud.auto_generate === false"
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mx-12 mb-3"
+            icon="mdi-laptop"
+          >
+            <div class="d-flex align-center ga-3 flex-wrap">
+              <div class="flex-grow-1">
+                <strong>External-LLM mode.</strong>
+                Stage agents are off for this BUD. Connect your local AI to
+                gather context, then paste the finished spec into each
+                section editor.
+              </div>
+              <v-btn
+                size="small"
+                color="primary"
+                variant="flat"
+                prepend-icon="mdi-connection"
+                :to="{ name: 'settings-mcp-connect' }"
+              >
+                MCP Connect
+              </v-btn>
+            </div>
+          </v-alert>
+
           <!-- Workflow banners, approval/reject/reassign dialogs, repo confirmation -->
           <BUDWorkflowActions
             ref="workflowRef"

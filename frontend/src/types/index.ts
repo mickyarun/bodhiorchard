@@ -199,6 +199,10 @@ export interface BUDDocument extends BUDListItem {
     failed_at: string | null
     metadata: Record<string, unknown>
   } | null
+  // When false, stage agents do not auto-run. The user drives PRD/design/
+  // tech-spec generation with their own local AI via the remote MCP
+  // endpoint and pastes the result into the section editors.
+  auto_generate: boolean
 }
 
 // ── BUD TODO Types ────────────────────────────────────────
