@@ -30,7 +30,7 @@ from app.schemas.design_system import (
     DesignSystemExtractRequest,
     DesignSystemRead,
     DesignSystemSetDefault,
-    DesignSystemUpdateContent,
+    DesignSystemUpdateCustomContent,
 )
 from app.schemas.jobs import DesignExtractJobPayload, JobCreatedResponse
 from app.services.job_queue import JOB_DESIGN_EXTRACT, create_job
@@ -38,6 +38,26 @@ from app.services.job_queue import JOB_DESIGN_EXTRACT, create_job
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["design-systems"])
+
+
+async def _to_read(
+    repo: DesignSystemRefRepository,
+    ds_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Return the `DesignSystemRead` shape for one row.
+
+    Goes through ``list_with_repo_names`` so the response shape (including
+    ``merged_content`` and the joined ``repo_name``) stays defined in one
+    place. Endpoints that just mutated a row call this to read it back.
+    """
+    items = await repo.list_with_repo_names()
+    for item in items:
+        if item["id"] == ds_id:
+            return item
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Design system not found",
+    )
 
 
 @router.get(
@@ -91,12 +111,7 @@ async def get_design_system(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Design system not found"
         )
-    # Return as dict with repo_name
-    items = await repo.list_with_repo_names()
-    for item in items:
-        if item["id"] == ds_id:
-            return item
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design system not found")
+    return await _to_read(repo, ds_id)
 
 
 @router.post(
@@ -208,22 +223,22 @@ async def set_default_design_system(
     response_model=DesignSystemRead,
     dependencies=[Depends(require_permissions("settings:edit"))],
 )
-async def update_design_system_content(
+async def update_design_system_custom_content(
     ds_id: uuid.UUID,
-    body: DesignSystemUpdateContent,
+    body: DesignSystemUpdateCustomContent,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Manually update the content of a design system.
+    """Write the user-owned customisation layer for a design system.
 
-    Args:
-        ds_id: The design system UUID.
-        body: Updated content.
-        current_user: The authenticated user.
-        db: The async database session.
+    The extractor's ``content`` field is untouched; only ``custom_content``
+    is written. Re-scans, PR-merge rescans, and forced ``/extract`` runs
+    flow through :meth:`DesignSystemRefRepository.upsert`, which never
+    references this column — so edits saved here survive every re-extraction.
 
-    Returns:
-        The updated design system entry.
+    Pass an empty / whitespace-only string to clear the customisation;
+    :meth:`DesignSystemRefRepository.set_custom_content` normalises to
+    ``None`` so the ``is_customised`` flag stays truthful.
     """
     ds_repo = DesignSystemRefRepository(db, org_id=current_user.org_id)
     ds = await ds_repo.get_by_id(ds_id)
@@ -232,29 +247,41 @@ async def update_design_system_content(
             status_code=status.HTTP_404_NOT_FOUND, detail="Design system not found"
         )
 
-    ds.content = body.content
-    await db.flush()
-    await db.refresh(ds)
+    await ds_repo.set_custom_content(ds, body.custom_content)
 
-    logger.info("design_system_content_updated", ds_id=str(ds_id))
+    logger.info(
+        "design_system_custom_content_updated",
+        ds_id=str(ds_id),
+        cleared=ds.custom_content is None,
+    )
 
-    items = await ds_repo.list_with_repo_names()
-    for item in items:
-        if item["id"] == ds_id:
-            return item
+    return await _to_read(ds_repo, ds_id)
 
-    return {
-        "id": ds.id,
-        "org_id": ds.org_id,
-        "repo_id": ds.repo_id,
-        "repo_name": None,
-        "is_default": ds.is_default,
-        "content": ds.content,
-        "source_hash": ds.source_hash,
-        "extracted_at": ds.extracted_at,
-        "created_at": ds.created_at,
-        "updated_at": ds.updated_at,
-    }
+
+@router.post(
+    "/{ds_id}/reset-customisations",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
+async def reset_design_system_customisations(
+    ds_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Drop the user customisation layer back to the extracted defaults.
+
+    Equivalent to ``PUT /{ds_id}`` with an empty body, exposed separately
+    so the frontend can offer a discoverable "Revert" affordance without
+    asking the user to clear a textarea by hand.
+    """
+    ds_repo = DesignSystemRefRepository(db, org_id=current_user.org_id)
+    ds = await ds_repo.get_by_id(ds_id)
+    if ds is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Design system not found"
+        )
+    await ds_repo.set_custom_content(ds, None)
+    logger.info("design_system_customisations_reset", ds_id=str(ds_id))
 
 
 @router.delete(

@@ -93,6 +93,16 @@
               >
                 DEFAULT
               </v-chip>
+              <v-chip
+                v-if="ds.is_customised"
+                color="success"
+                variant="tonal"
+                size="x-small"
+                label
+                prepend-icon="mdi-pencil-outline"
+              >
+                CUSTOMISED
+              </v-chip>
               <span class="text-caption text-medium-emphasis">
                 Extracted {{ formatRelative(ds.extracted_at) }}
               </span>
@@ -110,6 +120,14 @@
               >
                 <v-icon start size="15">mdi-eye-outline</v-icon>
                 Preview
+              </v-btn>
+              <v-btn
+                variant="text"
+                size="small"
+                @click="openCustomise(ds)"
+              >
+                <v-icon start size="15">mdi-pencil-outline</v-icon>
+                Customise
               </v-btn>
               <v-btn
                 variant="text"
@@ -184,18 +202,38 @@
       </v-card>
     </v-dialog>
 
-    <!-- Preview dialog -->
+    <!-- Preview dialog (merged extracted + custom) -->
     <v-dialog v-model="previewDialog" max-width="700">
       <v-card color="surface" class="pa-6">
-        <div class="d-flex align-center mb-4">
+        <div class="d-flex align-center mb-4 ga-2">
           <span class="text-h6 flex-grow-1">
             {{ previewItem?.repo_name || 'Design System' }}
           </span>
+          <v-chip
+            v-if="previewItem?.is_customised"
+            color="success"
+            variant="tonal"
+            size="x-small"
+            label
+            prepend-icon="mdi-pencil-outline"
+          >
+            CUSTOMISED
+          </v-chip>
           <v-btn icon="mdi-close" size="small" variant="text" @click="previewDialog = false" />
         </div>
-        <div class="preview-content rendered-markdown" v-html="renderMarkdown(previewItem?.content || '')" />
+        <div
+          class="preview-content rendered-markdown"
+          v-html="renderMarkdown(previewItem?.merged_content || previewItem?.content || '')"
+        />
       </v-card>
     </v-dialog>
+
+    <!-- Customise dialog — writes only custom_content; never touches the
+         extracted content, so re-scans cannot clobber what you save here. -->
+    <SettingsDesignSystemCustomiseDialog
+      v-model="customiseDialog"
+      :target="customiseTarget"
+    />
 
     <!-- Delete confirmation -->
     <v-dialog v-model="confirmDelete" max-width="400">
@@ -221,6 +259,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useJobSocket } from '@/composables/useJobSocket'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import SettingsDesignSystemCustomiseDialog from './SettingsDesignSystemCustomiseDialog.vue'
 
 const dsStore = useDesignSystemStore()
 const settingsStore = useSettingsStore()
@@ -237,6 +276,13 @@ const extractProgress = ref('')
 // Preview dialog
 const previewDialog = ref(false)
 const previewItem = ref<DesignSystemItem | null>(null)
+
+// Customise dialog state — edits ONLY the user customisation layer; the
+// extractor owns the base ``content`` field and is never reached from here.
+// All draft / saving / error state lives inside the dialog component;
+// we only hold open/closed and the target row at this level.
+const customiseDialog = ref(false)
+const customiseTarget = ref<DesignSystemItem | null>(null)
 
 // Delete dialog
 const confirmDelete = ref(false)
@@ -325,6 +371,11 @@ async function doDelete(): Promise<void> {
   await dsStore.remove(deleteTarget.value.id)
   confirmDelete.value = false
   deleteTarget.value = null
+}
+
+function openCustomise(ds: DesignSystemItem): void {
+  customiseTarget.value = ds
+  customiseDialog.value = true
 }
 
 function formatRelative(dateStr: string): string {

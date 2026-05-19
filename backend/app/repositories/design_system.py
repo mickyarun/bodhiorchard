@@ -134,6 +134,24 @@ class DesignSystemRefRepository(BaseRepository[DesignSystemRef]):
         )
         return await self.create(ds)
 
+    async def set_custom_content(
+        self,
+        ds: DesignSystemRef,
+        custom_content: str | None,
+    ) -> DesignSystemRef:
+        """User-owned write path for the customisation layer.
+
+        The extractor never reaches this column, so re-scans and PR-merge
+        rescans (which call :meth:`upsert`) cannot clobber edits made here.
+        Empty / whitespace-only input is normalised to ``None`` so the
+        ``is_customised`` flag in the API response stays truthful.
+        """
+        normalised = custom_content.strip() if custom_content else None
+        ds.custom_content = normalised or None
+        await self._db.flush()
+        await self._db.refresh(ds)
+        return ds
+
     async def set_default(self, design_system_id: uuid.UUID) -> None:
         """Mark one design system as the org default, clearing all others.
 
@@ -153,6 +171,29 @@ class DesignSystemRefRepository(BaseRepository[DesignSystemRef]):
             .values(is_default=True)
         )
         await self._db.flush()
+
+    @staticmethod
+    def merge_for_serve(ds: DesignSystemRef) -> str:
+        """Render the markdown a consumer (MCP, designer agent, preview) sees.
+
+        Extracted ``content`` first, then — when ``custom_content`` is set —
+        a divider marking the user override layer and the user's markdown.
+        The note line tells the designer agent that anything below is
+        authoritative; ``designer.md`` mirrors the same rule. Browsers
+        resolve duplicate ``:root`` tokens via CSS cascade (later wins), so
+        overrides work for free in the rendered preview.
+        """
+        if not ds.is_customised:
+            return ds.content
+        return (
+            f"{ds.content}\n\n"
+            "---\n\n"
+            "## User Customizations\n\n"
+            "_Authoritative override layer. Tokens, components, App "
+            "Skeleton fragments, and patterns defined below supersede "
+            "anything in the extracted content above._\n\n"
+            f"{ds.custom_content}"
+        )
 
     async def list_with_repo_names(self) -> list[dict[str, Any]]:
         """List all design systems for this org with joined repo names.
@@ -179,6 +220,13 @@ class DesignSystemRefRepository(BaseRepository[DesignSystemRef]):
                 "repo_name": row.repo_name,
                 "is_default": row.DesignSystemRef.is_default,
                 "content": row.DesignSystemRef.content,
+                "custom_content": row.DesignSystemRef.custom_content,
+                "is_customised": row.DesignSystemRef.is_customised,
+                # Server-rendered merged markdown is what every consumer
+                # (preview UI, MCP tool, designer agent) should display.
+                # Centralising the divider/note here is what stops the
+                # backend / frontend / agent skill from drifting.
+                "merged_content": self.merge_for_serve(row.DesignSystemRef),
                 "source_hash": row.DesignSystemRef.source_hash,
                 "extracted_at": row.DesignSystemRef.extracted_at,
                 "created_at": row.DesignSystemRef.created_at,

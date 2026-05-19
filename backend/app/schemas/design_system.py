@@ -29,6 +29,17 @@ class DesignSystemRead(BaseModel):
     repo_name: str | None = None
     is_default: bool
     content: str
+    # User-authored override / addition layer. ``None`` for rows that have
+    # never been customised; ``is_customised`` is the model's
+    # ``@property`` flattened to JSON so the frontend can render a badge
+    # without recomputing the rule.
+    custom_content: str | None = None
+    is_customised: bool = False
+    # Server-rendered concatenation of ``content`` + the User Customizations
+    # divider + ``custom_content`` — produced by
+    # ``DesignSystemRefRepository.merge_for_serve``. The frontend renders
+    # this directly so the divider format stays single-sourced.
+    merged_content: str = ""
     source_hash: str | None = None
     extracted_at: datetime
     created_at: datetime | None = None
@@ -50,7 +61,11 @@ class DesignSystemSetDefault(BaseModel):
     id: uuid.UUID
 
 
-class DesignSystemUpdateContent(BaseModel):
-    """Schema for manually updating design system content."""
+class DesignSystemUpdateCustomContent(BaseModel):
+    """Schema for writing the user-owned customisation layer.
 
-    content: str = Field(..., min_length=1)
+    Empty string clears the customisation — the API normalises to ``None``
+    so ``is_customised`` stays truthful.
+    """
+
+    custom_content: str = Field("", description="User markdown appended after extracted content")
