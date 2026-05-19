@@ -38,8 +38,25 @@ class DesignSystemRef(BaseModel):
     )
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # User-authored markdown appended after ``content`` when served. Owned by
+    # admins via the Settings → Design Systems UI; the extractor never writes
+    # here, so re-scans and PR-merge rescans (which call ``upsert``) cannot
+    # clobber it. Browser CSS cascade and the designer agent's later-wins
+    # reading of ``:root`` tokens give override-of-existing semantics for free.
+    custom_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    @property
+    def is_customised(self) -> bool:
+        """One canonical definition shared by repo, API, and tests.
+
+        ``set_custom_content`` normalises whitespace-only input to ``None``,
+        so truthiness is correct for rows written through the repo. Rows
+        written via raw SQL / bulk import still resolve correctly because
+        we check ``strip()`` here rather than trusting the column shape.
+        """
+        return bool(self.custom_content and self.custom_content.strip())
 
     def __repr__(self) -> str:
         return f"<DesignSystemRef(id={self.id}, org_id={self.org_id}, default={self.is_default})>"

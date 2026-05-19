@@ -23,6 +23,12 @@ export interface DesignSystemItem {
   repo_name: string | null
   is_default: boolean
   content: string
+  custom_content: string | null
+  is_customised: boolean
+  // Server-rendered concatenation of ``content`` + the User Customizations
+  // divider + ``custom_content``. The Preview dialog renders this directly,
+  // so the divider format is single-sourced in the backend repository.
+  merged_content: string
   source_hash: string | null
   extracted_at: string
   created_at: string | null
@@ -93,17 +99,39 @@ export const useDesignSystemStore = defineStore('designSystem', () => {
     }
   }
 
-  async function updateContent(id: string, content: string): Promise<boolean> {
+  async function updateCustomContent(id: string, customContent: string): Promise<boolean> {
     error.value = null
     try {
-      await api.put(`/v1/design-systems/${id}`, { content })
+      await api.put(`/v1/design-systems/${id}`, { custom_content: customContent })
       await fetchAll()
       return true
     } catch {
-      error.value = 'Failed to update content.'
+      error.value = 'Failed to save customisations.'
       return false
     }
   }
 
-  return { items, loading, error, fetchAll, extract, setDefault, remove, updateContent }
+  async function resetCustomisations(id: string): Promise<boolean> {
+    error.value = null
+    try {
+      await api.post(`/v1/design-systems/${id}/reset-customisations`)
+      await fetchAll()
+      return true
+    } catch {
+      error.value = 'Failed to reset customisations.'
+      return false
+    }
+  }
+
+  return {
+    items,
+    loading,
+    error,
+    fetchAll,
+    extract,
+    setDefault,
+    remove,
+    updateCustomContent,
+    resetCustomisations,
+  }
 })

@@ -159,15 +159,23 @@ async def handle_get_design_system(
             "message": "No design system extracted for this repository or organization.",
         }
 
+    # ``merge_for_serve`` appends the User Customizations section (when set)
+    # below the extracted content with an authoritative-override note the
+    # designer agent recognises (see ``designer.md``). Re-scans rewrite
+    # ``ds.content`` via ``upsert`` but never touch ``ds.custom_content``,
+    # so the merged output stays admin-controllable across re-extraction.
+    merged = DesignSystemRefRepository.merge_for_serve(ds)
     logger.info(
         "mcp_get_design_system",
         org_id=str(org.id),
         repo_id=repo_id_str,
-        content_length=len(ds.content or ""),
+        content_length=len(merged),
+        is_customised=ds.is_customised,
     )
     return {
         "found": True,
         "repo_id": str(ds.repo_id) if ds.repo_id else None,
         "is_default": ds.is_default,
-        "content": ds.content or "",
+        "content": merged,
+        "is_customised": ds.is_customised,
     }

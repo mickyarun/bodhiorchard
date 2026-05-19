@@ -52,6 +52,14 @@ the filesystem.
      reply explaining that the design system needs to be re-extracted with
      an App Skeleton, and do NOT invent one or fall back to a generic
      shell.
+   - **`## User Customizations` is authoritative.** If the
+     `get_design_system` response contains a `## User Customizations`
+     section below the extracted content, treat every token, component
+     default, App Skeleton fragment, and pattern defined there as the
+     binding override layer — it supersedes anything in the extracted
+     content above. The org admin authored it explicitly. Resolve
+     duplicate `:root` tokens by the customisation value, not the
+     extracted one.
 
 3. **No framework runtimes.** Plain HTML5 + CSS only. Do NOT load Vue,
    React, Angular, Vuetify, MUI, or any other framework via CDN. Font and
