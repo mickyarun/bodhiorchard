@@ -388,36 +388,30 @@ function close(): void {
 // and put the body in the Prompt field — same shape we expect from
 // users authoring from scratch.
 
-// Only frontmatter keys we actively consume below. Hard-coding the
-// allowlist (instead of writing to ``meta[kv[1]]`` for any matched
-// key) plugs a prototype-pollution / remote-property-injection vector
-// flagged by CodeQL — a malicious ``.md`` with ``__proto__: …`` or
-// ``constructor: …`` lines can't reach the global object prototype
-// because those keys never make it into ``meta``.
-type FrontmatterKey =
-  | 'name'
-  | 'description'
-  | 'tools'
-  | 'mcp_tools'
-  | 'model'
-  | 'max_turns'
-
-const FRONTMATTER_KEYS: ReadonlySet<FrontmatterKey> = new Set<FrontmatterKey>([
-  'name',
-  'description',
-  'tools',
-  'mcp_tools',
-  'model',
-  'max_turns',
-])
-
-function isFrontmatterKey(key: string): key is FrontmatterKey {
-  return (FRONTMATTER_KEYS as ReadonlySet<string>).has(key)
+// Parsed frontmatter — only the six fields we consume downstream.
+// Optional because any field may be absent from a real file.
+interface ParsedMeta {
+  name?: string
+  description?: string
+  tools?: string
+  mcp_tools?: string
+  model?: string
+  max_turns?: string
 }
 
 interface ParsedFrontmatter {
-  meta: Partial<Record<FrontmatterKey, string>>
+  meta: ParsedMeta
   body: string
+}
+
+function _stripQuotes(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1)
+  }
+  return value
 }
 
 function parseFrontmatter(text: string): ParsedFrontmatter | null {
@@ -425,22 +419,40 @@ function parseFrontmatter(text: string): ParsedFrontmatter | null {
   if (!match) return null
   const yamlBlock = match[1]
   const body = match[2] ?? ''
-  // Use a null-prototype object so even an unforeseen path that lands
-  // here can't reach ``Object.prototype``.
-  const meta = Object.create(null) as Partial<Record<FrontmatterKey, string>>
+  // Explicit switch on literal keys instead of ``meta[userKey] = value``.
+  // The dynamic-property-write form (even guarded by a runtime Set.has)
+  // tripped CodeQL's "Remote property injection" rule, since a malicious
+  // .md with ``__proto__: …`` or ``constructor: …`` lines would be
+  // tainted user input flowing into a property name. With a switch the
+  // assignment targets are compile-time literals — there's no dataflow
+  // edge for CodeQL to flag, and unknown keys are dropped on the floor.
+  const meta: ParsedMeta = {}
   for (const line of yamlBlock.split(/\r?\n/)) {
     const kv = line.match(/^([a-zA-Z_][a-zA-Z0-9_-]*)\s*:\s*(.*)$/)
     if (!kv) continue
     const key = kv[1]
-    if (!isFrontmatterKey(key)) continue
-    let value = kv[2].trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
+    const value = _stripQuotes(kv[2].trim())
+    switch (key) {
+      case 'name':
+        meta.name = value
+        break
+      case 'description':
+        meta.description = value
+        break
+      case 'tools':
+        meta.tools = value
+        break
+      case 'mcp_tools':
+        meta.mcp_tools = value
+        break
+      case 'model':
+        meta.model = value
+        break
+      case 'max_turns':
+        meta.max_turns = value
+        break
+      // any other key (incl. __proto__, constructor) is silently ignored
     }
-    meta[key] = value
   }
   return { meta, body: body.replace(/^\r?\n+/, '') }
 }
