@@ -189,7 +189,7 @@
     </div>
 
     <!-- Create BUD Dialog -->
-    <v-dialog v-model="showCreateDialog" max-width="500">
+    <v-dialog v-model="showCreateDialog" max-width="560">
       <v-card color="surface" class="pa-6">
         <div class="text-h6 font-weight-bold mb-4">New BUD</div>
         <v-text-field
@@ -208,7 +208,49 @@
           rows="4"
           variant="outlined"
         />
-        <v-card-actions class="pa-0 mt-2">
+
+        <!-- Advanced Settings: per-stage skill picker -->
+        <v-expansion-panels v-model="advancedPanel" variant="accordion" class="mt-3">
+          <v-expansion-panel value="advanced">
+            <v-expansion-panel-title>
+              <v-icon icon="mdi-tune-variant" size="20" class="mr-2" />
+              Advanced settings
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <div class="text-caption text-medium-emphasis mb-3">
+                Pick which skill runs at each stage of this BUD. Leave the
+                default to use the org-wide default skill for that stage.
+              </div>
+              <v-progress-circular
+                v-if="skillsStore.loading"
+                indeterminate
+                size="20"
+                class="my-3"
+              />
+              <div v-else class="d-flex flex-column ga-3">
+                <div
+                  v-for="stage in advancedStages"
+                  :key="stage.value"
+                  class="d-flex align-center ga-2"
+                >
+                  <span class="stage-label">{{ stage.label }}</span>
+                  <v-select
+                    v-model="stageSkillPicks[stage.value]"
+                    :items="skillsForStage(stage.agentType)"
+                    item-title="label"
+                    item-value="id"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    class="flex-grow-1"
+                  />
+                </div>
+              </div>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
+
+        <v-card-actions class="pa-0 mt-4">
           <v-spacer />
           <v-btn variant="text" @click="showCreateDialog = false">Cancel</v-btn>
           <v-btn
@@ -227,9 +269,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
+import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/agentSkills'
 import { BUD_STATUS_LABELS, BUD_STATUS_COLORS } from '@/types'
 import type { BUDStatus } from '@/types'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
@@ -237,11 +280,68 @@ import { usePermissions } from '@/composables/usePermissions'
 
 const router = useRouter()
 const budStore = useBUDStore()
+const skillsStore = useAgentSkillsStore()
 
 const showCreateDialog = ref(false)
 const newTitle = ref('')
 const newContent = ref('')
 const creating = ref(false)
+const advancedPanel = ref<string | null>(null)
+const stageSkillPicks = ref<Record<string, string | null>>({})
+
+// Single source of truth for which stages get a dropdown — mirrors
+// BUD_STAGE_AGENT_TYPE in backend/app/agents/skill_mapping.py. If a new
+// stage gets an agent on the backend, add it here too.
+interface StageConfig { value: BUDStatus; label: string; agentType: AgentType }
+const advancedStages: StageConfig[] = [
+  { value: 'bud' as BUDStatus, label: 'PRD writer', agentType: 'bud' },
+  { value: 'design' as BUDStatus, label: 'Design', agentType: 'design' },
+  { value: 'tech_arch' as BUDStatus, label: 'Tech plan', agentType: 'techPlan' },
+  { value: 'testing' as BUDStatus, label: 'Test plan', agentType: 'testPlan' },
+]
+
+interface StageSkillOption { id: string; label: string; isDefault: boolean }
+
+function skillsForStage(agentType: AgentType): StageSkillOption[] {
+  return skillsStore.skills
+    .filter((s): s is AgentSkill & { id: string } => s.agentType === agentType && s.id !== null)
+    .map(s => ({
+      id: s.id,
+      label: s.isDefault ? `${s.name} · default` : s.name,
+      isDefault: s.isDefault,
+    }))
+}
+
+function defaultSkillIdForAgent(agentType: AgentType): string | null {
+  const def = skillsStore.skills.find(s => s.agentType === agentType && s.isDefault)
+  return def?.id ?? null
+}
+
+function prefillStageDefaults(): void {
+  for (const stage of advancedStages) {
+    stageSkillPicks.value[stage.value] = defaultSkillIdForAgent(stage.agentType)
+  }
+}
+
+// Lazy-load skills the first time the dialog opens, then pre-fill each
+// stage dropdown with that agent type's current default — gives users a
+// clear "what would run if I change nothing" signal instead of an empty
+// "Skill" placeholder.
+watch(showCreateDialog, async open => {
+  if (!open) return
+  if (skillsStore.skills.length === 0 && !skillsStore.loading) {
+    await skillsStore.fetchSkills()
+  }
+  prefillStageDefaults()
+})
+
+// If the skills load AFTER the dialog opened (slow network), re-prefill.
+watch(
+  () => skillsStore.skills.length,
+  () => {
+    if (showCreateDialog.value) prefillStageDefaults()
+  },
+)
 
 onMounted(() => {
   budStore.fetchBUDs()
@@ -254,12 +354,29 @@ function openBUD(id: string): void {
 async function createBUD(): Promise<void> {
   if (!newTitle.value.trim()) return
   creating.value = true
-  const bud = await budStore.createBUD(newTitle.value.trim(), newContent.value.trim() || undefined)
+  // Only persist overrides where the user picked a NON-default skill.
+  // Matching-the-default picks are dropped so the BUD continues to
+  // follow whatever the org admin marks as default later, rather than
+  // being pinned to today's default skill_id.
+  const overrides: Record<string, string> = {}
+  for (const stage of advancedStages) {
+    const picked = stageSkillPicks.value[stage.value]
+    if (!picked) continue
+    if (picked === defaultSkillIdForAgent(stage.agentType)) continue
+    overrides[stage.value] = picked
+  }
+  const bud = await budStore.createBUD(
+    newTitle.value.trim(),
+    newContent.value.trim() || undefined,
+    Object.keys(overrides).length > 0 ? overrides : undefined,
+  )
   creating.value = false
   if (bud) {
     showCreateDialog.value = false
     newTitle.value = ''
     newContent.value = ''
+    stageSkillPicks.value = {}
+    advancedPanel.value = null
     router.push(`/buds/${bud.id}`)
   }
 }
@@ -351,5 +468,11 @@ function deadlineColor(deadline: string): string {
 
 .dot-empty {
   background: rgba(255, 255, 255, 0.12);
+}
+
+.stage-label {
+  width: 110px;
+  font-size: 13px;
+  color: rgba(var(--v-theme-on-surface), 0.75);
 }
 </style>

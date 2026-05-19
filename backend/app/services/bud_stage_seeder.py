@@ -34,24 +34,28 @@ DEFAULT_STAGE_MAPPINGS: list[dict[str, str | int]] = [
     {
         "bud_status": "bud",
         "skill_slug": "product-manager",
+        "agent_type": "bud",
         "execution_order": 1,
         "output_section": "requirements_md",
     },
     {
         "bud_status": "tech_arch",
         "skill_slug": "tech-planner",
+        "agent_type": "techPlan",
         "execution_order": 1,
         "output_section": "tech_spec_md",
     },
     {
         "bud_status": "code_review",
         "skill_slug": "code-reviewer",
+        "agent_type": "skill",
         "execution_order": 1,
         "output_section": "test_plan_md",
     },
     {
         "bud_status": "testing",
         "skill_slug": "testing",
+        "agent_type": "testPlan",
         "execution_order": 1,
         "output_section": "qa_execution_plan_md",
     },
@@ -72,6 +76,7 @@ async def seed_stage_mappings_for_org(org_id: uuid.UUID, db: AsyncSession) -> in
     Returns:
         Number of stage mappings seeded.
     """
+    from app.models.agent_skill import AgentType
     from app.models.agent_skill_bud_stage import AgentSkillBudStage
     from app.repositories.agent_skill import AgentSkillRepository
     from app.repositories.agent_skill_bud_stage import AgentSkillBudStageRepository
@@ -79,11 +84,12 @@ async def seed_stage_mappings_for_org(org_id: uuid.UUID, db: AsyncSession) -> in
     skill_repo = AgentSkillRepository(db, org_id=org_id)
     stage_repo = AgentSkillBudStageRepository(db, org_id=org_id)
 
-    # Bulk-fetch existing state to avoid N+1 queries
     existing_stages = await stage_repo.list_all()
     existing_keys = {(s.bud_status, s.execution_order) for s in existing_stages}
     all_skills = await skill_repo.list_all()
-    skill_by_slug = {s.skill_slug: s for s in all_skills}
+    # Key by (slug, agent_type) — multi-mapped slugs (product-manager,
+    # testing) appear once per agent_type since the migration split.
+    skill_by_key = {(s.skill_slug, s.agent_type): s for s in all_skills}
 
     seeded = 0
     for mapping in DEFAULT_STAGE_MAPPINGS:
@@ -91,13 +97,24 @@ async def seed_stage_mappings_for_org(org_id: uuid.UUID, db: AsyncSession) -> in
         execution_order = int(mapping["execution_order"])
 
         if (bud_status, execution_order) in existing_keys:
-            continue  # Already mapped — don't overwrite customizations
+            continue
 
-        skill = skill_by_slug.get(str(mapping["skill_slug"]))
+        try:
+            agent_type = AgentType(str(mapping["agent_type"]))
+        except ValueError:
+            logger.warning(
+                "seed_stage_mapping_bad_agent_type",
+                agent_type=mapping.get("agent_type"),
+                org_id=str(org_id),
+            )
+            continue
+
+        skill = skill_by_key.get((str(mapping["skill_slug"]), agent_type))
         if not skill:
             logger.warning(
                 "seed_stage_mapping_skill_not_found",
                 skill_slug=mapping["skill_slug"],
+                agent_type=str(agent_type),
                 org_id=str(org_id),
             )
             continue

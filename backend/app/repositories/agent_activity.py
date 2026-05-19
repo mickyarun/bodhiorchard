@@ -194,6 +194,21 @@ class AgentActivityLogRepository(BaseRepository[AgentActivityLog]):
         result = await self._db.execute(stmt)
         return result.scalars().first()
 
+    async def count_for_skill(self, skill_id: uuid.UUID) -> int:
+        """Total activity-log rows that reference this skill.
+
+        Used by the custom-skill delete pre-check: ``agent_activity_logs``
+        has a NO-ACTION FK on ``skill_id``, so any historical row blocks
+        the DELETE. We surface this as a 409 before the IntegrityError.
+        """
+        from sqlalchemy import func
+
+        stmt = self._scoped(
+            select(func.count(AgentActivityLog.id)).where(AgentActivityLog.skill_id == skill_id)
+        )
+        result = await self._db.execute(stmt)
+        return int(result.scalar() or 0)
+
     async def list_for_skill(
         self,
         skill_id: uuid.UUID,

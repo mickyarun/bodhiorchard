@@ -25,6 +25,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.models.bud import BUDStatus
+
 # Re-export design schemas so legacy imports keep working; new code
 # should import directly from :mod:`app.schemas.bud_design`.
 from app.schemas.bud_design import (  # noqa: F401
@@ -40,6 +42,11 @@ class BUDCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     requirements_md: str | None = None
     metadata_: dict[str, Any] | None = Field(None, alias="metadata")
+    # Optional "Advanced settings" picks: map each BUD stage to a specific
+    # AgentSkill id. Stages omitted (or the whole field omitted) fall back
+    # to the org's default skill for that stage's agent type. Validated in
+    # the route handler against the caller's org.
+    stage_skill_overrides: dict[BUDStatus, uuid.UUID] | None = None
 
     model_config = {"populate_by_name": True}
 

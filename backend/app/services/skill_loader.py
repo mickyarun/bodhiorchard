@@ -21,6 +21,7 @@ Also provides DB-aware loading: per-org overrides take precedence over
 file-based defaults via ``load_skill_for_org()``.
 """
 
+import os.path
 import re
 import uuid
 from dataclasses import dataclass
@@ -34,6 +35,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = structlog.get_logger(__name__)
 
 SKILLS_DIR = Path(__file__).parent.parent / "agents" / "skills"
+
+# Skill slugs must be kebab-case ASCII so the filesystem lookup
+# ``SKILLS_DIR / f"{skill_name}.md"`` can never resolve outside the
+# skills directory. CodeQL flagged the unfiltered form as "uncontrolled
+# data used in path expression" — every caller already passes either
+# a literal or an API-validated slug, but the static analyser can't
+# see that, so the guard lives here at the entry of ``load_skill``.
+_SAFE_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,99}$")
 
 
 @dataclass(frozen=True)
@@ -71,15 +80,34 @@ def load_skill(skill_name: str) -> Skill:
 
     Args:
         skill_name: The skill filename without extension (e.g., 'product-manager').
+            Must be a kebab-case ASCII slug — anything else is rejected
+            before it can reach the filesystem.
 
     Returns:
         A Skill object with parsed frontmatter and body.
 
     Raises:
+        ValueError: If ``skill_name`` is not a valid kebab-case slug or
+            the file has invalid frontmatter.
         FileNotFoundError: If the skill file doesn't exist.
-        ValueError: If the file has invalid frontmatter.
     """
-    skill_path = SKILLS_DIR / f"{skill_name}.md"
+    # Semantic guard: reject anything that isn't a kebab-case slug.
+    if not _SAFE_SLUG.fullmatch(skill_name):
+        raise ValueError(f"Invalid skill slug: {skill_name!r}")
+
+    # Normalise the constructed path then verify it stays under the
+    # skills root. This is the exact pattern CodeQL's
+    # ``py/path-injection`` recommendation documents (the
+    # ``user_picture3`` example): ``normpath`` collapses any ``..``
+    # or absolute components, then ``startswith`` on the resolved
+    # root forces containment. The trailing ``os.sep`` on the prefix
+    # stops ``<root>foo`` from sneaking past a literal prefix match.
+    base_path = str(SKILLS_DIR.resolve())
+    fullpath = os.path.normpath(os.path.join(base_path, skill_name + ".md"))
+    if not fullpath.startswith(base_path + os.sep):
+        raise ValueError(f"Skill slug escapes skills directory: {skill_name!r}")
+    skill_path = Path(fullpath)
+
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill not found: {skill_path}")
 
@@ -112,30 +140,8 @@ def list_available_skills() -> list[str]:
     return sorted(p.stem for p in SKILLS_DIR.glob("*.md"))
 
 
-async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSession) -> Skill:
-    """Load a skill from the DB for a given org.
-
-    Skills are seeded on startup so they should always exist in the DB.
-
-    Args:
-        skill_name: The skill slug (e.g., 'product-manager').
-        org_id: Organization UUID to look up the skill for.
-        db: Async database session.
-
-    Returns:
-        A Skill object from the DB.
-
-    Raises:
-        ValueError: If the skill is not found in the DB.
-    """
-    from app.repositories.agent_skill import AgentSkillRepository
-
-    repo = AgentSkillRepository(db, org_id=org_id)
-    skill_row = await repo.get_by_slug(skill_name)
-
-    if not skill_row:
-        raise ValueError(f"Skill not found in DB: {skill_name} (org_id={org_id})")
-
+def _skill_from_row(skill_row: Any) -> Skill:
+    """Adapter: build a :class:`Skill` dataclass from an ``AgentSkill`` ORM row."""
     return Skill(
         name=skill_row.name,
         slug=skill_row.skill_slug,
@@ -151,48 +157,125 @@ async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSessio
     )
 
 
-async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
-    """Seed all file-based skill defaults into DB for an org.
+async def load_skill_for_org(skill_name: str, org_id: uuid.UUID, db: AsyncSession) -> Skill:
+    """Load a skill by slug. **Agent-type-blind**: for shared slugs
+    (``product-manager``, ``testing``) the first matching row is returned.
+    Use :func:`resolve_skill_for_org` to honour per-BUD overrides and the
+    org-level ``is_default`` flag.
 
-    Skips any skill_slug that already has a DB row. Individual
-    skill failures (bad file or DB constraint violation) are logged
-    and skipped without aborting the entire seed.
+    Args:
+        skill_name: The skill slug (e.g. 'product-manager').
+        org_id: Organization UUID to scope the lookup.
+        db: Async database session.
+
+    Returns:
+        A Skill object from the DB.
+
+    Raises:
+        ValueError: If the slug doesn't resolve to any row.
+    """
+    from app.repositories.agent_skill import AgentSkillRepository
+
+    repo = AgentSkillRepository(db, org_id=org_id)
+    skill_row = await repo.get_by_slug(skill_name)
+    if not skill_row:
+        raise ValueError(f"Skill not found in DB: {skill_name} (org_id={org_id})")
+    return _skill_from_row(skill_row)
+
+
+async def resolve_skill_for_org(
+    agent_name: str,
+    org_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    bud_id: uuid.UUID | None = None,
+    bud_status: Any = None,
+    fallback_slug: str | None = None,
+) -> Skill:
+    """Resolve a Skill honouring per-BUD overrides and org defaults.
+
+    Priority order:
+    1. ``bud_stage_skill_overrides`` for (``bud_id``, ``bud_status``) — the
+       BUD's Advanced-settings pick.
+    2. ``agent_skills.is_default = true`` for the agent type — what an
+       admin promoted via "Set as default" in Settings → Agent Prompts.
+    3. ``AGENT_SKILL_MAP[agent_name]`` static fallback.
+    4. ``fallback_slug`` argument (last-resort lookup for legacy slugs).
+
+    Args:
+        agent_name: Agent key (e.g. 'bud', 'design', 'techPlan').
+        org_id: Org scope.
+        db: Async DB session.
+        bud_id: BUD context. Required for per-BUD override resolution.
+        bud_status: BUDStatus enum value paired with ``bud_id``.
+        fallback_slug: Last-resort slug if no agent-type match exists.
+
+    Returns:
+        A :class:`Skill` dataclass.
+
+    Raises:
+        ValueError: When no skill can be resolved.
+    """
+    from app.agents.skill_mapping import resolve_skill_for_agent
+
+    row = await resolve_skill_for_agent(
+        agent_name, org_id, db, bud_id=bud_id, bud_status=bud_status
+    )
+    if row is not None:
+        return _skill_from_row(row)
+    if fallback_slug:
+        return await load_skill_for_org(fallback_slug, org_id, db)
+    raise ValueError(
+        f"No skill resolved for agent {agent_name!r} "
+        f"(org_id={org_id}, bud_id={bud_id}, bud_status={bud_status})"
+    )
+
+
+async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
+    """Seed file-based skill defaults into DB for an org.
+
+    Iterates ``AGENT_SKILL_MAP`` so each agent type gets its own row,
+    even when several types share a slug (e.g. ``product-manager`` →
+    bud/standup/reassignment). Re-runs are idempotent: missing rows
+    are inserted with ``is_default=True``, existing rows have empty
+    timeout-seconds backfilled but never clobber tuned values.
 
     Args:
         org_id: Organization UUID to seed for.
         db: Async database session.
 
     Returns:
-        Number of skills seeded (new rows created).
+        Number of (agent_type, slug) rows newly inserted.
     """
     from sqlalchemy.exc import SQLAlchemyError
 
+    from app.agents.skill_mapping import AGENT_SKILL_MAP
+    from app.models.agent_skill import AgentType
     from app.repositories.agent_skill import AgentSkillRepository
 
     repo = AgentSkillRepository(db, org_id=org_id)
 
-    # Single query to get existing rows so we can both skip already-seeded
-    # slugs and backfill columns that landed after the initial seed (e.g.
-    # ``timeout_seconds`` — added later; existing rows ship with the DB
-    # default ``0`` until we copy the file frontmatter onto them once).
     existing_skills = await repo.list_all()
-    existing_by_slug = {s.skill_slug: s for s in existing_skills}
+    existing_by_key: dict[tuple[str, AgentType], Any] = {
+        (s.skill_slug, s.agent_type): s for s in existing_skills
+    }
 
-    available = list_available_skills()
     seeded = 0
     backfilled = 0
-    for slug in available:
+    for agent_name, slug in AGENT_SKILL_MAP.items():
+        try:
+            agent_type = AgentType(agent_name)
+        except ValueError:
+            logger.warning("seed_skill_unknown_agent_type", agent=agent_name)
+            continue
         try:
             skill = load_skill(slug)
         except (FileNotFoundError, ValueError, OSError):
             logger.warning("seed_skill_load_failed", skill=slug, exc_info=True)
             continue
 
-        existing = existing_by_slug.get(slug)
+        existing = existing_by_key.get((slug, agent_type))
         if existing is not None:
-            # Idempotent backfill: only fill columns that are still at
-            # their post-migration default. Never clobber values an admin
-            # has tuned (non-zero / non-empty wins).
             if existing.timeout_seconds == 0 and skill.timeout_seconds > 0:
                 existing.timeout_seconds = skill.timeout_seconds
                 backfilled += 1
@@ -211,10 +294,14 @@ async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
                 model=skill.model,
                 iteration_model=skill.iteration_model,
                 effort=skill.effort,
+                agent_type=agent_type,
+                is_default=True,
             )
             seeded += 1
         except SQLAlchemyError:
-            logger.warning("seed_skill_db_failed", skill=slug, exc_info=True)
+            logger.warning(
+                "seed_skill_db_failed", skill=slug, agent_type=agent_name, exc_info=True
+            )
             continue
 
     if backfilled:

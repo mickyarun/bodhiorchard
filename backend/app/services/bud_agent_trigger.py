@@ -48,6 +48,8 @@ async def create_agent_task_for_stage(
         triggered_by: Optional user UUID who triggered the transition.
         force: If True, skip the content-exists check (used on initial BUD creation).
     """
+    from app.agents.skill_mapping import BUD_STAGE_AGENT_TYPE, resolve_skill_for_agent
+    from app.models.bud import BUDStatus
     from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
     from app.repositories.agent_skill_bud_stage import AgentSkillBudStageRepository
     from app.schemas.jobs import BUDAgentTaskPayload
@@ -85,10 +87,32 @@ async def create_agent_task_for_stage(
     if await task_repo.get_active_for_bud(bud.id):
         return
 
+    # Resolve the skill that should actually run: per-BUD override
+    # (set via the create-BUD Advanced Settings) > org default
+    # (is_default=true on agent_skills) > legacy stage mapping. Without
+    # this step the legacy mapping wins and custom skills are inert.
+    try:
+        status_enum: BUDStatus | None = BUDStatus(bud_status)
+    except ValueError:
+        status_enum = None
+
+    agent_type = BUD_STAGE_AGENT_TYPE.get(status_enum) if status_enum else None
+    resolved_skill_id = first.skill_id
+    if agent_type is not None:
+        resolved = await resolve_skill_for_agent(
+            agent_type.value,
+            org_id,
+            db,
+            bud_id=bud.id,
+            bud_status=status_enum,
+        )
+        if resolved is not None:
+            resolved_skill_id = resolved.id
+
     task = BUDAgentTask(
         org_id=org_id,
         bud_id=bud.id,
-        skill_id=first.skill_id,
+        skill_id=resolved_skill_id,
         task_type=bud_status,
         status=AgentTaskStatus.PENDING,
         attempt=1,

@@ -86,13 +86,27 @@ async def generate_designs(
     await db.flush()
 
     # Resolve skill + create agent task BEFORE enqueuing jobs
-    # so task_id and skill_id are available in the job payload
+    # so task_id and skill_id are available in the job payload.
+    # Honours per-BUD override and org default via the resolver — picking
+    # a custom designer in the create-BUD Advanced Settings has to land
+    # here, otherwise the design generation still runs the seeded designer.
+    from app.agents.skill_mapping import resolve_skill_for_agent
+    from app.models.bud import BUDStatus
     from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
     from app.repositories.agent_skill import AgentSkillRepository
     from app.repositories.bud_agent_task import BUDAgentTaskRepository
 
-    skill_repo = AgentSkillRepository(db, org_id=current_user.org_id)
-    designer_skill = await skill_repo.get_by_slug("designer")
+    designer_skill = await resolve_skill_for_agent(
+        "design",
+        current_user.org_id,
+        db,
+        bud_id=bud_id,
+        bud_status=BUDStatus.DESIGN,
+    )
+    if designer_skill is None:
+        # Last-resort: slug-based lookup (seed not yet run on this org).
+        skill_repo = AgentSkillRepository(db, org_id=current_user.org_id)
+        designer_skill = await skill_repo.get_by_slug("designer")
     skill_id_str = str(designer_skill.id) if designer_skill else None
 
     task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
@@ -226,12 +240,24 @@ async def regenerate_design(
     design.status = BUDDesignStatus.GENERATING
     await db.flush()
 
-    # Resolve skill_id and active task_id for activity logging
+    # Resolve skill_id and active task_id for activity logging. Override-
+    # aware (matches the BUD's Advanced Settings pick) so re-runs of a
+    # design log against the user's chosen designer skill, not the seed.
+    from app.agents.skill_mapping import resolve_skill_for_agent
+    from app.models.bud import BUDStatus
     from app.repositories.agent_skill import AgentSkillRepository
     from app.repositories.bud_agent_task import BUDAgentTaskRepository
 
-    skill_repo = AgentSkillRepository(db, org_id=current_user.org_id)
-    designer_skill = await skill_repo.get_by_slug("designer")
+    designer_skill = await resolve_skill_for_agent(
+        "design",
+        current_user.org_id,
+        db,
+        bud_id=bud_id,
+        bud_status=BUDStatus.DESIGN,
+    )
+    if designer_skill is None:
+        skill_repo = AgentSkillRepository(db, org_id=current_user.org_id)
+        designer_skill = await skill_repo.get_by_slug("designer")
     task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
     active_task = await task_repo.get_active_for_bud(bud_id)
 

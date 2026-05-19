@@ -12,17 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Agent skill management endpoints."""
+"""Agent skill management endpoints.
+
+Two parallel access modes:
+* **slug-based** — used by the existing SettingsAgentPrompts UI to edit
+  one skill at a time; updates fan out across every ``agent_type`` row
+  sharing the slug (preserves the original "edit the product-manager
+  prompt once" UX after the multi-agent-type split).
+* **id-based** — new endpoints for the custom-skill workflow (create,
+  delete, set-default).
+"""
+
+import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
-from app.models.agent_skill import AgentSkill
+from app.models.agent_skill import AgentSkill, AgentType
 from app.models.user import User
 from app.repositories.agent_skill import AgentSkillRepository
-from app.schemas.agent_skills import AgentSkillRead, AgentSkillUpdate
+from app.schemas.agent_skills import (
+    AgentSkillRead,
+    AgentSkillUpdate,
+    CustomSkillCreate,
+)
 from app.services.skill_loader import (
     Skill,
     list_available_skills,
@@ -39,15 +54,7 @@ _SLUG_PATH = Path(..., pattern=_SLUG_PATTERN, description="Skill slug (kebab-cas
 
 
 def _check_customized(db_prompt: str, slug: str) -> bool:
-    """Compare a DB skill prompt against the file-based seed default.
-
-    Args:
-        db_prompt: The prompt stored in the DB.
-        slug: The skill slug to load the file default for.
-
-    Returns:
-        True if the DB version differs from the file default (or file is unavailable).
-    """
+    """True if the DB prompt differs from the file-based seed default."""
     try:
         file_skill = load_skill(slug)
         return db_prompt != file_skill.prompt
@@ -55,10 +62,14 @@ def _check_customized(db_prompt: str, slug: str) -> bool:
         return True
 
 
-def _skill_to_read(slug: str, skill_row: AgentSkill) -> AgentSkillRead:
-    """Convert a DB skill row to an AgentSkillRead schema."""
+def _skill_to_read(skill_row: AgentSkill) -> AgentSkillRead:
+    """Serialize a DB skill row, including agent_type / default / custom flags."""
     return AgentSkillRead(
-        skill_slug=slug,
+        id=skill_row.id,
+        skill_slug=skill_row.skill_slug,
+        agent_type=skill_row.agent_type,
+        is_default=skill_row.is_default,
+        is_custom=skill_row.is_custom,
         name=skill_row.name,
         description=skill_row.description,
         tools=skill_row.tools,
@@ -69,22 +80,12 @@ def _skill_to_read(slug: str, skill_row: AgentSkill) -> AgentSkillRead:
         model=getattr(skill_row, "model", "") or "",
         iteration_model=getattr(skill_row, "iteration_model", "") or "",
         effort=getattr(skill_row, "effort", "") or "",
-        is_customized=_check_customized(skill_row.prompt, slug),
+        is_customized=_check_customized(skill_row.prompt, skill_row.skill_slug),
     )
 
 
 def _load_skill_or_raise(slug: str) -> Skill:
-    """Load a skill from file, raising HTTPException on failure.
-
-    Args:
-        slug: The skill slug.
-
-    Returns:
-        The loaded Skill.
-
-    Raises:
-        HTTPException: 404 if file not found, 422 if file is malformed.
-    """
+    """Load a file-defined skill, raising HTTPException on errors."""
     try:
         return load_skill(slug)
     except FileNotFoundError as err:
@@ -104,24 +105,17 @@ def _load_skill_or_raise(slug: str) -> Skill:
     dependencies=[Depends(require_permissions("settings:view"))],
 )
 async def list_agent_skills(
+    agent_type: AgentType | None = Query(default=None, description="Filter to one agent type"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[AgentSkillRead]:
-    """List all agent skills merged from file defaults and DB overrides.
+    """List agent skills for the current org.
 
-    On first call for an org (no overrides exist), seeds defaults from files.
-
-    Args:
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        List of all skills with is_customized flag.
+    On first call (no rows yet) seeds the file defaults. Optionally
+    filters to a single ``agent_type``.
     """
     repo = AgentSkillRepository(db, org_id=current_user.org_id)
     skills = await repo.list_all()
-
-    # Lazy seed: if no skills at all and skills directory has files, seed once
     if not skills and list_available_skills():
         try:
             await seed_skills_for_org(current_user.org_id, db)
@@ -129,24 +123,10 @@ async def list_agent_skills(
             logger.exception("seed_skills_failed", org_id=str(current_user.org_id))
         skills = await repo.list_all()
 
-    skill_map = {s.skill_slug: s for s in skills}
-    available_slugs = list_available_skills()
+    if agent_type is not None:
+        skills = [s for s in skills if s.agent_type == agent_type]
 
-    # Build merged list: DB skills marked customized, file defaults as-is
-    all_slugs = sorted(set(available_slugs) | set(skill_map.keys()))
-    result: list[AgentSkillRead] = []
-
-    for slug in all_slugs:
-        if slug in skill_map:
-            result.append(_skill_to_read(slug, skill_map[slug]))
-        else:
-            try:
-                skill = load_skill(slug)
-                result.append(AgentSkillRead.from_skill(slug, skill))
-            except (FileNotFoundError, ValueError, OSError):
-                logger.warning("skill_file_load_failed", skill=slug)
-
-    return result
+    return [_skill_to_read(s) for s in skills]
 
 
 @router.get(
@@ -156,30 +136,32 @@ async def list_agent_skills(
 )
 async def get_agent_skill(
     slug: str = _SLUG_PATH,
+    agent_type: AgentType | None = Query(
+        default=None,
+        description="Disambiguate shared slugs (e.g. product-manager)",
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AgentSkillRead:
-    """Get a single agent skill by slug.
-
-    Args:
-        slug: The skill slug (e.g. 'triage-analyst').
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        The skill detail.
-
-    Raises:
-        HTTPException: If the skill slug doesn't exist anywhere.
-    """
+    """Get one skill by slug; ``agent_type`` is required for shared slugs."""
     repo = AgentSkillRepository(db, org_id=current_user.org_id)
-    skill_row = await repo.get_by_slug(slug)
-
+    skill_row = await repo.get_by_slug(slug, agent_type=agent_type)
     if skill_row:
-        return _skill_to_read(slug, skill_row)
+        return _skill_to_read(skill_row)
 
+    # Fall back to file default — same shape, no DB row.
     skill = _load_skill_or_raise(slug)
-    return AgentSkillRead.from_skill(slug, skill)
+    # File-based skills don't know their agent_type; require the caller
+    # to provide it so the response is well-typed.
+    if agent_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Skill not in DB yet; pass ?agent_type= to read the file "
+                "default with a typed response"
+            ),
+        )
+    return AgentSkillRead.from_skill(slug, skill, agent_type=agent_type)
 
 
 @router.put(
@@ -190,85 +172,57 @@ async def get_agent_skill(
 async def update_agent_skill(
     body: AgentSkillUpdate,
     slug: str = _SLUG_PATH,
+    agent_type: AgentType | None = Query(
+        default=None,
+        description=(
+            "Required when slug is shared across agent types (product-manager, "
+            "testing). For unique slugs, the single matching row is updated."
+        ),
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AgentSkillRead:
-    """Create or update a skill override for the current org.
-
-    Partial updates are supported — only provided fields are changed.
-
-    Args:
-        slug: The skill slug.
-        body: Fields to update.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Returns:
-        The updated skill.
-    """
+    """Update the (slug, agent_type) row. Partial-update semantics."""
     repo = AgentSkillRepository(db, org_id=current_user.org_id)
 
-    # Load current state (DB override or file default) as base
-    existing = await repo.get_by_slug(slug)
-    if existing:
-        name = body.name if body.name is not None else existing.name
-        description = body.description if body.description is not None else existing.description
-        tools = body.tools if body.tools is not None else existing.tools
-        mcp_tools = body.mcp_tools if body.mcp_tools is not None else existing.mcp_tools
-        prompt = body.prompt if body.prompt is not None else existing.prompt
-        max_turns = body.max_turns if body.max_turns is not None else (existing.max_turns or 0)
-        timeout_seconds = (
-            body.timeout_seconds
-            if body.timeout_seconds is not None
-            else (getattr(existing, "timeout_seconds", 0) or 0)
+    existing = await repo.get_by_slug(slug, agent_type=agent_type)
+    if existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill not found: slug={slug}, agent_type={agent_type}",
         )
-        model = body.model if body.model is not None else (getattr(existing, "model", "") or "")
-        iteration_model = (
-            body.iteration_model
-            if body.iteration_model is not None
-            else (getattr(existing, "iteration_model", "") or "")
-        )
-        effort = (
-            body.effort if body.effort is not None else (getattr(existing, "effort", "") or "")
-        )
-    else:
-        file_skill = _load_skill_or_raise(slug)
-        name = body.name if body.name is not None else file_skill.name
-        description = body.description if body.description is not None else file_skill.description
-        tools = body.tools if body.tools is not None else file_skill.tools
-        mcp_tools = body.mcp_tools if body.mcp_tools is not None else file_skill.mcp_tools
-        prompt = body.prompt if body.prompt is not None else file_skill.prompt
-        max_turns = body.max_turns if body.max_turns is not None else file_skill.max_turns
-        timeout_seconds = (
-            body.timeout_seconds
-            if body.timeout_seconds is not None
-            else file_skill.timeout_seconds
-        )
-        model = body.model if body.model is not None else file_skill.model
-        iteration_model = (
-            body.iteration_model
-            if body.iteration_model is not None
-            else file_skill.iteration_model
-        )
-        effort = body.effort if body.effort is not None else file_skill.effort
 
-    updated = await repo.upsert(
-        skill_slug=slug,
-        name=name,
-        description=description,
-        tools=tools,
-        mcp_tools=mcp_tools,
-        prompt=prompt,
-        max_turns=max_turns,
-        timeout_seconds=timeout_seconds,
-        model=model,
-        iteration_model=iteration_model,
-        effort=effort,
+    if body.name is not None:
+        existing.name = body.name
+    if body.description is not None:
+        existing.description = body.description
+    if body.tools is not None:
+        existing.tools = body.tools
+    if body.mcp_tools is not None:
+        existing.mcp_tools = body.mcp_tools
+    if body.prompt is not None:
+        existing.prompt = body.prompt
+    if body.max_turns is not None:
+        existing.max_turns = body.max_turns
+    if body.timeout_seconds is not None:
+        existing.timeout_seconds = body.timeout_seconds
+    if body.model is not None:
+        existing.model = body.model
+    if body.iteration_model is not None:
+        existing.iteration_model = body.iteration_model
+    if body.effort is not None:
+        existing.effort = body.effort
+
+    await db.flush()
+    await db.refresh(existing)
+
+    logger.info(
+        "agent_skill_updated",
+        slug=slug,
+        agent_type=str(existing.agent_type),
+        org_id=str(current_user.org_id),
     )
-
-    logger.info("agent_skill_updated", slug=slug, org_id=str(current_user.org_id))
-
-    return _skill_to_read(slug, updated)
+    return _skill_to_read(existing)
 
 
 @router.delete(
@@ -278,43 +232,199 @@ async def update_agent_skill(
 )
 async def reset_agent_skill(
     slug: str = _SLUG_PATH,
+    agent_type: AgentType | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Reset a skill to its file default by overwriting the DB row.
+    """Reset a seeded skill back to its file default.
 
-    We do not DELETE the row: ``bud_agent_tasks.skill_id`` has a NOT
-    NULL / non-cascading FK pointing at ``agent_skills.id``, so a row
-    with any historical agent task referencing it cannot be removed
-    (Postgres raises ``ForeignKeyViolationError`` and the API 500s
-    silently). Instead, upsert the row back to the file defaults so:
-    - the foreign key remains valid (task history is preserved),
-    - all fields (prompt, max_turns, model, iteration_model, effort,
-      tools, mcp_tools, description, name) match the file defaults,
-    - ``is_customized`` correctly flips back to ``False`` on the next
-      list call (since it compares the prompt to the file default).
-
-    Args:
-        slug: The skill slug.
-        current_user: The authenticated user.
-        db: The async database session.
-
-    Raises:
-        HTTPException: If the file default for this slug cannot be loaded.
+    Custom skills are NOT reset by this endpoint — use ``DELETE /{id}``
+    to remove a custom skill instead.
     """
     file_skill = _load_skill_or_raise(slug)
     repo = AgentSkillRepository(db, org_id=current_user.org_id)
-    await repo.upsert(
-        skill_slug=slug,
-        name=file_skill.name,
-        description=file_skill.description,
-        tools=file_skill.tools,
-        mcp_tools=file_skill.mcp_tools,
-        prompt=file_skill.prompt,
-        max_turns=file_skill.max_turns,
-        timeout_seconds=file_skill.timeout_seconds,
-        model=file_skill.model,
-        iteration_model=file_skill.iteration_model,
-        effort=file_skill.effort,
+    existing = await repo.get_by_slug(slug, agent_type=agent_type)
+    if existing is None or existing.is_custom:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Seeded skill not found for that slug/agent_type",
+        )
+
+    existing.name = file_skill.name
+    existing.description = file_skill.description
+    existing.tools = file_skill.tools
+    existing.mcp_tools = file_skill.mcp_tools
+    existing.prompt = file_skill.prompt
+    existing.max_turns = file_skill.max_turns
+    existing.timeout_seconds = file_skill.timeout_seconds
+    existing.model = file_skill.model
+    existing.iteration_model = file_skill.iteration_model
+    existing.effort = file_skill.effort
+    await db.flush()
+
+    logger.info(
+        "agent_skill_reset",
+        slug=slug,
+        agent_type=str(existing.agent_type),
+        org_id=str(current_user.org_id),
     )
-    logger.info("agent_skill_reset", slug=slug, org_id=str(current_user.org_id))
+
+
+# ────────────────────────────── Custom skill CRUD ──────────────────────────────
+
+
+@router.post(
+    "/",
+    response_model=AgentSkillRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
+async def create_custom_skill(
+    body: CustomSkillCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AgentSkillRead:
+    """Create a user-authored skill tied to ``agent_type``.
+
+    The (slug, agent_type) pair must be unique within the org. Newly
+    created skills are NOT marked default — call ``POST /{id}/set-default``
+    to promote one explicitly.
+    """
+    repo = AgentSkillRepository(db, org_id=current_user.org_id)
+    if await repo.get_by_slug(body.skill_slug, agent_type=body.agent_type):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"A skill with slug '{body.skill_slug}' already exists for "
+                f"agent_type '{body.agent_type.value}'"
+            ),
+        )
+    created = await repo.create_custom(
+        skill_slug=body.skill_slug,
+        agent_type=body.agent_type,
+        name=body.name,
+        description=body.description,
+        tools=body.tools,
+        mcp_tools=body.mcp_tools,
+        prompt=body.prompt,
+        max_turns=body.max_turns,
+        timeout_seconds=body.timeout_seconds,
+        model=body.model,
+        iteration_model=body.iteration_model,
+        effort=body.effort,
+    )
+    logger.info(
+        "custom_skill_created",
+        skill_id=str(created.id),
+        slug=created.skill_slug,
+        agent_type=str(created.agent_type),
+        org_id=str(current_user.org_id),
+    )
+    return _skill_to_read(created)
+
+
+@router.post(
+    "/{skill_id}/set-default",
+    response_model=AgentSkillRead,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
+async def set_default_skill(
+    skill_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AgentSkillRead:
+    """Mark a skill as default for its agent_type (demoting the prior default)."""
+    repo = AgentSkillRepository(db, org_id=current_user.org_id)
+    try:
+        updated = await repo.set_default(skill_id)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err)) from err
+    logger.info(
+        "agent_skill_default_set",
+        skill_id=str(updated.id),
+        agent_type=str(updated.agent_type),
+        org_id=str(current_user.org_id),
+    )
+    return _skill_to_read(updated)
+
+
+def _format_blocker_message(
+    *,
+    pinned_buds: list[tuple[int, str]],
+    task_count: int,
+) -> str:
+    """Build a user-facing 409 message listing where the skill is still in use."""
+    parts: list[str] = []
+    if pinned_buds:
+        # Cap the rendered list so a skill used by 50 BUDs doesn't break the toast.
+        head = pinned_buds[:5]
+        rendered = ", ".join(f"BUD-{num:03d} ({title})" for num, title in head)
+        if len(pinned_buds) > len(head):
+            rendered += f", and {len(pinned_buds) - len(head)} more"
+        parts.append(
+            f"pinned as the override in {len(pinned_buds)} BUD(s): {rendered}. "
+            "Open each BUD's Advanced settings and pick a different skill, then retry"
+        )
+    if task_count:
+        parts.append(f"{task_count} agent task(s) reference this skill")
+    if not parts:
+        return "Skill is in use"
+    return "Can't delete: " + "; ".join(parts) + "."
+
+
+@router.delete(
+    "/by-id/{skill_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
+async def delete_custom_skill(
+    skill_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a custom skill. Returns 409 for seeded skills OR when the
+    skill is still referenced by a BUD override, a task, or an activity
+    log. The 409 ``detail`` tells the user which BUDs to re-point first.
+    """
+    from app.repositories.bud_agent_task import BUDAgentTaskRepository
+    from app.repositories.bud_stage_skill_override import (
+        BUDStageSkillOverrideRepository,
+    )
+
+    repo = AgentSkillRepository(db, org_id=current_user.org_id)
+    existing = await repo.get_by_id(skill_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
+    if not existing.is_custom:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Seeded skills cannot be deleted; use PUT to reset to file default",
+        )
+
+    # Pre-check the FKs that would block the underlying DELETE. We
+    # surface BUD overrides + agent tasks because they're recoverable
+    # (the user re-points the BUD or waits for the task to finish);
+    # activity_logs are *not* blocked — ``delete_custom`` nulls those
+    # references in the same transaction so audit logs survive.
+    override_repo = BUDStageSkillOverrideRepository(db, org_id=current_user.org_id)
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+
+    pinned_buds = await override_repo.list_buds_using_skill(skill_id)
+    task_count = await task_repo.count_for_skill(skill_id)
+
+    if pinned_buds or task_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_format_blocker_message(pinned_buds=pinned_buds, task_count=task_count),
+        )
+
+    deleted = await repo.delete_custom(skill_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found or not custom"
+        )
+    logger.info(
+        "custom_skill_deleted",
+        skill_id=str(skill_id),
+        org_id=str(current_user.org_id),
+    )
