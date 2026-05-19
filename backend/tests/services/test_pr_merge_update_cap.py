@@ -48,6 +48,7 @@ def captured() -> dict[str, Any]:
         "scan_triggered": False,
         "scan_reason": None,
         "backfill_calls": [],
+        "advance_calls": [],
     }
 
 
@@ -84,11 +85,17 @@ def _patched(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> None:
             branch="synthesised", inserted=1, updated=0, revived=0, inactivated=0
         )
 
+    async def _fake_advance(*, org_id: Any, repo_id: Any, head_sha: str) -> None:
+        captured["advance_calls"].append(
+            {"org_id": str(org_id), "repo_id": str(repo_id), "head_sha": head_sha}
+        )
+
     monkeypatch.setattr(mod, "_trigger_repo_scan", _fake_trigger_scan)
     monkeypatch.setattr(mod, "_load_repo_and_org", _fake_repo_and_org)
     monkeypatch.setattr(mod, "_fetch_changed_paths", _fake_no_paths)
     monkeypatch.setattr(mod, "index_and_cache", _fake_index_and_cache)
     monkeypatch.setattr(mod, "run_narrow_synthesis", _fake_run_narrow)
+    monkeypatch.setattr(mod, "_advance_tracked_head_sha", _fake_advance)
 
 
 def _install_replay_row(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> None:
@@ -158,6 +165,10 @@ async def test_dispatcher_picks_narrow_under_cap(
     assert len(params.affected_signatures) == mod.NARROW_CAP
     # Affected signatures are sorted for deterministic comparison.
     assert params.affected_signatures == sorted(affected)
+    # Narrow synth succeeded → tracked_repositories.head_sha must advance
+    # so the next delivery's base_sha fallback sees this merge.
+    assert len(captured["advance_calls"]) == 1
+    assert captured["advance_calls"][0]["head_sha"] == "h"
 
 
 async def test_dispatcher_falls_back_to_full_scan_above_cap(
@@ -184,6 +195,9 @@ async def test_dispatcher_falls_back_to_full_scan_above_cap(
     assert captured["scan_triggered"] is True
     assert captured["narrow_params"] is None
     assert "above narrow cap" in (captured["scan_reason"] or "")
+    # Full scan path owns the head_sha advance via persist_results;
+    # dispatcher must NOT double-stamp here.
+    assert captured["advance_calls"] == []
 
 
 async def test_dispatcher_noop_when_no_clusters_affected(
@@ -208,6 +222,10 @@ async def test_dispatcher_noop_when_no_clusters_affected(
     await mod.handle_pr_merge_delivery("d1")
     assert captured["scan_triggered"] is False
     assert captured["narrow_params"] is None
+    # No-op terminal still advances head_sha — without this, the next
+    # delivery's base_sha fallback would compare against a stale SHA.
+    assert len(captured["advance_calls"]) == 1
+    assert captured["advance_calls"][0]["head_sha"] == "h"
 
 
 async def test_dispatcher_raises_when_narrow_synthesis_fails(
@@ -358,6 +376,9 @@ async def test_backfill_failure_falls_through_to_cache_miss_full_scan(
     assert captured["scan_triggered"] is True
     assert "cache_miss" in (captured["scan_reason"] or "")
     assert captured["narrow_params"] is None
+    # Cache-miss path delegates to full scan — dispatcher must NOT
+    # advance head_sha (the full pipeline's persist_results stage owns it).
+    assert captured["advance_calls"] == []
 
 
 async def test_backfill_skipped_when_repo_has_no_path(

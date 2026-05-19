@@ -144,6 +144,11 @@ async def handle_pr_merge_delivery(delivery_id: str) -> None:
         # delivery row gets flipped to ``failed`` so operators can
         # inspect; the worker re-raises into its caller to drive that.
         raise RuntimeError(outcome.error or "narrow synthesis failed")
+    # Narrow synth succeeded — the cluster_cache rows at head_sha and
+    # the affected features are now coherent. Stamp head_sha on the
+    # tracked repo so downstream readers (index builder, next
+    # delivery's base_sha lookup) line up with what we just wrote.
+    await _advance_tracked_head_sha(org_id=row.org_id, repo_id=row.repo_id, head_sha=head_sha)
     logger.info(
         "pr_merge_delivery_narrow_done",
         delivery_id=delivery_id,
@@ -223,6 +228,13 @@ async def _run_dispatch(
 
     affected, effective_base_sha = affected_result
     if not affected:
+        # No semantic change in the code graph at head_sha. Still advance
+        # tracked_repositories.head_sha so the BACKEND-route index
+        # builder + future deliveries' base_sha fallback see the merged
+        # commit as the new baseline — otherwise every subsequent PR's
+        # diff would compare against an ever-older SHA and the
+        # cache-miss branch fires unnecessarily.
+        await _advance_tracked_head_sha(org_id=org_id, repo_id=repo_id, head_sha=head_sha)
         logger.info(
             "pr_merge_update_no_affected_clusters",
             repo_id=str(repo_id),
@@ -459,3 +471,32 @@ async def _trigger_repo_scan(
         scan_id=str(scan_id),
         reason=reason,
     )
+
+
+async def _advance_tracked_head_sha(
+    *,
+    org_id: uuid.UUID,
+    repo_id: uuid.UUID,
+    head_sha: str,
+) -> None:
+    """Stamp ``tracked_repositories.head_sha`` after a successful delivery.
+
+    Called from the two delivery success terminals (no-affected-clusters
+    and narrow-synth-succeeded) so PR-merge webhooks AND operator
+    rescans converge ``head_sha`` onto the latest merged commit instead
+    of leaving it pinned at the last full-scan SHA. Without this, every
+    subsequent delivery's ``base_sha`` fallback compares against an
+    increasingly stale SHA and the cache-miss branch fires unnecessarily.
+
+    The cache-miss / over-cap branches DON'T call this — they kick off a
+    full scan via :func:`_trigger_repo_scan` which has its own
+    ``persist_results`` stage that updates ``head_sha``.
+
+    Underlying :meth:`TrackedRepoRepository.advance_head_sha` is a no-op
+    when ``head_sha`` is unchanged, so this is safe to call on every
+    delivery (concurrent merges at the same SHA don't churn the
+    timestamp).
+    """
+    async with AsyncSessionLocal() as db:
+        await TrackedRepoRepository(db, org_id=org_id).advance_head_sha(repo_id, head_sha)
+        await db.commit()
