@@ -254,7 +254,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:view/edit/approve",
             "buds:view/edit/approve",
-            "team:view",
+            "team:view/manage/assign_roles",
             "settings:view",
             "knowledge:view",
             "reports:*",
@@ -265,7 +265,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         description="Software developer",
         permission_specs=[
             "backlog:view",
-            "buds:view",
+            "buds:view/edit",
             "settings:view",
             "knowledge:view/contribute",
             "reports:view",
