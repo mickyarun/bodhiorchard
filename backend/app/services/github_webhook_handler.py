@@ -354,12 +354,6 @@ async def _maybe_detect_release_promotion(
             stage = "uat"
     elif repo.main_branch and base_ref == repo.main_branch:
         stage = "prod"
-    elif repo.develop_branch and base_ref == repo.develop_branch:
-        # ``develop_branch`` is the opt-in for the develop stage. If the
-        # tracked repo hasn't set it, a merge into a branch named "develop"
-        # does NOT credit XP — the absence of the column is the signal that
-        # the org doesn't treat that branch as a release stage.
-        stage = "develop"
 
     if stage is None:
         return
