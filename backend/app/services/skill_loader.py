@@ -21,6 +21,7 @@ Also provides DB-aware loading: per-org overrides take precedence over
 file-based defaults via ``load_skill_for_org()``.
 """
 
+import os.path
 import re
 import uuid
 from dataclasses import dataclass
@@ -91,20 +92,17 @@ def load_skill(skill_name: str) -> Skill:
         FileNotFoundError: If the skill file doesn't exist.
     """
     # Semantic guard: reject anything that isn't a kebab-case slug.
-    # CodeQL doesn't recognise regex checks as sanitisers but it's
-    # the readable contract for callers.
     if not _SAFE_SLUG.fullmatch(skill_name):
         raise ValueError(f"Invalid skill slug: {skill_name!r}")
 
-    # Canonicalise to a filename-only path component before joining.
-    # ``Path(...).name`` strips any directory component from user
-    # input — if ``skill_name`` were ``../../etc/passwd``, this
-    # returns just ``"passwd.md"``. CodeQL's ``py/path-injection``
-    # rule recognises this pattern as a sanitiser; the regex + this
-    # together are what the GitHub autofix proposed.
-    skills_root = SKILLS_DIR.resolve()
-    skill_filename = Path(f"{skill_name}.md").name
-    skill_path = (skills_root / skill_filename).resolve()
+    # Canonicalise to a filename-only path component via
+    # ``os.path.basename`` — the sanitiser CodeQL's
+    # ``py/path-injection`` rule documents explicitly. Any directory
+    # component a malicious slug might contain is stripped here, so
+    # the constructed path is structurally forced to be a single
+    # filename inside ``SKILLS_DIR``.
+    safe_filename = os.path.basename(skill_name + ".md")
+    skill_path = SKILLS_DIR / safe_filename
 
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill not found: {skill_path}")
