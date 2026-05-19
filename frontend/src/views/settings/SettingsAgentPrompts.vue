@@ -405,13 +405,17 @@
                     Delete skill
                   </v-btn>
                   <v-btn
-                    v-else-if="skill.isCustomized"
+                    v-else-if="!skill.isCustom"
                     variant="text"
-                    color="warning"
+                    :color="skill.isCustomized ? 'warning' : 'default'"
                     prepend-icon="mdi-restore"
                     :loading="store.saving"
                     class="text-none"
-                    @click="confirmResetTarget = { slug: skill.skillSlug, agentType: skill.agentType }"
+                    @click="confirmResetTarget = {
+                      slug: skill.skillSlug,
+                      agentType: skill.agentType,
+                      isCustomized: skill.isCustomized,
+                    }"
                   >
                     Reset to default
                   </v-btn>
@@ -440,10 +444,16 @@
           <v-icon icon="mdi-restore" size="24" />
         </div>
         <h3 class="confirm-title">Reset to default?</h3>
-        <p class="confirm-body">
+        <p v-if="confirmResetTarget?.isCustomized" class="confirm-body">
           Discards your customizations for
           <strong>{{ confirmResetTarget?.slug }}</strong>
           and restores the original prompt. Can't be undone.
+        </p>
+        <p v-else class="confirm-body">
+          Reloads
+          <strong>{{ confirmResetTarget?.slug }}</strong>
+          from its canonical skill file on disk. Use this after the
+          prompt has been updated in source. No customizations to lose.
         </p>
         <div class="confirm-actions">
           <v-btn variant="text" class="text-none" @click="confirmResetTarget = null">
@@ -514,7 +524,11 @@ const store = useAgentSkillsStore()
 
 const expanded = ref<string | null>(null)
 const previewMode = ref<'edit' | 'preview'>('edit')
-const confirmResetTarget = ref<{ slug: string; agentType: AgentType } | null>(null)
+const confirmResetTarget = ref<{
+  slug: string
+  agentType: AgentType
+  isCustomized: boolean
+} | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const showCreateDialog = ref(false)
 const createForAgent = ref<AgentType | null>(null)
