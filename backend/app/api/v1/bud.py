@@ -74,6 +74,54 @@ from app.services.bud_edit_policy import assert_section_editable
 logger = structlog.get_logger(__name__)
 
 
+async def _persist_stage_skill_overrides(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_id: uuid.UUID,
+    overrides: dict[BUDStatus, uuid.UUID],
+) -> None:
+    """Validate then store per-stage skill picks for one BUD.
+
+    Each ``skill_id`` must (a) belong to the caller's org and (b) have
+    the correct ``agent_type`` for the stage it's being assigned to —
+    e.g. picking a ``design`` skill for the ``testing`` stage is
+    rejected with 400.
+    """
+    from app.agents.skill_mapping import BUD_STAGE_AGENT_TYPE
+    from app.repositories.agent_skill import AgentSkillRepository
+    from app.repositories.bud_stage_skill_override import (
+        BUDStageSkillOverrideRepository,
+    )
+
+    skill_repo = AgentSkillRepository(db, org_id=org_id)
+
+    for stage, skill_id in overrides.items():
+        expected_agent_type = BUD_STAGE_AGENT_TYPE.get(stage)
+        if expected_agent_type is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Stage '{stage.value}' is not configurable",
+            )
+        skill = await skill_repo.get_by_id(skill_id)
+        if skill is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Skill {skill_id} not found for stage {stage.value}",
+            )
+        if skill.agent_type != expected_agent_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Skill {skill.skill_slug!r} (agent_type={skill.agent_type.value}) "
+                    f"cannot be assigned to stage {stage.value}; that stage runs the "
+                    f"{expected_agent_type.value} agent."
+                ),
+            )
+
+    override_repo = BUDStageSkillOverrideRepository(db, org_id=org_id)
+    await override_repo.bulk_set_for_bud(bud_id, overrides)
+
+
 async def _bud_response(
     bud: BUDDocument,
     org_id: uuid.UUID,
@@ -232,6 +280,18 @@ async def create_bud(
     )
     await bud_repo.create(bud)
 
+    # Persist per-BUD stage skill overrides (Advanced settings on create).
+    # Validates that each (stage, skill_id) pair points at a skill whose
+    # agent_type matches the stage's expected agent — wrong picks get a
+    # 400 instead of silently routing to the wrong skill at run-time.
+    if body.stage_skill_overrides:
+        await _persist_stage_skill_overrides(
+            db,
+            current_user.org_id,
+            bud.id,
+            body.stage_skill_overrides,
+        )
+
     # Generate embedding so the bug linker can match bugs to this BUD.
     # Fast (~50ms) and done inline so the embedding is available immediately.
     try:
@@ -328,6 +388,72 @@ async def get_bud_timeline(
     """Fetch timeline events for a BUD in chronological order."""
     repo = BUDTimelineRepository(db, org_id=current_user.org_id)
     return await repo.list_for_bud(bud_id)
+
+
+@router.get(
+    "/{bud_id}/stage-skill-overrides",
+    response_model=dict[BUDStatus, uuid.UUID],
+    dependencies=[Depends(require_permissions("buds:view"))],
+)
+async def get_stage_skill_overrides(
+    bud_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[BUDStatus, uuid.UUID]:
+    """Return the per-stage skill overrides set on this BUD.
+
+    Used by the BUD detail page's "Skills" dialog to render the current
+    pinned skill for each stage (so the user can see what they previously
+    picked, plus the default for stages they didn't override).
+    """
+    from app.repositories.bud_stage_skill_override import (
+        BUDStageSkillOverrideRepository,
+    )
+
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+
+    override_repo = BUDStageSkillOverrideRepository(db, org_id=current_user.org_id)
+    rows = await override_repo.list_for_bud(bud_id)
+    return {row.bud_status: row.skill_id for row in rows}
+
+
+@router.put(
+    "/{bud_id}/stage-skill-overrides",
+    response_model=dict[BUDStatus, uuid.UUID],
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def set_stage_skill_overrides(
+    bud_id: uuid.UUID,
+    body: dict[BUDStatus, uuid.UUID],
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[BUDStatus, uuid.UUID]:
+    """Replace the BUD's per-stage skill overrides in one shot.
+
+    The body is the *full* desired map of stage → skill_id. Stages not
+    present in the body are cleared — that way the same call shape works
+    for "I added an override", "I changed one", and "I cleared one back
+    to the org default". Each (stage, skill) pair is validated against
+    the stage's expected agent type before persisting.
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+
+    await _persist_stage_skill_overrides(db, current_user.org_id, bud_id, body)
+    await db.commit()
+
+    logger.info(
+        "bud_stage_skill_overrides_updated",
+        bud_id=str(bud_id),
+        org_id=str(current_user.org_id),
+        count=len(body),
+    )
+    return body
 
 
 @router.patch(

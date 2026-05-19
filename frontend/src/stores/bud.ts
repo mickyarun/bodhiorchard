@@ -84,10 +84,18 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
-  async function createBUD(title: string, requirements_md?: string): Promise<BUDDocument | null> {
+  async function createBUD(
+    title: string,
+    requirements_md?: string,
+    stage_skill_overrides?: Record<string, string>,
+  ): Promise<BUDDocument | null> {
     error.value = ''
     try {
-      const { data } = await api.post('/v1/buds/', { title, requirements_md })
+      const payload: Record<string, unknown> = { title, requirements_md }
+      if (stage_skill_overrides && Object.keys(stage_skill_overrides).length > 0) {
+        payload.stage_skill_overrides = stage_skill_overrides
+      }
+      const { data } = await api.post('/v1/buds/', payload)
       buds.value.unshift(data)
       return data
     } catch {

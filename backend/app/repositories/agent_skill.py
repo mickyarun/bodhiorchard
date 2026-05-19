@@ -16,10 +16,10 @@
 
 import uuid
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent_skill import AgentSkill
+from app.models.agent_skill import AgentSkill, AgentType
 from app.repositories.base import BaseRepository, rowcount
 
 
@@ -35,18 +35,138 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
         """
         super().__init__(AgentSkill, db, org_id=org_id)
 
-    async def get_by_slug(self, skill_slug: str) -> AgentSkill | None:
-        """Fetch a single skill by its slug.
+    async def get_by_slug(
+        self, skill_slug: str, agent_type: AgentType | None = None
+    ) -> AgentSkill | None:
+        """Fetch a skill by slug (and optionally agent_type).
 
-        Args:
-            skill_slug: The skill identifier (e.g. 'product-manager').
-
-        Returns:
-            The skill row, or None if not found.
+        With ``agent_type`` provided, returns the unique (slug, agent_type)
+        row. Without it, returns the first match — only safe for slugs that
+        map to a single agent type (e.g. 'designer', 'tech-planner').
         """
         stmt = self._scoped(select(AgentSkill).where(AgentSkill.skill_slug == skill_slug))
+        if agent_type is not None:
+            stmt = stmt.where(AgentSkill.agent_type == agent_type)
+        result = await self._db.execute(stmt)
+        return result.scalars().first()
+
+    async def get_default_for_agent_type(self, agent_type: AgentType) -> AgentSkill | None:
+        """Return the org's default skill for the given agent type, if any."""
+        stmt = self._scoped(
+            select(AgentSkill)
+            .where(AgentSkill.agent_type == agent_type)
+            .where(AgentSkill.is_default.is_(True))
+        )
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def list_by_agent_type(self, agent_type: AgentType) -> list[AgentSkill]:
+        """List every skill (seeded + custom) configured for an agent type."""
+        stmt = self._scoped(
+            select(AgentSkill)
+            .where(AgentSkill.agent_type == agent_type)
+            .order_by(AgentSkill.is_custom, AgentSkill.name)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_all_sorted(self) -> list[AgentSkill]:
+        """List every skill for the current org, ordered by (agent_type, name)."""
+        stmt = self._scoped(select(AgentSkill).order_by(AgentSkill.agent_type, AgentSkill.name))
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def set_default(self, skill_id: uuid.UUID) -> AgentSkill:
+        """Mark ``skill_id`` as default for its agent_type, demoting any prior default.
+
+        The partial unique index on ``(org_id, agent_type) WHERE is_default``
+        means we must demote-then-promote in two statements within the same
+        transaction.
+        """
+        skill = await self.get_by_id(skill_id)
+        if skill is None:
+            raise ValueError(f"Skill not found: {skill_id}")
+
+        await self._db.execute(
+            update(AgentSkill)
+            .where(AgentSkill.org_id == self._org_id)
+            .where(AgentSkill.agent_type == skill.agent_type)
+            .where(AgentSkill.id != skill_id)
+            .values(is_default=False)
+        )
+        skill.is_default = True
+        await self._db.flush()
+        await self._db.refresh(skill)
+        return skill
+
+    async def create_custom(
+        self,
+        *,
+        skill_slug: str,
+        agent_type: AgentType,
+        name: str,
+        description: str,
+        tools: list[str],
+        mcp_tools: list[str],
+        prompt: str,
+        max_turns: int = 0,
+        timeout_seconds: int = 0,
+        model: str = "",
+        iteration_model: str = "",
+        effort: str = "",
+    ) -> AgentSkill:
+        """Insert a user-authored skill row (``is_custom = true``)."""
+        skill = AgentSkill(
+            org_id=self._org_id,
+            skill_slug=skill_slug,
+            agent_type=agent_type,
+            is_default=False,
+            is_custom=True,
+            name=name,
+            description=description,
+            tools=tools,
+            mcp_tools=mcp_tools,
+            prompt=prompt,
+            max_turns=max_turns,
+            timeout_seconds=timeout_seconds,
+            model=model,
+            iteration_model=iteration_model,
+            effort=effort,
+        )
+        return await self.create(skill)
+
+    async def delete_custom(self, skill_id: uuid.UUID) -> bool:
+        """Delete a custom skill row. Refuses to delete seeded rows.
+
+        Before issuing the DELETE we null out the ``skill_id`` FK on
+        any ``agent_activity_logs`` rows pointing at this skill. The
+        column is nullable and the table has a denormalised
+        ``skill_slug`` text column for audit display, so the
+        historical record survives — without this step the NO-ACTION
+        FK would permanently lock any skill that's ever been invoked,
+        even after every BUD has been re-pointed off it.
+
+        Returns True iff a row was deleted. Returns False both when
+        the skill doesn't exist and when it's a seeded (non-custom)
+        row — callers map that into a 4xx response.
+        """
+        from app.models.agent_activity import AgentActivityLog
+
+        await self._db.execute(
+            update(AgentActivityLog)
+            .where(AgentActivityLog.org_id == self._org_id)
+            .where(AgentActivityLog.skill_id == skill_id)
+            .values(skill_id=None)
+        )
+        stmt = (
+            delete(AgentSkill)
+            .where(AgentSkill.org_id == self._org_id)
+            .where(AgentSkill.id == skill_id)
+            .where(AgentSkill.is_custom.is_(True))
+        )
+        result = await self._db.execute(stmt)
+        await self._db.flush()
+        return (rowcount(result) or 0) > 0
 
     async def upsert(
         self,
@@ -61,28 +181,17 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
         model: str = "",
         iteration_model: str = "",
         effort: str = "",
+        *,
+        agent_type: AgentType,
+        is_default: bool = True,
     ) -> AgentSkill:
-        """Insert or update a skill for a given slug.
+        """Insert or update a SEEDED skill row keyed by (slug, agent_type).
 
-        Args:
-            skill_slug: The skill identifier.
-            name: Display name.
-            description: Short description.
-            tools: List of file-based tools.
-            mcp_tools: List of MCP tools.
-            prompt: Full markdown prompt body.
-            max_turns: Max Claude CLI turns (0 = unlimited).
-            timeout_seconds: Wall-clock cap on the Claude subprocess
-                (0 = caller's hard-coded fallback).
-            model: Claude model alias or ID (empty = CLI default).
-            iteration_model: Faster model for chat-iteration paths
-                (empty = fall back to ``model``).
-            effort: Reasoning effort level (empty = default).
-
-        Returns:
-            The created or updated skill.
+        Used by ``seed_skills_for_org()``. Existing rows have their content
+        updated in place; missing rows are inserted with ``is_default`` set
+        per arg and ``is_custom=False``.
         """
-        existing = await self.get_by_slug(skill_slug)
+        existing = await self.get_by_slug(skill_slug, agent_type=agent_type)
         if existing is not None:
             existing.name = name
             existing.description = description
@@ -101,6 +210,9 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
         skill = AgentSkill(
             org_id=self._org_id,
             skill_slug=skill_slug,
+            agent_type=agent_type,
+            is_default=is_default,
+            is_custom=False,
             name=name,
             description=description,
             tools=tools,
@@ -113,21 +225,3 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             effort=effort,
         )
         return await self.create(skill)
-
-    async def delete_by_slug(self, skill_slug: str) -> bool:
-        """Delete a skill by slug.
-
-        Args:
-            skill_slug: The skill identifier.
-
-        Returns:
-            True if a row was deleted, False if not found.
-        """
-        stmt = (
-            delete(AgentSkill)
-            .where(AgentSkill.org_id == self._org_id)
-            .where(AgentSkill.skill_slug == skill_slug)
-        )
-        result = await self._db.execute(stmt)
-        await self._db.flush()
-        return (rowcount(result) or 0) > 0

@@ -16,13 +16,15 @@
 
 Skills are seeded from file templates on startup and stored in the DB
 as the primary source of truth. Orgs can customize prompts, tools,
-and model settings per skill.
+and model settings per skill — and add their own custom skills tagged
+to a specific agent type, with one marked as default per (org, agent_type).
 """
 
 import uuid
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,21 +34,75 @@ if TYPE_CHECKING:
     from app.models.agent_skill_bud_stage import AgentSkillBudStage
 
 
+class AgentType(StrEnum):
+    """Bodhiorchard agent types that own (or will own) a Claude-driven skill.
+
+    Values must mirror the keys of ``app.agents.skill_mapping.AGENT_SKILL_MAP``;
+    the seed flow uses that map to assign agent_type to each seeded row.
+
+    Three earlier enum values (``status``, ``standup``, ``reassignment``)
+    were dropped after audit confirmed nothing in the runtime ever
+    loaded their skill — standup is pure SQL aggregation, reassignment
+    is plain Python, status was never wired. Their stale rows are
+    removed by migration ``79884f63ba1a_drop_dead_agent_types``.
+
+    ``TRIAGE``, ``LEARNING``, and ``BUG_LINKER`` are also currently
+    unloaded by any runtime path, but kept as placeholders for planned
+    AI flows (BUD triage / learning recaps / bug-to-BUD linker). Their
+    seeded rows stay so an admin can pre-edit the prompts before the
+    wiring lands.
+    """
+
+    TRIAGE = "triage"
+    BUD = "bud"
+    LEARNING = "learning"
+    BUG_LINKER = "bugLinker"
+    SKILL = "skill"
+    TECH_PLAN = "techPlan"
+    TEST_PLAN = "testPlan"
+    DESIGN = "design"
+    SLACK_TRIAGE = "slackTriage"
+
+
 class AgentSkill(BaseModel):
     """Per-org agent skill configuration.
 
-    Seeded from file-based templates in agents/skills/ on startup.
-    The DB row is the runtime source of truth — file defaults are
-    only used during the seed process.
+    Seeded from file-based templates in agents/skills/ on startup; users
+    may also create custom skills via the settings UI. Each row is tied
+    to exactly one ``agent_type``; one row per ``(org_id, agent_type)``
+    can be marked ``is_default=true`` (the partial unique index on
+    ``is_default WHERE is_default = true`` enforces this).
     """
 
     __tablename__ = "agent_skills"
-    __table_args__ = (UniqueConstraint("org_id", "skill_slug", name="uq_skill_org_slug"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "skill_slug", "agent_type", name="uq_skill_org_slug_agent_type"
+        ),
+        # Partial unique: at most one default per (org, agent_type).
+        Index(
+            "uq_skill_one_default_per_agent_type",
+            "org_id",
+            "agent_type",
+            unique=True,
+            postgresql_where="is_default = true",
+        ),
+    )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     skill_slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    agent_type: Mapped[AgentType] = mapped_column(
+        Enum(AgentType, name="agent_type", values_callable=lambda e: [x.value for x in e]),
+        nullable=False,
+    )
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    is_custom: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     tools: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
