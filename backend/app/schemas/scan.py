@@ -173,11 +173,22 @@ class StartScanRequest(BaseModel):
 
 
 class StartScanResponse(BaseModel):
-    """Returned immediately after queueing a scan; clients poll GET /scans/{id}."""
+    """Returned immediately after queueing a scan; clients poll GET /scans/{id}.
 
-    scan_id: uuid.UUID
+    ``scan_id`` is ``None`` when every requested repo took the rescan
+    fast path (no first-time scans in the batch) — there is no ``Scan``
+    row to poll because the work is happening on the per-(org, repo)
+    Redis stream alongside any in-flight PR-merge deliveries.
+    ``rescan_delivery_ids`` carries the ``webhook_logs.delivery_id`` for
+    each enqueued rescan so the frontend can correlate progress via the
+    delivery log; ``repo_count`` is the total across both paths.
+    """
+
+    scan_id: uuid.UUID | None
     status: str
     repo_count: int
+    rescan_delivery_ids: list[str] = Field(default_factory=list)
+    rescan_repo_count: int = 0
 
 
 class ResumeScanResponse(BaseModel):

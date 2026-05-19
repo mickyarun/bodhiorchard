@@ -31,7 +31,6 @@ indexer → empty file list → ``"no source files found in repo"``.
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -220,22 +219,17 @@ async def fetch_and_reset(
     if rc == 0:
         return
 
-    if worktree is None:
-        # Reset failed on the live repo path — propagate so the
-        # operator sees uncommitted-changes errors etc., rather than
-        # silently continuing with a stale tree.
-        raise RuntimeError(f"failed to reset {repo_path} to {reset_ref}: {stderr[:200]}")
-
-    # For worktrees we rebuild on failure (matches prior behaviour).
-    wt_path = Path(worktree)
-    shutil.rmtree(wt_path, ignore_errors=True)
-    await run_git(["worktree", "prune"], cwd=repo_path)
-    _, stderr2, rc2 = await run_git(
-        ["worktree", "add", "-B", main_branch, worktree, reset_ref],
-        cwd=repo_path,
-    )
-    if rc2 != 0:
-        raise RuntimeError(f"failed to refresh worktree: {stderr[:200]} / {stderr2[:200]}")
+    # Propagate the failure to the caller for BOTH live-repo and worktree
+    # targets. Previously, worktree failures triggered a silent
+    # ``shutil.rmtree(wt_path)`` rebuild — that masked worktree
+    # corruption and, more importantly, could wipe the filesystem out
+    # from under a concurrent reader (scan stage / narrow-synth
+    # consumer reading the same path). Now the consumer's webhook_logs
+    # row flips to FAILED, orphan recovery re-publishes on the next
+    # boot, and the operator sees the actual git error instead of a
+    # "no source files found" downstream symptom.
+    target_label = "worktree" if worktree is not None else "repo"
+    raise RuntimeError(f"failed to reset {target_label} {target} to {reset_ref}: {stderr[:200]}")
 
 
 async def _remove_conflicting_worktree(repo_path: str, main_branch: str, *, keep: str) -> None:

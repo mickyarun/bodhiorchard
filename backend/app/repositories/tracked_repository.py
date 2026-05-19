@@ -410,6 +410,30 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_scanned_status_by_ids(self, repo_ids: list[uuid.UUID]) -> dict[uuid.UUID, bool]:
+        """Return ``{repo_id: has_been_scanned}`` for the supplied ids.
+
+        ``has_been_scanned`` is ``True`` when ``last_scanned_at`` is
+        non-null — the canonical signal that at least one scan has
+        completed for the repo (set by ``update_after_scan``). Used by
+        the scan API to route requests: never-scanned repos go through
+        the full pipeline; previously-scanned repos take the diff-based
+        rescan path via the PR-merge Redis stream.
+
+        Ids missing from the result represent repos that don't exist for
+        this org (filtered out by the ``_scoped`` org guard) — callers
+        should treat their absence as a 404 condition.
+        """
+        if not repo_ids:
+            return {}
+        stmt = self._scoped(
+            select(TrackedRepository.id, TrackedRepository.last_scanned_at).where(
+                TrackedRepository.id.in_(repo_ids)
+            )
+        )
+        result = await self._db.execute(stmt)
+        return {row.id: row.last_scanned_at is not None for row in result.all()}
+
     async def get_full_names_by_org(self) -> set[str]:
         """Return the set of non-null ``github_repo_full_name`` values for the org.
 

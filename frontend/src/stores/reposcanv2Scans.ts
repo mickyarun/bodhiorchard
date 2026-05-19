@@ -111,9 +111,14 @@ export interface V2Config {
 }
 
 interface StartScanResponse {
-  scan_id: string
+  // Null when every requested repo took the diff-based rescan
+  // fast path — there's no Scan row to poll because the work is
+  // happening on the per-(org, repo) PR-merge Redis stream.
+  scan_id: string | null
   status: string
   repo_count: number
+  rescan_delivery_ids?: string[]
+  rescan_repo_count?: number
 }
 
 interface ResumeResponse {
@@ -257,7 +262,13 @@ export const useReposcanV2ScansStore = defineStore('reposcanv2Scans', () => {
       }
       const { data } = await api.post<StartScanResponse>('/v1/reposcanv2/scans', body)
       error.value = null
-      await fetchScan(data.scan_id)
+      // ``scan_id`` is null when every requested repo took the rescan
+      // fast path — there's no Scan row to poll. The diff-based work
+      // runs on the PR-merge Redis stream and progress shows up in
+      // the deliveries log, not the timeline.
+      if (data.scan_id) {
+        await fetchScan(data.scan_id)
+      }
       return data.scan_id
     } catch (err) {
       // 409 = a scan is already running for this org. Switch the timeline
