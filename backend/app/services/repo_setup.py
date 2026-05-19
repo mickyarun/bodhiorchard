@@ -181,7 +181,22 @@ _SETUP_FILES = [
     "package.json",
     "CLAUDE.md",
     ".claude/skills/",
+    ".bodhiorchard/mcp_bridge.py",
 ]
+
+# Paths in ``_SETUP_FILES`` whose parent directory is in ``.gitignore``.
+# ``git add`` silently skips ignored files, so these need ``-f`` on first
+# stage. Once tracked, git tracks them regardless of .gitignore on every
+# subsequent scan, so the force flag is only load-bearing for the initial
+# bootstrap PR.
+_FORCE_ADD_PREFIXES = (".bodhiorchard/",)
+
+
+def _stage_file_args(filepath: str) -> list[str]:
+    """Build ``git add`` argv for ``filepath``, forcing past .gitignore when needed."""
+    if filepath.startswith(_FORCE_ADD_PREFIXES):
+        return ["add", "-f", filepath]
+    return ["add", filepath]
 
 
 def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
@@ -325,7 +340,7 @@ async def commit_and_push_setup_worktree(work_path: str) -> str | None:
         _, _, diff_rc = await run_git(["diff", "--quiet", "--", filepath], cwd=work_path)
         is_modified = diff_rc != 0
         if is_modified or is_untracked:
-            await run_git(["add", filepath], cwd=work_path)
+            await run_git(_stage_file_args(filepath), cwd=work_path)
             staged_any = True
 
     if not staged_any:
@@ -351,6 +366,7 @@ async def commit_and_push_setup_worktree(work_path: str) -> str | None:
             "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
             "- package.json: prepare script sets core.hooksPath on npm install\n"
             "- .gitignore: exclude .bodhiorchard/ worktrees\n"
+            "- .bodhiorchard/mcp_bridge.py: stdio bridge spawned by .mcp.json\n"
             "- CLAUDE.md: bodhi code-intelligence MCP guidance\n"
             "- .claude/skills/: bodhi agent skill definitions",
         ],
@@ -1650,7 +1666,7 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
             is_modified = diff_rc != 0
 
             if is_modified or is_untracked:
-                await run_git(["add", filepath], cwd=repo_path)
+                await run_git(_stage_file_args(filepath), cwd=repo_path)
                 staged_any = True
 
         if not staged_any:
@@ -1668,6 +1684,7 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
                 "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
                 "- package.json: prepare script sets core.hooksPath on npm install\n"
                 "- .gitignore: exclude .bodhiorchard/ worktrees\n"
+                "- .bodhiorchard/mcp_bridge.py: stdio bridge spawned by .mcp.json\n"
                 "- CLAUDE.md: bodhi code-intelligence MCP guidance\n"
                 "- .claude/skills/: bodhi agent skill definitions",
             ],
