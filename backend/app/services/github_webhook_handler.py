@@ -26,6 +26,7 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.organization import Organization
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.tracked_repository import SetupPrState, TrackedRepository
 from app.repositories.bud import BUDRepository
@@ -33,12 +34,16 @@ from app.repositories.pull_request import PullRequestRepository
 from app.repositories.user import UserRepository
 from app.schemas.github import GitHubComment, GitHubPullRequest, GitHubReview
 from app.services.bud_timeline import record_event
+from app.services.org_settings import is_uat_enabled
 from app.services.pr_auto_transition import (
     check_all_prs_merged,
     check_all_repos_have_prs,
     resolve_bud_from_branch,
 )
-from app.services.release_detection import ReleaseStage
+from app.services.release_detection import detect_release_promotion
+from app.services.stage_award import award_stage_xp_to_contributors
+from app.services.stage_types import ReleaseStage
+from app.utils.branch_matching import branch_matches
 
 logger = structlog.get_logger(__name__)
 
@@ -129,32 +134,9 @@ async def _handle_pr_opened(
         )
         await check_all_repos_have_prs(db, org_id, bud)
 
-    # Award XP for opening a PR
-    author_user_id, resolved_via = await _resolve_pr_author(db, org_id, pr_data.user.login, bud_id)
-    if author_user_id:
-        try:
-            from app.services.xp_service import award_xp
-
-            await award_xp(
-                db,
-                user_id=author_user_id,
-                org_id=org_id,
-                amount=15,
-                source="pr_opened",
-                source_ref=f"pr:{pr_data.id}",
-            )
-        except Exception:
-            logger.warning("xp_award_failed_pr_opened", exc_info=True)
-    else:
-        logger.info(
-            "pr_author_unresolved",
-            event="pr_opened",
-            pr_id=pr_data.id,
-            github_login=pr_data.user.login,
-            on_bud_branch=bud_id is not None,
-            resolution_source=resolved_via,
-        )
-
+    # XP is no longer credited on PR open. The outcome-based model awards
+    # XP at stage promotion (PR merged into a tracked repo's develop /
+    # uat / main branch), split among everyone who contributed to the BUD.
     await db.commit()
 
     # Push update to frontend so BUD detail refreshes
@@ -239,58 +221,12 @@ async def _handle_pr_closed(
         )
         await check_all_prs_merged(db, org_id, pr.bud_id)
 
-    # Award XP for merging a PR (author gets credit)
-    if is_merged:
-        author_user_id, resolved_via = await _resolve_pr_author(
-            db, org_id, pr_data.user.login, pr.bud_id
-        )
-        if author_user_id:
-            try:
-                from app.services.xp_service import award_xp
-
-                await award_xp(
-                    db,
-                    user_id=author_user_id,
-                    org_id=org_id,
-                    amount=25,
-                    source="pr_merged",
-                    source_ref=f"pr_merged:{pr_data.id}",
-                )
-            except Exception:
-                logger.warning("xp_award_failed_pr_merged", exc_info=True)
-
-            # SP award for PR merged (role-based)
-            try:
-                from app.services.sp_rules import SP_DEV_PR_MERGED
-                from app.services.sp_service import award_sp, get_user_role
-
-                role = await get_user_role(db, author_user_id, org_id)
-                if role == "developer":
-                    await award_sp(
-                        db,
-                        user_id=author_user_id,
-                        org_id=org_id,
-                        amount=SP_DEV_PR_MERGED,
-                        source="sp_pr_merged",
-                        source_ref=f"sp_pr_merged:{pr_data.id}",
-                    )
-            except Exception:
-                logger.warning("sp_award_failed_pr_merged", exc_info=True)
-        else:
-            logger.info(
-                "pr_author_unresolved",
-                event="pr_merged",
-                pr_id=pr_data.id,
-                github_login=pr_data.user.login,
-                on_bud_branch=pr.bud_id is not None,
-                resolution_source=resolved_via,
-            )
-
-    # Release-stage detection: if this PR was merged into a configured
-    # uat / main branch, walk its commits and record merged_to_{stage}
-    # events on every BUD whose work is included. Runs for ANY merged PR,
-    # not just BUD-branch PRs \u2014 a release PR (e.g. develop \u2192 release/uat)
-    # has no bud-NNN head branch but is exactly what we want to detect.
+    # Release-stage detection: when this PR was merged into a configured
+    # develop / uat / main branch on the tracked repo, walk its commits
+    # and record ``merged_to_{stage}`` events on every BUD whose work is
+    # included. The stage-award helper then splits the stage's XP pool
+    # across each BUD's contributors. PR-author XP no longer fires here
+    # \u2014 credit only lands when work actually ships to a stage branch.
     if is_merged:
         await _maybe_detect_release_promotion(org_id, repo, pr_data, pr, db)
 
@@ -336,25 +272,14 @@ async def _maybe_detect_release_promotion(
     Failures are logged but never break the parent webhook handler \u2014
     detection is observational and must not block PR state updates.
     """
-    from app.services.release_detection import ReleaseStage, detect_release_promotion
-
     base_ref = pr_data.base.ref
     if not base_ref:
         return
 
-    stage: ReleaseStage | None = None
-    from app.utils.branch_matching import branch_matches
+    org = await db.get(Organization, org_id)
+    uat_enabled = org is not None and is_uat_enabled(org.config)
 
-    if repo.uat_branch and branch_matches(base_ref, repo.uat_branch):
-        from app.models.organization import Organization
-        from app.services.org_settings import is_uat_enabled
-
-        org = await db.get(Organization, org_id)
-        if org is not None and is_uat_enabled(org.config):
-            stage = "uat"
-    elif repo.main_branch and base_ref == repo.main_branch:
-        stage = "prod"
-
+    stage = _resolve_release_stage(repo, base_ref, uat_enabled=uat_enabled)
     if stage is None:
         return
 
@@ -433,6 +358,10 @@ async def _record_release_event_for_bud(
         f"bud:{bud_id}:activity",
         {"event_type": f"merged_to_{stage}", "release_pr_number": pr_data.number},
     )
+
+    # Split the stage's XP pool among every BUD contributor. Idempotent on
+    # webhook re-delivery via the per-(user, bud, stage) source_ref.
+    await award_stage_xp_to_contributors(db, org_id, bud_id, stage)
 
     if stage == "prod":
         await _maybe_auto_close_bud(db, org_id, bud_id)
@@ -727,6 +656,31 @@ async def _handle_pr_comment(
         logger.warning("event_bus_publish_failed", bud_id=str(pr.bud_id))
 
 
+def _resolve_release_stage(
+    repo: TrackedRepository,
+    base_ref: str,
+    *,
+    uat_enabled: bool,
+) -> ReleaseStage | None:
+    """Map a PR's base branch to a release stage, or None if no stage matches.
+
+    Pure function — no DB or async deps so it's directly unit-testable.
+    Each stage opts in via the corresponding column on
+    ``tracked_repositories``: ``uat_branch``, ``main_branch``,
+    ``develop_branch``. A NULL column means "this repo doesn't treat the
+    matched branch as a release stage" and no XP credit fires. UAT also
+    requires the org-level ``is_uat_enabled`` flag; develop and prod are
+    always-on when the branch column is set.
+    """
+    if repo.uat_branch and branch_matches(base_ref, repo.uat_branch) and uat_enabled:
+        return "uat"
+    if repo.main_branch and base_ref == repo.main_branch:
+        return "prod"
+    if repo.develop_branch and base_ref == repo.develop_branch:
+        return "develop"
+    return None
+
+
 async def _resolve_github_user(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -736,32 +690,3 @@ async def _resolve_github_user(
     return await UserRepository(db).get_id_by_github_login(org_id, github_login)
 
 
-async def _resolve_pr_author(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    github_login: str,
-    bud_id: uuid.UUID | None,
-) -> tuple[uuid.UUID | None, str]:
-    """Resolve a PR author to a bodhi user_id with a BUD-assignee fallback.
-
-    Primary path matches ``users.github_username`` — the prod case where
-    developers signed up via GitHub OAuth. The fallback credits the BUD
-    assignee when the PR is on a BUD branch and the assignee is set;
-    this covers test/mock setups where no GitHub identity is linked, and
-    cases where the human pushing the branch is a different bodhi user
-    from the one who owns the BUD work. The BUD lookup runs only on the
-    fallback path, so the prod case pays no extra query.
-
-    Returns ``(user_id, resolution_source)``. ``resolution_source`` is
-    one of ``"github_username"``, ``"bud_assignee"``, ``"unresolved"`` —
-    callers should log this so dashboards can surface which path is
-    crediting the most XP/SP.
-    """
-    user_id = await UserRepository(db).get_id_by_github_login(org_id, github_login)
-    if user_id:
-        return user_id, "github_username"
-    if bud_id:
-        bud = await BUDRepository(db, org_id=org_id).get_by_id(bud_id)
-        if bud and bud.assignee_id:
-            return bud.assignee_id, "bud_assignee"
-    return None, "unresolved"

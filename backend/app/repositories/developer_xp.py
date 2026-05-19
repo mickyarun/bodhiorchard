@@ -132,8 +132,14 @@ class RewardEventRepository:
         source_ref: str | None = None,
         multiplier: float = 1.0,
         metadata: dict[str, Any] | None = None,
+        bud_id: uuid.UUID | None = None,
     ) -> RewardEvent:
-        """Record a reward event (XP or SP)."""
+        """Record a reward event (XP or SP).
+
+        ``bud_id`` is stored when the award is tied to a specific BUD
+        (stage merges, BUD close, quality bonus) so per-BUD earnings
+        queries don't have to parse the ``source_ref`` string.
+        """
         event = RewardEvent(
             user_id=user_id,
             org_id=self.org_id,
@@ -143,6 +149,7 @@ class RewardEventRepository:
             source_ref=source_ref,
             multiplier=multiplier,
             metadata_=metadata,
+            bud_id=bud_id,
         )
         self.db.add(event)
         await self.db.flush()

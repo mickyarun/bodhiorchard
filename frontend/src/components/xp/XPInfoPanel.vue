@@ -39,6 +39,14 @@
       </tbody>
     </v-table>
 
+    <div class="text-caption text-medium-emphasis mt-2">
+      XP for shipping is split equally among everyone who contributed commits or PRs to a BUD —
+      each contributor earns once per stage. Individual commits and opening PRs no longer credit
+      XP; what matters is whether your work actually reaches develop, UAT, and production. Each
+      stage opts in via the tracked repo's branch config — a stage with no branch set awards
+      nothing.
+    </div>
+
     <v-divider class="my-3" />
 
     <div class="text-subtitle-2 font-weight-bold mb-2">
@@ -130,9 +138,9 @@
 
 <script setup lang="ts">
 const XP_RULES = [
-  { source: 'commit', label: 'Commit', xp: 5, icon: 'mdi-source-commit' },
-  { source: 'pr_opened', label: 'Open PR', xp: 15, icon: 'mdi-source-pull' },
-  { source: 'pr_merged', label: 'Merge PR', xp: 25, icon: 'mdi-source-merge' },
+  { source: 'xp_stage_develop', label: 'Merge to develop', xp: '5 ÷ contributors', icon: 'mdi-source-branch' },
+  { source: 'xp_stage_uat', label: 'Merge to UAT', xp: '15 ÷ contributors', icon: 'mdi-shield-check-outline' },
+  { source: 'xp_stage_prod', label: 'Merge to production', xp: '25 ÷ contributors', icon: 'mdi-rocket-launch-outline' },
   { source: 'review', label: 'Code Review', xp: 20, icon: 'mdi-eye-check-outline' },
   { source: 'bud_completed', label: 'Complete BUD', xp: 50, icon: 'mdi-leaf' },
   { source: 'streak', label: 'Daily Streak', xp: 10, icon: 'mdi-fire' },

@@ -75,13 +75,22 @@ async def award_xp(
     *,
     user_id: uuid.UUID,
     org_id: uuid.UUID,
-    amount: int,
+    amount: float,
     source: str,
     source_ref: str | None = None,
     multiplier: float = 1.0,
     metadata: dict[str, Any] | None = None,
+    bud_id: uuid.UUID | None = None,
 ) -> XPAwardResult | None:
     """Award XP to a developer. Handles dedup, level-up, and WebSocket publish.
+
+    ``amount`` accepts floats so stage-promotion awards can split a fixed
+    pool (e.g. 25 XP) among contributors without losing precision in the
+    audit trail. ``RewardEvent.amount`` stores the exact fractional value
+    (``Numeric(10,2)``); the aggregate ``DeveloperXP.total_xp`` is an
+    integer so it's rounded once at increment time. Pass ``bud_id`` when
+    the award is tied to a specific BUD so per-BUD earnings can be queried
+    without parsing ``source_ref``.
 
     Returns None if deduped (source_ref already awarded). Otherwise returns
     XPAwardResult with old/new level and whether a level-up occurred.
@@ -96,7 +105,7 @@ async def award_xp(
         logger.debug("xp_dedup_skip", source_ref=source_ref, user_id=str(user_id))
         return None
 
-    effective_xp = max(0, int(amount * multiplier))
+    effective_xp = round(max(0.0, amount * multiplier), 2)
     if effective_xp == 0:
         return None
 
@@ -104,8 +113,9 @@ async def award_xp(
     row = await xp_repo.get_or_create(user_id)
     old_level = row.level
 
-    # Update aggregate
-    row.total_xp += effective_xp
+    # Aggregate is an integer column — round once on increment, keep the
+    # precise fractional amount on the audit row.
+    row.total_xp += round(effective_xp)
     new_level, new_name = compute_level(row.total_xp)
     row.level = new_level
     row.level_name = new_name
@@ -122,6 +132,7 @@ async def award_xp(
                 source_ref=source_ref,
                 multiplier=multiplier,
                 metadata=metadata,
+                bud_id=bud_id,
             )
     except IntegrityError:
         logger.debug("xp_dedup_integrity", source_ref=source_ref)
@@ -129,7 +140,7 @@ async def award_xp(
 
     level_changed = new_level != old_level
     result = XPAwardResult(
-        amount_awarded=effective_xp,
+        amount_awarded=round(effective_xp),
         new_total=row.total_xp,
         old_level=old_level,
         new_level=new_level,
@@ -137,13 +148,15 @@ async def award_xp(
         new_level_name=new_name,
     )
 
-    # Publish real-time notification
+    # Publish real-time notification. ``amount`` is rounded to int for the
+    # toast so a split like 8.33 doesn't render as ``+8.33 XP`` — the audit
+    # row keeps the precise fractional value, but the UI signal stays clean.
     publish(
         f"xp:{user_id}",
         {
             "event_type": "level_up" if level_changed else "xp_awarded",
             "type": RewardType.XP.value,
-            "amount": effective_xp,
+            "amount": round(effective_xp),
             "source": source,
             "new_total": row.total_xp,
             "level": new_level,
