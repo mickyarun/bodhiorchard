@@ -76,3 +76,10 @@ alembic revision --autogenerate -m "description"
 # Apply migrations
 alembic upgrade head
 ```
+
+## Remote MCP endpoint awareness
+
+- `/mcp/sse` (POST + GET) exposes the read-only remote MCP transport for external AI clients (Claude Desktop / Cursor / Continue). Tool exposure is enforced by the `REMOTE_TOOLS` frozenset in `app/mcp/streamable.py` — adding a tool to `TOOL_HANDLERS` does NOT make it remote-callable; that requires an explicit entry there.
+- `user_mcp_tokens` rows are multi-tenant credentials with `(user_id, org_id, name)` unique. `expires_at` and `last_used_at` are nullable; internal scan-pipeline tokens are in-memory only and bypass expiry checks.
+- `mcp_audit_log` captures every `/mcp/*` call (success + failure). Retention is 90 days via the daily async loop in `app/services/mcp_audit_cleanup.py`. Treat it as append-only; never UPDATE it from a handler. Read access is admin-gated via `org:edit_settings`.
+- `bud_documents.auto_generate` (bool) gates stage-agent auto-spawn. Always check it alongside status; see AGENTS.md.

@@ -35,3 +35,22 @@ so re-runs on the same `head_sha` short-circuit through `cluster_cache` /
 `repo_graph_cache` without re-parsing.
 
 <!-- bodhi-codeintel:end -->
+
+## BUD `auto_generate` flag
+
+Each `bud_documents` row carries an `auto_generate: bool` (default `true`).
+When `false`, NO stage agent (PM / Designer / TechPlanner / Tester) is
+auto-spawned on BUD creation or stage transition — the user drives PRD /
+design / tech-spec content with their own local AI through the read-only
+remote MCP endpoint (see `MCP-REMOTE.md`).
+
+Implications when working in this codebase:
+
+- Never check `bud.status` alone to decide whether to spawn an agent;
+  always also check `bud.auto_generate`. The two gating sites are
+  `api/v1/bud.py:create_bud` and `api/v1/bud.py:_trigger_status_jobs`.
+- The explicit `code-review/override` endpoint deliberately ignores
+  `auto_generate` — it's a manual user escalation, not auto-triggering.
+- If you add a new auto-spawn site, gate it the same way and write a
+  log entry on the skip path (existing skips log
+  `stage_agent_skip_auto_generate_off`).

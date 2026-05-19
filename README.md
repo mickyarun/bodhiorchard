@@ -188,6 +188,10 @@ library — tree-sitter parsing → NetworkX graph → Leiden community detectio
 
 Bodhiorchard exposes **10 MCP tools** to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other MCP-compatible clients. Today's flagship engine is Claude Code; the Anthropic direct API handles lightweight non-codebase agents; Ollama, OpenAI, and OpenAI Codex are next. See [AI Engines](#ai-engines) for the full breakdown, auth modes, and the `~/.claude.json` registration snippet.
 
+### Bring your own AI — external-LLM mode
+
+Prefer to draft your PRD / design / tech spec with **your own** local AI? Toggle "Auto-generate" off when creating a BUD, then connect Claude Desktop / Cursor / Continue to the read-only remote MCP endpoint and paste the finished spec back into the section editors. Tokens are scoped, expiring, individually revocable, rate-limited, and audited. See **[MCP-REMOTE.md](MCP-REMOTE.md)** for the full setup, client config snippets, and threat model.
+
 ### Enterprise-Grade Security
 
 - **Multi-tenant isolation** — all queries scoped to organization
