@@ -41,10 +41,9 @@
 
     <div class="text-caption text-medium-emphasis mt-2">
       XP for shipping is split equally among everyone who contributed commits or PRs to a BUD —
-      each contributor earns once per stage. Individual commits and opening PRs no longer credit
-      XP; what matters is whether your work actually reaches develop, UAT, and production. Each
-      stage opts in via the tracked repo's branch config — a stage with no branch set awards
-      nothing.
+      each contributor earns once per stage. What matters is whether your work actually reaches
+      develop, UAT, and production. Each stage opts in via the tracked repo's branch config — a
+      stage with no branch set awards nothing.
     </div>
 
     <v-divider class="my-3" />
