@@ -280,6 +280,39 @@ app = FastAPI(
 )
 
 app.add_middleware(RequestLoggingMiddleware)
+
+
+# Defence-in-depth: strip every CORS header from /mcp/* responses, and
+# fast-fail browser preflight (OPTIONS) for those paths. MCP clients are
+# desktop apps (Claude Desktop, Cursor, Continue) — they never send a
+# preflight and never need Access-Control-Allow-* headers. Removing them
+# means even if someone later widens the wildcard CORSMiddleware, no
+# browser can ever talk credentialed CORS to /mcp/. Added BEFORE the
+# CORSMiddleware so its post-processing runs AFTER (Starlette wraps
+# in reverse-add order).
+@app.middleware("http")
+async def block_cors_on_mcp(request: Any, call_next: Any) -> Any:
+    is_mcp_path = request.url.path.startswith("/mcp/") or request.url.path == "/mcp"
+    if is_mcp_path and request.method == "OPTIONS":
+        from fastapi import Response
+
+        # Pretend the route doesn't accept browser preflight. No CORS
+        # headers, no body. Browsers will refuse the actual request.
+        return Response(status_code=403, content=b"")
+    response = await call_next(request)
+    if is_mcp_path:
+        for header in (
+            "access-control-allow-origin",
+            "access-control-allow-credentials",
+            "access-control-allow-methods",
+            "access-control-allow-headers",
+            "access-control-expose-headers",
+            "access-control-max-age",
+        ):
+            response.headers.pop(header, None)
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
