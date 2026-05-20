@@ -433,10 +433,12 @@ export class AgentActivitySim {
    * ``agent_activity_recorded`` log line.
    */
   private logOrphanSweep(budNumber: number, sweptCount: number): void {
+    const safeBudNumber = safeLog(String(budNumber))
+    const safeSweptCount = safeLog(String(sweptCount))
     console.log(
-      "[AgentActivitySim] orphan_sweep bud=%d swept=%d",
-      budNumber,
-      sweptCount,
+      "[AgentActivitySim] orphan_sweep bud=%s swept=%s",
+      safeBudNumber,
+      safeSweptCount,
     )
   }
 
