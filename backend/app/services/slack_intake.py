@@ -361,7 +361,12 @@ async def _run_triage_agent(
         db=db,
     )
 
-    from app.services.claude_runner import ClaudeRunnerConfig, MCPServerConfig, run_claude_code
+    from app.services.claude_runner import (
+        NO_REPO_CONTEXT,
+        ClaudeRunnerConfig,
+        MCPServerConfig,
+        run_claude_code,
+    )
     from app.services.skill_loader import load_skill
 
     skill = load_skill(skill_name)
@@ -385,6 +390,7 @@ async def _run_triage_agent(
 
     result = await run_claude_code(
         prompt=prompt,
+        working_dir=NO_REPO_CONTEXT,
         config=ClaudeRunnerConfig(max_turns=skill.max_turns, timeout_seconds=120, mcp=mcp),
     )
 
@@ -480,6 +486,7 @@ async def _run_prd_agent(
     from app.config import settings as app_settings
     from app.mcp.auth import create_internal_mcp_token
     from app.services.claude_runner import (
+        NO_REPO_CONTEXT,
         ClaudeRunnerConfig,
         MCPServerConfig,
         run_claude_code,
@@ -507,6 +514,7 @@ async def _run_prd_agent(
         )
         result = await run_claude_code(
             prompt=prompt,
+            working_dir=NO_REPO_CONTEXT,
             config=ClaudeRunnerConfig(max_turns=skill.max_turns, timeout_seconds=300, mcp=mcp),
         )
 

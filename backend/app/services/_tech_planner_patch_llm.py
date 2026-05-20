@@ -27,7 +27,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
-from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
 from app.services.skill_loader import Skill, load_skill
 
 logger = structlog.get_logger(__name__)
@@ -63,7 +63,11 @@ async def request_patched_section(
         effort=skill.effort or None,
     )
 
-    result = await run_claude_code(prompt=prompt, config=config)
+    result = await run_claude_code(
+        prompt=prompt,
+        working_dir=NO_REPO_CONTEXT,
+        config=config,
+    )
     if not result.success or not result.output:
         logger.warning(
             "tech_planner_patch_failed",

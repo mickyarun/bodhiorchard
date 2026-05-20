@@ -268,13 +268,22 @@ class TestValidateWorkingDir:
         result = _validate_working_dir(str(tmp_path))
         assert result == str(tmp_path)
 
-    def test_none_defaults_to_cwd(self) -> None:
-        from pathlib import Path as _Path
-
+    def test_none_rejected(self) -> None:
         from app.services.claude_runner import _validate_working_dir
 
-        result = _validate_working_dir(None)
+        # Silent fallback to the FastAPI worker cwd is gone — that path
+        # could land the agent inside the Bodhiorchard repo itself.
+        with pytest.raises(ValueError, match="working_dir is required"):
+            _validate_working_dir(None)
+
+    def test_no_repo_context_sentinel_resolves_to_scratch_dir(self) -> None:
+        from pathlib import Path as _Path
+
+        from app.services.claude_runner import NO_REPO_CONTEXT, _validate_working_dir
+
+        result = _validate_working_dir(NO_REPO_CONTEXT)
         assert _Path(result).is_dir()
+        assert "bodhiorchard-no-repo" in result
 
     def test_missing_dir_rejected(self, tmp_path: object) -> None:
         from app.services.claude_runner import _validate_working_dir

@@ -46,6 +46,11 @@ CodeReviewRunStatus = Literal["never_run", "running", "ok", "parse_failed", "fai
 # Co-located here (rather than in the service layer) so the API
 # contract — types AND user-facing copy — lives in one place.
 PARSE_FAILURE_MESSAGES: dict[str, str] = {
+    "git_auth_failed": (
+        "Code review agent couldn't authenticate to GitHub — the installation "
+        "token likely rotated mid-run, or the repo isn't on the GitHub App "
+        "installation. Re-run the review; the next run will mint a fresh token."
+    ),
     "insight_contaminated": (
         "Code review agent output was wrapped in ★ Insight blocks (a Claude "
         "output-style plugin contaminated the response). Disable the "

@@ -24,7 +24,6 @@ caller logs the drops).
 from __future__ import annotations
 
 import uuid
-from typing import Any, cast
 
 from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -98,9 +97,15 @@ class BUDFeatureLinkRepository:
             BUDFeatureLink.bud_id == bud_id,
             BUDFeatureLink.feature_id.in_(feature_ids),
         )
+        # ``AsyncSession.execute`` is typed as returning ``Result[Any]``,
+        # but for a DML statement the runtime object is a ``CursorResult``
+        # which carries ``rowcount``. ``isinstance`` narrows for mypy
+        # without leaning on a cast that strict mode flags as redundant.
         result = await self._db.execute(stmt)
         await self._db.flush()
-        return cast(CursorResult[Any], result).rowcount or 0
+        if isinstance(result, CursorResult):
+            return result.rowcount or 0
+        return 0
 
     async def list_features_for_bud(self, bud_id: uuid.UUID) -> list[Feature]:
         """Return every active feature linked to ``bud_id``.

@@ -46,6 +46,18 @@ logger = structlog.get_logger(__name__)
 
 ProgressCallback = Callable[[str, dict[str, Any]], None]  # (tool_name, tool_input)
 
+# Sentinel ``working_dir`` value for callers that genuinely have no repo
+# context — pure-LLM calls like estimation, smart-assignment, slack
+# intake, the connection-test ping. Resolved by ``_validate_working_dir``
+# to a managed, empty scratch dir inside the platform tmp tree (which is
+# on the cwd allowlist). Using a sentinel rather than ``None`` makes the
+# intent explicit at every call site and removes the silent fallback to
+# the FastAPI worker's cwd — in Hybrid mode that cwd is the Bodhiorchard
+# repo root, which is a confused-deputy waiting to happen if a future
+# git/gh-using caller ever forgets to pass ``working_dir``.
+NO_REPO_CONTEXT: str = "<no-repo-context>"
+_NO_REPO_SCRATCH_DIR: str = str(Path(tempfile.gettempdir()) / "bodhiorchard-no-repo")
+
 # Absolute path to the MCP stdio bridge script — passed to the Claude CLI
 # via ``--mcp-config`` so the bridge subprocess can be launched with the
 # correct interpreter regardless of caller cwd.
@@ -493,10 +505,24 @@ def _validate_working_dir(working_dir: str | Path | None) -> str:
     4. Reject credential dirs (``.ssh``, ``.aws``, ...) on the
        reconstructed string. Then resolve and check ``is_dir()``.
 
-    ``None`` falls back to the FastAPI worker's own cwd, which is trusted.
+    ``working_dir`` must be supplied explicitly. Callers that have no
+    repo context (pure-LLM ping / estimation / candidate-pick) pass the
+    :data:`NO_REPO_CONTEXT` sentinel, which routes through the same
+    allowlist + regex validation against a managed empty scratch dir
+    under the platform tmp tree. Silent fallback to the worker cwd is
+    deliberately gone — see the sentinel's docstring for the rationale.
     """
     if working_dir is None:
-        return str(Path.cwd().resolve())
+        raise ValueError(
+            "run_claude_code working_dir is required. Pass an absolute "
+            "repo path, or claude_runner.NO_REPO_CONTEXT for pure-LLM calls."
+        )
+
+    if working_dir == NO_REPO_CONTEXT:
+        # Create on demand and resolve through the normal allowlist path
+        # below so security checks stay uniform.
+        Path(_NO_REPO_SCRATCH_DIR).mkdir(parents=True, exist_ok=True)
+        working_dir = _NO_REPO_SCRATCH_DIR
 
     raw = str(working_dir)
 
@@ -538,7 +564,7 @@ def _validate_working_dir(working_dir: str | Path | None) -> str:
 
 async def run_claude_code(
     prompt: str,
-    working_dir: str | Path | None = None,
+    working_dir: str | Path,
     config: ClaudeRunnerConfig | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> ClaudeRunResult:
@@ -550,7 +576,8 @@ async def run_claude_code(
 
     Args:
         prompt: The prompt/instruction to send to Claude Code.
-        working_dir: Directory to run in (for codebase context). Defaults to cwd.
+        working_dir: Directory to run in (for codebase context). Required.
+            Pass :data:`NO_REPO_CONTEXT` for pure-LLM calls with no repo.
         config: Runner configuration (turns, timeout).
         progress_callback: Optional callback invoked with each tool name as
             Claude uses tools. When provided, forces ``stream-json`` output
@@ -1071,6 +1098,7 @@ async def test_claude_connection(
 
     test_result = await run_claude_code(
         prompt="Reply with exactly: BODHIORCHARD_CONNECTION_OK",
+        working_dir=NO_REPO_CONTEXT,
         config=ClaudeRunnerConfig(
             max_turns=1,
             timeout_seconds=90,
