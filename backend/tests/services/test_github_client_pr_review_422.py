@@ -163,6 +163,49 @@ def test_format_dropped_comments_section_renders_each_comment() -> None:
     assert "```" not in out
 
 
+def test_format_dropped_comments_section_neutralizes_disclosure_tags() -> None:
+    # A comment body that contains a literal ``</details>`` must NOT
+    # close the outer disclosure block early — otherwise everything
+    # after it spills outside the fold (or breaks page layout). We
+    # insert a zero-width space inside the tag so it renders identically
+    # to the eye but no longer matches GitHub's HTML parser.
+    out = GitHubClient._format_dropped_comments_section(
+        [
+            {
+                "path": "src/x.py",
+                "line": 1,
+                "body": "evil:\n</details>\n<details>\n<summary>oops</summary>\nleak",
+            },
+            {"path": "src/y.py", "line": 2, "body": "next finding"},
+        ]
+    )
+    # Exactly ONE opening + ONE closing pair — the helper's own.
+    assert out.count("<details>") == 1
+    assert out.count("</details>") == 1
+    assert out.count("<summary>") == 1
+    assert out.count("</summary>") == 1
+    # Both comments survived inside the fold.
+    assert "src/x.py:1" in out
+    assert "src/y.py:2" in out
+    assert "next finding" in out
+
+
+def test_format_dropped_comments_section_truncates_when_over_budget() -> None:
+    # GitHub rejects review bodies over 65535 chars with another 422.
+    # A bodyless fallback that concatenates many long comments could
+    # blow past this and re-introduce the silent-loss bug. Verify the
+    # budget guard caps the output and inserts a truncation marker.
+    big_body = "x" * 10_000
+    comments = [{"path": f"src/f{i}.py", "line": 1, "body": big_body} for i in range(20)]
+    out = GitHubClient._format_dropped_comments_section(comments)
+    # Comfortably under GitHub's 65535 limit.
+    assert len(out) <= 65535
+    # Truncation marker present so the PR author knows more existed.
+    assert "comments truncated" in out
+    # The disclosure block itself still closes cleanly.
+    assert out.rstrip().endswith("</details>")
+
+
 def test_format_dropped_comments_section_handles_fenced_body() -> None:
     # A comment body that itself contains a fence must not break the
     # outer block — we use ``> `` line-quoting precisely to dodge this.

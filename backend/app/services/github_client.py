@@ -138,8 +138,32 @@ class GitHubClient:
             comments=comments,
         )
 
+    # Markdown review bodies are capped by GitHub at 65535 chars. We
+    # reserve a small buffer under that so the appended details block
+    # plus any later concatenation stays comfortably under.
+    _REVIEW_BODY_BUDGET = 60_000
+
     @staticmethod
-    def _format_dropped_comments_section(comments: list[dict[str, Any]]) -> str:
+    def _neutralize_disclosure_tags(body: str) -> str:
+        """Defang ``<details>``/``<summary>`` tags inside a quoted body.
+
+        A line-quoted ``> </details>`` would still close our outer
+        disclosure block early, dumping the remaining comments below
+        the fold (or worse, breaking page layout). We insert a
+        zero-width space inside any literal disclosure tag so it
+        renders identically to the eye but no longer matches GitHub's
+        HTML parser. Narrow targeting keeps legitimate ``<input>`` /
+        ``a > b`` content readable — encoding every ``<`` / ``>`` would
+        make code snippets in agent comments unreadable.
+        """
+        zws = "​"
+        for tag in ("</details>", "<details>", "</summary>", "<summary>"):
+            cased = tag.replace("<", f"<{zws}")
+            body = body.replace(tag, cased)
+        return body
+
+    @classmethod
+    def _format_dropped_comments_section(cls, comments: list[dict[str, Any]]) -> str:
         """Render dropped inline comments as a collapsible Markdown block.
 
         Returned string is appended to a review body when the recovery
@@ -153,28 +177,45 @@ class GitHubClient:
         already contain triple-backtick fences (the agent loves them),
         and embedding fences inside our own fence breaks GitHub's
         Markdown renderer. Line-quote is fence-safe.
+
+        Length budget enforced via :data:`_REVIEW_BODY_BUDGET`. If the
+        accumulated section would exceed it, the surplus comments are
+        replaced with a ``_… N comments truncated_`` marker — preferable
+        to GitHub rejecting the entire fallback POST with a second 422
+        and re-introducing the silent-loss bug this helper exists to fix.
         """
         if not comments:
             return ""
-        lines: list[str] = [
+        header = [
             "",
             "<details>",
             f"<summary>Additional review comments ({len(comments)} — could not be "
             "posted inline)</summary>",
             "",
         ]
-        for c in comments:
+        footer = ["</details>"]
+        # Pre-charge running length with header + footer so we don't
+        # render a single comment that already busts the budget.
+        running = sum(len(line) + 1 for line in header + footer)
+        body_lines: list[str] = []
+        rendered = 0
+        for rendered, c in enumerate(comments):
             path = str(c.get("path") or "(no path)")
             line = c.get("line")
             location = f"{path}:{line}" if line is not None else path
-            lines.append(f"**`{location}`**")
-            lines.append("")
-            body = str(c.get("body") or "").rstrip()
-            for body_line in body.splitlines() or [""]:
-                lines.append(f"> {body_line}")
-            lines.append("")
-        lines.append("</details>")
-        return "\n".join(lines)
+            raw_body = str(c.get("body") or "").rstrip()
+            safe_body = cls._neutralize_disclosure_tags(raw_body)
+            block = [f"**`{location}`**", ""]
+            block.extend(f"> {bl}" for bl in (safe_body.splitlines() or [""]))
+            block.append("")
+            block_len = sum(len(line) + 1 for line in block)
+            if running + block_len > cls._REVIEW_BODY_BUDGET:
+                remaining = len(comments) - rendered
+                body_lines.append(f"_… {remaining} comments truncated_")
+                break
+            body_lines.extend(block)
+            running += block_len
+        return "\n".join(header + body_lines + footer)
 
     async def _retry_review_after_422(
         self,
