@@ -88,6 +88,7 @@ PERMISSION_CATEGORIES: list[CategoryDef] = [
             PermissionDef("buds:create", "Create BUDs"),
             PermissionDef("buds:edit", "Edit BUDs"),
             PermissionDef("buds:approve", "Approve BUD Phase Gates"),
+            PermissionDef("buds:test", "Record QA Test Results and Evidence"),
         ],
     ),
     CategoryDef(
@@ -286,7 +287,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         description="Quality assurance engineer",
         permission_specs=[
             "backlog:view/edit",
-            "buds:view",
+            "buds:view/test",
             "settings:view",
             "knowledge:view/contribute",
             "reports:view",

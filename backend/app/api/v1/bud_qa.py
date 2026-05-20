@@ -20,12 +20,14 @@ and summary statistics for the QA/Testing phase of the BUD pipeline.
 
 import os
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.qa_test_evidence import QATestEvidence
@@ -74,7 +76,7 @@ async def get_test_cases(
 
 @router.patch(
     "/manual-results",
-    dependencies=[Depends(require_permissions("buds:edit"))],
+    dependencies=[Depends(require_permissions("buds:edit", "buds:test", mode="any"))],
 )
 async def update_manual_result(
     bud_id: uuid.UUID,
@@ -83,8 +85,6 @@ async def update_manual_result(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
     """Update the result of a manual test case (pass/fail/blocked/skipped)."""
-    from datetime import UTC, datetime
-
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
 
     # Row-level lock to prevent concurrent metadata overwrites
@@ -109,8 +109,6 @@ async def update_manual_result(
     if not found:
         raise HTTPException(status_code=404, detail=f"Test case {body.test_case_id} not found")
 
-    from sqlalchemy.orm.attributes import flag_modified
-
     bud.qa_manual_cases = manual_cases
     flag_modified(bud, "qa_manual_cases")
     await db.commit()
@@ -121,7 +119,7 @@ async def update_manual_result(
 @router.post(
     "/evidence/{test_case_id}",
     response_model=TestEvidenceRead,
-    dependencies=[Depends(require_permissions("buds:edit"))],
+    dependencies=[Depends(require_permissions("buds:edit", "buds:test", mode="any"))],
 )
 async def upload_evidence(
     bud_id: uuid.UUID,
@@ -209,7 +207,7 @@ async def download_evidence(
 
 @router.delete(
     "/evidence/{evidence_id}",
-    dependencies=[Depends(require_permissions("buds:edit"))],
+    dependencies=[Depends(require_permissions("buds:edit", "buds:test", mode="any"))],
 )
 async def delete_evidence(
     bud_id: uuid.UUID,
