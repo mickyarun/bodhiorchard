@@ -36,11 +36,18 @@ from app.schemas.dev_activity import DevActivityHookRequest, DevActivityHookResp
 from app.services.colyseus_bridge import publish_to_colyseus
 from app.services.event_bus import publish
 from app.services.user_resolution import resolve_user_by_email
-from app.services.xp_service import award_xp, check_and_award_streak
+from app.services.xp_service import check_and_award_streak
 
 logger = structlog.get_logger(__name__)
 
 _BUD_BRANCH_RE = re.compile(r"^bud-(\d+)/")
+
+# Strong references to in-flight Colyseus publish tasks. ``asyncio.create_task``
+# only holds a weak reference to the task it returns, so without an external
+# anchor the task can be garbage-collected mid-await — silently dropping the
+# HTTP POST and the character-movement event with it. Same pattern as
+# ``event_bus._transport_tasks`` and ``api.v1.bugs._background_tasks``.
+_publish_tasks: set[asyncio.Task[None]] = set()
 
 
 async def handle_dev_activity(
@@ -196,23 +203,29 @@ async def handle_dev_activity(
         "file_path": body.file_path,
         "created_at": log.created_at.isoformat(),
     }
-    asyncio.create_task(publish_to_colyseus(org.id, "dev_activity", dev_activity_payload))
+    logger.info(
+        "dev_activity_colyseus_publish_scheduled",
+        event_type=body.event_type,
+        bud_number=bud_number,
+        user_id=str(user_id) if user_id else None,
+        repo_name=_pub_repo_name,
+        org_id=str(org.id),
+    )
+    _publish_task = asyncio.create_task(
+        publish_to_colyseus(org.id, "dev_activity", dev_activity_payload)
+    )
+    _publish_tasks.add(_publish_task)
+    _publish_task.add_done_callback(_publish_tasks.discard)
 
-    # Award XP for developer activity (non-blocking — XP errors must not break hooks)
+    # Daily-streak XP only — individual commits no longer credit XP. The
+    # outcome-based model awards XP at stage promotion (PR merged into a
+    # tracked repo's develop / uat / main branch), split among everyone
+    # who contributed to the BUD.
     if user_id:
         try:
             await check_and_award_streak(db, user_id=user_id, org_id=org.id)
-            if body.event_type == "commit" and body.commit_sha:
-                await award_xp(
-                    db,
-                    user_id=user_id,
-                    org_id=org.id,
-                    amount=5,
-                    source="commit",
-                    source_ref=body.commit_sha,
-                )
         except Exception:
-            logger.warning("xp_award_failed", user_id=str(user_id), exc_info=True)
+            logger.warning("xp_streak_award_failed", user_id=str(user_id), exc_info=True)
 
     logger.info(
         "hook_activity_recorded",

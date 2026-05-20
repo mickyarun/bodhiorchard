@@ -104,6 +104,17 @@ class RewardEvent(BaseModel):
         Index("ix_reward_events_user_org_time", "user_id", "org_id", "created_at"),
         Index("ix_reward_events_org_time", "org_id", "created_at"),
         Index("ix_reward_events_type_time", "org_id", "type", "created_at"),
+        # Per-BUD lookup: "show me everything Alice earned on bud-001". Partial
+        # index — NULL bud_id rows (e.g. streak, greeting) are skipped to keep
+        # the index small.
+        Index(
+            "ix_reward_events_user_bud_source",
+            "org_id",
+            "user_id",
+            "bud_id",
+            "source",
+            postgresql_where="bud_id IS NOT NULL",
+        ),
         # Partial unique index: prevents duplicate awards for the same source_ref
         Index(
             "uq_reward_events_source_ref",
@@ -134,6 +145,15 @@ class RewardEvent(BaseModel):
     )
     source: Mapped[str] = mapped_column(String(30), nullable=False)
     source_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The BUD the work belongs to, when applicable (stage-merge awards, BUD
+    # close, quality bonus). NULL for org-wide awards like streaks and
+    # greetings. Recorded on the row so "earnings per BUD per user" can be
+    # queried without parsing ``source_ref`` strings.
+    bud_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bud_documents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     multiplier: Mapped[float] = mapped_column(
         Numeric(precision=3, scale=2),
         nullable=False,

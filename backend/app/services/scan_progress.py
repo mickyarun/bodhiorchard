@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio as _asyncio
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +44,13 @@ from app.services.event_bus import publish
 from app.services.scan.runner import cancel_background_task
 
 logger = structlog.get_logger(__name__)
+
+# Strong references to in-flight publish-status tasks. ``loop.create_task``
+# only holds a weak reference, so without an anchor a high-churn scan can
+# GC the dedup-publish task mid-await and silently drop a progress event.
+# Same pattern as ``handlers_hooks._publish_tasks`` /
+# ``event_bus._transport_tasks`` — caught by RUF006.
+_progress_publish_tasks: set[_asyncio.Task[Any]] = set()
 
 
 # ── Internal helpers ────────────────────────────────────────────────
@@ -99,7 +107,9 @@ def _publish(scan_id: str, status: ScanStatus) -> None:
 
     from app.services.scan_checkpoints import publish_scan_status as _publish_dedup
 
-    loop.create_task(_publish_dedup(scan_uuid, payload))
+    _task = loop.create_task(_publish_dedup(scan_uuid, payload))
+    _progress_publish_tasks.add(_task)
+    _task.add_done_callback(_progress_publish_tasks.discard)
 
 
 # ── Public API ──────────────────────────────────────────────────────
@@ -160,8 +170,6 @@ async def update_scan_progress(
 
     # Extract known-typed updates; anything else is passed through
     # as-is so a future new column doesn't require a touch here.
-    from typing import Any
-
     typed: dict[str, Any] = {}
     for key, value in fields.items():
         if value is not None:

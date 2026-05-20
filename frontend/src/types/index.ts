@@ -886,7 +886,12 @@ export interface CodeReviewRepoStatus {
   pr_number: number | null
   pr_state: CodeReviewPRState
   pr_url: string | null
+  /** Unresolved comment count — drives the badge number. */
   comment_count: number
+  /** Every stored comment (resolved + unresolved). Useful for "X / Y" tooltips. */
+  total_comment_count: number
+  /** Comments marked resolved via the ``pull_request_review_thread`` webhook. */
+  resolved_comment_count: number
 }
 
 export interface CodeReviewStatusResponse {

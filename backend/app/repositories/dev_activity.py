@@ -157,6 +157,23 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
         result = await self._db.execute(stmt)
         return {row[0]: row[1] for row in result.all() if row[0] and row[1]}
 
+    async def get_distinct_user_ids_for_bud(self, bud_id: uuid.UUID) -> set[uuid.UUID]:
+        """Distinct user_ids that have any dev_activity row for the BUD.
+
+        Used by the stage-promotion XP split — every developer who recorded
+        a commit, file change, or any other activity against the BUD counts
+        as a contributor. Rows with NULL ``user_id`` (anonymous webhook
+        events) are excluded.
+        """
+        stmt = self._scoped(
+            select(DevActivityLog.user_id).where(
+                DevActivityLog.bud_id == bud_id,
+                DevActivityLog.user_id.is_not(None),
+            )
+        ).distinct()
+        result = await self._db.execute(stmt)
+        return {uid for (uid,) in result.all() if uid is not None}
+
     async def count_events_by_user_in_window(
         self,
         event_types: list[str],

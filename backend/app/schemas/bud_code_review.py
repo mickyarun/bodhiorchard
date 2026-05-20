@@ -82,7 +82,14 @@ class CodeReviewRepoStatus(BaseModel):
     pr_number: int | None = None
     pr_state: str  # "not_raised" | "open" | "merged" | "closed"
     pr_url: str | None = None
+    # ``comment_count`` is the **unresolved** count (badge number on the
+    # tab). ``total_comment_count`` is every stored entry — useful for an
+    # "X resolved / Y total" tooltip. ``resolved_comment_count`` is the
+    # delta. Default ``total = resolved = 0`` so old clients that ignore
+    # the new fields still render the badge as before.
     comment_count: int
+    total_comment_count: int = 0
+    resolved_comment_count: int = 0
 
 
 class CodeReviewStatusResponse(BaseModel):

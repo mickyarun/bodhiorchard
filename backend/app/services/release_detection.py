@@ -40,7 +40,6 @@ and matching against the same fields stored in their ``detail`` JSON.
 """
 
 import uuid
-from typing import Literal
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,10 +54,15 @@ from app.services.bud_timeline import record_event
 from app.services.event_bus import publish
 from app.services.github_app_auth import get_installation_token
 from app.services.github_client import GitHubClient
+from app.services.stage_award import award_stage_xp_to_contributors
+
+# Re-exported for backward compatibility with callers that imported
+# ``ReleaseStage`` from this module. New code should depend on
+# ``app.services.stage_types`` directly so cycle-prone modules like
+# ``stage_award`` don't drag in this module's GitHub-client deps.
+from app.services.stage_types import ReleaseStage
 
 logger = structlog.get_logger(__name__)
-
-ReleaseStage = Literal["uat", "prod"]
 
 
 async def find_buds_for_shas(
@@ -230,6 +234,9 @@ async def detect_release_promotion(
                 "release_pr_number": pr_data.number,
             },
         )
+        # Split the stage's XP pool among every BUD contributor.
+        # Idempotent on re-delivery via the per-(user, bud, stage) source_ref.
+        await award_stage_xp_to_contributors(db, org_id, bud_id, stage)
         new_event_count += 1
 
     # For prod merges: auto-close the BUD when ALL impacted repos have

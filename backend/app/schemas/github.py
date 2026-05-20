@@ -84,3 +84,38 @@ class GitHubComment(BaseModel):
     created_at: str
     path: str | None = None  # Only on review comments (file path)
     line: int | None = None  # Only on review comments
+    # Present on ``pull_request_review_comment`` payloads — links the inline
+    # comment back to its parent review. Used by the webhook handler to
+    # recognise GitHub's per-comment echo of a review the agent itself just
+    # posted (the agent stages a ``review_id`` tag on its stored entries,
+    # then both the review-summary event AND each comment event arrive).
+    pull_request_review_id: int | None = None
+
+
+class GitHubReviewThreadComment(BaseModel):
+    """One comment carried inside a ``pull_request_review_thread`` payload.
+
+    ``path`` + ``line`` are kept so we can match the thread back to a
+    stored entry on its file location — agent-posted comments don't
+    have ``github_comment_id`` populated locally (the per-comment echo
+    is skipped to avoid duplicates), so id-only matching would miss
+    every agent review thread.
+    """
+
+    id: int
+    path: str | None = None
+    line: int | None = None
+
+
+class GitHubReviewThread(BaseModel):
+    """Review-thread payload from ``pull_request_review_thread`` webhook.
+
+    Fires with ``action: "resolved"`` when a reviewer clicks "Resolve
+    conversation" on GitHub, and ``action: "unresolved"`` if they
+    re-open it. The handler matches each stored ``code_review_comments``
+    entry against the thread's comments — by ``github_comment_id`` for
+    human-authored entries and by ``(file, line)`` for agent entries.
+    """
+
+    node_id: str
+    comments: list[GitHubReviewThreadComment] = []

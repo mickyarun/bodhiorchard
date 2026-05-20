@@ -78,6 +78,12 @@ async def publish_to_colyseus(
         "Content-Type": "application/json",
     }
 
+    logger.info(
+        "colyseus_bridge_publish_start",
+        event_type=event_type,
+        org_id=str(org_id),
+        url=url,
+    )
     try:
         client = _get_client()
         response = await client.post(url, json=payload, headers=headers)
@@ -87,6 +93,23 @@ async def publish_to_colyseus(
                 status=response.status_code,
                 event_type=event_type,
                 org_id=str(org_id),
+                response_body=response.text[:500],
+            )
+        else:
+            # Body carries ``{ delivered: bool, reason?: string }`` — surface
+            # "delivered: false" so we can see when Colyseus drops events
+            # because no OrgRoom is registered for the org (silent success
+            # at the HTTP layer but a no-op at the simulation layer).
+            try:
+                body = response.json()
+            except ValueError:
+                body = {}
+            logger.info(
+                "colyseus_bridge_publish_ok",
+                event_type=event_type,
+                org_id=str(org_id),
+                delivered=body.get("delivered"),
+                reason=body.get("reason"),
             )
     except httpx.HTTPError as err:
         logger.warning(

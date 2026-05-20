@@ -26,6 +26,7 @@
  * Per-frame tick updates positions at the server's simulation interval.
  */
 import type { MemberState } from "../schema/MemberState"
+import { safeLog } from "../bridge/logSanitize"
 
 // ─── Constants (mirror frontend) ──────────────
 
@@ -225,10 +226,29 @@ export class DevActivitySim {
     event: DevActivityEvent,
   ): void {
     const member = this.findMember(members, event.user_id, event.actor_name)
-    if (!member) return
+    if (!member) {
+      console.log(
+        `[DevActivitySim] drop event=${safeLog(event.event_type)} user_id=${safeLog(event.user_id)} ` +
+        `actor=${safeLog(event.actor_name)} repo=${safeLog(event.repo_name)} reason=member_not_found ` +
+        `known_members=${members.size}`,
+      )
+      return
+    }
 
     // Skip for player-controlled characters
-    if (member.takeoverSessionId) return
+    if (member.takeoverSessionId) {
+      console.log(
+        `[DevActivitySim] skip event=${safeLog(event.event_type)} user_id=${safeLog(event.user_id)} ` +
+        `member=${safeLog(member.name)} reason=taken_over session=${safeLog(member.takeoverSessionId)}`,
+      )
+      return
+    }
+
+    console.log(
+      `[DevActivitySim] handle event=${safeLog(event.event_type)} status=${safeLog(event.status)} ` +
+      `user_id=${safeLog(event.user_id)} member=${safeLog(member.name)} repo=${safeLog(event.repo_name)} ` +
+      `known_repos=${[...this.repoPositions.keys()].map(safeLog).join(",")}`,
+    )
 
     // Session end or completion → return to seat
     if (

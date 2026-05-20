@@ -35,24 +35,38 @@ export interface XPToastItem {
   streakCount?: number
 }
 
+// Labels for the "Recent XP Activity" feed. The xp_stage_* sources are the
+// stage-promotion awards emitted when a tracked-repo PR merges into a
+// configured develop / uat / main branch — see backend `stage_award.py`.
+// `commit`, `pr_opened`, `pr_merged` no longer produce new awards, but keep
+// the labels around so historical rows in a user's feed still render with
+// the right copy.
 const SOURCE_LABELS: Record<string, string> = {
+  xp_stage_develop: 'Merged to develop',
+  xp_stage_uat: 'Merged to UAT',
+  xp_stage_prod: 'Merged to production',
+  review: 'Code Review',
+  bud_completed: 'BUD Completed',
+  bud_contributor: 'BUD Contributor',
+  streak: 'Daily Streak',
+  quality_bonus: 'Quality Bonus',
   commit: 'Commit',
   pr_opened: 'PR Opened',
   pr_merged: 'PR Merged',
-  review: 'Code Review',
-  bud_completed: 'BUD Completed',
-  streak: 'Daily Streak',
-  quality_bonus: 'Quality Bonus',
 }
 
 const SOURCE_ICONS: Record<string, string> = {
+  xp_stage_develop: 'mdi-source-branch',
+  xp_stage_uat: 'mdi-shield-check-outline',
+  xp_stage_prod: 'mdi-rocket-launch-outline',
+  review: 'mdi-eye-check-outline',
+  bud_completed: 'mdi-leaf',
+  bud_contributor: 'mdi-account-multiple',
+  streak: 'mdi-fire',
+  quality_bonus: 'mdi-star',
   commit: 'mdi-source-commit',
   pr_opened: 'mdi-source-pull',
   pr_merged: 'mdi-source-merge',
-  review: 'mdi-eye-check-outline',
-  bud_completed: 'mdi-leaf',
-  streak: 'mdi-fire',
-  quality_bonus: 'mdi-star',
 }
 
 export function getSourceLabel(source: string): string {

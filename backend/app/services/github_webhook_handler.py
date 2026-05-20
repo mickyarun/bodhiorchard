@@ -26,19 +26,29 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.organization import Organization
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.tracked_repository import SetupPrState, TrackedRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.pull_request import PullRequestRepository
 from app.repositories.user import UserRepository
-from app.schemas.github import GitHubComment, GitHubPullRequest, GitHubReview
+from app.schemas.github import (
+    GitHubComment,
+    GitHubPullRequest,
+    GitHubReview,
+    GitHubReviewThread,
+)
 from app.services.bud_timeline import record_event
+from app.services.org_settings import is_uat_enabled
 from app.services.pr_auto_transition import (
     check_all_prs_merged,
     check_all_repos_have_prs,
     resolve_bud_from_branch,
 )
-from app.services.release_detection import ReleaseStage
+from app.services.release_detection import detect_release_promotion
+from app.services.stage_award import award_stage_xp_to_contributors
+from app.services.stage_types import ReleaseStage
+from app.utils.branch_matching import branch_matches
 
 logger = structlog.get_logger(__name__)
 
@@ -81,6 +91,10 @@ async def handle_github_event(
             ).get("number")
             if pr_number:
                 await _handle_pr_comment(org_id, repo, pr_number, comment, db)
+    elif event_type == "pull_request_review_thread" and action in ("resolved", "unresolved"):
+        thread = GitHubReviewThread.model_validate(payload["thread"])
+        pr_data = GitHubPullRequest.model_validate(payload["pull_request"])
+        await _handle_review_thread(org_id, pr_data, thread, resolved=action == "resolved", db=db)
 
 
 async def _handle_pr_opened(
@@ -129,32 +143,9 @@ async def _handle_pr_opened(
         )
         await check_all_repos_have_prs(db, org_id, bud)
 
-    # Award XP for opening a PR
-    author_user_id, resolved_via = await _resolve_pr_author(db, org_id, pr_data.user.login, bud_id)
-    if author_user_id:
-        try:
-            from app.services.xp_service import award_xp
-
-            await award_xp(
-                db,
-                user_id=author_user_id,
-                org_id=org_id,
-                amount=15,
-                source="pr_opened",
-                source_ref=f"pr:{pr_data.id}",
-            )
-        except Exception:
-            logger.warning("xp_award_failed_pr_opened", exc_info=True)
-    else:
-        logger.info(
-            "pr_author_unresolved",
-            event="pr_opened",
-            pr_id=pr_data.id,
-            github_login=pr_data.user.login,
-            on_bud_branch=bud_id is not None,
-            resolution_source=resolved_via,
-        )
-
+    # XP is no longer credited on PR open. The outcome-based model awards
+    # XP at stage promotion (PR merged into a tracked repo's develop /
+    # uat / main branch), split among everyone who contributed to the BUD.
     await db.commit()
 
     # Push update to frontend so BUD detail refreshes
@@ -239,58 +230,12 @@ async def _handle_pr_closed(
         )
         await check_all_prs_merged(db, org_id, pr.bud_id)
 
-    # Award XP for merging a PR (author gets credit)
-    if is_merged:
-        author_user_id, resolved_via = await _resolve_pr_author(
-            db, org_id, pr_data.user.login, pr.bud_id
-        )
-        if author_user_id:
-            try:
-                from app.services.xp_service import award_xp
-
-                await award_xp(
-                    db,
-                    user_id=author_user_id,
-                    org_id=org_id,
-                    amount=25,
-                    source="pr_merged",
-                    source_ref=f"pr_merged:{pr_data.id}",
-                )
-            except Exception:
-                logger.warning("xp_award_failed_pr_merged", exc_info=True)
-
-            # SP award for PR merged (role-based)
-            try:
-                from app.services.sp_rules import SP_DEV_PR_MERGED
-                from app.services.sp_service import award_sp, get_user_role
-
-                role = await get_user_role(db, author_user_id, org_id)
-                if role == "developer":
-                    await award_sp(
-                        db,
-                        user_id=author_user_id,
-                        org_id=org_id,
-                        amount=SP_DEV_PR_MERGED,
-                        source="sp_pr_merged",
-                        source_ref=f"sp_pr_merged:{pr_data.id}",
-                    )
-            except Exception:
-                logger.warning("sp_award_failed_pr_merged", exc_info=True)
-        else:
-            logger.info(
-                "pr_author_unresolved",
-                event="pr_merged",
-                pr_id=pr_data.id,
-                github_login=pr_data.user.login,
-                on_bud_branch=pr.bud_id is not None,
-                resolution_source=resolved_via,
-            )
-
-    # Release-stage detection: if this PR was merged into a configured
-    # uat / main branch, walk its commits and record merged_to_{stage}
-    # events on every BUD whose work is included. Runs for ANY merged PR,
-    # not just BUD-branch PRs \u2014 a release PR (e.g. develop \u2192 release/uat)
-    # has no bud-NNN head branch but is exactly what we want to detect.
+    # Release-stage detection: when this PR was merged into a configured
+    # develop / uat / main branch on the tracked repo, walk its commits
+    # and record ``merged_to_{stage}`` events on every BUD whose work is
+    # included. The stage-award helper then splits the stage's XP pool
+    # across each BUD's contributors. PR-author XP no longer fires here
+    # \u2014 credit only lands when work actually ships to a stage branch.
     if is_merged:
         await _maybe_detect_release_promotion(org_id, repo, pr_data, pr, db)
 
@@ -336,25 +281,14 @@ async def _maybe_detect_release_promotion(
     Failures are logged but never break the parent webhook handler \u2014
     detection is observational and must not block PR state updates.
     """
-    from app.services.release_detection import ReleaseStage, detect_release_promotion
-
     base_ref = pr_data.base.ref
     if not base_ref:
         return
 
-    stage: ReleaseStage | None = None
-    from app.utils.branch_matching import branch_matches
+    org = await db.get(Organization, org_id)
+    uat_enabled = org is not None and is_uat_enabled(org.config)
 
-    if repo.uat_branch and branch_matches(base_ref, repo.uat_branch):
-        from app.models.organization import Organization
-        from app.services.org_settings import is_uat_enabled
-
-        org = await db.get(Organization, org_id)
-        if org is not None and is_uat_enabled(org.config):
-            stage = "uat"
-    elif repo.main_branch and base_ref == repo.main_branch:
-        stage = "prod"
-
+    stage = _resolve_release_stage(repo, base_ref, uat_enabled=uat_enabled)
     if stage is None:
         return
 
@@ -433,6 +367,10 @@ async def _record_release_event_for_bud(
         f"bud:{bud_id}:activity",
         {"event_type": f"merged_to_{stage}", "release_pr_number": pr_data.number},
     )
+
+    # Split the stage's XP pool among every BUD contributor. Idempotent on
+    # webhook re-delivery via the per-(user, bud, stage) source_ref.
+    await award_stage_xp_to_contributors(db, org_id, bud_id, stage)
 
     if stage == "prod":
         await _maybe_auto_close_bud(db, org_id, bud_id)
@@ -666,6 +604,83 @@ async def _fetch_and_store_review_comments(
     )
 
 
+async def _handle_review_thread(
+    org_id: uuid.UUID,
+    pr_data: GitHubPullRequest,
+    thread: GitHubReviewThread,
+    *,
+    resolved: bool,
+    db: AsyncSession,
+) -> None:
+    """Flip the ``resolved`` flag on every BUD comment in this thread.
+
+    GitHub fires ``pull_request_review_thread`` with ``action: resolved``
+    when a reviewer clicks the "Resolve conversation" button on a PR,
+    and ``action: unresolved`` if they re-open it. The payload carries
+    the GitHub ids of every comment in the thread. We match those
+    against ``github_comment_id`` on the BUD's stored review comments
+    and flip the per-entry ``resolved`` flag. The badge count in the
+    Code Review tab uses this flag to show "unresolved" rather than
+    "total" — once all threads are resolved the badge drops to zero
+    while the entries remain visible in the history.
+    """
+    pr_repo = PullRequestRepository(db, org_id=org_id)
+    pr = await pr_repo.get_by_github_pr_id(pr_data.id)
+    if pr is None or pr.bud_id is None:
+        return
+
+    thread_comment_ids = {c.id for c in thread.comments}
+    thread_locations = {(c.path or "", c.line or 0) for c in thread.comments if c.path is not None}
+    if not thread_comment_ids and not thread_locations:
+        return
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id_for_update(pr.bud_id)
+    if bud is None:
+        return
+
+    existing = list(bud.code_review_comments or [])
+    flipped = 0
+    new_entries: list[dict[str, Any]] = []
+    for entry in existing:
+        # Id-match for human-authored entries; (file, line) fallback for
+        # agent entries that have no ``github_comment_id`` populated.
+        cid = entry.get("github_comment_id")
+        location = (entry.get("file") or "", entry.get("line") or 0)
+        matches = (cid is not None and cid in thread_comment_ids) or (
+            cid is None and location in thread_locations
+        )
+        if matches and entry.get("resolved") is not resolved:
+            new_entries.append({**entry, "resolved": resolved})
+            flipped += 1
+        else:
+            new_entries.append(entry)
+
+    if flipped == 0:
+        # No stored entry matched the thread. Either we don't track the
+        # thread's comments at all (rare), or the state was already
+        # correct. Logging at info so the gap is visible without noise.
+        logger.info(
+            "review_thread_no_match",
+            pr_number=pr_data.number,
+            bud_id=str(pr.bud_id),
+            thread_comments=len(thread_comment_ids),
+            resolved=resolved,
+        )
+        return
+
+    bud.code_review_comments = new_entries
+    await db.commit()
+
+    logger.info(
+        "review_thread_resolution_synced",
+        pr_number=pr_data.number,
+        bud_id=str(pr.bud_id),
+        flipped=flipped,
+        resolved=resolved,
+    )
+
+
 async def _handle_pr_comment(
     org_id: uuid.UUID,
     repo: TrackedRepository,
@@ -687,6 +702,30 @@ async def _handle_pr_comment(
         return
 
     existing = list(bud.code_review_comments or [])
+
+    # Echo-skip for inline comments that belong to a review the agent
+    # itself just posted. GitHub fires both ``pull_request_review`` (the
+    # summary) AND one ``pull_request_review_comment`` per inline comment
+    # — they arrive as separate webhooks. ``_fetch_and_store_review_comments``
+    # already guards the summary path via ``review_id`` matching on the
+    # agent-stored entries (tagged by ``_tag_agent_review_id``). The per-
+    # comment path lands here and must apply the same guard, otherwise every
+    # inline comment of an agent-posted review gets stored a second time
+    # (the agent entries have no ``github_comment_id`` so the id-based dedup
+    # below misses them). Without this, a 7-comment agent review balloons
+    # the BUD's stored count to 14.
+    if comment.pull_request_review_id and any(
+        c.get("review_id") == comment.pull_request_review_id for c in existing
+    ):
+        logger.info(
+            "review_comment_echo_skipped",
+            bud_id=str(pr.bud_id),
+            review_id=comment.pull_request_review_id,
+            comment_id=comment.id,
+            pr_number=pr_number,
+        )
+        return
+
     existing_ids = {c.get("github_comment_id") for c in existing if c.get("github_comment_id")}
     if comment.id in existing_ids:
         return
@@ -727,6 +766,31 @@ async def _handle_pr_comment(
         logger.warning("event_bus_publish_failed", bud_id=str(pr.bud_id))
 
 
+def _resolve_release_stage(
+    repo: TrackedRepository,
+    base_ref: str,
+    *,
+    uat_enabled: bool,
+) -> ReleaseStage | None:
+    """Map a PR's base branch to a release stage, or None if no stage matches.
+
+    Pure function — no DB or async deps so it's directly unit-testable.
+    Each stage opts in via the corresponding column on
+    ``tracked_repositories``: ``uat_branch``, ``main_branch``,
+    ``develop_branch``. A NULL column means "this repo doesn't treat the
+    matched branch as a release stage" and no XP credit fires. UAT also
+    requires the org-level ``is_uat_enabled`` flag; develop and prod are
+    always-on when the branch column is set.
+    """
+    if repo.uat_branch and branch_matches(base_ref, repo.uat_branch) and uat_enabled:
+        return "uat"
+    if repo.main_branch and base_ref == repo.main_branch:
+        return "prod"
+    if repo.develop_branch and base_ref == repo.develop_branch:
+        return "develop"
+    return None
+
+
 async def _resolve_github_user(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -734,34 +798,3 @@ async def _resolve_github_user(
 ) -> uuid.UUID | None:
     """Resolve a GitHub login to a user_id within the org."""
     return await UserRepository(db).get_id_by_github_login(org_id, github_login)
-
-
-async def _resolve_pr_author(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    github_login: str,
-    bud_id: uuid.UUID | None,
-) -> tuple[uuid.UUID | None, str]:
-    """Resolve a PR author to a bodhi user_id with a BUD-assignee fallback.
-
-    Primary path matches ``users.github_username`` — the prod case where
-    developers signed up via GitHub OAuth. The fallback credits the BUD
-    assignee when the PR is on a BUD branch and the assignee is set;
-    this covers test/mock setups where no GitHub identity is linked, and
-    cases where the human pushing the branch is a different bodhi user
-    from the one who owns the BUD work. The BUD lookup runs only on the
-    fallback path, so the prod case pays no extra query.
-
-    Returns ``(user_id, resolution_source)``. ``resolution_source`` is
-    one of ``"github_username"``, ``"bud_assignee"``, ``"unresolved"`` —
-    callers should log this so dashboards can surface which path is
-    crediting the most XP/SP.
-    """
-    user_id = await UserRepository(db).get_id_by_github_login(org_id, github_login)
-    if user_id:
-        return user_id, "github_username"
-    if bud_id:
-        bud = await BUDRepository(db, org_id=org_id).get_by_id(bud_id)
-        if bud and bud.assignee_id:
-            return bud.assignee_id, "bud_assignee"
-    return None, "unresolved"

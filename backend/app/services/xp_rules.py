@@ -113,3 +113,25 @@ def get_unlocked_items_for_level(level: int) -> UnlockedItems:
         characters=[k for k, v in CHARACTER_UNLOCKS.items() if v <= level],
         accessories=[k for k, v in ACCESSORY_UNLOCKS.items() if v <= level],
     )
+
+
+# ─── Stage promotion XP ───────────────────────
+#
+# Awarded when a tracked-repo PR merges into one of the repo's configured
+# stage branches (develop / uat / main). The amount is split equally among
+# everyone who contributed commits or PRs to the affected BUD, rounded to
+# 2 decimal places. Dedup is per (user_id, bud_id, stage), so the same
+# developer earns three credits as a BUD progresses through stages.
+# If a stage's branch column on ``tracked_repositories`` is NULL, the stage
+# is opted out and no XP fires for any merge — branch column existence is
+# the opt-in signal.
+
+XP_STAGE_DEVELOP = 5
+XP_STAGE_UAT = 15
+XP_STAGE_PROD = 25
+
+STAGE_XP: dict[str, int] = {
+    "develop": XP_STAGE_DEVELOP,
+    "uat": XP_STAGE_UAT,
+    "prod": XP_STAGE_PROD,
+}

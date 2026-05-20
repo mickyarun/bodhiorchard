@@ -55,6 +55,15 @@ _WEEKDAY_KEYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun
 
 logger = structlog.get_logger(__name__)
 
+# Strong references to in-flight Colyseus member_presence publish tasks.
+# ``asyncio.create_task`` only holds a weak reference, so without an
+# external anchor the task can be garbage-collected mid-await — silently
+# dropping the HTTP POST. Same pattern as
+# ``handlers_hooks._publish_tasks`` and ``event_bus._transport_tasks``.
+# Without this, Slack presence transitions never reach the dashboard's
+# 3D world and online characters appear stuck on their idle frame.
+_publish_tasks: set[asyncio.Task[None]] = set()
+
 
 class PresenceEntry:
     """Cached presence state for a single Slack user."""
@@ -273,7 +282,7 @@ async def _refresh_org_presence(
         polled += 1
 
         if old_display != new_display:
-            asyncio.create_task(
+            _publish_task = asyncio.create_task(
                 publish_to_colyseus(
                     str(org_id),
                     "member_presence",
@@ -283,6 +292,8 @@ async def _refresh_org_presence(
                     },
                 )
             )
+            _publish_tasks.add(_publish_task)
+            _publish_task.add_done_callback(_publish_tasks.discard)
             logger.info(
                 "presence_transition",
                 org_id=org_id_str,

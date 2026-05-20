@@ -39,6 +39,13 @@
       </tbody>
     </v-table>
 
+    <div class="text-caption text-medium-emphasis mt-2">
+      XP for shipping is split equally among everyone who contributed commits or PRs to a BUD —
+      each contributor earns once per stage. What matters is whether your work actually reaches
+      develop, UAT, and production. Each stage opts in via the tracked repo's branch config — a
+      stage with no branch set awards nothing.
+    </div>
+
     <v-divider class="my-3" />
 
     <div class="text-subtitle-2 font-weight-bold mb-2">
@@ -65,7 +72,11 @@
       Skill Points (SP)
     </div>
     <div class="text-caption text-medium-emphasis mb-3">
-      SP is a scarce currency earned through quality outcomes. Spend SP to unlock vehicles and upgrade your house.
+      SP is a scarce currency earned through quality outcomes. Spend SP to unlock vehicles and
+      upgrade your house. <strong>BUD-shipped SP is paid out only when the BUD reaches CLOSED
+      status</strong> — a PR merge into a stage branch credits stage XP, but the SP for shipping
+      waits for the BUD to move through testing → UAT → PROD → CLOSED. Streak milestones, code
+      reviews, and bug-filing SP credit immediately on the triggering event.
     </div>
 
     <div class="text-caption font-weight-bold mb-1 text-uppercase" style="letter-spacing: 0.05em;">Developer</div>
@@ -130,9 +141,9 @@
 
 <script setup lang="ts">
 const XP_RULES = [
-  { source: 'commit', label: 'Commit', xp: 5, icon: 'mdi-source-commit' },
-  { source: 'pr_opened', label: 'Open PR', xp: 15, icon: 'mdi-source-pull' },
-  { source: 'pr_merged', label: 'Merge PR', xp: 25, icon: 'mdi-source-merge' },
+  { source: 'xp_stage_develop', label: 'Merge to develop', xp: '5 ÷ contributors', icon: 'mdi-source-branch' },
+  { source: 'xp_stage_uat', label: 'Merge to UAT', xp: '15 ÷ contributors', icon: 'mdi-shield-check-outline' },
+  { source: 'xp_stage_prod', label: 'Merge to production', xp: '25 ÷ contributors', icon: 'mdi-rocket-launch-outline' },
   { source: 'review', label: 'Code Review', xp: 20, icon: 'mdi-eye-check-outline' },
   { source: 'bud_completed', label: 'Complete BUD', xp: 50, icon: 'mdi-leaf' },
   { source: 'streak', label: 'Daily Streak', xp: 10, icon: 'mdi-fire' },
@@ -154,7 +165,6 @@ const LEVELS = [
 ]
 
 const SP_DEV = [
-  { label: 'PR merged', sp: 0.5 },
   { label: 'Code review given', sp: 0.25 },
   { label: 'BUD shipped to PROD', sp: 1.0 },
   { label: 'Quality score > 80%', sp: 0.5 },
@@ -170,7 +180,7 @@ const SP_QA = [
 ]
 
 const SP_PM = [
-  { label: 'BUD shipped to PROD', sp: 0.5 },
+  { label: 'BUD shipped to PROD', sp: 2.0 },
   { label: 'BUD approved promptly', sp: 0.25 },
   { label: 'BUD discarded', sp: -0.5 },
 ]

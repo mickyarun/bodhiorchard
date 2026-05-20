@@ -126,6 +126,23 @@ class PullRequestRepository(BaseRepository[PullRequest]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_distinct_author_user_ids_for_bud(self, bud_id: uuid.UUID) -> set[uuid.UUID]:
+        """Distinct author user_ids across every PR linked to the BUD.
+
+        Used by the stage-promotion XP split — anyone who opened a PR
+        against the BUD's work counts as a contributor, regardless of
+        whether the PR has merged yet. Rows with NULL ``author_user_id``
+        (PRs opened by users not mapped to a bodhi account) are excluded.
+        """
+        stmt = self._scoped(
+            select(PullRequest.author_user_id).where(
+                PullRequest.bud_id == bud_id,
+                PullRequest.author_user_id.is_not(None),
+            )
+        ).distinct()
+        result = await self._db.execute(stmt)
+        return {uid for (uid,) in result.all() if uid is not None}
+
     async def list_for_bud(self, bud_id: uuid.UUID) -> list[PullRequest]:
         """List all PRs linked to a BUD, newest first."""
         stmt = self._scoped(
