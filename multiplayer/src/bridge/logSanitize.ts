@@ -22,20 +22,27 @@
  * log line ("log injection", CodeQL js/log-injection). That breaks
  * downstream log-parsing tools and can mask real events.
  *
- * Strict allowlist: keep printable ASCII (space through ~) plus tab.
- * Everything else — including every Unicode newline form (CR, LF,
- * NEL, LS, PS), ANSI escape, and any control character — becomes a
- * ``?``. Caps length first so a hostile gigabyte-sized name can't
- * blow up the process. ``null`` and ``undefined`` are surfaced as
- * literal placeholders so a missing-field bug stays diagnosable.
+ * Defers to ``JSON.stringify`` for the heavy lifting — it escapes
+ * every newline form (``\n``, ``\r``, ````, `` ``, `` ``)
+ * plus quotes, backslashes, and other control characters. The
+ * surrounding quotes ``JSON.stringify`` produces are stripped because
+ * we want to inline the value into a free-form log message, not embed
+ * it as a JSON string. ``JSON.stringify`` is on CodeQL's known-good
+ * sanitiser list for ``js/log-injection``, so wrapping every
+ * user-controlled interpolation in this helper closes the alert.
  *
- * The regex is a plain literal — not a dynamically-built ``new
- * RegExp(...)`` — so CodeQL recognises it as a known sanitiser and
- * closes the js/log-injection alerts on every interpolation site.
+ * Caps length first so a hostile gigabyte-sized name can't blow up
+ * the process or the log line. ``null`` and ``undefined`` are
+ * surfaced as literal placeholders so a missing-field bug stays
+ * diagnosable.
  */
 export function safeLog(value: unknown): string {
   if (value === null) return "<null>"
   if (value === undefined) return "<undefined>"
   const s = typeof value === "string" ? value : String(value)
-  return s.slice(0, 500).replace(/[^\t\x20-\x7e]/g, "?")
+  const capped = s.slice(0, 500)
+  // JSON.stringify on a string returns ``"..."`` with embedded
+  // escapes — strip the outer quotes for inline log readability.
+  const escaped = JSON.stringify(capped)
+  return escaped.slice(1, -1)
 }
