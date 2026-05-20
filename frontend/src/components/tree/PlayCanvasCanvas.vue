@@ -36,6 +36,39 @@
       :visible="loaderVisible"
       :phase="loaderPhase"
     />
+    <!-- Reconnect banner — surfaced when the Colyseus OrgRoom drops
+         (backend restart, idle eviction, network blip). The client
+         auto-retries with bounded backoff; this banner only shows
+         while reconnect is in-flight or after retries are exhausted
+         so the user has a manual "Reconnect" affordance. -->
+    <div
+      v-if="connectionBannerVisible"
+      class="playcanvas-canvas__reconnect"
+      :class="{ 'playcanvas-canvas__reconnect--failed': connectionStatus === 'failed' }"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="playcanvas-canvas__reconnect-text">
+        <template v-if="connectionStatus === 'reconnecting'">
+          Reconnecting to live dashboard…
+          <span v-if="reconnectAttempt" class="playcanvas-canvas__reconnect-attempt">
+            (attempt {{ reconnectAttempt }} of {{ reconnectMaxAttempts }})
+          </span>
+        </template>
+        <template v-else>
+          Live dashboard disconnected. Activity won't appear until you reconnect.
+        </template>
+      </span>
+      <button
+        v-if="connectionStatus === 'failed'"
+        type="button"
+        class="playcanvas-canvas__reconnect-btn"
+        :disabled="reconnectInFlight"
+        @click="onManualReconnect"
+      >
+        {{ reconnectInFlight ? 'Reconnecting…' : 'Reconnect' }}
+      </button>
+    </div>
     <TouchControls
       v-if="isTouch && touchContext"
       :context="touchContext"
@@ -85,6 +118,7 @@ import api from '@/services/api'
 import TouchControls, { type TouchContext } from '@/components/touch/TouchControls.vue'
 import EngineLoadingOverlay, { type LoadingPhase } from '@/components/tree/EngineLoadingOverlay.vue'
 import { useTouchDevice } from '@/composables/useTouchDevice'
+import { OrgRoomClient, type ConnectionStatus } from '@/multiplayer'
 
 const authStore = useAuthStore()
 
@@ -114,6 +148,32 @@ const emit = defineEmits<{
 const containerRef = ref<HTMLElement | null>(null)
 const tooltipText = ref<string | null>(null)
 const tooltipPos = ref({ x: 0, y: 0 })
+
+// Live-dashboard connection state surfaced from OrgRoomClient. The
+// banner only renders for ``reconnecting`` / ``failed`` — silent on
+// healthy ``connected`` and on the brief initial ``connecting`` /
+// post-teardown ``disconnected`` states (those are expected lifecycle
+// transitions, not user-actionable problems).
+const connectionStatus = ref<ConnectionStatus>('disconnected')
+const reconnectAttempt = ref<number | null>(null)
+const reconnectMaxAttempts = ref<number | null>(null)
+const reconnectInFlight = ref(false)
+const connectionBannerVisible = computed(
+  () => connectionStatus.value === 'reconnecting' || connectionStatus.value === 'failed',
+)
+let connectionStatusUnsubscribe: (() => void) | null = null
+
+async function onManualReconnect(): Promise<void> {
+  if (reconnectInFlight.value) return
+  reconnectInFlight.value = true
+  try {
+    await OrgRoomClient.getInstance().retryConnect()
+  } catch (err) {
+    console.warn('[PlayCanvasCanvas] manual reconnect failed:', err)
+  } finally {
+    reconnectInFlight.value = false
+  }
+}
 
 // Loading-overlay state. Visible from mount through scene-build; hides
 // on `scene-ready`. Phase is advanced manually at known checkpoints in
@@ -464,6 +524,18 @@ function onResize(): void {
 const initError = ref<string | null>(null)
 
 onMounted(async () => {
+  // Subscribe to OrgRoom connection-status BEFORE initEngine so the very
+  // first ``connecting`` event from connectToOrgRoom doesn't slip past us.
+  // The listener replays the current status synchronously so reactive
+  // refs always reflect reality even if the engine boot is slow.
+  connectionStatusUnsubscribe = OrgRoomClient.getInstance().addConnectionStatusListener(
+    (status, detail) => {
+      connectionStatus.value = status
+      reconnectAttempt.value = detail?.attempt ?? null
+      reconnectMaxAttempts.value = detail?.maxAttempts ?? null
+    },
+  )
+
   try {
     await initEngine()
   } catch (err) {
@@ -629,6 +701,10 @@ function teardownEngine(): void {
   engineReady = false
   // Bump the token so any in-flight initEngine bails at its next checkpoint.
   initToken++
+  if (connectionStatusUnsubscribe) {
+    connectionStatusUnsubscribe()
+    connectionStatusUnsubscribe = null
+  }
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -716,6 +792,55 @@ if (import.meta.hot) {
   white-space: pre-line;
   z-index: 10;
   max-width: 250px;
+}
+
+.playcanvas-canvas__reconnect {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid rgba(250, 204, 21, 0.5);
+  z-index: 20;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.playcanvas-canvas__reconnect--failed {
+  border-color: rgba(248, 113, 113, 0.65);
+}
+
+.playcanvas-canvas__reconnect-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.playcanvas-canvas__reconnect-attempt {
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+.playcanvas-canvas__reconnect-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  background: #f8fafc;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.playcanvas-canvas__reconnect-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 /* Position wrapper so the button + inline error stack vertically

@@ -29,4 +29,6 @@ export {
   type MemberStateSnapshot,
   type AgentStateSnapshot,
   type MemberChangeListener,
+  type ConnectionStatus,
+  type ConnectionStatusListener,
 } from './OrgRoomClient'

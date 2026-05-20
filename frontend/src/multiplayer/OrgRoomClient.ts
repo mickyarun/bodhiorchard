@@ -137,10 +137,43 @@ export type MemberChangeListener = (
   snapshot: MemberStateSnapshot | null,
 ) => void
 
+/** Connection lifecycle states surfaced to the UI for banner rendering. */
+export type ConnectionStatus =
+  | "disconnected"   // never connected, or user-initiated disconnect
+  | "connecting"    // initial connect in flight
+  | "connected"     // healthy
+  | "reconnecting"  // unexpected leave; bounded retry loop in progress
+  | "failed"        // retries exhausted; user must trigger a manual reconnect
+
+export type ConnectionStatusListener = (
+  status: ConnectionStatus,
+  detail: { attempt?: number; maxAttempts?: number; error?: string } | null,
+) => void
+
+/** Reconnect backoff (ms). 2/5/10/20/30s = ~67s before surfacing "failed". */
+const RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000, 20_000, 30_000] as const
+
 export class OrgRoomClient {
   private static instance: OrgRoomClient | null = null
   private client: Client
   private room: Room | null = null
+
+  /**
+   * Last successful connect args, kept across drops so the reconnect path
+   * can re-issue ``joinOrCreate`` without the caller having to remember.
+   * Cleared on an explicit ``disconnect()`` so a deliberate teardown does
+   * NOT trigger auto-reconnect.
+   */
+  private lastConnectArgs: {
+    orgId: string
+    userData: { userId: string; name: string; characterModel?: string; token?: string }
+  } | null = null
+  private reconnectAttempt = 0
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Listeners for the UI banner. */
+  private statusListeners = new Set<ConnectionStatusListener>()
+  private currentStatus: ConnectionStatus = "disconnected"
 
   /**
    * Cached mirror of server member state. Updated on every add/update/remove
@@ -198,6 +231,14 @@ export class OrgRoomClient {
       await this.disconnect()
     }
 
+    // Cancel any pending reconnect — a fresh ``connect()`` supersedes the
+    // background retry loop, otherwise an in-flight backoff might fire
+    // mid-connect and clobber the new room.
+    this.cancelPendingReconnect()
+    this.lastConnectArgs = { orgId, userData }
+    this.reconnectAttempt = 0
+    this.setStatus("connecting", null)
+
     try {
       this.room = await this.client.joinOrCreate("org", {
         roomId: `org-${orgId}`,
@@ -208,24 +249,158 @@ export class OrgRoomClient {
         token: userData.token ?? '',
       })
       this.setupStateListeners()
+      this.registerOnLeave()
+      this.setStatus("connected", null)
       console.debug(`[OrgRoomClient] Connected to org=${orgId} session=${this.room.sessionId}`)
     } catch (err) {
       console.warn("[OrgRoomClient] Failed to join org room:", err)
+      this.setStatus("failed", { error: err instanceof Error ? err.message : String(err) })
       throw err
     }
   }
 
+  /**
+   * Register an ``onLeave`` handler so unexpected WebSocket drops are
+   * detected instead of silently leaving ``this.room`` set to a dead
+   * Room instance (which would let ``isConnected`` keep returning true
+   * even though Colyseus has cleared its server-side state).
+   *
+   * Colyseus emits ``code = 1000`` for clean closes (server-initiated
+   * leave, normal flow) and other codes for abnormal closes (network
+   * drop, server restart, idle eviction). We only trigger auto-reconnect
+   * on abnormal closes — a clean close means the caller deliberately
+   * unsubscribed via ``disconnect()`` and we'd just race them.
+   */
+  private registerOnLeave(): void {
+    if (!this.room) return
+    this.room.onLeave((code) => {
+      console.warn(`[OrgRoomClient] room.onLeave code=${code}`)
+      this.clearRoomState()
+      // Code 1000 = normal close. Anything else = treat as transient.
+      if (code !== 1000 && this.lastConnectArgs) {
+        this.scheduleReconnect()
+      } else {
+        this.setStatus("disconnected", null)
+      }
+    })
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.lastConnectArgs) return
+    if (this.reconnectAttempt >= RECONNECT_BACKOFF_MS.length) {
+      this.setStatus("failed", {
+        attempt: this.reconnectAttempt,
+        maxAttempts: RECONNECT_BACKOFF_MS.length,
+      })
+      return
+    }
+
+    const delayMs = RECONNECT_BACKOFF_MS[this.reconnectAttempt]
+    this.reconnectAttempt += 1
+    this.setStatus("reconnecting", {
+      attempt: this.reconnectAttempt,
+      maxAttempts: RECONNECT_BACKOFF_MS.length,
+    })
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null
+      const args = this.lastConnectArgs
+      if (!args) return
+      try {
+        // Skip the public ``connect()`` shortcut path that resets
+        // ``reconnectAttempt`` — we want to *continue* the backoff
+        // ladder until success or exhaustion.
+        this.room = await this.client.joinOrCreate("org", {
+          roomId: `org-${args.orgId}`,
+          orgId: args.orgId,
+          userId: args.userData.userId,
+          name: args.userData.name,
+          characterModel: args.userData.characterModel ?? '',
+          token: args.userData.token ?? '',
+        })
+        this.setupStateListeners()
+        this.registerOnLeave()
+        this.reconnectAttempt = 0
+        this.setStatus("connected", null)
+        console.debug(
+          `[OrgRoomClient] Reconnected to org=${args.orgId} session=${this.room.sessionId}`,
+        )
+      } catch (err) {
+        console.warn(
+          `[OrgRoomClient] Reconnect attempt ${this.reconnectAttempt} failed:`,
+          err,
+        )
+        this.scheduleReconnect()
+      }
+    }, delayMs)
+  }
+
+  private cancelPendingReconnect(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+  }
+
+  /** Subscribe to connection status changes. Returns an unsubscribe function. */
+  addConnectionStatusListener(listener: ConnectionStatusListener): () => void {
+    this.statusListeners.add(listener)
+    // Replay the current status immediately so subscribers don't miss the
+    // state they joined on.
+    listener(this.currentStatus, null)
+    return () => {
+      this.statusListeners.delete(listener)
+    }
+  }
+
+  /** Caller-triggered retry — clears the "failed" state and starts fresh. */
+  async retryConnect(): Promise<void> {
+    if (!this.lastConnectArgs) {
+      console.warn("[OrgRoomClient] retryConnect called with no prior connect args")
+      return
+    }
+    this.cancelPendingReconnect()
+    this.reconnectAttempt = 0
+    await this.connect(this.lastConnectArgs.orgId, this.lastConnectArgs.userData)
+  }
+
+  private setStatus(
+    status: ConnectionStatus,
+    detail: { attempt?: number; maxAttempts?: number; error?: string } | null,
+  ): void {
+    this.currentStatus = status
+    for (const listener of this.statusListeners) {
+      try {
+        listener(status, detail)
+      } catch (err) {
+        console.warn("[OrgRoomClient] status listener threw:", err)
+      }
+    }
+  }
+
+  private clearRoomState(): void {
+    this.room = null
+    this.memberSnapshots.clear()
+    this.activeRaceSnapshots.clear()
+  }
+
   /** Disconnect from the org room. */
   async disconnect(): Promise<void> {
-    if (!this.room) return
+    // User-initiated teardown — suppress the reconnect loop.
+    this.cancelPendingReconnect()
+    this.lastConnectArgs = null
+    this.reconnectAttempt = 0
+    if (!this.room) {
+      this.setStatus("disconnected", null)
+      return
+    }
     try {
       await this.room.leave()
     } catch {
       // Already disconnected
     }
-    this.room = null
-    this.memberSnapshots.clear()
-    this.activeRaceSnapshots.clear()
+    this.clearRoomState()
+    this.setStatus("disconnected", null)
     // Drop the 6 engine-owned callbacks. Each is an arrow function that
     // captured `this` (the GardenEngine) when wireOrgRoomCallbacks ran —
     // since OrgRoomClient is a process-lifetime singleton, leaving these
