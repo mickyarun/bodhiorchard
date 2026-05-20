@@ -1,7 +1,7 @@
 """add auto_generate flag to bud_documents
 
 Revision ID: 303b6aac7141
-Revises: 15f415a484f1
+Revises: e3153001b6ee
 Create Date: 2026-05-19 12:10:09.364552
 
 """
@@ -14,7 +14,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "303b6aac7141"
-down_revision: str | None = "15f415a484f1"
+down_revision: str | None = "e3153001b6ee"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
