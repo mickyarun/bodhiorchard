@@ -27,21 +27,29 @@ def org_id() -> uuid.UUID:
 
 def _mock_db_with_repo(repo: object | None) -> MagicMock:
     db = MagicMock()
-    db.execute = AsyncMock()
-    scalar = MagicMock()
-    scalar.scalar_one_or_none.return_value = repo
-    db.execute.return_value = scalar
     db.get = AsyncMock()
+    # ``TrackedRepoRepository.get_by_path`` is what the helper calls;
+    # patched at the module level in each test.
+    db._repo_to_return = repo  # type: ignore[attr-defined]
     return db
+
+
+def _patch_get_by_path(db: MagicMock):  # type: ignore[no-untyped-def]
+    """Patch ``TrackedRepoRepository.get_by_path`` to return ``db._repo_to_return``."""
+    return patch(
+        "app.services.github_remote_refresh.TrackedRepoRepository.get_by_path",
+        new=AsyncMock(return_value=db._repo_to_return),
+    )
 
 
 async def test_returns_false_when_repo_not_tracked(org_id: uuid.UUID) -> None:
     db = _mock_db_with_repo(None)
-    result = await github_remote_refresh.refresh_origin_token(
-        working_dir="/some/path",
-        org_id=org_id,
-        db=db,
-    )
+    with _patch_get_by_path(db):
+        result = await github_remote_refresh.refresh_origin_token(
+            working_dir="/some/path",
+            org_id=org_id,
+            db=db,
+        )
     assert result is False
     db.get.assert_not_called()
 
@@ -50,11 +58,12 @@ async def test_returns_false_when_repo_has_no_github_link(org_id: uuid.UUID) -> 
     repo = MagicMock()
     repo.github_repo_full_name = None
     db = _mock_db_with_repo(repo)
-    result = await github_remote_refresh.refresh_origin_token(
-        working_dir="/some/path",
-        org_id=org_id,
-        db=db,
-    )
+    with _patch_get_by_path(db):
+        result = await github_remote_refresh.refresh_origin_token(
+            working_dir="/some/path",
+            org_id=org_id,
+            db=db,
+        )
     assert result is False
 
 
@@ -63,8 +72,11 @@ async def test_returns_false_when_no_installation_token(org_id: uuid.UUID) -> No
     repo.github_repo_full_name = "octocat/hello"
     db = _mock_db_with_repo(repo)
     db.get.return_value = MagicMock()
-    with patch.object(
-        github_remote_refresh, "get_installation_token", new=AsyncMock(return_value=None)
+    with (
+        _patch_get_by_path(db),
+        patch.object(
+            github_remote_refresh, "get_installation_token", new=AsyncMock(return_value=None)
+        ),
     ):
         result = await github_remote_refresh.refresh_origin_token(
             working_dir="/some/path",
@@ -88,6 +100,7 @@ async def test_happy_path_composes_x_access_token_url(org_id: uuid.UUID) -> None
         return ("", "", 0)
 
     with (
+        _patch_get_by_path(db),
         patch.object(
             github_remote_refresh,
             "get_installation_token",
@@ -121,6 +134,7 @@ async def test_token_redacted_from_failure_log(org_id: uuid.UUID) -> None:
 
     log_calls: list[dict[str, object]] = []
     with (
+        _patch_get_by_path(db),
         patch.object(
             github_remote_refresh,
             "get_installation_token",

@@ -43,10 +43,9 @@ from app.services.agent_result_handlers import (
     handle_prd_result,
     handle_tech_arch_result,
     handle_testing_result,
-    is_git_auth_failure,
 )
+from app.services.bud_agent_retry import maybe_retry_on_git_auth_failure
 from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
-from app.services.github_app_auth import invalidate_installation_token
 from app.services.github_remote_refresh import refresh_origin_token
 from app.services.job_queue import update_job
 from app.services.job_utils import build_mcp_config, make_progress_callback, record_agent_timeline
@@ -348,38 +347,24 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 progress_callback=make_progress_callback(job_id),
             )
 
-            # Retry once on git/GitHub auth failure. Pre-spawn refresh
-            # uses the cached token; if the cached token itself is the
-            # rejected one (e.g. the App installation was revoked then
-            # re-granted while our cache still held the dead token), the
-            # only fix is to drop the cache, re-stamp ``origin``, and
-            # spawn again. One retry is enough — the second mint always
-            # gets a brand-new token from GitHub, and if THAT also fails
-            # the problem is not transient (App uninstalled, repo not on
-            # the installation, etc.) and the parser will classify it.
-            if (
-                working_dir
-                and is_git_auth_failure(result.output or "")
-                and result.success  # retry only when the spawn itself didn't crash
-            ):
-                logger.warning(
-                    "bud_agent_git_auth_retry",
-                    task_id=str(task_id),
-                    bud_id=str(bud_id),
-                    skill_slug=_skill_slug,
-                )
-                invalidate_installation_token(str(org_id))
-                await refresh_origin_token(
-                    working_dir=working_dir,
-                    org_id=org_id,
-                    db=db,
-                )
-                result = await run_claude_code(
-                    prompt=prompt,
-                    working_dir=spawn_cwd,
-                    config=config,
-                    progress_callback=make_progress_callback(job_id),
-                )
+            # One automatic retry when the agent's git/gh subprocess
+            # returned an auth rejection — see ``bud_agent_retry`` for
+            # the contract (fresh session id, activity log row, etc.).
+            result = await maybe_retry_on_git_auth_failure(
+                result=result,
+                prompt=prompt,
+                spawn_cwd=spawn_cwd,
+                working_dir=working_dir,
+                config=config,
+                progress_callback=make_progress_callback(job_id),
+                org_id=org_id,
+                bud_id=bud_id,
+                task_id=task_id,
+                skill_id=task.skill_id,
+                skill_slug=_skill_slug,
+                repo_id=_repo_id,
+                db=db,
+            )
 
             logger.info(
                 "bud_agent_phase",

@@ -34,11 +34,10 @@ classifier now surfaces as ``git_auth_failed`` with an actionable banner.
 import uuid
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
-from app.models.tracked_repository import TrackedRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.git_operations import run_git
 from app.services.github_app_auth import get_installation_token
 
@@ -58,13 +57,8 @@ async def refresh_origin_token(
     config write error). Never raises — token freshness is a
     nice-to-have, not a precondition for the spawn.
     """
-    repo_row = await db.execute(
-        select(TrackedRepository).where(
-            TrackedRepository.path == working_dir,
-            TrackedRepository.org_id == org_id,
-        )
-    )
-    repo: TrackedRepository | None = repo_row.scalar_one_or_none()
+    repo_repo = TrackedRepoRepository(db, org_id=org_id)
+    repo = await repo_repo.get_by_path(working_dir)
     if repo is None or not repo.github_repo_full_name:
         # Working dir isn't a tracked GitHub repo (could be the no-repo
         # scratch dir, a local-only repo, or a tracked repo without a
@@ -78,8 +72,15 @@ async def refresh_origin_token(
 
     token = await get_installation_token(org)
     if not token:
-        # No App creds — caller may be on PAT-only or SSH auth. Skip
-        # silently; those paths don't need an installation-token refresh.
+        # No App creds — caller may be on PAT-only or SSH auth. Skip;
+        # those paths don't need an installation-token refresh. Logged
+        # at debug so a downstream ``git_auth_failed`` banner can be
+        # cross-referenced against "did we even attempt a refresh?".
+        logger.debug(
+            "origin_refresh_skip_no_app_creds",
+            org_id=str(org_id),
+            repo=repo.github_repo_full_name,
+        )
         return False
 
     # ``x-access-token`` is the documented username for installation-token
