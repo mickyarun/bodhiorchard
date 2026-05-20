@@ -33,7 +33,7 @@ from app.schemas.jobs import ChatJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
 from app.services.chat_persistence import persist_chat_message, persist_chat_update
 from app.services.chat_prompts import build_chat_prompt, build_design_prompt, fetch_chat_history
-from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
 from app.services.job_queue import update_job
 from app.services.job_utils import (
     build_mcp_config,
@@ -383,7 +383,7 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     try:
         result = await run_claude_code(
             prompt=prompt,
-            working_dir=repo_path,
+            working_dir=repo_path or NO_REPO_CONTEXT,
             config=_build_config(session_id=cli_session_id, resume=is_resume),
             progress_callback=make_progress_callback(job_id),
         )
@@ -403,7 +403,7 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             )
             result = await run_claude_code(
                 prompt=prompt,
-                working_dir=repo_path,
+                working_dir=repo_path or NO_REPO_CONTEXT,
                 config=_build_config(session_id=None, resume=False),
                 progress_callback=make_progress_callback(job_id),
             )

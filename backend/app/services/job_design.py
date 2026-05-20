@@ -31,7 +31,7 @@ from app.repositories.bud import BUDDesignRepository
 from app.schemas.jobs import DesignAgentJobPayload, DesignExtractJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
 from app.services.chat_prompts import build_design_prompt
-from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
 from app.services.job_queue import update_job
 from app.services.job_utils import (
     build_mcp_config,
@@ -160,7 +160,7 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
 
     result = await run_claude_code(
         prompt=prompt,
-        working_dir=repo_path,
+        working_dir=repo_path or NO_REPO_CONTEXT,
         config=ClaudeRunnerConfig(
             max_turns=designer_skill.max_turns if designer_skill else 0,
             timeout_seconds=900,
