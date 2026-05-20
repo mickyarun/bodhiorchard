@@ -65,6 +65,7 @@ REMOTE_TOOLS: frozenset[str] = frozenset(
         "get_features",
         "list_design_systems",
         "get_design_system",
+        "get_prompt",
     }
 )
 
@@ -112,6 +113,25 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {"repo_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "get_prompt",
+        "description": (
+            "Return the exact prompt our agent would use for a given BUD "
+            "stage (bud / design / tech_arch / testing). Feed it to your "
+            "local AI to produce content that matches the shape the BUD "
+            "section editors expect."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_type": {
+                    "type": "string",
+                    "enum": ["bud", "design", "tech_arch", "testing"],
+                },
+            },
+            "required": ["task_type"],
         },
     },
 ]

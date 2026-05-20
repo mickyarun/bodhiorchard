@@ -44,6 +44,8 @@ TOOL_COSTS: dict[str, int] = {
     "get_bud_context": 1,
     "list_design_systems": 1,
     "get_design_system": 2,
+    # Single indexed AgentSkill lookup — comparable to get_bud_context.
+    "get_prompt": 1,
     "get_team_context": 1,
     "write_bud": 10,
     # Code-graph tools are pgvector-heavy; weight similarly to features.

@@ -55,6 +55,7 @@ from app.mcp.handlers_features import (
     handle_write_feature_registry,
 )
 from app.mcp.handlers_hooks import handle_dev_activity
+from app.mcp.handlers_prompts import TASK_TYPE_TO_STAGE, handle_get_prompt
 from app.mcp.handlers_scan import handle_write_synthesis_feature
 from app.mcp.handlers_team import (
     handle_get_design_system,
@@ -431,6 +432,30 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     ),
                 },
             },
+        },
+    ),
+    MCPToolDefinition(
+        name="get_prompt",
+        description=(
+            "Return the exact prompt our PM / Designer / TechPlanner / "
+            "Tester agent would use for a given BUD stage. Honours the "
+            "org's default skill override. Feed this prompt to your local "
+            "AI to produce PRD / design / tech-spec / test-plan content "
+            "that matches the shape the BUD section editors expect."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "task_type": {
+                    "type": "string",
+                    "enum": sorted(TASK_TYPE_TO_STAGE.keys()),
+                    "description": (
+                        "Which stage's prompt to return: 'bud' (PRD), "
+                        "'design', 'tech_arch', or 'testing'."
+                    ),
+                },
+            },
+            "required": ["task_type"],
         },
     ),
     MCPToolDefinition(
@@ -824,6 +849,7 @@ TOOL_HANDLERS: dict[str, Any] = {
     "check_feature_exists": handle_check_feature_exists,
     "list_design_systems": handle_list_design_systems,
     "get_design_system": handle_get_design_system,
+    "get_prompt": handle_get_prompt,
     "get_bud_designs": handle_get_bud_designs,
     "write_bud_design": handle_write_bud_design,
     "code_impact": handle_code_impact,

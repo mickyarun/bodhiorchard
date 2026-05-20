@@ -35,6 +35,7 @@ https://<your-bodhiorchard-host>/mcp/sse
 | `get_features` | Semantic knowledge search over your org's active features. |
 | `list_design_systems` | Design-system metadata per repo. |
 | `get_design_system` | Full HTML / CSS / tokens for a repo or the org default. |
+| `get_prompt` | Return our agent's prompt for a BUD stage (`task_type` ∈ `bud` / `design` / `tech_arch` / `testing`). Feed it to your local AI so output matches the section-editor shape. |
 
 That's the complete list. `write_bud`, `get_team_context`, `code_*` and
 every other internal tool are NOT reachable from this endpoint — adding a

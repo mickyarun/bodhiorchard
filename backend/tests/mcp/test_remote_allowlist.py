@@ -19,7 +19,7 @@ from app.mcp.rate_limit import TOOL_COSTS, _cost
 from app.mcp.streamable import REMOTE_TOOLS
 
 
-def test_remote_allowlist_is_exactly_the_four_documented_tools() -> None:
+def test_remote_allowlist_is_exactly_the_documented_tools() -> None:
     """If this test fails, a tool was added/removed remotely — confirm the
     docs (MCP-REMOTE.md) + connect-panel UI snippet still match before
     updating the assertion."""
@@ -30,6 +30,7 @@ def test_remote_allowlist_is_exactly_the_four_documented_tools() -> None:
         "get_features",
         "list_design_systems",
         "get_design_system",
+        "get_prompt",
     }
     assert set(REMOTE_TOOLS) == expected
 

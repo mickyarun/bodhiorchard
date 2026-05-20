@@ -216,6 +216,7 @@ const TOOL_CATALOGUE = [
   { name: 'get_features', description: 'Semantic knowledge search over your org\'s active features.' },
   { name: 'list_design_systems', description: 'Design-system metadata per repo.' },
   { name: 'get_design_system', description: 'Full HTML/CSS/tokens for a repo or the org default.' },
+  { name: 'get_prompt', description: 'Return our agent\'s prompt for a stage (task_type: bud / design / tech_arch / testing) so your local AI produces matching output.' },
 ]
 
 interface ClientSnippet {
