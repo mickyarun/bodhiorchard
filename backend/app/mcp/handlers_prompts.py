@@ -27,7 +27,7 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.skill_mapping import BUD_STAGE_AGENT_TYPE
+from app.agents.skill_mapping import BUD_STAGE_AGENT_TYPE, resolve_skill_for_agent
 from app.models.bud import BUDStatus
 from app.models.organization import Organization
 
@@ -59,10 +59,12 @@ async def handle_get_prompt(
 
     Returns:
         ``{task_type, agent_type, skill_slug, prompt}`` on success;
-        ``{error}`` on unknown task_type or missing skill row.
+        ``{error}`` on unknown task_type or missing skill row. The
+        streamable.py JSON-RPC envelope inspects the ``error`` key and
+        sets ``isError: true`` so desktop MCP clients route this through
+        their error UI instead of feeding the error string into the LLM
+        as a prompt.
     """
-    from app.agents.skill_mapping import resolve_skill_for_agent
-
     task_type = params.get("task_type")
     if not isinstance(task_type, str) or task_type not in TASK_TYPE_TO_STAGE:
         return {

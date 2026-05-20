@@ -495,8 +495,14 @@ const bud = computed(() => budStore.currentBUD)
 // empty / null entirely). Drives the External-LLM banner — we only
 // surface the "connect your local AI" hint when there's literally no
 // auto-fired phase for the user to wait on.
+//
+// Guard on bud.value FIRST so the banner doesn't flash for a frame
+// during the initial fetch (currentBUD is null → phases is undefined
+// → null-coalesce would treat that as External-LLM mode and render
+// the banner for one tick before flipping off).
 const isExternalLlmMode = computed(() => {
-  const phases = bud.value?.auto_generate_phases
+  if (!bud.value) return false
+  const phases = bud.value.auto_generate_phases
   if (!phases) return true
   return !Object.values(phases).some(Boolean)
 })

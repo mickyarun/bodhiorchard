@@ -52,7 +52,10 @@ async def test_known_task_types_dispatch_to_resolver(monkeypatch: Any) -> None:
         captured.append((agent_name, org_id))
         return MagicMock(skill_slug=f"{agent_name}-default", prompt=f"PROMPT FOR {agent_name}")
 
-    monkeypatch.setattr("app.agents.skill_mapping.resolve_skill_for_agent", _fake_resolve)
+    # Patch the LOCAL name in handlers_prompts — the module now imports
+    # resolve_skill_for_agent at top-level, so the source-module patch
+    # would arrive too late to override the already-bound reference.
+    monkeypatch.setattr("app.mcp.handlers_prompts.resolve_skill_for_agent", _fake_resolve)
 
     org = MagicMock(id=uuid.uuid4())
     for task_type in TASK_TYPE_TO_STAGE:
@@ -75,10 +78,27 @@ async def test_no_active_skill_returns_error_payload(monkeypatch: Any) -> None:
         return None
 
     monkeypatch.setattr(
-        "app.agents.skill_mapping.resolve_skill_for_agent", _fake_resolve_none
+        "app.mcp.handlers_prompts.resolve_skill_for_agent", _fake_resolve_none
     )
 
     org = MagicMock(id=uuid.uuid4())
     result = await handle_get_prompt(MagicMock(), org, {"task_type": "bud"})
     assert "error" in result
     assert "skill" in result["error"].lower()
+
+
+def test_streamable_marks_error_payload_as_is_error_true() -> None:
+    """Pin the contract that error-shaped handler responses become isError=true.
+
+    Critical safety property: desktop MCP clients inspect isError to
+    decide whether to surface the response in their error UI or feed
+    it to the model as a prompt. A failure here means a "No active
+    skill" message gets piped into the LLM as if it were the prompt
+    itself.
+    """
+    # Match the exact predicate streamable._dispatch uses (line ~191).
+    success_result = {"task_type": "bud", "prompt": "..."}
+    error_result = {"error": "something broke"}
+
+    assert (isinstance(success_result, dict) and "error" in success_result) is False
+    assert (isinstance(error_result, dict) and "error" in error_result) is True

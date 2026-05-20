@@ -824,13 +824,21 @@ async def _trigger_status_jobs(
         # remote MCP endpoint) and pastes content into the section
         # editor. The status transition itself still happens in the
         # caller; only the auto-agent spawn is suppressed here.
+        #
+        # Use ``.value`` rather than ``str(new_status)`` for explicit
+        # decoupling: today BUDStatus is a StrEnum so ``str(...)``
+        # happens to yield ``"bud"`` etc., but if the base class ever
+        # changes the str-cast becomes ``"BUDStatus.BUD"`` and every
+        # lookup silently misses with no enum-related test failure.
+        phase_key = new_status.value if hasattr(new_status, "value") else str(new_status)
         phases = bud.auto_generate_phases or {}
-        if not phases.get(str(new_status), False):
+        if not phases.get(phase_key, False):
             logger.info(
                 "stage_agent_skip_auto_generate_off",
                 bud_id=str(bud.id),
                 from_status=str(old_status),
                 to_status=str(new_status),
+                phase_key=phase_key,
                 phases=phases,
             )
             return

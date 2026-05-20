@@ -48,6 +48,7 @@ from app.core.deps import get_db
 from app.database import AsyncSessionLocal
 from app.mcp.audit import emit_audit
 from app.mcp.auth import MCPAuthResult, verify_mcp_token
+from app.mcp.handlers_prompts import TASK_TYPE_TO_STAGE
 from app.mcp.rate_limit import enforce_rate_limit
 from app.repositories.user_mcp_token import UserMCPTokenRepository
 
@@ -119,16 +120,18 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "get_prompt",
         "description": (
             "Return the exact prompt our agent would use for a given BUD "
-            "stage (bud / design / tech_arch / testing). Feed it to your "
-            "local AI to produce content that matches the shape the BUD "
-            "section editors expect."
+            "stage. Feed it to your local AI to produce content that "
+            "matches the shape the BUD section editors expect."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "task_type": {
                     "type": "string",
-                    "enum": ["bud", "design", "tech_arch", "testing"],
+                    # Source-of-truth shared with server.py MCP_TOOLS so
+                    # the remote-advertised enum can never drift from
+                    # the handler's accepted values.
+                    "enum": sorted(TASK_TYPE_TO_STAGE.keys()),
                 },
             },
             "required": ["task_type"],
@@ -182,7 +185,15 @@ async def _dispatch(
             raise _RPCError(_INTERNAL_ERROR, f"Handler missing for {tool_name!r}")
         result = await handler(db, auth.org, tool_args)
         # Wrap raw handler output in the MCP tools/call response envelope.
-        return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
+        # Handlers signal a soft failure (bad params, missing seed data) by
+        # returning a dict with an ``error`` key instead of raising — propagate
+        # that to ``isError: true`` so desktop clients route it through their
+        # error UI rather than feeding the error text into the LLM as a prompt.
+        is_error = isinstance(result, dict) and "error" in result
+        return {
+            "content": [{"type": "text", "text": json.dumps(result)}],
+            "isError": is_error,
+        }
 
     raise _RPCError(_METHOD_NOT_FOUND, f"Unknown method: {method!r}")
 
