@@ -14,7 +14,7 @@ banner stays accurate as new failure modes get added.
 import pytest
 
 from app.schemas.bud_code_review import PARSE_FAILURE_MESSAGES
-from app.services.agent_result_handlers import _parse_code_review_output
+from app.services.agent_result_handlers import _parse_code_review_output, is_git_auth_failure
 
 
 @pytest.mark.parametrize(
@@ -49,6 +49,15 @@ def test_git_auth_failure_beats_insight_contamination() -> None:
 def test_no_json_when_no_known_signal() -> None:
     result = _parse_code_review_output("just some prose with no json and no auth error")
     assert result["_parse_failure_reason"] == "no_json"
+
+
+def test_is_git_auth_failure_matches_same_signals_as_parser() -> None:
+    # Shared with bud_agent_handler's retry path — keep the detector
+    # and classifier in lockstep by going through this helper.
+    assert is_git_auth_failure("remote: Invalid username or token.") is True
+    assert is_git_auth_failure("Bad credentials") is True
+    assert is_git_auth_failure("nothing wrong here") is False
+    assert is_git_auth_failure("") is False
 
 
 def test_banner_copy_exists_for_classifier_reasons() -> None:

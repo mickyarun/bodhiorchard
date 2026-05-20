@@ -59,7 +59,20 @@ __all__ = [
     "discover_installation_id_for_repo",
     "fetch_and_persist_app_slug",
     "get_installation_token",
+    "invalidate_installation_token",
 ]
+
+
+def invalidate_installation_token(org_id: str) -> None:
+    """Drop any cached installation token for ``org_id``.
+
+    Callers use this when a freshly-cached token still fails auth — most
+    commonly an agent's git/gh subprocess returning
+    ``Invalid username or token``. Removing the entry forces the next
+    :func:`get_installation_token` call to mint a brand-new token rather
+    than returning the rejected one again.
+    """
+    _token_cache.pop(org_id, None)
 
 
 async def discover_installation_id_for_repo(

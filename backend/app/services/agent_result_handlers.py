@@ -49,6 +49,16 @@ _GIT_AUTH_FAILURE_RE = re.compile(
 )
 
 
+def is_git_auth_failure(output: str) -> bool:
+    """Return ``True`` if ``output`` contains a git/GitHub auth rejection.
+
+    Shared with :mod:`app.services.bud_agent_handler` so the retry-once
+    path uses the same wording catalogue as the parser classifier — keep
+    them in sync by funnelling through this function.
+    """
+    return bool(_GIT_AUTH_FAILURE_RE.search(output or ""))
+
+
 async def handle_prd_result(
     bud_id: uuid_mod.UUID,
     org_id: uuid_mod.UUID,
