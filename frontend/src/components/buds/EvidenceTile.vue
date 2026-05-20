@@ -68,9 +68,14 @@ const props = defineProps<{
   budId: string
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'delete'): void
   (e: 'preview', blobUrl: string | null): void
+  // Surfaces fetch failures (download endpoint 500, thumbnail load
+  // refusal, network outage, expired token) so the parent panel can
+  // render the same error banner used by upload / delete instead of
+  // leaving the user with a broken-image icon and no explanation.
+  (e: 'error', message: string): void
 }>()
 
 const authStore = useAuthStore()
@@ -105,9 +110,24 @@ async function fetchBlob(): Promise<Blob> {
     },
   )
   if (!resp.ok) {
-    throw new Error(`Evidence fetch failed: ${resp.status}`)
+    // Try to lift the backend's ``{"detail": "..."}`` so a 404
+    // ("Evidence not found") or 500 (storage backend issue) reaches
+    // the user rather than degrading silently to a broken-image icon.
+    let detail = `HTTP ${resp.status}`
+    try {
+      const body = await resp.clone().json()
+      if (body?.detail) detail = String(body.detail)
+    }
+    catch { /* non-JSON body — keep the status fallback */ }
+    throw new Error(detail)
   }
   return await resp.blob()
+}
+
+function describeFetchError(err: unknown, action: 'thumbnail' | 'download'): string {
+  const reason = err instanceof Error ? err.message : 'unknown error'
+  const verb = action === 'thumbnail' ? 'load preview for' : 'download'
+  return `Couldn't ${verb} "${props.evidence.filename}" (${reason}).`
 }
 
 async function loadThumbnail(): Promise<void> {
@@ -116,10 +136,14 @@ async function loadThumbnail(): Promise<void> {
   try {
     const blob = await fetchBlob()
     blobUrl.value = URL.createObjectURL(blob)
-  } catch (e) {
+  }
+  catch (e) {
     errored.value = true
-    console.error('Evidence thumbnail failed', e)
-  } finally {
+    const message = describeFetchError(e, 'thumbnail')
+    console.error(message, e)
+    emit('error', message)
+  }
+  finally {
     loading.value = false
   }
 }
@@ -136,8 +160,11 @@ async function downloadFile(): Promise<void> {
     a.download = props.evidence.filename
     a.click()
     URL.revokeObjectURL(url)
-  } catch (e) {
-    console.error('Evidence download failed', e)
+  }
+  catch (e) {
+    const message = describeFetchError(e, 'download')
+    console.error(message, e)
+    emit('error', message)
   }
 }
 

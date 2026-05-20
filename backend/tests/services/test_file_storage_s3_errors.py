@@ -79,7 +79,13 @@ def fake_aioboto3():  # type: ignore[no-untyped-def]
         yield session_factory
 
 
-def _enable_s3(monkeypatch: pytest.MonkeyPatch) -> FileStorage:
+def _enable_s3(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    aws_access_key_id: str = "",
+    aws_secret_access_key: str = "",
+    aws_session_token: str = "",
+) -> FileStorage:
     # Tests construct the config directly rather than via env vars +
     # global ``settings`` — pydantic-settings caches the parse on first
     # access and would otherwise leak between tests.
@@ -91,6 +97,9 @@ def _enable_s3(monkeypatch: pytest.MonkeyPatch) -> FileStorage:
             s3_bucket="test-bucket",
             s3_region="us-east-1",
             local_dir="data/uploads",
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            aws_session_token=aws_session_token,
         )
     )
 
@@ -261,3 +270,74 @@ def test_env_file_value_reaches_filestorage(tmp_path, monkeypatch: pytest.Monkey
     assert storage.use_s3 is True
     assert storage.s3_bucket == "evidence-from-envfile"
     assert storage.s3_region == "eu-west-2"
+
+
+# ── Explicit AWS credential precedence ─────────────────────────────
+
+
+async def test_explicit_aws_creds_passed_to_session(
+    monkeypatch: pytest.MonkeyPatch, fake_aioboto3: MagicMock
+) -> None:
+    # When both ``AWS_ACCESS_KEY_ID`` and ``AWS_SECRET_ACCESS_KEY`` are
+    # present in the config, they MUST reach ``aioboto3.Session(...)``
+    # explicitly — that's how boto3 picks ``.env`` creds over a stale
+    # ``~/.aws/credentials`` file. The default chain (env → file →
+    # role) only reads ``os.environ``, which pydantic-settings does
+    # not populate.
+    storage = _enable_s3(
+        monkeypatch,
+        aws_access_key_id="AKIA-from-env",
+        aws_secret_access_key="secret-from-env",
+    )
+    fake_aioboto3.return_value = _s3_client_mock()
+    await storage._upload_s3("org/qa-evidence/x.png", b"data", "image/png")
+    fake_aioboto3.assert_called_once_with(
+        aws_access_key_id="AKIA-from-env",
+        aws_secret_access_key="secret-from-env",
+    )
+
+
+async def test_session_token_included_when_set(
+    monkeypatch: pytest.MonkeyPatch, fake_aioboto3: MagicMock
+) -> None:
+    storage = _enable_s3(
+        monkeypatch,
+        aws_access_key_id="AKIA-temp",
+        aws_secret_access_key="secret-temp",
+        aws_session_token="sts-temporary-token",
+    )
+    fake_aioboto3.return_value = _s3_client_mock()
+    await storage._upload_s3("org/qa-evidence/x.png", b"data", "image/png")
+    fake_aioboto3.assert_called_once_with(
+        aws_access_key_id="AKIA-temp",
+        aws_secret_access_key="secret-temp",
+        aws_session_token="sts-temporary-token",
+    )
+
+
+async def test_default_chain_used_when_no_explicit_creds(
+    monkeypatch: pytest.MonkeyPatch, fake_aioboto3: MagicMock
+) -> None:
+    # Without explicit creds, ``aioboto3.Session()`` must be called
+    # with no kwargs so boto3 falls through to its default chain
+    # (``os.environ`` → ``~/.aws/credentials`` → IAM role).
+    storage = _enable_s3(monkeypatch)
+    fake_aioboto3.return_value = _s3_client_mock()
+    await storage._upload_s3("org/qa-evidence/x.png", b"data", "image/png")
+    fake_aioboto3.assert_called_once_with()
+
+
+async def test_partial_creds_falls_back_to_default_chain(
+    monkeypatch: pytest.MonkeyPatch, fake_aioboto3: MagicMock
+) -> None:
+    # Only the access key set without the secret (or vice versa) is
+    # almost always a config typo. Treat it as "no explicit creds"
+    # and route through the default chain rather than guessing.
+    storage = _enable_s3(
+        monkeypatch,
+        aws_access_key_id="AKIA-orphan",
+        aws_secret_access_key="",
+    )
+    fake_aioboto3.return_value = _s3_client_mock()
+    await storage._upload_s3("org/qa-evidence/x.png", b"data", "image/png")
+    fake_aioboto3.assert_called_once_with()

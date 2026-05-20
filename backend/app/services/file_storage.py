@@ -28,7 +28,17 @@ from app.config import FileStorageConfig, settings
 
 logger = structlog.get_logger(__name__)
 
-# Maximum file size: 10 MB
+# Maximum file size for QA evidence uploads: 10 MB. The cap is
+# enforced in FOUR coordinated places that MUST stay in sync:
+#   * here (backend storage guard, emits ``FileStorageError`` with this number);
+#   * ``backend/app/api/v1/bud_qa.py`` (read cap on the request body so we
+#     don't buffer arbitrarily large uploads into memory just to reject them);
+#   * ``frontend/nginx.conf`` (``client_max_body_size``, set ~2 MB above
+#     this so the at-the-limit request reaches the backend's clean JSON
+#     413 instead of nginx's HTML page);
+#   * ``frontend/src/composables/useQATestCases.ts`` (``MAX_UPLOAD_BYTES``
+#     used by the 413 fallback message and the upload-limit hint).
+# Bumping the limit means updating all four.
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 # Allowed MIME types for evidence uploads
@@ -80,6 +90,12 @@ class FileStorage:
         self.s3_bucket = cfg.s3_bucket
         self.s3_region = cfg.s3_region
         self.local_dir = cfg.local_dir
+        # Explicit AWS creds, empty string = "fall back to boto3 default
+        # chain". Stored alongside the rest of the resolved config so
+        # ``_s3_session()`` doesn't have to reach back into pydantic.
+        self._aws_access_key_id = cfg.aws_access_key_id
+        self._aws_secret_access_key = cfg.aws_secret_access_key
+        self._aws_session_token = cfg.aws_session_token
 
         # Log BEFORE the bucket-presence check so a misconfigured boot
         # leaves an "I tried this" breadcrumb in the logs alongside the
@@ -98,6 +114,20 @@ class FileStorage:
             s3_bucket=self.s3_bucket or None,
             s3_region=self.s3_region if self.use_s3 else None,
             local_dir=self.local_dir if not self.use_s3 else None,
+            # ``aws_creds_source`` answers the most common operator
+            # question — "where is the backend reading my AWS keys
+            # from?" — without ever logging the keys themselves. We
+            # report ``env_explicit`` only when BOTH parts of a static
+            # credential pair are present; one without the other is
+            # almost always a misconfig and rolls back to the default
+            # chain (file / IAM).
+            aws_creds_source=(
+                "env_explicit"
+                if (self.use_s3 and self._has_explicit_aws_creds())
+                else "default_chain"
+            )
+            if self.use_s3
+            else None,
         )
 
         if self.use_s3 and not self.s3_bucket:
@@ -171,6 +201,39 @@ class FileStorage:
         else:
             await self._delete_local(storage_path)
 
+    # ── S3 session helper ────────────────────────────────────────
+
+    def _has_explicit_aws_creds(self) -> bool:
+        """True only when BOTH access key id AND secret are set.
+
+        One-without-the-other is almost always a config typo, not a
+        deliberate setup, so we treat it as "no explicit creds" and
+        fall back to the boto3 default chain. The session token is
+        opt-in (STS only) and not part of this check.
+        """
+        return bool(self._aws_access_key_id) and bool(self._aws_secret_access_key)
+
+    def _s3_session(self) -> "aioboto3.Session":
+        """Build an ``aioboto3.Session`` honouring the configured creds.
+
+        Explicit creds from ``FileStorageConfig`` (sourced from
+        ``.env``-aware pydantic-settings, not ``os.environ``) take
+        precedence over the default boto3 chain — matching the order
+        boto3 itself documents. When the explicit pair is absent, the
+        session is constructed with no credential args, so boto3 falls
+        through to ``os.environ`` → ``~/.aws/credentials`` → IAM role
+        as usual.
+        """
+        if self._has_explicit_aws_creds():
+            kwargs: dict[str, str] = {
+                "aws_access_key_id": self._aws_access_key_id,
+                "aws_secret_access_key": self._aws_secret_access_key,
+            }
+            if self._aws_session_token:
+                kwargs["aws_session_token"] = self._aws_session_token
+            return aioboto3.Session(**kwargs)
+        return aioboto3.Session()
+
     # ── Local storage ────────────────────────────────────────────
 
     def _safe_local_path(self, relative_path: str) -> Path:
@@ -227,7 +290,7 @@ class FileStorage:
 
     async def _upload_s3(self, full_path: str, data: bytes, content_type: str) -> str:
         """Store file in S3. Raises ``FileStorageError`` on any S3 failure."""
-        session = aioboto3.Session()
+        session = self._s3_session()
         try:
             async with session.client("s3", region_name=self.s3_region) as s3:
                 await s3.put_object(
@@ -251,7 +314,7 @@ class FileStorage:
 
     async def _download_s3(self, storage_path: str) -> tuple[bytes, str]:
         """Read file from S3. Raises ``FileStorageError`` on any S3 failure."""
-        session = aioboto3.Session()
+        session = self._s3_session()
         try:
             async with session.client("s3", region_name=self.s3_region) as s3:
                 response = await s3.get_object(Bucket=self.s3_bucket, Key=storage_path)
@@ -271,7 +334,7 @@ class FileStorage:
 
     async def _delete_s3(self, storage_path: str) -> None:
         """Delete a file from S3. Raises ``FileStorageError`` on any S3 failure."""
-        session = aioboto3.Session()
+        session = self._s3_session()
         try:
             async with session.client("s3", region_name=self.s3_region) as s3:
                 await s3.delete_object(Bucket=self.s3_bucket, Key=storage_path)

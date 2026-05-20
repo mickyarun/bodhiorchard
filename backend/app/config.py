@@ -236,6 +236,33 @@ class FileStorageConfig(BaseSettings):
         ),
     )
 
+    # Explicit AWS credentials. Boto3's default chain (env vars →
+    # ``~/.aws/credentials`` → IAM role) reads ``os.environ`` directly,
+    # but pydantic-settings loads ``.env`` into the model instance
+    # WITHOUT touching ``os.environ`` — same root cause as the
+    # ``FILE_STORAGE_S3`` bug. Threading the keys through this config
+    # and passing them to ``aioboto3.Session(...)`` explicitly means
+    # ``.env``-only deployments behave the same as shell-env ones, and
+    # explicit creds take precedence over the credentials file / IAM
+    # role exactly as the boto3 chain documents. Leaving the fields
+    # empty falls back to the default chain (omitting the args from
+    # the ``Session`` call so boto3 picks up the file / role).
+    aws_access_key_id: str = Field(
+        default="",
+        alias="AWS_ACCESS_KEY_ID",
+        description="AWS access key. Takes precedence over ~/.aws/credentials and IAM role.",
+    )
+    aws_secret_access_key: str = Field(
+        default="",
+        alias="AWS_SECRET_ACCESS_KEY",
+        description="AWS secret key paired with AWS_ACCESS_KEY_ID.",
+    )
+    aws_session_token: str = Field(
+        default="",
+        alias="AWS_SESSION_TOKEN",
+        description="STS session token. Only needed for temporary credentials.",
+    )
+
 
 class IntegrationConfig(BaseSettings):
     """Third-party integration configuration."""

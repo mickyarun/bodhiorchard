@@ -19,6 +19,8 @@ and summary statistics for the QA/Testing phase of the BUD pipeline.
 """
 
 import os
+import re
+import unicodedata
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -40,11 +42,66 @@ from app.schemas.qa import (
     QATestCasesResponse,
     TestEvidenceRead,
 )
-from app.services.file_storage import FileStorageError, get_file_storage
+from app.services.file_storage import MAX_FILE_SIZE, FileStorageError, get_file_storage
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+# Anything outside this set is replaced with ``_`` in the storage
+# filename. We intentionally allow only ASCII alphanumerics, dot,
+# dash, and underscore — that is the strict subset that survives
+# unchanged in: S3 object keys, every supported local filesystem,
+# the ``Content-Disposition: filename="..."`` header (latin-1 only),
+# and ``mimetypes.guess_type`` extension matching.
+_FILENAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]")
+_REPEATED_UNDERSCORE_RE = re.compile(r"_+")
+
+
+def _sanitize_filename(name: str | None) -> str:
+    """Normalise a user-supplied filename to an ASCII-safe storage name.
+
+    The previous implementation just ran ``os.path.basename`` and
+    trusted the user's name. That left `` `` (narrow no-break
+    space, common in macOS screenshot timestamps like
+    ``Screenshot 2026-05-20 at 4.00.01 PM.png``) in the value, which
+    crashed downloads at the ``Content-Disposition`` header-encode
+    step with ``UnicodeEncodeError: 'latin-1' codec can't encode
+    character``. Normalising at upload time keeps both the storage
+    path AND the DB-stored filename strictly latin-1 — downloads
+    never have to think about Unicode.
+
+    NFKD decomposes accented chars into base + combining marks,
+    ``encode("ascii", "ignore")`` then strips the combining marks
+    (so "café" → "cafe", not "caf"). Whatever remains that isn't
+    ``[A-Za-z0-9._-]`` becomes ``_``; runs of underscores collapse
+    to one; empty stems fall back to ``"evidence"``.
+    """
+    base = os.path.basename(name or "evidence")
+    if not base:
+        base = "evidence"
+
+    stem, dot, ext = base.rpartition(".")
+    if not dot:
+        stem, ext = base, ""
+
+    # NFKD → ASCII fold so "Café résumé.PDF" → "Cafe resume.PDF"
+    stem = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode("ascii")
+    ext = unicodedata.normalize("NFKD", ext).encode("ascii", "ignore").decode("ascii")
+
+    # Replace remaining unsafe chars, collapse repeats, trim ``_``s
+    stem = _FILENAME_UNSAFE_RE.sub("_", stem)
+    stem = _REPEATED_UNDERSCORE_RE.sub("_", stem).strip("_")
+    # Strip leading/trailing dots so all-dots inputs ("...", "..")
+    # don't survive as path-traversal-looking segments. ``strip(".")``
+    # AFTER underscore trimming handles ``__.__`` patterns too.
+    stem = stem.strip(".")
+    ext = _FILENAME_UNSAFE_RE.sub("", ext)[:10]  # cap extension length
+
+    if not stem:
+        stem = "evidence"
+    return f"{stem}.{ext}" if ext else stem
 
 
 @router.get(
@@ -134,18 +191,40 @@ async def upload_evidence(
     if not bud:
         raise HTTPException(status_code=404, detail="BUD not found")
 
-    # Sanitize filename to prevent path traversal
-    safe_filename = os.path.basename(file.filename or "evidence")
+    # Sanitise the user-supplied filename to an ASCII-safe form. This
+    # is used in BOTH the storage path AND the DB ``filename`` column,
+    # so the Content-Disposition header on download is latin-1 clean
+    # without any further escaping.
+    safe_filename = _sanitize_filename(file.filename)
 
-    # Read with size cap to prevent memory exhaustion before storage validation
-    max_upload = 10 * 1024 * 1024 + 1  # 10 MB + 1 byte to detect overflow
+    # Read with size cap to prevent memory exhaustion before storage
+    # validation. Keep this in lockstep with ``MAX_FILE_SIZE`` in
+    # ``app/services/file_storage.py`` — the shared comment block there
+    # lists every other place the limit is enforced.
+    max_upload = MAX_FILE_SIZE + 1  # +1 byte to detect overflow
     data = await file.read(max_upload)
     if len(data) >= max_upload:
-        raise HTTPException(status_code=413, detail="File exceeds 10 MB limit")
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds {MAX_FILE_SIZE // (1024 * 1024)} MB limit",
+        )
     content_type = file.content_type or "application/octet-stream"
 
+    # Storage layout:
+    #
+    #   {org_id}/qa-evidence/BUD-{nnn}/{MTC-xxx}/{evidence-uuid}-{safe_name}
+    #
+    # ``BUD-{nnn}`` is the human-readable per-org BUD number (matches
+    # what shows in the UI / branch names like ``bud-007/...``) so
+    # operators browsing S3 don't have to look up UUIDs. The
+    # ``evidence-uuid`` prefix on the filename guarantees no
+    # overwrites when two files of the same name land on the same
+    # test case (the previous flat layout silently clobbered them).
     storage = get_file_storage()
-    relative_path = f"qa-evidence/{bud_id}/{test_case_id}/{safe_filename}"
+    bud_label = f"BUD-{bud.bud_number:03d}"
+    evidence_key = uuid.uuid4().hex[:12]
+    storage_filename = f"{evidence_key}-{safe_filename}"
+    relative_path = f"qa-evidence/{bud_label}/{test_case_id}/{storage_filename}"
 
     try:
         storage_path = await storage.upload(
@@ -196,8 +275,14 @@ async def download_evidence(
     except FileStorageError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Sanitize filename for Content-Disposition header (prevent header injection)
-    safe_name = evidence.filename.replace('"', "_").replace("\n", "_").replace("\r", "_")
+    # Sanitise the on-disk filename for the ``Content-Disposition``
+    # header. New uploads already store ASCII-safe names (see
+    # ``_sanitize_filename`` at upload time), but pre-existing rows
+    # may carry `` `` / accented / CJK characters that would
+    # otherwise crash Starlette's latin-1 header encoder with
+    # ``UnicodeEncodeError``. Running the same sanitiser here is the
+    # belt to the upload path's braces.
+    safe_name = _sanitize_filename(evidence.filename)
     return Response(
         content=data,
         media_type=content_type,

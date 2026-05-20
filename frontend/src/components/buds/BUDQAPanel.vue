@@ -163,13 +163,33 @@
             Manual Test Cases ({{ manualCases.length }})
           </v-expansion-panel-title>
           <v-expansion-panel-text>
+            <!-- Panel-wide errors (load / update-result failures) stay
+                 at the top of the section — those aren't tied to one
+                 case. Per-case errors (upload / delete / blob fetch)
+                 render INSIDE the matching test card via
+                 ``evidence-error`` and ``evidenceError`` so the
+                 message lives next to the action that triggered it. -->
+            <v-alert
+              v-if="error"
+              type="error"
+              variant="tonal"
+              density="compact"
+              class="mb-3"
+              closable
+              @click:close="error = null"
+            >
+              {{ error }}
+            </v-alert>
             <ManualTestRunner
               :cases="manualCases"
               :evidence="evidence"
               :bud-id="props.budId"
+              :evidence-error="evidenceError"
               @update-result="handleUpdateResult"
               @upload-evidence="handleUploadEvidence"
               @delete-evidence="handleDeleteEvidence"
+              @evidence-error="(testCaseId, msg) => setEvidenceError(testCaseId, msg)"
+              @clear-evidence-error="(testCaseId) => clearEvidenceError(testCaseId)"
             />
           </v-expansion-panel-text>
         </v-expansion-panel>
@@ -207,6 +227,10 @@ const {
   executionPlan,
   evidence,
   loading,
+  error,
+  evidenceError,
+  clearEvidenceError,
+  setEvidenceError,
   load,
   updateManualResult,
   uploadEvidence,
