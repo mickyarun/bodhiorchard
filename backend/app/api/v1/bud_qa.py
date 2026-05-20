@@ -22,6 +22,7 @@ import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -45,6 +46,44 @@ from app.services.file_storage import FileStorageError, get_file_storage
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+def _content_disposition(filename: str) -> str:
+    """Build an RFC 6266 ``Content-Disposition`` value for a user filename.
+
+    HTTP header values must be latin-1 encodable, but agent / human
+    filenames routinely contain non-latin-1 characters — narrow no-break
+    spaces from macOS screenshot names (``\\u202f``), accented letters,
+    CJK, emojis. The previous implementation just quote-stripped the
+    name and assigned it as ``filename="..."``, which crashed Starlette
+    at the header-encode step with ``UnicodeEncodeError: 'latin-1'``.
+
+    RFC 6266 solves this by sending two parameters:
+
+    * ``filename="<ascii-safe>"`` — for legacy clients that ignore the
+      modern parameter; non-ASCII chars are replaced with ``?``.
+    * ``filename*=UTF-8''<percent-encoded>`` — for every modern browser
+      since IE 11. The percent-encoding is strictly ASCII so the whole
+      header stays latin-1 clean.
+
+    Header-injection chars (``"``, CR, LF) are stripped from the ASCII
+    fallback even though percent-encoding handles them in the modern
+    parameter — defense in depth.
+    """
+    # Empty / None defends the helper against an unexpectedly-null ORM
+    # column without each call site repeating the guard.
+    filename = filename or "evidence"
+    ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
+    # ``encode("ascii", "replace")`` substitutes ``?`` for each non-ASCII
+    # char; some shells treat ``?`` as a glob and Windows disallows it
+    # in filenames, so legacy clients (the ones that ignore ``filename*``)
+    # would otherwise get a save dialog with an invalid name. Modern
+    # clients see the original UTF-8 via ``filename*=`` regardless.
+    ascii_fallback = (
+        ascii_fallback.replace("?", "_").replace('"', "_").replace("\n", "_").replace("\r", "_")
+    )
+    encoded = quote(filename, safe="")
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
 
 
 @router.get(
@@ -196,12 +235,10 @@ async def download_evidence(
     except FileStorageError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Sanitize filename for Content-Disposition header (prevent header injection)
-    safe_name = evidence.filename.replace('"', "_").replace("\n", "_").replace("\r", "_")
     return Response(
         content=data,
         media_type=content_type,
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        headers={"Content-Disposition": _content_disposition(evidence.filename)},
     )
 
 
