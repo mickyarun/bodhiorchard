@@ -65,7 +65,12 @@ target-version = "py312"
 line-length = 99
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM"]
+# RUF006 catches ``asyncio.create_task(...)`` calls that don't hold the
+# returned Task — the GC anchor bug that silently dropped dev_activity
+# and member_presence publishes to Colyseus in the dashboard pipeline.
+# See ``handlers_hooks._publish_tasks`` / ``event_bus._transport_tasks``
+# for the correct pattern.
+select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM", "RUF006"]
 ignore = ["B008"]
 
 [tool.mypy]
