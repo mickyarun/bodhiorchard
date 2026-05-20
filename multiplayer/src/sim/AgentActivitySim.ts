@@ -30,6 +30,7 @@
  */
 import { MapSchema } from "@colyseus/schema"
 import { AgentState } from "../schema/AgentState"
+import { safeLog } from "../bridge/logSanitize"
 import { getAgentSlotAtTree, getAgentFallbackSlot } from "./WorldLayout"
 import { countAgentsAtRepo } from "../../../shared/world/agentStacking"
 import {
@@ -149,14 +150,42 @@ export class AgentActivitySim {
 
     // Completion / failure → begin despawn sequence
     if (event.event_type === "skill_completed" || event.event_type === "skill_failed") {
-      const entry = this.entries.get(key)
-      if (!entry) return
-      // If still spawning, mark pending so the completion runs after spawn finishes
-      if (entry.moveState === "spawning") {
-        entry.pendingComplete = true
+      // Direct key hit is the happy path: same task_id / session_id /
+      // fallback key across the agent's whole lifecycle.
+      const direct = this.entries.get(key)
+      if (direct) {
+        this.dispatchComplete(agents, direct)
         return
       }
-      this.beginCompleting(agents, entry)
+      // Orphan sweep: when the first event(s) for a skill arrive without
+      // a ``task_id`` they spawn an agent under the fallback key
+      // ``${skill_slug}_${actor_name}``. Once the backend resolves the
+      // task_id, every subsequent event keys differently — including the
+      // ``skill_completed`` — and the original entry becomes an undead
+      // robot stuck "Reviewing imports…" forever. Match on the structural
+      // identity (skill_slug + actor_name + bud_number) and despawn every
+      // matching entry. Cleans up duplicates created by any keying drift,
+      // not just the task_id-late scenario.
+      const slug = event.skill_slug ?? ""
+      const actor = event.actor_name ?? ""
+      const bud = event.bud_number ?? 0
+      let swept = 0
+      for (const candidate of this.entries.values()) {
+        if (
+          candidate.skillSlug === slug &&
+          candidate.actorName === actor &&
+          candidate.budNumber === bud
+        ) {
+          this.dispatchComplete(agents, candidate)
+          swept += 1
+        }
+      }
+      if (swept > 0) {
+        console.log(
+          `[AgentActivitySim] orphan_sweep skill=${safeLog(slug)} actor=${safeLog(actor)} ` +
+          `bud=${bud} swept=${swept}`,
+        )
+      }
       return
     }
 
@@ -379,6 +408,20 @@ export class AgentActivitySim {
       agent.action = ""
       agent.message = "Task Complete!"
     }
+  }
+
+  /**
+   * Wrap ``beginCompleting`` with the "still spawning?" check so both the
+   * direct-key and orphan-sweep callers go through the same gate. If the
+   * entry is mid-spawn the completion is queued via ``pendingComplete``
+   * so the spawn animation finishes cleanly before the despawn starts.
+   */
+  private dispatchComplete(agents: MapSchema<AgentState>, entry: AgentEntry): void {
+    if (entry.moveState === "spawning") {
+      entry.pendingComplete = true
+      return
+    }
+    this.beginCompleting(agents, entry)
   }
 
   private getRepoPosition(entry: AgentEntry): { x: number; z: number } | null {
