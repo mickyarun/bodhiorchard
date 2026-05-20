@@ -156,44 +156,98 @@ class FileStorage:
             logger.debug("file_deleted_local", path=str(dest))
 
     # ── S3 storage ───────────────────────────────────────────────
+    #
+    # Every S3 op MUST wrap ``ClientError`` (and ``BotoCoreError`` for
+    # credential / network failures that don't carry an HTTP status)
+    # into a :class:`FileStorageError`. Without this, a misconfigured
+    # backend — wrong region, missing IAM ``s3:PutObject``, the bucket
+    # simply doesn't exist — propagates as a bare ``ClientError`` to
+    # ``upload_evidence``, which only catches ``FileStorageError``.
+    # FastAPI then turns it into an opaque 500 and the operator sees
+    # "no image is getting stored" with no actionable hint.
+    #
+    # Logs are at ``info`` (success) / ``error`` (failure). Bumped
+    # from the old ``debug`` so operators on default log levels can
+    # confirm uploads landed without having to flip log verbosity.
 
     async def _upload_s3(self, full_path: str, data: bytes, content_type: str) -> str:
-        """Store file in S3."""
+        """Store file in S3. Raises ``FileStorageError`` on any S3 failure."""
         import aioboto3
+        from botocore.exceptions import BotoCoreError, ClientError
 
         session = aioboto3.Session()
-        async with session.client("s3", region_name=self.s3_region) as s3:
-            await s3.put_object(
-                Bucket=self.s3_bucket,
-                Key=full_path,
-                Body=data,
-                ContentType=content_type,
+        try:
+            async with session.client("s3", region_name=self.s3_region) as s3:
+                await s3.put_object(
+                    Bucket=self.s3_bucket,
+                    Key=full_path,
+                    Body=data,
+                    ContentType=content_type,
+                )
+        except (ClientError, BotoCoreError) as exc:
+            logger.error(
+                "file_upload_s3_failed",
+                bucket=self.s3_bucket,
+                region=self.s3_region,
+                key=full_path,
+                error_class=type(exc).__name__,
+                error=str(exc),
             )
-        logger.debug("file_uploaded_s3", bucket=self.s3_bucket, key=full_path, size=len(data))
+            raise FileStorageError(
+                f"S3 upload failed ({type(exc).__name__}): {exc}"
+            ) from exc
+        logger.info(
+            "file_uploaded_s3", bucket=self.s3_bucket, key=full_path, size=len(data)
+        )
         return full_path
 
     async def _download_s3(self, storage_path: str) -> tuple[bytes, str]:
-        """Read file from S3."""
+        """Read file from S3. Raises ``FileStorageError`` on any S3 failure."""
         import aioboto3
+        from botocore.exceptions import BotoCoreError, ClientError
 
         session = aioboto3.Session()
-        async with session.client("s3", region_name=self.s3_region) as s3:
-            try:
+        try:
+            async with session.client("s3", region_name=self.s3_region) as s3:
                 response = await s3.get_object(Bucket=self.s3_bucket, Key=storage_path)
                 data = await response["Body"].read()
                 content_type = response.get("ContentType", "application/octet-stream")
                 return data, content_type
-            except Exception as exc:
-                raise FileStorageError(f"S3 download failed: {storage_path}") from exc
+        except (ClientError, BotoCoreError) as exc:
+            logger.error(
+                "file_download_s3_failed",
+                bucket=self.s3_bucket,
+                region=self.s3_region,
+                key=storage_path,
+                error_class=type(exc).__name__,
+                error=str(exc),
+            )
+            raise FileStorageError(
+                f"S3 download failed ({type(exc).__name__}): {exc}"
+            ) from exc
 
     async def _delete_s3(self, storage_path: str) -> None:
-        """Delete file from S3."""
+        """Delete a file from S3. Raises ``FileStorageError`` on any S3 failure."""
         import aioboto3
+        from botocore.exceptions import BotoCoreError, ClientError
 
         session = aioboto3.Session()
-        async with session.client("s3", region_name=self.s3_region) as s3:
-            await s3.delete_object(Bucket=self.s3_bucket, Key=storage_path)
-            logger.debug("file_deleted_s3", bucket=self.s3_bucket, key=storage_path)
+        try:
+            async with session.client("s3", region_name=self.s3_region) as s3:
+                await s3.delete_object(Bucket=self.s3_bucket, Key=storage_path)
+        except (ClientError, BotoCoreError) as exc:
+            logger.error(
+                "file_delete_s3_failed",
+                bucket=self.s3_bucket,
+                region=self.s3_region,
+                key=storage_path,
+                error_class=type(exc).__name__,
+                error=str(exc),
+            )
+            raise FileStorageError(
+                f"S3 delete failed ({type(exc).__name__}): {exc}"
+            ) from exc
+        logger.info("file_deleted_s3", bucket=self.s3_bucket, key=storage_path)
 
 
 # Module-level singleton
