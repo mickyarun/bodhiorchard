@@ -103,10 +103,21 @@ def emit_audit(
     bearer prefix; pass ``None`` when nothing is known.
     """
     if len(_audit_tasks) >= _MAX_INFLIGHT:
-        logger.warning(
-            "mcp_audit_inflight_cap_hit",
+        # Compensating control is failing: rate-limit may be fail-open and
+        # now audit is dropping. Emit ALL identifying context (the row we
+        # would have written) at ERROR so this surfaces in alerts, not
+        # buried in WARNING-noise. Operators should treat sustained
+        # cap-hits as a Postgres-write-stall incident.
+        logger.error(
+            "mcp_audit_inflight_cap_hit_dropped",
             tool=tool_name,
-            dropped=True,
+            transport=transport,
+            status_code=status_code,
+            org_id=str(org_id),
+            user_id=str(auth.user.id) if auth and auth.user else None,
+            token_id=str(token_id) if token_id else None,
+            ip=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
             inflight=len(_audit_tasks),
         )
         return

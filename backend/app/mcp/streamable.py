@@ -186,6 +186,17 @@ async def remote_mcp_post(
     try:
         body = await request.json()
     except Exception:
+        # Auth already passed via the Depends, so org/token are known —
+        # record the parse failure so probing leaves a forensic trail.
+        emit_audit(
+            request=request,
+            auth=auth,
+            org_id=auth.org.id,
+            token_id=auth.token_id,
+            tool_name="<parse_error>",
+            transport="sse",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
         return JSONResponse(_rpc_error(None, _PARSE_ERROR, "Invalid JSON"), status_code=400)
 
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
@@ -277,7 +288,6 @@ _SSE_HEARTBEAT_SECONDS = 30
 @router.get("/sse")
 async def remote_mcp_sse(
     request: Request,
-    db: AsyncSession = Depends(get_db),
     auth: MCPAuthResult = Depends(verify_mcp_token),
 ) -> StreamingResponse:
     """SSE keepalive stream for server-initiated messages.
@@ -285,18 +295,19 @@ async def remote_mcp_sse(
     We do not push notifications today, so this only emits heartbeats and
     serves to honour token revocation mid-flight: the per-heartbeat
     re-auth via ``verify_mcp_token`` closes the stream on 401.
+
+    No ``Depends(get_db)`` here on purpose — the request-scoped session
+    would pin a connection from the pool for the entire stream lifetime
+    (potentially hours). The heartbeat opens its own ``AsyncSessionLocal``.
     """
     stream_id = str(uuid.uuid4())
     token_id = auth.token_id
+    # Sustained DB outage must not look like mass-revocation. Cap
+    # consecutive token-check failures and fail-open for liveness up to
+    # that cap, then close cleanly so the client can reconnect.
+    max_consecutive_check_failures = 3
 
     async def _token_still_valid() -> bool:
-        """True iff the per-user token row still exists and hasn't expired.
-
-        Uses a fresh session per beat because the request-scoped ``db``
-        will be torn down before the long-lived stream completes. Internal
-        tokens (``token_id is None``) skip this — they expire only on
-        server restart and are server-minted.
-        """
         if token_id is None:
             return True
         async with AsyncSessionLocal() as session:
@@ -307,11 +318,33 @@ async def remote_mcp_sse(
 
     async def _stream() -> AsyncIterator[bytes]:
         yield f": stream {stream_id} ready\n\n".encode()
+        consecutive_failures = 0
         try:
             while True:
                 if await request.is_disconnected():
                     break
-                if not await _token_still_valid():
+                try:
+                    still_valid = await _token_still_valid()
+                    consecutive_failures = 0
+                except Exception:
+                    consecutive_failures += 1
+                    logger.warning(
+                        "mcp_remote_sse_token_check_failed",
+                        stream_id=stream_id,
+                        token_id=str(token_id) if token_id else None,
+                        consecutive_failures=consecutive_failures,
+                        exc_info=True,
+                    )
+                    if consecutive_failures >= max_consecutive_check_failures:
+                        logger.error(
+                            "mcp_remote_sse_close_after_repeated_check_failures",
+                            stream_id=stream_id,
+                            token_id=str(token_id) if token_id else None,
+                        )
+                        break
+                    # Fail-open for liveness: don't close on a single blip.
+                    still_valid = True
+                if not still_valid:
                     logger.info(
                         "mcp_remote_sse_token_revoked_or_expired",
                         stream_id=stream_id,

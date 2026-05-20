@@ -30,6 +30,7 @@ import time
 
 import structlog
 from fastapi import HTTPException, Request, status
+from redis.exceptions import RedisError
 
 from app.mcp.auth import MCPAuthResult
 from app.services.redis_client import get_redis
@@ -101,29 +102,50 @@ async def enforce_rate_limit(
       2. Global per-token bucket (TOKEN_GLOBAL_UNITS_PER_MINUTE) so a
          botnet-distributed attack can't stay under the per-IP cap.
     """
-    redis = await get_redis()
-    if redis is None:
-        # Redis down — fail open. Audit log still captures the call.
-        logger.warning("mcp_rate_limit_redis_unavailable", tool=tool_name)
-        return
-
     cost = _cost(tool_name)
     principal = _principal_id(auth)
     ip = _client_ip(request)
     minute = _bucket_minute()
+
+    redis = await get_redis()
+    if redis is None:
+        # Redis down — fail open. Audit log still captures the call. Log
+        # principal/ip/org so we can reconstruct who was un-throttled if
+        # Redis flaps during an incident.
+        logger.warning(
+            "mcp_rate_limit_redis_unavailable",
+            tool=tool_name,
+            principal=principal,
+            ip=ip,
+            org_id=str(auth.org.id),
+        )
+        return
 
     per_ip_key = f"mcp_rate:{principal}:{ip}:{minute}"
     global_key = f"mcp_rate:{principal}:_global:{minute}"
 
     # INCRBY returns the new value. EXPIRE only sets a TTL if one isn't
     # already set (NX) — keeps the bucket aligned with the minute window
-    # without resetting the TTL on every call.
-    per_ip_total = await redis.incrby(per_ip_key, cost)
-    if per_ip_total == cost:
-        await redis.expire(per_ip_key, 65)
-    global_total = await redis.incrby(global_key, cost)
-    if global_total == cost:
-        await redis.expire(global_key, 65)
+    # without resetting the TTL on every call. Catch RedisError narrowly
+    # so a mid-call outage matches the get_redis()-returned-None policy
+    # (fail open + observable warning) rather than 500-ing the caller.
+    try:
+        per_ip_total = await redis.incrby(per_ip_key, cost)
+        if per_ip_total == cost:
+            await redis.expire(per_ip_key, 65)
+        global_total = await redis.incrby(global_key, cost)
+        if global_total == cost:
+            await redis.expire(global_key, 65)
+    except RedisError:
+        logger.warning(
+            "mcp_rate_limit_redis_error_fail_open",
+            tool=tool_name,
+            principal=principal,
+            ip=ip,
+            org_id=str(auth.org.id),
+            exc_info=True,
+        )
+        return
 
     if per_ip_total > BUCKET_UNITS_PER_MINUTE:
         logger.info(

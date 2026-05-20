@@ -18,7 +18,6 @@ import asyncio
 import hashlib
 import secrets
 import uuid
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -116,24 +115,30 @@ def _is_expired(expires_at: datetime | None) -> bool:
     return expires_at <= datetime.now(UTC)
 
 
-async def _touch_last_used(token_id: uuid.UUID) -> None:
+async def _touch_last_used(token_id: uuid.UUID, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
     """Background task: bump ``last_used_at`` on a successful auth.
 
     Uses its own session — the request's session may be torn down before
-    this background write completes. Failures are swallowed (logged) so a
-    transient DB hiccup never breaks the user-facing auth path.
+    this background write completes. Failures are swallowed (logged WITH
+    full context so a consistent FK / column mismatch surfaces in alerts)
+    so a transient DB hiccup never breaks the user-facing auth path.
     """
     try:
         async with AsyncSessionLocal() as session:
             await UserMCPTokenRepository(session).touch_last_used(token_id)
             await session.commit()
     except Exception:
-        logger.exception("mcp_token_last_used_touch_failed", token_id=str(token_id))
+        logger.exception(
+            "mcp_token_last_used_touch_failed",
+            token_id=str(token_id),
+            org_id=str(org_id),
+            user_id=str(user_id),
+        )
 
 
-def _schedule_last_used(token_id: uuid.UUID) -> None:
+def _schedule_last_used(token_id: uuid.UUID, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
     """Fire-and-forget last-used touch — never blocks the auth path."""
-    task = asyncio.create_task(_touch_last_used(token_id))
+    task = asyncio.create_task(_touch_last_used(token_id, org_id, user_id))
     _last_used_tasks.add(task)
     task.add_done_callback(_last_used_tasks.discard)
 
@@ -208,7 +213,7 @@ async def verify_mcp_token(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has expired",
             )
-        _schedule_last_used(ut.id)
+        _schedule_last_used(ut.id, ut.org_id, ut.user_id)
         logger.debug(
             "mcp_auth_user_token",
             org_id=str(ut.org_id),
@@ -231,11 +236,13 @@ async def verify_mcp_token(
     # Equalize timing: if no prefix matched AND no org token matched, run a
     # dummy bcrypt so the response time matches the "prefix matched but
     # bcrypt failed" path. Closes a token-prefix-enumeration side channel.
-    # ``suppress`` because the dummy hash is fixed and trusted; an exception
-    # here would only mean bcrypt itself is broken.
+    # Narrow except so a broken/misconfigured bcrypt backend surfaces as a
+    # WARNING rather than being hidden behind the uniform 401 below.
     if not candidates:
-        with suppress(Exception):
+        try:
             verify_password(token, _TIMING_EQUALIZER_HASH)
+        except ValueError:
+            logger.warning("mcp_timing_equalizer_failed")
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

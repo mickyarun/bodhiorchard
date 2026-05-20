@@ -31,7 +31,12 @@ from app.repositories.mcp_audit_log import MCPAuditLogRepository
 logger = structlog.get_logger(__name__)
 
 RETENTION_DAYS = 90
-SLEEP_SECONDS = 24 * 60 * 60  # daily
+SLEEP_SECONDS = 24 * 60 * 60  # daily on success
+RETRY_SLEEP_SECONDS = 60 * 60  # hourly while the sweep is failing
+# After this many consecutive failures the table is silently growing.
+# Escalate log level so operators see it on dashboards / Sentry, not just
+# in the per-failure exception noise.
+ALERT_AFTER_CONSECUTIVE_FAILURES = 2
 
 
 async def sweep_once() -> int:
@@ -46,10 +51,28 @@ async def sweep_once() -> int:
 
 
 async def run_forever() -> None:
-    """Daily loop; logs and continues on any failure."""
+    """Daily loop with consecutive-failure backoff.
+
+    On success: sleep for the full 24h window. On failure: retry hourly so
+    a broken sweep doesn't let the audit table grow unbounded for a full
+    day per attempt. Escalates to ERROR after a few consecutive failures
+    so the situation surfaces on alerting dashboards.
+    """
+    consecutive_failures = 0
     while True:
         try:
             await sweep_once()
+            consecutive_failures = 0
+            sleep_for = SLEEP_SECONDS
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            logger.exception("mcp_audit_retention_failed")
-        await asyncio.sleep(SLEEP_SECONDS)
+            consecutive_failures += 1
+            log = (
+                logger.error
+                if consecutive_failures >= ALERT_AFTER_CONSECUTIVE_FAILURES
+                else logger.exception
+            )
+            log("mcp_audit_retention_failed", consecutive_failures=consecutive_failures)
+            sleep_for = RETRY_SLEEP_SECONDS
+        await asyncio.sleep(sleep_for)
