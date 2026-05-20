@@ -181,16 +181,19 @@ export class AgentActivitySim {
         }
       }
       if (swept > 0) {
-        // Sanitise into locals BEFORE the template so CodeQL's
-        // data-flow analysis sees the safeLog call as the terminator
-        // of the tainted path. Multiple safeLog interpolations inside
-        // one template literal can confuse the rule even though the
-        // runtime semantics are identical to this form.
-        const safeSlug = safeLog(slug)
-        const safeActor = safeLog(actor)
+        // Pass user-controlled fields as discrete ``console.log``
+        // arguments instead of template-interpolating them. Each
+        // ``safeLog`` call's return value flows directly into the
+        // log's variadic args — no template-literal string concat
+        // for CodeQL's taint tracker to lose the sanitiser link in.
+        // ``bud`` and ``swept`` are numbers (validated by the parser
+        // via ``isFinite``) so they go in raw.
         console.log(
-          `[AgentActivitySim] orphan_sweep skill=${safeSlug} actor=${safeActor} ` +
-          `bud=${bud} swept=${swept}`,
+          "[AgentActivitySim] orphan_sweep skill=%s actor=%s bud=%d swept=%d",
+          safeLog(slug),
+          safeLog(actor),
+          bud,
+          swept,
         )
       }
       return
