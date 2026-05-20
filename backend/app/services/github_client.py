@@ -86,6 +86,19 @@ class GitHubClient:
     ) -> dict[str, Any] | None:
         """Post a review with inline comments on a PR.
 
+        On HTTP 422 — most commonly ``"Path could not be resolved"`` when
+        an inline comment references a file the PR diff doesn't touch —
+        the method retries in two steps before giving up:
+
+        1. Fetch the PR's actual changed-file list via
+           :meth:`list_pr_files` and drop any inline comment whose
+           ``path`` isn't in it. Repost with the surviving subset. This
+           preserves the annotations the agent got right instead of
+           nuking all five because one path was wrong.
+        2. If that retry still fails (or zero comments survived the
+           filter), fall back to a body-only review so the summary still
+           lands. Better a summary than nothing.
+
         Args:
             owner_repo: "owner/repo" string.
             pr_number: PR number.
@@ -113,27 +126,204 @@ class GitHubClient:
                     owner_repo=owner_repo,
                     pr_number=pr_number,
                 )
-                # Retry without inline comments (422 often means stale line refs)
-                if resp.status_code == 422 and comments:
-                    logger.warning(
-                        "github_review_422_retry_without_inline",
-                        pr_number=pr_number,
-                        inline_count=len(comments),
+                if resp.status_code != 422 or not comments:
+                    return None
+
+        # ── 422 with inline comments — try filtered retry, then bodyless ──
+        return await self._retry_review_after_422(
+            url=url,
+            owner_repo=owner_repo,
+            pr_number=pr_number,
+            body=body,
+            comments=comments,
+        )
+
+    # Markdown review bodies are capped by GitHub at 65535 chars. We
+    # reserve a small buffer under that so the appended details block
+    # plus any later concatenation stays comfortably under.
+    _REVIEW_BODY_BUDGET = 60_000
+
+    @staticmethod
+    def _neutralize_disclosure_tags(body: str) -> str:
+        """Defang ``<details>``/``<summary>`` tags inside a quoted body.
+
+        A line-quoted ``> </details>`` would still close our outer
+        disclosure block early, dumping the remaining comments below
+        the fold (or worse, breaking page layout). We insert a
+        zero-width space inside any literal disclosure tag so it
+        renders identically to the eye but no longer matches GitHub's
+        HTML parser. Narrow targeting keeps legitimate ``<input>`` /
+        ``a > b`` content readable — encoding every ``<`` / ``>`` would
+        make code snippets in agent comments unreadable.
+        """
+        zws = "​"
+        for tag in ("</details>", "<details>", "</summary>", "<summary>"):
+            cased = tag.replace("<", f"<{zws}")
+            body = body.replace(tag, cased)
+        return body
+
+    @classmethod
+    def _format_dropped_comments_section(cls, comments: list[dict[str, Any]]) -> str:
+        """Render dropped inline comments as a collapsible Markdown block.
+
+        Returned string is appended to a review body when the recovery
+        path can't post a comment inline — so the agent's findings still
+        reach the PR author instead of being silently swallowed. Empty
+        string when there's nothing to render so callers don't have to
+        guard the concat.
+
+        We deliberately use blockquote (``> ``) line-prefixing rather
+        than fenced code blocks for each comment body: a comment may
+        already contain triple-backtick fences (the agent loves them),
+        and embedding fences inside our own fence breaks GitHub's
+        Markdown renderer. Line-quote is fence-safe.
+
+        Length budget enforced via :data:`_REVIEW_BODY_BUDGET`. If the
+        accumulated section would exceed it, the surplus comments are
+        replaced with a ``_… N comments truncated_`` marker — preferable
+        to GitHub rejecting the entire fallback POST with a second 422
+        and re-introducing the silent-loss bug this helper exists to fix.
+        """
+        if not comments:
+            return ""
+        header = [
+            "",
+            "<details>",
+            f"<summary>Additional review comments ({len(comments)} — could not be "
+            "posted inline)</summary>",
+            "",
+        ]
+        footer = ["</details>"]
+        # Pre-charge running length with header + footer so we don't
+        # render a single comment that already busts the budget.
+        running = sum(len(line) + 1 for line in header + footer)
+        body_lines: list[str] = []
+        rendered = 0
+        for rendered, c in enumerate(comments):
+            path = str(c.get("path") or "(no path)")
+            line = c.get("line")
+            location = f"{path}:{line}" if line is not None else path
+            raw_body = str(c.get("body") or "").rstrip()
+            safe_body = cls._neutralize_disclosure_tags(raw_body)
+            block = [f"**`{location}`**", ""]
+            block.extend(f"> {bl}" for bl in (safe_body.splitlines() or [""]))
+            block.append("")
+            block_len = sum(len(line) + 1 for line in block)
+            if running + block_len > cls._REVIEW_BODY_BUDGET:
+                remaining = len(comments) - rendered
+                body_lines.append(f"_… {remaining} comments truncated_")
+                break
+            body_lines.extend(block)
+            running += block_len
+        return "\n".join(header + body_lines + footer)
+
+    async def _retry_review_after_422(
+        self,
+        *,
+        url: str,
+        owner_repo: str,
+        pr_number: int,
+        body: str,
+        comments: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Two-step recovery for ``create_pr_review`` 422 responses.
+
+        Pulled into its own method so the happy path in
+        :meth:`create_pr_review` stays linear and the recovery branches
+        get their own focused tests.
+        """
+        changed_files = set(await self.list_pr_files(owner_repo, pr_number))
+        kept = [c for c in comments if c.get("path") in changed_files]
+        dropped_list = [c for c in comments if c.get("path") not in changed_files]
+        dropped = len(dropped_list)
+        if not changed_files and comments:
+            # ``list_pr_files`` swallows its own errors and returns ``[]``
+            # on a transient failure (see ``github_list_pr_files_failed``
+            # at line ~362). Flag this case distinctly so a bodyless
+            # fallback driven by a GitHub outage doesn't get
+            # mis-diagnosed in dashboards as "agent invented every path".
+            logger.warning(
+                "github_review_list_files_empty_treating_as_bad",
+                pr_number=pr_number,
+                inline_count=len(comments),
+            )
+        logger.warning(
+            "github_review_422_filtered_inline",
+            pr_number=pr_number,
+            inline_count=len(comments),
+            kept_count=len(kept),
+            dropped_count=dropped,
+        )
+
+        # Body augmentations:
+        # * filtered retry → append the dropped ones (kept were posted inline).
+        # * bodyless fallback → append ALL the original comments.
+        # Either way, no findings are silently lost.
+        body_for_filtered = body + self._format_dropped_comments_section(dropped_list)
+        body_for_bodyless = body + self._format_dropped_comments_section(comments)
+
+        async with AsyncClient(timeout=30) as client:
+            if kept:
+                try:
+                    resp = await client.post(
+                        url,
+                        json={
+                            "body": body_for_filtered,
+                            "event": "COMMENT",
+                            "comments": kept,
+                        },
+                        headers=self._headers,
                     )
-                    try:
-                        fallback = await client.post(
-                            url,
-                            json={"body": body, "event": "COMMENT"},
-                            headers=self._headers,
-                        )
-                        fallback.raise_for_status()
-                        logger.info(
-                            "github_review_fallback_posted",
-                            pr_number=pr_number,
-                        )
-                        return cast(dict[str, Any], fallback.json())
-                    except HTTPStatusError:
-                        pass
+                    resp.raise_for_status()
+                    logger.info(
+                        "github_review_filtered_posted",
+                        pr_number=pr_number,
+                        kept_count=len(kept),
+                    )
+                    return cast(dict[str, Any], resp.json())
+                except HTTPStatusError:
+                    logger.warning(
+                        "github_review_filtered_still_422",
+                        pr_number=pr_number,
+                        status=resp.status_code,
+                    )
+                except Exception:
+                    # Transport error (DNS, TCP reset, timeout). Don't
+                    # raise out of the recovery path — fall through to
+                    # the bodyless attempt so the summary still has a
+                    # chance to land.
+                    logger.error(
+                        "github_review_filtered_connection_error",
+                        pr_number=pr_number,
+                        exc_info=True,
+                    )
+
+            # Last-resort: body-only review so the summary still lands.
+            # ``warning`` (not ``info``) — losing every annotation as
+            # an *inline* placement is a real degradation operators
+            # should see in the dashboard. The findings themselves
+            # still reach the PR author via the appended details block.
+            try:
+                fallback = await client.post(
+                    url,
+                    json={"body": body_for_bodyless, "event": "COMMENT"},
+                    headers=self._headers,
+                )
+                fallback.raise_for_status()
+                logger.warning(
+                    "github_review_bodyless_posted",
+                    pr_number=pr_number,
+                    dropped_inline=len(comments),
+                )
+                return cast(dict[str, Any], fallback.json())
+            except HTTPStatusError:
+                return None
+            except Exception:
+                logger.error(
+                    "github_review_bodyless_connection_error",
+                    pr_number=pr_number,
+                    exc_info=True,
+                )
                 return None
 
     async def list_pull_requests(
