@@ -86,6 +86,19 @@ class GitHubClient:
     ) -> dict[str, Any] | None:
         """Post a review with inline comments on a PR.
 
+        On HTTP 422 — most commonly ``"Path could not be resolved"`` when
+        an inline comment references a file the PR diff doesn't touch —
+        the method retries in two steps before giving up:
+
+        1. Fetch the PR's actual changed-file list via
+           :meth:`list_pr_files` and drop any inline comment whose
+           ``path`` isn't in it. Repost with the surviving subset. This
+           preserves the annotations the agent got right instead of
+           nuking all five because one path was wrong.
+        2. If that retry still fails (or zero comments survived the
+           filter), fall back to a body-only review so the summary still
+           lands. Better a summary than nothing.
+
         Args:
             owner_repo: "owner/repo" string.
             pr_number: PR number.
@@ -113,27 +126,111 @@ class GitHubClient:
                     owner_repo=owner_repo,
                     pr_number=pr_number,
                 )
-                # Retry without inline comments (422 often means stale line refs)
-                if resp.status_code == 422 and comments:
-                    logger.warning(
-                        "github_review_422_retry_without_inline",
-                        pr_number=pr_number,
-                        inline_count=len(comments),
+                if resp.status_code != 422 or not comments:
+                    return None
+
+        # ── 422 with inline comments — try filtered retry, then bodyless ──
+        return await self._retry_review_after_422(
+            url=url,
+            owner_repo=owner_repo,
+            pr_number=pr_number,
+            body=body,
+            comments=comments,
+        )
+
+    async def _retry_review_after_422(
+        self,
+        *,
+        url: str,
+        owner_repo: str,
+        pr_number: int,
+        body: str,
+        comments: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Two-step recovery for ``create_pr_review`` 422 responses.
+
+        Pulled into its own method so the happy path in
+        :meth:`create_pr_review` stays linear and the recovery branches
+        get their own focused tests.
+        """
+        changed_files = set(await self.list_pr_files(owner_repo, pr_number))
+        kept = [c for c in comments if c.get("path") in changed_files]
+        dropped = len(comments) - len(kept)
+        if not changed_files and comments:
+            # ``list_pr_files`` swallows its own errors and returns ``[]``
+            # on a transient failure (see ``github_list_pr_files_failed``
+            # at line ~362). Flag this case distinctly so a bodyless
+            # fallback driven by a GitHub outage doesn't get
+            # mis-diagnosed in dashboards as "agent invented every path".
+            logger.warning(
+                "github_review_list_files_empty_treating_as_bad",
+                pr_number=pr_number,
+                inline_count=len(comments),
+            )
+        logger.warning(
+            "github_review_422_filtered_inline",
+            pr_number=pr_number,
+            inline_count=len(comments),
+            kept_count=len(kept),
+            dropped_count=dropped,
+        )
+
+        async with AsyncClient(timeout=30) as client:
+            if kept:
+                try:
+                    resp = await client.post(
+                        url,
+                        json={"body": body, "event": "COMMENT", "comments": kept},
+                        headers=self._headers,
                     )
-                    try:
-                        fallback = await client.post(
-                            url,
-                            json={"body": body, "event": "COMMENT"},
-                            headers=self._headers,
-                        )
-                        fallback.raise_for_status()
-                        logger.info(
-                            "github_review_fallback_posted",
-                            pr_number=pr_number,
-                        )
-                        return cast(dict[str, Any], fallback.json())
-                    except HTTPStatusError:
-                        pass
+                    resp.raise_for_status()
+                    logger.info(
+                        "github_review_filtered_posted",
+                        pr_number=pr_number,
+                        kept_count=len(kept),
+                    )
+                    return cast(dict[str, Any], resp.json())
+                except HTTPStatusError:
+                    logger.warning(
+                        "github_review_filtered_still_422",
+                        pr_number=pr_number,
+                        status=resp.status_code,
+                    )
+                except Exception:
+                    # Transport error (DNS, TCP reset, timeout). Don't
+                    # raise out of the recovery path — fall through to
+                    # the bodyless attempt so the summary still has a
+                    # chance to land.
+                    logger.error(
+                        "github_review_filtered_connection_error",
+                        pr_number=pr_number,
+                        exc_info=True,
+                    )
+
+            # Last-resort: body-only review so the summary still lands.
+            # ``warning`` (not ``info``) — losing every annotation is a
+            # real degradation operators should see in the dashboard.
+            try:
+                fallback = await client.post(
+                    url,
+                    json={"body": body, "event": "COMMENT"},
+                    headers=self._headers,
+                )
+                fallback.raise_for_status()
+                logger.warning(
+                    "github_review_bodyless_posted",
+                    pr_number=pr_number,
+                    dropped_inline=len(comments),
+                )
+                return cast(dict[str, Any], fallback.json())
+            except HTTPStatusError:
+                return None
+            except Exception:
+                logger.error(
+                    "github_review_bodyless_connection_error",
+                    pr_number=pr_number,
+                    exc_info=True,
+                )
                 return None
 
     async def list_pull_requests(
