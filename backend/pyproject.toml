@@ -85,6 +85,8 @@ module = [
     "graphify.*",
     "pgvector.*",
     "aioboto3",
+    "botocore",
+    "botocore.*",
     "yaml",
     "jose",
     "jose.*",
