@@ -33,6 +33,21 @@ from app.services.json_parser import parse_json_response, strip_insight_blocks
 
 logger = structlog.get_logger(__name__)
 
+# Substrings emitted by ``git`` / ``gh`` / the GitHub HTTPS endpoint when the
+# bearer token is rejected. We match on the tools' own wording rather than a
+# paraphrase so the classifier doesn't drift if we change our own copy.
+# Surfaces as ``parse_failure_reason="git_auth_failed"`` — see
+# :data:`app.schemas.bud_code_review.PARSE_FAILURE_MESSAGES`.
+_GIT_AUTH_FAILURE_RE = re.compile(
+    r"(Invalid username or token"
+    r"|Authentication failed"
+    r"|could not read Username"
+    r"|remote: Repository not found"
+    r"|fatal: unable to access"
+    r"|Bad credentials)",
+    re.IGNORECASE,
+)
+
 
 async def handle_prd_result(
     bud_id: uuid_mod.UUID,
@@ -486,6 +501,10 @@ def _parse_code_review_output(output: str) -> dict[str, Any]:
     Failure reasons (persisted to ``result_summary.parse_failure_reason``
     and used by the Code Review tab banner):
 
+    * ``git_auth_failed`` — agent output contained a git/GitHub auth
+      rejection (e.g. ``Invalid username or token``). This is checked
+      first when no JSON was recovered because it points at a fixable
+      credential rotation, not at the agent's prompt or output style.
     * ``insight_contaminated`` — output contained ``★ Insight`` blocks
       from a learning/explanatory output-style plugin. JSON could not be
       recovered even after stripping. Root cause is config-side: the
@@ -518,11 +537,16 @@ def _parse_code_review_output(output: str) -> dict[str, Any]:
         }
 
     if parsed is None:
-        # No JSON object recovered. If the output was contaminated, that
-        # is the most actionable diagnosis to surface to the user (fix
-        # the plugin / subprocess config). Otherwise it's a generic
-        # "agent didn't emit JSON" failure.
-        reason = "insight_contaminated" if was_contaminated else "no_json"
+        # No JSON object recovered. Pick the most actionable diagnosis:
+        # auth failure beats insight contamination beats generic — the
+        # narrower the reason, the more directly the banner points at
+        # the real fix.
+        if _GIT_AUTH_FAILURE_RE.search(output or ""):
+            reason = "git_auth_failed"
+        elif was_contaminated:
+            reason = "insight_contaminated"
+        else:
+            reason = "no_json"
         logger.error(
             "code_review_output_no_json",
             reason=reason,
