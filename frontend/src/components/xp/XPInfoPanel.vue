@@ -72,7 +72,11 @@
       Skill Points (SP)
     </div>
     <div class="text-caption text-medium-emphasis mb-3">
-      SP is a scarce currency earned through quality outcomes. Spend SP to unlock vehicles and upgrade your house.
+      SP is a scarce currency earned through quality outcomes. Spend SP to unlock vehicles and
+      upgrade your house. <strong>BUD-shipped SP is paid out only when the BUD reaches CLOSED
+      status</strong> — a PR merge into a stage branch credits stage XP, but the SP for shipping
+      waits for the BUD to move through testing → UAT → PROD → CLOSED. Streak milestones, code
+      reviews, and bug-filing SP credit immediately on the triggering event.
     </div>
 
     <div class="text-caption font-weight-bold mb-1 text-uppercase" style="letter-spacing: 0.05em;">Developer</div>
@@ -161,7 +165,6 @@ const LEVELS = [
 ]
 
 const SP_DEV = [
-  { label: 'PR merged', sp: 0.5 },
   { label: 'Code review given', sp: 0.25 },
   { label: 'BUD shipped to PROD', sp: 1.0 },
   { label: 'Quality score > 80%', sp: 0.5 },
@@ -177,7 +180,7 @@ const SP_QA = [
 ]
 
 const SP_PM = [
-  { label: 'BUD shipped to PROD', sp: 0.5 },
+  { label: 'BUD shipped to PROD', sp: 2.0 },
   { label: 'BUD approved promptly', sp: 0.25 },
   { label: 'BUD discarded', sp: -0.5 },
 ]

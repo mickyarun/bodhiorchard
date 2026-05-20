@@ -40,7 +40,7 @@ SP_QA_FALSE_POSITIVE = -0.25  # bug closed as invalid
 
 # ─── PM ────────────────────────────────────────
 
-SP_PM_BUD_SHIPPED = 0.5  # BUD they approved reached PROD
+SP_PM_BUD_SHIPPED = 2.0  # BUD they approved reached PROD
 SP_PM_BUD_APPROVED_FAST = 0.25  # BUD approved within 1 day of creation
 SP_PM_BUD_DISCARDED = -0.5  # BUD discarded (wasted team effort)
 
