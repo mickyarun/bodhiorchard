@@ -18,10 +18,13 @@ Provides a unified interface for uploading, downloading, and deleting files.
 Storage backend is selected via environment variables at startup.
 """
 
-import os
 from pathlib import Path
 
+import aioboto3
 import structlog
+from botocore.exceptions import BotoCoreError, ClientError
+
+from app.config import FileStorageConfig, settings
 
 logger = structlog.get_logger(__name__)
 
@@ -48,11 +51,60 @@ class FileStorageError(Exception):
 class FileStorage:
     """File storage with local-disk default and optional S3 backend."""
 
-    def __init__(self) -> None:
-        self.use_s3 = os.getenv("FILE_STORAGE_S3", "false").lower() == "true"
-        self.s3_bucket = os.getenv("FILE_STORAGE_S3_BUCKET", "")
-        self.s3_region = os.getenv("AWS_REGION", "us-east-1")
-        self.local_dir = os.getenv("FILE_STORAGE_LOCAL_DIR", "data/uploads")
+    def __init__(self, config: FileStorageConfig | None = None) -> None:
+        """Initialise with a config, defaulting to the global singleton.
+
+        Args:
+            config: An explicit :class:`FileStorageConfig`, typically
+                only passed by tests that want to bypass the module-level
+                ``settings`` singleton. ``None`` (the production path)
+                reads ``app.config.settings.file_storage``, which itself
+                flows through pydantic-settings so the ``.env`` file is
+                actually loaded — calling ``os.getenv()`` directly (the
+                prior implementation) silently ignored ``.env`` entries
+                because ``BaseSettings.model_config[env_file]`` does NOT
+                mutate ``os.environ``, it only populates the Settings
+                instance. The symptom of that bug was "I set
+                ``FILE_STORAGE_S3=true`` in ``.env`` but the backend
+                keeps writing to disk."
+
+        Raises:
+            FileStorageError: when ``use_s3`` is enabled without a
+                bucket name. Catching this at construction time
+                surfaces the misconfig as a startup-time error log
+                instead of an opaque boto3 ``ParamValidationError`` on
+                the first user-triggered upload.
+        """
+        cfg = config if config is not None else settings.file_storage
+        self.use_s3 = cfg.use_s3
+        self.s3_bucket = cfg.s3_bucket
+        self.s3_region = cfg.s3_region
+        self.local_dir = cfg.local_dir
+
+        # Log BEFORE the bucket-presence check so a misconfigured boot
+        # leaves an "I tried this" breadcrumb in the logs alongside the
+        # raise below — operator can see both the bucket value (empty)
+        # and the error in one place instead of correlating two events.
+
+        # One-shot INFO log at construction so the resolved backend is
+        # visible in boot logs without needing to flip log levels. The
+        # singleton is built lazily on first ``get_file_storage()``,
+        # which is during the lifespan startup hook — every operator
+        # complaint of the shape "I enabled S3 but nothing happens"
+        # is answerable by grepping this single line.
+        logger.info(
+            "file_storage_resolved",
+            backend="s3" if self.use_s3 else "local",
+            s3_bucket=self.s3_bucket or None,
+            s3_region=self.s3_region if self.use_s3 else None,
+            local_dir=self.local_dir if not self.use_s3 else None,
+        )
+
+        if self.use_s3 and not self.s3_bucket:
+            raise FileStorageError(
+                "FILE_STORAGE_S3=true but FILE_STORAGE_S3_BUCKET is empty. "
+                "Set the bucket name in the backend env or disable S3."
+            )
 
     async def upload(
         self,
@@ -134,7 +186,10 @@ class FileStorage:
         dest = self._safe_local_path(full_path)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data)
-        logger.debug("file_uploaded_local", path=str(dest), size=len(data))
+        # ``info`` (not ``debug``) so the active backend is visible at
+        # default log verbosity. Matches the new info-level ``file_uploaded_s3``
+        # — operators can grep either event to confirm which path ran.
+        logger.info("file_uploaded_local", path=str(dest), size=len(data))
         return full_path
 
     async def _download_local(self, storage_path: str) -> tuple[bytes, str]:
@@ -156,44 +211,81 @@ class FileStorage:
             logger.debug("file_deleted_local", path=str(dest))
 
     # ── S3 storage ───────────────────────────────────────────────
+    #
+    # Every S3 op MUST wrap ``ClientError`` (and ``BotoCoreError`` for
+    # credential / network failures that don't carry an HTTP status)
+    # into a :class:`FileStorageError`. Without this, a misconfigured
+    # backend — wrong region, missing IAM ``s3:PutObject``, the bucket
+    # simply doesn't exist — propagates as a bare ``ClientError`` to
+    # ``upload_evidence``, which only catches ``FileStorageError``.
+    # FastAPI then turns it into an opaque 500 and the operator sees
+    # "no image is getting stored" with no actionable hint.
+    #
+    # Logs are at ``info`` (success) / ``error`` (failure). Bumped
+    # from the old ``debug`` so operators on default log levels can
+    # confirm uploads landed without having to flip log verbosity.
 
     async def _upload_s3(self, full_path: str, data: bytes, content_type: str) -> str:
-        """Store file in S3."""
-        import aioboto3
-
+        """Store file in S3. Raises ``FileStorageError`` on any S3 failure."""
         session = aioboto3.Session()
-        async with session.client("s3", region_name=self.s3_region) as s3:
-            await s3.put_object(
-                Bucket=self.s3_bucket,
-                Key=full_path,
-                Body=data,
-                ContentType=content_type,
+        try:
+            async with session.client("s3", region_name=self.s3_region) as s3:
+                await s3.put_object(
+                    Bucket=self.s3_bucket,
+                    Key=full_path,
+                    Body=data,
+                    ContentType=content_type,
+                )
+        except (ClientError, BotoCoreError) as exc:
+            logger.error(
+                "file_upload_s3_failed",
+                bucket=self.s3_bucket,
+                region=self.s3_region,
+                key=full_path,
+                error_class=type(exc).__name__,
+                error=str(exc),
             )
-        logger.debug("file_uploaded_s3", bucket=self.s3_bucket, key=full_path, size=len(data))
+            raise FileStorageError(f"S3 upload failed ({type(exc).__name__}): {exc}") from exc
+        logger.info("file_uploaded_s3", bucket=self.s3_bucket, key=full_path, size=len(data))
         return full_path
 
     async def _download_s3(self, storage_path: str) -> tuple[bytes, str]:
-        """Read file from S3."""
-        import aioboto3
-
+        """Read file from S3. Raises ``FileStorageError`` on any S3 failure."""
         session = aioboto3.Session()
-        async with session.client("s3", region_name=self.s3_region) as s3:
-            try:
+        try:
+            async with session.client("s3", region_name=self.s3_region) as s3:
                 response = await s3.get_object(Bucket=self.s3_bucket, Key=storage_path)
                 data = await response["Body"].read()
                 content_type = response.get("ContentType", "application/octet-stream")
                 return data, content_type
-            except Exception as exc:
-                raise FileStorageError(f"S3 download failed: {storage_path}") from exc
+        except (ClientError, BotoCoreError) as exc:
+            logger.error(
+                "file_download_s3_failed",
+                bucket=self.s3_bucket,
+                region=self.s3_region,
+                key=storage_path,
+                error_class=type(exc).__name__,
+                error=str(exc),
+            )
+            raise FileStorageError(f"S3 download failed ({type(exc).__name__}): {exc}") from exc
 
     async def _delete_s3(self, storage_path: str) -> None:
-        """Delete file from S3."""
-        import aioboto3
-
+        """Delete a file from S3. Raises ``FileStorageError`` on any S3 failure."""
         session = aioboto3.Session()
-        async with session.client("s3", region_name=self.s3_region) as s3:
-            await s3.delete_object(Bucket=self.s3_bucket, Key=storage_path)
-            logger.debug("file_deleted_s3", bucket=self.s3_bucket, key=storage_path)
+        try:
+            async with session.client("s3", region_name=self.s3_region) as s3:
+                await s3.delete_object(Bucket=self.s3_bucket, Key=storage_path)
+        except (ClientError, BotoCoreError) as exc:
+            logger.error(
+                "file_delete_s3_failed",
+                bucket=self.s3_bucket,
+                region=self.s3_region,
+                key=storage_path,
+                error_class=type(exc).__name__,
+                error=str(exc),
+            )
+            raise FileStorageError(f"S3 delete failed ({type(exc).__name__}): {exc}") from exc
+        logger.info("file_deleted_s3", bucket=self.s3_bucket, key=storage_path)
 
 
 # Module-level singleton

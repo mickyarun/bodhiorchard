@@ -195,6 +195,48 @@ class StorageConfig(BaseSettings):
         return Path(self.data_dir) / "repos"
 
 
+class FileStorageConfig(BaseSettings):
+    """File storage backend for QA evidence uploads (and other user files).
+
+    Distinct from :class:`StorageConfig` above — which owns the *system*
+    filesystem layout (cloned repos, SSH keys) — this one owns the
+    *user-content* backend: local disk by default, S3 when
+    ``FILE_STORAGE_S3=true``. ``os.getenv`` in the consumer is the
+    historical anti-pattern that made ``.env``-only deployments
+    silently fall back to local disk; routing through ``BaseSettings``
+    matches the rest of the project and loads from ``.env`` correctly.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
+
+    use_s3: bool = Field(
+        default=False,
+        alias="FILE_STORAGE_S3",
+        description=(
+            "When true, uploads / downloads / deletes go through S3 "
+            "instead of the local-disk backend."
+        ),
+    )
+    s3_bucket: str = Field(
+        default="",
+        alias="FILE_STORAGE_S3_BUCKET",
+        description="S3 bucket name. Required when use_s3 is true.",
+    )
+    s3_region: str = Field(
+        default="us-east-1",
+        alias="AWS_REGION",
+        description="AWS region the S3 client connects to.",
+    )
+    local_dir: str = Field(
+        default="data/uploads",
+        alias="FILE_STORAGE_LOCAL_DIR",
+        description=(
+            "Root directory for the local-disk backend. "
+            "Relative paths resolve against the backend's cwd."
+        ),
+    )
+
+
 class IntegrationConfig(BaseSettings):
     """Third-party integration configuration."""
 
@@ -270,6 +312,7 @@ class Settings(BaseSettings):
     redis: RedisConfig = RedisConfig()
     integrations: IntegrationConfig = IntegrationConfig()
     storage: StorageConfig = StorageConfig()
+    file_storage: FileStorageConfig = FileStorageConfig()
     ws: WebSocketConfig = WebSocketConfig()
     colyseus: ColyseusConfig = ColyseusConfig()
 

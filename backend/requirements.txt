@@ -38,3 +38,7 @@ PyJWT[crypto]>=2.8.0
 networkx>=3.2
 graphifyy[leiden]>=0.5.5,<0.6
 tzdata>=2026.2
+# S3 backend for QA evidence uploads (FILE_STORAGE_S3=true). The lazy
+# ``import aioboto3`` in app/services/file_storage.py would otherwise
+# raise ModuleNotFoundError on the first upload after enabling S3.
+aioboto3>=12.0.0
