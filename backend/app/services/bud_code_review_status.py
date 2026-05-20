@@ -91,12 +91,21 @@ async def get_pr_status_summary(
         if existing is None or _PR_STATE_PRIORITY[pr.state] < _PR_STATE_PRIORITY[existing.state]:
             pr_by_repo_id[key] = pr
 
-    # Count comments per repo name (webhook-synced + any agent-stored entries)
-    comment_counts: dict[str, int] = {}
+    # Count comments per repo name, split by resolution state. ``total`` is
+    # every stored entry; ``unresolved`` excludes those marked
+    # ``resolved: true`` by the ``pull_request_review_thread`` webhook. The
+    # badge in the Code Review tab uses ``unresolved`` so it drops to zero
+    # once a reviewer has resolved every thread on GitHub — matching the
+    # human-visible state without losing the history of past comments.
+    total_counts: dict[str, int] = {}
+    unresolved_counts: dict[str, int] = {}
     for c in bud.code_review_comments or []:
         repo_name = c.get("repo")
-        if repo_name:
-            comment_counts[repo_name] = comment_counts.get(repo_name, 0) + 1
+        if not repo_name:
+            continue
+        total_counts[repo_name] = total_counts.get(repo_name, 0) + 1
+        if not c.get("resolved"):
+            unresolved_counts[repo_name] = unresolved_counts.get(repo_name, 0) + 1
 
     result: list[dict[str, Any]] = []
     for ir in impacted_repos:
@@ -113,6 +122,8 @@ async def get_pr_status_summary(
             pr_number = None
             pr_url = None
 
+        unresolved = unresolved_counts.get(repo_name, 0)
+        total = total_counts.get(repo_name, 0)
         result.append(
             {
                 "repo_id": repo_id,
@@ -120,7 +131,12 @@ async def get_pr_status_summary(
                 "pr_number": pr_number,
                 "pr_state": pr_state,
                 "pr_url": pr_url,
-                "comment_count": comment_counts.get(repo_name, 0),
+                # ``comment_count`` is the badge number (unresolved only).
+                # ``total_comment_count`` and ``resolved_comment_count`` let
+                # the UI render "X resolved / Y total" if it wants to.
+                "comment_count": unresolved,
+                "total_comment_count": total,
+                "resolved_comment_count": total - unresolved,
             }
         )
 

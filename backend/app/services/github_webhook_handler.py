@@ -32,7 +32,12 @@ from app.models.tracked_repository import SetupPrState, TrackedRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.pull_request import PullRequestRepository
 from app.repositories.user import UserRepository
-from app.schemas.github import GitHubComment, GitHubPullRequest, GitHubReview
+from app.schemas.github import (
+    GitHubComment,
+    GitHubPullRequest,
+    GitHubReview,
+    GitHubReviewThread,
+)
 from app.services.bud_timeline import record_event
 from app.services.org_settings import is_uat_enabled
 from app.services.pr_auto_transition import (
@@ -86,6 +91,10 @@ async def handle_github_event(
             ).get("number")
             if pr_number:
                 await _handle_pr_comment(org_id, repo, pr_number, comment, db)
+    elif event_type == "pull_request_review_thread" and action in ("resolved", "unresolved"):
+        thread = GitHubReviewThread.model_validate(payload["thread"])
+        pr_data = GitHubPullRequest.model_validate(payload["pull_request"])
+        await _handle_review_thread(org_id, pr_data, thread, resolved=action == "resolved", db=db)
 
 
 async def _handle_pr_opened(
@@ -592,6 +601,83 @@ async def _fetch_and_store_review_comments(
         review_id=review.id,
         inline_count=len(gh_comments),
         total_stored=len(existing),
+    )
+
+
+async def _handle_review_thread(
+    org_id: uuid.UUID,
+    pr_data: GitHubPullRequest,
+    thread: GitHubReviewThread,
+    *,
+    resolved: bool,
+    db: AsyncSession,
+) -> None:
+    """Flip the ``resolved`` flag on every BUD comment in this thread.
+
+    GitHub fires ``pull_request_review_thread`` with ``action: resolved``
+    when a reviewer clicks the "Resolve conversation" button on a PR,
+    and ``action: unresolved`` if they re-open it. The payload carries
+    the GitHub ids of every comment in the thread. We match those
+    against ``github_comment_id`` on the BUD's stored review comments
+    and flip the per-entry ``resolved`` flag. The badge count in the
+    Code Review tab uses this flag to show "unresolved" rather than
+    "total" — once all threads are resolved the badge drops to zero
+    while the entries remain visible in the history.
+    """
+    pr_repo = PullRequestRepository(db, org_id=org_id)
+    pr = await pr_repo.get_by_github_pr_id(pr_data.id)
+    if pr is None or pr.bud_id is None:
+        return
+
+    thread_comment_ids = {c.id for c in thread.comments}
+    thread_locations = {(c.path or "", c.line or 0) for c in thread.comments if c.path is not None}
+    if not thread_comment_ids and not thread_locations:
+        return
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id_for_update(pr.bud_id)
+    if bud is None:
+        return
+
+    existing = list(bud.code_review_comments or [])
+    flipped = 0
+    new_entries: list[dict[str, Any]] = []
+    for entry in existing:
+        # Id-match for human-authored entries; (file, line) fallback for
+        # agent entries that have no ``github_comment_id`` populated.
+        cid = entry.get("github_comment_id")
+        location = (entry.get("file") or "", entry.get("line") or 0)
+        matches = (cid is not None and cid in thread_comment_ids) or (
+            cid is None and location in thread_locations
+        )
+        if matches and entry.get("resolved") is not resolved:
+            new_entries.append({**entry, "resolved": resolved})
+            flipped += 1
+        else:
+            new_entries.append(entry)
+
+    if flipped == 0:
+        # No stored entry matched the thread. Either we don't track the
+        # thread's comments at all (rare), or the state was already
+        # correct. Logging at info so the gap is visible without noise.
+        logger.info(
+            "review_thread_no_match",
+            pr_number=pr_data.number,
+            bud_id=str(pr.bud_id),
+            thread_comments=len(thread_comment_ids),
+            resolved=resolved,
+        )
+        return
+
+    bud.code_review_comments = new_entries
+    await db.commit()
+
+    logger.info(
+        "review_thread_resolution_synced",
+        pr_number=pr_data.number,
+        bud_id=str(pr.bud_id),
+        flipped=flipped,
+        resolved=resolved,
     )
 
 
