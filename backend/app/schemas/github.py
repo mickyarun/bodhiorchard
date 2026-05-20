@@ -84,3 +84,9 @@ class GitHubComment(BaseModel):
     created_at: str
     path: str | None = None  # Only on review comments (file path)
     line: int | None = None  # Only on review comments
+    # Present on ``pull_request_review_comment`` payloads — links the inline
+    # comment back to its parent review. Used by the webhook handler to
+    # recognise GitHub's per-comment echo of a review the agent itself just
+    # posted (the agent stages a ``review_id`` tag on its stored entries,
+    # then both the review-summary event AND each comment event arrive).
+    pull_request_review_id: int | None = None

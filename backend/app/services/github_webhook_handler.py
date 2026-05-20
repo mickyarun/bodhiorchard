@@ -616,6 +616,30 @@ async def _handle_pr_comment(
         return
 
     existing = list(bud.code_review_comments or [])
+
+    # Echo-skip for inline comments that belong to a review the agent
+    # itself just posted. GitHub fires both ``pull_request_review`` (the
+    # summary) AND one ``pull_request_review_comment`` per inline comment
+    # — they arrive as separate webhooks. ``_fetch_and_store_review_comments``
+    # already guards the summary path via ``review_id`` matching on the
+    # agent-stored entries (tagged by ``_tag_agent_review_id``). The per-
+    # comment path lands here and must apply the same guard, otherwise every
+    # inline comment of an agent-posted review gets stored a second time
+    # (the agent entries have no ``github_comment_id`` so the id-based dedup
+    # below misses them). Without this, a 7-comment agent review balloons
+    # the BUD's stored count to 14.
+    if comment.pull_request_review_id and any(
+        c.get("review_id") == comment.pull_request_review_id for c in existing
+    ):
+        logger.info(
+            "review_comment_echo_skipped",
+            bud_id=str(pr.bud_id),
+            review_id=comment.pull_request_review_id,
+            comment_id=comment.id,
+            pr_number=pr_number,
+        )
+        return
+
     existing_ids = {c.get("github_comment_id") for c in existing if c.get("github_comment_id")}
     if comment.id in existing_ids:
         return
