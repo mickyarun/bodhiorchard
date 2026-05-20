@@ -24,9 +24,8 @@ caller logs the drops).
 from __future__ import annotations
 
 import uuid
-from typing import Any, cast
 
-from sqlalchemy import CursorResult, delete, select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -100,7 +99,7 @@ class BUDFeatureLinkRepository:
         )
         result = await self._db.execute(stmt)
         await self._db.flush()
-        return cast(CursorResult[Any], result).rowcount or 0
+        return result.rowcount or 0
 
     async def list_features_for_bud(self, bud_id: uuid.UUID) -> list[Feature]:
         """Return every active feature linked to ``bud_id``.
