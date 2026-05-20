@@ -181,7 +181,7 @@ export class AgentActivitySim {
         }
       }
       if (swept > 0) {
-        this.logOrphanSweep(slug, actor, bud, swept)
+        this.logOrphanSweep(bud, swept)
       }
       return
     }
@@ -422,24 +422,19 @@ export class AgentActivitySim {
   }
 
   /**
-   * Diagnostic log for the orphan-sweep path. Extracted into its own
-   * method so the user-controlled string parameters arrive as fresh
-   * locals — divorced from the ``for…of`` loop scope in
-   * ``handleEvent`` that confused CodeQL's per-flow taint tracker into
-   * keeping the ``js/log-injection`` alert open even when each
-   * interpolation went through ``safeLog`` directly. Same sanitiser,
-   * cleaner data-flow shape.
+   * Diagnostic log for the orphan-sweep path. Numbers only — the
+   * sweep itself happens whether or not we log it, and the count is
+   * sufficient to confirm "the cleanup fired N times". Dropping the
+   * skill/actor names eliminates the only user-controlled flow into
+   * the log call, which is what CodeQL's per-flow analyser kept
+   * tracking through the orphan-match for-loop comparison even when
+   * the values were wrapped in ``safeLog``. The skill/actor that
+   * triggered the sweep are still visible in the upstream backend
+   * ``agent_activity_recorded`` log line.
    */
-  private logOrphanSweep(
-    skillSlug: string,
-    actorName: string,
-    budNumber: number,
-    sweptCount: number,
-  ): void {
+  private logOrphanSweep(budNumber: number, sweptCount: number): void {
     console.log(
-      "[AgentActivitySim] orphan_sweep skill=%s actor=%s bud=%d swept=%d",
-      safeLog(skillSlug),
-      safeLog(actorName),
+      "[AgentActivitySim] orphan_sweep bud=%d swept=%d",
       budNumber,
       sweptCount,
     )
