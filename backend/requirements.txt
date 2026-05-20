@@ -36,7 +36,7 @@ python-dotenv>=1.2.2
 PyYAML>=6.0
 PyJWT[crypto]>=2.8.0
 networkx>=3.2
-graphifyy[leiden]>=0.5.5,<0.6
+graphifyy[leiden]>=0.5.5,<0.9
 tzdata>=2026.2
 # S3 backend for QA evidence uploads (FILE_STORAGE_S3=true). The lazy
 # ``import aioboto3`` in app/services/file_storage.py would otherwise
