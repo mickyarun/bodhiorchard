@@ -23,14 +23,15 @@ def test_remote_allowlist_is_exactly_the_four_documented_tools() -> None:
     """If this test fails, a tool was added/removed remotely — confirm the
     docs (MCP-REMOTE.md) + connect-panel UI snippet still match before
     updating the assertion."""
-    assert REMOTE_TOOLS == frozenset(
-        {
-            "get_bud_context",
-            "get_features",
-            "list_design_systems",
-            "get_design_system",
-        }
-    )
+    # Compared against a plain set literal so ruff's SIM300 doesn't flag
+    # the comparison as Yoda — frozenset == set is true iff elements match.
+    expected = {
+        "get_bud_context",
+        "get_features",
+        "list_design_systems",
+        "get_design_system",
+    }
+    assert set(REMOTE_TOOLS) == expected
 
 
 @pytest.mark.parametrize(
