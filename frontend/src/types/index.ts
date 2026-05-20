@@ -199,11 +199,18 @@ export interface BUDDocument extends BUDListItem {
     failed_at: string | null
     metadata: Record<string, unknown>
   } | null
-  // When false, stage agents do not auto-run. The user drives PRD/design/
-  // tech-spec generation with their own local AI via the remote MCP
-  // endpoint and pastes the result into the section editors.
-  auto_generate: boolean
+  // Per-phase auto-generation map. Keys: 'bud' / 'design' / 'tech_arch'
+  // / 'testing'. Value true = our agent fires for that phase; missing
+  // key or false = user drives the phase manually (typically via their
+  // local AI through the remote MCP endpoint). NULL or empty dict =
+  // all phases skip (the new default for freshly created BUDs).
+  auto_generate_phases: Record<string, boolean> | null
 }
+
+export type AutoGeneratePhases = Record<string, boolean>
+
+/** Phase keys the UI knows how to surface as switches. */
+export const AUTO_GENERATE_PHASE_KEYS = ['bud', 'design', 'tech_arch', 'testing'] as const
 
 // ── BUD TODO Types ────────────────────────────────────────
 

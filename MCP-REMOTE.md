@@ -12,9 +12,11 @@ editor only.
 
 ## When to use it
 
-Toggle **External-LLM mode** on a BUD (Advanced settings → "Auto-generate"
-switch off) when you'd rather drive the writing yourself instead of letting
-the PM / Designer / TechPlanner agents run. The BUD detail page will then
+New BUDs default to External-LLM mode for every phase — under Advanced
+settings on create, opt **in** per phase (`PRD writer` / `Design` /
+`Tech plan` / `Test plan`) to anything you'd rather have our agent
+auto-fire; leave the rest off and you'll drive them yourself. The BUD
+detail page will then
 show a banner with a one-click link to this page.
 
 ## Endpoint

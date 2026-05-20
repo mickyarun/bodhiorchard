@@ -271,6 +271,10 @@ async def create_bud(
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     next_number = await bud_repo.next_bud_number()
 
+    # Empty dict from the schema default = all phases skip. Stored as
+    # the JSONB literal (not NULL) so the frontend can distinguish a
+    # freshly-created opt-out from a never-explicitly-set legacy row.
+    auto_generate_phases = body.auto_generate_phases
     bud = BUDDocument(
         org_id=current_user.org_id,
         bud_number=next_number,
@@ -278,7 +282,7 @@ async def create_bud(
         status=BUDStatus.BUD,
         requirements_md=body.requirements_md,
         metadata_=body.metadata_,
-        auto_generate=body.auto_generate,
+        auto_generate_phases=auto_generate_phases,
     )
     await bud_repo.create(bud)
 
@@ -344,14 +348,14 @@ async def create_bud(
         bud_id=str(bud.id),
         bud_number=next_number,
         org_id=str(bud.org_id),
-        auto_generate=bud.auto_generate,
+        auto_generate_phases=auto_generate_phases,
     )
 
-    # External-LLM mode: skip auto-triggering the PM agent. The user will
-    # drive PRD/design/tech-spec generation with their own local AI
-    # (connected via the remote MCP endpoint) and paste the result into the
-    # section editors. Stage-PATCH transitions are similarly gated.
-    if bud.auto_generate:
+    # External-LLM mode: each phase is opt-in. Only fire the PM/bud
+    # agent if the user explicitly enabled the "bud" phase. Missing key
+    # or False = skip; user supplies the PRD via the section editor
+    # (typically driven by their local AI through the remote MCP).
+    if auto_generate_phases.get("bud", False):
         await create_agent_task_for_stage(
             bud,
             "bud",
@@ -813,16 +817,21 @@ async def _trigger_status_jobs(
 
     # Data-driven agent triggering via stage mappings
     if new_status != old_status:
-        # External-LLM mode: skip all stage-agent triggers. The user supplies
-        # PRD/design/tech-spec/test-plan content via the section editors. The
-        # status transition itself still happens in the caller; only the
-        # auto-agent spawn is suppressed.
-        if not bud.auto_generate:
+        # Per-phase opt-in: the auto-fire only runs when the BUD's
+        # auto_generate_phases map has this stage's key set to True.
+        # Missing key / False / NULL dict = the user is driving this
+        # phase manually (typically via their local AI through the
+        # remote MCP endpoint) and pastes content into the section
+        # editor. The status transition itself still happens in the
+        # caller; only the auto-agent spawn is suppressed here.
+        phases = bud.auto_generate_phases or {}
+        if not phases.get(str(new_status), False):
             logger.info(
                 "stage_agent_skip_auto_generate_off",
                 bud_id=str(bud.id),
                 from_status=str(old_status),
                 to_status=str(new_status),
+                phases=phases,
             )
             return
 

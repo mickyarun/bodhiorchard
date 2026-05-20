@@ -217,34 +217,28 @@
               Advanced settings
             </v-expansion-panel-title>
             <v-expansion-panel-text>
-              <!-- BYO-AI toggle: when off, the BUD skips every auto-spawned
-                   stage agent (PM/Designer/TechPlan/Tester). The user drives
-                   PRD/design/tech-spec generation with their own local AI
-                   (typically via the remote MCP endpoint, see Settings →
-                   MCP Connect) and pastes the result into the section
-                   editors. The per-stage skill picker is meaningless in
-                   this mode so we dim it. -->
-              <div class="d-flex align-center ga-2 mb-3">
+              <!-- Per-phase auto-generation. ALL phases default OFF —
+                   the BUD ships in External-LLM mode unless the user
+                   explicitly opts in to letting our agent run for a
+                   given phase. The per-stage skill picker only matters
+                   for phases that are opted in. -->
+              <div class="text-caption text-medium-emphasis mb-3">
+                Pick which phases our AI agent should auto-run. Anything
+                left off, you drive yourself via the section editors
+                (typically using your local AI through
+                <strong>Settings → MCP Connect</strong>).
+              </div>
+              <div class="d-flex flex-column ga-2 mb-4">
                 <v-switch
-                  v-model="autoGenerate"
+                  v-for="stage in advancedStages"
+                  :key="`gen-${stage.value}`"
+                  v-model="autoGeneratePhases[stage.value]"
+                  :label="`Auto-generate ${stage.label}`"
                   color="primary"
                   density="compact"
                   hide-details
                   inset
-                  label="Auto-generate PRD, design and tech spec with our AI agents"
                 />
-              </div>
-              <div class="text-caption text-medium-emphasis mb-3">
-                <template v-if="autoGenerate">
-                  Pick which skill runs at each stage of this BUD. Leave the
-                  default to use the org-wide default skill for that stage.
-                </template>
-                <template v-else>
-                  External-LLM mode is on. Stage agents will NOT run. Use your
-                  local AI via <strong>Settings → MCP Connect</strong> to
-                  generate PRD / design / tech-spec, then paste each section
-                  into the BUD editor tabs.
-                </template>
               </div>
               <v-progress-circular
                 v-if="skillsStore.loading"
@@ -252,15 +246,16 @@
                 size="20"
                 class="my-3"
               />
-              <div
-                v-else
-                class="d-flex flex-column ga-3"
-                :style="{ opacity: autoGenerate ? 1 : 0.4 }"
-              >
+              <div v-else class="d-flex flex-column ga-3">
+                <!-- Per-stage skill picker. Only enabled for phases the
+                     user explicitly opted in to via the switches above.
+                     Picking a skill for a phase that's off would have
+                     no runtime effect, so we dim/disable until opt-in. -->
                 <div
                   v-for="stage in advancedStages"
                   :key="stage.value"
                   class="d-flex align-center ga-2"
+                  :style="{ opacity: autoGeneratePhases[stage.value] ? 1 : 0.4 }"
                 >
                   <span class="stage-label">{{ stage.label }}</span>
                   <v-select
@@ -271,7 +266,7 @@
                     density="compact"
                     variant="outlined"
                     hide-details
-                    :disabled="!autoGenerate"
+                    :disabled="!autoGeneratePhases[stage.value]"
                     class="flex-grow-1"
                   />
                 </div>
@@ -318,7 +313,12 @@ const newContent = ref('')
 const creating = ref(false)
 const advancedPanel = ref<string | null>(null)
 const stageSkillPicks = ref<Record<string, string | null>>({})
-const autoGenerate = ref(true)
+// Per-phase auto-generate switches. ALL FALSE by default — fresh BUDs
+// ship in External-LLM mode and the user opts in per phase. Initialised
+// once below in prefillStageDefaults / closeAndReset rather than as a
+// const literal so future stage additions only need a single edit on
+// ``advancedStages``.
+const autoGeneratePhases = ref<Record<string, boolean>>({})
 
 // Single source of truth for which stages get a dropdown — mirrors
 // BUD_STAGE_AGENT_TYPE in backend/app/agents/skill_mapping.py. If a new
@@ -351,6 +351,11 @@ function defaultSkillIdForAgent(agentType: AgentType): string | null {
 function prefillStageDefaults(): void {
   for (const stage of advancedStages) {
     stageSkillPicks.value[stage.value] = defaultSkillIdForAgent(stage.agentType)
+    // Ensure each switch has a defined boolean; missing keys render
+    // the v-switch as indeterminate.
+    if (autoGeneratePhases.value[stage.value] === undefined) {
+      autoGeneratePhases.value[stage.value] = false
+    }
   }
 }
 
@@ -396,11 +401,17 @@ async function createBUD(): Promise<void> {
     if (picked === defaultSkillIdForAgent(stage.agentType)) continue
     overrides[stage.value] = picked
   }
+  // Snapshot the switches by value so a later reset doesn't mutate the
+  // payload object reactively.
+  const phases: Record<string, boolean> = {}
+  for (const stage of advancedStages) {
+    phases[stage.value] = !!autoGeneratePhases.value[stage.value]
+  }
   const bud = await budStore.createBUD(
     newTitle.value.trim(),
     newContent.value.trim() || undefined,
     Object.keys(overrides).length > 0 ? overrides : undefined,
-    autoGenerate.value,
+    phases,
   )
   creating.value = false
   if (bud) {
@@ -409,7 +420,7 @@ async function createBUD(): Promise<void> {
     newContent.value = ''
     stageSkillPicks.value = {}
     advancedPanel.value = null
-    autoGenerate.value = true
+    autoGeneratePhases.value = {}
     router.push(`/buds/${bud.id}`)
   }
 }

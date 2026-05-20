@@ -47,10 +47,12 @@ class BUDCreate(BaseModel):
     # to the org's default skill for that stage's agent type. Validated in
     # the route handler against the caller's org.
     stage_skill_overrides: dict[BUDStatus, uuid.UUID] | None = None
-    # When False, no stage agent runs on create or transition — the user
-    # supplies PRD/design/tech-spec themselves (typically via their local
-    # AI driven through the remote MCP endpoint).
-    auto_generate: bool = True
+    # Per-phase auto-generation. Keys: "bud" / "design" / "tech_arch" /
+    # "testing". Value true = our agent fires; false / missing = skip.
+    # DEFAULT EMPTY DICT = all phases skip. User opts in per phase via
+    # the Advanced-settings switches; for everything they leave off the
+    # local-AI / external-LLM flow takes over.
+    auto_generate_phases: dict[str, bool] = Field(default_factory=dict)
 
     model_config = {"populate_by_name": True}
 
@@ -111,7 +113,10 @@ class BUDRead(BaseModel):
     qa_manual_cases: list[dict[str, Any]] | None = None
     qa_execution_plan_md: str | None = None
     code_review_comments: list[dict[str, Any]] | None = None
-    auto_generate: bool = True
+    # Empty dict / None means "all phases skip" — the new default for
+    # newly created BUDs. Returned to the frontend so the BUD detail
+    # banner can decide which phases are user-driven.
+    auto_generate_phases: dict[str, bool] | None = None
     designs: list[BUDDesignRead] = []
     metadata: dict[str, Any] | None = Field(None, validation_alias="metadata_")
     impacted_repos: list[dict[str, Any]] | None = None

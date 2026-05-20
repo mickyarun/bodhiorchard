@@ -49,13 +49,13 @@
             @open-skill-settings="skillSettingsOpen = true"
           />
 
-          <!-- External-LLM mode banner. When auto_generate is OFF, no
-               PM / Designer / TechPlanner agent will spawn for this
-               BUD — the user is expected to drive content with their
-               own local AI via the remote MCP endpoint and paste the
-               result into each section editor. -->
+          <!-- External-LLM mode banner. Shown when EVERY phase in
+               auto_generate_phases is off (or the dict is empty / null
+               — the default for newly-created BUDs). The user drives
+               each phase via the section editor, typically using their
+               local AI through the remote MCP endpoint. -->
           <v-alert
-            v-if="bud.auto_generate === false"
+            v-if="isExternalLlmMode"
             type="info"
             variant="tonal"
             density="compact"
@@ -490,6 +490,16 @@ const settingsStore = useSettingsStore()
 const budLinkedFeaturesStore = useBudLinkedFeaturesStore()
 
 const bud = computed(() => budStore.currentBUD)
+
+// True iff every phase in auto_generate_phases is off (or the map is
+// empty / null entirely). Drives the External-LLM banner — we only
+// surface the "connect your local AI" hint when there's literally no
+// auto-fired phase for the user to wait on.
+const isExternalLlmMode = computed(() => {
+  const phases = bud.value?.auto_generate_phases
+  if (!phases) return true
+  return !Object.values(phases).some(Boolean)
+})
 
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)

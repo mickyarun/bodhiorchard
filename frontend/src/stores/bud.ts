@@ -88,11 +88,19 @@ export const useBUDStore = defineStore('bud', () => {
     title: string,
     requirements_md?: string,
     stage_skill_overrides?: Record<string, string>,
-    auto_generate: boolean = true,
+    auto_generate_phases: Record<string, boolean> = {},
   ): Promise<BUDDocument | null> {
     error.value = ''
     try {
-      const payload: Record<string, unknown> = { title, requirements_md, auto_generate }
+      // auto_generate_phases defaults to {} = all phases skip. The
+      // backend treats missing keys identically to false, but we send
+      // the dict verbatim so an explicit user opt-in survives any
+      // future server-side merging.
+      const payload: Record<string, unknown> = {
+        title,
+        requirements_md,
+        auto_generate_phases,
+      }
       if (stage_skill_overrides && Object.keys(stage_skill_overrides).length > 0) {
         payload.stage_skill_overrides = stage_skill_overrides
       }
