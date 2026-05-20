@@ -38,6 +38,7 @@ from app.models.bud import BUDDocument
 from app.models.skill_profile import SkillProfile
 from app.models.user import User, UserRole
 from app.repositories.skill_profile import SkillProfileRepository
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
 
 logger = structlog.get_logger(__name__)
 
@@ -212,8 +213,6 @@ async def _llm_tiebreak(
 ) -> User | None:
     """Use a lightweight LLM call to break a tie between two candidates."""
     try:
-        from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
-
         prompt = (
             f"You must pick one developer for this task. Reply with ONLY the name.\n\n"
             f"Task: {bud.title}\n"
@@ -224,7 +223,11 @@ async def _llm_tiebreak(
         )
 
         config = ClaudeRunnerConfig(max_turns=1, timeout_seconds=60)
-        result = await run_claude_code(prompt=prompt, config=config)
+        result = await run_claude_code(
+            prompt=prompt,
+            working_dir=NO_REPO_CONTEXT,
+            config=config,
+        )
 
         if result.success and result.output:
             output = result.output.strip().lower()

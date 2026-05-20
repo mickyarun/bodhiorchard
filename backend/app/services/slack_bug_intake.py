@@ -30,6 +30,7 @@ from app.models.user import UserRole
 from app.repositories.triage_session import TriageSessionRepository
 from app.repositories.user import UserRepository
 from app.services import slack_client
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
 
 logger = structlog.get_logger(__name__)
 
@@ -214,11 +215,15 @@ async def run_bug_triage_agent(
         triage_context=session.triage_context,
     )
 
-    from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
+    # ``_parse_agent_response`` is imported lazily here because
+    # ``slack_intake`` and ``slack_bug_intake`` import each other for
+    # dispatch — only the top-level module load is circular, the in-call
+    # lookup is safe.
     from app.services.slack_intake import _parse_agent_response
 
     result = await run_claude_code(
         prompt=prompt,
+        working_dir=NO_REPO_CONTEXT,
         config=ClaudeRunnerConfig(max_turns=5, timeout_seconds=60),
     )
 

@@ -44,7 +44,8 @@ from app.services.agent_result_handlers import (
     handle_tech_arch_result,
     handle_testing_result,
 )
-from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.github_remote_refresh import refresh_origin_token
 from app.services.job_queue import update_job
 from app.services.job_utils import build_mcp_config, make_progress_callback, record_agent_timeline
 from app.services.section_session import mint_session_id, record_originating_session
@@ -319,9 +320,28 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 skill_slug=_skill_slug,
             )
 
+            # Re-stamp ``origin`` with a freshly-minted installation
+            # token right before spawn. GitHub-App tokens expire after
+            # 1 hour and the URL baked into ``.git/config`` at clone
+            # time can be hours/days old. Best-effort: a failure here
+            # is logged but does not block the run — the agent may then
+            # surface the auth error itself, classified as
+            # ``git_auth_failed`` by the result parser.
+            if working_dir:
+                await refresh_origin_token(
+                    working_dir=working_dir,
+                    org_id=org_id,
+                    db=db,
+                )
+
+            # Some prompt builders (e.g. PRD) return ``working_dir=None``
+            # because the agent runs purely against the LLM — map to the
+            # explicit no-repo sentinel so ``_validate_working_dir`` never
+            # has to fall back to the worker cwd.
+            spawn_cwd: str = working_dir if working_dir else NO_REPO_CONTEXT
             result = await run_claude_code(
                 prompt=prompt,
-                working_dir=working_dir,
+                working_dir=spawn_cwd,
                 config=config,
                 progress_callback=make_progress_callback(job_id),
             )
