@@ -29,6 +29,7 @@
 import type { Request, Response } from "express"
 import { timingSafeEqual } from "crypto"
 import { OrgRoom } from "../rooms/OrgRoom"
+import { safeLog } from "./logSanitize"
 
 // Fail-closed in production: if the secret isn't configured, refuse to start.
 // In dev/test we allow a well-known placeholder so local tooling works without
@@ -100,15 +101,15 @@ export function handleBridgePublish(req: Request, res: Response): void {
     // client to join will pull the org-snapshot HTTP route and pick up
     // current state; ephemeral events like dev_activity are not replayed.
     console.log(
-      `[BridgeEndpoint] drop type=${payload.type} org=${payload.orgId} ` +
-      `reason=no_active_room registered=[${[...orgRooms.keys()].join(",")}]`,
+      `[BridgeEndpoint] drop type=${safeLog(payload.type)} org=${safeLog(payload.orgId)} ` +
+      `reason=no_active_room registered=[${[...orgRooms.keys()].map(safeLog).join(",")}]`,
     )
     res.status(200).json({ delivered: false, reason: "no active room" })
     return
   }
 
   console.log(
-    `[BridgeEndpoint] deliver type=${payload.type} org=${payload.orgId}`,
+    `[BridgeEndpoint] deliver type=${safeLog(payload.type)} org=${safeLog(payload.orgId)}`,
   )
   try {
     room.handleBridgeEvent(payload.type, payload.data)

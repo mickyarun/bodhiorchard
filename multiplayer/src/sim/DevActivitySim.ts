@@ -26,6 +26,7 @@
  * Per-frame tick updates positions at the server's simulation interval.
  */
 import type { MemberState } from "../schema/MemberState"
+import { safeLog } from "../bridge/logSanitize"
 
 // ─── Constants (mirror frontend) ──────────────
 
@@ -227,8 +228,8 @@ export class DevActivitySim {
     const member = this.findMember(members, event.user_id, event.actor_name)
     if (!member) {
       console.log(
-        `[DevActivitySim] drop event=${event.event_type} user_id=${event.user_id} ` +
-        `actor=${event.actor_name} repo=${event.repo_name} reason=member_not_found ` +
+        `[DevActivitySim] drop event=${safeLog(event.event_type)} user_id=${safeLog(event.user_id)} ` +
+        `actor=${safeLog(event.actor_name)} repo=${safeLog(event.repo_name)} reason=member_not_found ` +
         `known_members=${members.size}`,
       )
       return
@@ -237,16 +238,16 @@ export class DevActivitySim {
     // Skip for player-controlled characters
     if (member.takeoverSessionId) {
       console.log(
-        `[DevActivitySim] skip event=${event.event_type} user_id=${event.user_id} ` +
-        `member=${member.name} reason=taken_over session=${member.takeoverSessionId}`,
+        `[DevActivitySim] skip event=${safeLog(event.event_type)} user_id=${safeLog(event.user_id)} ` +
+        `member=${safeLog(member.name)} reason=taken_over session=${safeLog(member.takeoverSessionId)}`,
       )
       return
     }
 
     console.log(
-      `[DevActivitySim] handle event=${event.event_type} status=${event.status} ` +
-      `user_id=${event.user_id} member=${member.name} repo=${event.repo_name} ` +
-      `known_repos=${[...this.repoPositions.keys()].join(",")}`,
+      `[DevActivitySim] handle event=${safeLog(event.event_type)} status=${safeLog(event.status)} ` +
+      `user_id=${safeLog(event.user_id)} member=${safeLog(member.name)} repo=${safeLog(event.repo_name)} ` +
+      `known_repos=${[...this.repoPositions.keys()].map(safeLog).join(",")}`,
     )
 
     // Session end or completion → return to seat
