@@ -22,13 +22,13 @@ name + message, and logs a structured event the operator can find.
 
 from __future__ import annotations
 
-import sys
-import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 
+from app.config import FileStorageConfig
+from app.services import file_storage as fs_module
 from app.services.file_storage import FileStorage, FileStorageError
 
 
@@ -65,28 +65,34 @@ def _s3_client_mock(method_to_raise: str | None = None, exc: Exception | None = 
 
 
 @pytest.fixture
-def fake_aioboto3() -> MagicMock:
-    """Inject a fake ``aioboto3`` into ``sys.modules`` for the lazy import.
+def fake_aioboto3():  # type: ignore[no-untyped-def]
+    """Patch ``aioboto3.Session`` on the ``file_storage`` module.
 
-    Each S3 helper does ``import aioboto3`` at call time. In CI the real
-    package is installed; locally and in CI alike we want to test
-    behaviour against a controlled session mock instead of hitting AWS.
-    Returning the ``Session`` MagicMock lets each test customise the
-    client behaviour per-call.
+    ``file_storage.py`` does ``import aioboto3`` at module-load time
+    and then calls ``aioboto3.Session()`` inside each S3 helper.
+    Patching the symbol on the module rebinds those calls to our mock
+    without ever touching the real boto3 client machinery. Yields the
+    ``Session`` MagicMock so each test customises the client per-call.
     """
-    fake = types.ModuleType("aioboto3")
     session_factory = MagicMock()
-    fake.Session = session_factory  # type: ignore[attr-defined]
-    sys.modules["aioboto3"] = fake
-    yield session_factory
-    sys.modules.pop("aioboto3", None)
+    with patch.object(fs_module.aioboto3, "Session", session_factory):
+        yield session_factory
 
 
 def _enable_s3(monkeypatch: pytest.MonkeyPatch) -> FileStorage:
-    monkeypatch.setenv("FILE_STORAGE_S3", "true")
-    monkeypatch.setenv("FILE_STORAGE_S3_BUCKET", "test-bucket")
-    monkeypatch.setenv("AWS_REGION", "us-east-1")
-    return FileStorage()
+    # Tests construct the config directly rather than via env vars +
+    # global ``settings`` — pydantic-settings caches the parse on first
+    # access and would otherwise leak between tests.
+    # ``model_construct`` skips Pydantic validation; safe here because
+    # we're exercising ``FileStorage`` behaviour, not field coercion.
+    return FileStorage(
+        config=FileStorageConfig.model_construct(
+            use_s3=True,
+            s3_bucket="test-bucket",
+            s3_region="us-east-1",
+            local_dir="data/uploads",
+        )
+    )
 
 
 # ── _upload_s3 ──────────────────────────────────────────────────────
@@ -197,3 +203,61 @@ async def test_delete_happy_path_does_not_raise(
     storage = _enable_s3(monkeypatch)
     fake_aioboto3.return_value = _s3_client_mock()
     await storage._delete_s3("org/qa-evidence/x.png")  # must not raise
+
+
+# ── Misconfig guard ─────────────────────────────────────────────────
+
+
+def test_s3_enabled_without_bucket_raises_at_init() -> None:
+    # Catching this at construction makes the misconfig a boot-time
+    # log line, not an opaque boto3 ``ParamValidationError`` on the
+    # first user-triggered upload.
+    cfg = FileStorageConfig.model_construct(
+        use_s3=True,
+        s3_bucket="",
+        s3_region="us-east-1",
+        local_dir="data/uploads",
+    )
+    with pytest.raises(FileStorageError, match="FILE_STORAGE_S3_BUCKET is empty"):
+        FileStorage(config=cfg)
+
+
+def test_local_backend_without_bucket_initialises_normally() -> None:
+    # The bucket guard must only fire when S3 is actually enabled.
+    cfg = FileStorageConfig.model_construct(
+        use_s3=False,
+        s3_bucket="",
+        s3_region="us-east-1",
+        local_dir="data/uploads",
+    )
+    storage = FileStorage(config=cfg)
+    assert storage.use_s3 is False
+
+
+# ── End-to-end: .env → BaseSettings → FileStorage ───────────────────
+
+
+def test_env_file_value_reaches_filestorage(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Regression guard for the bug that prompted this refactor:
+    # ``.env`` with ``FILE_STORAGE_S3=true`` used to be ignored because
+    # ``FileStorage`` called ``os.getenv`` directly while every other
+    # config read through pydantic-settings. ``BaseSettings`` loads
+    # ``env_file`` into the model but does NOT mutate ``os.environ``,
+    # so the operator's env file was a no-op for storage selection.
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "FILE_STORAGE_S3=true\n"
+        "FILE_STORAGE_S3_BUCKET=evidence-from-envfile\n"
+        "AWS_REGION=eu-west-2\n"
+    )
+    # Real ``FileStorageConfig`` construction targeting the temp .env.
+    cfg = FileStorageConfig(_env_file=str(env_file))  # type: ignore[call-arg]
+
+    assert cfg.use_s3 is True
+    assert cfg.s3_bucket == "evidence-from-envfile"
+    assert cfg.s3_region == "eu-west-2"
+
+    storage = FileStorage(config=cfg)
+    assert storage.use_s3 is True
+    assert storage.s3_bucket == "evidence-from-envfile"
+    assert storage.s3_region == "eu-west-2"
