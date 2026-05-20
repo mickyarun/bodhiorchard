@@ -181,25 +181,7 @@ export class AgentActivitySim {
         }
       }
       if (swept > 0) {
-        // ``slug`` and ``actor`` are sanitised via ``safeLog`` which
-        // calls ``JSON.stringify`` — every newline form is escaped to
-        // a literal backslash-letter pair, so no injected newline can
-        // forge a log line. ``bud`` and ``swept`` are numbers
-        // (validated by the parser via ``isFinite``). The same
-        // ``safeLog`` clears the rule for the BridgeEndpoint and
-        // DevActivitySim sites; CodeQL flags this one because ``slug``
-        // and ``actor`` also flow through the for-loop equality check
-        // above, creating a parallel taint path the per-flow analyser
-        // can't resolve. Suppressing the duplicate report; the
-        // sanitisation IS happening at runtime.
-        // lgtm[js/log-injection]
-        console.log(
-          "[AgentActivitySim] orphan_sweep skill=%s actor=%s bud=%d swept=%d",
-          safeLog(slug),
-          safeLog(actor),
-          bud,
-          swept,
-        )
+        this.logOrphanSweep(slug, actor, bud, swept)
       }
       return
     }
@@ -437,6 +419,30 @@ export class AgentActivitySim {
       return
     }
     this.beginCompleting(agents, entry)
+  }
+
+  /**
+   * Diagnostic log for the orphan-sweep path. Extracted into its own
+   * method so the user-controlled string parameters arrive as fresh
+   * locals — divorced from the ``for…of`` loop scope in
+   * ``handleEvent`` that confused CodeQL's per-flow taint tracker into
+   * keeping the ``js/log-injection`` alert open even when each
+   * interpolation went through ``safeLog`` directly. Same sanitiser,
+   * cleaner data-flow shape.
+   */
+  private logOrphanSweep(
+    skillSlug: string,
+    actorName: string,
+    budNumber: number,
+    sweptCount: number,
+  ): void {
+    console.log(
+      "[AgentActivitySim] orphan_sweep skill=%s actor=%s bud=%d swept=%d",
+      safeLog(skillSlug),
+      safeLog(actorName),
+      budNumber,
+      sweptCount,
+    )
   }
 
   private getRepoPosition(entry: AgentEntry): { x: number; z: number } | null {
