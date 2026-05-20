@@ -108,10 +108,22 @@ async def sync_review_comments_to_github(
         if not matching:
             continue
 
-        # Skip if we already posted a review for this set
-        meta = pr.metadata_ or {}
-        if meta.get("review_synced"):
-            continue
+        # No sticky ``review_synced`` short-circuit here. The real dedup
+        # mechanism is the per-comment ``review_id`` tag written by
+        # ``_tag_agent_review_id`` — the webhook handler uses that to
+        # suppress GitHub's echo of our own review. A PR-level flag
+        # would block re-runs entirely: every subsequent code-review
+        # agent run on the same BUD would store its comments locally
+        # but never reach GitHub, leaving the PR perpetually showing
+        # the first run's review while the BUD-tab count keeps growing.
+        #
+        # KNOWN GAP: two *concurrent* sync calls against the same PR
+        # row will both reach the POST and double-post. A SELECT … FOR
+        # UPDATE on ``pull_requests`` (or an advisory lock keyed by
+        # ``pr.id``) is the right fix when we tackle the concurrency
+        # follow-up; for now the cost (a duplicate GitHub review) is
+        # vastly preferable to the previous failure mode (re-runs
+        # silently lost forever).
 
         gh_comments = _map_to_github_comments(matching)
         body = f"Automated code review by BodhiOrchard ({len(matching)} comment(s))"
@@ -140,12 +152,6 @@ async def sync_review_comments_to_github(
         # this, every agent inline comment gets counted twice in
         # ``bud.code_review_comments``: once by the agent path, once
         # when GitHub fires ``pull_request_review`` back at us.
-        #
-        # If the API response is missing / wrong-shape, we MUST NOT set
-        # ``review_synced=True`` — the next run is our only path to
-        # recover the dedup tag (the flag would short-circuit it on
-        # line 112). Better to risk an extra post than to permanently
-        # leak duplicate comments into the BUD.
         review_id_raw = result.get("id") if isinstance(result, dict) else None
         if not isinstance(review_id_raw, int):
             logger.error(
@@ -157,7 +163,6 @@ async def sync_review_comments_to_github(
             continue
 
         await _tag_agent_review_id(db, org_id, bud_id, repo_name, review_id_raw)
-        pr.metadata_ = {**(pr.metadata_ or {}), "review_synced": True}
         await db.flush()
         logger.info(
             "github_review_posted",
