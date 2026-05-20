@@ -124,10 +124,56 @@ async def test_422_filters_bad_path_and_retries_with_surviving_comments() -> Non
     assert result == {"id": 200}
     assert len(captured) == 2  # original + filtered retry, no bodyless fallback
     retry_payload = captured[1]
-    assert retry_payload["body"] == "summary"
+    # Body keeps the original summary at the top, then appends a
+    # ``<details>`` block listing the dropped comment so its content
+    # still reaches the PR author.
+    assert retry_payload["body"].startswith("summary")
+    assert "<details>" in retry_payload["body"]
+    assert "src/PHANTOM.py:5" in retry_payload["body"]
+    assert "bad path" in retry_payload["body"]
     assert retry_payload["event"] == "COMMENT"
     kept_paths = {c["path"] for c in retry_payload["comments"]}
     assert kept_paths == {"src/a.py", "src/b.py"}
+
+
+def test_format_dropped_comments_section_empty_returns_blank() -> None:
+    assert GitHubClient._format_dropped_comments_section([]) == ""
+
+
+def test_format_dropped_comments_section_renders_each_comment() -> None:
+    out = GitHubClient._format_dropped_comments_section(
+        [
+            {"path": "src/x.py", "line": 7, "body": "first finding"},
+            {"path": "src/y.py", "line": 42, "body": "second\nmultiline\nfinding"},
+        ]
+    )
+    # Collapsible disclosure scaffold.
+    assert "<details>" in out
+    assert "</details>" in out
+    assert "Additional review comments (2" in out
+    # Per-comment location + body.
+    assert "src/x.py:7" in out
+    assert "src/y.py:42" in out
+    assert "> first finding" in out
+    # Multi-line body is line-quoted (no triple-backtick fence — agent
+    # bodies often contain their own fences, nesting breaks renderer).
+    assert "> second" in out
+    assert "> multiline" in out
+    assert "> finding" in out
+    assert "```" not in out
+
+
+def test_format_dropped_comments_section_handles_fenced_body() -> None:
+    # A comment body that itself contains a fence must not break the
+    # outer block — we use ``> `` line-quoting precisely to dodge this.
+    out = GitHubClient._format_dropped_comments_section(
+        [{"path": "src/z.py", "line": 1, "body": "before\n```py\ncode()\n```\nafter"}]
+    )
+    # Each line of the fenced body becomes a quoted line; the outer
+    # block has no fence of its own.
+    assert "> ```py" in out
+    assert "> code()" in out
+    assert "> ```" in out
 
 
 async def test_422_with_all_bad_paths_falls_back_to_bodyless() -> None:
@@ -158,6 +204,14 @@ async def test_422_with_all_bad_paths_falls_back_to_bodyless() -> None:
     assert result == {"id": 300}
     assert len(captured) == 2  # original (422) + bodyless (200), no middle retry
     assert "comments" not in captured[1]  # body-only payload
+    # Bodyless fallback still surfaces ALL findings via the appended
+    # details block — the agent's review never gets silently swallowed.
+    bodyless = captured[1]["body"]
+    assert bodyless.startswith("summary")
+    assert "<details>" in bodyless
+    for c in _comments():
+        assert c["body"] in bodyless
+        assert c["path"] in bodyless
 
 
 async def test_422_filtered_retry_still_422_falls_back_to_bodyless() -> None:

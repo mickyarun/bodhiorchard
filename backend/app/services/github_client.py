@@ -138,6 +138,44 @@ class GitHubClient:
             comments=comments,
         )
 
+    @staticmethod
+    def _format_dropped_comments_section(comments: list[dict[str, Any]]) -> str:
+        """Render dropped inline comments as a collapsible Markdown block.
+
+        Returned string is appended to a review body when the recovery
+        path can't post a comment inline — so the agent's findings still
+        reach the PR author instead of being silently swallowed. Empty
+        string when there's nothing to render so callers don't have to
+        guard the concat.
+
+        We deliberately use blockquote (``> ``) line-prefixing rather
+        than fenced code blocks for each comment body: a comment may
+        already contain triple-backtick fences (the agent loves them),
+        and embedding fences inside our own fence breaks GitHub's
+        Markdown renderer. Line-quote is fence-safe.
+        """
+        if not comments:
+            return ""
+        lines: list[str] = [
+            "",
+            "<details>",
+            f"<summary>Additional review comments ({len(comments)} — could not be "
+            "posted inline)</summary>",
+            "",
+        ]
+        for c in comments:
+            path = str(c.get("path") or "(no path)")
+            line = c.get("line")
+            location = f"{path}:{line}" if line is not None else path
+            lines.append(f"**`{location}`**")
+            lines.append("")
+            body = str(c.get("body") or "").rstrip()
+            for body_line in body.splitlines() or [""]:
+                lines.append(f"> {body_line}")
+            lines.append("")
+        lines.append("</details>")
+        return "\n".join(lines)
+
     async def _retry_review_after_422(
         self,
         *,
@@ -155,7 +193,8 @@ class GitHubClient:
         """
         changed_files = set(await self.list_pr_files(owner_repo, pr_number))
         kept = [c for c in comments if c.get("path") in changed_files]
-        dropped = len(comments) - len(kept)
+        dropped_list = [c for c in comments if c.get("path") not in changed_files]
+        dropped = len(dropped_list)
         if not changed_files and comments:
             # ``list_pr_files`` swallows its own errors and returns ``[]``
             # on a transient failure (see ``github_list_pr_files_failed``
@@ -175,12 +214,23 @@ class GitHubClient:
             dropped_count=dropped,
         )
 
+        # Body augmentations:
+        # * filtered retry → append the dropped ones (kept were posted inline).
+        # * bodyless fallback → append ALL the original comments.
+        # Either way, no findings are silently lost.
+        body_for_filtered = body + self._format_dropped_comments_section(dropped_list)
+        body_for_bodyless = body + self._format_dropped_comments_section(comments)
+
         async with AsyncClient(timeout=30) as client:
             if kept:
                 try:
                     resp = await client.post(
                         url,
-                        json={"body": body, "event": "COMMENT", "comments": kept},
+                        json={
+                            "body": body_for_filtered,
+                            "event": "COMMENT",
+                            "comments": kept,
+                        },
                         headers=self._headers,
                     )
                     resp.raise_for_status()
@@ -208,12 +258,14 @@ class GitHubClient:
                     )
 
             # Last-resort: body-only review so the summary still lands.
-            # ``warning`` (not ``info``) — losing every annotation is a
-            # real degradation operators should see in the dashboard.
+            # ``warning`` (not ``info``) — losing every annotation as
+            # an *inline* placement is a real degradation operators
+            # should see in the dashboard. The findings themselves
+            # still reach the PR author via the appended details block.
             try:
                 fallback = await client.post(
                     url,
-                    json={"body": body, "event": "COMMENT"},
+                    json={"body": body_for_bodyless, "event": "COMMENT"},
                     headers=self._headers,
                 )
                 fallback.raise_for_status()
