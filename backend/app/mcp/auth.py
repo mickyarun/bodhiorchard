@@ -213,6 +213,23 @@ async def verify_mcp_token(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has expired",
             )
+        # Defence-in-depth: ``users.is_active = False`` is a soft delete
+        # used by member-deactivation and member-merge. The token-revoke
+        # at deactivation time handles the happy path, but this check
+        # rejects any token that survives that step (race, missed call
+        # site, stale row) before it can read org data. Distinct log line
+        # so an unexpected revival surfaces in alerts.
+        if ut.user is not None and not ut.user.is_active:
+            logger.info(
+                "mcp_auth_user_token_inactive_user",
+                token_id=str(ut.id),
+                org_id=str(ut.org_id),
+                user_id=str(ut.user_id),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Account is deactivated",
+            )
         _schedule_last_used(ut.id, ut.org_id, ut.user_id)
         logger.debug(
             "mcp_auth_user_token",

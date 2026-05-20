@@ -125,6 +125,20 @@ class UserMCPTokenRepository(BaseRepository[UserMCPToken]):
         # without a per-line ``type: ignore``.
         return int(getattr(result, "rowcount", 0) or 0)
 
+    async def delete_all_for_user(self, user_id: uuid.UUID) -> int:
+        """Revoke EVERY token belonging to a user, across all orgs.
+
+        Called from the member-deactivation / merge paths because
+        ``users.is_active = False`` is a soft delete that does NOT fire
+        the FK CASCADE on ``user_mcp_tokens.user_id``. Without this,
+        a deactivated member's bodhi_token would keep authenticating
+        to /mcp/* until manually revoked.
+        """
+        result = await self._db.execute(
+            delete(UserMCPToken).where(UserMCPToken.user_id == user_id)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def touch_last_used(self, token_id: uuid.UUID) -> None:
         """Update ``last_used_at`` to now. Fire-and-forget from the MCP auth path."""
         await self._db.execute(
