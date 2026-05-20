@@ -220,7 +220,12 @@ async def verify_mcp_token(
         # site, stale row) before it can read org data. Distinct log line
         # so an unexpected revival surfaces in alerts.
         if ut.user is not None and not ut.user.is_active:
-            logger.info(
+            # WARNING (not INFO) — reaching this branch means a token
+            # survived deactivation revocation. Could be a race, a missed
+            # call site, or a future code path that flips is_active
+            # without calling delete_all_for_user. Either way it deserves
+            # alerting, not getting drowned in routine traffic.
+            logger.warning(
                 "mcp_auth_user_token_inactive_user",
                 token_id=str(ut.id),
                 org_id=str(ut.org_id),

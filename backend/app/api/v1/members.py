@@ -298,6 +298,12 @@ async def toggle_member_status(
     # via is_active=False doesn't fire the FK CASCADE on user_mcp_tokens,
     # so without this step a leaked / forgotten bodhi_token would keep
     # authenticating to /mcp/* indefinitely after offboarding.
+    #
+    # On REACTIVATION we deliberately do NOT re-revoke: there should be
+    # nothing left to revoke (the deactivation drained the table), and
+    # forcing a re-mint flow on reactivated users is the intended UX.
+    # The verify_mcp_token is_active check is the safety net for any
+    # token that somehow survives.
     revoked_tokens = 0
     if not new_state:
         revoked_tokens = await UserMCPTokenRepository(db).delete_all_for_user(user.id)
@@ -311,6 +317,11 @@ async def toggle_member_status(
         action=action,
         by=current_user.email,
         mcp_tokens_revoked=revoked_tokens,
+        # Explicit boolean so an audit query can distinguish "no tokens
+        # to revoke" (common) from "0 due to a bug" if the rowcount
+        # interpretation ever changes (some drivers return -1 for
+        # unknown — our getattr-or-0 in the repo would mask that).
+        had_tokens_to_revoke=bool(revoked_tokens),
     )
 
     return _user_to_member(user)
@@ -604,6 +615,7 @@ async def merge_members(
         source_email=source.email,
         profiles_transferred=transferred,
         mcp_tokens_revoked=revoked_tokens,
+        had_tokens_to_revoke=bool(revoked_tokens),
         by=current_user.email,
     )
 
