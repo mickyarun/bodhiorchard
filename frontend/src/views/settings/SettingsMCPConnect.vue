@@ -224,6 +224,12 @@ interface ClientSnippet {
   render: (url: string) => string
 }
 
+// Desktop clients' mcp.json schemas reject ``"transport": "streamable-http"``
+// directly (it's the MCP wire-protocol identifier, not a config-file key).
+// The cross-version reliable shape is the ``mcp-remote`` npm bridge — it
+// runs stdio to the client and translates to our streamable-http endpoint.
+// Newer Claude Desktop builds support a native ``"type": "http"`` form, but
+// mcp-remote works everywhere; recommend it as the default snippet.
 const SNIPPETS: Record<string, ClientSnippet> = {
   'claude-desktop': {
     label: 'Claude Desktop',
@@ -231,11 +237,14 @@ const SNIPPETS: Record<string, ClientSnippet> = {
 {
   "mcpServers": {
     "bodhiorchard": {
-      "transport": "streamable-http",
-      "url": "${url}",
-      "headers": {
-        "Authorization": "Bearer YOUR_TOKEN_HERE"
-      }
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "${url}",
+        "--header",
+        "Authorization: Bearer YOUR_TOKEN_HERE"
+      ]
     }
   }
 }`,
@@ -246,9 +255,14 @@ const SNIPPETS: Record<string, ClientSnippet> = {
 {
   "mcpServers": {
     "bodhiorchard": {
-      "url": "${url}",
-      "transport": "streamable-http",
-      "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" }
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "${url}",
+        "--header",
+        "Authorization: Bearer YOUR_TOKEN_HERE"
+      ]
     }
   }
 }`,
@@ -258,11 +272,14 @@ const SNIPPETS: Record<string, ClientSnippet> = {
     render: (url) => `// ~/.continue/config.json — under "experimental.mcpServers"
 {
   "name": "bodhiorchard",
-  "transport": {
-    "type": "streamable-http",
-    "url": "${url}",
-    "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" }
-  }
+  "command": "npx",
+  "args": [
+    "-y",
+    "mcp-remote",
+    "${url}",
+    "--header",
+    "Authorization: Bearer YOUR_TOKEN_HERE"
+  ]
 }`,
   },
 }

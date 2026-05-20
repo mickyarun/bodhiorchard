@@ -57,7 +57,15 @@ Visit **Settings → MCP Connect** in the Bodhiorchard UI:
 
 ## Client config snippets
 
-### Claude Desktop
+Claude Desktop / Cursor / Continue's `mcp.json` schemas accept stdio
+servers natively. For an HTTP MCP server the reliable cross-version
+approach is the `mcp-remote` npm bridge (maintained by the MCP team)
+— it runs as a stdio child process and translates to streamable-http
+on our side. The newer `"type": "http"` form is shown second for
+desktop builds that support it natively, but `mcp-remote` works
+everywhere.
+
+### Claude Desktop (recommended — `mcp-remote` bridge)
 
 ```jsonc
 // ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)
@@ -65,7 +73,26 @@ Visit **Settings → MCP Connect** in the Bodhiorchard UI:
 {
   "mcpServers": {
     "bodhiorchard": {
-      "transport": "streamable-http",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://<your-host>/mcp/sse",
+        "--header",
+        "Authorization: Bearer YOUR_TOKEN_HERE"
+      ]
+    }
+  }
+}
+```
+
+### Claude Desktop (native HTTP — newer builds only)
+
+```jsonc
+{
+  "mcpServers": {
+    "bodhiorchard": {
+      "type": "http",
       "url": "https://<your-host>/mcp/sse",
       "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" }
     }
@@ -80,9 +107,14 @@ Visit **Settings → MCP Connect** in the Bodhiorchard UI:
 {
   "mcpServers": {
     "bodhiorchard": {
-      "url": "https://<your-host>/mcp/sse",
-      "transport": "streamable-http",
-      "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" }
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://<your-host>/mcp/sse",
+        "--header",
+        "Authorization: Bearer YOUR_TOKEN_HERE"
+      ]
     }
   }
 }
@@ -94,11 +126,14 @@ Visit **Settings → MCP Connect** in the Bodhiorchard UI:
 // ~/.continue/config.json under "experimental.mcpServers"
 {
   "name": "bodhiorchard",
-  "transport": {
-    "type": "streamable-http",
-    "url": "https://<your-host>/mcp/sse",
-    "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" }
-  }
+  "command": "npx",
+  "args": [
+    "-y",
+    "mcp-remote",
+    "https://<your-host>/mcp/sse",
+    "--header",
+    "Authorization: Bearer YOUR_TOKEN_HERE"
+  ]
 }
 ```
 

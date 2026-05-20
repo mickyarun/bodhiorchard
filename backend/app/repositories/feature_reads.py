@@ -317,13 +317,16 @@ class FeatureReadRepository:
         query_vector: list[float],
         *,
         limit: int = 10,
+        offset: int = 0,
         only_active: bool = True,
     ) -> list[tuple[Feature, float]]:
         """Cosine-distance semantic search over ``Feature.embedding``.
 
         Returns ``(feature, distance)`` tuples sorted ascending by
-        distance (smallest first = most similar). Used by the renamed
-        MCP ``get_features`` tool and the duplicate-feature check.
+        distance (smallest first = most similar). ``offset`` enables
+        cursor-free pagination — the MCP ``get_features`` tool surfaces
+        it so an external LLM can iterate through more than ``limit``
+        matches in orgs with hundreds of features.
         """
         distance = Feature.embedding.cosine_distance(query_vector).label("distance")
         stmt = (
@@ -333,6 +336,7 @@ class FeatureReadRepository:
                 Feature.embedding.isnot(None),
             )
             .order_by(distance)
+            .offset(offset)
             .limit(limit)
         )
         if only_active:

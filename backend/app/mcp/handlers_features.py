@@ -58,9 +58,18 @@ async def handle_get_features(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Query active features via semantic search (pgvector cosine)."""
+    """Query active features via semantic search (pgvector cosine).
+
+    Required: ``query`` (a non-empty keyword / phrase). Optional:
+    ``limit`` (default 10, max 50) and ``offset`` (default 0). External
+    LLMs paginate by calling with ``offset = offset + limit`` until
+    ``has_more`` is false — necessary for orgs with hundreds of
+    features where a single page would either truncate the relevant
+    matches or blow out the rate-limit cost.
+    """
     query = params.get("query", "")
-    limit = min(params.get("limit", 10), 50)
+    limit = min(int(params.get("limit", 10) or 10), 50)
+    offset = max(int(params.get("offset", 0) or 0), 0)
 
     if not query:
         return {"results": [], "error": "query is required"}
@@ -72,11 +81,21 @@ async def handle_get_features(
         return {"results": [], "error": "Embedding service unavailable"}
 
     reads = FeatureReadRepository(db, org_id=org.id)
-    rows = await reads.semantic_search(vector, limit=limit, only_active=True)
+    # Fetch one extra row to detect ``has_more`` without a separate
+    # COUNT query — cheap because semantic_search is already cursor-
+    # ordered. Trim it back to ``limit`` before serializing.
+    rows = await reads.semantic_search(vector, limit=limit + 1, offset=offset, only_active=True)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
 
     return {
         "results": [
             {
+                # Surfaced so an external LLM drafting requirements_md
+                # can put real feature UUIDs into the trailing
+                # {"linked_feature_ids": [...]} JSON fence the section
+                # editor parses on save.
+                "id": str(feature.id),
                 "title": feature.feature_title,
                 "description": feature.description,
                 "capabilities": list((feature.capabilities or {}).get("capabilities", [])),
@@ -88,6 +107,10 @@ async def handle_get_features(
             }
             for feature, distance in rows
         ],
+        "limit": limit,
+        "offset": offset,
+        "has_more": has_more,
+        "next_offset": offset + limit if has_more else None,
     }
 
 

@@ -95,9 +95,7 @@ async def test_verify_mcp_token_rejects_inactive_user(monkeypatch: Any) -> None:
     async def _list_by_prefix(self: Any, prefix: str) -> list[Any]:
         return [inactive_token]
 
-    monkeypatch.setattr(
-        UserMCPTokenRepository, "list_by_prefix_with_relations", _list_by_prefix
-    )
+    monkeypatch.setattr(UserMCPTokenRepository, "list_by_prefix_with_relations", _list_by_prefix)
     monkeypatch.setattr("app.mcp.auth.verify_password", lambda token, hash_: True)
 
     db = MagicMock()
@@ -115,9 +113,7 @@ async def test_verify_mcp_token_accepts_active_user(monkeypatch: Any) -> None:
     async def _list_by_prefix(self: Any, prefix: str) -> list[Any]:
         return [active_token]
 
-    monkeypatch.setattr(
-        UserMCPTokenRepository, "list_by_prefix_with_relations", _list_by_prefix
-    )
+    monkeypatch.setattr(UserMCPTokenRepository, "list_by_prefix_with_relations", _list_by_prefix)
     monkeypatch.setattr("app.mcp.auth.verify_password", lambda token, hash_: True)
     # The is_active=True path schedules a background task; stub it so the
     # test doesn't actually create an asyncio task against a mock session.

@@ -33,6 +33,7 @@ from app.api.v1.bud_todos import router as todos_router
 from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus, BUDTimelineEvent
+from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.user import User
 from app.repositories.agent_activity import AgentActivityLogRepository
 from app.repositories.bud import BUDDesignRepository, BUDRepository
@@ -64,6 +65,7 @@ from app.schemas.dev_activity import (
     UntrackedRepoRead,
 )
 from app.services.agent_activity_logger import PHASE_WORKER_SLUGS
+from app.services.agent_result_handlers import persist_linked_features_from_markdown
 from app.services.agent_task_cancel import (
     AgentTaskCancelError,
     cancel_task,
@@ -717,12 +719,35 @@ async def update_bud(
         )
 
     old_tech_spec_md = bud.tech_spec_md if "tech_spec_md" in update_data else None
+    requirements_md_changed = (
+        "requirements_md" in update_data and update_data["requirements_md"] != bud.requirements_md
+    )
 
     for field, value in update_data.items():
         setattr(bud, field, value)
 
     await db.flush()
     await db.refresh(bud)
+
+    # External-LLM mode: when a user pastes locally-generated PRD
+    # content into requirements_md, parse the trailing
+    # {"linked_feature_ids": [...]} JSON fence the prompt instructs the
+    # LLM to emit. Without this hook the BYO-AI flow would produce BUD
+    # text with the fence but no actual BUDFeatureLink rows in the DB,
+    # so downstream Designer / TechPlanner agents (and the dependency
+    # map) wouldn't see what features the user linked. Mirrors the
+    # PM-agent result-handler path; uses MANUAL source so audit and
+    # timeline distinguish human-driven from agent-driven links.
+    if requirements_md_changed and update_data.get("requirements_md"):
+        await persist_linked_features_from_markdown(
+            bud.id,
+            current_user.org_id,
+            update_data["requirements_md"],
+            db,
+            source=BUDFeatureLinkSource.MANUAL,
+            actor_name=current_user.name or current_user.email,
+            actor_id=current_user.id,
+        )
 
     # If the developer edited tech_spec_md on a DEVELOPMENT-phase BUD,
     # refresh the Implementation TODO section (LLM patch when the diff

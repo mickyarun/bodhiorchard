@@ -77,9 +77,7 @@ async def test_no_active_skill_returns_error_payload(monkeypatch: Any) -> None:
     async def _fake_resolve_none(*args: Any, **kw: Any) -> None:
         return None
 
-    monkeypatch.setattr(
-        "app.mcp.handlers_prompts.resolve_skill_for_agent", _fake_resolve_none
-    )
+    monkeypatch.setattr("app.mcp.handlers_prompts.resolve_skill_for_agent", _fake_resolve_none)
 
     org = MagicMock(id=uuid.uuid4())
     result = await handle_get_prompt(MagicMock(), org, {"task_type": "bud"})

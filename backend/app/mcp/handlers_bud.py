@@ -35,11 +35,24 @@ async def handle_get_bud_context(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Retrieve existing BUDs for context."""
+    """Retrieve existing BUDs for context.
+
+    By default returns only **in-progress** BUDs (anything not in a
+    terminal status). This is the right answer for the BYO-AI flow:
+    when an external LLM is drafting a PRD it wants to see active
+    work to avoid duplicating it, NOT every BUD ever closed or
+    discarded — that's 90% noise once an org has any history.
+
+    Callers that want the full set can pass ``include_terminal=true``.
+    """
     limit = min(params.get("limit", 5), 20)
+    include_terminal = bool(params.get("include_terminal", False))
 
     bud_repo = BUDRepository(db, org_id=org.id)
-    buds = await bud_repo.list_buds(limit=limit)
+    buds = await bud_repo.list_buds(
+        limit=limit,
+        exclude_statuses=None if include_terminal else _TERMINAL_BUD_STATUSES,
+    )
 
     return {
         "buds": [
@@ -52,7 +65,18 @@ async def handle_get_bud_context(
             }
             for bud in buds
         ],
+        "filter": "in_progress" if not include_terminal else "all",
     }
+
+
+# Statuses we consider "done with" — closed work and discarded ideas.
+# Production BUDs deliberately stay in the in-progress view because
+# they still represent active features the LLM may want to reference
+# when drafting follow-ups.
+_TERMINAL_BUD_STATUSES: tuple[BUDStatus, ...] = (
+    BUDStatus.CLOSED,
+    BUDStatus.DISCARDED,
+)
 
 
 async def handle_write_bud(

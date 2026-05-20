@@ -15,6 +15,7 @@
 """BUD document data access repository."""
 
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -106,20 +107,25 @@ class BUDRepository(BaseRepository[BUDDocument]):
         self,
         *,
         status_filter: str | None = None,
+        exclude_statuses: Sequence[BUDStatus] | None = None,
         limit: int | None = None,
     ) -> list[BUDDocument]:
         """List BUDs ordered by bud_number descending.
 
         Args:
-            status_filter: Optional status string to filter by.
+            status_filter: Optional single status to include exclusively.
+            exclude_statuses: Optional set of statuses to drop from the
+                result. Used by the MCP ``get_bud_context`` tool to hide
+                terminal BUDs (closed / discarded) from the BYO-AI flow
+                by default. Combines with ``status_filter`` if both
+                supplied, though that combination is rarely useful.
             limit: Maximum number of results.
-
-        Returns:
-            List of BUDDocument instances.
         """
         stmt = self._scoped(select(BUDDocument).order_by(BUDDocument.bud_number.desc()))
         if status_filter:
             stmt = stmt.where(BUDDocument.status == status_filter)
+        if exclude_statuses:
+            stmt = stmt.where(BUDDocument.status.notin_(exclude_statuses))
         if limit is not None:
             stmt = stmt.limit(limit)
         result = await self._db.execute(stmt)

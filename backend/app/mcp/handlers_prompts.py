@@ -67,12 +67,7 @@ async def handle_get_prompt(
     """
     task_type = params.get("task_type")
     if not isinstance(task_type, str) or task_type not in TASK_TYPE_TO_STAGE:
-        return {
-            "error": (
-                "task_type must be one of: "
-                f"{sorted(TASK_TYPE_TO_STAGE.keys())}"
-            )
-        }
+        return {"error": (f"task_type must be one of: {sorted(TASK_TYPE_TO_STAGE.keys())}")}
 
     stage = TASK_TYPE_TO_STAGE[task_type]
     agent_type = BUD_STAGE_AGENT_TYPE[stage]

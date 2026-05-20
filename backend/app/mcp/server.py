@@ -106,11 +106,28 @@ class MCPToolCallRequest(BaseModel):
 MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="get_bud_context",
-        description="Retrieve existing BUDs for context when generating new ones",
+        description=(
+            "Retrieve EXISTING IN-PROGRESS BUDs (anything not closed or "
+            "discarded) for context when drafting a new one. Pass "
+            "include_terminal=true to also see closed/discarded history."
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "description": "Max BUDs to return", "default": 5},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max BUDs to return (default 5, max 20)",
+                    "default": 5,
+                },
+                "include_terminal": {
+                    "type": "boolean",
+                    "description": (
+                        "Include closed and discarded BUDs in the result. "
+                        "Default false — those are usually noise for the "
+                        "BYO-AI drafting flow."
+                    ),
+                    "default": False,
+                },
             },
         },
     ),
@@ -142,12 +159,31 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     ),
     MCPToolDefinition(
         name="get_features",
-        description="Search the organization's active features via semantic search",
+        description=(
+            "Semantic search over your org's active features. ALWAYS pass a "
+            "non-empty ``query`` — an org with hundreds of features will "
+            "drown the model in noise otherwise. Paginate via ``offset`` + "
+            "``next_offset`` until ``has_more`` is false. Each result "
+            "includes ``id`` you can put into a BUD's "
+            '{"linked_feature_ids": [...]} JSON fence.'
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query"},
-                "limit": {"type": "integer", "default": 10},
+                "query": {
+                    "type": "string",
+                    "description": "Keyword or phrase to semantic-search.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Page size (max 50).",
+                },
+                "offset": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "Pagination offset; use next_offset from prior page.",
+                },
             },
             "required": ["query"],
         },

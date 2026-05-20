@@ -77,11 +77,16 @@ REMOTE_TOOLS: frozenset[str] = frozenset(
 _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "get_bud_context",
-        "description": "List recent BUDs in your org for context when drafting a new one.",
+        "description": (
+            "List in-progress BUDs (not closed/discarded) in your org "
+            "for context when drafting a new one. Pass "
+            "include_terminal=true to also see closed/discarded history."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 50},
+                "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
+                "include_terminal": {"type": "boolean", "default": False},
             },
         },
     },
@@ -89,13 +94,17 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "get_features",
         "description": (
             "Semantic search over your org's active features (the knowledge base). "
-            "Use this to find existing capabilities before proposing new ones."
+            "ALWAYS pass a non-empty ``query`` — orgs with hundreds of features need "
+            "keyword filtering. Paginate via ``offset`` + ``next_offset`` until "
+            "``has_more`` is false. Each result has an ``id`` you can place into a "
+            'BUD\'s trailing {"linked_feature_ids": [...]} fence.'
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
                 "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
+                "offset": {"type": "integer", "default": 0, "minimum": 0},
             },
             "required": ["query"],
         },

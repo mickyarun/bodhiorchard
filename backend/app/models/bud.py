@@ -143,9 +143,7 @@ class BUDDocument(BaseModel):
     # Existing rows are migrated based on the prior ``auto_generate``
     # bool: true → all four phases enabled, false → empty. The
     # migration preserves behaviour for any in-flight pipeline.
-    auto_generate_phases: Mapped[dict[str, bool] | None] = mapped_column(
-        JSONB, nullable=True
-    )
+    auto_generate_phases: Mapped[dict[str, bool] | None] = mapped_column(JSONB, nullable=True)
 
     # Timestamp the user last clicked "Dismiss" on the phase-failure
     # banner. Any ``skill_failed`` event in ``agent_activity_logs`` newer
