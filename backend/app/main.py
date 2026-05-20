@@ -29,6 +29,7 @@ from sqlalchemy import select
 from app.api.router import api_router
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
+from app.services.file_storage import get_file_storage
 from app.services.pr_merge_worker import WorkerPool, start_pr_merge_workers
 from app.services.scan.pr_merge_update import handle_pr_merge_delivery
 
@@ -95,6 +96,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("permission_seed_synced")
     except Exception:
         logger.warning("permission_seed_failed_at_startup")
+
+    # 4a. Validate file-storage backend config. Fail-fast on obvious
+    # misconfigurations (S3 enabled but bucket empty); warn loudly when
+    # the local-disk backend points at a path that would be eaten by a
+    # Docker container rebuild. Non-fatal — an evidence-upload outage
+    # shouldn't take the whole API down. Broad except catches both the
+    # typed ``FileStorageError`` and any defensive failure inside the
+    # helper itself (e.g. an unusable ``FILE_STORAGE_LOCAL_DIR`` that
+    # raises during ``Path.resolve()``).
+    try:
+        get_file_storage().validate_config()
+    except Exception as exc:
+        logger.error("file_storage_misconfigured", error=str(exc), exc_info=True)
 
     # 4b. Reconcile orphan scans. Any scan still in a non-terminal
     # status with no running task (i.e. updated_at older than 60s at

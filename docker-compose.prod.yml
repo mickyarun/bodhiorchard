@@ -75,6 +75,11 @@ services:
     volumes:
       - repos_data:/data/repos
       - ssh_data:/data/ssh
+      # QA evidence uploads. Production deployments should set
+      # ``FILE_STORAGE_S3=true`` and a bucket so evidence survives a host
+      # loss / scale-out — this volume is the fallback for single-host
+      # deployments that haven't wired S3 yet.
+      - evidence_data:/app/data/uploads
     logging:
       driver: json-file
       options:
@@ -140,5 +145,6 @@ volumes:
   redis_data:
   repos_data:
   ssh_data:
+  evidence_data:
   caddy_data:
   caddy_config:

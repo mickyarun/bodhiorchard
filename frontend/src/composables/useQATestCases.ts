@@ -53,7 +53,7 @@ export function useQATestCases(budId: string) {
 
   async function updateManualResult(
     testCaseId: string,
-    result: 'pass' | 'fail' | 'blocked' | 'skipped',
+    result: 'pass' | 'fail' | 'blocked' | 'skipped' | 'pending',
     notes?: string,
   ): Promise<void> {
     const tc = manualCases.value.find(c => c.id === testCaseId)
@@ -66,14 +66,29 @@ export function useQATestCases(budId: string) {
     const previousNotes = tc?.notes
 
     // Optimistic update — populate tester attribution locally so the
-    // collapsed card header reflects "Tested by X · just now" immediately.
-    // The backend will stamp the same fields from the authenticated user
-    // on the PATCH, so on success these values converge.
+    // collapsed card header reflects "Tested by X · just now"
+    // immediately. The backend will stamp the same fields from the
+    // authenticated user on the PATCH, so on success these values
+    // converge. The ``pending`` revert path is the exception: the
+    // backend explicitly nulls tester / timestamp / stale notes so the
+    // case looks genuinely untested again, and the optimistic UI must
+    // mirror that or the row would still show the old attribution
+    // until the next refresh.
     if (tc) {
       tc.result = result
-      tc.tester_name = authStore.user?.name ?? 'You'
-      tc.tested_at = new Date().toISOString()
-      if (notes !== undefined) tc.notes = notes
+      if (result === 'pending') {
+        tc.tester_name = null
+        tc.tested_at = null
+        // ManualTestCase types ``notes`` as ``string | undefined``;
+        // ``undefined`` is what we want for "no note" so the UI shows
+        // an empty placeholder instead of a stale draft from the
+        // previous verdict.
+        tc.notes = notes ?? undefined
+      } else {
+        tc.tester_name = authStore.user?.name ?? 'You'
+        tc.tested_at = new Date().toISOString()
+        if (notes !== undefined) tc.notes = notes
+      }
     }
 
     const resp = await fetch(`/api/v1/buds/${budId}/qa/manual-results`, {

@@ -308,7 +308,10 @@ async function handleUpdateResult(
   result: ManualTestCase['result'],
   notes?: string,
 ): Promise<void> {
-  if (result === 'pending') return
+  // ``pending`` is the explicit revert path — QA un-marks a previous
+  // Pass/Fail after a regression invalidates the earlier judgement.
+  // The backend handler erases tester / timestamp / stale notes on
+  // this path so the case looks genuinely untested again.
   await updateManualResult(testCaseId, result, notes)
 }
 

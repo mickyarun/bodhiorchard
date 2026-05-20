@@ -99,10 +99,20 @@ async def update_manual_result(
     for case in manual_cases:
         if case.get("id") == body.test_case_id:
             case["result"] = body.result
-            case["tester_name"] = current_user.name
-            case["tested_at"] = datetime.now(UTC).isoformat()
-            if body.notes:
-                case["notes"] = body.notes
+            if body.result == "pending":
+                # Revert path: erase prior tester attribution so the
+                # case looks genuinely untested again. Stale notes /
+                # tester / timestamp on a "pending" row would imply
+                # the new pending state was the original tester's
+                # call, which it isn't.
+                case["tester_name"] = None
+                case["tested_at"] = None
+                case["notes"] = body.notes or None
+            else:
+                case["tester_name"] = current_user.name
+                case["tested_at"] = datetime.now(UTC).isoformat()
+                if body.notes:
+                    case["notes"] = body.notes
             found = True
             break
 

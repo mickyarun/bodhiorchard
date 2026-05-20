@@ -213,6 +213,23 @@
                     <kbd class="shortcut-key">{{ option.key }}</kbd>
                   </v-btn>
                 </div>
+                <!-- Revert: only meaningful once a verdict exists. The
+                     handler erases tester / timestamp / stale notes so
+                     the case is genuinely untested again. -->
+                <div v-if="tc.result !== 'pending'" class="reset-row">
+                  <v-btn
+                    variant="text"
+                    size="small"
+                    prepend-icon="mdi-restore"
+                    @click="setResult(tc.id, 'pending')"
+                  >
+                    Reset to pending
+                    <v-tooltip activator="parent" location="top">
+                      Un-mark this test (e.g. after a regression). Tester and
+                      timestamp will be cleared so it can be re-tested fresh.
+                    </v-tooltip>
+                  </v-btn>
+                </div>
               </div>
 
               <!-- Inline notes -->
@@ -339,7 +356,11 @@ import type { ManualTestCase, TestEvidence } from '@/types'
 import EvidenceTile from './EvidenceTile.vue'
 
 type ManualResult = ManualTestCase['result']
-type SetResult = Exclude<ManualResult, 'pending'>
+// ``SetResult`` covers every result the UI can write to a case — the
+// four terminal verdicts AND ``pending``, which is the explicit revert
+// path used when a previous Pass/Fail needs to be re-tested. The
+// backend schema accepts the same five values.
+type SetResult = ManualResult
 type FilterValue = 'all' | ManualResult
 
 const props = defineProps<{
@@ -923,6 +944,12 @@ watch(filteredCases, (list) => {
 .result-btn {
   text-transform: none;
   letter-spacing: 0;
+}
+
+.reset-row {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .shortcut-key {

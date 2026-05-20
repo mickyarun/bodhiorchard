@@ -54,6 +54,51 @@ class FileStorage:
         self.s3_region = os.getenv("AWS_REGION", "us-east-1")
         self.local_dir = os.getenv("FILE_STORAGE_LOCAL_DIR", "data/uploads")
 
+    def validate_config(self) -> None:
+        """Fail-fast configuration check, called once at app startup.
+
+        Runtime errors from a misconfigured backend land deep in an
+        upload handler with cryptic ``aioboto3`` / ``boto3`` tracebacks
+        the operator doesn't see until the first user-triggered upload.
+        Better to refuse to start the process. Raises
+        :class:`FileStorageError` so ``main.py`` lifespan can log and
+        choose its policy (we currently log + continue, on the theory
+        that an evidence-upload outage is non-fatal — but the loud log
+        is the actionable signal).
+        """
+        if self.use_s3:
+            if not self.s3_bucket:
+                raise FileStorageError(
+                    "FILE_STORAGE_S3=true but FILE_STORAGE_S3_BUCKET is empty. "
+                    "Set the bucket name in the backend env or disable S3."
+                )
+            logger.info(
+                "file_storage_configured",
+                backend="s3",
+                bucket=self.s3_bucket,
+                region=self.s3_region,
+            )
+            return
+        # Local backend: warn loudly when the path is inside the typical
+        # container filesystem (``/app/...``) without a hint of being a
+        # mount — that's the "Docker restart eats my evidence" footgun.
+        # Operators on Hybrid mode point the dir at host-owned storage
+        # and never see this warning.
+        resolved = str(Path(self.local_dir).resolve())
+        looks_ephemeral = resolved.startswith("/app/") and not resolved.startswith("/app/data/")
+        logger.info(
+            "file_storage_configured",
+            backend="local",
+            local_dir=resolved,
+        )
+        if looks_ephemeral:
+            logger.warning(
+                "file_storage_local_dir_may_be_ephemeral",
+                local_dir=resolved,
+                hint="Mount FILE_STORAGE_LOCAL_DIR as a Docker volume or "
+                "set FILE_STORAGE_S3=true with a configured bucket.",
+            )
+
     async def upload(
         self,
         org_id: str,

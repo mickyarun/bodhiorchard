@@ -70,6 +70,12 @@ services:
       # Persistent store for the backend's ed25519 deploy keypair used to
       # clone private GitHub repos. Only the public key is ever exposed.
       - ssh_data:/data/ssh
+      # QA evidence uploads (when ``FILE_STORAGE_S3`` is unset / false).
+      # Without this mount, every container rebuild silently wipes every
+      # uploaded screenshot. Operators using S3 ignore this — the local
+      # backend doesn't run when S3 is enabled, so the volume just stays
+      # empty.
+      - evidence_data:/app/data/uploads
     # Defense-in-depth hardening around the ``claude`` subprocess.
     # To enable the egress firewall on a Linux host:
     #
@@ -138,3 +144,4 @@ volumes:
   postgres_data:
   repos_data:
   ssh_data:
+  evidence_data:
