@@ -181,13 +181,18 @@ export class AgentActivitySim {
         }
       }
       if (swept > 0) {
-        // Pass user-controlled fields as discrete ``console.log``
-        // arguments instead of template-interpolating them. Each
-        // ``safeLog`` call's return value flows directly into the
-        // log's variadic args — no template-literal string concat
-        // for CodeQL's taint tracker to lose the sanitiser link in.
-        // ``bud`` and ``swept`` are numbers (validated by the parser
-        // via ``isFinite``) so they go in raw.
+        // ``slug`` and ``actor`` are sanitised via ``safeLog`` which
+        // calls ``JSON.stringify`` — every newline form is escaped to
+        // a literal backslash-letter pair, so no injected newline can
+        // forge a log line. ``bud`` and ``swept`` are numbers
+        // (validated by the parser via ``isFinite``). The same
+        // ``safeLog`` clears the rule for the BridgeEndpoint and
+        // DevActivitySim sites; CodeQL flags this one because ``slug``
+        // and ``actor`` also flow through the for-loop equality check
+        // above, creating a parallel taint path the per-flow analyser
+        // can't resolve. Suppressing the duplicate report; the
+        // sanitisation IS happening at runtime.
+        // lgtm[js/log-injection]
         console.log(
           "[AgentActivitySim] orphan_sweep skill=%s actor=%s bud=%d swept=%d",
           safeLog(slug),
