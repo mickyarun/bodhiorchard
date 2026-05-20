@@ -67,8 +67,18 @@
                 <strong>External-LLM mode.</strong>
                 Stage agents are off for this BUD. Connect your local AI to
                 gather context, then paste the finished spec into each
-                section editor.
+                section editor — or flip individual phases back on under
+                <strong>AI skills</strong>.
               </div>
+              <v-btn
+                size="small"
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-tune-variant"
+                @click="skillSettingsOpen = true"
+              >
+                AI skills
+              </v-btn>
               <v-btn
                 size="small"
                 color="primary"
@@ -387,11 +397,16 @@
         </div>
       </template>
 
-      <!-- Per-BUD AI skills picker -->
+      <!-- Per-BUD AI skills picker + per-phase auto-generate toggles.
+           Re-fetch the BUD on @saved so the banner / next stage-PATCH
+           pick up the freshly persisted auto_generate_phases without a
+           hard reload. -->
       <BUDSkillSettingsDialog
         v-if="bud"
         v-model="skillSettingsOpen"
         :bud-id="bud.id"
+        :auto-generate-phases="bud.auto_generate_phases ?? null"
+        @saved="budStore.fetchBUD(bud.id)"
       />
 
       <!-- Delete confirmation -->

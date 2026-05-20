@@ -69,6 +69,10 @@ class BUDUpdate(BaseModel):
     code_review_comments: list[dict[str, Any]] | None = None
     metadata_: dict[str, Any] | None = Field(None, alias="metadata")
     assignee_id: uuid.UUID | None = None
+    # Per-phase auto-generate map can be flipped post-creation from the
+    # BUD detail page. Send the FULL desired map; the backend replaces
+    # the column verbatim. Send {} to clear (= all phases skip).
+    auto_generate_phases: dict[str, bool] | None = None
 
     model_config = {"populate_by_name": True}
 

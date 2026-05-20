@@ -60,11 +60,27 @@
         </div>
 
         <div v-else class="stage-list">
+          <div class="stage-list-hint text-caption text-medium-emphasis">
+            Toggle a phase ON to let our agent auto-run when the BUD
+            enters that stage. Toggle OFF to drive that phase yourself
+            (typically via your local AI through
+            <strong>Settings → MCP Connect</strong>). The skill picker
+            only matters for phases that are ON.
+          </div>
           <div
             v-for="stage in advancedStages"
             :key="stage.value"
             class="stage-row"
           >
+            <v-switch
+              v-model="autoPhases[stage.value]"
+              color="primary"
+              density="compact"
+              hide-details
+              inset
+              class="stage-switch"
+              :aria-label="`Auto-generate ${stage.label}`"
+            />
             <div class="stage-label-wrap">
               <span class="stage-label">{{ stage.label }}</span>
               <span class="stage-agent">{{ agentTypeName(stage.agentType) }}</span>
@@ -77,6 +93,7 @@
               density="compact"
               variant="outlined"
               hide-details
+              :disabled="!autoPhases[stage.value]"
               class="stage-select"
             />
           </div>
@@ -115,6 +132,11 @@ import {
 interface Props {
   modelValue: boolean
   budId: string
+  // Current auto_generate_phases map straight from the BUD row. Loaded
+  // into the local ``autoPhases`` ref each time the dialog opens so the
+  // switches reflect whatever the backend has stored, including any
+  // previous edits made from this same dialog earlier in the session.
+  autoGeneratePhases?: Record<string, boolean> | null
 }
 
 const props = defineProps<Props>()
@@ -129,6 +151,11 @@ const saving = ref(false)
 const errorMessage = ref<string | null>(null)
 // Map of stage → either a real skill UUID or null (meaning "use org default").
 const picks = ref<Record<string, string | null>>({})
+// Per-phase auto-generate flags. Missing key in the incoming
+// autoGeneratePhases prop = false (= phase off) — matches the backend's
+// ``phases.get(stage, False)`` semantic so the UI never shows a phase
+// as enabled when the server treats it as off.
+const autoPhases = ref<Record<string, boolean>>({})
 
 interface StageConfig { value: string; label: string; agentType: AgentType }
 const advancedStages: StageConfig[] = [
@@ -178,11 +205,15 @@ async function load(): Promise<void> {
     const { data } = await api.get<Record<string, string>>(
       `/v1/buds/${props.budId}/stage-skill-overrides`,
     )
-    const next: Record<string, string | null> = {}
+    const nextPicks: Record<string, string | null> = {}
+    const nextPhases: Record<string, boolean> = {}
+    const incomingPhases = props.autoGeneratePhases ?? {}
     for (const stage of advancedStages) {
-      next[stage.value] = data[stage.value] ?? defaultSkillIdForAgent(stage.agentType)
+      nextPicks[stage.value] = data[stage.value] ?? defaultSkillIdForAgent(stage.agentType)
+      nextPhases[stage.value] = !!incomingPhases[stage.value]
     }
-    picks.value = next
+    picks.value = nextPicks
+    autoPhases.value = nextPhases
   } catch (err) {
     errorMessage.value = extractError(err, 'Failed to load BUD skill settings.')
   } finally {
@@ -194,16 +225,26 @@ async function save(): Promise<void> {
   saving.value = true
   errorMessage.value = null
   try {
-    // Only persist picks that differ from the org default; the rest fall
-    // back at dispatch time so future default changes still flow through.
-    const body: Record<string, string> = {}
+    // Two writes here are intentional: stage-skill overrides have their
+    // own validated PUT endpoint (rejects skill_id / agent_type
+    // mismatches with 400), while auto_generate_phases goes through the
+    // generic BUD PATCH. Fire skills first; if it 400s we don't want a
+    // half-applied state where phases changed but skills didn't.
+    const overridesBody: Record<string, string> = {}
     for (const stage of advancedStages) {
       const picked = picks.value[stage.value]
       if (!picked) continue
       if (picked === defaultSkillIdForAgent(stage.agentType)) continue
-      body[stage.value] = picked
+      overridesBody[stage.value] = picked
     }
-    await api.put(`/v1/buds/${props.budId}/stage-skill-overrides`, body)
+    await api.put(`/v1/buds/${props.budId}/stage-skill-overrides`, overridesBody)
+    // Send the full normalised map (every stage key with a boolean) so
+    // the backend's setattr replace is unambiguous — never partial.
+    const phasesBody: Record<string, boolean> = {}
+    for (const stage of advancedStages) {
+      phasesBody[stage.value] = !!autoPhases.value[stage.value]
+    }
+    await api.patch(`/v1/buds/${props.budId}`, { auto_generate_phases: phasesBody })
     emit('saved')
     close()
   } catch (err) {
