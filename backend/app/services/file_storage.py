@@ -25,6 +25,7 @@ import structlog
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import FileStorageConfig, settings
+from app.core.paths import PathTraversalError, safe_join
 
 logger = structlog.get_logger(__name__)
 
@@ -237,12 +238,18 @@ class FileStorage:
     # ── Local storage ────────────────────────────────────────────
 
     def _safe_local_path(self, relative_path: str) -> Path:
-        """Resolve a path and verify it stays within the storage directory."""
-        base = Path(self.local_dir).resolve()
-        dest = (base / relative_path).resolve()
-        if not str(dest).startswith(str(base)):
-            raise FileStorageError("Invalid storage path: directory traversal detected")
-        return dest
+        """Resolve a path and verify it stays within the storage directory.
+
+        Delegates to :func:`app.core.paths.safe_join`, which uses
+        ``os.path.realpath`` + ``os.path.commonpath`` — the
+        CodeQL-recognised sanitiser for ``py/path-injection``. The
+        previous form ``str(dest).startswith(str(base))`` was
+        suffix-bypassable (e.g. ``base = /a/b`` would match ``/a/bc``).
+        """
+        try:
+            return safe_join(self.local_dir, relative_path)
+        except PathTraversalError as exc:
+            raise FileStorageError("Invalid storage path: directory traversal detected") from exc
 
     async def _upload_local(self, full_path: str, data: bytes) -> str:
         """Store file on local disk under self.local_dir."""
