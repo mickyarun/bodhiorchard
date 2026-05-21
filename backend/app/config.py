@@ -195,6 +195,75 @@ class StorageConfig(BaseSettings):
         return Path(self.data_dir) / "repos"
 
 
+class FileStorageConfig(BaseSettings):
+    """File storage backend for QA evidence uploads (and other user files).
+
+    Distinct from :class:`StorageConfig` above — which owns the *system*
+    filesystem layout (cloned repos, SSH keys) — this one owns the
+    *user-content* backend: local disk by default, S3 when
+    ``FILE_STORAGE_S3=true``. ``os.getenv`` in the consumer is the
+    historical anti-pattern that made ``.env``-only deployments
+    silently fall back to local disk; routing through ``BaseSettings``
+    matches the rest of the project and loads from ``.env`` correctly.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
+
+    use_s3: bool = Field(
+        default=False,
+        alias="FILE_STORAGE_S3",
+        description=(
+            "When true, uploads / downloads / deletes go through S3 "
+            "instead of the local-disk backend."
+        ),
+    )
+    s3_bucket: str = Field(
+        default="",
+        alias="FILE_STORAGE_S3_BUCKET",
+        description="S3 bucket name. Required when use_s3 is true.",
+    )
+    s3_region: str = Field(
+        default="us-east-1",
+        alias="AWS_REGION",
+        description="AWS region the S3 client connects to.",
+    )
+    local_dir: str = Field(
+        default="data/uploads",
+        alias="FILE_STORAGE_LOCAL_DIR",
+        description=(
+            "Root directory for the local-disk backend. "
+            "Relative paths resolve against the backend's cwd."
+        ),
+    )
+
+    # Explicit AWS credentials. Boto3's default chain (env vars →
+    # ``~/.aws/credentials`` → IAM role) reads ``os.environ`` directly,
+    # but pydantic-settings loads ``.env`` into the model instance
+    # WITHOUT touching ``os.environ`` — same root cause as the
+    # ``FILE_STORAGE_S3`` bug. Threading the keys through this config
+    # and passing them to ``aioboto3.Session(...)`` explicitly means
+    # ``.env``-only deployments behave the same as shell-env ones, and
+    # explicit creds take precedence over the credentials file / IAM
+    # role exactly as the boto3 chain documents. Leaving the fields
+    # empty falls back to the default chain (omitting the args from
+    # the ``Session`` call so boto3 picks up the file / role).
+    aws_access_key_id: str = Field(
+        default="",
+        alias="AWS_ACCESS_KEY_ID",
+        description="AWS access key. Takes precedence over ~/.aws/credentials and IAM role.",
+    )
+    aws_secret_access_key: str = Field(
+        default="",
+        alias="AWS_SECRET_ACCESS_KEY",
+        description="AWS secret key paired with AWS_ACCESS_KEY_ID.",
+    )
+    aws_session_token: str = Field(
+        default="",
+        alias="AWS_SESSION_TOKEN",
+        description="STS session token. Only needed for temporary credentials.",
+    )
+
+
 class IntegrationConfig(BaseSettings):
     """Third-party integration configuration."""
 
@@ -270,6 +339,7 @@ class Settings(BaseSettings):
     redis: RedisConfig = RedisConfig()
     integrations: IntegrationConfig = IntegrationConfig()
     storage: StorageConfig = StorageConfig()
+    file_storage: FileStorageConfig = FileStorageConfig()
     ws: WebSocketConfig = WebSocketConfig()
     colyseus: ColyseusConfig = ColyseusConfig()
 

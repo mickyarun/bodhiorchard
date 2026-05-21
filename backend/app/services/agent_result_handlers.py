@@ -25,13 +25,34 @@ from typing import Any
 
 import structlog
 
+from app.models.bud import BUDDocument
 from app.models.bud_agent_task import BUDAgentTask
 from app.models.bud_feature_link import BUDFeatureLinkSource
+from app.models.bud_version import BUDEditSource
+from app.repositories import bud_version as bud_version_repo
 from app.repositories.bud_feature_link import BUDFeatureLinkRepository
 from app.services.bud_timeline import record_event
 from app.services.json_parser import parse_json_response, strip_insight_blocks
 
 logger = structlog.get_logger(__name__)
+
+
+async def _snapshot_agent_write(db: Any, bud: BUDDocument) -> None:
+    """Capture the BUD's pre-edit state for the History/revert flow.
+
+    Called by every agent result handler that mutates BUD content
+    columns. ``edited_by`` is ``None`` because the writer is the system,
+    not an interactive user; the ``source=AGENT`` enum value is enough
+    to attribute the row in the History tab.
+    """
+    await bud_version_repo.insert_snapshot(
+        db,
+        bud=bud,
+        phase=bud.status,
+        source=BUDEditSource.AGENT,
+        edited_by=None,
+    )
+
 
 # Substrings emitted by ``git`` / ``gh`` / the GitHub HTTPS endpoint when the
 # bearer token is rejected. We match on the tools' own wording rather than a
@@ -95,24 +116,39 @@ async def handle_prd_result(
     }
 
 
-async def _persist_pm_linked_features(
+async def persist_linked_features_from_markdown(
     bud_id: uuid_mod.UUID,
     org_id: uuid_mod.UUID,
-    output: str,
+    content: str,
     db: Any,
+    *,
+    source: BUDFeatureLinkSource,
+    actor_name: str,
+    actor_id: uuid_mod.UUID | None = None,
 ) -> int:
-    """Parse + persist ``linked_feature_ids`` from the PM agent's output.
+    """Parse a trailing ``{"linked_feature_ids": [...]}`` JSON fence and
+    upsert ``BUDFeatureLink`` rows for the listed feature UUIDs.
+
+    Used by:
+
+    * The PM agent's result handler (``source=PM_AGENT``).
+    * The manual BUD-edit / external-LLM path (``source=MANUAL``) —
+      when the user pastes locally-generated requirements_md content,
+      the same JSON fence the prompt instructs the LLM to emit gets
+      parsed here so the BYO-AI flow produces the same downstream
+      feature-link state as the in-process agent flow.
 
     Returns the count of links actually accepted (after UUID parsing,
     org-scope filtering, and ON CONFLICT dedup at the repository).
     """
-    parsed = _extract_last_json_dict(output)
+    parsed = _extract_last_json_dict(content)
     raw_ids = parsed.get("linked_feature_ids") if parsed else None
     if not isinstance(raw_ids, list):
         if parsed is not None:
             logger.warning(
-                "pm_linked_feature_ids_missing_or_wrong_shape",
+                "linked_feature_ids_missing_or_wrong_shape",
                 bud_id=str(bud_id),
+                source=source.value,
                 fence_keys=list(parsed.keys()),
             )
         return 0
@@ -126,8 +162,9 @@ async def _persist_pm_linked_features(
             dropped.append(str(raw))
     if dropped:
         logger.warning(
-            "pm_linked_feature_ids_unparseable",
+            "linked_feature_ids_unparseable",
             bud_id=str(bud_id),
+            source=source.value,
             dropped=dropped,
         )
 
@@ -135,14 +172,12 @@ async def _persist_pm_linked_features(
         return 0
 
     link_repo = BUDFeatureLinkRepository(db, org_id=org_id)
-    accepted = await link_repo.link_features(
-        bud_id, valid_ids, source=BUDFeatureLinkSource.PM_AGENT
-    )
-    # Surface auto-linking in the BUD timeline so users see when the PM
-    # agent picked features versus when a human did it. Skipped when
-    # ``accepted`` is empty (ON CONFLICT dedup means every id was already
-    # linked — no real activity to record). Titles are resolved so the
-    # timeline can name the features instead of opaque UUIDs.
+    accepted = await link_repo.link_features(bud_id, valid_ids, source=source)
+    # Surface auto-linking in the BUD timeline so users can see when the
+    # PM agent picked features vs when a human did it (and now, when an
+    # external LLM did it via the manual-paste path). Skipped when
+    # ``accepted`` is empty (ON CONFLICT dedup means every id was
+    # already linked — no real activity to record).
     if accepted:
         title_map = await link_repo.titles_by_ids(accepted)
         await record_event(
@@ -150,20 +185,40 @@ async def _persist_pm_linked_features(
             org_id,
             bud_id,
             "features_auto_linked",
-            actor_name="PM Agent",
+            actor_id=actor_id,
+            actor_name=actor_name,
             detail={
                 "feature_ids": [str(fid) for fid in accepted],
                 "feature_titles": [title_map.get(fid, "") for fid in accepted],
                 "count": len(accepted),
+                "source": source.value,
             },
         )
     logger.info(
-        "pm_linked_features_persisted",
+        "linked_features_persisted",
         bud_id=str(bud_id),
+        source=source.value,
         requested=len(valid_ids),
         accepted=len(accepted),
     )
     return len(accepted)
+
+
+async def _persist_pm_linked_features(
+    bud_id: uuid_mod.UUID,
+    org_id: uuid_mod.UUID,
+    output: str,
+    db: Any,
+) -> int:
+    """Thin wrapper preserving the PM-agent call shape."""
+    return await persist_linked_features_from_markdown(
+        bud_id,
+        org_id,
+        output,
+        db,
+        source=BUDFeatureLinkSource.PM_AGENT,
+        actor_name="PM Agent",
+    )
 
 
 def _extract_last_json_dict(output: str) -> dict[str, Any] | None:
@@ -205,6 +260,7 @@ async def handle_tech_arch_result(
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud:
+        await _snapshot_agent_write(db, bud)
         # Extract impacted repos from the last JSON fence, then strip it
         impacted_names, clean_output = _extract_impacted_repos_json(output)
         bud.tech_spec_md = clean_output
@@ -302,6 +358,7 @@ async def handle_code_review_result(
     comment_count = 0
 
     if bud:
+        await _snapshot_agent_write(db, bud)
         raw_comments = review_data.get("code_review_comments", [])
         # Defensive: if the agent returned a scalar or garbage, don't crash
         # downstream with a confusing error.
@@ -409,6 +466,7 @@ async def handle_testing_result(
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud:
+        await _snapshot_agent_write(db, bud)
         bud.qa_automation_cases = parsed_data["automation_test_cases"]
         bud.qa_manual_cases = parsed_data["manual_test_cases"]
         bud.qa_execution_plan_md = parsed_data["test_execution_plan"]

@@ -60,11 +60,27 @@
         </div>
 
         <div v-else class="stage-list">
+          <div class="stage-list-hint text-caption text-medium-emphasis">
+            Toggle a phase ON to let our agent auto-run when the BUD
+            enters that stage. Toggle OFF to drive that phase yourself
+            (typically via your local AI through
+            <strong>Settings → MCP Connect</strong>). The skill picker
+            only matters for phases that are ON.
+          </div>
           <div
             v-for="stage in advancedStages"
             :key="stage.value"
             class="stage-row"
           >
+            <v-switch
+              v-model="autoPhases[stage.value]"
+              color="primary"
+              density="compact"
+              hide-details
+              inset
+              class="stage-switch"
+              :aria-label="`Auto-generate ${stage.label}`"
+            />
             <div class="stage-label-wrap">
               <span class="stage-label">{{ stage.label }}</span>
               <span class="stage-agent">{{ agentTypeName(stage.agentType) }}</span>
@@ -77,6 +93,7 @@
               density="compact"
               variant="outlined"
               hide-details
+              :disabled="!autoPhases[stage.value]"
               class="stage-select"
             />
           </div>
@@ -115,6 +132,11 @@ import {
 interface Props {
   modelValue: boolean
   budId: string
+  // Current auto_generate_phases map straight from the BUD row. Loaded
+  // into the local ``autoPhases`` ref each time the dialog opens so the
+  // switches reflect whatever the backend has stored, including any
+  // previous edits made from this same dialog earlier in the session.
+  autoGeneratePhases?: Record<string, boolean> | null
 }
 
 const props = defineProps<Props>()
@@ -129,6 +151,11 @@ const saving = ref(false)
 const errorMessage = ref<string | null>(null)
 // Map of stage → either a real skill UUID or null (meaning "use org default").
 const picks = ref<Record<string, string | null>>({})
+// Per-phase auto-generate flags. Missing key in the incoming
+// autoGeneratePhases prop = false (= phase off) — matches the backend's
+// ``phases.get(stage, False)`` semantic so the UI never shows a phase
+// as enabled when the server treats it as off.
+const autoPhases = ref<Record<string, boolean>>({})
 
 interface StageConfig { value: string; label: string; agentType: AgentType }
 const advancedStages: StageConfig[] = [
@@ -178,11 +205,15 @@ async function load(): Promise<void> {
     const { data } = await api.get<Record<string, string>>(
       `/v1/buds/${props.budId}/stage-skill-overrides`,
     )
-    const next: Record<string, string | null> = {}
+    const nextPicks: Record<string, string | null> = {}
+    const nextPhases: Record<string, boolean> = {}
+    const incomingPhases = props.autoGeneratePhases ?? {}
     for (const stage of advancedStages) {
-      next[stage.value] = data[stage.value] ?? defaultSkillIdForAgent(stage.agentType)
+      nextPicks[stage.value] = data[stage.value] ?? defaultSkillIdForAgent(stage.agentType)
+      nextPhases[stage.value] = !!incomingPhases[stage.value]
     }
-    picks.value = next
+    picks.value = nextPicks
+    autoPhases.value = nextPhases
   } catch (err) {
     errorMessage.value = extractError(err, 'Failed to load BUD skill settings.')
   } finally {
@@ -193,24 +224,57 @@ async function load(): Promise<void> {
 async function save(): Promise<void> {
   saving.value = true
   errorMessage.value = null
-  try {
-    // Only persist picks that differ from the org default; the rest fall
-    // back at dispatch time so future default changes still flow through.
-    const body: Record<string, string> = {}
-    for (const stage of advancedStages) {
-      const picked = picks.value[stage.value]
-      if (!picked) continue
-      if (picked === defaultSkillIdForAgent(stage.agentType)) continue
-      body[stage.value] = picked
-    }
-    await api.put(`/v1/buds/${props.budId}/stage-skill-overrides`, body)
-    emit('saved')
-    close()
-  } catch (err) {
-    errorMessage.value = extractError(err, 'Failed to save settings.')
-  } finally {
-    saving.value = false
+  // Two writes — there is no single backend endpoint for both today.
+  // Order chosen so a partial failure leaves the most-recoverable state:
+  //
+  //   1. PATCH phases (generic field write — validation is just a
+  //      Pydantic dict; near-impossible to 400 on a normalised payload).
+  //   2. PUT skill overrides (validates each skill_id matches its stage's
+  //      expected agent_type; can 400 on a stale skill list).
+  //
+  // If step 2 fails after step 1 succeeds we surface a SPECIFIC error
+  // ("phases saved, skill picks failed") so the user knows what's
+  // persisted and what to retry. If we reversed the order, the more
+  // failure-prone write would commit first and a phases-PATCH failure
+  // would leave the dialog with stale skill state and no useful hint.
+  const phasesBody: Record<string, boolean> = {}
+  for (const stage of advancedStages) {
+    phasesBody[stage.value] = !!autoPhases.value[stage.value]
   }
+  try {
+    await api.patch(`/v1/buds/${props.budId}`, { auto_generate_phases: phasesBody })
+  } catch (err) {
+    errorMessage.value = extractError(err, 'Failed to save phase toggles.')
+    saving.value = false
+    return
+  }
+
+  // Only persist picks that differ from the org default; matching picks
+  // are dropped so the BUD continues to follow whatever the org admin
+  // marks as default later, rather than being pinned to today's id.
+  const overridesBody: Record<string, string> = {}
+  for (const stage of advancedStages) {
+    const picked = picks.value[stage.value]
+    if (!picked) continue
+    if (picked === defaultSkillIdForAgent(stage.agentType)) continue
+    overridesBody[stage.value] = picked
+  }
+  try {
+    await api.put(`/v1/buds/${props.budId}/stage-skill-overrides`, overridesBody)
+  } catch (err) {
+    // Phases ARE saved at this point — be explicit so the user doesn't
+    // assume the whole dialog rolled back and re-flip phases on retry.
+    errorMessage.value = extractError(
+      err,
+      'Phase toggles saved, but skill picks failed. Re-open and retry the skill picker.',
+    )
+    saving.value = false
+    return
+  }
+
+  emit('saved')
+  close()
+  saving.value = false
 }
 
 function close(): void {
@@ -274,12 +338,28 @@ watch(
 }
 
 .stage-list { display: flex; flex-direction: column; gap: 10px; }
+.stage-list-hint { margin-bottom: 4px; line-height: 1.45; }
 
+/* Three columns: switch (auto) · label block (fixed) · skill picker (rest).
+   The original two-column grid here was for label + select; adding the
+   switch as a third child without widening the template silently wrapped
+   the picker onto a new row. */
 .stage-row {
   display: grid;
-  grid-template-columns: 150px 1fr;
+  grid-template-columns: auto 150px 1fr;
   align-items: center;
-  gap: 14px;
+  column-gap: 14px;
+  row-gap: 0;
+}
+
+/* Strip the default v-switch label padding — the row's grid already
+   provides spacing and we render the label ourselves via stage-label. */
+.stage-switch :deep(.v-input__control),
+.stage-switch :deep(.v-selection-control) {
+  min-height: 32px;
+}
+.stage-switch :deep(.v-selection-control__wrapper) {
+  margin-inline-end: 0;
 }
 
 .stage-label-wrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }

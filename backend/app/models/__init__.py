@@ -42,6 +42,7 @@ from app.models.bud_feature_link import (
 from app.models.bud_section_session import BUDSectionSession
 from app.models.bud_stage_skill_override import BUDStageSkillOverride
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
+from app.models.bud_version import MAX_VERSIONS_PER_PHASE, BUDEditSource, BUDVersion
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.cluster_cache import ClusterCache
 from app.models.design_system import DesignSystemRef
@@ -54,6 +55,7 @@ from app.models.feature_match_log import FeatureMatchLog
 from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
+from app.models.mcp_audit_log import MCPAuditLogEntry
 from app.models.notification import Notification, NotificationType
 from app.models.organization import Organization
 from app.models.permission import Permission, PermissionCategory
@@ -112,6 +114,9 @@ __all__ = [
     "BUDStageSkillOverride",
     "BUDTodo",
     "BUDTodoStatus",
+    "BUDEditSource",
+    "BUDVersion",
+    "MAX_VERSIONS_PER_PHASE",
     "BUDStatus",
     "BUDTimelineEvent",
     "BUDTimelineEventType",
@@ -175,6 +180,7 @@ __all__ = [
     "User",
     "UserEmailAlias",
     "UserMCPToken",
+    "MCPAuditLogEntry",
     "UserRole",
     "WebhookLog",
     "RewardEvent",

@@ -207,6 +207,14 @@ const router = createRouter({
           component: () => import('@/views/settings/SettingsCode.vue'),
         },
         {
+          path: 'settings/mcp-connect',
+          name: 'settings-mcp-connect',
+          // Self-service: any authenticated user can manage their own
+          // MCP tokens and copy the connect config for their local AI.
+          // No org-level permission gate.
+          component: () => import('@/views/settings/SettingsMCPConnect.vue'),
+        },
+        {
           path: 'raceview/:roomId',
           name: 'race-view',
           component: () => import('@/views/race/RaceRoomView.vue'),

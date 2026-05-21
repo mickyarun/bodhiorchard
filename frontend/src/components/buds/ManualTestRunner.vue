@@ -238,6 +238,22 @@
                 </div>
               </div>
 
+              <!-- Per-case evidence error: scoped to this card so a
+                   failed upload / delete / blob-fetch lands next to
+                   the action that triggered it rather than at the
+                   top of the panel where it's visually orphaned. -->
+              <v-alert
+                v-if="evidenceError && evidenceError.testCaseId === tc.id"
+                type="error"
+                variant="tonal"
+                density="compact"
+                class="mb-3"
+                closable
+                @click:close="emit('clear-evidence-error', tc.id)"
+              >
+                {{ evidenceError.message }}
+              </v-alert>
+
               <!-- Evidence section (with drag-and-drop) -->
               <div
                 class="evidence-section"
@@ -249,6 +265,7 @@
               >
                 <div class="section-label d-flex align-center">
                   <span>Evidence</span>
+                  <span class="upload-limit-hint">Max {{ MAX_UPLOAD_MB }} MB per file</span>
                   <v-spacer />
                   <v-btn
                     size="x-small"
@@ -265,7 +282,7 @@
                   class="empty-evidence"
                 >
                   <v-icon icon="mdi-image-plus-outline" size="20" class="mr-2 opacity-60" />
-                  Drag images or files here, or click Upload
+                  Drag images or files here, or click Upload (max {{ MAX_UPLOAD_MB }} MB each)
                 </div>
 
                 <div v-else class="evidence-grid">
@@ -276,6 +293,7 @@
                     :bud-id="budId"
                     @delete="emit('delete-evidence', ev.id)"
                     @preview="(url) => openLightbox(ev, url)"
+                    @error="(msg) => emit('evidence-error', ev.test_case_id, msg)"
                   />
                 </div>
               </div>
@@ -336,6 +354,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import type { ManualTestCase, TestEvidence } from '@/types'
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '@/composables/useQATestCases'
 import EvidenceTile from './EvidenceTile.vue'
 
 type ManualResult = ManualTestCase['result']
@@ -346,12 +365,24 @@ const props = defineProps<{
   cases: ManualTestCase[]
   evidence: TestEvidence[]
   budId: string
+  // ``{testCaseId, message}`` of the most recent upload / delete /
+  // blob-fetch failure. Passed in from the parent so the alert can
+  // be rendered INSIDE the matching test card rather than floating
+  // above the whole panel. ``null`` while everything is healthy.
+  evidenceError?: { testCaseId: string, message: string } | null
 }>()
 
 const emit = defineEmits<{
   (e: 'update-result', testCaseId: string, result: SetResult, notes?: string): void
   (e: 'upload-evidence', testCaseId: string, file: File): void
   (e: 'delete-evidence', evidenceId: string): void
+  // Surfaced when EvidenceTile reports a thumbnail / download
+  // failure OR when client-side pre-validation rejects a file. Both
+  // carry the test case id so the parent's ``evidenceError`` ref
+  // can be scoped to the right card.
+  (e: 'evidence-error', testCaseId: string, message: string): void
+  // Fired when the user dismisses the alert for a specific case.
+  (e: 'clear-evidence-error', testCaseId: string): void
 }>()
 
 // ── UI state ──────────────────────────────────────────────────────────
@@ -559,12 +590,30 @@ function triggerUpload(caseId: string): void {
   fileInputRef.value?.click()
 }
 
+function emitUploadIfWithinLimit(caseId: string, file: File): void {
+  // Client-side guard: rejecting an over-limit file here saves both
+  // the multipart upload bandwidth AND the backend cycle of buffering
+  // the bytes only to 413 them. The server still enforces the cap
+  // (the trust boundary), so we just flag and skip with the same
+  // message the 413 fallback would have produced.
+  if (file.size > MAX_UPLOAD_BYTES) {
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(1)
+    emit(
+      'evidence-error',
+      caseId,
+      `"${file.name}" is too large (${sizeMb} MB). Evidence must be ${MAX_UPLOAD_MB} MB or smaller.`,
+    )
+    return
+  }
+  emit('upload-evidence', caseId, file)
+}
+
 function handleFileSelected(event: Event): void {
   const input = event.target as HTMLInputElement
   const files = input.files
   if (files && uploadTargetCaseId.value) {
     for (const file of Array.from(files)) {
-      emit('upload-evidence', uploadTargetCaseId.value, file)
+      emitUploadIfWithinLimit(uploadTargetCaseId.value, file)
     }
   }
   input.value = ''
@@ -585,7 +634,7 @@ function handleDrop(caseId: string, event: DragEvent): void {
   const files = event.dataTransfer?.files
   if (!files || files.length === 0) return
   for (const file of Array.from(files)) {
-    emit('upload-evidence', caseId, file)
+    emitUploadIfWithinLimit(caseId, file)
   }
 }
 
@@ -880,6 +929,18 @@ watch(filteredCases, (list) => {
   letter-spacing: 0.04em;
   color: rgba(var(--v-theme-on-surface), 0.6);
   margin-bottom: 6px;
+}
+
+.upload-limit-hint {
+  /* Inline hint next to the Evidence label so users know the cap
+     before they trigger the picker. Lower contrast than the label
+     itself (which is already low-contrast) so it reads as secondary. */
+  margin-left: 10px;
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: rgba(var(--v-theme-on-surface), 0.45);
 }
 
 .section-text {

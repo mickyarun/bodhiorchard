@@ -48,7 +48,6 @@ from app.services.claude_env import (
 from app.services.claude_runner import test_claude_connection
 from app.services.deployment_info import deployment_info
 from app.services.git_operations import list_remote_branches
-from app.services.redis_setup_status import get_setup_complete, set_setup_complete
 from app.services.repo_scanner import _detect_develop_branch, _detect_main_branch
 from app.services.scan_progress import get_active_scan_for_org
 from app.services.setup_finalize import setup_finalize_with_repos
@@ -63,26 +62,19 @@ router = APIRouter(tags=["setup"])
 async def setup_status(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Check whether initial setup has been completed.
 
-    Reads a Redis fast-path flag first so the wizard's polling
-    doesn't grab a DB connection per request. Falls back to the
-    canonical ``OrganizationRepository.check_setup_exists`` query
-    when the flag is unset (e.g. older orgs initialised before this
-    fast-path landed, or after a Redis flush) and re-warms the cache
-    on a successful DB hit.
+    Single indexed lookup against ``organizations`` — no caching
+    layer. The wizard polls this endpoint, but a WebSocket push
+    (``ws/org:{org_id}:install``) drives the live transition, leaving
+    only a 30 s safety-net poll. At that frequency the DB hit is
+    rounding error and the cache that used to short-circuit it caused
+    more drift bugs than it ever saved DB connections.
 
     Returns:
         A dict with ``is_setup_complete`` and ``org_slug``.
     """
-    cached_slug = await get_setup_complete()
-    if cached_slug is not None:
-        return {"is_setup_complete": True, "org_slug": cached_slug}
-
-    org_repo = OrganizationRepository(db)
-    org = await org_repo.check_setup_exists()
+    org = await OrganizationRepository(db).check_setup_exists()
     if org is None:
         return {"is_setup_complete": False, "org_slug": None}
-    # Warm the Redis cache so the next poll skips the DB.
-    await set_setup_complete(org.slug)
     return {"is_setup_complete": True, "org_slug": org.slug}
 
 

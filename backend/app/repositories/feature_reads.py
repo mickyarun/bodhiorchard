@@ -312,18 +312,66 @@ class FeatureReadRepository:
             grouped.setdefault(fid, []).append(repo_name)
         return grouped
 
+    async def keyword_search(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        offset: int = 0,
+        only_active: bool = True,
+    ) -> list[Feature]:
+        """ILIKE substring search over ``feature_title`` — mirrors the
+        frontend ``/features`` page's ``?q=`` behaviour exactly.
+
+        The frontend (``list_with_links``) matches the WHOLE query as a
+        substring on title only, alphabetically ordered. We mirror that
+        verbatim so MCP ``get_features`` returns the same results an
+        LLM would see if it hit ``/v1/features?q=…`` directly.
+
+        Earlier this method tokenised on whitespace and OR-matched each
+        token against title + description, but that surfaced features
+        whose description coincidentally mentioned one of the tokens
+        (e.g. "Account Information Services" matched "payment link
+        notes" because its description had "links" and "notes") ranked
+        above the actual payment-link features alphabetically. The
+        substring-only match is stricter but produces results LLMs and
+        users alike can predict — and the prompt instructs the LLM to
+        retry with shorter queries when a long phrase returns nothing.
+        """
+        stripped = query.strip()
+        if not stripped:
+            return []
+
+        stmt = (
+            select(Feature)
+            .where(
+                Feature.org_id == self._org_id,
+                Feature.feature_title.ilike(f"%{stripped}%"),
+            )
+            .order_by(Feature.feature_title)
+            .offset(offset)
+            .limit(limit)
+        )
+        if only_active:
+            stmt = stmt.where(Feature.is_active.is_(True))
+        result = await self._db.execute(stmt)
+        return list(result.scalars().unique().all())
+
     async def semantic_search(
         self,
         query_vector: list[float],
         *,
         limit: int = 10,
+        offset: int = 0,
         only_active: bool = True,
     ) -> list[tuple[Feature, float]]:
         """Cosine-distance semantic search over ``Feature.embedding``.
 
         Returns ``(feature, distance)`` tuples sorted ascending by
-        distance (smallest first = most similar). Used by the renamed
-        MCP ``get_features`` tool and the duplicate-feature check.
+        distance (smallest first = most similar). ``offset`` enables
+        cursor-free pagination — the MCP ``get_features`` tool surfaces
+        it so an external LLM can iterate through more than ``limit``
+        matches in orgs with hundreds of features.
         """
         distance = Feature.embedding.cosine_distance(query_vector).label("distance")
         stmt = (
@@ -333,6 +381,7 @@ class FeatureReadRepository:
                 Feature.embedding.isnot(None),
             )
             .order_by(distance)
+            .offset(offset)
             .limit(limit)
         )
         if only_active:

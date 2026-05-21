@@ -47,6 +47,12 @@ class BUDCreate(BaseModel):
     # to the org's default skill for that stage's agent type. Validated in
     # the route handler against the caller's org.
     stage_skill_overrides: dict[BUDStatus, uuid.UUID] | None = None
+    # Per-phase auto-generation. Keys: "bud" / "design" / "tech_arch" /
+    # "testing". Value true = our agent fires; false / missing = skip.
+    # DEFAULT EMPTY DICT = all phases skip. User opts in per phase via
+    # the Advanced-settings switches; for everything they leave off the
+    # local-AI / external-LLM flow takes over.
+    auto_generate_phases: dict[str, bool] = Field(default_factory=dict)
 
     model_config = {"populate_by_name": True}
 
@@ -63,6 +69,20 @@ class BUDUpdate(BaseModel):
     code_review_comments: list[dict[str, Any]] | None = None
     metadata_: dict[str, Any] | None = Field(None, alias="metadata")
     assignee_id: uuid.UUID | None = None
+    # Per-phase auto-generate map can be flipped post-creation from the
+    # BUD detail page (BUDSkillSettingsDialog). The backend MERGES the
+    # incoming dict with the existing column rather than replacing it
+    # verbatim, so an older client that doesn't know about a future
+    # phase won't silently drop it to false; unknown keys are dropped
+    # with a warning log. To explicitly turn a phase off, send the key
+    # with ``false`` — omitting it keeps the prior value.
+    #
+    # Intentionally NOT in FIELD_OWNING_STATUS — editable in any
+    # status, including closed/discarded. Closed-BUD edits have no
+    # runtime effect (no transitions fire post-close) but stay
+    # auditable, and locking the field would surprise users who want
+    # to fix the config after the fact.
+    auto_generate_phases: dict[str, bool] | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -107,6 +127,10 @@ class BUDRead(BaseModel):
     qa_manual_cases: list[dict[str, Any]] | None = None
     qa_execution_plan_md: str | None = None
     code_review_comments: list[dict[str, Any]] | None = None
+    # Empty dict / None means "all phases skip" — the new default for
+    # newly created BUDs. Returned to the frontend so the BUD detail
+    # banner can decide which phases are user-driven.
+    auto_generate_phases: dict[str, bool] | None = None
     designs: list[BUDDesignRead] = []
     metadata: dict[str, Any] | None = Field(None, validation_alias="metadata_")
     impacted_repos: list[dict[str, Any]] | None = None

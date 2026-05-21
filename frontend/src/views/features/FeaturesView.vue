@@ -86,6 +86,21 @@
       {{ store.error }}
     </v-alert>
 
+    <v-alert
+      v-if="focusedFeatureId"
+      type="info"
+      variant="tonal"
+      density="compact"
+      class="mb-4 d-flex align-center"
+    >
+      <div class="d-flex align-center ga-2 flex-wrap">
+        <span>Showing one feature — deep-linked from a BUD.</span>
+        <v-btn size="x-small" variant="text" @click="clearFocus">
+          Show all features
+        </v-btn>
+      </div>
+    </v-alert>
+
     <template v-if="hasLoadedOnce">
       <div
         v-if="store.items.length === 0 && !store.loading"
@@ -126,6 +141,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { PAGE_SIZE, useFeaturesStore, type FeatureViewMode } from '@/stores/features'
 import { useSettingsStore } from '@/stores/settings'
 import type { RepoContributor, RepoInfo } from '@/types'
@@ -134,12 +150,20 @@ import TopContributorsPanel from '@/components/features/TopContributorsPanel.vue
 
 const store = useFeaturesStore()
 const settingsStore = useSettingsStore()
+const route = useRoute()
+const router = useRouter()
 
 const selectedRepoId = ref('')
 const searchQuery = ref('')
 const debouncedQuery = ref('')
 const page = ref(1)
 const hasLoadedOnce = ref(false)
+
+// Focused-feature mode. When the URL carries ``?id=<uuid>`` we fetch
+// that one feature directly (e.g. clicking a BUD's Linked-features
+// row deep-links here) and render it in isolation. Clearing the
+// filter drops the query param and the normal listing reload fires.
+const focusedFeatureId = ref<string | null>(null)
 
 // Exclusive view modes — pick ONE filter, not a cumulative widening.
 // Each mode answers a different question:
@@ -248,9 +272,50 @@ watch(page, () => {
   void reload()
 })
 
-onMounted(() => {
+async function loadFocusedFeature(id: string): Promise<void> {
+  focusedFeatureId.value = id
+  await store.fetchFeature(id)
+  // Replace the items list with the single feature so the existing
+  // grid renders it without a separate code path. Clearing
+  // focused-mode triggers a full reload via the route watcher below.
+  if (store.selectedFeature) {
+    store.items = [store.selectedFeature]
+    store.total = 1
+  } else {
+    store.items = []
+    store.total = 0
+  }
+  hasLoadedOnce.value = true
+}
+
+function clearFocus(): void {
+  if (focusedFeatureId.value == null) return
+  // Drop the query param — the route watcher below will detect the
+  // change and run a normal listing reload.
+  void router.replace({ query: { ...route.query, id: undefined } })
+}
+
+watch(
+  () => route.query.id,
+  async (next) => {
+    const id = typeof next === 'string' ? next : null
+    if (id) {
+      await loadFocusedFeature(id)
+    } else if (focusedFeatureId.value != null) {
+      focusedFeatureId.value = null
+      await reload()
+    }
+  },
+)
+
+onMounted(async () => {
   void settingsStore.fetchRepos()
-  void reload()
+  const initialId = typeof route.query.id === 'string' ? route.query.id : null
+  if (initialId) {
+    await loadFocusedFeature(initialId)
+  } else {
+    void reload()
+  }
 })
 </script>
 

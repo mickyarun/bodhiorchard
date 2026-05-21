@@ -14,7 +14,10 @@
 
 """UserMCPToken data access repository."""
 
-from sqlalchemy import select
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -51,3 +54,95 @@ class UserMCPTokenRepository(BaseRepository[UserMCPToken]):
             )
         )
         return list(result.scalars().all())
+
+    async def get_by_user_org_name(
+        self, user_id: uuid.UUID, org_id: uuid.UUID, name: str
+    ) -> UserMCPToken | None:
+        """Fetch one token by its (user, org, name) tuple."""
+        result = await self._db.execute(
+            select(UserMCPToken).where(
+                UserMCPToken.user_id == user_id,
+                UserMCPToken.org_id == org_id,
+                UserMCPToken.name == name,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_for_user(self, user_id: uuid.UUID, org_id: uuid.UUID) -> list[UserMCPToken]:
+        """All tokens belonging to the caller, newest first.
+
+        Used by ``GET /v1/me/mcp-tokens`` for the connect panel.
+        """
+        result = await self._db.execute(
+            select(UserMCPToken)
+            .where(UserMCPToken.user_id == user_id, UserMCPToken.org_id == org_id)
+            .order_by(UserMCPToken.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def list_for_org(self, org_id: uuid.UUID) -> list[UserMCPToken]:
+        """All tokens issued within an org, newest first.
+
+        Used by the admin org-wide visibility endpoint so an owner can
+        spot leaked/forgotten tokens belonging to any team member.
+        """
+        result = await self._db.execute(
+            select(UserMCPToken)
+            .where(UserMCPToken.org_id == org_id)
+            .options(selectinload(UserMCPToken.user))
+            .order_by(UserMCPToken.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def delete_for_user(
+        self, token_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID
+    ) -> int:
+        """Revoke one of the caller's own tokens. Returns rowcount."""
+        result = await self._db.execute(
+            delete(UserMCPToken).where(
+                UserMCPToken.id == token_id,
+                UserMCPToken.user_id == user_id,
+                UserMCPToken.org_id == org_id,
+            )
+        )
+        # ``rowcount`` is exposed on CursorResult (returned by DML statements)
+        # but isn't part of the generic Result[Any] protocol that the
+        # session.execute() stub advertises. ``getattr`` keeps mypy strict-clean
+        # without a per-line ``type: ignore``.
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def delete_for_org(self, token_id: uuid.UUID, org_id: uuid.UUID) -> int:
+        """Admin revoke — drops any token within the admin's org. Returns rowcount."""
+        result = await self._db.execute(
+            delete(UserMCPToken).where(
+                UserMCPToken.id == token_id,
+                UserMCPToken.org_id == org_id,
+            )
+        )
+        # ``rowcount`` is exposed on CursorResult (returned by DML statements)
+        # but isn't part of the generic Result[Any] protocol that the
+        # session.execute() stub advertises. ``getattr`` keeps mypy strict-clean
+        # without a per-line ``type: ignore``.
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def delete_all_for_user(self, user_id: uuid.UUID) -> int:
+        """Revoke EVERY token belonging to a user, across all orgs.
+
+        Called from the member-deactivation / merge paths because
+        ``users.is_active = False`` is a soft delete that does NOT fire
+        the FK CASCADE on ``user_mcp_tokens.user_id``. Without this,
+        a deactivated member's bodhi_token would keep authenticating
+        to /mcp/* until manually revoked.
+        """
+        result = await self._db.execute(
+            delete(UserMCPToken).where(UserMCPToken.user_id == user_id)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def touch_last_used(self, token_id: uuid.UUID) -> None:
+        """Update ``last_used_at`` to now. Fire-and-forget from the MCP auth path."""
+        await self._db.execute(
+            update(UserMCPToken)
+            .where(UserMCPToken.id == token_id)
+            .values(last_used_at=datetime.now(UTC))
+        )

@@ -34,6 +34,18 @@ Please include, where possible:
 - A triage update within 7 days with a severity assessment and proposed timeline.
 - Coordinated disclosure: we will not file a public issue or push a public fix that names the vulnerability until a patched release is available, and we will credit reporters who wish to be named.
 
+## MCP tokens (`bodhi_token`)
+
+The `bodhi_token` credential authenticates both the Claude Code CLI integration AND the external-LLM remote MCP endpoint introduced in `MCP-REMOTE.md`. Treat them like long-lived API keys:
+
+- **Storage** — bcrypt hashes only; SHA-256 prefix indexed for lookup. Plaintext shown once at creation, never logged.
+- **Default TTL** — 90 days (max 365). Internal scan-pipeline tokens are short-lived and live in memory only.
+- **Revocation** — `Settings → MCP Connect` for self-service, admin org-wide endpoint for any team member's token. Revoked tokens 401 within ~30 s for SSE streams.
+- **Audit** — every MCP call writes to `mcp_audit_log` (org_id, user_id, token_id, tool, ip, ua, status). 90-day retention via daily background sweep.
+- **Rate limit** — Redis-backed per (token, IP) and globally per token. Fails open on Redis outage; audit still records.
+
+**Token-leak response.** Revoke first (kills any active session within a heartbeat), then query `mcp_audit_log` filtered by `token_id`. The remote MCP endpoint is read-only — a leaked token cannot rewrite BUD content, but it can read every BUD in the org.
+
 ## Scope
 
 In scope:

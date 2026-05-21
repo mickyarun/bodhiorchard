@@ -129,6 +129,22 @@ class BUDDocument(BaseModel):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
 
+    # Per-phase auto-generation map. Keys are the BUDStatus values where
+    # an agent runs (``bud``, ``design``, ``tech_arch``, ``testing``);
+    # value ``true`` means "let our agent fire for this phase",
+    # ``false`` or absent means "skip — user supplies the content via
+    # editor / external LLM".
+    #
+    # NEW DEFAULT: empty dict = all skip. Newly created BUDs require an
+    # explicit opt-in for each phase the user wants automated. This is
+    # the opposite of the prior single-boolean default (which auto-fired
+    # everything); the change is intentional product policy.
+    #
+    # Existing rows are migrated based on the prior ``auto_generate``
+    # bool: true → all four phases enabled, false → empty. The
+    # migration preserves behaviour for any in-flight pipeline.
+    auto_generate_phases: Mapped[dict[str, bool] | None] = mapped_column(JSONB, nullable=True)
+
     # Timestamp the user last clicked "Dismiss" on the phase-failure
     # banner. Any ``skill_failed`` event in ``agent_activity_logs`` newer
     # than this is shown on the BUD detail; older ones are hidden. NULL
