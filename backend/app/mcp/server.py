@@ -204,6 +204,18 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                         "phase owns. Empty strings are rejected."
                     ),
                 },
+                "expected_phase": {
+                    "type": "string",
+                    "enum": ["bud", "design", "tech_arch"],
+                    "description": (
+                        "The phase you believe you're writing content for. "
+                        "Server rejects with phase_mismatch if the BUD's "
+                        "actual status differs — prevents content composed "
+                        "for one phase being silently written to another "
+                        "when the BUD moved between your read and your "
+                        "write (e.g. manual status change in another tab)."
+                    ),
+                },
                 "linked_feature_ids": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -213,7 +225,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     ),
                 },
             },
-            "required": ["bud_id", "content"],
+            "required": ["bud_id", "content", "expected_phase"],
         },
     ),
     MCPToolDefinition(

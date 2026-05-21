@@ -159,13 +159,71 @@ async def test_update_bud_writes_only_owning_field(monkeypatch: Any) -> None:
 
     db = MagicMock(flush=AsyncMock())
 
-    result = await handle_update_bud(db, auth, {"bud_id": str(bud.id), "content": "NEW SPEC"})
+    result = await handle_update_bud(
+        db,
+        auth,
+        {"bud_id": str(bud.id), "content": "NEW SPEC", "expected_phase": "tech_arch"},
+    )
     assert result["success"] is True
     assert result["field"] == "tech_spec_md"
     assert bud.tech_spec_md == "NEW SPEC"
     assert bud.requirements_md == original_requirements
     assert len(snapshots) == 1
     assert snapshots[0]["source"].value == "mcp"
+
+
+@pytest.mark.asyncio
+async def test_update_bud_rejects_phase_mismatch(monkeypatch: Any) -> None:
+    """When the caller declares ``expected_phase`` and the BUD has
+    moved since the pre-flight read, the server must reject loudly
+    rather than silently writing content composed for the wrong
+    phase. This is the safety net against design HTML landing in
+    requirements_md when the BUD's status changes mid-conversation."""
+    user_id = uuid.uuid4()
+    auth = _auth(user_id)
+    bud = _fake_bud(status=BUDStatus.BUD, assignee_id=user_id)
+
+    async def _get(self: Any, bud_id: uuid.UUID) -> MagicMock:
+        return bud
+
+    monkeypatch.setattr(BUDRepository, "get_by_id", _get)
+
+    result = await handle_update_bud(
+        MagicMock(),
+        auth,
+        {
+            "bud_id": str(bud.id),
+            "content": "<div>some wireframe HTML</div>",
+            "expected_phase": "design",  # caller thinks DESIGN, BUD is BUD
+        },
+    )
+    assert result["success"] is False
+    assert result["code"] == "phase_mismatch"
+    assert result["current_status"] == "bud"
+    assert result["expected_phase"] == "design"
+
+
+@pytest.mark.asyncio
+async def test_update_bud_rejects_missing_expected_phase(monkeypatch: Any) -> None:
+    """Without ``expected_phase`` the safety check can't fire — the
+    LLM must declare its intent. Older clients with stale schema
+    caches surface here so the user is prompted to restart."""
+    user_id = uuid.uuid4()
+    auth = _auth(user_id)
+    bud = _fake_bud(status=BUDStatus.BUD, assignee_id=user_id)
+
+    async def _get(self: Any, bud_id: uuid.UUID) -> MagicMock:
+        return bud
+
+    monkeypatch.setattr(BUDRepository, "get_by_id", _get)
+
+    result = await handle_update_bud(
+        MagicMock(),
+        auth,
+        {"bud_id": str(bud.id), "content": "body"},  # no expected_phase
+    )
+    assert result["success"] is False
+    assert result["code"] == "missing_expected_phase"
 
 
 @pytest.mark.asyncio
@@ -205,7 +263,13 @@ async def test_update_bud_design_phase_routes_to_design_upsert(monkeypatch: Any)
 
     db = MagicMock(flush=AsyncMock())
     result = await handle_update_bud(
-        db, auth, {"bud_id": str(bud.id), "content": "<div>NEW WIREFRAME</div>"}
+        db,
+        auth,
+        {
+            "bud_id": str(bud.id),
+            "content": "<div>NEW WIREFRAME</div>",
+            "expected_phase": "design",
+        },
     )
 
     assert result["success"] is True
@@ -267,6 +331,7 @@ async def test_update_bud_wires_linked_feature_ids(monkeypatch: Any) -> None:
         {
             "bud_id": str(bud.id),
             "content": "new text",
+            "expected_phase": "bud",
             "linked_feature_ids": [str(feature_a), str(feature_b)],
         },
     )
@@ -318,6 +383,7 @@ async def test_update_bud_logs_dropped_invalid_uuids(monkeypatch: Any) -> None:
         {
             "bud_id": str(bud.id),
             "content": "text",
+            "expected_phase": "bud",
             "linked_feature_ids": ["not-a-uuid", "also bad"],
         },
     )

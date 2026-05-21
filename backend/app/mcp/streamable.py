@@ -166,19 +166,26 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "(testing, code_review, …) are NOT remotely writable. You "
             "must be the BUD's assignee; the server picks the field "
             "from the phase — you cannot address a different one. "
-            "Optional linked_feature_ids is idempotent."
+            "expected_phase is a REQUIRED sanity check: declare the "
+            "phase you composed content for, and the server rejects "
+            "with phase_mismatch if the BUD has since moved. "
+            "linked_feature_ids is optional and idempotent."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "bud_id": {"type": "string"},
                 "content": {"type": "string"},
+                "expected_phase": {
+                    "type": "string",
+                    "enum": ["bud", "design", "tech_arch"],
+                },
                 "linked_feature_ids": {
                     "type": "array",
                     "items": {"type": "string"},
                 },
             },
-            "required": ["bud_id", "content"],
+            "required": ["bud_id", "content", "expected_phase"],
         },
     },
     {

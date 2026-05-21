@@ -112,6 +112,11 @@ _AUDITABLE_PARAM_KEYS: frozenset[str] = frozenset(
         # an admin can audit "which features did this token link to
         # this BUD".
         "linked_feature_ids",
+        # Declared write-intent phase. Useful in incident response
+        # when a phase_mismatch fires — admin can see what phase the
+        # caller thought it was writing for vs the BUD's actual phase
+        # at the time of the call.
+        "expected_phase",
     }
 )
 # Per-value cap so a runaway 50 KB "query" doesn't bloat the audit table.

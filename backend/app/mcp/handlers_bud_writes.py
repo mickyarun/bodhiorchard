@@ -341,7 +341,10 @@ async def handle_update_bud(
     3. ``bud.assignee_id == auth.user.id``
     4. BUD is not in a terminal phase
     5. ``bud.status`` is in :data:`_MCP_EDITABLE_PHASES`
-    6. ``content`` is non-empty after strip
+    6. ``expected_phase`` is declared AND matches ``bud.status``.
+       Mismatch returns ``phase_mismatch`` — the caller composed
+       content for a phase the BUD is no longer in.
+    7. ``content`` is non-empty after strip
     """
     if auth.user is None:
         return _err("user_token_required", "update_bud requires a per-user MCP token.")
@@ -386,6 +389,38 @@ async def handle_update_bud(
                 f"BUD is currently in '{bud.status.value}'."
             ),
             current_status=bud.status.value,
+        )
+
+    # Intent declaration. The caller (LLM) must state which phase it
+    # believes it is writing content for; the server compares against
+    # the BUD's actual current phase. Mismatch means the BUD moved
+    # between the LLM's pre-flight read and this write call (manual
+    # status change, racing agent, stale chat context) — abort loudly
+    # rather than silently writing, say, design HTML into
+    # requirements_md.
+    #
+    # expected_phase is a sanity check only — it never routes the
+    # write. The field still comes from ``bud.status``, so this
+    # parameter cannot be abused to write to a different phase.
+    expected_phase_raw = params.get("expected_phase")
+    if not isinstance(expected_phase_raw, str) or not expected_phase_raw.strip():
+        return _err(
+            "missing_expected_phase",
+            "update_bud requires expected_phase ('bud' | 'design' | 'tech_arch'). "
+            "Declare what kind of content you're writing so the server can "
+            "abort if the BUD has changed phase since your last read.",
+        )
+    expected_phase = expected_phase_raw.strip().lower()
+    if expected_phase != bud.status.value:
+        return _err(
+            "phase_mismatch",
+            (
+                f"You said you were writing '{expected_phase}' content but the BUD "
+                f"is in '{bud.status.value}' now. Refetch via get_bud_by_id and "
+                "reconsider — do NOT submit content composed for a different phase."
+            ),
+            current_status=bud.status.value,
+            expected_phase=expected_phase,
         )
 
     content = str(params["content"])

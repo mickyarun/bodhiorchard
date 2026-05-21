@@ -495,7 +495,9 @@ id, and linked_features.linked_count from the response.`,
 ${REVIEW_GATE}
 
 When I confirm, call update_bud(bud_id="<uuid>", content=<full body>,
-linked_feature_ids=[<feature-uuid>, ...]). Show me the response.`,
+expected_phase="bud", linked_feature_ids=[<feature-uuid>, ...]). Show
+me the response. If the server returns phase_mismatch, the BUD moved
+since your pre-flight read — refetch and reconsider before retrying.`,
   },
   design: {
     kind: 'single',
@@ -528,8 +530,10 @@ and 'create_bud' is reserved for brand-new BUDs in the BUD phase.
 ${REVIEW_GATE}
 
 When I confirm, call update_bud(bud_id="<uuid>", content=<wireframe
-HTML>). The server sanitises the HTML and writes it to the BUD-level
-design row. Show me the response.`,
+HTML>, expected_phase="design"). The expected_phase param is the
+safety net — if the BUD moved out of DESIGN since your pre-flight
+read, the server returns phase_mismatch instead of writing your HTML
+into the wrong section. Show me the response.`,
   },
   tech_arch: {
     kind: 'single',
@@ -565,8 +569,12 @@ BUD phase.
 ${REVIEW_GATE}
 
 When I confirm, call update_bud(bud_id="<uuid>", content=<tech spec
-markdown>, linked_feature_ids=[<feature-uuid>, ...]). Show me the
-response (id, bud_number, field, phase, linked_features).`,
+markdown>, expected_phase="tech_arch", linked_feature_ids=[<feature-uuid>,
+...]). The expected_phase param is the safety net — if the BUD moved
+out of TECH_ARCH since your pre-flight read, the server returns
+phase_mismatch instead of writing your tech spec into the wrong
+section. Show me the response (id, bud_number, field, phase,
+linked_features).`,
   },
 }
 
