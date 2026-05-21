@@ -46,10 +46,11 @@ import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.bud import BUDDocument, BUDStatus
+from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus
 from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.bud_version import BUDEditSource, BUDVersion
 from app.repositories import bud_version as bud_version_repo
+from app.repositories.bud import BUDDesignRepository
 from app.repositories.bud_version import SNAPSHOT_FIELDS
 from app.services.agent_result_handlers import persist_linked_features_from_markdown
 from app.services.bud_timeline import record_event
@@ -91,14 +92,17 @@ def _phase_progressed_past_snapshot(current: BUDStatus, snapshot_phase: BUDStatu
     current_rank = _PHASE_RANK.get(current)
     snap_rank = _PHASE_RANK.get(snapshot_phase)
     if current_rank is None or snap_rank is None:
-        # Defensive: an unknown phase shouldn't block the user — log
-        # and let the call through so an operator can investigate.
+        # Defensive fail-closed: an unknown phase should treat the
+        # restore as "progressed past" so an operator notices and the
+        # revert is blocked. If we ever add a new content-bearing
+        # phase to BUDStatus, ``_PHASE_RANK`` must be updated in the
+        # same change.
         logger.warning(
             "bud_revert_unknown_phase",
             current=current.value if current else None,
             snapshot_phase=snapshot_phase.value if snapshot_phase else None,
         )
-        return False
+        return True
     return current_rank > snap_rank
 
 
@@ -152,6 +156,44 @@ def _apply_snapshot(bud: BUDDocument, snapshot: dict[str, object]) -> None:
         if key == "assignee_id" and isinstance(value, str):
             value = uuid.UUID(value)
         setattr(bud, key, value)
+
+
+async def _restore_design_html_if_present(
+    db: AsyncSession, bud: BUDDocument, snapshot: dict[str, object]
+) -> bool:
+    """Restore the BUD-level ``bud_designs`` row from the snapshot's
+    ``__design_html`` sentinel, if any.
+
+    Design content lives in ``bud_designs``, not ``bud_documents``, so
+    the standard :func:`_apply_snapshot` (keyed off SNAPSHOT_FIELDS)
+    can't restore it. The MCP design-phase write captures the prior
+    HTML under the sentinel key in
+    :func:`handlers_bud_writes._apply_design_content`; revert needs
+    the symmetric restore or the BUD row gets rolled back while the
+    design row keeps the post-edit content.
+
+    Returns ``True`` if a design row was upserted.
+    """
+    if "__design_html" not in snapshot:
+        return False
+    prior_html = snapshot["__design_html"]
+    # ``None`` is a legitimate value (means there was no design row
+    # at snapshot time) but ``upsert`` with ``design_html=None``
+    # would leave the column at whatever's currently there — which
+    # is the wrong behaviour for "restore to a state with no
+    # design". For now treat None as "no restore", and only roll
+    # back when the snapshot carried HTML. A future refinement can
+    # support delete-on-restore by adding a sentinel value.
+    if not isinstance(prior_html, str) or not prior_html:
+        return False
+    design_repo = BUDDesignRepository(db, org_id=bud.org_id)
+    await design_repo.upsert(
+        bud.id,
+        None,
+        design_html=prior_html,
+        status=BUDDesignStatus.READY,
+    )
+    return True
 
 
 async def _refresh_derived_state_if_requirements_changed(
@@ -247,7 +289,9 @@ async def restore_bud_to_version(
         reason=f"revert to {target.phase.value} v{target.version_no}",
     )
 
-    _apply_snapshot(bud, target.snapshot or {})
+    snap = target.snapshot or {}
+    _apply_snapshot(bud, snap)
+    design_html_restored = await _restore_design_html_if_present(db, bud, snap)
     await db.flush()
 
     summary = await _refresh_derived_state_if_requirements_changed(
@@ -267,6 +311,7 @@ async def restore_bud_to_version(
             "snapshot_version_no": target.version_no,
             "embedding_refreshed": summary["embedding_refreshed"],
             "linked_features_reparsed": summary["linked_features_reparsed"],
+            "design_html_restored": design_html_restored,
         },
     )
 
@@ -279,6 +324,7 @@ async def restore_bud_to_version(
         version_no=target.version_no,
         embedding_refreshed=summary["embedding_refreshed"],
         linked_features_reparsed=summary["linked_features_reparsed"],
+        design_html_restored=design_html_restored,
     )
     return {
         "bud_id": str(bud.id),
@@ -286,4 +332,5 @@ async def restore_bud_to_version(
         "reverted_to_version": target.version_no,
         "embedding_refreshed": summary["embedding_refreshed"],
         "linked_features_reparsed": summary["linked_features_reparsed"],
+        "design_html_restored": design_html_restored,
     }

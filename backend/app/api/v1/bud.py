@@ -494,6 +494,13 @@ async def update_bud(
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
 
+    # Capture the full set of fields the caller actually sent BEFORE
+    # ``update_data`` gets mutated (assignee_id / auto_generate_phases
+    # are popped out below for special-case handling). The version
+    # snapshot check at the end of the handler keys off this set so
+    # an assignee-only PATCH still produces a history row — without
+    # it the gate would see an empty ``update_data`` and skip.
+    original_body_keys = set(body.model_dump(exclude_unset=True).keys())
     update_data = body.model_dump(exclude_unset=True)
     update_data.pop("status_override_reason", None)  # consumed separately, not a model field
 
@@ -765,7 +772,12 @@ async def update_bud(
     # to roll back to). ``pre_phase`` is the phase the edit happened
     # IN — even if this same request advances status, the snapshot
     # belongs to the old phase's ring buffer.
-    if update_data or "auto_generate_phases" in body.model_dump(exclude_unset=True):
+    # ``original_body_keys`` includes assignee_id / auto_generate_phases /
+    # status — the early pops left ``update_data`` partial, so we use the
+    # original key set as the "did the user actually change anything
+    # snapshot-worthy?" check.
+    snapshot_worthy_keys = original_body_keys - {"status_override_reason"}
+    if snapshot_worthy_keys:
         await bud_version_repo.commit_snapshot(
             db,
             bud_id=bud.id,
@@ -907,9 +919,16 @@ async def _trigger_status_jobs(
     # Without the second condition the FE fires the design job
     # straight after the status PATCH, defeating the External-LLM
     # mode banner's "you're driving this BUD" contract.
-    if new_status == BUDStatus.DESIGN and old_status != BUDStatus.DESIGN:
-        has_designs = bud.designs and any(d.status == "ready" for d in bud.designs)
-        if not has_designs and phase_auto_generate:
+    #
+    # Count via the repo rather than accessing ``bud.designs`` — the
+    # relationship is ``lazy="selectin"`` today but the explicit query
+    # is greenlet-safe whatever the eager-load policy ends up being,
+    # and avoids the surprise MissingGreenlet failure mode the
+    # backend CLAUDE.md warns about.
+    if new_status == BUDStatus.DESIGN and old_status != BUDStatus.DESIGN and phase_auto_generate:
+        design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
+        ready_count = await design_repo.count_by_status(bud.id, BUDDesignStatus.READY)
+        if ready_count == 0:
             response.headers["X-Design-Available"] = "true"
 
     # Data-driven agent triggering via stage mappings

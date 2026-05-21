@@ -27,6 +27,7 @@ unit-tested without spinning up FastAPI.
 """
 
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -44,6 +45,28 @@ from app.services.bud_version_restore import restore_bud_to_version
 # from pulling thousands of rows in one shot. Tune up if a real use case
 # emerges; 500 covers ~25 phase transitions worth of edits per BUD.
 _MAX_VERSIONS_LIMIT = 500
+
+# Per-string truncation for snapshot fields returned by the detail
+# endpoint. The diff viewer renders markdown — a few KB per section
+# is plenty for visual diffing — and unbounded blob fetches would
+# amplify egress on any BUD with very large requirements_md /
+# tech_spec_md / test_plan_md.
+_SNAPSHOT_FIELD_TRUNCATE = 20_000
+
+
+def _truncate_snapshot_blob(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Cap string-typed snapshot fields to ``_SNAPSHOT_FIELD_TRUNCATE``
+    characters. Non-string values (lists, dicts, None) pass through —
+    they have their own size dynamics and aren't the typical hot path
+    for amplification."""
+    out: dict[str, Any] = {}
+    for key, value in snapshot.items():
+        if isinstance(value, str) and len(value) > _SNAPSHOT_FIELD_TRUNCATE:
+            out[key] = value[:_SNAPSHOT_FIELD_TRUNCATE] + "…"
+        else:
+            out[key] = value
+    return out
+
 
 logger = structlog.get_logger(__name__)
 
@@ -95,6 +118,9 @@ async def get_bud_version_detail(
     owns against the current BUD's value of that field. Reads use
     ``buds:view`` so QA / observers can review the trail without write
     rights.
+
+    Each string field in the snapshot is truncated to
+    ``_SNAPSHOT_FIELD_TRUNCATE`` chars to keep the response bounded.
     """
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
@@ -106,7 +132,9 @@ async def get_bud_version_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No version v{version_no} for phase '{phase.value}' on this BUD.",
         )
-    return BUDVersionDetail.model_validate(row)
+    detail = BUDVersionDetail.model_validate(row)
+    detail.snapshot = _truncate_snapshot_blob(detail.snapshot)
+    return detail
 
 
 @router.post(

@@ -25,6 +25,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport
 
+from app.core.deps import get_db
+from app.mcp import server as mcp_server
 from app.mcp import streamable
 from app.mcp.audit import _AUDITABLE_PARAM_KEYS
 from app.mcp.auth import MCPAuthResult, verify_mcp_token
@@ -46,9 +48,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     app = FastAPI()
     app.include_router(streamable.router)
     app.dependency_overrides[verify_mcp_token] = _bypass_auth
-    # Stub the request-scoped session — we never hit the DB in these tests.
-    from app.core.deps import get_db
 
+    # Stub the request-scoped session — we never hit the DB in these tests.
     async def _fake_db() -> Any:
         yield MagicMock()
 
@@ -84,9 +85,8 @@ def test_create_bud_call_emits_audit_with_tool_name(
         audit_calls.append(kw)
 
     monkeypatch.setattr(streamable, "emit_audit", _capture)
-    # Stub the handler so we don't actually mutate the DB.
-    from app.mcp import server as mcp_server
 
+    # Stub the handler so we don't actually mutate the DB.
     async def _fake_create(db: Any, auth: Any, params: dict[str, Any]) -> dict[str, Any]:
         return {"success": True, "id": "fake", "bud_number": 1, "title": params["title"]}
 
@@ -127,7 +127,6 @@ def test_dispatch_error_still_emits_audit(
         audit_calls.append(kw)
 
     monkeypatch.setattr(streamable, "emit_audit", _capture)
-    from app.mcp import server as mcp_server
 
     async def _crashing_handler(db: Any, auth: Any, params: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("boom")
