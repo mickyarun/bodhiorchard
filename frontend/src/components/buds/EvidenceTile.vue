@@ -47,14 +47,18 @@
 
     <v-btn
       class="delete-btn"
-      icon="mdi-close"
+      icon
       size="x-small"
       variant="flat"
       density="comfortable"
-      color="surface-variant"
-      aria-label="Delete evidence"
+      aria-label="Delete evidence. Upload a replacement after deleting."
       @click.stop="$emit('delete')"
-    />
+    >
+      <v-icon size="14">mdi-close</v-icon>
+      <v-tooltip activator="parent" location="top">
+        Delete, then re-upload to replace
+      </v-tooltip>
+    </v-btn>
   </div>
 </template>
 
@@ -240,16 +244,22 @@ onBeforeUnmount(() => {
   color: rgba(var(--v-theme-on-surface), 0.75);
 }
 
+/* Persistently visible — hover-only discovery left users unable to find
+ * the delete affordance on touch devices, and made "I want to replace
+ * this upload" feel unsupported. The tile has plenty of corner space
+ * for an always-on × badge without obscuring the thumbnail. */
 .delete-btn {
   position: absolute;
   top: 4px;
   right: 4px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  background: rgba(0, 0, 0, 0.55) !important;
+  color: white !important;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
-.evidence-tile:hover .delete-btn,
-.evidence-tile:focus-within .delete-btn {
-  opacity: 1;
+.delete-btn:hover {
+  background: rgba(var(--v-theme-error), 0.95) !important;
+  transform: scale(1.08);
 }
 </style>
