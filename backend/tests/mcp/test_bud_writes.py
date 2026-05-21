@@ -349,6 +349,36 @@ async def test_get_bud_by_id_org_scoped(monkeypatch: Any) -> None:
     result = await handle_get_bud_by_id(MagicMock(), auth, {"bud_id": str(bud.id)})
     assert result["bud_number"] == 42
     assert result["status"] == "bud"
+    # caller_user_id always echoes the token's user so the LLM can
+    # cross-check against assignee_id without a separate whoami call.
+    assert result["caller_user_id"] == str(auth.user.id)
+
+
+@pytest.mark.asyncio
+async def test_get_bud_by_id_is_assignee_flag(monkeypatch: Any) -> None:
+    """``is_assignee`` derived flag matches a real assignee match and
+    reflects mismatches so the LLM can stop before composing."""
+    user_id = uuid.uuid4()
+    other = uuid.uuid4()
+    auth = _auth(user_id)
+    matched = _fake_bud(assignee_id=user_id)
+    mismatched = _fake_bud(assignee_id=other)
+
+    async def _get_matched(self: Any, bud_id: uuid.UUID) -> MagicMock:
+        return matched
+
+    async def _get_mismatched(self: Any, bud_id: uuid.UUID) -> MagicMock:
+        return mismatched
+
+    monkeypatch.setattr(BUDRepository, "get_by_id", _get_matched)
+    result = await handle_get_bud_by_id(MagicMock(), auth, {"bud_id": str(matched.id)})
+    assert result["is_assignee"] is True
+
+    monkeypatch.setattr(BUDRepository, "get_by_id", _get_mismatched)
+    result = await handle_get_bud_by_id(MagicMock(), auth, {"bud_id": str(mismatched.id)})
+    assert result["is_assignee"] is False
+    assert result["assignee_id"] == str(other)
+    assert result["caller_user_id"] == str(user_id)
 
 
 @pytest.mark.asyncio

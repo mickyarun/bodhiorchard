@@ -427,7 +427,15 @@ async def handle_get_bud_by_id(
 
     No assignee restriction on reads — a developer drafting a related
     BUD should be able to pull context from their teammate's in-flight
-    work.
+    work. The response includes:
+
+    * ``caller_user_id`` — the user the MCP token represents, or
+      ``None`` for org-level tokens. Lets the LLM detect at the
+      pre-flight step whether the assignee check will pass without
+      composing a body the server would only reject.
+    * ``is_assignee`` — derived convenience flag (``True`` iff
+      ``bud.assignee_id == caller_user_id``). Saves the LLM from
+      string-comparing UUIDs in chat.
     """
     error = require_non_empty(params, "bud_id")
     if error:
@@ -448,12 +456,21 @@ async def handle_get_bud_by_id(
             return None
         return value if len(value) <= _BUD_BY_ID_TRUNCATE else value[:_BUD_BY_ID_TRUNCATE] + "…"
 
+    caller_user_id = str(auth.user.id) if auth.user else None
+    is_assignee = bool(
+        caller_user_id is not None
+        and bud.assignee_id is not None
+        and str(bud.assignee_id) == caller_user_id
+    )
+
     return {
         "id": str(bud.id),
         "bud_number": bud.bud_number,
         "title": bud.title,
         "status": bud.status.value,
         "assignee_id": str(bud.assignee_id) if bud.assignee_id else None,
+        "caller_user_id": caller_user_id,
+        "is_assignee": is_assignee,
         "requirements_md": _truncate(bud.requirements_md),
         "tech_spec_md": _truncate(bud.tech_spec_md),
         "test_plan_md": _truncate(bud.test_plan_md),

@@ -228,7 +228,11 @@
             {{ ex.label }}
           </v-tab>
         </v-tabs>
-        <AppPillToggle v-model="promptMode" :options="promptModeOptions" />
+        <AppPillToggle
+          v-if="showPromptModeToggle"
+          v-model="promptMode"
+          :options="promptModeOptions"
+        />
       </div>
       <v-divider />
       <v-window v-model="exampleTab">
@@ -407,16 +411,25 @@ interface ClientSnippet {
   render: (url: string) => string
 }
 
-interface ExamplePrompt {
+// PM/PRD genuinely has two distinct flows — create_bud for a new
+// BUD vs update_bud to revise an existing one. Design and Tech-spec
+// only ever call update_bud (the BUD already exists), so the
+// "Create / Update" framing is misleading on those tabs and a
+// single prompt covers both first-time writes and refinements.
+interface ExamplePromptWithToggle {
+  kind: 'with-toggle'
   label: string
-  // Each phase has a "create" prompt (first-time write — most often a
-  // brand new BUD via create_bud, or the first design/tech-spec write
-  // on a blank section) and an "update" prompt (subsequent edits on
-  // existing content). Both call the same MCP tools; the framing
-  // differs so the LLM knows whether to read existing content first.
   create: string
   update: string
 }
+
+interface ExamplePromptSingle {
+  kind: 'single'
+  label: string
+  body: string
+}
+
+type ExamplePrompt = ExamplePromptWithToggle | ExamplePromptSingle
 
 type PromptMode = 'create' | 'update'
 
@@ -444,6 +457,7 @@ const REVIEW_GATE = `Important — review-then-commit:
 
 const EXAMPLE_PROMPTS: Record<string, ExamplePrompt> = {
   pm: {
+    kind: 'with-toggle',
     label: 'PM / PRD',
     create: `I want to create a BUD for: <your topic>
 
@@ -467,12 +481,12 @@ body>, linked_feature_ids=[<feature-uuid>, ...]). Show me bud_number,
 id, and linked_features.linked_count from the response.`,
     update: `I want to update the PRD for BUD-<BUD-NUMBER>.
 
-Pre-flight: the BUD must still be in the BUD phase and I must be the
-assignee. update_bud will 409 otherwise — surface the server's error
-verbatim if so.
-
-1. Call get_bud_by_id(bud_id="<uuid>") to read the current
-   requirements_md and confirm status == "bud".
+1. Call get_bud_by_id(bud_id="<uuid>") and validate:
+   * 'status' == "bud". If not, stop and tell me what status the
+     BUD is actually in.
+   * 'is_assignee' == true. If false, stop and tell me which user
+     ID owns it — only the assignee can update via MCP.
+   Do NOT proceed past these checks if either fails.
 2. Call get_prompt(task_type="pm") to recall the body shape we expect.
 3. Optionally call get_features for new areas the revision touches.
 4. Compose the FULL revised Markdown body (not a diff — update_bud
@@ -484,89 +498,75 @@ When I confirm, call update_bud(bud_id="<uuid>", content=<full body>,
 linked_feature_ids=[<feature-uuid>, ...]). Show me the response.`,
   },
   design: {
+    kind: 'single',
     label: 'Design',
-    create: `I want to draft the UX/UI design for BUD-<BUD-NUMBER>.
+    body: `I want to write or revise the UX/UI design for BUD-<BUD-NUMBER>.
 
-Pre-flight: the BUD must be in the DESIGN phase and I must be the
-assignee. update_bud will 409 otherwise — surface the server's error
-verbatim if so.
+The BUD already exists — the design is added by calling update_bud
+while the BUD is in the DESIGN phase. There is no separate "create
+design" tool; if the design row is empty this still uses update_bud,
+and 'create_bud' is reserved for brand-new BUDs in the BUD phase.
 
-1. Call get_bud_by_id(bud_id="<uuid>") to read the agreed PRD content
-   (requirements_md) and confirm status == "design". If status is
-   something else, stop and tell me.
-2. Call get_prompt(task_type="design") and follow that prompt EXACTLY
+1. Call get_bud_by_id(bud_id="<uuid>") and validate:
+   * 'status' == "design". If not, stop and tell me what status
+     the BUD is actually in (design content can only be written while
+     the BUD is in the design phase).
+   * 'is_assignee' == true. If false, stop and tell me which user
+     ID owns it — only the assignee can update via MCP.
+   Do NOT proceed past these checks if either fails.
+2. Call get_bud_designs(bud_id="<uuid>") to see if a wireframe already
+   exists. If so, you're refining it — preserve structure / tokens
+   the user already approved. If empty, this is the first wireframe.
+3. Call get_prompt(task_type="design") and follow that prompt EXACTLY
    for the wireframe HTML shape.
-3. Call list_design_systems(), then get_design_system(repo_id="<id>")
+4. Call list_design_systems(), then get_design_system(repo_id="<id>")
    for the repo this design lands in (or omit repo_id for the org
    default). Use ONLY tokens/components from that design system — no
    ad-hoc colours, no new components.
-4. Compose the wireframe HTML.
+5. Compose the FULL wireframe HTML (update_bud overwrites the field).
 
 ${REVIEW_GATE}
 
 When I confirm, call update_bud(bud_id="<uuid>", content=<wireframe
 HTML>). The server sanitises the HTML and writes it to the BUD-level
 design row. Show me the response.`,
-    update: `I want to refine the existing design for BUD-<BUD-NUMBER>.
-
-Pre-flight: the BUD must still be in the DESIGN phase and I must be
-the assignee. update_bud will 409 otherwise.
-
-1. Call get_bud_by_id(bud_id="<uuid>") to read the existing design
-   context. Also call get_bud_designs(bud_id="<uuid>") to see the
-   current wireframe HTML.
-2. Call get_design_system(repo_id="<id>") so the iteration stays
-   within the same token set.
-3. Compose the FULL revised wireframe HTML (update_bud overwrites
-   it).
-
-${REVIEW_GATE}
-
-When I confirm, call update_bud(bud_id="<uuid>", content=<wireframe
-HTML>). Show me the response.`,
   },
   tech_arch: {
+    kind: 'single',
     label: 'Tech spec',
-    create: `I want to write the tech architecture for BUD-<BUD-NUMBER>.
+    body: `I want to write or revise the tech architecture for BUD-<BUD-NUMBER>.
 
-Pre-flight: the BUD must be in the TECH_ARCH phase and I must be the
-assignee. update_bud will 409 otherwise — surface the server's error
-verbatim if so.
+The BUD already exists — the tech spec is added by calling update_bud
+while the BUD is in the TECH_ARCH phase. There is no separate "create
+tech spec" tool; 'create_bud' is reserved for brand-new BUDs in the
+BUD phase.
 
-1. Call get_bud_by_id(bud_id="<uuid>") to read the PRD content and
-   confirm status == "tech_arch". If it isn't, stop and tell me.
+1. Call get_bud_by_id(bud_id="<uuid>") and validate:
+   * 'status' == "tech_arch". If not, stop and tell me what status
+     the BUD is actually in (tech_spec can only be written while the
+     BUD is in the tech_arch phase).
+   * 'is_assignee' == true. If false, stop and tell me which user
+     ID owns it — only the assignee can update via MCP.
+   Also note whether 'tech_spec_md' is already populated — if so,
+   preserve structure when you revise; if empty, this is the first
+   spec. Do NOT proceed past the status / assignee checks if either
+   fails.
 2. Call get_prompt(task_type="tech_plan") and follow that prompt
    EXACTLY for the spec shape.
 3. Call get_features(query="<area touched by this BUD>") with
    pagination to see existing capabilities you should reuse or extend
    rather than re-implement.
-4. Compose the tech-spec Markdown with explicit sections for:
-   components touched, schema changes, API surface, testing strategy,
-   rollout & rollback. End the body with the impacted-repos JSON
-   fence the prompt describes — the backend parses it.
+4. Compose the FULL tech-spec Markdown (update_bud replaces the
+   field). Use explicit sections for: components touched, schema
+   changes, API surface, testing strategy, rollout & rollback. End
+   the body with the impacted-repos JSON fence the prompt describes
+   — the backend parses it.
 
 ${REVIEW_GATE}
 
 When I confirm, call update_bud(bud_id="<uuid>", content=<tech spec
 markdown>, linked_feature_ids=[<feature-uuid>, ...]). Show me the
 response (id, bud_number, field, phase, linked_features).`,
-    update: `I want to refine the tech spec for BUD-<BUD-NUMBER>.
-
-Pre-flight: the BUD must still be in the TECH_ARCH phase and I must
-be the assignee.
-
-1. Call get_bud_by_id(bud_id="<uuid>") to read the current
-   tech_spec_md (so you don't lose existing structure) and confirm
-   status.
-2. Call get_features for any newly-touched area.
-3. Compose the FULL revised Markdown. Preserve the impacted-repos
-   JSON fence at the bottom.
-
-${REVIEW_GATE}
-
-When I confirm, call update_bud(bud_id="<uuid>", content=<tech spec
-markdown>, linked_feature_ids=[<feature-uuid>, ...]). Show me the
-response.`,
   },
 }
 
@@ -647,8 +647,18 @@ const promptModeOptions: { label: string; value: PromptMode }[] = [
 ]
 
 function promptBody(ex: ExamplePrompt): string {
+  if (ex.kind === 'single') return ex.body
   return promptMode.value === 'update' ? ex.update : ex.create
 }
+
+// The Create/Update toggle is only meaningful when the active tab has
+// two distinct flows. Design + Tech-spec only ever call update_bud,
+// so showing the toggle there would suggest a Create path that
+// doesn't exist.
+const activePrompt = computed<ExamplePrompt | undefined>(
+  () => EXAMPLE_PROMPTS[exampleTab.value],
+)
+const showPromptModeToggle = computed(() => activePrompt.value?.kind === 'with-toggle')
 
 function tokenSubtitle(t: TokenRead): string {
   const parts: string[] = [`Prefix ${t.token_prefix}…`]
