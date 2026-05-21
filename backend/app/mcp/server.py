@@ -173,12 +173,14 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="update_bud",
         description=(
-            "Update the content field owned by the BUD's CURRENT phase "
-            "(requirements_md when status='bud', tech_spec_md when "
-            "'tech_arch', test_plan_md when 'testing', code_review_comments "
-            "when 'code_review'). The server picks the field — you cannot "
-            "address a different one. Only allowed when you are the "
-            "BUD's assignee and it isn't closed or discarded."
+            "Update content for the BUD's CURRENT creative phase. The "
+            "server picks the target from the phase: requirements_md "
+            "when status='bud', the BUD-level wireframe HTML when "
+            "'design', or tech_spec_md when 'tech_arch'. Other phases "
+            "(testing, code_review, …) are NOT writable via MCP — those "
+            "involve PR state, evidence uploads, and stage gates that "
+            "stay UI/agent-driven. Only allowed when you are the BUD's "
+            "assignee and it isn't closed or discarded."
         ),
         input_schema={
             "type": "object",

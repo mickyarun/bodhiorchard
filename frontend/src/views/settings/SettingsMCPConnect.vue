@@ -20,34 +20,58 @@
      org's knowledge, and consult design systems while drafting PRD /
      design / tech-spec content. -->
 <template>
-  <v-container fluid class="pa-6" style="max-width: 960px">
-    <div class="d-flex align-center ga-2 mb-2">
-      <v-icon icon="mdi-connection" size="28" />
-      <h1 class="text-h5 font-weight-bold">Connect your local AI (MCP)</h1>
-    </div>
-    <p class="text-body-2 text-medium-emphasis mb-6">
-      When auto-generate is off on a BUD, your own local AI assistant
-      can use the four read-only tools below to gather context before
-      you paste the finished PRD / design / tech spec into the editor.
-      Token credentials are personal and revocable at any time.
-    </p>
-
-    <v-card variant="outlined" class="mb-6 pa-4">
-      <div class="text-subtitle-1 font-weight-medium mb-2">Endpoint</div>
-      <div class="d-flex align-center ga-2">
-        <code class="endpoint-code">{{ endpointUrl }}</code>
-        <v-btn icon="mdi-content-copy" size="small" variant="text" @click="copy(endpointUrl)" />
+  <v-container fluid class="mcp-page pa-6 pa-md-8">
+    <header class="mcp-hero mb-8">
+      <div class="d-flex align-center ga-3 mb-2">
+        <v-avatar color="primary" size="44" rounded>
+          <v-icon icon="mdi-connection" size="24" color="white" />
+        </v-avatar>
+        <div>
+          <h1 class="text-h5 font-weight-bold mb-0">Connect your local AI</h1>
+          <div class="text-caption text-medium-emphasis text-uppercase font-weight-medium mcp-hero__eyebrow">
+            MCP · Model Context Protocol
+          </div>
+        </div>
       </div>
-      <div class="text-caption text-medium-emphasis mt-2">
-        Send <code>Authorization: Bearer &lt;token&gt;</code> on every request.
-        Stream uses MCP <code>2025-03-26/streamable-http</code>.
+      <p class="text-body-2 text-medium-emphasis mcp-hero__lede mt-3">
+        Your local AI assistant — Claude Desktop, Cursor, Continue — connects to
+        Bodhiorchard via MCP. It can read org context, draft BUDs in chat, and
+        save them back through the BYO-AI write surface. Writes are scoped to
+        BUDs you are the assignee of, only the field the current phase owns is
+        editable, and every change is captured in the History tab for one-click
+        revert.
+      </p>
+    </header>
+
+    <v-card variant="outlined" class="mcp-card mb-6">
+      <div class="mcp-card__header">
+        <v-icon icon="mdi-link-variant" size="18" color="primary" />
+        <div class="text-subtitle-2 font-weight-medium">Endpoint</div>
+      </div>
+      <div class="mcp-card__body">
+        <div class="d-flex align-center ga-2 flex-wrap">
+          <code class="endpoint-code flex-grow-1">{{ endpointUrl }}</code>
+          <v-btn
+            size="small"
+            variant="tonal"
+            prepend-icon="mdi-content-copy"
+            @click="copy(endpointUrl, 'Endpoint copied')"
+          >
+            Copy
+          </v-btn>
+        </div>
+        <div class="text-caption text-medium-emphasis mt-3">
+          Send <code class="inline-code">Authorization: Bearer &lt;token&gt;</code> on
+          every request. Stream uses MCP
+          <code class="inline-code">2025-03-26/streamable-http</code>.
+        </div>
       </div>
     </v-card>
 
-    <v-card variant="outlined" class="mb-6">
-      <v-card-title class="d-flex align-center ga-2">
-        <v-icon icon="mdi-key-variant" />
-        Your tokens
+    <v-card variant="outlined" class="mcp-card mb-6">
+      <div class="mcp-card__header">
+        <v-icon icon="mdi-key-variant" size="18" color="primary" />
+        <div class="text-subtitle-2 font-weight-medium">Your tokens</div>
         <v-spacer />
         <v-btn
           color="primary"
@@ -58,68 +82,114 @@
         >
           New token
         </v-btn>
-      </v-card-title>
+      </div>
       <v-divider />
-      <v-list lines="two">
-        <v-list-item v-if="!tokens.length && !loading">
-          <v-list-item-title class="text-medium-emphasis">
-            No tokens yet — create one to connect your local AI.
-          </v-list-item-title>
-        </v-list-item>
+      <div v-if="!tokens.length && !loading" class="empty-state">
+        <v-icon icon="mdi-key-plus" size="32" class="text-medium-emphasis" />
+        <div class="text-body-2 text-medium-emphasis">
+          No tokens yet — create one to connect your local AI.
+        </div>
+      </div>
+      <v-list v-else lines="two" density="comfortable" class="token-list">
         <v-list-item
           v-for="t in tokens"
           :key="t.id"
           :title="t.name"
           :subtitle="tokenSubtitle(t)"
         >
+          <template #prepend>
+            <v-avatar color="surface-variant" size="32" rounded>
+              <v-icon icon="mdi-key" size="16" />
+            </v-avatar>
+          </template>
           <template #append>
-            <v-btn
-              icon="mdi-delete-outline"
-              size="small"
-              variant="text"
-              color="error"
-              @click="revoke(t)"
-            />
+            <v-tooltip text="Revoke this token" location="top">
+              <template #activator="{ props: tipProps }">
+                <v-btn
+                  v-bind="tipProps"
+                  icon="mdi-delete-outline"
+                  size="small"
+                  variant="text"
+                  color="error"
+                  @click="revoke(t)"
+                />
+              </template>
+            </v-tooltip>
           </template>
         </v-list-item>
       </v-list>
     </v-card>
 
-    <v-card variant="outlined" class="mb-6 pa-4">
-      <div class="text-subtitle-1 font-weight-medium mb-3">Available tools (read-only)</div>
-      <div v-for="tool in TOOL_CATALOGUE" :key="tool.name" class="mb-2">
-        <code class="text-caption font-weight-bold">{{ tool.name }}</code>
-        — <span class="text-caption">{{ tool.description }}</span>
+    <v-card variant="outlined" class="mcp-card mb-6">
+      <div class="mcp-card__header">
+        <v-icon icon="mdi-toolbox-outline" size="18" color="primary" />
+        <div class="text-subtitle-2 font-weight-medium">Available tools</div>
       </div>
-      <v-alert type="info" variant="tonal" density="compact" class="mt-4">
-        <strong>Write-back is NOT exposed remotely.</strong> When the local AI
-        finishes drafting, paste the result into the BUD section editor.
-        This intentional limit keeps a leaked or prompt-injected token
-        from rewriting your BUDs.
+      <div class="mcp-card__body">
+        <div v-for="group in TOOL_GROUPS" :key="group.label" class="tool-group">
+          <div class="tool-group__label">
+            <v-chip
+              :color="group.label === 'Write' ? 'warning' : 'success'"
+              size="x-small"
+              variant="tonal"
+              class="text-uppercase font-weight-bold"
+            >
+              {{ group.label }}
+            </v-chip>
+            <span class="text-caption text-medium-emphasis">
+              {{ group.label === 'Write' ? 'Mutates org state' : 'Read-only' }}
+            </span>
+          </div>
+          <div
+            v-for="tool in group.tools"
+            :key="tool.name"
+            class="tool-row"
+          >
+            <code class="tool-row__name">{{ tool.name }}</code>
+            <div class="tool-row__description">{{ tool.description }}</div>
+          </div>
+        </div>
+      </div>
+      <v-alert type="info" variant="tonal" density="compact" class="ma-4 mt-0">
+        <strong>Writes are bounded.</strong> <code class="inline-code">update_bud</code>
+        is restricted to three creative phases:
+        <code class="inline-code">requirements_md</code> in BUD,
+        <code class="inline-code">design</code> wireframe HTML in DESIGN, and
+        <code class="inline-code">tech_spec_md</code> in TECH_ARCH. Testing and
+        Code Review remain UI / agent-driven. Every write snapshots prior
+        state in the BUD detail's History tab so a bad edit reverts in one
+        click.
       </v-alert>
     </v-card>
 
-    <v-card variant="outlined" class="mb-6 pa-4">
-      <div class="text-subtitle-1 font-weight-medium mb-3">Client config snippets</div>
-      <v-tabs v-model="snippetTab" density="compact">
-        <v-tab v-for="(snippet, key) in SNIPPETS" :key="key" :value="key">{{ snippet.label }}</v-tab>
+    <v-card variant="outlined" class="mcp-card mb-6">
+      <div class="mcp-card__header">
+        <v-icon icon="mdi-code-braces" size="18" color="primary" />
+        <div class="text-subtitle-2 font-weight-medium">Client config snippets</div>
+      </div>
+      <v-tabs v-model="snippetTab" density="compact" class="px-4">
+        <v-tab v-for="(snippet, key) in SNIPPETS" :key="key" :value="key">
+          {{ snippet.label }}
+        </v-tab>
       </v-tabs>
-      <v-window v-model="snippetTab" class="mt-3">
+      <v-divider />
+      <v-window v-model="snippetTab">
         <v-window-item v-for="(snippet, key) in SNIPPETS" :key="key" :value="key">
-          <pre class="snippet-pre">{{ snippet.render(endpointUrl) }}</pre>
-          <div class="d-flex justify-end">
+          <div class="snippet-block">
+            <pre class="snippet-pre">{{ snippet.render(endpointUrl) }}</pre>
             <v-btn
+              class="snippet-copy"
               size="small"
-              variant="text"
+              variant="tonal"
               prepend-icon="mdi-content-copy"
-              @click="copy(snippet.render(endpointUrl))"
+              @click="copy(snippet.render(endpointUrl), 'Snippet copied')"
             >
               Copy snippet
             </v-btn>
           </div>
         </v-window-item>
       </v-window>
-      <v-alert type="warning" variant="tonal" density="compact" class="mt-3">
+      <v-alert type="warning" variant="tonal" density="compact" class="ma-4 mt-0">
         Connecting an external LLM extends its trust boundary to your BUD
         content. Anyone who can read a token can read every BUD in your
         org. Treat tokens like passwords; revoke unused ones.
@@ -131,40 +201,45 @@
          our agents use. These snippets give the local LLM the verbs it
          needs (which tools to call, in what order) so the output lands
          in the shape the BUD section editors expect. -->
-    <v-card variant="outlined" class="mb-6 pa-4">
-      <div class="text-subtitle-1 font-weight-medium mb-2">Example prompts to start work</div>
-      <div class="text-caption text-medium-emphasis mb-3">
-        Paste one of these into your local AI to kick off a phase. Each
-        instructs the LLM to fetch our exact agent prompt via
-        <code>get_prompt</code>, gather the right context, then produce
-        the section's content. When it's done, copy the body into the
-        matching BUD editor tab.
+    <v-card variant="outlined" class="mcp-card mb-6">
+      <div class="mcp-card__header">
+        <v-icon icon="mdi-text-box-edit-outline" size="18" color="primary" />
+        <div class="text-subtitle-2 font-weight-medium">Example prompts to start work</div>
       </div>
-      <v-tabs v-model="exampleTab" density="compact">
+      <div class="mcp-card__body pb-0">
+        <div class="text-caption text-medium-emphasis">
+          Paste one of these into your local AI to kick off a phase. Each
+          instructs the LLM to fetch our exact agent prompt via
+          <code class="inline-code">get_prompt</code>, gather the right context,
+          then produce the section's content.
+        </div>
+      </div>
+      <v-tabs v-model="exampleTab" density="compact" class="px-4 mt-2">
         <v-tab v-for="(ex, key) in EXAMPLE_PROMPTS" :key="key" :value="key">
           {{ ex.label }}
         </v-tab>
       </v-tabs>
-      <v-window v-model="exampleTab" class="mt-3">
+      <v-divider />
+      <v-window v-model="exampleTab">
         <v-window-item v-for="(ex, key) in EXAMPLE_PROMPTS" :key="key" :value="key">
-          <pre class="snippet-pre">{{ ex.body }}</pre>
-          <div class="d-flex justify-end">
+          <div class="snippet-block">
+            <pre class="snippet-pre">{{ ex.body }}</pre>
             <v-btn
+              class="snippet-copy"
               size="small"
-              variant="text"
+              variant="tonal"
               prepend-icon="mdi-content-copy"
-              @click="copy(ex.body)"
+              @click="copy(ex.body, 'Prompt copied')"
             >
               Copy prompt
             </v-btn>
           </div>
         </v-window-item>
       </v-window>
-      <v-alert type="info" variant="tonal" density="compact" class="mt-3">
-        Replace <code>&lt;your topic&gt;</code> / <code>&lt;BUD-NUMBER&gt;</code>
-        in the prompt with the actual values before sending. The LLM
-        will call the read-only tools listed above; you save the
-        result by pasting into the BUD editor.
+      <v-alert type="info" variant="tonal" density="compact" class="ma-4 mt-0">
+        Replace <code class="inline-code">&lt;your topic&gt;</code> /
+        <code class="inline-code">&lt;BUD-NUMBER&gt;</code> in the prompt with
+        the actual values before sending.
       </v-alert>
     </v-card>
 
@@ -206,6 +281,15 @@
       </v-card>
     </v-dialog>
 
+    <v-snackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      :timeout="2000"
+      location="bottom"
+    >
+      {{ snackbar.text }}
+    </v-snackbar>
+
     <!-- Plaintext-once dialog -->
     <v-dialog v-model="plaintextDialog" max-width="560" persistent>
       <v-card class="pa-5">
@@ -222,7 +306,7 @@
           readonly
           density="comfortable"
           append-inner-icon="mdi-content-copy"
-          @click:append-inner="copy(plaintextToken)"
+          @click:append-inner="copy(plaintextToken, 'Token copied successfully')"
         />
         <v-card-actions>
           <v-spacer />
@@ -275,12 +359,28 @@ const endpointUrl = computed(() => {
   return `${base}/mcp/sse`
 })
 
-const TOOL_CATALOGUE = [
-  { name: 'get_bud_context', description: 'List recent BUDs for context.' },
-  { name: 'get_features', description: 'Semantic knowledge search over your org\'s active features.' },
-  { name: 'list_design_systems', description: 'Design-system metadata per repo.' },
-  { name: 'get_design_system', description: 'Full HTML/CSS/tokens for a repo or the org default.' },
-  { name: 'get_prompt', description: 'Return our agent\'s prompt for a stage (task_type: pm / design / tech_plan / testing) so your local AI produces matching output.' },
+// Grouped so users can see at a glance which tools mutate org state
+// and which don't. Names + descriptions match the backend's
+// _REMOTE_TOOL_SCHEMAS in app/mcp/streamable.py — keep in sync.
+const TOOL_GROUPS: { label: string; tools: { name: string; description: string }[] }[] = [
+  {
+    label: 'Read',
+    tools: [
+      { name: 'get_bud_context', description: 'List in-progress BUDs (with optional keyword filter) so the LLM doesn\'t propose duplicates.' },
+      { name: 'get_bud_by_id', description: 'Fetch one BUD by UUID with the full body of every section.' },
+      { name: 'get_features', description: 'Hybrid keyword + semantic search over your org\'s active features.' },
+      { name: 'list_design_systems', description: 'Design-system metadata per repo.' },
+      { name: 'get_design_system', description: 'Full HTML/CSS/tokens for a repo or the org default.' },
+      { name: 'get_prompt', description: 'Return our agent\'s prompt for a stage (task_type: pm / design / tech_plan / testing) so your local AI produces matching output.' },
+    ],
+  },
+  {
+    label: 'Write',
+    tools: [
+      { name: 'create_bud', description: 'Create a new BUD; the calling token\'s user is set as both creator and assignee.' },
+      { name: 'update_bud', description: 'Update the content field owned by the BUD\'s current phase. Assignee-only; the server picks the editable field from the phase.' },
+    ],
+  },
 ]
 
 interface ClientSnippet {
@@ -482,11 +582,25 @@ async function revoke(t: TokenRead): Promise<void> {
   await refresh()
 }
 
-async function copy(text: string): Promise<void> {
+const snackbar = ref<{ show: boolean; text: string; color: 'success' | 'error' }>({
+  show: false,
+  text: '',
+  color: 'success',
+})
+
+function notify(text: string, color: 'success' | 'error' = 'success'): void {
+  snackbar.value = { show: true, text, color }
+}
+
+async function copy(text: string, label = 'Copied to clipboard'): Promise<void> {
   try {
     await navigator.clipboard.writeText(text)
+    notify(label, 'success')
   } catch {
-    // Clipboard write is best-effort; user can fall back to manual select.
+    // Clipboard write blocked (insecure context, denied permission) —
+    // surface the failure so the user knows to fall back to manual
+    // select rather than silently doing nothing.
+    notify('Copy failed — select and copy manually', 'error')
   }
 }
 
@@ -494,20 +608,117 @@ onMounted(refresh)
 </script>
 
 <style scoped>
+.mcp-page {
+  max-width: 1040px;
+  margin: 0 auto;
+}
+.mcp-hero__eyebrow {
+  letter-spacing: 0.08em;
+}
+.mcp-hero__lede {
+  max-width: 78ch;
+  line-height: 1.55;
+}
+.mcp-card {
+  overflow: hidden;
+}
+.mcp-card__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: rgba(var(--v-theme-on-surface), 0.025);
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+}
+.mcp-card__body {
+  padding: 18px;
+}
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+}
+.token-list {
+  background: transparent;
+}
 .endpoint-code {
-  background: rgba(var(--v-theme-on-surface), 0.06);
-  padding: 4px 10px;
+  background: rgba(var(--v-theme-on-surface), 0.07);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-family: var(--v-font-family-monospace, 'Menlo', monospace);
+  font-size: 13px;
+  min-width: 0;
+  word-break: break-all;
+}
+.inline-code {
+  background: rgba(var(--v-theme-on-surface), 0.07);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  font-family: var(--v-font-family-monospace, 'Menlo', monospace);
+}
+.tool-group + .tool-group {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px dashed rgba(var(--v-theme-on-surface), 0.08);
+}
+.tool-group__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.tool-row {
+  display: grid;
+  grid-template-columns: minmax(160px, max-content) 1fr;
+  align-items: baseline;
+  gap: 14px;
+  padding: 6px 0;
+}
+.tool-row__name {
+  background: rgba(var(--v-theme-on-surface), 0.07);
+  padding: 2px 8px;
   border-radius: 4px;
   font-family: var(--v-font-family-monospace, 'Menlo', monospace);
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+}
+.tool-row__description {
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface), 0.78);
+}
+.snippet-block {
+  position: relative;
+  padding: 16px 18px 18px;
+}
+.snippet-copy {
+  position: absolute;
+  top: 24px;
+  right: 26px;
 }
 .snippet-pre {
   background: rgba(var(--v-theme-on-surface), 0.06);
-  border-radius: 6px;
-  padding: 12px;
+  border-radius: 8px;
+  padding: 14px 16px;
   overflow-x: auto;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.5;
   font-family: var(--v-font-family-monospace, 'Menlo', monospace);
   white-space: pre;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+}
+@media (max-width: 600px) {
+  .tool-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .snippet-copy {
+    position: static;
+    margin-top: 8px;
+  }
 }
 </style>

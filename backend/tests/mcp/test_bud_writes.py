@@ -12,9 +12,10 @@ prompt-injection scenarios:
    assignee, even when the BUD belongs to the token's org.
 2. ``update_bud`` rejects calls against terminal-status BUDs so a
    closed/discarded BUD can't be edited back to life via MCP.
-3. ``update_bud`` rejects calls when the current phase has no editable
-   field (e.g. DEVELOPMENT or UAT) — eliminates an entire class of
-   "write the wrong field via MCP" injection.
+3. ``update_bud`` rejects calls when the current phase isn't in the
+   ``_MCP_EDITABLE_PHASES`` allowlist (TESTING, CODE_REVIEW, DEVELOPMENT,
+   UAT, PROD) — eliminates an entire class of "write the wrong field
+   via MCP" injection and keeps PR/evidence-gated phases UI-only.
 4. ``create_bud`` requires a per-user token; org-level tokens are
    rejected so we never produce a BUD with no assignee-of-record.
 """
@@ -101,12 +102,25 @@ async def test_update_bud_rejects_terminal_status(monkeypatch: Any) -> None:
     assert result["code"] == "terminal_status"
 
 
+@pytest.mark.parametrize(
+    "blocked_phase",
+    [
+        BUDStatus.DEVELOPMENT,
+        BUDStatus.TESTING,
+        BUDStatus.CODE_REVIEW,
+        BUDStatus.UAT,
+        BUDStatus.PROD,
+    ],
+)
 @pytest.mark.asyncio
-async def test_update_bud_rejects_phase_with_no_owning_field(monkeypatch: Any) -> None:
-    """DEVELOPMENT phase owns no markdown column — MCP cannot edit anything."""
+async def test_update_bud_rejects_non_creative_phases(
+    monkeypatch: Any, blocked_phase: BUDStatus
+) -> None:
+    """Only BUD / DESIGN / TECH_ARCH are MCP-writable — every other live
+    phase rejects with ``phase_not_writable``."""
     user_id = uuid.uuid4()
     auth = _auth(user_id)
-    bud = _fake_bud(status=BUDStatus.DEVELOPMENT, assignee_id=user_id)
+    bud = _fake_bud(status=blocked_phase, assignee_id=user_id)
 
     async def _get(self: Any, bud_id: uuid.UUID) -> MagicMock:
         return bud
@@ -117,8 +131,8 @@ async def test_update_bud_rejects_phase_with_no_owning_field(monkeypatch: Any) -
         MagicMock(), auth, {"bud_id": str(bud.id), "content": "anything"}
     )
     assert result["success"] is False
-    assert result["code"] == "no_editable_field"
-    assert result["current_status"] == "development"
+    assert result["code"] == "phase_not_writable"
+    assert result["current_status"] == blocked_phase.value
 
 
 @pytest.mark.asyncio
@@ -152,6 +166,61 @@ async def test_update_bud_writes_only_owning_field(monkeypatch: Any) -> None:
     assert bud.requirements_md == original_requirements
     assert len(snapshots) == 1
     assert snapshots[0]["source"].value == "mcp"
+
+
+@pytest.mark.asyncio
+async def test_update_bud_design_phase_routes_to_design_upsert(monkeypatch: Any) -> None:
+    """DESIGN-phase writes don't touch BUD markdown columns — they upsert
+    the BUD-level row in ``bud_designs`` and snapshot the prior HTML
+    alongside the standard BUD snapshot under ``__design_html``."""
+    user_id = uuid.uuid4()
+    auth = _auth(user_id)
+    bud = _fake_bud(status=BUDStatus.DESIGN, assignee_id=user_id)
+    prior_design = MagicMock(repo_id=None, design_html="<old>OLD</old>")
+    new_design = MagicMock(id=uuid.uuid4())
+
+    snapshots: list[dict[str, Any]] = []
+    upsert_calls: list[dict[str, Any]] = []
+
+    async def _get(self: Any, bud_id: uuid.UUID) -> MagicMock:
+        return bud
+
+    async def _list_for_bud(self: Any, bud_id: uuid.UUID) -> list[Any]:
+        return [prior_design]
+
+    async def _upsert(self: Any, bud_id: uuid.UUID, repo_id: Any, **kw: Any) -> MagicMock:
+        upsert_calls.append({"bud_id": bud_id, "repo_id": repo_id, **kw})
+        return new_design
+
+    async def _commit_snapshot(db: Any, **kw: Any) -> Any:
+        snapshots.append(kw)
+        return MagicMock()
+
+    monkeypatch.setattr(BUDRepository, "get_by_id", _get)
+    monkeypatch.setattr("app.repositories.bud.BUDDesignRepository.list_for_bud", _list_for_bud)
+    monkeypatch.setattr("app.repositories.bud.BUDDesignRepository.upsert", _upsert)
+    monkeypatch.setattr(
+        "app.mcp.handlers_bud_writes.bud_version_repo.commit_snapshot", _commit_snapshot
+    )
+
+    db = MagicMock(flush=AsyncMock())
+    result = await handle_update_bud(
+        db, auth, {"bud_id": str(bud.id), "content": "<div>NEW WIREFRAME</div>"}
+    )
+
+    assert result["success"] is True
+    assert result["field"] == "design_html"
+    assert result["design_id"] == str(new_design.id)
+    # The design upsert ran with repo_id=None — i.e. the BUD-level
+    # design slot, not a per-repo wireframe.
+    assert len(upsert_calls) == 1
+    assert upsert_calls[0]["repo_id"] is None
+    assert "NEW WIREFRAME" in upsert_calls[0]["design_html"]
+    # The pre-edit design HTML was captured in the snapshot under the
+    # sentinel key, so revert can roll BOTH the BUD columns and the
+    # design row back to v1.
+    assert len(snapshots) == 1
+    assert snapshots[0]["snapshot"]["__design_html"] == "<old>OLD</old>"
 
 
 @pytest.mark.asyncio

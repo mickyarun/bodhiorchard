@@ -154,10 +154,12 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "update_bud",
         "description": (
-            "Update the content field owned by the BUD's current phase. "
-            "You must be the BUD's assignee and the BUD must not be in "
-            "closed/discarded. The server picks the editable field from "
-            "the phase — you cannot address a different one."
+            "Update content for the BUD's current creative phase. "
+            "Editable phases: BUD (requirements_md), DESIGN (BUD-level "
+            "wireframe HTML), TECH_ARCH (tech_spec_md). Other phases "
+            "(testing, code_review, …) are NOT remotely writable. You "
+            "must be the BUD's assignee; the server picks the field "
+            "from the phase — you cannot address a different one."
         ),
         "inputSchema": {
             "type": "object",

@@ -52,8 +52,10 @@
           <!-- External-LLM mode banner. Shown when EVERY phase in
                auto_generate_phases is off (or the dict is empty / null
                — the default for newly-created BUDs). The user drives
-               each phase via the section editor, typically using their
-               local AI through the remote MCP endpoint. -->
+               each phase from their local AI through the remote MCP
+               endpoint, which can either write back directly via the
+               assignee-gated update_bud tool or hand the user content
+               to paste into the section editor. -->
           <v-alert
             v-if="isExternalLlmMode"
             type="info"
@@ -65,9 +67,11 @@
             <div class="d-flex align-center ga-3 flex-wrap">
               <div class="flex-grow-1">
                 <strong>External-LLM mode.</strong>
-                Stage agents are off for this BUD. Connect your local AI to
-                gather context, then paste the finished spec into each
-                section editor — or flip individual phases back on under
+                Stage agents are off for this BUD. Your local AI can write
+                BUD / Design / Tech-spec content back directly through
+                <strong>MCP Connect</strong> (assignee-only, current phase
+                only), or you can paste the finished spec into the section
+                editor. Flip individual phases back to auto under
                 <strong>AI skills</strong>.
               </div>
               <v-btn
@@ -232,6 +236,10 @@
               <v-tab v-if="uatStageEnabled" value="uat">UAT</v-tab>
               <v-tab value="prod">Prod</v-tab>
               <v-tab v-if="isClosed" value="closed">{{ bud.status === 'discarded' ? 'Discarded' : 'Closed' }}</v-tab>
+              <v-tab value="history">
+                <v-icon start size="16">mdi-history</v-icon>
+                History
+              </v-tab>
             </v-tabs>
             <BUDSectionToolbar
               v-if="!isReadOnlyTab"
@@ -376,6 +384,20 @@
                 <BUDClosedTab v-if="bud" :bud="bud" :timeline-events="timelineEvents" />
               </v-tabs-window-item>
 
+              <!-- Edit history + revert. Reads /buds/{id}/versions and
+                   triggers a BUD refresh on revert so the section
+                   editors above reflect the restored content. -->
+              <v-tabs-window-item value="history">
+                <div class="pa-4">
+                  <BUDVersionHistoryPanel
+                    v-if="bud"
+                    :bud-id="bud.id"
+                    :bud-status="bud.status"
+                    @reverted="onBudReverted"
+                  />
+                </div>
+              </v-tabs-window-item>
+
               <!-- Test Plan tab removed — test plan content is now part of QA tab -->
             </v-tabs-window>
           </div>
@@ -493,6 +515,7 @@ import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
 import BUDTechSpecTab from '@/components/buds/BUDTechSpecTab.vue'
 import BUDClosedTab from '@/components/buds/BUDClosedTab.vue'
+import BUDVersionHistoryPanel from '@/components/buds/BUDVersionHistoryPanel.vue'
 import BUDSectionToolbar from '@/components/buds/BUDSectionToolbar.vue'
 import BUDStatusDialogs from '@/components/buds/BUDStatusDialogs.vue'
 import { useBudLinkedFeaturesStore } from '@/stores/budLinkedFeatures'
@@ -674,6 +697,15 @@ const reachedCodeReview = computed(() => {
 // via the STATUS_TAB_MAP watcher once fetchBUD picks up the new status,
 // so no manual activeTab assignment needed.
 async function onCodeReviewTransitioned(): Promise<void> {
+  if (!bud.value) return
+  await Promise.all([budStore.fetchBUD(bud.value.id), loadTimeline()])
+}
+
+// History-tab revert handler. Refreshes the BUD body so the section
+// editors above the History tab show the restored content. Timeline
+// reload too — the revert produces a new ``source='revert'`` row that
+// the activity panel should pick up.
+async function onBudReverted(): Promise<void> {
   if (!bud.value) return
   await Promise.all([budStore.fetchBUD(bud.value.id), loadTimeline()])
 }

@@ -38,21 +38,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.auth import MCPAuthResult
 from app.mcp.handler_utils import require_non_empty
-from app.models.bud import BUDDocument, BUDStatus
+from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus
 from app.models.bud_version import BUDEditSource
 from app.repositories import bud_version as bud_version_repo
-from app.repositories.bud import BUDRepository
+from app.repositories.bud import BUDDesignRepository, BUDRepository
+from app.repositories.bud_version import build_snapshot
 from app.services.bud_edit_policy import FIELD_OWNING_STATUS
 from app.services.embedding_service import embedding_service
 from app.services.feature_lifecycle import create_planned_feature
+from app.services.html_sanitizer import sanitize_design_html
 
-# Reverse of :data:`FIELD_OWNING_STATUS`: given the current BUD status,
-# which markdown column is editable. Built at import time so the handler
-# stays a constant-time lookup. A status absent from this map (e.g.
-# DEVELOPMENT, UAT, PROD) has no MCP-editable field — the policy is
-# "wait for the phase to advance".
+# The MCP write surface is intentionally narrower than the REST PATCH
+# policy: external LLMs may author the three creative phases (drafting
+# the PRD, designing the UI, writing the tech spec). Testing and
+# code-review writes stay UI/agent-driven — they involve evidence
+# uploads, PR merge state, and stage-gating logic that a stateless LLM
+# call should not steer.
+_MCP_EDITABLE_PHASES: frozenset[BUDStatus] = frozenset(
+    {BUDStatus.BUD, BUDStatus.DESIGN, BUDStatus.TECH_ARCH}
+)
+
+# Reverse of :data:`FIELD_OWNING_STATUS` for the markdown-column phases.
+# ``DESIGN`` is excluded because its content lives in the ``bud_designs``
+# table — see :func:`_apply_design_content` for the dedicated write path.
 _STATUS_TO_OWNING_FIELD: dict[BUDStatus, str] = {
-    status: field for field, status in FIELD_OWNING_STATUS.items()
+    status: field
+    for field, status in FIELD_OWNING_STATUS.items()
+    if status in _MCP_EDITABLE_PHASES
 }
 
 logger = structlog.get_logger(__name__)
@@ -152,19 +164,107 @@ async def handle_create_bud(
     }
 
 
+async def _apply_design_content(
+    db: AsyncSession,
+    auth: MCPAuthResult,
+    bud: BUDDocument,
+    content: str,
+) -> dict[str, Any]:
+    """Persist DESIGN-phase content via the dedicated ``bud_designs`` upsert.
+
+    BUD-level design (``repo_id=None``) is the single MCP-writable design
+    row — the per-repo wireframe rows stay agent/UI-driven so the LLM
+    can't accidentally overwrite a repo-specific design that's still
+    being iterated on. Snapshot the prior HTML alongside the standard
+    BUD snapshot so revert can restore both columns.
+    """
+    design_repo = BUDDesignRepository(db, org_id=auth.org.id)
+    rows = await design_repo.list_for_bud(bud.id)
+    prior_design = next((r for r in rows if r.repo_id is None), None)
+
+    snapshot = build_snapshot(bud)
+    snapshot["__design_html"] = prior_design.design_html if prior_design else None
+
+    await bud_version_repo.commit_snapshot(
+        db,
+        bud_id=bud.id,
+        phase=bud.status,
+        snapshot=snapshot,
+        source=BUDEditSource.MCP,
+        edited_by=auth.user.id if auth.user else None,
+        mcp_token_id=auth.token_id,
+    )
+
+    safe_html = sanitize_design_html(content)
+    design = await design_repo.upsert(
+        bud.id,
+        None,
+        design_html=safe_html,
+        status=BUDDesignStatus.READY,
+    )
+    await db.flush()
+    return {
+        "success": True,
+        "id": str(bud.id),
+        "bud_number": bud.bud_number,
+        "field": "design_html",
+        "design_id": str(design.id),
+        "phase": bud.status.value,
+    }
+
+
+async def _apply_markdown_content(
+    db: AsyncSession,
+    auth: MCPAuthResult,
+    bud: BUDDocument,
+    field: str,
+    content: str,
+) -> dict[str, Any]:
+    """Persist a markdown content field via the standard snapshot+setattr path."""
+    await bud_version_repo.insert_snapshot(
+        db,
+        bud=bud,
+        phase=bud.status,
+        source=BUDEditSource.MCP,
+        edited_by=auth.user.id if auth.user else None,
+        mcp_token_id=auth.token_id,
+    )
+
+    setattr(bud, field, content)
+
+    # Embedding regenerates only when requirements_md changes — the
+    # other markdown fields are downstream context the search pipeline
+    # doesn't index, so paying the embed-roundtrip on every edit is
+    # waste.
+    if field == "requirements_md":
+        try:
+            bud.embedding = await embedding_service.embed(f"{bud.title} {content[:500]}")
+        except Exception:
+            logger.warning("mcp_update_bud_embedding_failed", bud_id=str(bud.id), exc_info=True)
+
+    await db.flush()
+    return {
+        "success": True,
+        "id": str(bud.id),
+        "bud_number": bud.bud_number,
+        "field": field,
+        "phase": bud.status.value,
+    }
+
+
 async def handle_update_bud(
     db: AsyncSession,
     auth: MCPAuthResult,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Update the phase-owned content field of one BUD.
+    """Update content tied to the BUD's CURRENT phase.
 
-    The caller never names the field directly. The server resolves it
-    from the BUD's current status against :data:`FIELD_OWNING_STATUS`,
-    which both (a) tracks the same policy the UI mirrors and (b)
-    forecloses an entire class of injection where an attacker LLM
-    prompts the agent to write ``tech_spec_md`` while the BUD is still
-    in the BUD phase.
+    MCP writes are restricted to three creative phases — BUD (PRD),
+    DESIGN (wireframe HTML), and TECH_ARCH (tech spec). The caller never
+    names the field; the server resolves it from
+    :data:`_MCP_EDITABLE_PHASES`. This both (a) mirrors the policy the
+    UI shows and (b) forecloses an entire injection class where an LLM
+    prompts another agent to "write tech_spec while in BUD phase".
 
     Guard order (fail-fast):
 
@@ -172,7 +272,7 @@ async def handle_update_bud(
     2. ``bud_id`` parses + BUD exists in the token's org
     3. ``bud.assignee_id == auth.user.id``
     4. BUD is not in a terminal phase
-    5. current phase has an owning content field
+    5. ``bud.status`` is in :data:`_MCP_EDITABLE_PHASES`
     6. ``content`` is non-empty after strip
     """
     if auth.user is None:
@@ -210,38 +310,23 @@ async def handle_update_bud(
             f"BUD is in '{bud.status.value}'; create a new BUD instead of editing this one.",
         )
 
-    field = _STATUS_TO_OWNING_FIELD.get(bud.status)
-    if field is None:
+    if bud.status not in _MCP_EDITABLE_PHASES:
         return _err(
-            "no_editable_field",
-            f"No content field is editable in '{bud.status.value}'. "
-            "Wait for the phase to advance.",
+            "phase_not_writable",
+            (
+                f"MCP writes are limited to the BUD, DESIGN, and TECH_ARCH phases. "
+                f"BUD is currently in '{bud.status.value}'."
+            ),
             current_status=bud.status.value,
         )
 
     content = str(params["content"])
 
-    await bud_version_repo.insert_snapshot(
-        db,
-        bud=bud,
-        phase=bud.status,
-        source=BUDEditSource.MCP,
-        edited_by=auth.user.id,
-        mcp_token_id=auth.token_id,
-    )
-
-    setattr(bud, field, content)
-
-    # Refresh the embedding only when requirements_md changes — every
-    # other field is downstream context the search pipeline doesn't
-    # index.
-    if field == "requirements_md":
-        try:
-            bud.embedding = await embedding_service.embed(f"{bud.title} {content[:500]}")
-        except Exception:
-            logger.warning("mcp_update_bud_embedding_failed", bud_id=str(bud_id), exc_info=True)
-
-    await db.flush()
+    if bud.status == BUDStatus.DESIGN:
+        result = await _apply_design_content(db, auth, bud, content)
+    else:
+        field = _STATUS_TO_OWNING_FIELD[bud.status]
+        result = await _apply_markdown_content(db, auth, bud, field, content)
 
     logger.info(
         "mcp_update_bud",
@@ -250,16 +335,10 @@ async def handle_update_bud(
         token_id=str(auth.token_id) if auth.token_id else None,
         bud_id=str(bud_id),
         phase=bud.status.value,
-        field=field,
+        field=result.get("field"),
         content_len=len(content),
     )
-    return {
-        "success": True,
-        "id": str(bud.id),
-        "bud_number": bud.bud_number,
-        "field": field,
-        "phase": bud.status.value,
-    }
+    return result
 
 
 async def handle_get_bud_by_id(
