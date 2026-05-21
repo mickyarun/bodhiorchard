@@ -79,7 +79,15 @@ def _patch_repos(
       after the continuity-hit assignment (suppresses continuity).
     """
     list_active = AsyncMock(return_value=candidates)
-    user_repo_cls = MagicMock(return_value=MagicMock(list_active_with_role=list_active))
+    user_repo_cls = MagicMock(
+        return_value=MagicMock(
+            list_active_with_role=list_active,
+            # CODE_REVIEW retention now resolves the actual role of the
+            # held-over developer (or fallback tech_lead) — default None
+            # is fine for tests that don't care.
+            get_role=AsyncMock(return_value=None),
+        )
+    )
     monkeypatch.setattr(bud_assignment, "UserRepository", user_repo_cls)
 
     bud_repo = MagicMock()
@@ -89,7 +97,7 @@ def _patch_repos(
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
 
     timeline_repo = MagicMock()
-    timeline_repo.latest_assignee_for_roles = AsyncMock(return_value=continuity_hit)
+    timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=continuity_hit)
     timeline_repo.latest_user_unassign_after = AsyncMock(return_value=later_user_unassign)
     monkeypatch.setattr(
         bud_assignment, "BUDTimelineRepository", MagicMock(return_value=timeline_repo)
@@ -167,7 +175,7 @@ async def test_all_at_capacity_emits_warning_and_leaves_unassigned(
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
 
     timeline_repo = MagicMock()
-    timeline_repo.latest_assignee_for_roles = AsyncMock(return_value=None)
+    timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=None)
     timeline_repo.latest_user_unassign_after = AsyncMock(return_value=False)
     monkeypatch.setattr(
         bud_assignment, "BUDTimelineRepository", MagicMock(return_value=timeline_repo)
@@ -252,7 +260,7 @@ async def test_fallback_role_used_when_primary_empty(
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
 
     timeline_repo = MagicMock()
-    timeline_repo.latest_assignee_for_roles = AsyncMock(return_value=None)
+    timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=None)
     timeline_repo.latest_user_unassign_after = AsyncMock(return_value=False)
     monkeypatch.setattr(
         bud_assignment, "BUDTimelineRepository", MagicMock(return_value=timeline_repo)
@@ -378,7 +386,7 @@ async def test_code_review_does_not_emit_lifecycle_events(
 
 
 def _continuity_hit(user_id: uuid.UUID, role: str = "pm") -> tuple[uuid.UUID, datetime, str]:
-    """Build a fake ``latest_assignee_for_roles`` return value."""
+    """Build a fake ``latest_assignee_for_phase`` return value."""
     return (user_id, datetime(2026, 5, 14, tzinfo=UTC), role)
 
 
@@ -423,7 +431,7 @@ def _patch_continuity_world(
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
 
     timeline_repo = MagicMock()
-    timeline_repo.latest_assignee_for_roles = AsyncMock(
+    timeline_repo.latest_assignee_for_phase = AsyncMock(
         return_value=_continuity_hit(prev_user.id, prev_role.value)
     )
     timeline_repo.latest_user_unassign_after = AsyncMock(return_value=later_unassign)
@@ -645,7 +653,7 @@ async def test_chain_message_attributes_primary_when_fallback_at_cap(
     bud_repo.count_active_loads_for_assignees = AsyncMock(return_value={pm.id: 1})
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
     timeline_repo = MagicMock()
-    timeline_repo.latest_assignee_for_roles = AsyncMock(return_value=None)
+    timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=None)
     timeline_repo.latest_user_unassign_after = AsyncMock(return_value=False)
     monkeypatch.setattr(
         bud_assignment, "BUDTimelineRepository", MagicMock(return_value=timeline_repo)
@@ -716,7 +724,7 @@ async def test_chain_never_falls_through_to_org_owner(
     bud_repo.count_active_loads_for_assignees = AsyncMock(side_effect=loads)
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
     timeline_repo = MagicMock()
-    timeline_repo.latest_assignee_for_roles = AsyncMock(return_value=None)
+    timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=None)
     timeline_repo.latest_user_unassign_after = AsyncMock(return_value=False)
     monkeypatch.setattr(
         bud_assignment, "BUDTimelineRepository", MagicMock(return_value=timeline_repo)
@@ -773,3 +781,163 @@ async def test_manual_assign_records_role_for_continuity_lookups(
     assert detail["method"] == "manual"
     assert detail["role"] == "pm"
     assert detail["assignee_id"] == str(assignee_id)
+    # ``phase`` must be stamped so continuity lookups on future re-entry
+    # can match by phase rather than role-in-chain.
+    assert detail["phase"] == BUDStatus.BUD.value
+
+
+# ── Phase-scoped continuity (no cross-phase bleed via fallback roles) ──
+
+
+@pytest.mark.asyncio
+async def test_first_design_entry_does_not_carry_pm_from_bud_phase(
+    monkeypatch: pytest.MonkeyPatch,
+    org_id: uuid.UUID,
+) -> None:
+    """A PM assigned during BUD must NOT win continuity on first DESIGN entry.
+
+    Regression for the original bug: DESIGN's chain is ``(DESIGNER, PM)``
+    so the old role-in-chain continuity matched the previous PM event
+    and short-circuited the designer pool. Phase-scoped lookup must
+    return ``None`` for the unseen DESIGN phase and let the chain walk
+    pick a designer.
+    """
+    designer = SimpleNamespace(id=uuid.uuid4(), name="Dee", created_at="2026-01-01")
+
+    async def list_active(_org_id: uuid.UUID, role: object) -> list[SimpleNamespace]:
+        return [designer] if role == UserRole.DESIGNER else []
+
+    monkeypatch.setattr(
+        bud_assignment,
+        "UserRepository",
+        MagicMock(
+            return_value=MagicMock(
+                list_active_with_role=AsyncMock(side_effect=list_active),
+                get_role=AsyncMock(return_value=None),
+            )
+        ),
+    )
+    bud_repo = MagicMock()
+    bud_repo.count_active_loads_for_assignees = AsyncMock(return_value={designer.id: 0})
+    monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
+    timeline_repo = MagicMock()
+    # Phase-scoped query for "design" must return None even though the
+    # underlying timeline holds a PM ``assigned`` event from the BUD phase.
+    timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=None)
+    timeline_repo.latest_user_unassign_after = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        bud_assignment, "BUDTimelineRepository", MagicMock(return_value=timeline_repo)
+    )
+    log_activity = AsyncMock(return_value=None)
+    monkeypatch.setattr(bud_assignment, "log_agent_activity", log_activity)
+    monkeypatch.setattr(bud_assignment, "record_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "app.services.smart_assignment.assign_best_for_role",
+        AsyncMock(return_value=designer),
+    )
+
+    fake_db = MagicMock(name="AsyncSession")
+    fake_db.get = AsyncMock(return_value=None)
+    bud = _make_bud()
+
+    result = await bud_assignment.auto_assign_for_phase(fake_db, org_id, bud, BUDStatus.DESIGN)
+
+    # Designer (the primary) wins; PM never enters the picture.
+    assert result == designer.id
+    timeline_repo.latest_assignee_for_phase.assert_awaited_once_with(
+        bud.id, BUDStatus.DESIGN.value
+    )
+    completed = log_activity.await_args_list[-1].kwargs["metadata_"]
+    assert completed["role"] == "designer"
+    assert completed.get("method") != "continuity"
+
+
+@pytest.mark.asyncio
+async def test_testing_picks_qa_even_when_developer_was_just_assigned(
+    monkeypatch: pytest.MonkeyPatch,
+    org_id: uuid.UUID,
+) -> None:
+    """DEV → CODE_REVIEW → TESTING must pick a QA, not retain the developer.
+
+    Regression for the second bug: TESTING's chain is ``(QA, DEVELOPER)``
+    and CODE_REVIEW writes another ``assigned`` event with role=developer.
+    The old role-in-chain lookup matched that developer event; the
+    phase-scoped lookup returns None for the unseen TESTING phase and
+    lets the chain walk pick a QA.
+    """
+    qa = SimpleNamespace(id=uuid.uuid4(), name="Quinn", created_at="2026-01-01")
+
+    async def list_active(_org_id: uuid.UUID, role: object) -> list[SimpleNamespace]:
+        return [qa] if role == UserRole.QA else []
+
+    monkeypatch.setattr(
+        bud_assignment,
+        "UserRepository",
+        MagicMock(
+            return_value=MagicMock(
+                list_active_with_role=AsyncMock(side_effect=list_active),
+                get_role=AsyncMock(return_value=None),
+            )
+        ),
+    )
+    bud_repo = MagicMock()
+    bud_repo.count_active_loads_for_assignees = AsyncMock(return_value={qa.id: 0})
+    monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
+    timeline_repo = MagicMock()
+    timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=None)
+    timeline_repo.latest_user_unassign_after = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        bud_assignment, "BUDTimelineRepository", MagicMock(return_value=timeline_repo)
+    )
+    log_activity = AsyncMock(return_value=None)
+    monkeypatch.setattr(bud_assignment, "log_agent_activity", log_activity)
+    monkeypatch.setattr(bud_assignment, "record_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "app.services.smart_assignment.assign_best_for_role",
+        AsyncMock(return_value=qa),
+    )
+
+    fake_db = MagicMock(name="AsyncSession")
+    fake_db.get = AsyncMock(return_value=None)
+    bud = _make_bud()
+    bud.assignee_id = uuid.uuid4()  # the developer carried from CODE_REVIEW
+
+    result = await bud_assignment.auto_assign_for_phase(fake_db, org_id, bud, BUDStatus.TESTING)
+
+    assert result == qa.id
+    timeline_repo.latest_assignee_for_phase.assert_awaited_once_with(
+        bud.id, BUDStatus.TESTING.value
+    )
+    completed = log_activity.await_args_list[-1].kwargs["metadata_"]
+    assert completed["role"] == "qa"
+    assert completed.get("method") != "continuity"
+
+
+@pytest.mark.asyncio
+async def test_same_phase_re_entry_still_uses_continuity(
+    monkeypatch: pytest.MonkeyPatch,
+    org_id: uuid.UUID,
+) -> None:
+    """Re-entering the SAME phase must still carry over the previous assignee.
+
+    Guards against over-tightening: phase-scoped continuity must still
+    fire when a BUD comes back to a phase it has already visited (e.g.
+    DESIGN → DEV → back to DESIGN for rework).
+    """
+    designer = SimpleNamespace(id=uuid.uuid4(), name="Dee", created_at="2026-01-01")
+    log_activity = _patch_continuity_world(
+        monkeypatch,
+        prev_user=designer,
+        prev_role=UserRole.DESIGNER,
+    )
+
+    db = MagicMock(name="AsyncSession")
+    db.get = AsyncMock(return_value=designer)
+    bud = _make_bud()
+
+    result = await bud_assignment.auto_assign_for_phase(db, org_id, bud, BUDStatus.DESIGN)
+
+    assert result == designer.id
+    completed = log_activity.await_args_list[-1].kwargs["metadata_"]
+    assert completed["method"] == "continuity"
+    assert completed["continuity_from_role"] == "designer"

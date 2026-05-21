@@ -96,19 +96,25 @@ class BUDTimelineRepository(BaseRepository[BUDTimelineEvent]):
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
-    async def latest_assignee_for_roles(
-        self, bud_id: uuid.UUID, role_values: list[str]
-    ) -> tuple[uuid.UUID, datetime, str] | None:
-        """Return the most recent ``assigned`` event whose ``detail.role`` matches.
+    async def latest_assignee_for_phase(
+        self, bud_id: uuid.UUID, phase_value: str
+    ) -> tuple[uuid.UUID, datetime, str | None] | None:
+        """Return the most recent ``assigned`` event whose ``detail.phase`` matches.
 
         Used for continuity on phase re-entry — when a BUD comes back to
-        a phase, prefer the previous assignee whose role belongs to the
-        new phase's chain. Returns ``(assignee_id, created_at, role)``
-        so callers can compare against any later ``unassigned`` event.
-        Returns ``None`` when no matching event exists.
+        a phase, prefer the assignee who held it the last time the BUD
+        was actually in this phase. Matching on ``detail.phase`` (rather
+        than ``detail.role`` against the chain) stops cross-phase bleed:
+        a PM assigned during the ``bud`` phase no longer wins continuity
+        on first entry to ``design`` just because PM is the design
+        chain's fallback role.
+
+        Returns ``(assignee_id, created_at, role)`` — ``role`` is ``None``
+        for legacy events that didn't record one. ``None`` when no
+        matching event exists (including pre-deploy events that lack the
+        ``phase`` key; those degrade to the chain walk, which is the
+        intended fallback).
         """
-        if not role_values:
-            return None
         stmt = self._scoped(
             select(
                 BUDTimelineEvent.detail["assignee_id"].astext,
@@ -118,7 +124,7 @@ class BUDTimelineRepository(BaseRepository[BUDTimelineEvent]):
             .where(
                 BUDTimelineEvent.bud_id == bud_id,
                 BUDTimelineEvent.event_type == "assigned",
-                BUDTimelineEvent.detail["role"].astext.in_(role_values),
+                BUDTimelineEvent.detail["phase"].astext == phase_value,
                 BUDTimelineEvent.detail["assignee_id"].astext.isnot(None),
             )
             .order_by(BUDTimelineEvent.created_at.desc())

@@ -48,6 +48,15 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
+# Test-case identifiers come from the frontend QA flow; the route uses the
+# value as a directory component when composing the evidence-upload path,
+# so anything outside a strict alphanumeric+``-_`` shape is rejected at
+# the boundary. Storage layer's ``safe_join`` is the second line of
+# defence; this one gives the caller a clean 400 instead of a 500.
+# ``\Z`` (not ``$``) — Python's ``$`` matches before a trailing ``\n``,
+# which would let ``tc-001\n`` slip through.
+_TEST_CASE_ID_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
+
 
 # Anything outside this set is replaced with ``_`` in the storage
 # filename. We intentionally allow only ASCII alphanumerics, dot,
@@ -196,6 +205,9 @@ async def upload_evidence(
     current_user: User = Depends(get_current_user),
 ) -> TestEvidenceRead:
     """Upload an evidence file for a manual test case."""
+    if not _TEST_CASE_ID_PATTERN.match(test_case_id):
+        raise HTTPException(status_code=400, detail="Invalid test_case_id")
+
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if not bud:
