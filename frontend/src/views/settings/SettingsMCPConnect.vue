@@ -217,8 +217,8 @@
           the draft — no writes on intermediate edits.
         </div>
       </div>
-      <div class="d-flex align-center justify-space-between flex-wrap ga-3 px-4 pt-3">
-        <v-tabs v-model="exampleTab" density="compact">
+      <div class="prompt-tab-row">
+        <v-tabs v-model="exampleTab" density="compact" class="prompt-tab-row__tabs">
           <v-tab v-for="(ex, key) in EXAMPLE_PROMPTS" :key="key" :value="key">
             {{ ex.label }}
           </v-tab>
@@ -242,7 +242,7 @@
           </v-btn>
         </v-btn-toggle>
       </div>
-      <v-divider class="mt-3" />
+      <v-divider />
       <v-window v-model="exampleTab">
         <v-window-item v-for="(ex, key) in EXAMPLE_PROMPTS" :key="key" :value="key">
           <div class="snippet-block">
@@ -890,18 +890,47 @@ onMounted(refresh)
   }
 }
 
-/* Sub-toggle inside each prompt tab — sits at the right of the
-   v-tabs row. Small, outlined; primary accent on the active option
-   to mirror the tab indicator. */
+/* Row containing the phase tabs (left) and the create/update toggle
+   (right). Symmetric inset so the toggle has the same breathing room
+   from the card edge that the tabs have on their side, and the row
+   has top + bottom padding so it doesn't crash into the prose above
+   or the divider below. */
+.prompt-tab-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px 12px;
+  flex-wrap: wrap;
+}
+.prompt-tab-row__tabs {
+  min-width: 0;
+}
+
+/* Sub-toggle inside each prompt tab. Slightly taller than the
+   default ``density=compact`` so the active outline isn't crammed
+   against the text, and a touch of horizontal padding inside each
+   button for a better click target. */
 .prompt-mode-toggle {
-  height: 32px;
+  height: 34px;
+  flex-shrink: 0;
 }
 .prompt-mode-toggle :deep(.v-btn) {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 500;
   font-size: 12px;
-  padding-inline: 12px;
+  padding-inline: 14px;
+  min-width: 70px;
+}
+
+@media (max-width: 560px) {
+  .prompt-tab-row {
+    padding: 12px 16px;
+  }
+  .prompt-mode-toggle {
+    width: 100%;
+  }
 }
 
 /* "Placeholders" callout under the example prompts. Same visual
