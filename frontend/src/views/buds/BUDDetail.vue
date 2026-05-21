@@ -47,6 +47,7 @@
             @delete="confirmDelete = true"
             @save-title="handleSaveTitle"
             @open-skill-settings="skillSettingsOpen = true"
+            @open-history="historyDialogOpen = true"
           />
 
           <!-- External-LLM mode banner. Shown when EVERY phase in
@@ -236,10 +237,6 @@
               <v-tab v-if="uatStageEnabled" value="uat">UAT</v-tab>
               <v-tab value="prod">Prod</v-tab>
               <v-tab v-if="isClosed" value="closed">{{ bud.status === 'discarded' ? 'Discarded' : 'Closed' }}</v-tab>
-              <v-tab value="history">
-                <v-icon start size="16">mdi-history</v-icon>
-                History
-              </v-tab>
             </v-tabs>
             <BUDSectionToolbar
               v-if="!isReadOnlyTab"
@@ -384,20 +381,6 @@
                 <BUDClosedTab v-if="bud" :bud="bud" :timeline-events="timelineEvents" />
               </v-tabs-window-item>
 
-              <!-- Edit history + revert. Reads /buds/{id}/versions and
-                   triggers a BUD refresh on revert so the section
-                   editors above reflect the restored content. -->
-              <v-tabs-window-item value="history">
-                <div class="pa-4">
-                  <BUDVersionHistoryPanel
-                    v-if="bud"
-                    :bud-id="bud.id"
-                    :bud-status="bud.status"
-                    @reverted="onBudReverted"
-                  />
-                </div>
-              </v-tabs-window-item>
-
               <!-- Test Plan tab removed — test plan content is now part of QA tab -->
             </v-tabs-window>
           </div>
@@ -432,6 +415,35 @@
         :auto-generate-phases="bud.auto_generate_phases ?? null"
         @saved="reloadBudAfterSettingsSave"
       />
+
+      <!-- Edit-history dialog. Reachable from the header History button
+           alongside the AI chat button — keeps the version log
+           prominent instead of buried in the section tabs row. -->
+      <v-dialog
+        v-model="historyDialogOpen"
+        max-width="720"
+        scrollable
+      >
+        <v-card v-if="bud" class="history-dialog">
+          <v-card-title class="d-flex align-center ga-2 pa-4 pb-2">
+            <v-icon icon="mdi-history" size="22" />
+            <span class="text-h6 font-weight-bold">Edit history</span>
+            <span class="text-caption text-medium-emphasis ml-2">
+              BUD-{{ String(bud.bud_number).padStart(3, '0') }}
+            </span>
+            <v-spacer />
+            <v-btn icon="mdi-close" variant="text" size="small" @click="historyDialogOpen = false" />
+          </v-card-title>
+          <v-divider />
+          <v-card-text class="pa-4 history-dialog__body">
+            <BUDVersionHistoryPanel
+              :bud-id="bud.id"
+              :bud-status="bud.status"
+              @reverted="onBudReverted"
+            />
+          </v-card-text>
+        </v-card>
+      </v-dialog>
 
       <!-- Delete confirmation -->
       <v-dialog v-model="confirmDelete" max-width="400">
@@ -563,6 +575,7 @@ const isExternalLlmMode = computed(() => {
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)
 const skillSettingsOpen = ref(false)
+const historyDialogOpen = ref(false)
 
 // Org-level UAT toggle. Hidden when false: the UAT tab disappears, and
 // any active session that's currently on the UAT tab falls back to Prod.
@@ -1131,5 +1144,12 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
   width: 0;
   min-width: 0;
   opacity: 0;
+}
+
+/* Cap the history dialog body so a long-running BUD with hundreds of
+   edits doesn't grow the dialog past the viewport — the internal
+   v-list scrolls instead. */
+.history-dialog__body {
+  max-height: 70vh;
 }
 </style>
