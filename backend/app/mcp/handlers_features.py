@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.mcp.handler_utils import require_non_empty
 from app.mcp.synth_feature_writer import persist_synth_feature
 from app.mcp.synthesis_queue import get_queue_remaining, remove_from_queue
+from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.organization import Organization
 from app.repositories.bug import BugRepository
 from app.repositories.feature_reads import FeatureReadRepository
@@ -46,6 +47,30 @@ from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.embedding_service import embedding_service
 from app.services.feature_content import format_feature_content
 from app.services.feature_content import try_embed as _try_embed
+
+
+def _serialise_repo_links(repo_links: list[FeatureToRepo]) -> list[dict[str, Any]]:
+    """Materialise PRIMARY-role repo links into the MCP response shape.
+
+    One entry per primary repo, each carrying ``code_locations`` —
+    layer (frontend / backend / processor / …) → list of file paths
+    relative to the repo root. Non-PRIMARY junctions (BACKEND
+    callee-side links produced by Phase-5 cross-repo merge) are
+    excluded; the LLM only needs the source-of-truth repo to read
+    code, and including callee rows would double-count.
+    """
+    out: list[dict[str, Any]] = []
+    for link in repo_links:
+        if link.role != FeatureToRepoRole.PRIMARY:
+            continue
+        out.append(
+            {
+                "repo_id": str(link.repo_id),
+                "code_locations": link.code_locations or {},
+            }
+        )
+    return out
+
 
 logger = structlog.get_logger(__name__)
 
@@ -151,6 +176,14 @@ async def handle_get_features(
                 "source": feature.source,
                 "source_ref": feature.source_ref,
                 "feature_status": feature.feature_status or "implemented",
+                # Per-repo code anchors. One entry per PRIMARY repo
+                # the feature lives in; each entry is the layer → file
+                # paths dict the scan pipeline produced. Local AI
+                # clients can use these as pointers to the actual
+                # source files (read via their own filesystem tool
+                # against the user's checkout) and ground spec / design
+                # work in real implementation context.
+                "code_locations": _serialise_repo_links(feature.repo_links),
             }
             for feature in rows
         ],

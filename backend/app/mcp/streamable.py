@@ -106,8 +106,11 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "first (mirrors the frontend /features page), with semantic-embedding "
             "fallback when the literal phrase isn't in any title. ALWAYS pass a "
             "non-empty ``query``. Paginate via ``offset`` + ``next_offset`` until "
-            "``has_more`` is false. Each result has an ``id`` you can place into a "
-            'BUD\'s trailing {"linked_feature_ids": [...]} fence.'
+            "``has_more`` is false. Each result returns ``id`` (for linked_feature_ids "
+            "on create_bud / update_bud) and ``code_locations`` — a per-repo "
+            "layer→file-path map you can use to read the actual implementation "
+            "source via your local filesystem tool when composing a tech spec or "
+            "design that has to interoperate with existing code."
         ),
         "inputSchema": {
             "type": "object",

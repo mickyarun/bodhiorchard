@@ -455,6 +455,25 @@ const REVIEW_GATE = `Important — review-then-commit:
 * Once I confirm, make the single write, show me the server response,
   and stop. Don't keep editing afterwards unless I ask.`
 
+// Inserted into design + tech-spec prompts. Pushes the LLM to
+// ground its output in real source code rather than guessing,
+// using the ``code_locations`` paths get_features returns plus the
+// user's local checkout (read via the LLM's filesystem tool — NOT
+// via Bodhiorchard MCP, which doesn't expose source files).
+const LOCAL_CODE_CONTEXT_BLOCK = `Local code context (recommended):
+* Ask me which local directory holds my checkout, and confirm it's
+  on the latest main (e.g. "git pull origin main first"). If I
+  don't have a checkout handy, skip this block and continue.
+* For each relevant feature from get_features, read its
+  'code_locations' — a per-repo map of layer → file paths
+  (frontend / backend / processor / etc.). Use YOUR OWN
+  filesystem tool to read those files under my checkout; don't
+  try to fetch them via the Bodhiorchard MCP (it only exposes
+  metadata, not source).
+* Ground the spec / design in what those files actually do:
+  reuse existing components, name real functions, reference real
+  endpoints. Avoid restating implementation that's already there.`
+
 const EXAMPLE_PROMPTS: Record<string, ExamplePrompt> = {
   pm: {
     kind: 'with-toggle',
@@ -534,9 +553,16 @@ and 'create_bud' is reserved for brand-new BUDs in the BUD phase.
 4. Call get_design_system(repo_id="<picked-id>") and use ONLY
    tokens/components from that design system — no ad-hoc colours,
    no new components.
-5. Call get_prompt(task_type="design") and follow that prompt
+5. Call get_features(query="<area touched by this BUD>") and read
+   each result's 'code_locations'. These paths point to existing
+   frontend components / views / stores you should reuse rather
+   than re-invent.
+
+${LOCAL_CODE_CONTEXT_BLOCK}
+
+6. Call get_prompt(task_type="design") and follow that prompt
    EXACTLY for the wireframe HTML shape.
-6. Compose the FULL wireframe HTML (update_bud overwrites the field).
+7. Compose the FULL wireframe HTML (update_bud overwrites the field).
 
 ${REVIEW_GATE}
 
@@ -570,13 +596,19 @@ BUD phase.
 2. Call get_prompt(task_type="tech_plan") and follow that prompt
    EXACTLY for the spec shape.
 3. Call get_features(query="<area touched by this BUD>") with
-   pagination to see existing capabilities you should reuse or extend
-   rather than re-implement.
+   pagination to see existing capabilities you should reuse or
+   extend rather than re-implement. Read each result's
+   'code_locations' — a per-repo layer → file-path map pointing at
+   the existing implementation files.
+
+${LOCAL_CODE_CONTEXT_BLOCK}
+
 4. Compose the FULL tech-spec Markdown (update_bud replaces the
-   field). Use explicit sections for: components touched, schema
-   changes, API surface, testing strategy, rollout & rollback. End
-   the body with the impacted-repos JSON fence the prompt describes
-   — the backend parses it.
+   field). Use explicit sections for: components touched (reference
+   real file paths from code_locations), schema changes, API
+   surface, testing strategy, rollout & rollback. End the body with
+   the impacted-repos JSON fence the prompt describes — the backend
+   parses it.
 
 ${REVIEW_GATE}
 

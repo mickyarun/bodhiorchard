@@ -290,8 +290,12 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "in any title. ALWAYS pass a non-empty ``query`` — an org "
             "with hundreds of features will drown the model in noise "
             "otherwise. Paginate via ``offset`` + ``next_offset`` until "
-            "``has_more`` is false. Each result includes ``id`` you can "
-            'put into a BUD\'s {"linked_feature_ids": [...]} JSON fence.'
+            "``has_more`` is false. Each result includes ``id`` (use it "
+            "with create_bud / update_bud's linked_feature_ids param) "
+            "and ``code_locations`` — per-repo layer→file-path maps "
+            "your local AI can use to read the actual implementation "
+            "source via its own filesystem tool, grounding tech-spec / "
+            "design work in real code instead of guesses."
         ),
         input_schema={
             "type": "object",
