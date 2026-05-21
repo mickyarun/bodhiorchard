@@ -99,10 +99,15 @@ function select(value: T): void {
   min-width: 84px;
 }
 .app-pill-toggle__option {
+  /* Reset the user-agent <button> styles, then drive everything from
+     here. Without ``color: #fff`` Chrome/Safari fall back to the
+     button's default colour (~ButtonText, often near-black) which
+     reads as invisible on the primary-green track. */
   appearance: none;
+  -webkit-appearance: none;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.88);
+  color: #fff;
   font-family: inherit;
   font-weight: 600;
   letter-spacing: 0;
@@ -117,11 +122,10 @@ function select(value: T): void {
   justify-content: center;
 }
 .app-pill-toggle__option:hover:not(.app-pill-toggle__option--active) {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
 }
 .app-pill-toggle__option--active {
-  background: rgb(var(--v-theme-surface));
+  background: #fff;
   color: rgb(var(--v-theme-primary));
   cursor: default;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
