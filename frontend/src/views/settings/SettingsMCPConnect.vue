@@ -259,7 +259,7 @@ const TOOL_CATALOGUE = [
   { name: 'get_features', description: 'Semantic knowledge search over your org\'s active features.' },
   { name: 'list_design_systems', description: 'Design-system metadata per repo.' },
   { name: 'get_design_system', description: 'Full HTML/CSS/tokens for a repo or the org default.' },
-  { name: 'get_prompt', description: 'Return our agent\'s prompt for a stage (task_type: bud / design / tech_arch / testing) so your local AI produces matching output.' },
+  { name: 'get_prompt', description: 'Return our agent\'s prompt for a stage (task_type: pm / design / tech_plan / testing) so your local AI produces matching output.' },
 ]
 
 interface ClientSnippet {
@@ -285,7 +285,7 @@ const EXAMPLE_PROMPTS: Record<string, ExamplePrompt> = {
     body: `I want to draft a PRD for: <your topic>
 
 Use the bodhiorchard MCP server I've connected. Steps:
-1. Call get_prompt(task_type="bud") and follow that prompt EXACTLY.
+1. Call get_prompt(task_type="pm") and follow that prompt EXACTLY.
 2. Call get_bud_context() to see what's already in flight so you don't
    propose a duplicate.
 3. Call get_features(query="<keywords from my topic>") and paginate
@@ -323,7 +323,7 @@ When done, give me ONLY the final HTML — I'll paste it into the BUD's
     body: `I want to write the tech architecture for BUD-<BUD-NUMBER>.
 
 Use the bodhiorchard MCP server. Steps:
-1. Call get_prompt(task_type="tech_arch") and follow that prompt
+1. Call get_prompt(task_type="tech_plan") and follow that prompt
    EXACTLY.
 2. Call get_bud_context() and use the PRD content for the BUD as the
    authoritative scope — don't invent requirements.

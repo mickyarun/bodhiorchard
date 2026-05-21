@@ -33,16 +33,29 @@ from app.models.organization import Organization
 
 logger = structlog.get_logger(__name__)
 
-# Public mapping: which task_type tokens the caller can ask for. Keys
-# match the BUDStatus string values that already show up in the
-# auto_generate_phases dict, the BUD section editor tabs, and the
-# Advanced-settings stage labels — one consistent vocabulary across the
-# whole BYO-AI flow.
+# Public mapping: which task_type tokens the caller can ask for.
+#
+# We accept both:
+#   * Internal phase names from BUDStatus (``bud`` / ``tech_arch``) —
+#     one vocabulary across auto_generate_phases keys, status
+#     transitions, and the BUD section tabs.
+#   * Friendlier role-based aliases (``pm`` / ``tech_plan``) — what a
+#     local LLM (and the human writing the prompt) reads naturally.
+#
+# The ``CANONICAL_TASK_TYPES`` set is what we advertise in the tool
+# schema enum and in user-facing docs. Aliases work for backward and
+# forward compatibility but aren't featured.
+CANONICAL_TASK_TYPES: tuple[str, ...] = ("pm", "design", "tech_plan", "testing")
+
 TASK_TYPE_TO_STAGE: dict[str, BUDStatus] = {
-    "bud": BUDStatus.BUD,
+    # Canonical / preferred names (match the agent roles).
+    "pm": BUDStatus.BUD,
     "design": BUDStatus.DESIGN,
-    "tech_arch": BUDStatus.TECH_ARCH,
+    "tech_plan": BUDStatus.TECH_ARCH,
     "testing": BUDStatus.TESTING,
+    # Internal phase-name aliases (match BUDStatus values).
+    "bud": BUDStatus.BUD,
+    "tech_arch": BUDStatus.TECH_ARCH,
 }
 
 

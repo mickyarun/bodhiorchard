@@ -48,7 +48,7 @@ from app.core.deps import get_db
 from app.database import AsyncSessionLocal
 from app.mcp.audit import emit_audit
 from app.mcp.auth import MCPAuthResult, verify_mcp_token
-from app.mcp.handlers_prompts import TASK_TYPE_TO_STAGE
+from app.mcp.handlers_prompts import CANONICAL_TASK_TYPES
 from app.mcp.rate_limit import enforce_rate_limit
 from app.repositories.user_mcp_token import UserMCPTokenRepository
 
@@ -137,10 +137,13 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "properties": {
                 "task_type": {
                     "type": "string",
-                    # Source-of-truth shared with server.py MCP_TOOLS so
-                    # the remote-advertised enum can never drift from
-                    # the handler's accepted values.
-                    "enum": sorted(TASK_TYPE_TO_STAGE.keys()),
+                    # Advertise the canonical role-based names — shared
+                    # with server.py MCP_TOOLS so the remote-advertised
+                    # enum can't drift. Internal phase-name aliases
+                    # (``bud``, ``tech_arch``) still work but aren't
+                    # surfaced to discourage drift between the two
+                    # vocabularies.
+                    "enum": list(CANONICAL_TASK_TYPES),
                 },
             },
             "required": ["task_type"],

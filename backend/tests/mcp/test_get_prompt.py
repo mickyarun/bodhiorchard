@@ -23,7 +23,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.mcp.handlers_prompts import TASK_TYPE_TO_STAGE, handle_get_prompt
+from app.mcp.handlers_prompts import (
+    CANONICAL_TASK_TYPES,
+    TASK_TYPE_TO_STAGE,
+    handle_get_prompt,
+)
+from app.models.bud import BUDStatus
 
 
 @pytest.mark.asyncio
@@ -83,6 +88,27 @@ async def test_no_active_skill_returns_error_payload(monkeypatch: Any) -> None:
     result = await handle_get_prompt(MagicMock(), org, {"task_type": "bud"})
     assert "error" in result
     assert "skill" in result["error"].lower()
+
+
+def test_canonical_task_types_resolve_to_expected_stages() -> None:
+    """Every advertised task_type must resolve to a real BUDStatus.
+
+    Adding a new canonical name without a TASK_TYPE_TO_STAGE entry
+    would 404 in the handler — this test fails before that ships.
+    """
+    for name in CANONICAL_TASK_TYPES:
+        assert name in TASK_TYPE_TO_STAGE
+
+
+def test_phase_name_aliases_still_accepted() -> None:
+    """Aliases (``bud`` / ``tech_arch``) must resolve identically to their
+    canonical counterparts for backward compatibility with the docs we
+    shipped on the first iteration of the BYO-AI flow.
+    """
+    assert TASK_TYPE_TO_STAGE["bud"] is BUDStatus.BUD
+    assert TASK_TYPE_TO_STAGE["pm"] is BUDStatus.BUD
+    assert TASK_TYPE_TO_STAGE["tech_arch"] is BUDStatus.TECH_ARCH
+    assert TASK_TYPE_TO_STAGE["tech_plan"] is BUDStatus.TECH_ARCH
 
 
 def test_streamable_marks_error_payload_as_is_error_true() -> None:

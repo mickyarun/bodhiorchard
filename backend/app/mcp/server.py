@@ -55,7 +55,7 @@ from app.mcp.handlers_features import (
     handle_write_feature_registry,
 )
 from app.mcp.handlers_hooks import handle_dev_activity
-from app.mcp.handlers_prompts import TASK_TYPE_TO_STAGE, handle_get_prompt
+from app.mcp.handlers_prompts import CANONICAL_TASK_TYPES, handle_get_prompt
 from app.mcp.handlers_scan import handle_write_synthesis_feature
 from app.mcp.handlers_team import (
     handle_get_design_system,
@@ -484,10 +484,15 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "properties": {
                 "task_type": {
                     "type": "string",
-                    "enum": sorted(TASK_TYPE_TO_STAGE.keys()),
+                    # Advertise the canonical role-based names only —
+                    # the handler also accepts the internal BUDStatus
+                    # aliases (``bud`` for ``pm``, ``tech_arch`` for
+                    # ``tech_plan``) for backward compat, but those
+                    # don't need to be discoverable here.
+                    "enum": list(CANONICAL_TASK_TYPES),
                     "description": (
-                        "Which stage's prompt to return: 'bud' (PRD), "
-                        "'design', 'tech_arch', or 'testing'."
+                        "Which stage's prompt to return: 'pm' (PRD), "
+                        "'design', 'tech_plan', or 'testing'."
                     ),
                 },
             },
