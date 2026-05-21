@@ -101,7 +101,7 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "fallback when the literal phrase isn't in any title. ALWAYS pass a "
             "non-empty ``query``. Paginate via ``offset`` + ``next_offset`` until "
             "``has_more`` is false. Each result has an ``id`` you can place into a "
-            "BUD's trailing {\"linked_feature_ids\": [...]} fence."
+            'BUD\'s trailing {"linked_feature_ids": [...]} fence.'
         ),
         "inputSchema": {
             "type": "object",

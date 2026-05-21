@@ -179,7 +179,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "with hundreds of features will drown the model in noise "
             "otherwise. Paginate via ``offset`` + ``next_offset`` until "
             "``has_more`` is false. Each result includes ``id`` you can "
-            "put into a BUD's {\"linked_feature_ids\": [...]} JSON fence."
+            'put into a BUD\'s {"linked_feature_ids": [...]} JSON fence.'
         ),
         input_schema={
             "type": "object",
