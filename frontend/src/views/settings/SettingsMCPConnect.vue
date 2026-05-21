@@ -209,9 +209,11 @@
       <div class="mcp-card__body pb-0">
         <div class="text-caption text-medium-emphasis">
           Paste one of these into your local AI to kick off a phase. Each
-          instructs the LLM to fetch our exact agent prompt via
-          <code class="inline-code">get_prompt</code>, gather the right context,
-          then produce the section's content.
+          tells the LLM to fetch our agent's exact prompt via
+          <code class="inline-code">get_prompt</code>, gather context, then save
+          the result directly via <code class="inline-code">create_bud</code> /
+          <code class="inline-code">update_bud</code> instead of asking you to
+          copy-paste.
         </div>
       </div>
       <v-tabs v-model="exampleTab" density="compact" class="px-4 mt-2">
@@ -237,9 +239,13 @@
         </v-window-item>
       </v-window>
       <v-alert type="info" variant="tonal" density="compact" class="ma-4 mt-0">
-        Replace <code class="inline-code">&lt;your topic&gt;</code> /
-        <code class="inline-code">&lt;BUD-NUMBER&gt;</code> in the prompt with
-        the actual values before sending.
+        Replace <code class="inline-code">&lt;your topic&gt;</code>,
+        <code class="inline-code">&lt;BUD-NUMBER&gt;</code>, and
+        <code class="inline-code">&lt;uuid&gt;</code> in the prompt with the
+        actual values. The Design and Tech-spec prompts need the BUD
+        UUID — grab it from the URL on the BUD detail page or call
+        <code class="inline-code">get_bud_context()</code> and look up by
+        <code class="inline-code">bud_number</code>.
       </v-alert>
     </v-card>
 
@@ -405,60 +411,83 @@ interface ExamplePrompt {
 const EXAMPLE_PROMPTS: Record<string, ExamplePrompt> = {
   pm: {
     label: 'PM / PRD',
-    body: `I want to draft a PRD for: <your topic>
+    body: `I want to create a BUD for: <your topic>
 
 Use the bodhiorchard MCP server I've connected. Steps:
-1. Call get_prompt(task_type="pm") and follow that prompt EXACTLY.
-2. Call get_bud_context() to see what's already in flight so you don't
-   propose a duplicate.
+1. Call get_prompt(task_type="pm") and follow that prompt EXACTLY for
+   the body shape.
+2. Call get_bud_context() to see what's already in flight — refuse to
+   continue if my topic is an obvious duplicate (tell me the BUD-id
+   instead).
 3. Call get_features(query="<keywords from my topic>") and paginate
    (offset += limit while has_more) until you've reviewed the relevant
    matches. Note the feature IDs of anything this PRD will touch.
-4. Produce the Markdown body the prompt asks for. End with the
-   trailing JSON fence: \`\`\`json
+4. Compose the title and the full Markdown body. End the body with the
+   trailing JSON fence so feature links wire up server-side:
+   \`\`\`json
    {"linked_feature_ids": ["<feature-uuid>", ...]}
    \`\`\`
-   so when I paste this into the BUD's requirements editor, the
-   linked-features will auto-populate.
+5. Call create_bud(title=<title>, requirements_md=<full body>). It
+   returns {id, bud_number}. Show me both — bud_number is what I'll
+   reference in the UI; id is what you'll pass to update_bud /
+   get_bud_by_id for follow-up edits.
 
-When done, give me ONLY the final Markdown — I'll paste it into the
-BUD's "Requirements" tab.`,
+Do NOT print the body to me first and wait — the create_bud call
+itself is the save. If the call fails (assignee/phase guard, empty
+body), report the server's error code verbatim so I can fix it.`,
   },
   design: {
     label: 'Design',
     body: `I want to draft the UX/UI design for BUD-<BUD-NUMBER>.
 
+Pre-flight: the BUD must be in the DESIGN phase and I must be the
+assignee. update_bud will 409 otherwise — surface the server's error
+verbatim if so.
+
 Use the bodhiorchard MCP server. Steps:
-1. Call get_prompt(task_type="design") and follow that prompt EXACTLY.
-2. Call get_bud_context() (then read the requirements_md for the BUD
-   you're working on) so the design ties to the agreed PRD.
+1. Call get_bud_by_id(bud_id="<uuid>") to read the agreed PRD content
+   (requirements_md) and confirm status == "design". If status is
+   something else, stop and tell me.
+2. Call get_prompt(task_type="design") and follow that prompt EXACTLY
+   for the wireframe HTML shape.
 3. Call list_design_systems(), then get_design_system(repo_id="<id>")
    for the repo this design lands in (or omit repo_id for the org
    default). Use ONLY tokens/components from that design system — no
    ad-hoc colours, no new components.
-4. Produce the wireframe HTML the prompt asks for.
+4. Compose the wireframe HTML.
+5. Call update_bud(bud_id="<uuid>", content=<wireframe HTML>). The
+   server sanitises the HTML and writes it to the BUD-level design
+   row. Show me the success response.
 
-When done, give me ONLY the final HTML — I'll paste it into the BUD's
-"Design" tab.`,
+If you can't find the bud_id, call get_bud_context() and match by
+bud_number first.`,
   },
   tech_arch: {
     label: 'Tech spec',
     body: `I want to write the tech architecture for BUD-<BUD-NUMBER>.
 
-Use the bodhiorchard MCP server. Steps:
-1. Call get_prompt(task_type="tech_plan") and follow that prompt
-   EXACTLY.
-2. Call get_bud_context() and use the PRD content for the BUD as the
-   authoritative scope — don't invent requirements.
-3. Call get_features(query="<area touched by this BUD>") with
-   pagination to see what existing capabilities you should reuse or
-   extend rather than re-implement.
-4. Produce the tech-spec Markdown the prompt asks for, with explicit
-   sections for: components touched, schema changes, API surface,
-   testing strategy, rollout & rollback.
+Pre-flight: the BUD must be in the TECH_ARCH phase and I must be the
+assignee. update_bud will 409 otherwise — surface the server's error
+verbatim if so.
 
-When done, give me ONLY the final Markdown — I'll paste it into the
-BUD's "Tech spec" tab.`,
+Use the bodhiorchard MCP server. Steps:
+1. Call get_bud_by_id(bud_id="<uuid>") to read the PRD content and
+   confirm status == "tech_arch". If it isn't, stop and tell me.
+2. Call get_prompt(task_type="tech_plan") and follow that prompt
+   EXACTLY for the spec shape.
+3. Call get_features(query="<area touched by this BUD>") with
+   pagination to see existing capabilities you should reuse or extend
+   rather than re-implement.
+4. Compose the tech-spec Markdown with explicit sections for:
+   components touched, schema changes, API surface, testing strategy,
+   rollout & rollback. End the body with the impacted-repos JSON
+   fence the prompt describes — the backend parses it.
+5. Call update_bud(bud_id="<uuid>", content=<tech spec markdown>).
+   The server picks the field from the current phase and writes it.
+   Show me the success response (id, bud_number, field, phase).
+
+If you can't find the bud_id, call get_bud_context() and match by
+bud_number first.`,
   },
 }
 
