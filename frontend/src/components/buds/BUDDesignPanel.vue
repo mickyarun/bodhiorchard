@@ -15,6 +15,24 @@
  -->
 
 <template>
+  <!--
+    Figma URL field always rendered at the top of the Design tab so
+    the PM can paste a link at any time. Component handles both the
+    "no URL yet" and "URL set, render iframe" states.
+
+    When the PM sets a URL, the AI-wireframe flow below is hidden
+    (v-if on the next block). Devs reference Figma directly during
+    development; we never duplicate frame data into our DB.
+   -->
+  <BUDFigmaSection
+    v-if="currentBUD"
+    :bud="currentBUD"
+    :editable="props.editable"
+  />
+
+  <!-- AI-wireframe flow: only when no figma_url is set. Picking
+       Figma is the explicit opt-out from the AI generator below. -->
+  <template v-if="!currentBUD?.figma_url">
   <!-- Multi-design sub-tabs when designs exist -->
   <div v-if="designs.length > 0" class="design-multi-panel">
     <div class="design-sub-tabs-row">
@@ -231,6 +249,7 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
+  </template>
 </template>
 
 <script setup lang="ts">
@@ -241,7 +260,13 @@ import { useDesignSystemStore } from '@/stores/designSystem'
 import { useJobSocket } from '@/composables/useJobSocket'
 import { friendlyAgentError } from '@/types/agentErrors'
 import AgentErrorMessage from '@/components/common/AgentErrorMessage.vue'
+import BUDFigmaSection from '@/components/buds/BUDFigmaSection.vue'
 import type { BUDDesign, RepoInfo } from '@/types'
+
+// ``currentBUD`` is the BUD doc the parent ``BUDDetail.vue`` loaded
+// and the BUD store keeps in sync. We pull it through the store
+// rather than adding a new ``bud`` prop so the existing parent call
+// site (which only passes ``bud-id``) stays unchanged.
 
 const props = withDefaults(
   defineProps<{
@@ -264,6 +289,11 @@ const budStore = useBUDStore()
 const settingsStore = useSettingsStore()
 const designSystemStore = useDesignSystemStore()
 const { startTracking } = useJobSocket()
+
+// Mirrors the BUD doc the parent loaded into the store. We use it to
+// branch the template on ``bud.figma_url`` — when set, render only
+// the Figma section and hide the AI-wireframe generator below.
+const currentBUD = computed(() => budStore.currentBUD)
 
 // Repos with design system extraction in progress
 const extractingRepos = computed(() =>

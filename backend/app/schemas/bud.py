@@ -19,11 +19,12 @@ Section + stage constants (``BUD_SECTIONS``, ``SECTION_REQUIRED_STAGES``,
 This module hosts only the request/response DTO classes.
 """
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.bud import BUDStatus
 
@@ -35,12 +36,43 @@ from app.schemas.bud_design import (  # noqa: F401
     DesignHtmlUpdate,
 )
 
+# Single source of truth for the accepted Figma share-URL shape:
+# - ``/file/<key>/...`` (legacy)
+# - ``/design/<key>/...`` (current default since 2024)
+# - ``/proto/<key>/...`` (prototype preview links)
+# Reused by every BUD schema that accepts ``figma_url`` so a typo can't
+# slip into the DB and feed a broken iframe to the Design tab.
+_FIGMA_URL_RE = re.compile(
+    r"^https://(?:www\.)?figma\.com/(file|design|proto)/[A-Za-z0-9]+(/.*)?$"
+)
+
+
+def _validate_optional_figma_url(value: str | None) -> str | None:
+    """Pydantic validator hook — ``None`` / ``""`` pass through, malformed raises.
+
+    Hoisted into a module helper so ``BUDCreate`` / ``BUDUpdate`` /
+    ``BUDRead`` share the exact same predicate, not three drift-prone
+    copies of the same regex check.
+    """
+    if value is None or value == "":
+        return None
+    if not _FIGMA_URL_RE.match(value):
+        raise ValueError(
+            "figma_url must look like https://www.figma.com/{file|design|proto}/<key>/..."
+        )
+    return value
+
 
 class BUDCreate(BaseModel):
     """Schema for creating a new BUD."""
 
     title: str = Field(..., min_length=1, max_length=500)
     requirements_md: str | None = None
+    # Optional Figma file URL — see the bud_documents.figma_url column
+    # comment in app.models.bud for the full rationale (Design-tab embed
+    # + local-Claude tech-spec prompt). Validated against
+    # ``_FIGMA_URL_RE`` so the Design tab never has to render a typo.
+    figma_url: str | None = None
     metadata_: dict[str, Any] | None = Field(None, alias="metadata")
     # Optional "Advanced settings" picks: map each BUD stage to a specific
     # AgentSkill id. Stages omitted (or the whole field omitted) fall back
@@ -56,6 +88,8 @@ class BUDCreate(BaseModel):
 
     model_config = {"populate_by_name": True}
 
+    _validate_figma_url = field_validator("figma_url")(_validate_optional_figma_url)
+
 
 class BUDUpdate(BaseModel):
     """Schema for updating an existing BUD."""
@@ -66,6 +100,7 @@ class BUDUpdate(BaseModel):
     requirements_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
+    figma_url: str | None = None
     code_review_comments: list[dict[str, Any]] | None = None
     metadata_: dict[str, Any] | None = Field(None, alias="metadata")
     assignee_id: uuid.UUID | None = None
@@ -85,6 +120,8 @@ class BUDUpdate(BaseModel):
     auto_generate_phases: dict[str, bool] | None = None
 
     model_config = {"populate_by_name": True}
+
+    _validate_figma_url = field_validator("figma_url")(_validate_optional_figma_url)
 
 
 class BUDAgentTaskRead(BaseModel):
@@ -123,6 +160,7 @@ class BUDRead(BaseModel):
     requirements_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
+    figma_url: str | None = None
     qa_automation_cases: list[dict[str, Any]] | None = None
     qa_manual_cases: list[dict[str, Any]] | None = None
     qa_execution_plan_md: str | None = None

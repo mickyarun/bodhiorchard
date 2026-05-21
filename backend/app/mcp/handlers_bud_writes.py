@@ -545,6 +545,13 @@ async def handle_get_bud_by_id(
         "requirements_md": _truncate(bud.requirements_md),
         "tech_spec_md": _truncate(bud.tech_spec_md),
         "test_plan_md": _truncate(bud.test_plan_md),
+        # Optional Figma file URL. Surfaced verbatim (no truncate) so
+        # the tech-planner skill can pass it straight into the Figma
+        # MCP tools (``get_metadata`` / ``get_design_context``). See
+        # ``tech-planner.md`` Workflow step "Design context" for the
+        # branching rule: presence of ``figma_url`` + local Figma MCP
+        # availability triggers the Figma flow extraction sub-section.
+        "figma_url": bud.figma_url,
         "code_review_comments": bud.code_review_comments,
         "auto_generate_phases": bud.auto_generate_phases,
         # impacted_repos is the BUD-scoped repo list once the

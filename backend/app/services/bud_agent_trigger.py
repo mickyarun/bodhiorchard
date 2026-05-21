@@ -29,6 +29,22 @@ from app.models.bud import BUDDocument
 logger = structlog.get_logger(__name__)
 
 
+def should_auto_generate_phase(phases: dict[str, bool] | None, phase_key: str) -> bool:
+    """Return True iff the BUD's per-phase map enables ``phase_key``.
+
+    ``None`` / missing key / explicit ``False`` all return ``False`` —
+    "external-LLM mode" is the default. The Figma flow relies on this:
+    a BUD whose PM hasn't enabled auto-generation for ``tech_arch``
+    falls through to the Tech-Arch tab's local-Claude prompt panel
+    instead of getting a server-side AI tech spec it then has to throw
+    away.
+
+    Single-source-of-truth so the create-BUD path and the status-
+    transition path can't drift to subtly different predicates.
+    """
+    return bool((phases or {}).get(phase_key, False))
+
+
 async def create_agent_task_for_stage(
     bud: BUDDocument,
     bud_status: str,

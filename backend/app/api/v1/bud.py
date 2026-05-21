@@ -74,7 +74,10 @@ from app.services.agent_task_cancel import (
     cancel_task,
     is_task_terminal,
 )
-from app.services.bud_agent_trigger import create_agent_task_for_stage
+from app.services.bud_agent_trigger import (
+    create_agent_task_for_stage,
+    should_auto_generate_phase,
+)
 from app.services.bud_edit_policy import assert_section_editable
 
 logger = structlog.get_logger(__name__)
@@ -287,6 +290,7 @@ async def create_bud(
         title=body.title,
         status=BUDStatus.BUD,
         requirements_md=body.requirements_md,
+        figma_url=body.figma_url,
         metadata_=body.metadata_,
         auto_generate_phases=auto_generate_phases,
     )
@@ -361,7 +365,7 @@ async def create_bud(
     # agent if the user explicitly enabled the "bud" phase. Missing key
     # or False = skip; user supplies the PRD via the section editor
     # (typically driven by their local AI through the remote MCP).
-    if auto_generate_phases.get("bud", False):
+    if should_auto_generate_phase(auto_generate_phases, "bud"):
         await create_agent_task_for_stage(
             bud,
             "bud",
@@ -912,7 +916,7 @@ async def _trigger_status_jobs(
     # misses with no enum-related test failure.
     phase_key = new_status.value if hasattr(new_status, "value") else str(new_status)
     phases = bud.auto_generate_phases or {}
-    phase_auto_generate = bool(phases.get(phase_key, False))
+    phase_auto_generate = should_auto_generate_phase(phases, phase_key)
 
     # Design phase: only prompt for generation if (a) no designs
     # exist yet AND (b) the user has design auto-generation enabled.

@@ -112,6 +112,14 @@ class BUDDocument(BaseModel):
     requirements_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     tech_spec_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     test_plan_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional pointer to the BUD's Figma file. Displayed as an iframe
+    # embed on the Design tab and threaded into the local-Claude
+    # tech-spec prompt template on the Tech-Arch tab. The Figma URL is
+    # the only Figma-related data we persist — frame extraction happens
+    # client-side in the developer's local Claude Code via the local
+    # Figma MCP, and the resulting tech spec is written back into
+    # ``tech_spec_md`` via the existing ``update_bud`` MCP tool.
+    figma_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     qa_automation_cases: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
     qa_manual_cases: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
     qa_execution_plan_md: Mapped[str | None] = mapped_column(Text, nullable=True)

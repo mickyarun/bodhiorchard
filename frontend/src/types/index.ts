@@ -175,6 +175,11 @@ export interface BUDDocument extends BUDListItem {
   requirements_md: string | null
   tech_spec_md: string | null
   test_plan_md: string | null
+  // Optional Figma file URL pasted on the Design tab. Drives the
+  // iframe embed on Design and the local-Claude prompt template on
+  // Tech-Arch. Validated server-side against the canonical
+  // ``https://figma.com/{file|design|proto}/<key>/...`` shape.
+  figma_url: string | null
   qa_automation_cases: AutomationTestCase[] | null
   qa_manual_cases: ManualTestCase[] | null
   qa_execution_plan_md: string | null
