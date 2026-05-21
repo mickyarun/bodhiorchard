@@ -262,12 +262,16 @@ const plaintextToken = ref('')
 // value can derive from Object.keys() without hitting the TDZ.
 
 const endpointUrl = computed(() => {
-  // Prefer VITE_API_BASE_URL when set (split-host deployments); otherwise
-  // assume the API and the SPA share an origin and the user can hand-edit
-  // the snippet if Caddy maps a different public hostname.
-  const base = (import.meta.env.VITE_API_BASE_URL ?? window.location.origin)
+  // VITE_API_BASE_URL may be absolute ("https://api.example.com" or
+  // "https://api.example.com/api") for split-host deployments, OR a
+  // bare path like "/api" when the SPA and API share an origin behind
+  // the same proxy. After stripping a trailing "/api" the path-form
+  // collapses to "" — fall back to window.location.origin in that case
+  // so the user sees a full URL instead of "/mcp/sse".
+  const stripped = (import.meta.env.VITE_API_BASE_URL ?? '')
     .replace(/\/api\/?$/, '')
     .replace(/\/$/, '')
+  const base = /^https?:\/\//i.test(stripped) ? stripped : window.location.origin
   return `${base}/mcp/sse`
 })
 
