@@ -315,12 +315,28 @@ watch(
 }
 
 .stage-list { display: flex; flex-direction: column; gap: 10px; }
+.stage-list-hint { margin-bottom: 4px; line-height: 1.45; }
 
+/* Three columns: switch (auto) · label block (fixed) · skill picker (rest).
+   The original two-column grid here was for label + select; adding the
+   switch as a third child without widening the template silently wrapped
+   the picker onto a new row. */
 .stage-row {
   display: grid;
-  grid-template-columns: 150px 1fr;
+  grid-template-columns: auto 150px 1fr;
   align-items: center;
-  gap: 14px;
+  column-gap: 14px;
+  row-gap: 0;
+}
+
+/* Strip the default v-switch label padding — the row's grid already
+   provides spacing and we render the label ourselves via stage-label. */
+.stage-switch :deep(.v-input__control),
+.stage-switch :deep(.v-selection-control) {
+  min-height: 32px;
+}
+.stage-switch :deep(.v-selection-control__wrapper) {
+  margin-inline-end: 0;
 }
 
 .stage-label-wrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
