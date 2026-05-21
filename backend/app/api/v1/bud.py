@@ -886,30 +886,35 @@ async def _trigger_status_jobs(
 
     new_status = update_data["status"]
 
-    # Design phase: only prompt for generation if no designs exist yet
+    # Compute the per-phase opt-in BEFORE any side-effect-producing
+    # header or task spawn. Earlier this gate was checked AFTER the
+    # ``X-Design-Available`` header was set — the FE's design panel
+    # interprets that header as "auto-fire generation" and POSTs to
+    # ``/designs/generate`` even when ``auto_generate_phases.design``
+    # is off. Compute once, gate everything that follows.
+    #
+    # Use ``.value`` rather than ``str(new_status)`` for explicit
+    # decoupling: today BUDStatus is a StrEnum so ``str(...)`` happens
+    # to yield ``"bud"`` etc., but if the base class ever changes the
+    # str-cast becomes ``"BUDStatus.BUD"`` and every lookup silently
+    # misses with no enum-related test failure.
+    phase_key = new_status.value if hasattr(new_status, "value") else str(new_status)
+    phases = bud.auto_generate_phases or {}
+    phase_auto_generate = bool(phases.get(phase_key, False))
+
+    # Design phase: only prompt for generation if (a) no designs
+    # exist yet AND (b) the user has design auto-generation enabled.
+    # Without the second condition the FE fires the design job
+    # straight after the status PATCH, defeating the External-LLM
+    # mode banner's "you're driving this BUD" contract.
     if new_status == BUDStatus.DESIGN and old_status != BUDStatus.DESIGN:
         has_designs = bud.designs and any(d.status == "ready" for d in bud.designs)
-        if not has_designs:
+        if not has_designs and phase_auto_generate:
             response.headers["X-Design-Available"] = "true"
 
     # Data-driven agent triggering via stage mappings
     if new_status != old_status:
-        # Per-phase opt-in: the auto-fire only runs when the BUD's
-        # auto_generate_phases map has this stage's key set to True.
-        # Missing key / False / NULL dict = the user is driving this
-        # phase manually (typically via their local AI through the
-        # remote MCP endpoint) and pastes content into the section
-        # editor. The status transition itself still happens in the
-        # caller; only the auto-agent spawn is suppressed here.
-        #
-        # Use ``.value`` rather than ``str(new_status)`` for explicit
-        # decoupling: today BUDStatus is a StrEnum so ``str(...)``
-        # happens to yield ``"bud"`` etc., but if the base class ever
-        # changes the str-cast becomes ``"BUDStatus.BUD"`` and every
-        # lookup silently misses with no enum-related test failure.
-        phase_key = new_status.value if hasattr(new_status, "value") else str(new_status)
-        phases = bud.auto_generate_phases or {}
-        if not phases.get(phase_key, False):
+        if not phase_auto_generate:
             logger.info(
                 "stage_agent_skip_auto_generate_off",
                 bud_id=str(bud.id),
