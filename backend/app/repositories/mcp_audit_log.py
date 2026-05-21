@@ -16,6 +16,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +42,7 @@ class MCPAuditLogRepository(BaseRepository[MCPAuditLogEntry]):
         ip: str | None,
         user_agent: str | None,
         status_code: int,
+        params: dict[str, Any] | None = None,
     ) -> None:
         """Insert one audit row. Caller commits."""
         self._db.add(
@@ -53,6 +55,7 @@ class MCPAuditLogRepository(BaseRepository[MCPAuditLogEntry]):
                 ip=ip,
                 user_agent=user_agent,
                 status_code=status_code,
+                params=params or None,
             )
         )
 

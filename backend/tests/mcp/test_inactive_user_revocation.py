@@ -119,8 +119,44 @@ async def test_verify_mcp_token_accepts_active_user(monkeypatch: Any) -> None:
     # test doesn't actually create an asyncio task against a mock session.
     monkeypatch.setattr("app.mcp.auth._schedule_last_used", lambda *a, **kw: None)
 
+    # New defence-in-depth: verify_mcp_token now also checks the user
+    # is a current member of the token's org. Stub the repo method so
+    # the mock token passes both checks.
+    async def _is_member(self, user_id, org_id):  # type: ignore[no-untyped-def]
+        return True
+
+    monkeypatch.setattr("app.repositories.user.UserRepository.is_member_of_org", _is_member)
+
     db = MagicMock()
     result = await verify_mcp_token(db=db, authorization="Bearer fake-token-string")
     assert result.org is active_token.organization
     assert result.user is active_token.user
     assert result.token_id == active_token.id
+
+
+@pytest.mark.asyncio
+async def test_verify_mcp_token_rejects_when_user_not_org_member(monkeypatch: Any) -> None:
+    """Token must 401 when its user_id is no longer a member of the org.
+
+    This is the data-restore failure mode: dump preserved the token
+    row and the linked user row, but org_to_user membership didn't
+    survive, leaving the token authenticating against an org the user
+    has no right to read.
+    """
+    active_token = _fake_token_row(is_active=True)
+
+    async def _list_by_prefix(self: Any, prefix: str) -> list[Any]:
+        return [active_token]
+
+    async def _not_a_member(self, user_id, org_id):  # type: ignore[no-untyped-def]
+        return False
+
+    monkeypatch.setattr(UserMCPTokenRepository, "list_by_prefix_with_relations", _list_by_prefix)
+    monkeypatch.setattr("app.mcp.auth.verify_password", lambda token, hash_: True)
+    monkeypatch.setattr("app.repositories.user.UserRepository.is_member_of_org", _not_a_member)
+
+    db = MagicMock()
+    with pytest.raises(HTTPException) as exc:
+        await verify_mcp_token(db=db, authorization="Bearer fake-token-string")
+    assert exc.value.status_code == 401
+    assert "member" in exc.value.detail.lower()

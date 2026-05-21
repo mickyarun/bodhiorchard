@@ -824,6 +824,7 @@ async def call_tool(
             token_id=auth.token_id,
             tool_name=tool_name,
             transport="http",
+            params=body.params,
             status_code=exc.status_code,
         )
         raise
@@ -839,6 +840,7 @@ async def call_tool(
             token_id=auth.token_id,
             tool_name=tool_name,
             transport="http",
+            params=body.params,
             status_code=status.HTTP_404_NOT_FOUND,
         )
         raise HTTPException(
@@ -860,6 +862,7 @@ async def call_tool(
             token_id=auth.token_id,
             tool_name=tool_name,
             transport="http",
+            params=body.params,
             status_code=exc.status_code,
         )
         raise
@@ -871,6 +874,7 @@ async def call_tool(
             token_id=auth.token_id,
             tool_name=tool_name,
             transport="http",
+            params=body.params,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
         raise

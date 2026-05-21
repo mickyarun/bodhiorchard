@@ -31,6 +31,7 @@ from app.database import AsyncSessionLocal
 from app.models.organization import Organization
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
+from app.repositories.user import UserRepository
 from app.repositories.user_mcp_token import UserMCPTokenRepository
 
 logger = structlog.get_logger(__name__)
@@ -217,23 +218,40 @@ async def verify_mcp_token(
         # used by member-deactivation and member-merge. The token-revoke
         # at deactivation time handles the happy path, but this check
         # rejects any token that survives that step (race, missed call
-        # site, stale row) before it can read org data. Distinct log line
-        # so an unexpected revival surfaces in alerts.
-        if ut.user is not None and not ut.user.is_active:
-            # WARNING (not INFO) — reaching this branch means a token
-            # survived deactivation revocation. Could be a race, a missed
-            # call site, or a future code path that flips is_active
-            # without calling delete_all_for_user. Either way it deserves
-            # alerting, not getting drowned in routine traffic.
+        # site, stale row) before it can read org data.
+        #
+        # ut.user can also be None entirely if the FK was somehow broken
+        # (e.g. data restore that didn't load the users row) — reject
+        # both cases with the same 401.
+        if ut.user is None or not ut.user.is_active:
             logger.warning(
-                "mcp_auth_user_token_inactive_user",
+                "mcp_auth_user_token_user_missing_or_inactive",
+                token_id=str(ut.id),
+                org_id=str(ut.org_id),
+                user_id=str(ut.user_id),
+                user_loaded=ut.user is not None,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Account is deactivated",
+            )
+        # Token must belong to a CURRENT member of the org it claims.
+        # Catches the data-restore failure mode where users + tokens
+        # survive but org_to_user rows didn't — the dump leaves a
+        # token row pointing at a real user who isn't actually a member
+        # of the org any more. Without this check that token reads org
+        # data it has no business reading.
+        is_member = await UserRepository(db).is_member_of_org(ut.user_id, ut.org_id)
+        if not is_member:
+            logger.warning(
+                "mcp_auth_user_token_not_org_member",
                 token_id=str(ut.id),
                 org_id=str(ut.org_id),
                 user_id=str(ut.user_id),
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Account is deactivated",
+                detail="User is not a member of the token's organization",
             )
         _schedule_last_used(ut.id, ut.org_id, ut.user_id)
         logger.debug(

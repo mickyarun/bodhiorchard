@@ -101,7 +101,7 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "/features page behaviour). ALWAYS pass a non-empty ``query`` — orgs "
             "with hundreds of features need filtering. Paginate via ``offset`` + "
             "``next_offset`` until ``has_more`` is false. Each result has an "
-            '``id`` you can place into a BUD\'s trailing '
+            "``id`` you can place into a BUD's trailing "
             '{"linked_feature_ids": [...]} fence.'
         ),
         "inputSchema": {
@@ -271,6 +271,14 @@ async def remote_mcp_post(
     audit_tool = params.get("name", method) if method == "tools/call" else method
     if not isinstance(audit_tool, str):
         audit_tool = method
+    # For tools/call the meaningful params are the inner tool arguments
+    # (e.g. the search query); for other methods the JSON-RPC params
+    # themselves carry useful detail. audit.py sanitises to an
+    # allowlist before storing, so passing the raw dict is safe.
+    if method == "tools/call" and isinstance(params.get("arguments"), dict):
+        audit_params: dict[str, Any] = params["arguments"]
+    else:
+        audit_params = params or {}
 
     try:
         await enforce_rate_limit(request=request, auth=auth, tool_name=audit_tool)
@@ -282,6 +290,7 @@ async def remote_mcp_post(
             token_id=auth.token_id,
             tool_name=audit_tool,
             transport="sse",
+            params=audit_params,
             status_code=exc.status_code,
         )
         return JSONResponse(
@@ -299,6 +308,7 @@ async def remote_mcp_post(
             token_id=auth.token_id,
             tool_name=audit_tool,
             transport="sse",
+            params=audit_params,
             status_code=status.HTTP_404_NOT_FOUND if exc.code == _METHOD_NOT_FOUND else 400,
         )
         return JSONResponse(_rpc_error(req_id, exc.code, exc.message))
@@ -311,6 +321,7 @@ async def remote_mcp_post(
             token_id=auth.token_id,
             tool_name=audit_tool,
             transport="sse",
+            params=audit_params,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
         return JSONResponse(_rpc_error(req_id, _INTERNAL_ERROR, "Internal error"), status_code=500)
@@ -322,6 +333,7 @@ async def remote_mcp_post(
         token_id=auth.token_id,
         tool_name=audit_tool,
         transport="sse",
+        params=audit_params,
         status_code=status.HTTP_200_OK,
     )
     return JSONResponse(_rpc_result(req_id, result))

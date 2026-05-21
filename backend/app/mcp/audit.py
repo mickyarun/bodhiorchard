@@ -22,6 +22,7 @@ break the user-facing MCP response.
 
 import asyncio
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import Request
@@ -61,6 +62,7 @@ async def _write_audit_row(
     ip: str | None,
     user_agent: str | None,
     status_code: int,
+    params: dict[str, Any] | None = None,
 ) -> None:
     """Internal: insert one audit row using a fresh session."""
     try:
@@ -74,6 +76,7 @@ async def _write_audit_row(
                 ip=ip,
                 user_agent=user_agent,
                 status_code=status_code,
+                params=params,
             )
             await session.commit()
     except Exception:
@@ -85,6 +88,44 @@ async def _write_audit_row(
         )
 
 
+# Allowlist of param keys we'll record in the audit row. Anything not
+# in this set is dropped during sanitisation — keeps free-form param
+# blobs (which could carry plaintext secrets a caller mistakenly passed
+# alongside the structured args) out of the audit table.
+_AUDITABLE_PARAM_KEYS: frozenset[str] = frozenset(
+    {
+        "query",
+        "limit",
+        "offset",
+        "task_type",
+        "repo_id",
+        "include_terminal",
+        "bud_number",
+    }
+)
+# Per-value cap so a runaway 50 KB "query" doesn't bloat the audit table.
+_AUDIT_PARAM_VALUE_MAX = 500
+
+
+def _sanitise_params(params: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return a copy of ``params`` containing only allowlisted keys with
+    string values truncated to ``_AUDIT_PARAM_VALUE_MAX``.
+
+    Returns ``None`` if the result would be empty so the audit row stays
+    NULL instead of recording an empty JSON object.
+    """
+    if not params:
+        return None
+    cleaned: dict[str, Any] = {}
+    for key in _AUDITABLE_PARAM_KEYS & params.keys():
+        val = params[key]
+        if isinstance(val, str) and len(val) > _AUDIT_PARAM_VALUE_MAX:
+            cleaned[key] = val[:_AUDIT_PARAM_VALUE_MAX] + "…"
+        else:
+            cleaned[key] = val
+    return cleaned or None
+
+
 def emit_audit(
     *,
     request: Request,
@@ -94,6 +135,7 @@ def emit_audit(
     tool_name: str,
     transport: str,
     status_code: int,
+    params: dict[str, Any] | None = None,
 ) -> None:
     """Schedule a fire-and-forget audit write.
 
@@ -101,7 +143,12 @@ def emit_audit(
     is optional so a 401 (before auth resolves) can still record an
     attempt against the resolved org if one is available later via the
     bearer prefix; pass ``None`` when nothing is known.
+
+    ``params`` is filtered through :func:`_sanitise_params` so only
+    allowlisted keys land in the audit row — never store free-form
+    blobs that could contain secrets.
     """
+    cleaned_params = _sanitise_params(params)
     if len(_audit_tasks) >= _MAX_INFLIGHT:
         # Compensating control is failing: rate-limit may be fail-open and
         # now audit is dropping. Emit ALL identifying context (the row we
@@ -131,6 +178,7 @@ def emit_audit(
             ip=_client_ip(request),
             user_agent=request.headers.get("user-agent"),
             status_code=status_code,
+            params=cleaned_params,
         )
     )
     _audit_tasks.add(task)

@@ -25,9 +25,10 @@ the configured window — 90 days by default.
 """
 
 import uuid
+from typing import Any
 
 from sqlalchemy import ForeignKey, Index, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -70,3 +71,10 @@ class MCPAuditLogEntry(BaseModel):
     # HTTP-style status: 200 success, 401 auth fail, 403 scope fail, 404
     # unknown tool, 429 rate-limited, 500 handler exception.
     status_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Filtered call params so an admin can see WHAT was searched / read,
+    # not just which tool was called. We sanitise to a small allowlist
+    # of safe keys (query, limit, offset, task_type, repo_id,
+    # include_terminal) before writing — never store free-form params
+    # blobs, which could carry secrets the caller mistakenly put there.
+    # NULL when the call had no params or the params were already empty.
+    params: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
