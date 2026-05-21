@@ -47,7 +47,7 @@
             @delete="confirmDelete = true"
             @save-title="handleSaveTitle"
             @open-skill-settings="skillSettingsOpen = true"
-            @open-history="historyDialogOpen = true"
+            @open-history="openHeaderHistory"
           />
 
           <!-- External-LLM mode banner. Shown when EVERY phase in
@@ -249,7 +249,6 @@
               @toggle-edit="toggleEdit"
               @export-section="downloadSection"
               @import-section="handleImportSection"
-              @open-history="openSectionHistory"
             />
           </div>
 
@@ -417,40 +416,11 @@
         @saved="reloadBudAfterSettingsSave"
       />
 
-      <!-- Edit-history dialog. Reachable from the header History button
-           alongside the AI chat button — keeps the version log
-           prominent instead of buried in the section tabs row. -->
-      <v-dialog
-        v-model="historyDialogOpen"
-        max-width="720"
-        scrollable
-      >
-        <v-card v-if="bud" class="history-dialog">
-          <v-card-title class="d-flex align-center ga-2 pa-4 pb-2">
-            <v-icon icon="mdi-history" size="22" />
-            <span class="text-h6 font-weight-bold">Edit history</span>
-            <span class="text-caption text-medium-emphasis ml-2">
-              BUD-{{ String(bud.bud_number).padStart(3, '0') }}
-            </span>
-            <v-spacer />
-            <v-btn icon="mdi-close" variant="text" size="small" @click="historyDialogOpen = false" />
-          </v-card-title>
-          <v-divider />
-          <v-card-text class="pa-4 history-dialog__body">
-            <BUDVersionHistoryPanel
-              :bud-id="bud.id"
-              :bud-status="bud.status"
-              @reverted="onBudReverted"
-            />
-          </v-card-text>
-        </v-card>
-      </v-dialog>
-
-      <!-- Per-section diff drawer (Google Docs style). Filters the
-           version log to a single phase and shows a unified line diff
-           between the selected snapshot and the current content, with
-           an inline Restore. The header History dialog stays for the
-           cross-phase audit view. -->
+      <!-- Edit-history drawer. Single entry point from the page
+           header. The drawer is scoped to whichever section the user
+           is currently looking at — closing it, switching tabs,
+           reopening it picks up the new section automatically via the
+           section prop. -->
       <BUDSectionDiffDrawer
         v-if="bud"
         v-model="sectionDiffOpen"
@@ -542,7 +512,6 @@ import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
 import BUDTechSpecTab from '@/components/buds/BUDTechSpecTab.vue'
 import BUDClosedTab from '@/components/buds/BUDClosedTab.vue'
-import BUDVersionHistoryPanel from '@/components/buds/BUDVersionHistoryPanel.vue'
 import BUDSectionDiffDrawer from '@/components/buds/BUDSectionDiffDrawer.vue'
 import BUDSectionToolbar from '@/components/buds/BUDSectionToolbar.vue'
 import BUDStatusDialogs from '@/components/buds/BUDStatusDialogs.vue'
@@ -591,10 +560,11 @@ const isExternalLlmMode = computed(() => {
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)
 const skillSettingsOpen = ref(false)
-const historyDialogOpen = ref(false)
-// Per-section diff drawer. Mirrors Google Docs / Word: open from a
-// section toolbar, see only edits to THAT section's content, view a
-// line-level diff against the current text, and restore in place.
+// Edit-history drawer. One entry point lives in the page header; the
+// drawer scopes its content to whichever section is currently active.
+// UAT / Prod / Closed have no editable section, so the drawer falls
+// back to ``requirements`` — the section that always has at least the
+// v1 backfill row.
 const sectionDiffOpen = ref(false)
 type DiffSection = 'requirements' | 'tech-spec' | 'design' | 'testing' | 'code-review'
 const DIFF_SECTIONS: ReadonlySet<DiffSection> = new Set([
@@ -606,16 +576,12 @@ const DIFF_SECTIONS: ReadonlySet<DiffSection> = new Set([
 ])
 const sectionDiffSection = ref<DiffSection>('requirements')
 
-// Map the BUDSectionKey emitted by the toolbar (e.g. 'requirements_md')
-// to the tab slug the drawer expects ('requirements'). Falls back to
-// the active tab when the section isn't a tab-mapped one.
-function openSectionHistory(sectionKey: string): void {
-  const tab = (BUD_SECTIONS as Record<string, { tab: string } | undefined>)[sectionKey]?.tab
-    ?? activeTab.value
-  if (DIFF_SECTIONS.has(tab as DiffSection)) {
-    sectionDiffSection.value = tab as DiffSection
-    sectionDiffOpen.value = true
-  }
+function openHeaderHistory(): void {
+  const tab = activeTab.value
+  sectionDiffSection.value = DIFF_SECTIONS.has(tab as DiffSection)
+    ? (tab as DiffSection)
+    : 'requirements'
+  sectionDiffOpen.value = true
 }
 
 // Org-level UAT toggle. Hidden when false: the UAT tab disappears, and
@@ -1187,10 +1153,4 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
   opacity: 0;
 }
 
-/* Cap the history dialog body so a long-running BUD with hundreds of
-   edits doesn't grow the dialog past the viewport — the internal
-   v-list scrolls instead. */
-.history-dialog__body {
-  max-height: 70vh;
-}
 </style>

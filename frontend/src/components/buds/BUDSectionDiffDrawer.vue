@@ -5,22 +5,14 @@
  * you may not use this file except in compliance with the License.
  -->
 
-<!-- Per-section "Google Docs" version-history drawer.
+<!-- Edit-history drawer for one BUD section.
 
-     Opens from the section toolbar (Requirements / Tech Spec / Design /
-     Testing / Code Review). Lists versions scoped to that section's
-     phase only, so the user sees only edits that affect what they're
-     looking at. Selecting a version renders a unified line-level diff
-     between THAT snapshot and the current BUD content, with green
-     additions and red deletions in the gutter. A Restore button on
-     each selected version POSTs to /buds/{id}/revert/{phase}/{v},
-     which produces a new ``source='revert'`` row server-side — the
-     history is append-only so the action is itself reversible.
-
-     The cross-phase audit view ("everything that ever changed across
-     all phases, with source badges") still lives behind the History
-     button in the page header — different audience, different
-     question. -->
+     Lists snapshots scoped to a single phase (e.g. only the BUD
+     phase's snapshots show up when looking at Requirements). Selecting
+     a snapshot renders a unified line-level diff against the current
+     content. Restore POSTs to /buds/{id}/revert/{phase}/{v}, which
+     produces a new ``source='revert'`` row — history is append-only,
+     so the restore is itself reversible. -->
 <template>
   <v-navigation-drawer
     v-model="open"

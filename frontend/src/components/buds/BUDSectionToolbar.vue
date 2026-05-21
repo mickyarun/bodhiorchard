@@ -36,7 +36,6 @@ const emit = defineEmits<{
   'toggle-edit': []
   'export-section': [section: string]
   'import-section': [section: string, file: File]
-  'open-history': [section: string]
 }>()
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -72,17 +71,6 @@ function onFileChange(event: Event): void {
       </v-icon>
       {{ isEditing ? 'Preview' : 'Edit' }}
     </PhaseLockedBtn>
-    <span class="toolbar-sep" />
-    <v-btn
-      variant="text"
-      size="small"
-      class="toolbar-btn"
-      title="View version history and restore previous edits"
-      @click="emit('open-history', currentSection)"
-    >
-      <v-icon size="15" class="mr-1">mdi-history</v-icon>
-      History
-    </v-btn>
     <span class="toolbar-sep" />
     <v-btn
       variant="text"
