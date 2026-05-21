@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, lazyload
 
@@ -108,6 +108,7 @@ class BUDRepository(BaseRepository[BUDDocument]):
         *,
         status_filter: str | None = None,
         exclude_statuses: Sequence[BUDStatus] | None = None,
+        query: str | None = None,
         limit: int | None = None,
     ) -> list[BUDDocument]:
         """List BUDs ordered by bud_number descending.
@@ -119,6 +120,12 @@ class BUDRepository(BaseRepository[BUDDocument]):
                 terminal BUDs (closed / discarded) from the BYO-AI flow
                 by default. Combines with ``status_filter`` if both
                 supplied, though that combination is rarely useful.
+            query: Optional keyword search — whitespace-tokenised
+                substring ILIKE on ``title`` OR ``requirements_md``. Any
+                token match counts; tokens shorter than 2 chars are
+                dropped. Same shape as
+                ``FeatureReadRepository.keyword_search`` so the BYO-AI
+                experience is consistent across the two MCP read tools.
             limit: Maximum number of results.
         """
         stmt = self._scoped(select(BUDDocument).order_by(BUDDocument.bud_number.desc()))
@@ -126,6 +133,17 @@ class BUDRepository(BaseRepository[BUDDocument]):
             stmt = stmt.where(BUDDocument.status == status_filter)
         if exclude_statuses:
             stmt = stmt.where(BUDDocument.status.notin_(exclude_statuses))
+        if query:
+            tokens = {t for t in query.lower().split() if len(t) >= 2}
+            if tokens:
+                or_clauses = [
+                    or_(
+                        BUDDocument.title.ilike(f"%{tok}%"),
+                        BUDDocument.requirements_md.ilike(f"%{tok}%"),
+                    )
+                    for tok in tokens
+                ]
+                stmt = stmt.where(or_(*or_clauses))
         if limit is not None:
             stmt = stmt.limit(limit)
         result = await self._db.execute(stmt)

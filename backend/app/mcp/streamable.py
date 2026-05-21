@@ -79,13 +79,16 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "get_bud_context",
         "description": (
             "List in-progress BUDs (not closed/discarded) in your org "
-            "for context when drafting a new one. Pass "
+            "for context when drafting a new one. Optional ``query`` "
+            "does substring keyword search on title + requirements_md "
+            "(same tokenisation as get_features). Pass "
             "include_terminal=true to also see closed/discarded history."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
+                "query": {"type": "string"},
                 "include_terminal": {"type": "boolean", "default": False},
             },
         },
@@ -93,11 +96,13 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "get_features",
         "description": (
-            "Semantic search over your org's active features (the knowledge base). "
-            "ALWAYS pass a non-empty ``query`` — orgs with hundreds of features need "
-            "keyword filtering. Paginate via ``offset`` + ``next_offset`` until "
-            "``has_more`` is false. Each result has an ``id`` you can place into a "
-            'BUD\'s trailing {"linked_feature_ids": [...]} fence.'
+            "Keyword search over your org's active features (substring match on "
+            "title + description, tokenised on whitespace; matches frontend "
+            "/features page behaviour). ALWAYS pass a non-empty ``query`` — orgs "
+            "with hundreds of features need filtering. Paginate via ``offset`` + "
+            "``next_offset`` until ``has_more`` is false. Each result has an "
+            '``id`` you can place into a BUD\'s trailing '
+            '{"linked_feature_ids": [...]} fence.'
         ),
         "inputSchema": {
             "type": "object",

@@ -43,15 +43,21 @@ async def handle_get_bud_context(
     work to avoid duplicating it, NOT every BUD ever closed or
     discarded — that's 90% noise once an org has any history.
 
-    Callers that want the full set can pass ``include_terminal=true``.
+    Optional ``query`` enables substring keyword search on title +
+    requirements_md (same tokenisation as ``get_features`` so the LLM
+    can use the same query style for both tools). Callers that want
+    the full set can pass ``include_terminal=true``.
     """
     limit = min(params.get("limit", 5), 20)
     include_terminal = bool(params.get("include_terminal", False))
+    query = params.get("query")
+    query = query.strip() if isinstance(query, str) and query.strip() else None
 
     bud_repo = BUDRepository(db, org_id=org.id)
     buds = await bud_repo.list_buds(
         limit=limit,
         exclude_statuses=None if include_terminal else _TERMINAL_BUD_STATUSES,
+        query=query,
     )
 
     return {
@@ -66,6 +72,7 @@ async def handle_get_bud_context(
             for bud in buds
         ],
         "filter": "in_progress" if not include_terminal else "all",
+        "query": query,
     }
 
 

@@ -108,7 +108,9 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         name="get_bud_context",
         description=(
             "Retrieve EXISTING IN-PROGRESS BUDs (anything not closed or "
-            "discarded) for context when drafting a new one. Pass "
+            "discarded) for context when drafting a new one. Optional "
+            "``query`` does substring keyword search on title + "
+            "requirements_md (same tokenisation as get_features). Pass "
             "include_terminal=true to also see closed/discarded history."
         ),
         input_schema={
@@ -118,6 +120,15 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "type": "integer",
                     "description": "Max BUDs to return (default 5, max 20)",
                     "default": 5,
+                },
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Optional keyword filter — whitespace-tokenised "
+                        "substring match on title + requirements_md. "
+                        "Tokens shorter than 2 chars are dropped. Omit "
+                        "to get the most recent BUDs."
+                    ),
                 },
                 "include_terminal": {
                     "type": "boolean",
@@ -160,9 +171,11 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="get_features",
         description=(
-            "Semantic search over your org's active features. ALWAYS pass a "
-            "non-empty ``query`` — an org with hundreds of features will "
-            "drown the model in noise otherwise. Paginate via ``offset`` + "
+            "Keyword search over your org's active features (substring "
+            "match on title + description, tokenised on whitespace; tokens "
+            "shorter than 2 chars are dropped). ALWAYS pass a non-empty "
+            "``query`` — an org with hundreds of features will drown the "
+            "model in noise otherwise. Paginate via ``offset`` + "
             "``next_offset`` until ``has_more`` is false. Each result "
             "includes ``id`` you can put into a BUD's "
             '{"linked_feature_ids": [...]} JSON fence.'
