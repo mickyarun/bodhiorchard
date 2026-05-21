@@ -244,7 +244,7 @@
     </v-card>
 
     <!-- Create-token dialog -->
-    <v-dialog v-model="showCreate" max-width="460">
+    <v-dialog v-model="showCreate" max-width="460" @update:model-value="onCreateDialogToggle">
       <v-card class="pa-5">
         <div class="text-h6 font-weight-bold mb-3">New MCP token</div>
         <v-text-field
@@ -254,6 +254,8 @@
           :rules="[(v) => !!v?.trim() || 'Name required']"
           autofocus
           density="comfortable"
+          :error-messages="createError ? [createError] : []"
+          @update:model-value="createError = null"
         />
         <v-text-field
           v-model.number="newTTL"
@@ -551,8 +553,19 @@ async function refresh(): Promise<void> {
   }
 }
 
+// Inline error for the New-token dialog. Cleared on every field edit
+// and on dialog open/close so it never stays stale across attempts.
+const createError = ref<string | null>(null)
+
+function onCreateDialogToggle(open: boolean): void {
+  if (!open) {
+    createError.value = null
+  }
+}
+
 async function createToken(): Promise<void> {
   creating.value = true
+  createError.value = null
   try {
     const { data } = await api.post<{ mcp_token: string; name: string }>(
       '/v1/me/mcp-tokens',
@@ -564,6 +577,21 @@ async function createToken(): Promise<void> {
     newName.value = ''
     newTTL.value = 90
     await refresh()
+  } catch (err: unknown) {
+    // Show the backend's ``detail`` message inline on the Token-name
+    // field. The most common failure is the 409 duplicate-name from
+    // ``POST /me/mcp-tokens`` (see backend/app/api/v1/me.py); other
+    // statuses fall back to a generic message so the user always sees
+    // SOMETHING rather than the dialog appearing to silently no-op.
+    const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
+    const detail = axiosErr.response?.data?.detail
+    if (axiosErr.response?.status === 409) {
+      createError.value = detail || 'A token with that name already exists.'
+    } else if (typeof detail === 'string') {
+      createError.value = detail
+    } else {
+      createError.value = 'Could not create token. Please try again.'
+    }
   } finally {
     creating.value = false
   }
