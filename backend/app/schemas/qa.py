@@ -22,10 +22,17 @@ from pydantic import BaseModel, Field
 
 
 class ManualTestResultUpdate(BaseModel):
-    """Request body for updating a manual test case result."""
+    """Request body for updating a manual test case result.
+
+    ``pending`` is accepted so QA can revert a previous mark (e.g. a
+    Pass that needs re-testing after a regression). The handler clears
+    ``tester_name`` / ``tested_at`` / ``notes`` on revert so the case
+    looks fresh — otherwise stale attribution would imply the new
+    pending state was the original tester's call.
+    """
 
     test_case_id: str = Field(..., max_length=20, examples=["MTC-001"])
-    result: Literal["pass", "fail", "blocked", "skipped"]
+    result: Literal["pass", "fail", "blocked", "skipped", "pending"]
     notes: str | None = Field(None, max_length=2000)
 
 
