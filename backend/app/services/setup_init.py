@@ -47,7 +47,6 @@ from app.services.claude_env import (
     apply_claude_auth_to_env,
 )
 from app.services.permission_seeder import seed_permissions
-from app.services.redis_setup_status import set_setup_complete
 from app.services.repo_cloner import purge_org_clones
 from app.services.skill_loader import seed_skills_for_org
 
@@ -175,10 +174,6 @@ async def setup_init_org(req: InitOrgRequest, db: AsyncSession) -> InitOrgResult
     # request, separate session) sees the new rows. Stage-2 also opens
     # its own session for ``start_scan``.
     await db.commit()
-
-    # Warm the Redis fast-path so the wizard's repeated polling of
-    # ``/v1/setup/status`` doesn't grab DB connections.
-    await set_setup_complete(org.slug)
 
     # Wipe any leftover clones from a prior deployment of this slug. The
     # DB has just been seeded with a fresh org row, so anything sitting
