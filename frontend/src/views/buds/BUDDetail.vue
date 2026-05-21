@@ -400,13 +400,15 @@
       <!-- Per-BUD AI skills picker + per-phase auto-generate toggles.
            Re-fetch the BUD on @saved so the banner / next stage-PATCH
            pick up the freshly persisted auto_generate_phases without a
-           hard reload. -->
+           hard reload. We await the refetch (and log on failure) so a
+           transient network blip doesn't leave the banner showing
+           stale state for the rest of the session. -->
       <BUDSkillSettingsDialog
         v-if="bud"
         v-model="skillSettingsOpen"
         :bud-id="bud.id"
         :auto-generate-phases="bud.auto_generate_phases ?? null"
-        @saved="budStore.fetchBUD(bud.id)"
+        @saved="reloadBudAfterSettingsSave"
       />
 
       <!-- Delete confirmation -->
@@ -505,6 +507,19 @@ const settingsStore = useSettingsStore()
 const budLinkedFeaturesStore = useBudLinkedFeaturesStore()
 
 const bud = computed(() => budStore.currentBUD)
+
+async function reloadBudAfterSettingsSave(): Promise<void> {
+  // Save dialog already closed itself; refetch is best-effort. On
+  // failure the banner / status tab keep showing the pre-save state,
+  // which is a stale-view bug — surface it loudly enough that the user
+  // knows to refresh, instead of silently swallowing the rejection.
+  if (!bud.value) return
+  try {
+    await budStore.fetchBUD(bud.value.id)
+  } catch (err) {
+    console.error('BUD reload after settings save failed:', err)
+  }
+}
 
 // True iff every phase in auto_generate_phases is off (or the map is
 // empty / null entirely). Drives the External-LLM banner — we only

@@ -111,6 +111,46 @@ def test_phase_name_aliases_still_accepted() -> None:
     assert TASK_TYPE_TO_STAGE["tech_plan"] is BUDStatus.TECH_ARCH
 
 
+def test_every_configurable_stage_has_exactly_one_canonical_task_type() -> None:
+    """Each BUDStatus an agent can run for must map to ONE canonical name.
+
+    Stops the "we added a 5th canonical but forgot to remove the alias
+    that pointed at the same stage" failure mode from drifting silently.
+    """
+    canonical_stages: dict[BUDStatus, str] = {}
+    for canonical in CANONICAL_TASK_TYPES:
+        stage = TASK_TYPE_TO_STAGE[canonical]
+        assert stage not in canonical_stages, (
+            f"Two canonical task_types ({canonical_stages[stage]!r} and "
+            f"{canonical!r}) both resolve to {stage}"
+        )
+        canonical_stages[stage] = canonical
+
+
+@pytest.mark.asyncio
+async def test_canonical_and_alias_return_identical_prompt(monkeypatch: Any) -> None:
+    """``pm`` and ``bud`` (and ``tech_plan`` / ``tech_arch``) MUST return
+    the same prompt — they're aliases for the same agent stage. If the
+    resolution path ever diverges (e.g. someone adds per-alias overrides)
+    this test fails before the BYO-AI UX silently splits.
+    """
+
+    async def _fake_resolve(agent_name: str, org_id: uuid.UUID, db: Any, **kw: Any) -> Any:
+        return MagicMock(skill_slug=f"{agent_name}-default", prompt=f"PROMPT {agent_name}")
+
+    monkeypatch.setattr("app.mcp.handlers_prompts.resolve_skill_for_agent", _fake_resolve)
+    org = MagicMock(id=uuid.uuid4())
+    db = MagicMock()
+    pm_result = await handle_get_prompt(db, org, {"task_type": "pm"})
+    bud_result = await handle_get_prompt(db, org, {"task_type": "bud"})
+    assert pm_result["prompt"] == bud_result["prompt"]
+    assert pm_result["skill_slug"] == bud_result["skill_slug"]
+
+    plan_result = await handle_get_prompt(db, org, {"task_type": "tech_plan"})
+    arch_result = await handle_get_prompt(db, org, {"task_type": "tech_arch"})
+    assert plan_result["prompt"] == arch_result["prompt"]
+
+
 def test_streamable_marks_error_payload_as_is_error_true() -> None:
     """Pin the contract that error-shaped handler responses become isError=true.
 

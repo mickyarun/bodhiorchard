@@ -241,8 +241,9 @@ const creating = ref(false)
 const plaintextDialog = ref(false)
 const plaintextToken = ref('')
 
-const snippetTab = ref<string>('claude-desktop')
-const exampleTab = ref<string>('pm')
+// snippetTab / exampleTab refs are declared further down the file —
+// after the SNIPPETS / EXAMPLE_PROMPTS constants — so the initial
+// value can derive from Object.keys() without hitting the TDZ.
 
 const endpointUrl = computed(() => {
   // Prefer VITE_API_BASE_URL when set (split-host deployments); otherwise
@@ -398,6 +399,12 @@ const SNIPPETS: Record<string, ClientSnippet> = {
 }`,
   },
 }
+
+// Initialise from Object.keys so renaming a SNIPPETS / EXAMPLE_PROMPTS
+// key can't silently render a blank v-window — v-tabs requires its
+// model to match one of the rendered v-tab :value props.
+const snippetTab = ref<string>(Object.keys(SNIPPETS)[0] ?? '')
+const exampleTab = ref<string>(Object.keys(EXAMPLE_PROMPTS)[0] ?? '')
 
 function tokenSubtitle(t: TokenRead): string {
   const parts: string[] = [`Prefix ${t.token_prefix}…`]

@@ -723,6 +723,28 @@ async def update_bud(
         "requirements_md" in update_data and update_data["requirements_md"] != bud.requirements_md
     )
 
+    # auto_generate_phases is MERGED, not replaced. The dialog sends the
+    # full normalised map today, but if a future BUDStatus phase becomes
+    # configurable and an older client sends only the four keys it knows
+    # about, a verbatim setattr would silently drop the new phase to
+    # False. Merge-with-existing keeps forward compatibility: unknown
+    # keys are validated out (only BUDStatus values are accepted), known
+    # keys not in the patch keep their prior value.
+    if "auto_generate_phases" in update_data:
+        incoming_phases = update_data.pop("auto_generate_phases") or {}
+        merged: dict[str, bool] = dict(bud.auto_generate_phases or {})
+        valid_phase_keys = {s.value for s in BUDStatus}
+        for key, val in incoming_phases.items():
+            if key in valid_phase_keys:
+                merged[key] = bool(val)
+            else:
+                logger.warning(
+                    "bud_auto_generate_phases_unknown_key_dropped",
+                    bud_id=str(bud.id),
+                    key=key,
+                )
+        bud.auto_generate_phases = merged
+
     for field, value in update_data.items():
         setattr(bud, field, value)
 

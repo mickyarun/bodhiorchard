@@ -70,8 +70,18 @@ class BUDUpdate(BaseModel):
     metadata_: dict[str, Any] | None = Field(None, alias="metadata")
     assignee_id: uuid.UUID | None = None
     # Per-phase auto-generate map can be flipped post-creation from the
-    # BUD detail page. Send the FULL desired map; the backend replaces
-    # the column verbatim. Send {} to clear (= all phases skip).
+    # BUD detail page (BUDSkillSettingsDialog). The backend MERGES the
+    # incoming dict with the existing column rather than replacing it
+    # verbatim, so an older client that doesn't know about a future
+    # phase won't silently drop it to false; unknown keys are dropped
+    # with a warning log. To explicitly turn a phase off, send the key
+    # with ``false`` — omitting it keeps the prior value.
+    #
+    # Intentionally NOT in FIELD_OWNING_STATUS — editable in any
+    # status, including closed/discarded. Closed-BUD edits have no
+    # runtime effect (no transitions fire post-close) but stay
+    # auditable, and locking the field would surprise users who want
+    # to fix the config after the fact.
     auto_generate_phases: dict[str, bool] | None = None
 
     model_config = {"populate_by_name": True}

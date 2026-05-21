@@ -224,34 +224,57 @@ async function load(): Promise<void> {
 async function save(): Promise<void> {
   saving.value = true
   errorMessage.value = null
-  try {
-    // Two writes here are intentional: stage-skill overrides have their
-    // own validated PUT endpoint (rejects skill_id / agent_type
-    // mismatches with 400), while auto_generate_phases goes through the
-    // generic BUD PATCH. Fire skills first; if it 400s we don't want a
-    // half-applied state where phases changed but skills didn't.
-    const overridesBody: Record<string, string> = {}
-    for (const stage of advancedStages) {
-      const picked = picks.value[stage.value]
-      if (!picked) continue
-      if (picked === defaultSkillIdForAgent(stage.agentType)) continue
-      overridesBody[stage.value] = picked
-    }
-    await api.put(`/v1/buds/${props.budId}/stage-skill-overrides`, overridesBody)
-    // Send the full normalised map (every stage key with a boolean) so
-    // the backend's setattr replace is unambiguous — never partial.
-    const phasesBody: Record<string, boolean> = {}
-    for (const stage of advancedStages) {
-      phasesBody[stage.value] = !!autoPhases.value[stage.value]
-    }
-    await api.patch(`/v1/buds/${props.budId}`, { auto_generate_phases: phasesBody })
-    emit('saved')
-    close()
-  } catch (err) {
-    errorMessage.value = extractError(err, 'Failed to save settings.')
-  } finally {
-    saving.value = false
+  // Two writes — there is no single backend endpoint for both today.
+  // Order chosen so a partial failure leaves the most-recoverable state:
+  //
+  //   1. PATCH phases (generic field write — validation is just a
+  //      Pydantic dict; near-impossible to 400 on a normalised payload).
+  //   2. PUT skill overrides (validates each skill_id matches its stage's
+  //      expected agent_type; can 400 on a stale skill list).
+  //
+  // If step 2 fails after step 1 succeeds we surface a SPECIFIC error
+  // ("phases saved, skill picks failed") so the user knows what's
+  // persisted and what to retry. If we reversed the order, the more
+  // failure-prone write would commit first and a phases-PATCH failure
+  // would leave the dialog with stale skill state and no useful hint.
+  const phasesBody: Record<string, boolean> = {}
+  for (const stage of advancedStages) {
+    phasesBody[stage.value] = !!autoPhases.value[stage.value]
   }
+  try {
+    await api.patch(`/v1/buds/${props.budId}`, { auto_generate_phases: phasesBody })
+  } catch (err) {
+    errorMessage.value = extractError(err, 'Failed to save phase toggles.')
+    saving.value = false
+    return
+  }
+
+  // Only persist picks that differ from the org default; matching picks
+  // are dropped so the BUD continues to follow whatever the org admin
+  // marks as default later, rather than being pinned to today's id.
+  const overridesBody: Record<string, string> = {}
+  for (const stage of advancedStages) {
+    const picked = picks.value[stage.value]
+    if (!picked) continue
+    if (picked === defaultSkillIdForAgent(stage.agentType)) continue
+    overridesBody[stage.value] = picked
+  }
+  try {
+    await api.put(`/v1/buds/${props.budId}/stage-skill-overrides`, overridesBody)
+  } catch (err) {
+    // Phases ARE saved at this point — be explicit so the user doesn't
+    // assume the whole dialog rolled back and re-flip phases on retry.
+    errorMessage.value = extractError(
+      err,
+      'Phase toggles saved, but skill picks failed. Re-open and retry the skill picker.',
+    )
+    saving.value = false
+    return
+  }
+
+  emit('saved')
+  close()
+  saving.value = false
 }
 
 function close(): void {
