@@ -31,6 +31,7 @@ from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
 from app.repositories.skill_profile import SkillProfileRepository
 from app.repositories.user import UserRepository
+from app.repositories.user_mcp_token import UserMCPTokenRepository
 from app.schemas.members import (
     AddMemberRequest,
     AssignRoleRequest,
@@ -291,13 +292,36 @@ async def toggle_member_status(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    user.is_active = not user.is_active
+    new_state = not user.is_active
+    user.is_active = new_state
+    # On deactivation, revoke every MCP token this user owns. Soft-delete
+    # via is_active=False doesn't fire the FK CASCADE on user_mcp_tokens,
+    # so without this step a leaked / forgotten bodhi_token would keep
+    # authenticating to /mcp/* indefinitely after offboarding.
+    #
+    # On REACTIVATION we deliberately do NOT re-revoke: there should be
+    # nothing left to revoke (the deactivation drained the table), and
+    # forcing a re-mint flow on reactivated users is the intended UX.
+    # The verify_mcp_token is_active check is the safety net for any
+    # token that somehow survives.
+    revoked_tokens = 0
+    if not new_state:
+        revoked_tokens = await UserMCPTokenRepository(db).delete_all_for_user(user.id)
     await db.flush()
     await db.refresh(user)
 
     action = "reactivated" if user.is_active else "deactivated"
     logger.info(
-        "member_status_changed", user_id=str(user_id), action=action, by=current_user.email
+        "member_status_changed",
+        user_id=str(user_id),
+        action=action,
+        by=current_user.email,
+        mcp_tokens_revoked=revoked_tokens,
+        # Explicit boolean so an audit query can distinguish "no tokens
+        # to revoke" (common) from "0 due to a bug" if the rowcount
+        # interpretation ever changes (some drivers return -1 for
+        # unknown — our getattr-or-0 in the repo would mask that).
+        had_tokens_to_revoke=bool(revoked_tokens),
     )
 
     return _user_to_member(user)
@@ -577,8 +601,11 @@ async def merge_members(
     for alias in source_aliases:
         await user_repo.add_email_alias(org.id, target.id, alias.email)
 
-    # 4. Deactivate source
+    # 4. Deactivate source + revoke its MCP tokens. Token revocation must
+    # happen here (not via the FK CASCADE) because is_active=False is a
+    # soft-delete; tokens would otherwise outlive the merge.
     source.is_active = False
+    revoked_tokens = await UserMCPTokenRepository(db).delete_all_for_user(source.id)
     await db.flush()
 
     logger.info(
@@ -587,6 +614,8 @@ async def merge_members(
         source_id=str(body.source_id),
         source_email=source.email,
         profiles_transferred=transferred,
+        mcp_tokens_revoked=revoked_tokens,
+        had_tokens_to_revoke=bool(revoked_tokens),
         by=current_user.email,
     )
 

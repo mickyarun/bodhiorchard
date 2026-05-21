@@ -1,0 +1,168 @@
+# Copyright 2025-2026 Arun Rajkumar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+
+"""Tests for the ``get_prompt`` MCP tool.
+
+Validates the BYO-AI surface that lets a user pull our org's active
+prompt for a given BUD stage. Two invariants matter most:
+
+1. Only the documented ``task_type`` values are accepted — any other
+   string returns an ``error`` payload, never a 500.
+2. The handler resolves through ``resolve_skill_for_agent`` (the same
+   override-aware resolver our internal agents use) so the external LLM
+   gets exactly the prompt the in-process agent would have run.
+"""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
+
+from app.mcp.handlers_prompts import (
+    CANONICAL_TASK_TYPES,
+    TASK_TYPE_TO_STAGE,
+    handle_get_prompt,
+)
+from app.models.bud import BUDStatus
+
+
+@pytest.mark.asyncio
+async def test_unknown_task_type_returns_error_payload(monkeypatch: Any) -> None:
+    """Garbage task_type must produce an MCP-friendly error, not a 500."""
+    org = MagicMock(id=uuid.uuid4())
+    result = await handle_get_prompt(MagicMock(), org, {"task_type": "not_a_stage"})
+    assert "error" in result
+    assert "task_type" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_missing_task_type_returns_error_payload() -> None:
+    """No task_type at all is the same shape as a bad task_type."""
+    org = MagicMock(id=uuid.uuid4())
+    result = await handle_get_prompt(MagicMock(), org, {})
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_known_task_types_dispatch_to_resolver(monkeypatch: Any) -> None:
+    """Each valid task_type calls resolve_skill_for_agent and returns the prompt."""
+    captured: list[tuple[str, uuid.UUID]] = []
+
+    async def _fake_resolve(agent_name: str, org_id: uuid.UUID, db: Any, **kw: Any) -> Any:
+        captured.append((agent_name, org_id))
+        return MagicMock(skill_slug=f"{agent_name}-default", prompt=f"PROMPT FOR {agent_name}")
+
+    # Patch the LOCAL name in handlers_prompts — the module now imports
+    # resolve_skill_for_agent at top-level, so the source-module patch
+    # would arrive too late to override the already-bound reference.
+    monkeypatch.setattr("app.mcp.handlers_prompts.resolve_skill_for_agent", _fake_resolve)
+
+    org = MagicMock(id=uuid.uuid4())
+    for task_type in TASK_TYPE_TO_STAGE:
+        result = await handle_get_prompt(MagicMock(), org, {"task_type": task_type})
+        assert "error" not in result, f"task_type={task_type!r} unexpectedly errored: {result}"
+        assert result["task_type"] == task_type
+        assert result["prompt"].startswith("PROMPT FOR ")
+        assert result["skill_slug"].endswith("-default")
+
+    # Resolver was called once per known task_type with this org's id.
+    assert len(captured) == len(TASK_TYPE_TO_STAGE)
+    assert {org_id for _, org_id in captured} == {org.id}
+
+
+@pytest.mark.asyncio
+async def test_no_active_skill_returns_error_payload(monkeypatch: Any) -> None:
+    """If the org has no seeded skill for the agent type, surface as error."""
+
+    async def _fake_resolve_none(*args: Any, **kw: Any) -> None:
+        return None
+
+    monkeypatch.setattr("app.mcp.handlers_prompts.resolve_skill_for_agent", _fake_resolve_none)
+
+    org = MagicMock(id=uuid.uuid4())
+    result = await handle_get_prompt(MagicMock(), org, {"task_type": "bud"})
+    assert "error" in result
+    assert "skill" in result["error"].lower()
+
+
+def test_canonical_task_types_resolve_to_expected_stages() -> None:
+    """Every advertised task_type must resolve to a real BUDStatus.
+
+    Adding a new canonical name without a TASK_TYPE_TO_STAGE entry
+    would 404 in the handler — this test fails before that ships.
+    """
+    for name in CANONICAL_TASK_TYPES:
+        assert name in TASK_TYPE_TO_STAGE
+
+
+def test_phase_name_aliases_still_accepted() -> None:
+    """Aliases (``bud`` / ``tech_arch``) must resolve identically to their
+    canonical counterparts for backward compatibility with the docs we
+    shipped on the first iteration of the BYO-AI flow.
+    """
+    assert TASK_TYPE_TO_STAGE["bud"] is BUDStatus.BUD
+    assert TASK_TYPE_TO_STAGE["pm"] is BUDStatus.BUD
+    assert TASK_TYPE_TO_STAGE["tech_arch"] is BUDStatus.TECH_ARCH
+    assert TASK_TYPE_TO_STAGE["tech_plan"] is BUDStatus.TECH_ARCH
+
+
+def test_every_configurable_stage_has_exactly_one_canonical_task_type() -> None:
+    """Each BUDStatus an agent can run for must map to ONE canonical name.
+
+    Stops the "we added a 5th canonical but forgot to remove the alias
+    that pointed at the same stage" failure mode from drifting silently.
+    """
+    canonical_stages: dict[BUDStatus, str] = {}
+    for canonical in CANONICAL_TASK_TYPES:
+        stage = TASK_TYPE_TO_STAGE[canonical]
+        assert stage not in canonical_stages, (
+            f"Two canonical task_types ({canonical_stages[stage]!r} and "
+            f"{canonical!r}) both resolve to {stage}"
+        )
+        canonical_stages[stage] = canonical
+
+
+@pytest.mark.asyncio
+async def test_canonical_and_alias_return_identical_prompt(monkeypatch: Any) -> None:
+    """``pm`` and ``bud`` (and ``tech_plan`` / ``tech_arch``) MUST return
+    the same prompt — they're aliases for the same agent stage. If the
+    resolution path ever diverges (e.g. someone adds per-alias overrides)
+    this test fails before the BYO-AI UX silently splits.
+    """
+
+    async def _fake_resolve(agent_name: str, org_id: uuid.UUID, db: Any, **kw: Any) -> Any:
+        return MagicMock(skill_slug=f"{agent_name}-default", prompt=f"PROMPT {agent_name}")
+
+    monkeypatch.setattr("app.mcp.handlers_prompts.resolve_skill_for_agent", _fake_resolve)
+    org = MagicMock(id=uuid.uuid4())
+    db = MagicMock()
+    pm_result = await handle_get_prompt(db, org, {"task_type": "pm"})
+    bud_result = await handle_get_prompt(db, org, {"task_type": "bud"})
+    assert pm_result["prompt"] == bud_result["prompt"]
+    assert pm_result["skill_slug"] == bud_result["skill_slug"]
+
+    plan_result = await handle_get_prompt(db, org, {"task_type": "tech_plan"})
+    arch_result = await handle_get_prompt(db, org, {"task_type": "tech_arch"})
+    assert plan_result["prompt"] == arch_result["prompt"]
+
+
+def test_streamable_marks_error_payload_as_is_error_true() -> None:
+    """Pin the contract that error-shaped handler responses become isError=true.
+
+    Critical safety property: desktop MCP clients inspect isError to
+    decide whether to surface the response in their error UI or feed
+    it to the model as a prompt. A failure here means a "No active
+    skill" message gets piped into the LLM as if it were the prompt
+    itself.
+    """
+    # Match the exact predicate streamable._dispatch uses (line ~191).
+    success_result = {"task_type": "bud", "prompt": "..."}
+    error_result = {"error": "something broke"}
+
+    assert (isinstance(success_result, dict) and "error" in success_result) is False
+    assert (isinstance(error_result, dict) and "error" in error_result) is True

@@ -22,13 +22,15 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from app.api.router import api_router
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
+from app.services.mcp_audit_cleanup import run_forever as run_audit_cleanup
 from app.services.pr_merge_worker import WorkerPool, start_pr_merge_workers
 from app.services.scan.pr_merge_update import handle_pr_merge_delivery
 
@@ -234,6 +236,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     embedding_warmup_task = asyncio.create_task(_warm_embedding_model())
 
+    # 8a. Daily retention sweep for the MCP audit log. Single-instance:
+    # if Bodhiorchard grows multi-pod we'll move this behind a Redis lock
+    # so duplicate deletes don't race across pods.
+    mcp_audit_cleanup_task = asyncio.create_task(run_audit_cleanup())
+
     # 9. PR-merge Redis-stream worker pool. One consumer per
     # (org, repo) stream; supervisor task spawns consumers lazily as
     # streams appear in the registry. Orphan recovery re-publishes
@@ -253,6 +260,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cleanup_task.cancel()
     presence_task.cancel()
     embedding_warmup_task.cancel()
+    mcp_audit_cleanup_task.cancel()
     if pr_merge_pool is not None:
         await pr_merge_pool.stop()
     await stop_workers()
@@ -280,6 +288,45 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Design-Job-Id"],
 )
+
+
+# Defence-in-depth on top of CORSMiddleware. MCP clients are desktop apps
+# (Claude Desktop, Cursor, Continue) — they never send a preflight and
+# never need Access-Control-Allow-* headers. Even if someone later widens
+# the wildcard CORSMiddleware, no browser can talk credentialed CORS to
+# /mcp/ because:
+#   * preflight OPTIONS for /mcp/* short-circuits with 403 BEFORE
+#     CORSMiddleware can answer it with 200+CORS headers, and
+#   * any non-OPTIONS response for /mcp/* gets its CORS headers stripped
+#     AFTER CORSMiddleware re-adds them.
+# Registered AFTER CORSMiddleware so Starlette's reverse-wrap order places
+# this OUTERMOST — it sees the OPTIONS request before CORSMiddleware does
+# and strips headers from the response after CORSMiddleware has added them.
+_MCP_CORS_HEADERS_TO_STRIP = (
+    "access-control-allow-origin",
+    "access-control-allow-credentials",
+    "access-control-allow-methods",
+    "access-control-allow-headers",
+    "access-control-expose-headers",
+    "access-control-max-age",
+)
+
+
+async def _block_cors_on_mcp(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    is_mcp_path = request.url.path.startswith("/mcp/") or request.url.path == "/mcp"
+    if is_mcp_path and request.method == "OPTIONS":
+        return Response(status_code=403, content=b"")
+    response = await call_next(request)
+    if is_mcp_path:
+        for header in _MCP_CORS_HEADERS_TO_STRIP:
+            # ``MutableHeaders`` supports __delitem__ but not pop(); raises
+            # KeyError if absent, so guard each delete.
+            if header in response.headers:
+                del response.headers[header]
+    return response
+
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=_block_cors_on_mcp)
 
 app.include_router(api_router)
 

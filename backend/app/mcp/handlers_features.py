@@ -58,36 +58,107 @@ async def handle_get_features(
     org: Organization,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Query active features via semantic search (pgvector cosine)."""
+    """Hybrid keyword + semantic search over active features.
+
+    Strategy chosen so the MCP path behaves predictably for both
+    short title-like queries AND multi-word natural-language queries
+    LLMs tend to produce:
+
+    1. **Title-substring (ILIKE) first** — mirrors the frontend
+       ``/v1/features?q=`` page exactly. High precision; alphabetical.
+    2. **Semantic embedding fallback** — when the literal phrase
+       isn't in any title, embed the query and rank by cosine
+       distance against ``Feature.embedding``. Catches LLM phrasing
+       like "payment links notes post-payment edit" that no title
+       contains verbatim.
+
+    Required: ``query`` (non-empty). Optional: ``limit`` (default 10,
+    max 50), ``offset`` (default 0). The two backends share the same
+    pagination semantics so the caller doesn't see which one fired
+    except via the ``search_mode`` field in the response.
+
+    Each result carries ``id`` so an LLM can put real feature UUIDs
+    into the trailing ``{"linked_feature_ids": [...]}`` JSON fence
+    the BUD section editor parses on save.
+    """
     query = params.get("query", "")
-    limit = min(params.get("limit", 10), 50)
+    limit = min(int(params.get("limit", 10) or 10), 50)
+    offset = max(int(params.get("offset", 0) or 0), 0)
 
-    if not query:
+    stripped = query.strip() if isinstance(query, str) else ""
+    if not stripped:
         return {"results": [], "error": "query is required"}
-
-    try:
-        vector = await embedding_service.embed(query)
-    except Exception:
-        logger.exception("mcp_get_features_embed_failed", query=query[:100])
-        return {"results": [], "error": "Embedding service unavailable"}
+    # Reject tiny substring queries — ``%a%`` would match nearly every
+    # title in the org and never trigger the semantic fallback (because
+    # keyword "succeeded" with a huge unranked slice), wasting the
+    # LLM's context window. 3 chars is the smallest that still allows
+    # legitimate codes like "AIS" / "KYC" without matching the alphabet.
+    if len(stripped) < 3:
+        return {
+            "results": [],
+            "error": "query must be at least 3 characters",
+        }
 
     reads = FeatureReadRepository(db, org_id=org.id)
-    rows = await reads.semantic_search(vector, limit=limit, only_active=True)
+
+    # 1. Title-substring path first — same shape as the frontend.
+    # Fetch limit+1 to detect has_more without a separate COUNT.
+    rows = await reads.keyword_search(query, limit=limit + 1, offset=offset, only_active=True)
+    search_mode = "keyword"
+    # Semantic fallback caps at a single page (see below). This flag
+    # tells the response builder to force has_more=False / next_offset=None
+    # so the client doesn't try to paginate past a non-paginable corpus.
+    cap_pagination = False
+
+    # 2. Semantic fallback when keyword found nothing AT ALL (offset=0
+    # check — don't fall back mid-pagination, that would confuse the
+    # client about which page it's on). LLM queries like "payment
+    # link notes post-payment edit" land here.
+    if not rows and offset == 0:
+        try:
+            vector = await embedding_service.embed(query)
+            semantic_rows = await reads.semantic_search(
+                vector, limit=limit + 1, offset=0, only_active=True
+            )
+            rows = [feature for feature, _distance in semantic_rows]
+            search_mode = "semantic"
+            # Cap pagination on the semantic branch — paginating past
+            # the top-K cosine matches is rarely useful (the model
+            # already ranked the best ones first) and the next page
+            # would silently re-enter keyword and look empty.
+            cap_pagination = True
+        except Exception:
+            logger.exception(
+                "mcp_get_features_semantic_fallback_failed",
+                query_prefix=query[:200],
+                query_len=len(query),
+            )
+            # Distinguish "no matches" from "embed crashed" so an
+            # admin tailing the audit / log can spot a degraded path.
+            search_mode = "semantic_failed"
+
+    has_more = (not cap_pagination) and len(rows) > limit
+    rows = rows[:limit]
 
     return {
         "results": [
             {
+                "id": str(feature.id),
                 "title": feature.feature_title,
                 "description": feature.description,
                 "capabilities": list((feature.capabilities or {}).get("capabilities", [])),
                 "tags": list(feature.tags or []),
-                "score": round(1.0 - distance, 4),
                 "source": feature.source,
                 "source_ref": feature.source_ref,
                 "feature_status": feature.feature_status or "implemented",
             }
-            for feature, distance in rows
+            for feature in rows
         ],
+        "search_mode": search_mode,
+        "limit": limit,
+        "offset": offset,
+        "has_more": has_more,
+        "next_offset": offset + limit if has_more else None,
     }
 
 

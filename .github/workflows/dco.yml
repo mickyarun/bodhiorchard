@@ -15,6 +15,8 @@ jobs:
     timeout-minutes: 3
     env:
       PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       # Dependabot, the GitHub merge queue, and release-please don't
       # author commits the human way and can't reasonably
@@ -38,24 +40,61 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      # tim-actions/dco needs an array of commit objects; the raw
-      # ``pull_request.commits`` field is an integer (count), so fetch
-      # the array via the helper action first.
-      - name: Collect PR commits
-        id: get-pr-commits
-        if: >-
-          github.event.pull_request.user.login != 'dependabot[bot]' &&
-          github.event.pull_request.user.login != 'github-merge-queue[bot]' &&
-          github.event.pull_request.user.login != 'release-please[bot]'
-        uses: tim-actions/get-pr-commits@v1.3.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
+      # Inline DCO verification. We previously used tim-actions/dco@v1.1.0,
+      # but that action embeds the full GitHub-API commit JSON for every
+      # PR commit into the INPUT_COMMITS env var. On PRs with many commits
+      # the runner hits POSIX ARG_MAX when spawning Node ("Argument list
+      # too long") and fails before the action's logic runs at all.
+      #
+      # The replacement loops local refs with ``git log`` (one commit at
+      # a time) so it scales to any PR size, and enforces the same two
+      # invariants tim-actions/dco does:
+      #   1. A ``Signed-off-by: Name <email>`` trailer exists.
+      #   2. The trailer email matches the commit author email (the DCO
+      #      attestation must come from the author, not a third party).
       - name: Verify every PR commit has Signed-off-by
         if: >-
           github.event.pull_request.user.login != 'dependabot[bot]' &&
           github.event.pull_request.user.login != 'github-merge-queue[bot]' &&
           github.event.pull_request.user.login != 'release-please[bot]'
-        uses: tim-actions/dco@v1.1.0
-        with:
-          commits: ${{ steps.get-pr-commits.outputs.commits }}
+        run: |
+          set -euo pipefail
+          missing=0
+          mismatched=0
+          mapfile -t shas < <(git rev-list --no-merges "$BASE_SHA".."$HEAD_SHA")
+          if [ "${#shas[@]}" -eq 0 ]; then
+            echo "No commits in range $BASE_SHA..$HEAD_SHA — nothing to verify."
+            exit 0
+          fi
+          echo "Verifying ${#shas[@]} commit(s)..."
+          for sha in "${shas[@]}"; do
+            author_email=$(git log -1 --format='%ae' "$sha")
+            trailer=$(git log -1 --format='%(trailers:key=Signed-off-by,valueonly,separator=%x0A)' "$sha")
+            if [ -z "$trailer" ]; then
+              echo "::error::commit $sha (author $author_email) is missing a Signed-off-by trailer"
+              missing=$((missing + 1))
+              continue
+            fi
+            # A commit may have multiple Signed-off-by trailers (e.g. co-authors).
+            # DCO passes if any trailer's email matches the author's email.
+            matched=0
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              trailer_email=$(printf '%s' "$line" | sed -n 's/.*<\([^>]*\)>.*/\1/p')
+              if [ "$trailer_email" = "$author_email" ]; then
+                matched=1
+                break
+              fi
+            done <<< "$trailer"
+            if [ "$matched" -eq 0 ]; then
+              echo "::error::commit $sha Signed-off-by email does not match author email ($author_email). Trailer(s): $trailer"
+              mismatched=$((mismatched + 1))
+            fi
+          done
+          if [ "$missing" -gt 0 ] || [ "$mismatched" -gt 0 ]; then
+            echo ""
+            echo "DCO check failed: $missing missing trailer(s), $mismatched mismatched email(s)."
+            echo "Fix locally with: git rebase --signoff $BASE_SHA && git push --force-with-lease"
+            exit 1
+          fi
+          echo "All commits carry a valid Signed-off-by trailer."

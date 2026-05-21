@@ -33,6 +33,7 @@ from app.api.v1.bud_todos import router as todos_router
 from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus, BUDTimelineEvent
+from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.user import User
 from app.repositories.agent_activity import AgentActivityLogRepository
 from app.repositories.bud import BUDDesignRepository, BUDRepository
@@ -64,11 +65,13 @@ from app.schemas.dev_activity import (
     UntrackedRepoRead,
 )
 from app.services.agent_activity_logger import PHASE_WORKER_SLUGS
+from app.services.agent_result_handlers import persist_linked_features_from_markdown
 from app.services.agent_task_cancel import (
     AgentTaskCancelError,
     cancel_task,
     is_task_terminal,
 )
+from app.services.bud_agent_trigger import create_agent_task_for_stage
 from app.services.bud_edit_policy import assert_section_editable
 
 logger = structlog.get_logger(__name__)
@@ -270,6 +273,10 @@ async def create_bud(
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     next_number = await bud_repo.next_bud_number()
 
+    # Empty dict from the schema default = all phases skip. Stored as
+    # the JSONB literal (not NULL) so the frontend can distinguish a
+    # freshly-created opt-out from a never-explicitly-set legacy row.
+    auto_generate_phases = body.auto_generate_phases
     bud = BUDDocument(
         org_id=current_user.org_id,
         bud_number=next_number,
@@ -277,6 +284,7 @@ async def create_bud(
         status=BUDStatus.BUD,
         requirements_md=body.requirements_md,
         metadata_=body.metadata_,
+        auto_generate_phases=auto_generate_phases,
     )
     await bud_repo.create(bud)
 
@@ -337,19 +345,27 @@ async def create_bud(
         actor_name=current_user.name,
     )
 
-    logger.info("bud_created", bud_id=str(bud.id), bud_number=next_number, org_id=str(bud.org_id))
-
-    # Auto-trigger PM agent, same as the Slack approval flow
-    from app.services.bud_agent_trigger import create_agent_task_for_stage
-
-    await create_agent_task_for_stage(
-        bud,
-        "bud",
-        current_user.org_id,
-        db,
-        triggered_by=current_user.id,
-        force=True,
+    logger.info(
+        "bud_created",
+        bud_id=str(bud.id),
+        bud_number=next_number,
+        org_id=str(bud.org_id),
+        auto_generate_phases=auto_generate_phases,
     )
+
+    # External-LLM mode: each phase is opt-in. Only fire the PM/bud
+    # agent if the user explicitly enabled the "bud" phase. Missing key
+    # or False = skip; user supplies the PRD via the section editor
+    # (typically driven by their local AI through the remote MCP).
+    if auto_generate_phases.get("bud", False):
+        await create_agent_task_for_stage(
+            bud,
+            "bud",
+            current_user.org_id,
+            db,
+            triggered_by=current_user.id,
+            force=True,
+        )
 
     # Estimation deferred — triggers after PRD agent completes (via agent_result_handlers)
 
@@ -703,12 +719,57 @@ async def update_bud(
         )
 
     old_tech_spec_md = bud.tech_spec_md if "tech_spec_md" in update_data else None
+    requirements_md_changed = (
+        "requirements_md" in update_data and update_data["requirements_md"] != bud.requirements_md
+    )
+
+    # auto_generate_phases is MERGED, not replaced. The dialog sends the
+    # full normalised map today, but if a future BUDStatus phase becomes
+    # configurable and an older client sends only the four keys it knows
+    # about, a verbatim setattr would silently drop the new phase to
+    # False. Merge-with-existing keeps forward compatibility: unknown
+    # keys are validated out (only BUDStatus values are accepted), known
+    # keys not in the patch keep their prior value.
+    if "auto_generate_phases" in update_data:
+        incoming_phases = update_data.pop("auto_generate_phases") or {}
+        merged: dict[str, bool] = dict(bud.auto_generate_phases or {})
+        valid_phase_keys = {s.value for s in BUDStatus}
+        for key, val in incoming_phases.items():
+            if key in valid_phase_keys:
+                merged[key] = bool(val)
+            else:
+                logger.warning(
+                    "bud_auto_generate_phases_unknown_key_dropped",
+                    bud_id=str(bud.id),
+                    key=key,
+                )
+        bud.auto_generate_phases = merged
 
     for field, value in update_data.items():
         setattr(bud, field, value)
 
     await db.flush()
     await db.refresh(bud)
+
+    # External-LLM mode: when a user pastes locally-generated PRD
+    # content into requirements_md, parse the trailing
+    # {"linked_feature_ids": [...]} JSON fence the prompt instructs the
+    # LLM to emit. Without this hook the BYO-AI flow would produce BUD
+    # text with the fence but no actual BUDFeatureLink rows in the DB,
+    # so downstream Designer / TechPlanner agents (and the dependency
+    # map) wouldn't see what features the user linked. Mirrors the
+    # PM-agent result-handler path; uses MANUAL source so audit and
+    # timeline distinguish human-driven from agent-driven links.
+    if requirements_md_changed and update_data.get("requirements_md"):
+        await persist_linked_features_from_markdown(
+            bud.id,
+            current_user.org_id,
+            update_data["requirements_md"],
+            db,
+            source=BUDFeatureLinkSource.MANUAL,
+            actor_name=current_user.name or current_user.email,
+            actor_id=current_user.id,
+        )
 
     # If the developer edited tech_spec_md on a DEVELOPMENT-phase BUD,
     # refresh the Implementation TODO section (LLM patch when the diff
@@ -803,7 +864,31 @@ async def _trigger_status_jobs(
 
     # Data-driven agent triggering via stage mappings
     if new_status != old_status:
-        from app.services.bud_agent_trigger import create_agent_task_for_stage
+        # Per-phase opt-in: the auto-fire only runs when the BUD's
+        # auto_generate_phases map has this stage's key set to True.
+        # Missing key / False / NULL dict = the user is driving this
+        # phase manually (typically via their local AI through the
+        # remote MCP endpoint) and pastes content into the section
+        # editor. The status transition itself still happens in the
+        # caller; only the auto-agent spawn is suppressed here.
+        #
+        # Use ``.value`` rather than ``str(new_status)`` for explicit
+        # decoupling: today BUDStatus is a StrEnum so ``str(...)``
+        # happens to yield ``"bud"`` etc., but if the base class ever
+        # changes the str-cast becomes ``"BUDStatus.BUD"`` and every
+        # lookup silently misses with no enum-related test failure.
+        phase_key = new_status.value if hasattr(new_status, "value") else str(new_status)
+        phases = bud.auto_generate_phases or {}
+        if not phases.get(phase_key, False):
+            logger.info(
+                "stage_agent_skip_auto_generate_off",
+                bud_id=str(bud.id),
+                from_status=str(old_status),
+                to_status=str(new_status),
+                phase_key=phase_key,
+                phases=phases,
+            )
+            return
 
         # Skip the code review agent if there are no open PRs. The agent's
         # only purpose is to post automated feedback to open PRs — if every
@@ -979,7 +1064,6 @@ async def override_code_review(
     the QA test-case agent. Blocked if an agent task is currently running on
     this BUD.
     """
-    from app.services.bud_agent_trigger import create_agent_task_for_stage
     from app.services.bud_timeline import record_event
 
     # Row lock serializes concurrent override requests — the second caller

@@ -25,12 +25,12 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.v1.settings_claude import router as claude_router
 from app.api.v1.settings_github_members import router as gh_members_router
+from app.api.v1.settings_mcp_tokens import router as mcp_tokens_router
 from app.api.v1.settings_repos import router as repos_router
 from app.api.v1.settings_slack import router as slack_router
 from app.core.deps import get_current_user, get_db, require_permissions
@@ -39,8 +39,9 @@ from app.core.security import hash_password
 from app.mcp.auth import compute_token_prefix
 from app.models.organization import Organization
 from app.models.user import User
-from app.models.user_mcp_token import UserMCPToken
+from app.models.user_mcp_token import DEFAULT_TOKEN_NAME, UserMCPToken
 from app.repositories.organization import OrganizationRepository
+from app.repositories.user_mcp_token import UserMCPTokenRepository
 from app.schemas.settings import (
     AIConfigSettings,
     ConnectionsRead,
@@ -85,6 +86,7 @@ router.include_router(repos_router)
 router.include_router(slack_router)
 router.include_router(claude_router)
 router.include_router(gh_members_router)
+router.include_router(mcp_tokens_router)
 
 
 @router.get(
@@ -381,25 +383,26 @@ async def regenerate_mcp_token(
     org.mcp_token_hash = token_hash
     await db.flush()
 
-    # Upsert per-user token (one token per user per org)
-    existing = await db.execute(
-        select(UserMCPToken).where(
-            UserMCPToken.user_id == current_user.id,
-            UserMCPToken.org_id == org.id,
-        )
-    )
-    user_token = existing.scalar_one_or_none()
+    # Upsert the user's "Default" named token (one per user per org).
+    # Matches the legacy single-token mental model used by Claude Code CLI;
+    # additional named tokens for external AI clients go through the
+    # multi-token endpoints in api/v1/me.py.
+    repo = UserMCPTokenRepository(db)
+    user_token = await repo.get_by_user_org_name(current_user.id, org.id, DEFAULT_TOKEN_NAME)
     if user_token:
         user_token.token_hash = token_hash
         user_token.token_prefix = token_prefix
+        user_token.expires_at = None
     else:
-        user_token = UserMCPToken(
-            user_id=current_user.id,
-            org_id=org.id,
-            token_hash=token_hash,
-            token_prefix=token_prefix,
+        db.add(
+            UserMCPToken(
+                user_id=current_user.id,
+                org_id=org.id,
+                name=DEFAULT_TOKEN_NAME,
+                token_hash=token_hash,
+                token_prefix=token_prefix,
+            )
         )
-        db.add(user_token)
     await db.flush()
 
     logger.info(

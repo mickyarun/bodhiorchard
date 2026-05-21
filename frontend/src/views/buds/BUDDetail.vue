@@ -49,6 +49,48 @@
             @open-skill-settings="skillSettingsOpen = true"
           />
 
+          <!-- External-LLM mode banner. Shown when EVERY phase in
+               auto_generate_phases is off (or the dict is empty / null
+               — the default for newly-created BUDs). The user drives
+               each phase via the section editor, typically using their
+               local AI through the remote MCP endpoint. -->
+          <v-alert
+            v-if="isExternalLlmMode"
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mx-12 mb-3"
+            icon="mdi-laptop"
+          >
+            <div class="d-flex align-center ga-3 flex-wrap">
+              <div class="flex-grow-1">
+                <strong>External-LLM mode.</strong>
+                Stage agents are off for this BUD. Connect your local AI to
+                gather context, then paste the finished spec into each
+                section editor — or flip individual phases back on under
+                <strong>AI skills</strong>.
+              </div>
+              <v-btn
+                size="small"
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-tune-variant"
+                @click="skillSettingsOpen = true"
+              >
+                AI skills
+              </v-btn>
+              <v-btn
+                size="small"
+                color="primary"
+                variant="flat"
+                prepend-icon="mdi-connection"
+                :to="{ name: 'settings-mcp-connect' }"
+              >
+                MCP Connect
+              </v-btn>
+            </div>
+          </v-alert>
+
           <!-- Workflow banners, approval/reject/reassign dialogs, repo confirmation -->
           <BUDWorkflowActions
             ref="workflowRef"
@@ -355,11 +397,18 @@
         </div>
       </template>
 
-      <!-- Per-BUD AI skills picker -->
+      <!-- Per-BUD AI skills picker + per-phase auto-generate toggles.
+           Re-fetch the BUD on @saved so the banner / next stage-PATCH
+           pick up the freshly persisted auto_generate_phases without a
+           hard reload. We await the refetch (and log on failure) so a
+           transient network blip doesn't leave the banner showing
+           stale state for the rest of the session. -->
       <BUDSkillSettingsDialog
         v-if="bud"
         v-model="skillSettingsOpen"
         :bud-id="bud.id"
+        :auto-generate-phases="bud.auto_generate_phases ?? null"
+        @saved="reloadBudAfterSettingsSave"
       />
 
       <!-- Delete confirmation -->
@@ -458,6 +507,35 @@ const settingsStore = useSettingsStore()
 const budLinkedFeaturesStore = useBudLinkedFeaturesStore()
 
 const bud = computed(() => budStore.currentBUD)
+
+async function reloadBudAfterSettingsSave(): Promise<void> {
+  // Save dialog already closed itself; refetch is best-effort. On
+  // failure the banner / status tab keep showing the pre-save state,
+  // which is a stale-view bug — surface it loudly enough that the user
+  // knows to refresh, instead of silently swallowing the rejection.
+  if (!bud.value) return
+  try {
+    await budStore.fetchBUD(bud.value.id)
+  } catch (err) {
+    console.error('BUD reload after settings save failed:', err)
+  }
+}
+
+// True iff every phase in auto_generate_phases is off (or the map is
+// empty / null entirely). Drives the External-LLM banner — we only
+// surface the "connect your local AI" hint when there's literally no
+// auto-fired phase for the user to wait on.
+//
+// Guard on bud.value FIRST so the banner doesn't flash for a frame
+// during the initial fetch (currentBUD is null → phases is undefined
+// → null-coalesce would treat that as External-LLM mode and render
+// the banner for one tick before flipping off).
+const isExternalLlmMode = computed(() => {
+  if (!bud.value) return false
+  const phases = bud.value.auto_generate_phases
+  if (!phases) return true
+  return !Object.values(phases).some(Boolean)
+})
 
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)
