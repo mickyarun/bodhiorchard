@@ -150,24 +150,21 @@
           </div>
         </div>
       </div>
-      <div class="callout callout--info mx-4 mb-4">
-        <div class="callout__icon">
-          <v-icon icon="mdi-shield-check-outline" size="18" />
-        </div>
-        <div class="callout__body">
-          <div class="callout__eyebrow">Writes are bounded</div>
-          <div class="callout__text">
-            <code class="inline-code">update_bud</code> is restricted to
-            three creative phases:
-            <code class="inline-code">requirements_md</code> in BUD,
-            <code class="inline-code">design</code> wireframe HTML in DESIGN,
-            and <code class="inline-code">tech_spec_md</code> in TECH_ARCH.
-            Testing and Code Review remain UI / agent-driven. Every write
-            snapshots prior state in the BUD detail's History tab so a bad
-            edit reverts in one click.
-          </div>
-        </div>
-      </div>
+      <AppCallout
+        variant="info"
+        eyebrow="Writes are bounded"
+        icon="mdi-shield-check-outline"
+        class="mx-4 mb-4"
+      >
+        <code class="inline-code">update_bud</code> is restricted to
+        three creative phases:
+        <code class="inline-code">requirements_md</code> in BUD,
+        <code class="inline-code">design</code> wireframe HTML in DESIGN,
+        and <code class="inline-code">tech_spec_md</code> in TECH_ARCH.
+        Testing and Code Review remain UI / agent-driven. Every write
+        snapshots prior state in the BUD detail's History tab so a bad
+        edit reverts in one click.
+      </AppCallout>
     </v-card>
 
     <v-card variant="outlined" class="mcp-card mb-6">
@@ -197,19 +194,11 @@
           </div>
         </v-window-item>
       </v-window>
-      <div class="callout callout--warning mx-4 mb-4">
-        <div class="callout__icon">
-          <v-icon icon="mdi-alert-outline" size="18" />
-        </div>
-        <div class="callout__body">
-          <div class="callout__eyebrow">Trust boundary</div>
-          <div class="callout__text">
-            Connecting an external LLM extends its trust boundary to your
-            BUD content. Anyone who can read a token can read every BUD
-            in your org. Treat tokens like passwords; revoke unused ones.
-          </div>
-        </div>
-      </div>
+      <AppCallout variant="warning" eyebrow="Trust boundary" class="mx-4 mb-4">
+        Connecting an external LLM extends its trust boundary to your
+        BUD content. Anyone who can read a token can read every BUD in
+        your org. Treat tokens like passwords; revoke unused ones.
+      </AppCallout>
     </v-card>
 
     <!-- Example starter prompts. The point of MCP isn't just "your AI can
@@ -239,24 +228,7 @@
             {{ ex.label }}
           </v-tab>
         </v-tabs>
-        <v-btn-toggle
-          v-model="promptMode"
-          mandatory
-          density="compact"
-          variant="outlined"
-          divided
-          color="primary"
-          class="prompt-mode-toggle"
-        >
-          <v-btn
-            v-for="opt in promptModeOptions"
-            :key="opt.value"
-            :value="opt.value"
-            size="small"
-          >
-            {{ opt.label }}
-          </v-btn>
-        </v-btn-toggle>
+        <AppPillToggle v-model="promptMode" :options="promptModeOptions" />
       </div>
       <v-divider />
       <v-window v-model="exampleTab">
@@ -275,23 +247,15 @@
           </div>
         </v-window-item>
       </v-window>
-      <div class="callout callout--info mx-4 mb-4">
-        <div class="callout__icon">
-          <v-icon icon="mdi-information-outline" size="18" />
-        </div>
-        <div class="callout__body">
-          <div class="callout__eyebrow">Placeholders</div>
-          <div class="callout__text">
-            Replace <code class="inline-code">&lt;your topic&gt;</code>,
-            <code class="inline-code">&lt;BUD-NUMBER&gt;</code>, and
-            <code class="inline-code">&lt;uuid&gt;</code> before sending. The
-            Design and Tech-spec prompts need the BUD UUID — grab it from
-            the URL on the BUD detail page or call
-            <code class="inline-code">get_bud_context()</code> and look up
-            by <code class="inline-code">bud_number</code>.
-          </div>
-        </div>
-      </div>
+      <AppCallout variant="info" eyebrow="Placeholders" class="mx-4 mb-4">
+        Replace <code class="inline-code">&lt;your topic&gt;</code>,
+        <code class="inline-code">&lt;BUD-NUMBER&gt;</code>, and
+        <code class="inline-code">&lt;uuid&gt;</code> before sending. The
+        Design and Tech-spec prompts need the BUD UUID — grab it from the
+        URL on the BUD detail page or call
+        <code class="inline-code">get_bud_context()</code> and look up by
+        <code class="inline-code">bud_number</code>.
+      </AppCallout>
     </v-card>
 
     <!-- Create-token dialog -->
@@ -373,6 +337,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import api from '@/services/api'
+import AppCallout from '@/components/common/AppCallout.vue'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
 
 interface TokenRead {
   id: string
@@ -923,127 +889,9 @@ onMounted(refresh)
   min-width: 0;
 }
 
-/* Pill segmented control. Solid primary fill on the track, the
-   active option flips to a white pill with primary-color text. Same
-   visual grammar as a "Hotels / Apartments" filter — clearer "pick
-   one of these states" affordance than a row of outlined buttons. */
-.prompt-mode-toggle {
-  height: 34px;
-  flex-shrink: 0;
-  padding: 3px;
-  border-radius: 999px;
-  background: rgb(var(--v-theme-primary));
-  border: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-.prompt-mode-toggle :deep(.v-btn) {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 600;
-  font-size: 12px;
-  padding-inline: 18px;
-  min-width: 84px;
-  height: 28px;
-  border-radius: 999px;
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.92);
-  box-shadow: none;
-}
-.prompt-mode-toggle :deep(.v-btn .v-btn__overlay) {
-  display: none;
-}
-.prompt-mode-toggle :deep(.v-btn--active) {
-  background: rgb(var(--v-theme-surface));
-  color: rgb(var(--v-theme-primary));
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-}
-.prompt-mode-toggle :deep(.v-btn--active .v-btn__overlay) {
-  display: none;
-}
-.prompt-mode-toggle :deep(.v-btn:hover:not(.v-btn--active)) {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
-}
-
 @media (max-width: 560px) {
   .prompt-tab-row {
     padding: 12px 16px;
   }
-  .prompt-mode-toggle {
-    width: 100%;
-  }
-}
-
-/* Reusable callout for inline notes on the MCP Connect page.
-
-   The base ``.callout`` matches the BUD-detail External-LLM banner
-   pattern: muted tint, 3px left accent, hairline border, no heavy
-   uniform fill. Variants change the accent colour to encode intent
-   without painting the whole row:
-
-   * ``--info``    — primary accent. Informational notes.
-   * ``--warning`` — warning accent. Risk / security hints.
-
-   Folded the old ``.prompt-tip`` styles into this so all three
-   callouts (Writes-are-bounded, Placeholders, Trust-boundary) share
-   one definition. */
-.callout {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: start;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  background: rgba(var(--v-theme-on-surface), 0.025);
-  border-left-width: 3px;
-}
-.callout__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-}
-.callout__body {
-  min-width: 0;
-}
-.callout__eyebrow {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  margin-bottom: 2px;
-}
-.callout__text {
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: rgba(var(--v-theme-on-surface), 0.72);
-}
-.callout--info {
-  background: rgba(var(--v-theme-primary), 0.035);
-  border-left-color: rgb(var(--v-theme-primary));
-}
-.callout--info .callout__icon {
-  background: rgba(var(--v-theme-primary), 0.1);
-  color: rgb(var(--v-theme-primary));
-}
-.callout--info .callout__eyebrow {
-  color: rgb(var(--v-theme-primary));
-}
-.callout--warning {
-  background: rgba(var(--v-theme-warning), 0.04);
-  border-left-color: rgb(var(--v-theme-warning));
-}
-.callout--warning .callout__icon {
-  background: rgba(var(--v-theme-warning), 0.12);
-  color: rgb(var(--v-theme-warning));
-}
-.callout--warning .callout__eyebrow {
-  color: rgb(var(--v-theme-warning));
 }
 </style>
