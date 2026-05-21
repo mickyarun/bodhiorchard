@@ -110,6 +110,48 @@
       </v-alert>
     </v-card>
 
+    <!-- Example starter prompts. The point of MCP isn't just "your AI can
+         now read our data" — it's that your AI can use the SAME prompts
+         our agents use. These snippets give the local LLM the verbs it
+         needs (which tools to call, in what order) so the output lands
+         in the shape the BUD section editors expect. -->
+    <v-card variant="outlined" class="mb-6 pa-4">
+      <div class="text-subtitle-1 font-weight-medium mb-2">Example prompts to start work</div>
+      <div class="text-caption text-medium-emphasis mb-3">
+        Paste one of these into your local AI to kick off a phase. Each
+        instructs the LLM to fetch our exact agent prompt via
+        <code>get_prompt</code>, gather the right context, then produce
+        the section's content. When it's done, copy the body into the
+        matching BUD editor tab.
+      </div>
+      <v-tabs v-model="exampleTab" density="compact">
+        <v-tab v-for="(ex, key) in EXAMPLE_PROMPTS" :key="key" :value="key">
+          {{ ex.label }}
+        </v-tab>
+      </v-tabs>
+      <v-window v-model="exampleTab" class="mt-3">
+        <v-window-item v-for="(ex, key) in EXAMPLE_PROMPTS" :key="key" :value="key">
+          <pre class="snippet-pre">{{ ex.body }}</pre>
+          <div class="d-flex justify-end">
+            <v-btn
+              size="small"
+              variant="text"
+              prepend-icon="mdi-content-copy"
+              @click="copy(ex.body)"
+            >
+              Copy prompt
+            </v-btn>
+          </div>
+        </v-window-item>
+      </v-window>
+      <v-alert type="info" variant="tonal" density="compact" class="mt-3">
+        Replace <code>&lt;your topic&gt;</code> / <code>&lt;BUD-NUMBER&gt;</code>
+        in the prompt with the actual values before sending. The LLM
+        will call the read-only tools listed above; you save the
+        result by pasting into the BUD editor.
+      </v-alert>
+    </v-card>
+
     <!-- Create-token dialog -->
     <v-dialog v-model="showCreate" max-width="460">
       <v-card class="pa-5">
@@ -200,6 +242,7 @@ const plaintextDialog = ref(false)
 const plaintextToken = ref('')
 
 const snippetTab = ref<string>('claude-desktop')
+const exampleTab = ref<string>('pm')
 
 const endpointUrl = computed(() => {
   // Prefer VITE_API_BASE_URL when set (split-host deployments); otherwise
@@ -222,6 +265,78 @@ const TOOL_CATALOGUE = [
 interface ClientSnippet {
   label: string
   render: (url: string) => string
+}
+
+interface ExamplePrompt {
+  label: string
+  body: string
+}
+
+// Starter prompts for each BUD phase. Designed to be pasted verbatim
+// into the local LLM after the MCP server is connected. Each one (a)
+// pulls our agent's own prompt via get_prompt so the output shape
+// matches the section editor, (b) lists the read-only tools the LLM
+// should call to gather context, and (c) tells the user where to paste
+// the result. Keep these short and copy-pasteable — long prose here
+// dilutes the verbs the LLM needs to act on.
+const EXAMPLE_PROMPTS: Record<string, ExamplePrompt> = {
+  pm: {
+    label: 'PM / PRD',
+    body: `I want to draft a PRD for: <your topic>
+
+Use the bodhiorchard MCP server I've connected. Steps:
+1. Call get_prompt(task_type="bud") and follow that prompt EXACTLY.
+2. Call get_bud_context() to see what's already in flight so you don't
+   propose a duplicate.
+3. Call get_features(query="<keywords from my topic>") and paginate
+   (offset += limit while has_more) until you've reviewed the relevant
+   matches. Note the feature IDs of anything this PRD will touch.
+4. Produce the Markdown body the prompt asks for. End with the
+   trailing JSON fence: \`\`\`json
+   {"linked_feature_ids": ["<feature-uuid>", ...]}
+   \`\`\`
+   so when I paste this into the BUD's requirements editor, the
+   linked-features will auto-populate.
+
+When done, give me ONLY the final Markdown — I'll paste it into the
+BUD's "Requirements" tab.`,
+  },
+  design: {
+    label: 'Design',
+    body: `I want to draft the UX/UI design for BUD-<BUD-NUMBER>.
+
+Use the bodhiorchard MCP server. Steps:
+1. Call get_prompt(task_type="design") and follow that prompt EXACTLY.
+2. Call get_bud_context() (then read the requirements_md for the BUD
+   you're working on) so the design ties to the agreed PRD.
+3. Call list_design_systems(), then get_design_system(repo_id="<id>")
+   for the repo this design lands in (or omit repo_id for the org
+   default). Use ONLY tokens/components from that design system — no
+   ad-hoc colours, no new components.
+4. Produce the wireframe HTML the prompt asks for.
+
+When done, give me ONLY the final HTML — I'll paste it into the BUD's
+"Design" tab.`,
+  },
+  tech_arch: {
+    label: 'Tech spec',
+    body: `I want to write the tech architecture for BUD-<BUD-NUMBER>.
+
+Use the bodhiorchard MCP server. Steps:
+1. Call get_prompt(task_type="tech_arch") and follow that prompt
+   EXACTLY.
+2. Call get_bud_context() and use the PRD content for the BUD as the
+   authoritative scope — don't invent requirements.
+3. Call get_features(query="<area touched by this BUD>") with
+   pagination to see what existing capabilities you should reuse or
+   extend rather than re-implement.
+4. Produce the tech-spec Markdown the prompt asks for, with explicit
+   sections for: components touched, schema changes, API surface,
+   testing strategy, rollout & rollback.
+
+When done, give me ONLY the final Markdown — I'll paste it into the
+BUD's "Tech spec" tab.`,
+  },
 }
 
 // Desktop clients' mcp.json schemas reject ``"transport": "streamable-http"``
