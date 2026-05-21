@@ -133,10 +133,13 @@ async def auto_assign_for_phase(
     phase_value = new_status.value
 
     # Continuity: prefer the previous assignee for this BUD when the
-    # phase has been visited before. Skipped when the previous assignee
-    # is inactive, no longer holds an eligible role, over their cap, or
-    # was explicitly unassigned afterwards — see _previous_assignee_for_chain.
-    continuity = await _previous_assignee_for_chain(db, org_id, bud.id, chain)
+    # phase has been visited before. Phase-scoped so an earlier phase's
+    # assignment (e.g. PM during BUD phase) doesn't bleed into a later
+    # phase's first visit (e.g. DESIGN with PM as the fallback role).
+    # Skipped when the previous assignee is inactive, no longer holds
+    # an eligible role, over their cap, or was explicitly unassigned
+    # afterwards — see _previous_assignee_for_phase.
+    continuity = await _previous_assignee_for_phase(db, org_id, bud.id, chain, phase_value)
     if continuity is not None:
         return await _assign_via_continuity(
             db,
@@ -302,6 +305,7 @@ async def auto_assign_for_phase(
         chosen=chosen,
         role_name=role_name,
         method=method,
+        phase_value=phase_value,
         actor_id=actor_id,
         actor_name=actor_name,
     )
@@ -458,7 +462,7 @@ async def _resolve_via_chain(
 class _ContinuityPick:
     """The previous assignee + the role they held when previously assigned.
 
-    Returned by :func:`_previous_assignee_for_chain` so the lifecycle
+    Returned by :func:`_previous_assignee_for_phase` so the lifecycle
     event can record which earlier role this continuity decision
     inherits from (rendered as "carried over from previous <phase>"
     on the timeline UI).
@@ -517,6 +521,7 @@ async def _assign_via_continuity(
         chosen=pick.user,
         role_name=pick.role,
         method=method,
+        phase_value=phase_value,
         actor_id=actor_id,
         actor_name=actor_name,
     )
@@ -552,18 +557,22 @@ async def _assign_via_continuity(
     return pick.user.id
 
 
-async def _previous_assignee_for_chain(
+async def _previous_assignee_for_phase(
     db: AsyncSession,
     org_id: uuid.UUID,
     bud_id: uuid.UUID,
     chain: tuple[UserRole, ...],
+    phase_value: str,
 ) -> _ContinuityPick | None:
-    """Return the previous assignee for this BUD whose role is in ``chain``.
+    """Return the previous assignee from the LAST visit to ``phase_value``.
 
     Continuity rules (in order):
 
-    1. Most recent ``assigned`` event on this BUD with ``detail.role`` in
-       ``chain`` — that's the candidate.
+    1. Most recent ``assigned`` event on this BUD with ``detail.phase``
+       equal to ``phase_value``. Scoping by phase (rather than by any
+       role appearing in ``chain``) stops a previous phase's primary
+       role from winning continuity on first entry to a new phase that
+       happens to list it as a fallback.
     2. If a user-triggered ``unassigned`` event occurred AFTER that
        assignment (i.e. ``detail.reason != 'auto_assign_skipped'``),
        respect the unassign — return None.
@@ -575,8 +584,7 @@ async def _previous_assignee_for_chain(
     normal chain walk.
     """
     timeline_repo = BUDTimelineRepository(db, org_id=org_id)
-    role_values = [r.value for r in chain]
-    latest = await timeline_repo.latest_assignee_for_roles(bud_id, role_values)
+    latest = await timeline_repo.latest_assignee_for_phase(bud_id, phase_value)
     if latest is None:
         return None
     prev_user_id, assigned_at, prev_role_str = latest
@@ -612,18 +620,20 @@ async def _previous_assignee_for_chain(
     if load_map.get(user.id, 0) >= cap:
         return None
 
-    try:
-        previous_role = UserRole(prev_role_str)
-    except ValueError:
-        # Old data with an unknown role string. The timeline UI would
-        # render "carried over from previous <unknown>" which is worse
-        # than skipping continuity — drop through to the chain walk.
-        logger.info(
-            "continuity_skipped_unknown_prev_role",
-            bud_id=str(bud_id),
-            prev_role=prev_role_str,
-        )
-        return None
+    # The previous-phase role is recorded for the timeline UI's "carried
+    # over from previous <role>" banner. Legacy events without a role —
+    # or with an unrecognised value — degrade to the eligible role we
+    # just resolved rather than dropping continuity entirely.
+    previous_role = eligible_role
+    if prev_role_str:
+        try:
+            previous_role = UserRole(prev_role_str)
+        except ValueError:
+            logger.info(
+                "continuity_unknown_prev_role",
+                bud_id=str(bud_id),
+                prev_role=prev_role_str,
+            )
 
     return _ContinuityPick(user=user, role=eligible_role, previous_role=previous_role)
 
@@ -671,10 +681,25 @@ async def _retain_code_review_assignee(
     actor_id: uuid.UUID | None,
     actor_name: str | None,
 ) -> uuid.UUID | None:
-    """CODE_REVIEW keeps the developer from DEVELOPMENT; record it on the timeline."""
+    """CODE_REVIEW keeps the developer from DEVELOPMENT; record it on the timeline.
+
+    Resolves the assignee's actual role rather than hard-coding DEVELOPER
+    — DEVELOPMENT can fall back to TECH_LEAD when the dev pool is empty,
+    and mis-labelling that as ``developer`` would also corrupt continuity
+    on later phase re-entries that look for the real role.
+    """
     if not bud.assignee_id:
         return bud.assignee_id
     assignee = await db.get(User, bud.assignee_id)
+    actual_role = await UserRepository(db).get_role(bud.assignee_id, org_id)
+    detail: dict[str, Any] = {
+        "assignee_id": str(bud.assignee_id),
+        "assignee_name": assignee.name if assignee else None,
+        "method": "retained_from_development",
+        "phase": BUDStatus.CODE_REVIEW.value,
+    }
+    if actual_role is not None:
+        detail["role"] = actual_role.value
     await record_event(
         db,
         org_id,
@@ -682,12 +707,7 @@ async def _retain_code_review_assignee(
         "assigned",
         actor_id=actor_id,
         actor_name=actor_name,
-        detail={
-            "assignee_id": str(bud.assignee_id),
-            "assignee_name": assignee.name if assignee else None,
-            "role": UserRole.DEVELOPER.value,
-            "method": "retained_from_development",
-        },
+        detail=detail,
     )
     return bud.assignee_id
 
@@ -712,10 +732,16 @@ async def _record_assignment(
     chosen: User,
     role_name: UserRole,
     method: str,
+    phase_value: str,
     actor_id: uuid.UUID | None,
     actor_name: str | None,
 ) -> None:
-    """Write unassigned (if re-assigning) + assigned timeline events."""
+    """Write unassigned (if re-assigning) + assigned timeline events.
+
+    ``phase_value`` is stamped onto the ``assigned`` event detail so
+    continuity lookups on phase re-entry can match by phase instead of
+    by role-in-chain — see ``_previous_assignee_for_phase``.
+    """
     old_assignee_id = bud.assignee_id
     if old_assignee_id and old_assignee_id != chosen.id:
         await record_event(
@@ -744,6 +770,7 @@ async def _record_assignment(
             "assignee_name": chosen.name,
             "role": role_name.value,
             "method": method,
+            "phase": phase_value,
         },
     )
 
@@ -796,6 +823,7 @@ async def assign_bud(
         "assignee_id": str(assignee_id),
         "assignee_name": assignee.name if assignee else None,
         "method": "manual",
+        "phase": bud.status.value,
     }
     if user_role is not None:
         detail["role"] = user_role.value

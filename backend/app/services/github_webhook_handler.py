@@ -482,7 +482,14 @@ async def _handle_review_submitted(
             # covers both miss paths.
             logger.info(
                 "review_author_unresolved",
-                event="review_submitted",
+                # NOT ``event=`` — structlog reserves that key for the
+                # log event name (the first positional arg above). Using
+                # the bare ``event`` kwarg here raises ``BoundLogger.info()
+                # got multiple values for argument 'event'`` at runtime
+                # and 500s the entire webhook delivery. Rename to a
+                # domain-specific key so both pieces of info land in
+                # the structured record.
+                webhook_event="review_submitted",
                 pr_id=pr_data.id,
                 github_login=review.user.login,
                 on_bud_branch=pr.bud_id is not None,

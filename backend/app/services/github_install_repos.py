@@ -87,7 +87,12 @@ _HTTP_RETRY_BASE_DELAY_S = 0.25
 # than GitHub's own UI rules (it allows trailing hyphens in either part);
 # the goal is path-injection rejection, not exact mirror of GitHub's
 # name validator. Non-matching real names just 404 against GitHub.
-_FULL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+# ``\A`` / ``\Z`` (not ``^`` / ``$``) — Python's ``$`` matches before a
+# trailing ``\n``, which would otherwise let ``acme/widgets\n`` slip
+# through into the URL path.
+_FULL_NAME_PATTERN = re.compile(
+    r"\A[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z"
+)
 
 
 def _validate_repo_full_name(full_name: str) -> str:
