@@ -45,6 +45,7 @@ from app.repositories import bud_version as bud_version_repo
 from app.repositories.bud import BUDDesignRepository, BUDRepository
 from app.repositories.bud_feature_link import BUDFeatureLinkRepository
 from app.repositories.bud_version import build_snapshot
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.bud_edit_policy import FIELD_OWNING_STATUS
 from app.services.embedding_service import embedding_service
 from app.services.feature_lifecycle import create_planned_feature
@@ -237,21 +238,26 @@ async def _apply_design_content(
     auth: MCPAuthResult,
     bud: BUDDocument,
     content: str,
+    repo_id: uuid_mod.UUID,
 ) -> dict[str, Any]:
     """Persist DESIGN-phase content via the dedicated ``bud_designs`` upsert.
 
-    BUD-level design (``repo_id=None``) is the single MCP-writable design
-    row — the per-repo wireframe rows stay agent/UI-driven so the LLM
-    can't accidentally overwrite a repo-specific design that's still
-    being iterated on. Snapshot the prior HTML alongside the standard
-    BUD snapshot so revert can restore both columns.
+    Each design lives on a specific repo's wireframe row so the
+    History tab + UI tab labels match the repo names the design
+    agent would have produced. ``repo_id`` is required by the caller
+    (validated against the token's org), and the snapshot remembers
+    it so revert can write back to the same row.
     """
     design_repo = BUDDesignRepository(db, org_id=auth.org.id)
     rows = await design_repo.list_for_bud(bud.id)
-    prior_design = next((r for r in rows if r.repo_id is None), None)
+    prior_design = next((r for r in rows if r.repo_id == repo_id), None)
 
     snapshot = build_snapshot(bud)
     snapshot["__design_html"] = prior_design.design_html if prior_design else None
+    # Remember which repo this design belongs to so the revert path
+    # can target the correct ``(bud_id, repo_id)`` row instead of
+    # blindly upserting against the BUD-level (None) slot.
+    snapshot["__design_repo_id"] = str(repo_id)
 
     await bud_version_repo.commit_snapshot(
         db,
@@ -266,7 +272,7 @@ async def _apply_design_content(
     safe_html = sanitize_design_html(content)
     design = await design_repo.upsert(
         bud.id,
-        None,
+        repo_id,
         design_html=safe_html,
         status=BUDDesignStatus.READY,
     )
@@ -277,6 +283,7 @@ async def _apply_design_content(
         "bud_number": bud.bud_number,
         "field": "design_html",
         "design_id": str(design.id),
+        "repo_id": str(repo_id),
         "phase": bud.status.value,
     }
 
@@ -426,7 +433,36 @@ async def handle_update_bud(
     content = str(params["content"])
 
     if bud.status == BUDStatus.DESIGN:
-        result = await _apply_design_content(db, auth, bud, content)
+        # Design-phase writes target a specific (bud_id, repo_id)
+        # row in ``bud_designs``. The caller picks which repo —
+        # there is no BUD-level default, because that would create
+        # a "default" tab that doesn't match what the design agent
+        # produces (per-repo rows with the actual repo name as the
+        # tab label).
+        repo_id_raw = params.get("repo_id")
+        if not isinstance(repo_id_raw, str) or not repo_id_raw.strip():
+            return _err(
+                "missing_repo_id",
+                "Design-phase update_bud requires repo_id. List "
+                "design systems via list_design_systems and ask the "
+                "user which repo this design targets before composing.",
+            )
+        try:
+            repo_id = uuid_mod.UUID(repo_id_raw.strip())
+        except ValueError:
+            return _err("bad_repo_id", "repo_id must be a UUID.")
+
+        repo_repo = TrackedRepoRepository(db, org_id=auth.org.id)
+        repo_row = await repo_repo.get_by_id(repo_id)
+        if repo_row is None:
+            return _err(
+                "repo_not_found",
+                f"No tracked repo with id {repo_id} in this org. "
+                "Call list_design_systems again — the id may be stale "
+                "or from a different tenant.",
+            )
+
+        result = await _apply_design_content(db, auth, bud, content, repo_id)
     else:
         field = _STATUS_TO_OWNING_FIELD[bud.status]
         result = await _apply_markdown_content(db, auth, bud, field, content)
@@ -511,4 +547,10 @@ async def handle_get_bud_by_id(
         "test_plan_md": _truncate(bud.test_plan_md),
         "code_review_comments": bud.code_review_comments,
         "auto_generate_phases": bud.auto_generate_phases,
+        # impacted_repos is the BUD-scoped repo list once the
+        # tech_arch agent has resolved it. Empty for fresh BUDs and
+        # those still in BUD / DESIGN phases. For design-phase
+        # update_bud, fall back to list_design_systems when this is
+        # empty — both paths surface the same ``repo_id`` shape.
+        "impacted_repos": bud.impacted_repos or [],
     }

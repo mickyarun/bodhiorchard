@@ -227,14 +227,76 @@ async def test_update_bud_rejects_missing_expected_phase(monkeypatch: Any) -> No
 
 
 @pytest.mark.asyncio
-async def test_update_bud_design_phase_routes_to_design_upsert(monkeypatch: Any) -> None:
-    """DESIGN-phase writes don't touch BUD markdown columns — they upsert
-    the BUD-level row in ``bud_designs`` and snapshot the prior HTML
-    alongside the standard BUD snapshot under ``__design_html``."""
+async def test_update_bud_design_phase_requires_repo_id(monkeypatch: Any) -> None:
+    """Design writes must target a specific repo's wireframe row so the
+    UI tab labels match what the design agent would produce. Omitting
+    repo_id is rejected before any side effect."""
     user_id = uuid.uuid4()
     auth = _auth(user_id)
     bud = _fake_bud(status=BUDStatus.DESIGN, assignee_id=user_id)
-    prior_design = MagicMock(repo_id=None, design_html="<old>OLD</old>")
+
+    async def _get(self: Any, bud_id: uuid.UUID) -> MagicMock:
+        return bud
+
+    monkeypatch.setattr(BUDRepository, "get_by_id", _get)
+
+    result = await handle_update_bud(
+        MagicMock(),
+        auth,
+        {
+            "bud_id": str(bud.id),
+            "content": "<div>x</div>",
+            "expected_phase": "design",
+        },
+    )
+    assert result["success"] is False
+    assert result["code"] == "missing_repo_id"
+
+
+@pytest.mark.asyncio
+async def test_update_bud_design_phase_rejects_cross_org_repo(monkeypatch: Any) -> None:
+    """The validation defends multi-tenancy — passing a repo_id that
+    isn't a tracked repo in the caller's org returns repo_not_found."""
+    user_id = uuid.uuid4()
+    auth = _auth(user_id)
+    bud = _fake_bud(status=BUDStatus.DESIGN, assignee_id=user_id)
+
+    async def _get(self: Any, bud_id: uuid.UUID) -> MagicMock:
+        return bud
+
+    async def _repo_lookup(self: Any, repo_id: uuid.UUID) -> Any:
+        return None  # repo absent / belongs to another org
+
+    monkeypatch.setattr(BUDRepository, "get_by_id", _get)
+    monkeypatch.setattr(
+        "app.repositories.tracked_repository.TrackedRepoRepository.get_by_id",
+        _repo_lookup,
+    )
+
+    result = await handle_update_bud(
+        MagicMock(),
+        auth,
+        {
+            "bud_id": str(bud.id),
+            "content": "<div>x</div>",
+            "expected_phase": "design",
+            "repo_id": str(uuid.uuid4()),
+        },
+    )
+    assert result["success"] is False
+    assert result["code"] == "repo_not_found"
+
+
+@pytest.mark.asyncio
+async def test_update_bud_design_phase_routes_to_repo_upsert(monkeypatch: Any) -> None:
+    """Happy path: DESIGN-phase writes upsert ``(bud_id, repo_id)`` —
+    not a BUD-level slot. Snapshot records both the prior HTML and the
+    repo id so revert can target the same row."""
+    user_id = uuid.uuid4()
+    auth = _auth(user_id)
+    bud = _fake_bud(status=BUDStatus.DESIGN, assignee_id=user_id)
+    target_repo = uuid.uuid4()
+    prior_design = MagicMock(repo_id=target_repo, design_html="<old>OLD</old>")
     new_design = MagicMock(id=uuid.uuid4())
 
     snapshots: list[dict[str, Any]] = []
@@ -254,11 +316,18 @@ async def test_update_bud_design_phase_routes_to_design_upsert(monkeypatch: Any)
         snapshots.append(kw)
         return MagicMock()
 
+    async def _repo_lookup(self: Any, repo_id: uuid.UUID) -> Any:
+        return MagicMock(id=target_repo)
+
     monkeypatch.setattr(BUDRepository, "get_by_id", _get)
     monkeypatch.setattr("app.repositories.bud.BUDDesignRepository.list_for_bud", _list_for_bud)
     monkeypatch.setattr("app.repositories.bud.BUDDesignRepository.upsert", _upsert)
     monkeypatch.setattr(
         "app.mcp.handlers_bud_writes.bud_version_repo.commit_snapshot", _commit_snapshot
+    )
+    monkeypatch.setattr(
+        "app.repositories.tracked_repository.TrackedRepoRepository.get_by_id",
+        _repo_lookup,
     )
 
     db = MagicMock(flush=AsyncMock())
@@ -269,16 +338,21 @@ async def test_update_bud_design_phase_routes_to_design_upsert(monkeypatch: Any)
             "bud_id": str(bud.id),
             "content": "<div>NEW WIREFRAME</div>",
             "expected_phase": "design",
+            "repo_id": str(target_repo),
         },
     )
 
     assert result["success"] is True
     assert result["field"] == "design_html"
     assert result["design_id"] == str(new_design.id)
-    # The design upsert ran with repo_id=None — i.e. the BUD-level
-    # design slot, not a per-repo wireframe.
+    assert result["repo_id"] == str(target_repo)
     assert len(upsert_calls) == 1
-    assert upsert_calls[0]["repo_id"] is None
+    # The design upsert MUST target the chosen repo, not the BUD-
+    # level (None) slot.
+    assert upsert_calls[0]["repo_id"] == target_repo
+    # Snapshot remembers the repo so revert can write back to the
+    # same row.
+    assert snapshots[0]["snapshot"]["__design_repo_id"] == str(target_repo)
     assert "NEW WIREFRAME" in upsert_calls[0]["design_html"]
     # The pre-edit design HTML was captured in the snapshot under the
     # sentinel key, so revert can roll BOTH the BUD columns and the

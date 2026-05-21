@@ -180,6 +180,14 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "type": "string",
                     "enum": ["bud", "design", "tech_arch"],
                 },
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "Required when expected_phase='design'. List repos via "
+                        "list_design_systems and ask the user to pick if there "
+                        "are multiple."
+                    ),
+                },
                 "linked_feature_ids": {
                     "type": "array",
                     "items": {"type": "string"},

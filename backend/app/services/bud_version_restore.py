@@ -161,35 +161,48 @@ def _apply_snapshot(bud: BUDDocument, snapshot: dict[str, object]) -> None:
 async def _restore_design_html_if_present(
     db: AsyncSession, bud: BUDDocument, snapshot: dict[str, object]
 ) -> bool:
-    """Restore the BUD-level ``bud_designs`` row from the snapshot's
-    ``__design_html`` sentinel, if any.
+    """Restore the targeted ``bud_designs`` row from the snapshot's
+    ``__design_html`` + ``__design_repo_id`` sentinels, if present.
 
-    Design content lives in ``bud_designs``, not ``bud_documents``, so
-    the standard :func:`_apply_snapshot` (keyed off SNAPSHOT_FIELDS)
+    Design content lives in ``bud_designs``, not ``bud_documents``,
+    so the standard :func:`_apply_snapshot` (keyed off SNAPSHOT_FIELDS)
     can't restore it. The MCP design-phase write captures the prior
-    HTML under the sentinel key in
-    :func:`handlers_bud_writes._apply_design_content`; revert needs
-    the symmetric restore or the BUD row gets rolled back while the
-    design row keeps the post-edit content.
+    HTML and the repo it belonged to; revert upserts back into that
+    same ``(bud_id, repo_id)`` row.
 
     Returns ``True`` if a design row was upserted.
     """
     if "__design_html" not in snapshot:
         return False
     prior_html = snapshot["__design_html"]
-    # ``None`` is a legitimate value (means there was no design row
-    # at snapshot time) but ``upsert`` with ``design_html=None``
-    # would leave the column at whatever's currently there — which
-    # is the wrong behaviour for "restore to a state with no
-    # design". For now treat None as "no restore", and only roll
-    # back when the snapshot carried HTML. A future refinement can
-    # support delete-on-restore by adding a sentinel value.
+    # ``None`` is a legitimate snapshot value (no design at the
+    # time) but ``upsert`` with ``design_html=None`` would leave
+    # the column at whatever's there now — wrong behaviour for
+    # "restore to a no-design state". Treat None as no-op; a
+    # future enhancement can add an explicit delete-on-restore
+    # sentinel.
     if not isinstance(prior_html, str) or not prior_html:
         return False
+    raw_repo_id = snapshot.get("__design_repo_id")
+    if not isinstance(raw_repo_id, str) or not raw_repo_id:
+        # Legacy snapshot without the repo sentinel — fall back to
+        # the BUD-level slot so older history rows still restore
+        # without the tab-mismatch we just fixed.
+        repo_id: uuid.UUID | None = None
+    else:
+        try:
+            repo_id = uuid.UUID(raw_repo_id)
+        except ValueError:
+            logger.warning(
+                "bud_revert_bad_design_repo_id",
+                bud_id=str(bud.id),
+                raw_repo_id=raw_repo_id,
+            )
+            return False
     design_repo = BUDDesignRepository(db, org_id=bud.org_id)
     await design_repo.upsert(
         bud.id,
-        None,
+        repo_id,
         design_html=prior_html,
         status=BUDDesignStatus.READY,
     )

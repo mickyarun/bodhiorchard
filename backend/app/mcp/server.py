@@ -216,6 +216,17 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                         "write (e.g. manual status change in another tab)."
                     ),
                 },
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "Tracked-repo UUID — REQUIRED when expected_phase is "
+                        "'design' (each design row is per-repo, like the "
+                        "design agent would produce). Call list_design_systems "
+                        "first; if multiple repos are available, ASK THE USER "
+                        "which one this design targets before composing. "
+                        "Ignored for other phases."
+                    ),
+                },
                 "linked_feature_ids": {
                     "type": "array",
                     "items": {"type": "string"},

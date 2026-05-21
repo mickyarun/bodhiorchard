@@ -115,7 +115,10 @@ _AUDITABLE_PARAM_KEYS: frozenset[str] = frozenset(
         # Declared write-intent phase. Useful in incident response
         # when a phase_mismatch fires — admin can see what phase the
         # caller thought it was writing for vs the BUD's actual phase
-        # at the time of the call.
+        # at the time of the call. Note: ``repo_id`` is already in
+        # the allowlist above (originally for code-graph reads); the
+        # design-phase update_bud's repo_id reuses that same entry,
+        # so admins get "which repo did this token touch" for free.
         "expected_phase",
     }
 )

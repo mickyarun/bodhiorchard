@@ -515,25 +515,37 @@ and 'create_bud' is reserved for brand-new BUDs in the BUD phase.
      the BUD is in the design phase).
    * 'is_assignee' == true. If false, stop and tell me which user
      ID owns it — only the assignee can update via MCP.
-   Do NOT proceed past these checks if either fails.
-2. Call get_bud_designs(bud_id="<uuid>") to see if a wireframe already
-   exists. If so, you're refining it — preserve structure / tokens
-   the user already approved. If empty, this is the first wireframe.
-3. Call get_prompt(task_type="design") and follow that prompt EXACTLY
-   for the wireframe HTML shape.
-4. Call list_design_systems(), then get_design_system(repo_id="<id>")
-   for the repo this design lands in (or omit repo_id for the org
-   default). Use ONLY tokens/components from that design system — no
-   ad-hoc colours, no new components.
-5. Compose the FULL wireframe HTML (update_bud overwrites the field).
+   Do NOT proceed past these checks if either fails. Also note
+   'impacted_repos' from the response — it may be empty in design
+   phase (tech_arch sets it later) but if populated it's the
+   BUD-scoped list of repos this design targets.
+2. Call list_design_systems() to see every repo that has a design
+   system extracted (returns repo_id + repo_name + is_default).
+   ALSO call get_bud_designs(bud_id="<uuid>") to see which repos
+   already have wireframes for this BUD.
+3. Pick the target repo:
+   * If there's exactly one impacted_repo and it has a design
+     system, use that.
+   * If get_bud_designs shows existing wireframes you're refining,
+     reuse the same repo_id (so the user's existing tab gets
+     updated, not a duplicate tab created).
+   * Otherwise STOP AND ASK ME which repo to target. List the
+     options (repo_name → repo_id) and wait for my pick.
+4. Call get_design_system(repo_id="<picked-id>") and use ONLY
+   tokens/components from that design system — no ad-hoc colours,
+   no new components.
+5. Call get_prompt(task_type="design") and follow that prompt
+   EXACTLY for the wireframe HTML shape.
+6. Compose the FULL wireframe HTML (update_bud overwrites the field).
 
 ${REVIEW_GATE}
 
 When I confirm, call update_bud(bud_id="<uuid>", content=<wireframe
-HTML>, expected_phase="design"). The expected_phase param is the
-safety net — if the BUD moved out of DESIGN since your pre-flight
-read, the server returns phase_mismatch instead of writing your HTML
-into the wrong section. Show me the response.`,
+HTML>, expected_phase="design", repo_id="<picked-id>"). repo_id is
+REQUIRED — without it the server returns missing_repo_id; with a
+mismatched repo it returns repo_not_found. expected_phase guards
+against the BUD having moved out of DESIGN since your pre-flight
+read. Show me the response (id, bud_number, design_id, repo_id).`,
   },
   tech_arch: {
     kind: 'single',
