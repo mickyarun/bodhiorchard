@@ -42,6 +42,7 @@ from app.models.bud_feature_link import (
 from app.models.bud_section_session import BUDSectionSession
 from app.models.bud_stage_skill_override import BUDStageSkillOverride
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
+from app.models.bud_version import MAX_VERSIONS_PER_PHASE, BUDEditSource, BUDVersion
 from app.models.bug import Bug, BugSeverity, BugStatus
 from app.models.cluster_cache import ClusterCache
 from app.models.design_system import DesignSystemRef
@@ -113,6 +114,9 @@ __all__ = [
     "BUDStageSkillOverride",
     "BUDTodo",
     "BUDTodoStatus",
+    "BUDEditSource",
+    "BUDVersion",
+    "MAX_VERSIONS_PER_PHASE",
     "BUDStatus",
     "BUDTimelineEvent",
     "BUDTimelineEventType",

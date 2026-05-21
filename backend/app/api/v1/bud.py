@@ -30,11 +30,14 @@ from app.api.v1.bud_linked_features import router as linked_features_router
 from app.api.v1.bud_prs import router as prs_router
 from app.api.v1.bud_qa import router as qa_router
 from app.api.v1.bud_todos import router as todos_router
+from app.api.v1.bud_versions import router as versions_router
 from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus, BUDTimelineEvent
 from app.models.bud_feature_link import BUDFeatureLinkSource
+from app.models.bud_version import BUDEditSource
 from app.models.user import User
+from app.repositories import bud_version as bud_version_repo
 from app.repositories.agent_activity import AgentActivityLogRepository
 from app.repositories.bud import BUDDesignRepository, BUDRepository
 from app.repositories.bud_agent_task import BUDAgentTaskRepository
@@ -219,6 +222,7 @@ router.include_router(qa_router, prefix="/{bud_id}/qa", tags=["bud-qa"])
 router.include_router(workflows_router, prefix="/{bud_id}", tags=["bud-workflows"])
 router.include_router(chat_router, prefix="/{bud_id}", tags=["bud-chat"])
 router.include_router(todos_router, tags=["bud-todos"])
+router.include_router(versions_router, prefix="/{bud_id}", tags=["bud-versions"])
 
 
 # ── CRUD ──────────────────────────────────────────────────────────
@@ -493,6 +497,16 @@ async def update_bud(
     update_data = body.model_dump(exclude_unset=True)
     update_data.pop("status_override_reason", None)  # consumed separately, not a model field
 
+    # Capture the pre-edit snapshot AS A DICT here, before any of the
+    # auto_generate_phases / assignee / status mutations below. The
+    # actual DB insert happens at the end, after every guard has passed
+    # — see ``commit_snapshot`` call further down. Splitting build vs
+    # commit is what keeps revert correct: the snapshot reflects the
+    # BUD as it was when the request arrived, not the mutation in
+    # flight.
+    pre_snapshot = bud_version_repo.build_snapshot(bud)
+    pre_phase = bud.status
+
     if "status" in update_data:
         try:
             update_data["status"] = BUDStatus(update_data["status"])
@@ -744,6 +758,22 @@ async def update_bud(
                     key=key,
                 )
         bud.auto_generate_phases = merged
+
+    # Commit the pre-edit snapshot captured at the top of the handler.
+    # Runs only when something will actually mutate (an empty payload
+    # after ``status_override_reason`` is popped means there's nothing
+    # to roll back to). ``pre_phase`` is the phase the edit happened
+    # IN — even if this same request advances status, the snapshot
+    # belongs to the old phase's ring buffer.
+    if update_data or "auto_generate_phases" in body.model_dump(exclude_unset=True):
+        await bud_version_repo.commit_snapshot(
+            db,
+            bud_id=bud.id,
+            phase=pre_phase,
+            snapshot=pre_snapshot,
+            source=BUDEditSource.UI,
+            edited_by=current_user.id,
+        )
 
     for field, value in update_data.items():
         setattr(bud, field, value)

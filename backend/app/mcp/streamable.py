@@ -67,6 +67,12 @@ REMOTE_TOOLS: frozenset[str] = frozenset(
         "list_design_systems",
         "get_design_system",
         "get_prompt",
+        # BYO-AI write surface. Gated additionally at the handler layer
+        # (assignee-only, content-only-within-current-phase) — see
+        # ``handlers_bud_writes.py``.
+        "create_bud",
+        "update_bud",
+        "get_bud_by_id",
     }
 )
 
@@ -127,6 +133,51 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {"repo_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "create_bud",
+        "description": (
+            "Create a new BUD in your org. You become both creator and "
+            "assignee so subsequent update_bud calls from this token can "
+            "find it. Empty title or requirements_md is rejected."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "requirements_md": {"type": "string"},
+            },
+            "required": ["title", "requirements_md"],
+        },
+    },
+    {
+        "name": "update_bud",
+        "description": (
+            "Update the content field owned by the BUD's current phase. "
+            "You must be the BUD's assignee and the BUD must not be in "
+            "closed/discarded. The server picks the editable field from "
+            "the phase — you cannot address a different one."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bud_id": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["bud_id", "content"],
+        },
+    },
+    {
+        "name": "get_bud_by_id",
+        "description": (
+            "Fetch a single BUD by UUID with the full body of every "
+            "section (per-field truncation applied)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"bud_id": {"type": "string"}},
+            "required": ["bud_id"],
         },
     },
     {
@@ -194,12 +245,18 @@ async def _dispatch(
             raise _RPCError(_METHOD_NOT_FOUND, f"Tool not available remotely: {tool_name!r}")
         # Import locally to avoid a circular import with server.py's
         # TOOL_HANDLERS dict (server.py imports this module to mount it).
-        from app.mcp.server import TOOL_HANDLERS
+        from app.mcp.server import AUTH_TOOL_HANDLERS, TOOL_HANDLERS
 
+        # Auth-aware handlers receive the full MCPAuthResult so they can
+        # enforce per-user guards (e.g. update_bud's assignee check).
+        auth_handler = AUTH_TOOL_HANDLERS.get(tool_name)
         handler = TOOL_HANDLERS.get(tool_name)
-        if handler is None:
+        if auth_handler is not None:
+            result = await auth_handler(db, auth, tool_args)
+        elif handler is not None:
+            result = await handler(db, auth.org, tool_args)
+        else:
             raise _RPCError(_INTERNAL_ERROR, f"Handler missing for {tool_name!r}")
-        result = await handler(db, auth.org, tool_args)
         # Wrap raw handler output in the MCP tools/call response envelope.
         # Handlers signal a soft failure (bad params, missing seed data) by
         # returning a dict with an ``error`` key instead of raising — propagate

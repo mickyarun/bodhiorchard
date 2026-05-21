@@ -39,6 +39,11 @@ from app.mcp.handlers_bud_design import (
     handle_get_bud_designs,
     handle_write_bud_design,
 )
+from app.mcp.handlers_bud_writes import (
+    handle_create_bud,
+    handle_get_bud_by_id,
+    handle_update_bud,
+)
 from app.mcp.handlers_code_graph import (
     handle_code_community,
     handle_code_context,
@@ -140,6 +145,69 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "default": False,
                 },
             },
+        },
+    ),
+    MCPToolDefinition(
+        name="create_bud",
+        description=(
+            "Create a new BUD owned by the calling user. Sets you as both "
+            "creator and assignee — required so subsequent update_bud calls "
+            "from your MCP token can find this BUD. Available remotely as "
+            "the write-side of the BYO-AI flow."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "requirements_md": {
+                    "type": "string",
+                    "description": (
+                        "Full markdown body — problem, proposed solution, "
+                        "acceptance criteria, edge cases, dependencies."
+                    ),
+                },
+            },
+            "required": ["title", "requirements_md"],
+        },
+    ),
+    MCPToolDefinition(
+        name="update_bud",
+        description=(
+            "Update the content field owned by the BUD's CURRENT phase "
+            "(requirements_md when status='bud', tech_spec_md when "
+            "'tech_arch', test_plan_md when 'testing', code_review_comments "
+            "when 'code_review'). The server picks the field — you cannot "
+            "address a different one. Only allowed when you are the "
+            "BUD's assignee and it isn't closed or discarded."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_id": {"type": "string", "description": "BUD UUID."},
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "New content for whichever field the BUD's current "
+                        "phase owns. Empty strings are rejected."
+                    ),
+                },
+            },
+            "required": ["bud_id", "content"],
+        },
+    ),
+    MCPToolDefinition(
+        name="get_bud_by_id",
+        description=(
+            "Fetch a single BUD by UUID with the full content of every "
+            "section (truncated per field). Org-scoped — no assignee "
+            "restriction on reads."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_id": {"type": "string", "description": "BUD UUID."},
+            },
+            "required": ["bud_id"],
         },
     ),
     MCPToolDefinition(
@@ -925,6 +993,9 @@ AUTH_TOOL_HANDLERS: dict[str, Any] = {
     "get_bud_plan": handle_get_bud_plan,
     "takeover_todo": handle_takeover_todo,
     "complete_todo": handle_complete_todo,
+    "create_bud": handle_create_bud,
+    "update_bud": handle_update_bud,
+    "get_bud_by_id": handle_get_bud_by_id,
 }
 
 

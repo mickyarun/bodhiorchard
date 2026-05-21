@@ -101,6 +101,12 @@ _AUDITABLE_PARAM_KEYS: frozenset[str] = frozenset(
         "repo_id",
         "include_terminal",
         "bud_number",
+        # BYO-AI write surface. ``content`` and ``title`` are truncated
+        # to the per-value cap so a runaway markdown body can't bloat
+        # the audit table.
+        "bud_id",
+        "title",
+        "content",
     }
 )
 # Per-value cap so a runaway 50 KB "query" doesn't bloat the audit table.

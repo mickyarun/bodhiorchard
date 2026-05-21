@@ -25,13 +25,34 @@ from typing import Any
 
 import structlog
 
+from app.models.bud import BUDDocument
 from app.models.bud_agent_task import BUDAgentTask
 from app.models.bud_feature_link import BUDFeatureLinkSource
+from app.models.bud_version import BUDEditSource
+from app.repositories import bud_version as bud_version_repo
 from app.repositories.bud_feature_link import BUDFeatureLinkRepository
 from app.services.bud_timeline import record_event
 from app.services.json_parser import parse_json_response, strip_insight_blocks
 
 logger = structlog.get_logger(__name__)
+
+
+async def _snapshot_agent_write(db: Any, bud: BUDDocument) -> None:
+    """Capture the BUD's pre-edit state for the History/revert flow.
+
+    Called by every agent result handler that mutates BUD content
+    columns. ``edited_by`` is ``None`` because the writer is the system,
+    not an interactive user; the ``source=AGENT`` enum value is enough
+    to attribute the row in the History tab.
+    """
+    await bud_version_repo.insert_snapshot(
+        db,
+        bud=bud,
+        phase=bud.status,
+        source=BUDEditSource.AGENT,
+        edited_by=None,
+    )
+
 
 # Substrings emitted by ``git`` / ``gh`` / the GitHub HTTPS endpoint when the
 # bearer token is rejected. We match on the tools' own wording rather than a
@@ -239,6 +260,7 @@ async def handle_tech_arch_result(
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud:
+        await _snapshot_agent_write(db, bud)
         # Extract impacted repos from the last JSON fence, then strip it
         impacted_names, clean_output = _extract_impacted_repos_json(output)
         bud.tech_spec_md = clean_output
@@ -336,6 +358,7 @@ async def handle_code_review_result(
     comment_count = 0
 
     if bud:
+        await _snapshot_agent_write(db, bud)
         raw_comments = review_data.get("code_review_comments", [])
         # Defensive: if the agent returned a scalar or garbage, don't crash
         # downstream with a confusing error.
@@ -443,6 +466,7 @@ async def handle_testing_result(
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud:
+        await _snapshot_agent_write(db, bud)
         bud.qa_automation_cases = parsed_data["automation_test_cases"]
         bud.qa_manual_cases = parsed_data["manual_test_cases"]
         bud.qa_execution_plan_md = parsed_data["test_execution_plan"]
