@@ -43,6 +43,7 @@ const emit = defineEmits<{
   delete: []
   'save-title': [title: string]
   'open-skill-settings': []
+  'open-history': []
 }>()
 
 const membersStore = useMembersStore()
@@ -190,10 +191,20 @@ function saveTitle(): void {
           </v-list>
         </v-menu>
         <v-btn
+          variant="tonal"
+          size="x-small"
+          class="header-action-btn"
+          title="View edit history and restore previous versions"
+          @click="emit('open-history')"
+        >
+          <v-icon start size="14">mdi-history</v-icon>
+          History
+        </v-btn>
+        <v-btn
           :variant="chatOpen ? 'flat' : 'tonal'"
           :color="chatOpen ? 'primary' : 'default'"
           size="x-small"
-          class="ai-chat-btn"
+          class="header-action-btn ai-chat-btn"
           :disabled="agentLocked || !chatable"
           :title="!chatable && !agentLocked
             ? 'Chat is not available for this section in the current stage.'
@@ -235,6 +246,12 @@ function saveTitle(): void {
 </template>
 
 <style scoped>
+.header-action-btn {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-size: 13px;
+}
 .ai-chat-btn {
   text-transform: none;
   letter-spacing: 0;

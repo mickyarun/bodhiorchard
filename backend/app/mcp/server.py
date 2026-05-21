@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
+from app.mcp.audit import emit_audit
 from app.mcp.auth import MCPAuthResult, verify_mcp_token
 from app.mcp.handlers_agent_activity import handle_agent_activity
 from app.mcp.handlers_bud import (
@@ -37,6 +38,11 @@ from app.mcp.handlers_bud import (
 from app.mcp.handlers_bud_design import (
     handle_get_bud_designs,
     handle_write_bud_design,
+)
+from app.mcp.handlers_bud_writes import (
+    handle_create_bud,
+    handle_get_bud_by_id,
+    handle_update_bud,
 )
 from app.mcp.handlers_code_graph import (
     handle_code_community,
@@ -54,6 +60,7 @@ from app.mcp.handlers_features import (
     handle_write_feature_registry,
 )
 from app.mcp.handlers_hooks import handle_dev_activity
+from app.mcp.handlers_prompts import CANONICAL_TASK_TYPES, handle_get_prompt
 from app.mcp.handlers_scan import handle_write_synthesis_feature
 from app.mcp.handlers_team import (
     handle_get_design_system,
@@ -66,6 +73,7 @@ from app.mcp.handlers_todo import (
     handle_get_bud_plan,
     handle_takeover_todo,
 )
+from app.mcp.rate_limit import enforce_rate_limit
 from app.mcp.synthesis_queue import (  # noqa: F401
     clear_synthesis_queue,
     get_queue_remaining,
@@ -103,12 +111,147 @@ class MCPToolCallRequest(BaseModel):
 MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="get_bud_context",
-        description="Retrieve existing BUDs for context when generating new ones",
+        description=(
+            "Retrieve EXISTING IN-PROGRESS BUDs (anything not closed or "
+            "discarded) for context when drafting a new one. Optional "
+            "``query`` does substring keyword search on title + "
+            "requirements_md (same tokenisation as get_features). Pass "
+            "include_terminal=true to also see closed/discarded history."
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "description": "Max BUDs to return", "default": 5},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max BUDs to return (default 5, max 20)",
+                    "default": 5,
+                },
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Optional keyword filter — whitespace-tokenised "
+                        "substring match on title + requirements_md. "
+                        "Tokens shorter than 2 chars are dropped. Omit "
+                        "to get the most recent BUDs."
+                    ),
+                },
+                "include_terminal": {
+                    "type": "boolean",
+                    "description": (
+                        "Include closed and discarded BUDs in the result. "
+                        "Default false — those are usually noise for the "
+                        "BYO-AI drafting flow."
+                    ),
+                    "default": False,
+                },
             },
+        },
+    ),
+    MCPToolDefinition(
+        name="create_bud",
+        description=(
+            "Create a new BUD owned by the calling user. Sets you as both "
+            "creator and assignee — required so subsequent update_bud calls "
+            "from your MCP token can find this BUD. Available remotely as "
+            "the write-side of the BYO-AI flow. Pass linked_feature_ids "
+            "(UUIDs from get_features) to wire BUDFeatureLink rows in the "
+            "same call — no trailing JSON fence needed."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "requirements_md": {
+                    "type": "string",
+                    "description": (
+                        "Full markdown body — problem, proposed solution, "
+                        "acceptance criteria, edge cases, dependencies."
+                    ),
+                },
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Feature UUIDs (from get_features) this BUD touches. "
+                        "Server idempotently creates BUDFeatureLink rows so "
+                        "downstream agents inherit the grounding. Optional."
+                    ),
+                },
+            },
+            "required": ["title", "requirements_md"],
+        },
+    ),
+    MCPToolDefinition(
+        name="update_bud",
+        description=(
+            "Update content for the BUD's CURRENT creative phase. The "
+            "server picks the target from the phase: requirements_md "
+            "when status='bud', the BUD-level wireframe HTML when "
+            "'design', or tech_spec_md when 'tech_arch'. Other phases "
+            "(testing, code_review, …) are NOT writable via MCP — those "
+            "involve PR state, evidence uploads, and stage gates that "
+            "stay UI/agent-driven. Only allowed when you are the BUD's "
+            "assignee and it isn't closed or discarded."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_id": {"type": "string", "description": "BUD UUID."},
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "New content for whichever field the BUD's current "
+                        "phase owns. Empty strings are rejected."
+                    ),
+                },
+                "expected_phase": {
+                    "type": "string",
+                    "enum": ["bud", "design", "tech_arch"],
+                    "description": (
+                        "The phase you believe you're writing content for. "
+                        "Server rejects with phase_mismatch if the BUD's "
+                        "actual status differs — prevents content composed "
+                        "for one phase being silently written to another "
+                        "when the BUD moved between your read and your "
+                        "write (e.g. manual status change in another tab)."
+                    ),
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "Tracked-repo UUID — REQUIRED when expected_phase is "
+                        "'design' (each design row is per-repo, like the "
+                        "design agent would produce). Call list_design_systems "
+                        "first; if multiple repos are available, ASK THE USER "
+                        "which one this design targets before composing. "
+                        "Ignored for other phases."
+                    ),
+                },
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Feature UUIDs (from get_features) this BUD touches. "
+                        "Idempotent — re-passing existing links is a no-op."
+                    ),
+                },
+            },
+            "required": ["bud_id", "content", "expected_phase"],
+        },
+    ),
+    MCPToolDefinition(
+        name="get_bud_by_id",
+        description=(
+            "Fetch a single BUD by UUID with the full content of every "
+            "section (truncated per field). Org-scoped — no assignee "
+            "restriction on reads."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_id": {"type": "string", "description": "BUD UUID."},
+            },
+            "required": ["bud_id"],
         },
     ),
     MCPToolDefinition(
@@ -139,12 +282,38 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     ),
     MCPToolDefinition(
         name="get_features",
-        description="Search the organization's active features via semantic search",
+        description=(
+            "Hybrid search over your org's active features. Tries an "
+            "exact substring match on title first (same as the frontend "
+            "/features ?q=… page); falls back to semantic similarity "
+            "over the feature embeddings when the literal phrase isn't "
+            "in any title. ALWAYS pass a non-empty ``query`` — an org "
+            "with hundreds of features will drown the model in noise "
+            "otherwise. Paginate via ``offset`` + ``next_offset`` until "
+            "``has_more`` is false. Each result includes ``id`` (use it "
+            "with create_bud / update_bud's linked_feature_ids param) "
+            "and ``code_locations`` — per-repo layer→file-path maps "
+            "your local AI can use to read the actual implementation "
+            "source via its own filesystem tool, grounding tech-spec / "
+            "design work in real code instead of guesses."
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query"},
-                "limit": {"type": "integer", "default": 10},
+                "query": {
+                    "type": "string",
+                    "description": "Keyword or phrase to semantic-search.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Page size (max 50).",
+                },
+                "offset": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "Pagination offset; use next_offset from prior page.",
+                },
             },
             "required": ["query"],
         },
@@ -432,6 +601,35 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         },
     ),
     MCPToolDefinition(
+        name="get_prompt",
+        description=(
+            "Return the exact prompt our PM / Designer / TechPlanner / "
+            "Tester agent would use for a given BUD stage. Honours the "
+            "org's default skill override. Feed this prompt to your local "
+            "AI to produce PRD / design / tech-spec / test-plan content "
+            "that matches the shape the BUD section editors expect."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "task_type": {
+                    "type": "string",
+                    # Advertise the canonical role-based names only —
+                    # the handler also accepts the internal BUDStatus
+                    # aliases (``bud`` for ``pm``, ``tech_arch`` for
+                    # ``tech_plan``) for backward compat, but those
+                    # don't need to be discoverable here.
+                    "enum": list(CANONICAL_TASK_TYPES),
+                    "description": (
+                        "Which stage's prompt to return: 'pm' (PRD), "
+                        "'design', 'tech_plan', or 'testing'."
+                    ),
+                },
+            },
+            "required": ["task_type"],
+        },
+    ),
+    MCPToolDefinition(
         name="get_bud_designs",
         description=(
             "Fetch wireframe(s) attached to a BUD, one row per impacted "
@@ -702,14 +900,21 @@ async def list_tools() -> list[MCPToolDefinition]:
 async def call_tool(
     tool_name: str,
     body: MCPToolCallRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: MCPAuthResult = Depends(verify_mcp_token),
 ) -> dict[str, Any]:
     """Execute an MCP tool call from Claude Code.
 
+    Every call is rate-limited (per token, per IP) and recorded in the
+    ``mcp_audit_log`` table for incident response. Both checks are
+    transport-level cross-cutting concerns — neither knows or cares which
+    specific handler ends up running.
+
     Args:
         tool_name: The name of the tool to execute.
         body: Tool call parameters.
+        request: FastAPI request, used to derive client IP / user-agent.
         db: The async database session.
         auth: The authenticated org (and optional user) from MCP token.
 
@@ -724,19 +929,83 @@ async def call_tool(
         params=body.params,
     )
 
+    # Rate limit BEFORE dispatch so a spammed unknown tool also gets
+    # throttled (otherwise the 404 path is free-to-spam).
+    try:
+        await enforce_rate_limit(request=request, auth=auth, tool_name=tool_name)
+    except HTTPException as exc:
+        emit_audit(
+            request=request,
+            auth=auth,
+            org_id=auth.org.id,
+            token_id=auth.token_id,
+            tool_name=tool_name,
+            transport="http",
+            params=body.params,
+            status_code=exc.status_code,
+        )
+        raise
+
     # Auth-aware handlers receive the full MCPAuthResult (needs user).
     auth_handler = AUTH_TOOL_HANDLERS.get(tool_name)
-    if auth_handler is not None:
-        return cast(dict[str, Any], await auth_handler(db, auth, body.params))
-
     handler = TOOL_HANDLERS.get(tool_name)
-    if handler is None:
+    if auth_handler is None and handler is None:
+        emit_audit(
+            request=request,
+            auth=auth,
+            org_id=auth.org.id,
+            token_id=auth.token_id,
+            tool_name=tool_name,
+            transport="http",
+            params=body.params,
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown tool: {tool_name}",
         )
 
-    return cast(dict[str, Any], await handler(db, auth.org, body.params))
+    try:
+        if auth_handler is not None:
+            result = cast(dict[str, Any], await auth_handler(db, auth, body.params))
+        else:
+            assert handler is not None  # checked above
+            result = cast(dict[str, Any], await handler(db, auth.org, body.params))
+    except HTTPException as exc:
+        emit_audit(
+            request=request,
+            auth=auth,
+            org_id=auth.org.id,
+            token_id=auth.token_id,
+            tool_name=tool_name,
+            transport="http",
+            params=body.params,
+            status_code=exc.status_code,
+        )
+        raise
+    except Exception:
+        emit_audit(
+            request=request,
+            auth=auth,
+            org_id=auth.org.id,
+            token_id=auth.token_id,
+            tool_name=tool_name,
+            transport="http",
+            params=body.params,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+        raise
+
+    emit_audit(
+        request=request,
+        auth=auth,
+        org_id=auth.org.id,
+        token_id=auth.token_id,
+        tool_name=tool_name,
+        transport="http",
+        status_code=status.HTTP_200_OK,
+    )
+    return result
 
 
 # --- Tool handler dispatch ---
@@ -755,6 +1024,7 @@ TOOL_HANDLERS: dict[str, Any] = {
     "check_feature_exists": handle_check_feature_exists,
     "list_design_systems": handle_list_design_systems,
     "get_design_system": handle_get_design_system,
+    "get_prompt": handle_get_prompt,
     "get_bud_designs": handle_get_bud_designs,
     "write_bud_design": handle_write_bud_design,
     "code_impact": handle_code_impact,
@@ -771,6 +1041,9 @@ AUTH_TOOL_HANDLERS: dict[str, Any] = {
     "get_bud_plan": handle_get_bud_plan,
     "takeover_todo": handle_takeover_todo,
     "complete_todo": handle_complete_todo,
+    "create_bud": handle_create_bud,
+    "update_bud": handle_update_bud,
+    "get_bud_by_id": handle_get_bud_by_id,
 }
 
 

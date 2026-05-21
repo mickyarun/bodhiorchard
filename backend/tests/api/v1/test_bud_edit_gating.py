@@ -116,6 +116,12 @@ async def test_patch_title_is_always_allowed(
     # up downstream — we only care that the gate doesn't reject title.
     monkeypatch.setattr(bud_handlers, "_bud_response", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr("app.services.bud_timeline.record_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        bud_handlers.bud_version_repo, "insert_snapshot", AsyncMock(return_value=MagicMock())
+    )
+    monkeypatch.setattr(
+        bud_handlers.bud_version_repo, "commit_snapshot", AsyncMock(return_value=MagicMock())
+    )
 
     body = BUDUpdate(title="Renamed during prod")
     # Must not raise — the BUDEditPolicy is the only gate under test;

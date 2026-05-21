@@ -35,3 +35,36 @@ so re-runs on the same `head_sha` short-circuit through `cluster_cache` /
 `repo_graph_cache` without re-parsing.
 
 <!-- bodhi-codeintel:end -->
+
+## BUD `auto_generate_phases` map
+
+Each `bud_documents` row carries `auto_generate_phases: JSONB | NULL`
+keyed by BUDStatus string (`bud` / `design` / `tech_arch` / `testing`)
+→ bool. Value `true` means our agent fires for that phase; missing key,
+`false`, or `NULL` dict means the user drives the phase manually
+(typically via their local AI through the remote MCP endpoint — see
+`MCP-REMOTE.md`).
+
+**Default for new BUDs is empty / all skip.** This was a deliberate
+product-policy flip from the previous "auto-fire everything" default —
+new BUDs are External-LLM mode unless the creator opts in per phase.
+Existing rows pre-flip were backfilled (`true → {all four phases on}`)
+so any in-flight pipeline keeps running.
+
+Implications when working in this codebase:
+
+- Never check `bud.status` alone to decide whether to spawn an agent;
+  always check `(bud.auto_generate_phases or {}).get(str(stage), False)`.
+  The two gating sites are `api/v1/bud.py:create_bud` (uses key `"bud"`)
+  and `api/v1/bud.py:_trigger_status_jobs` (uses the transitioning
+  status key).
+- The explicit `code-review/override` endpoint deliberately ignores
+  `auto_generate_phases` — it's a manual user escalation, not
+  auto-triggering.
+- If you add a new auto-spawn site, gate it the same way and write a
+  log entry on the skip path (existing skips log
+  `stage_agent_skip_auto_generate_off` with the resolved `phases`
+  field for debuggability).
+- External LLMs can pull the exact prompt our agent would use via the
+  `get_prompt` MCP tool — same vocabulary (`task_type ∈ {bud, design,
+  tech_arch, testing}`) so the BYO-AI flow stays consistent end-to-end.
