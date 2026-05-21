@@ -210,43 +210,72 @@
         <div class="text-caption text-medium-emphasis">
           Paste one of these into your local AI to kick off a phase. Each
           tells the LLM to fetch our agent's exact prompt via
-          <code class="inline-code">get_prompt</code>, gather context, then save
-          the result directly via <code class="inline-code">create_bud</code> /
-          <code class="inline-code">update_bud</code> instead of asking you to
-          copy-paste.
+          <code class="inline-code">get_prompt</code>, gather context, draft
+          the content, and then call
+          <code class="inline-code">create_bud</code> /
+          <code class="inline-code">update_bud</code> only after you confirm
+          the draft — no writes on intermediate edits.
         </div>
       </div>
-      <v-tabs v-model="exampleTab" density="compact" class="px-4 mt-2">
-        <v-tab v-for="(ex, key) in EXAMPLE_PROMPTS" :key="key" :value="key">
-          {{ ex.label }}
-        </v-tab>
-      </v-tabs>
-      <v-divider />
+      <div class="d-flex align-center justify-space-between flex-wrap ga-3 px-4 pt-3">
+        <v-tabs v-model="exampleTab" density="compact">
+          <v-tab v-for="(ex, key) in EXAMPLE_PROMPTS" :key="key" :value="key">
+            {{ ex.label }}
+          </v-tab>
+        </v-tabs>
+        <v-btn-toggle
+          v-model="promptMode"
+          mandatory
+          density="compact"
+          variant="outlined"
+          divided
+          color="primary"
+          class="prompt-mode-toggle"
+        >
+          <v-btn
+            v-for="opt in promptModeOptions"
+            :key="opt.value"
+            :value="opt.value"
+            size="small"
+          >
+            {{ opt.label }}
+          </v-btn>
+        </v-btn-toggle>
+      </div>
+      <v-divider class="mt-3" />
       <v-window v-model="exampleTab">
         <v-window-item v-for="(ex, key) in EXAMPLE_PROMPTS" :key="key" :value="key">
           <div class="snippet-block">
-            <pre class="snippet-pre">{{ ex.body }}</pre>
+            <pre class="snippet-pre">{{ promptBody(ex) }}</pre>
             <v-btn
               class="snippet-copy"
               size="small"
               variant="tonal"
               prepend-icon="mdi-content-copy"
-              @click="copy(ex.body, 'Prompt copied')"
+              @click="copy(promptBody(ex), 'Prompt copied')"
             >
               Copy prompt
             </v-btn>
           </div>
         </v-window-item>
       </v-window>
-      <v-alert type="info" variant="tonal" density="compact" class="ma-4 mt-0">
-        Replace <code class="inline-code">&lt;your topic&gt;</code>,
-        <code class="inline-code">&lt;BUD-NUMBER&gt;</code>, and
-        <code class="inline-code">&lt;uuid&gt;</code> in the prompt with the
-        actual values. The Design and Tech-spec prompts need the BUD
-        UUID — grab it from the URL on the BUD detail page or call
-        <code class="inline-code">get_bud_context()</code> and look up by
-        <code class="inline-code">bud_number</code>.
-      </v-alert>
+      <div class="prompt-tip mb-4 mx-4">
+        <div class="prompt-tip__icon">
+          <v-icon icon="mdi-information-outline" size="18" />
+        </div>
+        <div class="prompt-tip__body">
+          <div class="prompt-tip__eyebrow">Placeholders</div>
+          <div class="prompt-tip__text">
+            Replace <code class="inline-code">&lt;your topic&gt;</code>,
+            <code class="inline-code">&lt;BUD-NUMBER&gt;</code>, and
+            <code class="inline-code">&lt;uuid&gt;</code> before sending. The
+            Design and Tech-spec prompts need the BUD UUID — grab it from
+            the URL on the BUD detail page or call
+            <code class="inline-code">get_bud_context()</code> and look up
+            by <code class="inline-code">bud_number</code>.
+          </div>
+        </div>
+      </div>
     </v-card>
 
     <!-- Create-token dialog -->
@@ -398,8 +427,16 @@ interface ClientSnippet {
 
 interface ExamplePrompt {
   label: string
-  body: string
+  // Each phase has a "create" prompt (first-time write — most often a
+  // brand new BUD via create_bud, or the first design/tech-spec write
+  // on a blank section) and an "update" prompt (subsequent edits on
+  // existing content). Both call the same MCP tools; the framing
+  // differs so the LLM knows whether to read existing content first.
+  create: string
+  update: string
 }
+
+type PromptMode = 'create' | 'update'
 
 // Starter prompts for each BUD phase. Designed to be pasted verbatim
 // into the local LLM after the MCP server is connected. Each one (a)
@@ -408,10 +445,25 @@ interface ExamplePrompt {
 // should call to gather context, and (c) tells the user where to paste
 // the result. Keep these short and copy-pasteable — long prose here
 // dilutes the verbs the LLM needs to act on.
+// Shared "review then commit" gate inserted at the end of every
+// prompt. Stops the LLM from writing on every micro-edit during
+// iteration — users want to review the full draft once before
+// anything lands in the DB, and they want subsequent rounds of "tweak
+// this paragraph" to stay in the chat until they're done.
+const REVIEW_GATE = `Important — review-then-commit:
+* Compose the full draft and show it to me in the chat.
+* Wait for me to say "create it" / "update it" / "looks good, save it"
+  (or words to that effect). Do NOT call create_bud / update_bud
+  before that explicit confirmation.
+* If I ask for changes, iterate on the draft IN THE CHAT — no MCP
+  writes mid-iteration.
+* Once I confirm, make the single write, show me the server response,
+  and stop. Don't keep editing afterwards unless I ask.`
+
 const EXAMPLE_PROMPTS: Record<string, ExamplePrompt> = {
   pm: {
     label: 'PM / PRD',
-    body: `I want to create a BUD for: <your topic>
+    create: `I want to create a BUD for: <your topic>
 
 Use the bodhiorchard MCP server I've connected. Steps:
 1. Call get_prompt(task_type="pm") and follow that prompt EXACTLY for
@@ -425,25 +477,38 @@ Use the bodhiorchard MCP server I've connected. Steps:
 4. Compose the title and the full Markdown body. Do NOT embed a
    trailing JSON fence — pass linked feature UUIDs via the explicit
    parameter instead.
-5. Call create_bud(title=<title>, requirements_md=<full body>,
-   linked_feature_ids=[<feature-uuid>, ...]). It returns
-   {id, bud_number, linked_features}. Show me bud_number (what I'll
-   reference in the UI), id (what you'll pass to update_bud /
-   get_bud_by_id later), and linked_features.linked_count.
 
-Do NOT print the body to me first and wait — the create_bud call
-itself is the save. If the call fails (assignee/phase guard, empty
-body), report the server's error code verbatim so I can fix it.`,
+${REVIEW_GATE}
+
+When I confirm, call create_bud(title=<title>, requirements_md=<full
+body>, linked_feature_ids=[<feature-uuid>, ...]). Show me bud_number,
+id, and linked_features.linked_count from the response.`,
+    update: `I want to update the PRD for BUD-<BUD-NUMBER>.
+
+Pre-flight: the BUD must still be in the BUD phase and I must be the
+assignee. update_bud will 409 otherwise — surface the server's error
+verbatim if so.
+
+1. Call get_bud_by_id(bud_id="<uuid>") to read the current
+   requirements_md and confirm status == "bud".
+2. Call get_prompt(task_type="pm") to recall the body shape we expect.
+3. Optionally call get_features for new areas the revision touches.
+4. Compose the FULL revised Markdown body (not a diff — update_bud
+   replaces the field).
+
+${REVIEW_GATE}
+
+When I confirm, call update_bud(bud_id="<uuid>", content=<full body>,
+linked_feature_ids=[<feature-uuid>, ...]). Show me the response.`,
   },
   design: {
     label: 'Design',
-    body: `I want to draft the UX/UI design for BUD-<BUD-NUMBER>.
+    create: `I want to draft the UX/UI design for BUD-<BUD-NUMBER>.
 
 Pre-flight: the BUD must be in the DESIGN phase and I must be the
 assignee. update_bud will 409 otherwise — surface the server's error
 verbatim if so.
 
-Use the bodhiorchard MCP server. Steps:
 1. Call get_bud_by_id(bud_id="<uuid>") to read the agreed PRD content
    (requirements_md) and confirm status == "design". If status is
    something else, stop and tell me.
@@ -454,22 +519,38 @@ Use the bodhiorchard MCP server. Steps:
    default). Use ONLY tokens/components from that design system — no
    ad-hoc colours, no new components.
 4. Compose the wireframe HTML.
-5. Call update_bud(bud_id="<uuid>", content=<wireframe HTML>). The
-   server sanitises the HTML and writes it to the BUD-level design
-   row. Show me the success response.
 
-If you can't find the bud_id, call get_bud_context() and match by
-bud_number first.`,
+${REVIEW_GATE}
+
+When I confirm, call update_bud(bud_id="<uuid>", content=<wireframe
+HTML>). The server sanitises the HTML and writes it to the BUD-level
+design row. Show me the response.`,
+    update: `I want to refine the existing design for BUD-<BUD-NUMBER>.
+
+Pre-flight: the BUD must still be in the DESIGN phase and I must be
+the assignee. update_bud will 409 otherwise.
+
+1. Call get_bud_by_id(bud_id="<uuid>") to read the existing design
+   context. Also call get_bud_designs(bud_id="<uuid>") to see the
+   current wireframe HTML.
+2. Call get_design_system(repo_id="<id>") so the iteration stays
+   within the same token set.
+3. Compose the FULL revised wireframe HTML (update_bud overwrites
+   it).
+
+${REVIEW_GATE}
+
+When I confirm, call update_bud(bud_id="<uuid>", content=<wireframe
+HTML>). Show me the response.`,
   },
   tech_arch: {
     label: 'Tech spec',
-    body: `I want to write the tech architecture for BUD-<BUD-NUMBER>.
+    create: `I want to write the tech architecture for BUD-<BUD-NUMBER>.
 
 Pre-flight: the BUD must be in the TECH_ARCH phase and I must be the
 assignee. update_bud will 409 otherwise — surface the server's error
 verbatim if so.
 
-Use the bodhiorchard MCP server. Steps:
 1. Call get_bud_by_id(bud_id="<uuid>") to read the PRD content and
    confirm status == "tech_arch". If it isn't, stop and tell me.
 2. Call get_prompt(task_type="tech_plan") and follow that prompt
@@ -481,14 +562,29 @@ Use the bodhiorchard MCP server. Steps:
    components touched, schema changes, API surface, testing strategy,
    rollout & rollback. End the body with the impacted-repos JSON
    fence the prompt describes — the backend parses it.
-5. Call update_bud(bud_id="<uuid>", content=<tech spec markdown>,
-   linked_feature_ids=[<feature-uuid>, ...]). The server picks the
-   field from the current phase, writes it, and idempotently wires
-   new feature links. Show me the success response (id, bud_number,
-   field, phase, linked_features).
 
-If you can't find the bud_id, call get_bud_context() and match by
-bud_number first.`,
+${REVIEW_GATE}
+
+When I confirm, call update_bud(bud_id="<uuid>", content=<tech spec
+markdown>, linked_feature_ids=[<feature-uuid>, ...]). Show me the
+response (id, bud_number, field, phase, linked_features).`,
+    update: `I want to refine the tech spec for BUD-<BUD-NUMBER>.
+
+Pre-flight: the BUD must still be in the TECH_ARCH phase and I must
+be the assignee.
+
+1. Call get_bud_by_id(bud_id="<uuid>") to read the current
+   tech_spec_md (so you don't lose existing structure) and confirm
+   status.
+2. Call get_features for any newly-touched area.
+3. Compose the FULL revised Markdown. Preserve the impacted-repos
+   JSON fence at the bottom.
+
+${REVIEW_GATE}
+
+When I confirm, call update_bud(bud_id="<uuid>", content=<tech spec
+markdown>, linked_feature_ids=[<feature-uuid>, ...]). Show me the
+response.`,
   },
 }
 
@@ -557,6 +653,20 @@ const SNIPPETS: Record<string, ClientSnippet> = {
 // model to match one of the rendered v-tab :value props.
 const snippetTab = ref<string>(Object.keys(SNIPPETS)[0] ?? '')
 const exampleTab = ref<string>(Object.keys(EXAMPLE_PROMPTS)[0] ?? '')
+
+// Sub-toggle inside each Example tab. ``create`` is the first-time
+// write (new BUD or empty section); ``update`` is the "I already
+// have content, refine it" flow that should read existing state
+// before composing the diff.
+const promptMode = ref<PromptMode>('create')
+const promptModeOptions: { label: string; value: PromptMode }[] = [
+  { label: 'Create', value: 'create' },
+  { label: 'Update', value: 'update' },
+]
+
+function promptBody(ex: ExamplePrompt): string {
+  return promptMode.value === 'update' ? ex.update : ex.create
+}
 
 function tokenSubtitle(t: TokenRead): string {
   const parts: string[] = [`Prefix ${t.token_prefix}…`]
@@ -778,5 +888,62 @@ onMounted(refresh)
     position: static;
     margin-top: 8px;
   }
+}
+
+/* Sub-toggle inside each prompt tab — sits at the right of the
+   v-tabs row. Small, outlined; primary accent on the active option
+   to mirror the tab indicator. */
+.prompt-mode-toggle {
+  height: 32px;
+}
+.prompt-mode-toggle :deep(.v-btn) {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 12px;
+  padding-inline: 12px;
+}
+
+/* "Placeholders" callout under the example prompts. Same visual
+   grammar as the BUD-detail External-LLM banner: muted tint, 3px
+   left accent, hairline border, no heavy uniform fill. Replaces the
+   default v-alert info-blue which read as a wall of colour against
+   the dark page. */
+.prompt-tip {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(var(--v-theme-primary), 0.035);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-left: 3px solid rgb(var(--v-theme-primary));
+}
+.prompt-tip__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(var(--v-theme-primary), 0.1);
+  color: rgb(var(--v-theme-primary));
+}
+.prompt-tip__body {
+  min-width: 0;
+}
+.prompt-tip__eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--v-theme-primary));
+  margin-bottom: 2px;
+}
+.prompt-tip__text {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(var(--v-theme-on-surface), 0.72);
 }
 </style>
