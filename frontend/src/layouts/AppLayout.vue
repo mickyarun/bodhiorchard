@@ -148,6 +148,14 @@
               rounded="lg"
               class="pl-10"
             />
+            <!-- MCP Connect is self-service (any authenticated user can
+                 mint / revoke their own tokens); no canView* gate. -->
+            <v-list-item
+              title="MCP Connect"
+              to="/settings/mcp-connect"
+              rounded="lg"
+              class="pl-10"
+            />
           </v-list-group>
         </v-list>
 

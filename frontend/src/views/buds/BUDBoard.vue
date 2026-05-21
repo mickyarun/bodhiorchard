@@ -217,11 +217,12 @@
               Advanced settings
             </v-expansion-panel-title>
             <v-expansion-panel-text>
-              <!-- Per-phase auto-generation. ALL phases default OFF —
-                   the BUD ships in External-LLM mode unless the user
-                   explicitly opts in to letting our agent run for a
-                   given phase. The per-stage skill picker only matters
-                   for phases that are opted in. -->
+              <!-- Per-phase auto-generation. All phases default ON —
+                   our agents run by default for a new BUD; toggle any
+                   phase OFF to drive it yourself (typically via your
+                   local AI through Settings → MCP Connect). The
+                   per-stage skill picker only matters for phases that
+                   are still opted in. -->
               <div class="text-caption text-medium-emphasis mb-3">
                 Pick which phases our AI agent should auto-run. Anything
                 left off, you drive yourself via the section editors
@@ -351,10 +352,13 @@ function defaultSkillIdForAgent(agentType: AgentType): string | null {
 function prefillStageDefaults(): void {
   for (const stage of advancedStages) {
     stageSkillPicks.value[stage.value] = defaultSkillIdForAgent(stage.agentType)
-    // Ensure each switch has a defined boolean; missing keys render
-    // the v-switch as indeterminate.
+    // Default each phase to ON for new BUDs — user feedback was that
+    // the previous all-skip default required clicking through Advanced
+    // settings just to get the in-flight default behaviour. Users who
+    // want External-LLM mode can still flip individual switches OFF
+    // before creating, or change them later via the AI skills dialog.
     if (autoGeneratePhases.value[stage.value] === undefined) {
-      autoGeneratePhases.value[stage.value] = false
+      autoGeneratePhases.value[stage.value] = true
     }
   }
 }
