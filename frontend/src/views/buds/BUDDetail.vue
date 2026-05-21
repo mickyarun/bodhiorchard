@@ -249,6 +249,7 @@
               @toggle-edit="toggleEdit"
               @export-section="downloadSection"
               @import-section="handleImportSection"
+              @open-history="openSectionHistory"
             />
           </div>
 
@@ -445,6 +446,20 @@
         </v-card>
       </v-dialog>
 
+      <!-- Per-section diff drawer (Google Docs style). Filters the
+           version log to a single phase and shows a unified line diff
+           between the selected snapshot and the current content, with
+           an inline Restore. The header History dialog stays for the
+           cross-phase audit view. -->
+      <BUDSectionDiffDrawer
+        v-if="bud"
+        v-model="sectionDiffOpen"
+        :bud-id="bud.id"
+        :bud-status="bud.status"
+        :section="sectionDiffSection"
+        @reverted="onBudReverted"
+      />
+
       <!-- Delete confirmation -->
       <v-dialog v-model="confirmDelete" max-width="400">
         <v-card color="surface" class="pa-6">
@@ -528,6 +543,7 @@ import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
 import BUDTechSpecTab from '@/components/buds/BUDTechSpecTab.vue'
 import BUDClosedTab from '@/components/buds/BUDClosedTab.vue'
 import BUDVersionHistoryPanel from '@/components/buds/BUDVersionHistoryPanel.vue'
+import BUDSectionDiffDrawer from '@/components/buds/BUDSectionDiffDrawer.vue'
 import BUDSectionToolbar from '@/components/buds/BUDSectionToolbar.vue'
 import BUDStatusDialogs from '@/components/buds/BUDStatusDialogs.vue'
 import { useBudLinkedFeaturesStore } from '@/stores/budLinkedFeatures'
@@ -576,6 +592,31 @@ const activeTab = ref('requirements')
 const confirmDelete = ref(false)
 const skillSettingsOpen = ref(false)
 const historyDialogOpen = ref(false)
+// Per-section diff drawer. Mirrors Google Docs / Word: open from a
+// section toolbar, see only edits to THAT section's content, view a
+// line-level diff against the current text, and restore in place.
+const sectionDiffOpen = ref(false)
+type DiffSection = 'requirements' | 'tech-spec' | 'design' | 'testing' | 'code-review'
+const DIFF_SECTIONS: ReadonlySet<DiffSection> = new Set([
+  'requirements',
+  'tech-spec',
+  'design',
+  'testing',
+  'code-review',
+])
+const sectionDiffSection = ref<DiffSection>('requirements')
+
+// Map the BUDSectionKey emitted by the toolbar (e.g. 'requirements_md')
+// to the tab slug the drawer expects ('requirements'). Falls back to
+// the active tab when the section isn't a tab-mapped one.
+function openSectionHistory(sectionKey: string): void {
+  const tab = (BUD_SECTIONS as Record<string, { tab: string } | undefined>)[sectionKey]?.tab
+    ?? activeTab.value
+  if (DIFF_SECTIONS.has(tab as DiffSection)) {
+    sectionDiffSection.value = tab as DiffSection
+    sectionDiffOpen.value = true
+  }
+}
 
 // Org-level UAT toggle. Hidden when false: the UAT tab disappears, and
 // any active session that's currently on the UAT tab falls back to Prod.

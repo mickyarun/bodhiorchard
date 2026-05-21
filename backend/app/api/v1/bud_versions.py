@@ -34,7 +34,7 @@ from app.models.user import User
 from app.repositories import bud_version as bud_version_repo
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_version import SNAPSHOT_FIELDS
-from app.schemas.bud_version import BUDVersionRead
+from app.schemas.bud_version import BUDVersionDetail, BUDVersionRead
 
 # Hard cap on the History tab page size — keeps an over-zealous client
 # from pulling thousands of rows in one shot. Tune up if a real use case
@@ -70,6 +70,39 @@ async def list_bud_versions(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
     rows = await bud_version_repo.list_for_bud(db, bud_id, limit=capped_limit)
     return [BUDVersionRead.model_validate(row) for row in rows]
+
+
+@router.get(
+    "/versions/{phase}/{version_no}",
+    response_model=BUDVersionDetail,
+    dependencies=[Depends(require_permissions("buds:view"))],
+)
+async def get_bud_version_detail(
+    bud_id: uuid.UUID,
+    phase: BUDStatus,
+    version_no: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BUDVersionDetail:
+    """Return one version row including the snapshot blob.
+
+    Used by the per-section diff viewer: the section opens this endpoint
+    to fetch the historical snapshot, then diffs the field that the
+    phase owns against the current BUD's value of that field. Reads use
+    ``buds:view`` so QA / observers can review the trail without write
+    rights.
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+    row = await bud_version_repo.get_one(db, bud_id, phase, version_no)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No version v{version_no} for phase '{phase.value}' on this BUD.",
+        )
+    return BUDVersionDetail.model_validate(row)
 
 
 @router.post(

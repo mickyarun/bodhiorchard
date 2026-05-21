@@ -21,12 +21,12 @@ from pydantic import BaseModel
 
 
 class BUDVersionRead(BaseModel):
-    """One row of BUD edit history.
+    """One row of BUD edit history (no snapshot blob).
 
-    ``snapshot`` is intentionally omitted from the list view — it can
-    weigh tens of KB per row and the UI only needs the summary line for
-    the History tab. A future endpoint can return the full snapshot for
-    a single (phase, version_no) when implementing the diff viewer.
+    The snapshot is intentionally omitted from the list view — it can
+    weigh tens of KB per row and the History tab only needs the summary
+    line. Use :class:`BUDVersionDetail` to fetch a single snapshot for
+    the diff viewer.
     """
 
     id: uuid.UUID
@@ -39,3 +39,16 @@ class BUDVersionRead(BaseModel):
     edited_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class BUDVersionDetail(BUDVersionRead):
+    """Single version row including the full snapshot blob.
+
+    The snapshot keys are the columns captured at write time — see
+    :data:`app.repositories.bud_version.SNAPSHOT_FIELDS`. DESIGN-phase
+    rows additionally carry the sentinel ``__design_html`` key holding
+    the prior wireframe HTML, since design content lives outside
+    ``bud_documents``.
+    """
+
+    snapshot: dict[str, object]
