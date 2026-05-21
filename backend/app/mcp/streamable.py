@@ -96,13 +96,12 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "get_features",
         "description": (
-            "Keyword search over your org's active features (substring match on "
-            "title + description, tokenised on whitespace; matches frontend "
-            "/features page behaviour). ALWAYS pass a non-empty ``query`` — orgs "
-            "with hundreds of features need filtering. Paginate via ``offset`` + "
-            "``next_offset`` until ``has_more`` is false. Each result has an "
-            "``id`` you can place into a BUD's trailing "
-            '{"linked_feature_ids": [...]} fence.'
+            "Hybrid search over your org's active features. Title-substring match "
+            "first (mirrors the frontend /features page), with semantic-embedding "
+            "fallback when the literal phrase isn't in any title. ALWAYS pass a "
+            "non-empty ``query``. Paginate via ``offset`` + ``next_offset`` until "
+            "``has_more`` is false. Each result has an ``id`` you can place into a "
+            "BUD's trailing {\"linked_feature_ids\": [...]} fence."
         ),
         "inputSchema": {
             "type": "object",

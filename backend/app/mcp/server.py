@@ -171,14 +171,15 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="get_features",
         description=(
-            "Keyword search over your org's active features (substring "
-            "match on title + description, tokenised on whitespace; tokens "
-            "shorter than 2 chars are dropped). ALWAYS pass a non-empty "
-            "``query`` — an org with hundreds of features will drown the "
-            "model in noise otherwise. Paginate via ``offset`` + "
-            "``next_offset`` until ``has_more`` is false. Each result "
-            "includes ``id`` you can put into a BUD's "
-            '{"linked_feature_ids": [...]} JSON fence.'
+            "Hybrid search over your org's active features. Tries an "
+            "exact substring match on title first (same as the frontend "
+            "/features ?q=… page); falls back to semantic similarity "
+            "over the feature embeddings when the literal phrase isn't "
+            "in any title. ALWAYS pass a non-empty ``query`` — an org "
+            "with hundreds of features will drown the model in noise "
+            "otherwise. Paginate via ``offset`` + ``next_offset`` until "
+            "``has_more`` is false. Each result includes ``id`` you can "
+            "put into a BUD's {\"linked_feature_ids\": [...]} JSON fence."
         ),
         input_schema={
             "type": "object",
