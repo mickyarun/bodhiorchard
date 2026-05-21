@@ -56,29 +56,44 @@
                each phase from their local AI through the remote MCP
                endpoint, which can either write back directly via the
                assignee-gated update_bud tool or hand the user content
-               to paste into the section editor. -->
-          <v-alert
-            v-if="isExternalLlmMode"
-            type="info"
-            variant="tonal"
-            density="compact"
-            class="mx-12 mb-3"
-            icon="mdi-laptop"
-          >
-            <div class="d-flex align-center ga-3 flex-wrap">
-              <div class="flex-grow-1">
-                <strong>External-LLM mode.</strong>
-                Stage agents are off for this BUD. Your local AI can write
-                BUD / Design / Tech-spec content back directly through
-                <strong>MCP Connect</strong> (assignee-only, current phase
-                only), or you can paste the finished spec into the section
-                editor. Flip individual phases back to auto under
-                <strong>AI skills</strong>.
+               to paste into the section editor.
+
+               Visual treatment: muted surface tint + left accent bar
+               rather than a saturated info-blue fill. Keeps the banner
+               unobtrusive while still readable against the dark page,
+               and stops the colour from fighting the rest of the chrome
+               (which uses the primary/teal accent). -->
+          <div v-if="isExternalLlmMode" class="external-llm-banner mx-12 mb-4">
+            <div class="external-llm-banner__icon">
+              <v-icon icon="mdi-laptop-account" size="22" />
+            </div>
+            <div class="external-llm-banner__body">
+              <div class="external-llm-banner__eyebrow">External LLM mode</div>
+              <div class="external-llm-banner__title">
+                Stage agents are off — you're driving this BUD.
               </div>
+              <div class="external-llm-banner__lede">
+                Your local AI can write Requirements, Design, and Tech-spec
+                content directly via
+                <button
+                  type="button"
+                  class="external-llm-banner__link"
+                  @click="$router.push({ name: 'settings-mcp-connect' })"
+                >MCP Connect</button>
+                (assignee-only, current phase only) — or paste the finished
+                spec into the section editor. Flip individual phases back
+                to auto under
+                <button
+                  type="button"
+                  class="external-llm-banner__link"
+                  @click="skillSettingsOpen = true"
+                >AI skills</button>.
+              </div>
+            </div>
+            <div class="external-llm-banner__actions">
               <v-btn
                 size="small"
-                color="primary"
-                variant="tonal"
+                variant="text"
                 prepend-icon="mdi-tune-variant"
                 @click="skillSettingsOpen = true"
               >
@@ -86,15 +101,15 @@
               </v-btn>
               <v-btn
                 size="small"
+                variant="tonal"
                 color="primary"
-                variant="flat"
                 prepend-icon="mdi-connection"
                 :to="{ name: 'settings-mcp-connect' }"
               >
                 MCP Connect
               </v-btn>
             </div>
-          </v-alert>
+          </div>
 
           <!-- Workflow banners, approval/reject/reassign dialogs, repo confirmation -->
           <BUDWorkflowActions
@@ -1153,4 +1168,96 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
   opacity: 0;
 }
 
+/* External-LLM mode banner.
+
+   Design pattern: muted surface tint (~3% primary on dark theme) +
+   a 3px left accent bar, hairline border on the remaining sides.
+   No heavy uniform fill — that approach (Vuetify v-alert default
+   ``tonal info``) was reading as a wall of colour against the dark
+   chrome and competing with the project's primary accent.
+
+   The eyebrow → title → lede → actions hierarchy mirrors the lead
+   pattern used by quiet informational callouts in modern dark-mode
+   dashboards. */
+.external-llm-banner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 14px;
+  padding: 14px 16px 14px 14px;
+  border-radius: 10px;
+  background: rgba(var(--v-theme-primary), 0.035);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-left: 3px solid rgb(var(--v-theme-primary));
+}
+.external-llm-banner__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-primary), 0.1);
+  color: rgb(var(--v-theme-primary));
+  flex-shrink: 0;
+}
+.external-llm-banner__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.external-llm-banner__eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--v-theme-primary));
+}
+.external-llm-banner__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), 0.92);
+  line-height: 1.4;
+}
+.external-llm-banner__lede {
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(var(--v-theme-on-surface), 0.68);
+  margin-top: 2px;
+  max-width: 78ch;
+}
+.external-llm-banner__link {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: rgb(var(--v-theme-primary));
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(var(--v-theme-primary), 0.5);
+  transition: border-color 0.12s ease;
+}
+.external-llm-banner__link:hover {
+  border-bottom-color: rgb(var(--v-theme-primary));
+}
+.external-llm-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .external-llm-banner {
+    grid-template-columns: auto 1fr;
+  }
+  .external-llm-banner__actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    padding-top: 4px;
+  }
+}
 </style>
