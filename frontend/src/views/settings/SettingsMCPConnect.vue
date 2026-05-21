@@ -422,15 +422,14 @@ Use the bodhiorchard MCP server I've connected. Steps:
 3. Call get_features(query="<keywords from my topic>") and paginate
    (offset += limit while has_more) until you've reviewed the relevant
    matches. Note the feature IDs of anything this PRD will touch.
-4. Compose the title and the full Markdown body. End the body with the
-   trailing JSON fence so feature links wire up server-side:
-   \`\`\`json
-   {"linked_feature_ids": ["<feature-uuid>", ...]}
-   \`\`\`
-5. Call create_bud(title=<title>, requirements_md=<full body>). It
-   returns {id, bud_number}. Show me both — bud_number is what I'll
-   reference in the UI; id is what you'll pass to update_bud /
-   get_bud_by_id for follow-up edits.
+4. Compose the title and the full Markdown body. Do NOT embed a
+   trailing JSON fence — pass linked feature UUIDs via the explicit
+   parameter instead.
+5. Call create_bud(title=<title>, requirements_md=<full body>,
+   linked_feature_ids=[<feature-uuid>, ...]). It returns
+   {id, bud_number, linked_features}. Show me bud_number (what I'll
+   reference in the UI), id (what you'll pass to update_bud /
+   get_bud_by_id later), and linked_features.linked_count.
 
 Do NOT print the body to me first and wait — the create_bud call
 itself is the save. If the call fails (assignee/phase guard, empty
@@ -482,9 +481,11 @@ Use the bodhiorchard MCP server. Steps:
    components touched, schema changes, API surface, testing strategy,
    rollout & rollback. End the body with the impacted-repos JSON
    fence the prompt describes — the backend parses it.
-5. Call update_bud(bud_id="<uuid>", content=<tech spec markdown>).
-   The server picks the field from the current phase and writes it.
-   Show me the success response (id, bud_number, field, phase).
+5. Call update_bud(bud_id="<uuid>", content=<tech spec markdown>,
+   linked_feature_ids=[<feature-uuid>, ...]). The server picks the
+   field from the current phase, writes it, and idempotently wires
+   new feature links. Show me the success response (id, bud_number,
+   field, phase, linked_features).
 
 If you can't find the bud_id, call get_bud_context() and match by
 bud_number first.`,

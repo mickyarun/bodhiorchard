@@ -140,13 +140,19 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "description": (
             "Create a new BUD in your org. You become both creator and "
             "assignee so subsequent update_bud calls from this token can "
-            "find it. Empty title or requirements_md is rejected."
+            "find it. Empty title or requirements_md is rejected. Pass "
+            "linked_feature_ids (UUIDs from get_features) to wire feature "
+            "links in the same call."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
                 "requirements_md": {"type": "string"},
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
             },
             "required": ["title", "requirements_md"],
         },
@@ -159,13 +165,18 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "wireframe HTML), TECH_ARCH (tech_spec_md). Other phases "
             "(testing, code_review, …) are NOT remotely writable. You "
             "must be the BUD's assignee; the server picks the field "
-            "from the phase — you cannot address a different one."
+            "from the phase — you cannot address a different one. "
+            "Optional linked_feature_ids is idempotent."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "bud_id": {"type": "string"},
                 "content": {"type": "string"},
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
             },
             "required": ["bud_id", "content"],
         },

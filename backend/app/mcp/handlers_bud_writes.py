@@ -39,9 +39,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.mcp.auth import MCPAuthResult
 from app.mcp.handler_utils import require_non_empty
 from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus
+from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.bud_version import BUDEditSource
 from app.repositories import bud_version as bud_version_repo
 from app.repositories.bud import BUDDesignRepository, BUDRepository
+from app.repositories.bud_feature_link import BUDFeatureLinkRepository
 from app.repositories.bud_version import build_snapshot
 from app.services.bud_edit_policy import FIELD_OWNING_STATUS
 from app.services.embedding_service import embedding_service
@@ -73,6 +75,65 @@ logger = structlog.get_logger(__name__)
 # cap in ``get_bud_context`` because the caller has asked for *this*
 # specific BUD — they want the full content, not a list teaser.
 _BUD_BY_ID_TRUNCATE = 10_000
+
+
+def _parse_feature_ids(raw: Any) -> tuple[list[uuid_mod.UUID], list[str]]:
+    """Coerce a caller-provided value into a list of UUIDs.
+
+    Returns ``(valid_ids, dropped_raw)`` so the handler can log the
+    LLM's typos / hallucinations without raising. Accepts a list of
+    strings; anything else returns empty + a dropped marker so the
+    handler can surface a soft error.
+    """
+    if raw is None:
+        return [], []
+    if not isinstance(raw, list):
+        return [], ["<not a list>"]
+    valid: list[uuid_mod.UUID] = []
+    dropped: list[str] = []
+    for entry in raw:
+        try:
+            valid.append(uuid_mod.UUID(str(entry)))
+        except (ValueError, TypeError):
+            dropped.append(str(entry))
+    return valid, dropped
+
+
+async def _wire_feature_links(
+    db: AsyncSession,
+    auth: MCPAuthResult,
+    bud_id: uuid_mod.UUID,
+    raw: Any,
+) -> dict[str, int | list[str]]:
+    """Persist the caller's ``linked_feature_ids`` array as BUDFeatureLink rows.
+
+    The MCP write surface accepts an explicit ``linked_feature_ids``
+    array (preferred over parsing the trailing JSON fence in the
+    markdown body) so the LLM never has to fabricate the fence format.
+    The repository's ``link_features`` is idempotent — already-linked
+    features are skipped at the DB layer. ``source=MANUAL`` so the
+    activity log distinguishes MCP-driven links from agent-driven
+    ones.
+    """
+    valid_ids, dropped = _parse_feature_ids(raw)
+    if not valid_ids and not dropped:
+        return {"linked_count": 0, "dropped": []}
+
+    accepted: list[uuid_mod.UUID] = []
+    if valid_ids:
+        link_repo = BUDFeatureLinkRepository(db, org_id=auth.org.id)
+        accepted = await link_repo.link_features(
+            bud_id,
+            valid_ids,
+            source=BUDFeatureLinkSource.MANUAL,
+        )
+    if dropped:
+        logger.warning(
+            "mcp_linked_feature_ids_dropped",
+            bud_id=str(bud_id),
+            dropped=dropped,
+        )
+    return {"linked_count": len(accepted), "dropped": dropped}
 
 
 def _err(code: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -148,6 +209,11 @@ async def handle_create_bud(
     except Exception:
         logger.warning("mcp_create_bud_feature_link_failed", exc_info=True)
 
+    # Explicit feature linkage — caller passes UUIDs they already
+    # resolved via get_features. Replaces the brittle JSON-fence in
+    # markdown the older REST flow relies on.
+    link_summary = await _wire_feature_links(db, auth, bud.id, params.get("linked_feature_ids"))
+
     logger.info(
         "mcp_create_bud",
         org_id=str(auth.org.id),
@@ -155,12 +221,14 @@ async def handle_create_bud(
         token_id=str(auth.token_id) if auth.token_id else None,
         bud_id=str(bud.id),
         bud_number=next_number,
+        linked_count=link_summary["linked_count"],
     )
     return {
         "success": True,
         "id": str(bud.id),
         "bud_number": next_number,
         "title": title,
+        "linked_features": link_summary,
     }
 
 
@@ -328,6 +396,14 @@ async def handle_update_bud(
         field = _STATUS_TO_OWNING_FIELD[bud.status]
         result = await _apply_markdown_content(db, auth, bud, field, content)
 
+    # Same explicit-link path as create_bud. Linking happens AFTER the
+    # content write so a failed write doesn't produce orphan link rows.
+    # ``link_features`` is idempotent — re-passing existing ids is a
+    # no-op, which makes update_bud safe to call with the same
+    # ``linked_feature_ids`` on every edit.
+    link_summary = await _wire_feature_links(db, auth, bud.id, params.get("linked_feature_ids"))
+    result["linked_features"] = link_summary
+
     logger.info(
         "mcp_update_bud",
         org_id=str(auth.org.id),
@@ -337,6 +413,7 @@ async def handle_update_bud(
         phase=bud.status.value,
         field=result.get("field"),
         content_len=len(content),
+        linked_count=link_summary["linked_count"],
     )
     return result
 

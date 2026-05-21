@@ -75,7 +75,7 @@
       <v-list-item
         v-for="row in rows"
         :key="row.id"
-        :to="`/features/${row.id}`"
+        :to="{ name: 'features', query: { id: row.id } }"
         class="linked-feature-row"
       >
         <template #default>

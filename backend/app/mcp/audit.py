@@ -107,6 +107,11 @@ _AUDITABLE_PARAM_KEYS: frozenset[str] = frozenset(
         "bud_id",
         "title",
         "content",
+        # Array of feature UUIDs the LLM is wiring up at write time.
+        # Stored verbatim (truncated by the global per-value cap) so
+        # an admin can audit "which features did this token link to
+        # this BUD".
+        "linked_feature_ids",
     }
 )
 # Per-value cap so a runaway 50 KB "query" doesn't bloat the audit table.

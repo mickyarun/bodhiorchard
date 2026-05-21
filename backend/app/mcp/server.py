@@ -153,7 +153,9 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "Create a new BUD owned by the calling user. Sets you as both "
             "creator and assignee — required so subsequent update_bud calls "
             "from your MCP token can find this BUD. Available remotely as "
-            "the write-side of the BYO-AI flow."
+            "the write-side of the BYO-AI flow. Pass linked_feature_ids "
+            "(UUIDs from get_features) to wire BUDFeatureLink rows in the "
+            "same call — no trailing JSON fence needed."
         ),
         input_schema={
             "type": "object",
@@ -164,6 +166,15 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "description": (
                         "Full markdown body — problem, proposed solution, "
                         "acceptance criteria, edge cases, dependencies."
+                    ),
+                },
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Feature UUIDs (from get_features) this BUD touches. "
+                        "Server idempotently creates BUDFeatureLink rows so "
+                        "downstream agents inherit the grounding. Optional."
                     ),
                 },
             },
@@ -191,6 +202,14 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "description": (
                         "New content for whichever field the BUD's current "
                         "phase owns. Empty strings are rejected."
+                    ),
+                },
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Feature UUIDs (from get_features) this BUD touches. "
+                        "Idempotent — re-passing existing links is a no-op."
                     ),
                 },
             },

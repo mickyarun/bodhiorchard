@@ -224,6 +224,110 @@ async def test_update_bud_design_phase_routes_to_design_upsert(monkeypatch: Any)
 
 
 @pytest.mark.asyncio
+async def test_update_bud_wires_linked_feature_ids(monkeypatch: Any) -> None:
+    """``update_bud`` must call ``link_features`` with the caller's
+    explicit UUID array — that's the whole point of the new
+    ``linked_feature_ids`` param vs the old JSON-fence parsing."""
+    user_id = uuid.uuid4()
+    auth = _auth(user_id)
+    bud = _fake_bud(status=BUDStatus.BUD, assignee_id=user_id)
+    bud.requirements_md = "old text"
+    feature_a = uuid.uuid4()
+    feature_b = uuid.uuid4()
+
+    link_calls: list[dict[str, Any]] = []
+
+    async def _get(self: Any, bud_id: uuid.UUID) -> MagicMock:
+        return bud
+
+    async def _snapshot(db: Any, **kw: Any) -> Any:
+        return MagicMock()
+
+    async def _link_features(
+        self: Any, bud_id: Any, feature_ids: list[Any], **kw: Any
+    ) -> list[Any]:
+        link_calls.append({"bud_id": bud_id, "feature_ids": feature_ids, **kw})
+        return feature_ids  # all accepted
+
+    async def _embed(text: str) -> list[float]:
+        return [0.0] * 384
+
+    monkeypatch.setattr(BUDRepository, "get_by_id", _get)
+    monkeypatch.setattr("app.mcp.handlers_bud_writes.bud_version_repo.insert_snapshot", _snapshot)
+    monkeypatch.setattr(
+        "app.repositories.bud_feature_link.BUDFeatureLinkRepository.link_features",
+        _link_features,
+    )
+    monkeypatch.setattr("app.mcp.handlers_bud_writes.embedding_service.embed", _embed)
+
+    db = MagicMock(flush=AsyncMock())
+    result = await handle_update_bud(
+        db,
+        auth,
+        {
+            "bud_id": str(bud.id),
+            "content": "new text",
+            "linked_feature_ids": [str(feature_a), str(feature_b)],
+        },
+    )
+
+    assert result["success"] is True
+    assert result["linked_features"]["linked_count"] == 2
+    assert len(link_calls) == 1
+    assert set(link_calls[0]["feature_ids"]) == {feature_a, feature_b}
+    # Source must be MANUAL so the audit + activity log separate MCP
+    # writes from agent-driven links.
+    assert link_calls[0]["source"].value == "manual"
+
+
+@pytest.mark.asyncio
+async def test_update_bud_logs_dropped_invalid_uuids(monkeypatch: Any) -> None:
+    """Garbage entries in linked_feature_ids must be dropped (not crash
+    the write) and surfaced in the response so the LLM can fix its
+    output on the next call."""
+    user_id = uuid.uuid4()
+    auth = _auth(user_id)
+    bud = _fake_bud(status=BUDStatus.BUD, assignee_id=user_id)
+
+    async def _get(self: Any, bud_id: uuid.UUID) -> MagicMock:
+        return bud
+
+    async def _snapshot(db: Any, **kw: Any) -> Any:
+        return MagicMock()
+
+    async def _link_features(
+        self: Any, bud_id: Any, feature_ids: list[Any], **kw: Any
+    ) -> list[Any]:
+        return []
+
+    async def _embed(text: str) -> list[float]:
+        return [0.0] * 384
+
+    monkeypatch.setattr(BUDRepository, "get_by_id", _get)
+    monkeypatch.setattr("app.mcp.handlers_bud_writes.bud_version_repo.insert_snapshot", _snapshot)
+    monkeypatch.setattr(
+        "app.repositories.bud_feature_link.BUDFeatureLinkRepository.link_features",
+        _link_features,
+    )
+    monkeypatch.setattr("app.mcp.handlers_bud_writes.embedding_service.embed", _embed)
+
+    db = MagicMock(flush=AsyncMock())
+    result = await handle_update_bud(
+        db,
+        auth,
+        {
+            "bud_id": str(bud.id),
+            "content": "text",
+            "linked_feature_ids": ["not-a-uuid", "also bad"],
+        },
+    )
+
+    assert result["success"] is True
+    assert result["linked_features"]["dropped"] == ["not-a-uuid", "also bad"]
+    assert result["linked_features"]["linked_count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_create_bud_requires_user_token() -> None:
     auth = _auth(user_id=None)
     result = await handle_create_bud(MagicMock(), auth, {"title": "T", "requirements_md": "B"})
