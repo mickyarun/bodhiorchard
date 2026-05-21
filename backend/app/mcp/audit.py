@@ -101,6 +101,25 @@ _AUDITABLE_PARAM_KEYS: frozenset[str] = frozenset(
         "repo_id",
         "include_terminal",
         "bud_number",
+        # BYO-AI write surface. ``content`` and ``title`` are truncated
+        # to the per-value cap so a runaway markdown body can't bloat
+        # the audit table.
+        "bud_id",
+        "title",
+        "content",
+        # Array of feature UUIDs the LLM is wiring up at write time.
+        # Stored verbatim (truncated by the global per-value cap) so
+        # an admin can audit "which features did this token link to
+        # this BUD".
+        "linked_feature_ids",
+        # Declared write-intent phase. Useful in incident response
+        # when a phase_mismatch fires — admin can see what phase the
+        # caller thought it was writing for vs the BUD's actual phase
+        # at the time of the call. Note: ``repo_id`` is already in
+        # the allowlist above (originally for code-graph reads); the
+        # design-phase update_bud's repo_id reuses that same entry,
+        # so admins get "which repo did this token touch" for free.
+        "expected_phase",
     }
 )
 # Per-value cap so a runaway 50 KB "query" doesn't bloat the audit table.

@@ -31,6 +31,11 @@ def test_remote_allowlist_is_exactly_the_documented_tools() -> None:
         "list_design_systems",
         "get_design_system",
         "get_prompt",
+        # BYO-AI write surface — handler-layer guards enforce
+        # assignee-only writes within the current phase.
+        "create_bud",
+        "update_bud",
+        "get_bud_by_id",
     }
     assert set(REMOTE_TOOLS) == expected
 
@@ -38,7 +43,11 @@ def test_remote_allowlist_is_exactly_the_documented_tools() -> None:
 @pytest.mark.parametrize(
     "blocked_tool",
     [
-        "write_bud",  # write surface — must never be remote
+        # ``write_bud`` is the legacy in-process write — superseded
+        # remotely by the assignee-gated ``create_bud`` + ``update_bud``
+        # pair. The legacy tool stays internal so internal flows can
+        # keep using it without inheriting the remote guards.
+        "write_bud",
         "get_team_context",  # team PII — must never be remote
         "code_impact",  # code-graph — internal scan use only
         "post_slack_message",  # external side-effect

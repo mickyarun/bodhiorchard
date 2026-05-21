@@ -47,33 +47,43 @@
             @delete="confirmDelete = true"
             @save-title="handleSaveTitle"
             @open-skill-settings="skillSettingsOpen = true"
+            @open-history="openHeaderHistory"
           />
 
           <!-- External-LLM mode banner. Shown when EVERY phase in
                auto_generate_phases is off (or the dict is empty / null
                — the default for newly-created BUDs). The user drives
-               each phase via the section editor, typically using their
-               local AI through the remote MCP endpoint. -->
-          <v-alert
+               each phase from their local AI through the remote MCP
+               endpoint, which can either write back directly via the
+               assignee-gated update_bud tool or hand the user content
+               to paste into the section editor. -->
+          <AppCallout
             v-if="isExternalLlmMode"
-            type="info"
-            variant="tonal"
-            density="compact"
-            class="mx-12 mb-3"
-            icon="mdi-laptop"
+            variant="info"
+            eyebrow="External LLM mode"
+            title="Stage agents are off — you're driving this BUD."
+            icon="mdi-laptop-account"
+            class="mx-12 mb-4"
           >
-            <div class="d-flex align-center ga-3 flex-wrap">
-              <div class="flex-grow-1">
-                <strong>External-LLM mode.</strong>
-                Stage agents are off for this BUD. Connect your local AI to
-                gather context, then paste the finished spec into each
-                section editor — or flip individual phases back on under
-                <strong>AI skills</strong>.
-              </div>
+            Your local AI can write Requirements, Design, and Tech-spec
+            content directly via
+            <button
+              type="button"
+              class="external-llm-banner__link"
+              @click="$router.push({ name: 'settings-mcp-connect' })"
+            >MCP Connect</button>
+            (assignee-only, current phase only) — or paste the finished
+            spec into the section editor. Flip individual phases back to
+            auto under
+            <button
+              type="button"
+              class="external-llm-banner__link"
+              @click="skillSettingsOpen = true"
+            >AI skills</button>.
+            <template #actions>
               <v-btn
                 size="small"
-                color="primary"
-                variant="tonal"
+                variant="text"
                 prepend-icon="mdi-tune-variant"
                 @click="skillSettingsOpen = true"
               >
@@ -81,15 +91,15 @@
               </v-btn>
               <v-btn
                 size="small"
+                variant="tonal"
                 color="primary"
-                variant="flat"
                 prepend-icon="mdi-connection"
                 :to="{ name: 'settings-mcp-connect' }"
               >
                 MCP Connect
               </v-btn>
-            </div>
-          </v-alert>
+            </template>
+          </AppCallout>
 
           <!-- Workflow banners, approval/reject/reassign dialogs, repo confirmation -->
           <BUDWorkflowActions
@@ -411,6 +421,20 @@
         @saved="reloadBudAfterSettingsSave"
       />
 
+      <!-- Edit-history drawer. Single entry point from the page
+           header. The drawer is scoped to whichever section the user
+           is currently looking at — closing it, switching tabs,
+           reopening it picks up the new section automatically via the
+           section prop. -->
+      <BUDSectionDiffDrawer
+        v-if="bud"
+        v-model="sectionDiffOpen"
+        :bud-id="bud.id"
+        :bud-status="bud.status"
+        :section="sectionDiffSection"
+        @reverted="onBudReverted"
+      />
+
       <!-- Delete confirmation -->
       <v-dialog v-model="confirmDelete" max-width="400">
         <v-card color="surface" class="pa-6">
@@ -493,6 +517,8 @@ import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
 import BUDTechSpecTab from '@/components/buds/BUDTechSpecTab.vue'
 import BUDClosedTab from '@/components/buds/BUDClosedTab.vue'
+import BUDSectionDiffDrawer from '@/components/buds/BUDSectionDiffDrawer.vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import BUDSectionToolbar from '@/components/buds/BUDSectionToolbar.vue'
 import BUDStatusDialogs from '@/components/buds/BUDStatusDialogs.vue'
 import { useBudLinkedFeaturesStore } from '@/stores/budLinkedFeatures'
@@ -540,6 +566,29 @@ const isExternalLlmMode = computed(() => {
 const activeTab = ref('requirements')
 const confirmDelete = ref(false)
 const skillSettingsOpen = ref(false)
+// Edit-history drawer. One entry point lives in the page header; the
+// drawer scopes its content to whichever section is currently active.
+// UAT / Prod / Closed have no editable section, so the drawer falls
+// back to ``requirements`` — the section that always has at least the
+// v1 backfill row.
+const sectionDiffOpen = ref(false)
+type DiffSection = 'requirements' | 'tech-spec' | 'design' | 'testing' | 'code-review'
+const DIFF_SECTIONS: ReadonlySet<DiffSection> = new Set([
+  'requirements',
+  'tech-spec',
+  'design',
+  'testing',
+  'code-review',
+])
+const sectionDiffSection = ref<DiffSection>('requirements')
+
+function openHeaderHistory(): void {
+  const tab = activeTab.value
+  sectionDiffSection.value = DIFF_SECTIONS.has(tab as DiffSection)
+    ? (tab as DiffSection)
+    : 'requirements'
+  sectionDiffOpen.value = true
+}
 
 // Org-level UAT toggle. Hidden when false: the UAT tab disappears, and
 // any active session that's currently on the UAT tab falls back to Prod.
@@ -674,6 +723,15 @@ const reachedCodeReview = computed(() => {
 // via the STATUS_TAB_MAP watcher once fetchBUD picks up the new status,
 // so no manual activeTab assignment needed.
 async function onCodeReviewTransitioned(): Promise<void> {
+  if (!bud.value) return
+  await Promise.all([budStore.fetchBUD(bud.value.id), loadTimeline()])
+}
+
+// History-tab revert handler. Refreshes the BUD body so the section
+// editors above the History tab show the restored content. Timeline
+// reload too — the revert produces a new ``source='revert'`` row that
+// the activity panel should pick up.
+async function onBudReverted(): Promise<void> {
   if (!bud.value) return
   await Promise.all([budStore.fetchBUD(bud.value.id), loadTimeline()])
 }
@@ -1099,5 +1157,36 @@ async function handleAssigneeChange(memberId: string | null): Promise<void> {
   width: 0;
   min-width: 0;
   opacity: 0;
+}
+
+/* External-LLM mode banner.
+
+   Design pattern: muted surface tint (~3% primary on dark theme) +
+   a 3px left accent bar, hairline border on the remaining sides.
+   No heavy uniform fill — that approach (Vuetify v-alert default
+   ``tonal info``) was reading as a wall of colour against the dark
+   chrome and competing with the project's primary accent.
+
+   The eyebrow → title → lede → actions hierarchy mirrors the lead
+   pattern used by quiet informational callouts in modern dark-mode
+   dashboards. */
+/* Inline link buttons inside the External-LLM AppCallout body slot.
+   The callout itself ships the surrounding structure; this only
+   styles the dashed-underline link affordance the body refers to. */
+.external-llm-banner__link {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: rgb(var(--v-theme-primary));
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(var(--v-theme-primary), 0.5);
+  transition: border-color 0.12s ease;
+}
+.external-llm-banner__link:hover {
+  border-bottom-color: rgb(var(--v-theme-primary));
 }
 </style>

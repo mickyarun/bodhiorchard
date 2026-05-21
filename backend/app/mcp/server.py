@@ -39,6 +39,11 @@ from app.mcp.handlers_bud_design import (
     handle_get_bud_designs,
     handle_write_bud_design,
 )
+from app.mcp.handlers_bud_writes import (
+    handle_create_bud,
+    handle_get_bud_by_id,
+    handle_update_bud,
+)
 from app.mcp.handlers_code_graph import (
     handle_code_community,
     handle_code_context,
@@ -143,6 +148,113 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         },
     ),
     MCPToolDefinition(
+        name="create_bud",
+        description=(
+            "Create a new BUD owned by the calling user. Sets you as both "
+            "creator and assignee — required so subsequent update_bud calls "
+            "from your MCP token can find this BUD. Available remotely as "
+            "the write-side of the BYO-AI flow. Pass linked_feature_ids "
+            "(UUIDs from get_features) to wire BUDFeatureLink rows in the "
+            "same call — no trailing JSON fence needed."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "requirements_md": {
+                    "type": "string",
+                    "description": (
+                        "Full markdown body — problem, proposed solution, "
+                        "acceptance criteria, edge cases, dependencies."
+                    ),
+                },
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Feature UUIDs (from get_features) this BUD touches. "
+                        "Server idempotently creates BUDFeatureLink rows so "
+                        "downstream agents inherit the grounding. Optional."
+                    ),
+                },
+            },
+            "required": ["title", "requirements_md"],
+        },
+    ),
+    MCPToolDefinition(
+        name="update_bud",
+        description=(
+            "Update content for the BUD's CURRENT creative phase. The "
+            "server picks the target from the phase: requirements_md "
+            "when status='bud', the BUD-level wireframe HTML when "
+            "'design', or tech_spec_md when 'tech_arch'. Other phases "
+            "(testing, code_review, …) are NOT writable via MCP — those "
+            "involve PR state, evidence uploads, and stage gates that "
+            "stay UI/agent-driven. Only allowed when you are the BUD's "
+            "assignee and it isn't closed or discarded."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_id": {"type": "string", "description": "BUD UUID."},
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "New content for whichever field the BUD's current "
+                        "phase owns. Empty strings are rejected."
+                    ),
+                },
+                "expected_phase": {
+                    "type": "string",
+                    "enum": ["bud", "design", "tech_arch"],
+                    "description": (
+                        "The phase you believe you're writing content for. "
+                        "Server rejects with phase_mismatch if the BUD's "
+                        "actual status differs — prevents content composed "
+                        "for one phase being silently written to another "
+                        "when the BUD moved between your read and your "
+                        "write (e.g. manual status change in another tab)."
+                    ),
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "Tracked-repo UUID — REQUIRED when expected_phase is "
+                        "'design' (each design row is per-repo, like the "
+                        "design agent would produce). Call list_design_systems "
+                        "first; if multiple repos are available, ASK THE USER "
+                        "which one this design targets before composing. "
+                        "Ignored for other phases."
+                    ),
+                },
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Feature UUIDs (from get_features) this BUD touches. "
+                        "Idempotent — re-passing existing links is a no-op."
+                    ),
+                },
+            },
+            "required": ["bud_id", "content", "expected_phase"],
+        },
+    ),
+    MCPToolDefinition(
+        name="get_bud_by_id",
+        description=(
+            "Fetch a single BUD by UUID with the full content of every "
+            "section (truncated per field). Org-scoped — no assignee "
+            "restriction on reads."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_id": {"type": "string", "description": "BUD UUID."},
+            },
+            "required": ["bud_id"],
+        },
+    ),
+    MCPToolDefinition(
         name="write_bud",
         description=(
             "Save or update a BUD document. If bud_number is provided, updates "
@@ -178,8 +290,12 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "in any title. ALWAYS pass a non-empty ``query`` — an org "
             "with hundreds of features will drown the model in noise "
             "otherwise. Paginate via ``offset`` + ``next_offset`` until "
-            "``has_more`` is false. Each result includes ``id`` you can "
-            'put into a BUD\'s {"linked_feature_ids": [...]} JSON fence.'
+            "``has_more`` is false. Each result includes ``id`` (use it "
+            "with create_bud / update_bud's linked_feature_ids param) "
+            "and ``code_locations`` — per-repo layer→file-path maps "
+            "your local AI can use to read the actual implementation "
+            "source via its own filesystem tool, grounding tech-spec / "
+            "design work in real code instead of guesses."
         ),
         input_schema={
             "type": "object",
@@ -925,6 +1041,9 @@ AUTH_TOOL_HANDLERS: dict[str, Any] = {
     "get_bud_plan": handle_get_bud_plan,
     "takeover_todo": handle_takeover_todo,
     "complete_todo": handle_complete_todo,
+    "create_bud": handle_create_bud,
+    "update_bud": handle_update_bud,
+    "get_bud_by_id": handle_get_bud_by_id,
 }
 
 

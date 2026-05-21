@@ -18,7 +18,7 @@ import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -47,7 +47,20 @@ class User(BaseModel):
     """Application user — org membership is tracked via OrgToUser."""
 
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        # Partial unique index — defence-in-depth for restored DBs
+        # where ``uq_users_email`` never landed (the legacy state
+        # that allowed duplicate ``users.email`` rows). Migration
+        # ``6e375ee9d275`` creates it; declaring it on the model
+        # keeps the autogen drift check happy.
+        Index(
+            "uq_users_email_active",
+            "email",
+            unique=True,
+            postgresql_where="is_active = true",
+        ),
+    )
 
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)

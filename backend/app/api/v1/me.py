@@ -46,6 +46,7 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -199,7 +200,34 @@ async def create_my_mcp_token(
             expires_at=_resolve_expiry(body.expires_in_days),
         )
     )
-    await db.flush()
+    # Defensive catch for an integrity violation slipping past the
+    # pre-check above. The pre-check covers the documented
+    # ``(user_id, org_id, name)`` collision; an IntegrityError that
+    # reaches here usually means a stale legacy index (e.g. the old
+    # single-token-per-user constraint that migration 2c87d34be5bc was
+    # supposed to drop — see migration 555236b875ed for the cleanup).
+    # Convert to a 409 so the user sees an actionable message instead
+    # of a 500 stack trace.
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        logger.warning(
+            "mcp_token_integrity_violation",
+            org_id=str(current_user.org_id),
+            user=current_user.email,
+            name=body.name,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Could not create token — a uniqueness constraint blocked the "
+                "insert. If this is your first attempt after a fresh deploy, "
+                "ensure all DB migrations are applied (run "
+                "``alembic upgrade head``)."
+            ),
+        ) from exc
 
     logger.info(
         "mcp_token_created",

@@ -67,6 +67,12 @@ REMOTE_TOOLS: frozenset[str] = frozenset(
         "list_design_systems",
         "get_design_system",
         "get_prompt",
+        # BYO-AI write surface. Gated additionally at the handler layer
+        # (assignee-only, content-only-within-current-phase) — see
+        # ``handlers_bud_writes.py``.
+        "create_bud",
+        "update_bud",
+        "get_bud_by_id",
     }
 )
 
@@ -100,8 +106,11 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "first (mirrors the frontend /features page), with semantic-embedding "
             "fallback when the literal phrase isn't in any title. ALWAYS pass a "
             "non-empty ``query``. Paginate via ``offset`` + ``next_offset`` until "
-            "``has_more`` is false. Each result has an ``id`` you can place into a "
-            'BUD\'s trailing {"linked_feature_ids": [...]} fence.'
+            "``has_more`` is false. Each result returns ``id`` (for linked_feature_ids "
+            "on create_bud / update_bud) and ``code_locations`` — a per-repo "
+            "layer→file-path map you can use to read the actual implementation "
+            "source via your local filesystem tool when composing a tech spec or "
+            "design that has to interoperate with existing code."
         ),
         "inputSchema": {
             "type": "object",
@@ -127,6 +136,79 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {"repo_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "create_bud",
+        "description": (
+            "Create a new BUD in your org. You become both creator and "
+            "assignee so subsequent update_bud calls from this token can "
+            "find it. Empty title or requirements_md is rejected. Pass "
+            "linked_feature_ids (UUIDs from get_features) to wire feature "
+            "links in the same call."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "requirements_md": {"type": "string"},
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["title", "requirements_md"],
+        },
+    },
+    {
+        "name": "update_bud",
+        "description": (
+            "Update content for the BUD's current creative phase. "
+            "Editable phases: BUD (requirements_md), DESIGN (BUD-level "
+            "wireframe HTML), TECH_ARCH (tech_spec_md). Other phases "
+            "(testing, code_review, …) are NOT remotely writable. You "
+            "must be the BUD's assignee; the server picks the field "
+            "from the phase — you cannot address a different one. "
+            "expected_phase is a REQUIRED sanity check: declare the "
+            "phase you composed content for, and the server rejects "
+            "with phase_mismatch if the BUD has since moved. "
+            "linked_feature_ids is optional and idempotent."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bud_id": {"type": "string"},
+                "content": {"type": "string"},
+                "expected_phase": {
+                    "type": "string",
+                    "enum": ["bud", "design", "tech_arch"],
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": (
+                        "Required when expected_phase='design'. List repos via "
+                        "list_design_systems and ask the user to pick if there "
+                        "are multiple."
+                    ),
+                },
+                "linked_feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["bud_id", "content", "expected_phase"],
+        },
+    },
+    {
+        "name": "get_bud_by_id",
+        "description": (
+            "Fetch a single BUD by UUID with the full body of every "
+            "section (per-field truncation applied)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"bud_id": {"type": "string"}},
+            "required": ["bud_id"],
         },
     },
     {
@@ -194,12 +276,18 @@ async def _dispatch(
             raise _RPCError(_METHOD_NOT_FOUND, f"Tool not available remotely: {tool_name!r}")
         # Import locally to avoid a circular import with server.py's
         # TOOL_HANDLERS dict (server.py imports this module to mount it).
-        from app.mcp.server import TOOL_HANDLERS
+        from app.mcp.server import AUTH_TOOL_HANDLERS, TOOL_HANDLERS
 
+        # Auth-aware handlers receive the full MCPAuthResult so they can
+        # enforce per-user guards (e.g. update_bud's assignee check).
+        auth_handler = AUTH_TOOL_HANDLERS.get(tool_name)
         handler = TOOL_HANDLERS.get(tool_name)
-        if handler is None:
+        if auth_handler is not None:
+            result = await auth_handler(db, auth, tool_args)
+        elif handler is not None:
+            result = await handler(db, auth.org, tool_args)
+        else:
             raise _RPCError(_INTERNAL_ERROR, f"Handler missing for {tool_name!r}")
-        result = await handler(db, auth.org, tool_args)
         # Wrap raw handler output in the MCP tools/call response envelope.
         # Handlers signal a soft failure (bad params, missing seed data) by
         # returning a dict with an ``error`` key instead of raising — propagate

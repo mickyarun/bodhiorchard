@@ -48,6 +48,9 @@ TOOL_COSTS: dict[str, int] = {
     "get_prompt": 1,
     "get_team_context": 1,
     "write_bud": 10,
+    "create_bud": 15,
+    "update_bud": 15,
+    "get_bud_by_id": 2,
     # Code-graph tools are pgvector-heavy; weight similarly to features.
     "code_impact": 5,
     "code_query": 3,
