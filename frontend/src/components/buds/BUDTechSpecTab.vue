@@ -21,6 +21,7 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import { useMermaidRender } from '@/composables/useMermaidRender'
 import type { BUDDocument } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
+import { techArchPrompt } from '@/utils/budPromptTemplates'
 import './bud-section.css'
 
 const props = defineProps<{
@@ -53,34 +54,11 @@ const showLocalClaudePanel = computed(
   () => !props.bud.tech_spec_md && techArchAutoOff.value,
 )
 
-// Prompt template the developer pastes into their local Claude
-// Code. Mirrors the tech-planner skill's contract: walk Figma
-// frames, understand the user flow, embed it as a Mermaid source
-// block (NOT a rendered image), derive corner cases from that
-// flow understanding, ask for source-code clarity in CHAT (never
-// in the spec), and present the draft for approval before
-// persisting via update_bud. Keeping the template terse — the
-// real instructions live in get_prompt(task_type="tech_plan").
+// Prompt template using the shared tech-arch template. Pre-fills the
+// BUD number, id, and optionally the Figma URL so the developer never
+// has to substitute placeholders by hand.
 const promptText = computed(
-  () => `Generate tech spec for BUD-${props.bud.bud_number} (id: ${props.bud.id}).
-Figma URL: ${props.bud.figma_url || '<PASTE FIGMA URL HERE>'}
-
-Call get_prompt(task_type="tech_plan") and follow it precisely. Key contract:
-  - Walk frames via local Figma MCP frame-by-frame to understand the user flow
-    (entry → main path → exits, including decision branches and error transitions).
-  - Embed the flow as a fenced \`\`\`mermaid\`\`\` source block in the spec markdown
-    — do NOT render to PNG / base64 / image; the frontend renders Mermaid inline.
-  - Derive corner cases FROM the flow understanding above (not as a standalone
-    checklist): per node + per edge edge states, errors, races, auth gates.
-  - Ambiguous repo / file / symbol or requirement? ASK ME IN THIS CHAT, naming
-    what you need. NEVER write "source code access needed" / "TBD" /
-    "needs clarification" into the spec body. Unresolved questions stay in
-    the conversation; the spec ships clean.
-  - When the spec is complete, SHOW the full markdown here and ask "Ready
-    to save?" Wait for my "yes" before calling update_bud. Never save
-    speculatively.
-
-Once I approve, save via update_bud(content=<markdown>, expected_phase="tech_arch").`,
+  () => techArchPrompt(props.bud.bud_number, props.bud.id, props.bud.figma_url),
 )
 
 const copied = ref(false)
@@ -169,12 +147,39 @@ async function copyPrompt(): Promise<void> {
         Start writing manually
       </v-btn>
     </div>
-    <div v-else class="section-empty">
-      <v-icon icon="mdi-code-braces" size="40" class="mb-3" />
-      <div>No tech spec yet</div>
-      <v-btn variant="tonal" size="small" class="mt-3" @click="emit('startEdit')">
+    <!-- Auto-generate ON but spec not yet written — show the same
+         prompt panel so the developer can also write it locally if
+         they don't want to wait for the agent. -->
+    <div v-else class="local-claude-panel">
+      <AppCallout
+        variant="info"
+        eyebrow="Tech spec not yet generated"
+        icon="mdi-code-braces"
+        class="mb-4"
+      >
+        The AI agent will generate this when the BUD enters Tech Arch
+        phase. You can also paste the prompt below into your local
+        Claude Code to write it now.
+      </AppCallout>
+
+      <div class="prompt-wrapper">
+        <pre class="prompt-text">{{ promptText }}</pre>
+        <v-btn
+          variant="tonal"
+          size="small"
+          class="copy-btn"
+          @click="copyPrompt"
+        >
+          <v-icon start size="15">
+            {{ copied ? 'mdi-check' : 'mdi-content-copy' }}
+          </v-icon>
+          {{ copied ? 'Copied' : 'Copy prompt' }}
+        </v-btn>
+      </div>
+
+      <v-btn variant="text" size="small" class="mt-3" @click="emit('startEdit')">
         <v-icon start size="15">mdi-pencil-outline</v-icon>
-        Start writing
+        Start writing manually
       </v-btn>
     </div>
   </div>

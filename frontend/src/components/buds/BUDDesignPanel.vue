@@ -169,43 +169,57 @@
     </v-tabs-window>
   </div>
 
-  <!-- Empty state: generate or extracting -->
-  <div v-else class="section-empty">
-    <!-- Extraction in progress -->
-    <v-alert
+  <!-- Empty state — prompt panel + generate button -->
+  <div v-else class="phase-prompt-panel">
+    <!-- Extraction in progress hint -->
+    <AppCallout
       v-if="extractingRepos.length > 0"
-      type="info"
-      variant="tonal"
-      density="compact"
+      variant="info"
+      eyebrow="Extraction in progress"
+      icon="mdi-loading"
       class="mb-4"
-      style="max-width: 440px;"
     >
-      <div class="d-flex align-center ga-2">
-        <v-progress-circular indeterminate size="16" width="2" />
-        <span>
-          Design system extraction in progress for
-          {{ extractingRepos.map(r => r.name).join(', ') }}...
-        </span>
-      </div>
-      <div class="text-caption text-medium-emphasis mt-1">
-        Wireframe generation will be available once extraction completes.
-      </div>
-    </v-alert>
+      Design system extraction running for
+      {{ extractingRepos.map(r => r.name).join(', ') }}.
+      Wireframe generation will be available once extraction completes.
+    </AppCallout>
 
-    <v-icon icon="mdi-palette-outline" size="40" class="mb-3" />
-    <div>No design yet</div>
-    <div class="text-caption text-medium-emphasis mt-1 mb-3">
-      Generate wireframes using your repos' design systems
+    <AppCallout
+      v-else
+      variant="info"
+      eyebrow="Create a wireframe"
+      icon="mdi-palette-outline"
+      class="mb-4"
+    >
+      Paste the prompt into your local Claude Code to draft wireframes
+      via MCP, or generate them automatically from your repo's design system.
+    </AppCallout>
+
+    <div class="prompt-wrapper mb-4">
+      <pre class="prompt-text">{{ designPromptText }}</pre>
+      <v-btn
+        variant="tonal"
+        size="small"
+        class="copy-btn"
+        @click="copyDesignPrompt"
+      >
+        <v-icon start size="15">
+          {{ copiedDesignPrompt ? 'mdi-check' : 'mdi-content-copy' }}
+        </v-icon>
+        {{ copiedDesignPrompt ? 'Copied' : 'Copy prompt' }}
+      </v-btn>
     </div>
+
     <v-btn
       variant="tonal"
       size="small"
+      color="primary"
       :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
       :title="!props.editable ? 'Move the BUD to Design to generate wireframes' : ''"
       @click="triggerDesignGeneration"
     >
       <v-icon start size="15">mdi-creation-outline</v-icon>
-      Generate Wireframes
+      Generate with AI
     </v-btn>
   </div>
 
@@ -260,7 +274,9 @@ import { useDesignSystemStore } from '@/stores/designSystem'
 import { useJobSocket } from '@/composables/useJobSocket'
 import { friendlyAgentError } from '@/types/agentErrors'
 import AgentErrorMessage from '@/components/common/AgentErrorMessage.vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import BUDFigmaSection from '@/components/buds/BUDFigmaSection.vue'
+import { designPrompt } from '@/utils/budPromptTemplates'
 import type { BUDDesign, RepoInfo } from '@/types'
 
 // ``currentBUD`` is the BUD doc the parent ``BUDDetail.vue`` loaded
@@ -319,6 +335,24 @@ let notesSaveTimer: ReturnType<typeof setTimeout> | null = null
 const activeDesignObj = computed(() =>
   designs.value.find(d => d.id === activeDesignTab.value) || null,
 )
+
+const copiedDesignPrompt = ref(false)
+const designPromptText = computed(() =>
+  currentBUD.value
+    ? designPrompt(currentBUD.value.bud_number, currentBUD.value.id)
+    : '',
+)
+
+async function copyDesignPrompt(): Promise<void> {
+  if (!designPromptText.value) return
+  try {
+    await navigator.clipboard.writeText(designPromptText.value)
+    copiedDesignPrompt.value = true
+    setTimeout(() => { copiedDesignPrompt.value = false }, 2000)
+  } catch {
+    // Non-secure context — falls back to the selectable pre block.
+  }
+}
 
 function designSrcdoc(html: string): string {
   // Inject `<base href="about:srcdoc">` so relative URLs in the wireframe
@@ -608,5 +642,36 @@ defineExpose({
   font-size: 13px;
   line-height: 1.75;
   box-sizing: border-box;
+}
+
+.phase-prompt-panel {
+  padding: 16px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.prompt-wrapper {
+  position: relative;
+  background: rgb(var(--v-theme-surface-variant));
+  border: 1px solid rgb(var(--v-theme-outline-variant));
+  border-radius: 6px;
+  padding: 12px;
+  padding-top: 40px;
+}
+
+.prompt-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgb(var(--v-theme-on-surface));
+  margin: 0;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
 }
 </style>

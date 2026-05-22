@@ -15,10 +15,12 @@
  -->
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { BUDDocument } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
+import AppCallout from '@/components/common/AppCallout.vue'
 import BUDLinkedFeaturesPanel from './BUDLinkedFeaturesPanel.vue'
+import { pmUpdatePrompt } from '@/utils/budPromptTemplates'
 import './bud-section.css'
 
 const props = defineProps<{
@@ -43,6 +45,19 @@ const showEnrichHint = computed(() =>
   && !props.agentLocked
   && (props.bud.requirements_md?.length ?? 0) < 200,
 )
+
+const copiedPrompt = ref(false)
+const promptText = computed(() => pmUpdatePrompt(props.bud.bud_number, props.bud.id))
+
+async function copyPrompt(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(promptText.value)
+    copiedPrompt.value = true
+    setTimeout(() => { copiedPrompt.value = false }, 2000)
+  } catch {
+    // Non-secure context — falls back to the selectable pre block.
+  }
+}
 </script>
 
 <template>
@@ -81,25 +96,82 @@ const showEnrichHint = computed(() =>
       </v-alert>
       <div class="rendered-markdown" v-html="renderMarkdown(bud.requirements_md)" />
     </template>
-    <div v-else class="section-empty">
-      <v-icon icon="mdi-text-box-outline" size="40" class="mb-3" />
-      <div>No requirements written yet</div>
-      <div class="d-flex ga-2 mt-3">
-        <v-btn variant="tonal" size="small" @click="emit('startEdit')">
-          <v-icon start size="15">mdi-pencil-outline</v-icon>
-          Start writing
-        </v-btn>
+    <!-- Empty state — prompt panel + generate button -->
+    <div v-else class="phase-prompt-panel">
+      <AppCallout
+        variant="info"
+        eyebrow="Write requirements"
+        icon="mdi-text-box-outline"
+        class="mb-4"
+      >
+        Paste the prompt into your local Claude Code to draft requirements
+        via MCP, or use the AI button to let the in-app agent enrich them.
+      </AppCallout>
+
+      <div class="prompt-wrapper">
+        <pre class="prompt-text">{{ promptText }}</pre>
         <v-btn
-          v-if="!agentLocked"
+          variant="tonal"
+          size="small"
+          class="copy-btn"
+          @click="copyPrompt"
+        >
+          <v-icon start size="15">
+            {{ copiedPrompt ? 'mdi-check' : 'mdi-content-copy' }}
+          </v-icon>
+          {{ copiedPrompt ? 'Copied' : 'Copy prompt' }}
+        </v-btn>
+      </div>
+
+      <div class="d-flex ga-2 mt-4">
+        <v-btn
           variant="tonal"
           size="small"
           color="primary"
+          :disabled="agentLocked"
           @click="emit('enrich')"
         >
           <v-icon start size="15">mdi-creation-outline</v-icon>
-          Enrich with AI
+          Generate with AI
+        </v-btn>
+        <v-btn variant="text" size="small" @click="emit('startEdit')">
+          <v-icon start size="15">mdi-pencil-outline</v-icon>
+          Write manually
         </v-btn>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.phase-prompt-panel {
+  padding: 16px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.prompt-wrapper {
+  position: relative;
+  background: rgb(var(--v-theme-surface-variant));
+  border: 1px solid rgb(var(--v-theme-outline-variant));
+  border-radius: 6px;
+  padding: 12px;
+  padding-top: 40px;
+}
+
+.prompt-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgb(var(--v-theme-on-surface));
+  margin: 0;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+</style>
