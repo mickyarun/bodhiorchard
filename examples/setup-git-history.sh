@@ -52,10 +52,8 @@ git add src/tasks/
 git -c user.name="Bob Martinez" -c user.email="bob@taskflow.dev" commit -m "Add task management: CRUD, assignment, status transitions, comments" --date="2025-12-05T14:00:00"
 git add src/notifications/
 git -c user.name="Dave Chen" -c user.email="dave@taskflow.dev" commit -m "Add notification system: in-app, email queue, push queue, preferences" --date="2025-12-08T11:00:00"
-git add src/billing/
-git -c user.name="Carol Singh" -c user.email="carol@taskflow.dev" commit -m "Add billing: plans, subscriptions, invoices, usage tracking" --date="2025-12-10T16:00:00"
-git add src/auth/password_reset.py
-git -c user.name="Alice Kim" -c user.email="alice@taskflow.dev" commit -m "Add password reset flow with token validation" --date="2025-12-12T09:00:00"
+git add src/search/
+git -c user.name="Carol Singh" -c user.email="carol@taskflow.dev" commit -m "Add full-text search: indexing, query, and result ranking" --date="2025-12-10T16:00:00"
 git add README.md .gitignore src/create_db.py
 git -c user.name="Dave Chen" -c user.email="dave@taskflow.dev" commit -m "Add CORS, create_db script, README" --date="2025-12-16T12:00:00"
 echo "  Done ($(git rev-list --count HEAD) commits)"
@@ -96,6 +94,24 @@ git add index.html vite.config.ts tsconfig.json src/main.ts src/App.vue README.m
 git -c user.name="Dave Chen" -c user.email="dave@taskflow.dev" commit -m "Add Vite config, router, App shell, README" --date="2025-12-16T11:00:00"
 echo "  Done ($(git rev-list --count HEAD) commits)"
 
+echo "Setting up taskflow-qa git history..."
+cd ../taskflow-qa
+rm -rf .git
+git init && git branch -m main
+git add package.json tsconfig.json playwright.config.ts src/helpers/
+git -c user.name="Dave Chen" -c user.email="dave@taskflow.dev" commit -m "QA project setup: Playwright config, API client, test data helpers" --date="2025-12-05T09:00:00"
+git add src/pages/
+git -c user.name="Bob Martinez" -c user.email="bob@taskflow.dev" commit -m "Add page-object models: LoginPage, TaskBoardPage" --date="2025-12-07T11:00:00"
+git add src/fixtures/ src/features/auth/ src/steps/auth/
+git -c user.name="Alice Kim" -c user.email="alice@taskflow.dev" commit -m "Add auth fixture and login BDD feature + step definitions" --date="2025-12-10T10:00:00"
+git add src/features/tasks/ src/steps/tasks/ tests/e2e/
+git -c user.name="Bob Martinez" -c user.email="bob@taskflow.dev" commit -m "Add task CRUD feature, step definitions, and e2e specs" --date="2025-12-12T14:00:00"
+git add src/features/notifications/
+git -c user.name="Dave Chen" -c user.email="dave@taskflow.dev" commit -m "Add notification bell feature spec" --date="2025-12-14T11:00:00"
+git add tests/smoke/ README.md
+git -c user.name="Dave Chen" -c user.email="dave@taskflow.dev" commit -m "Add smoke tests and README" --date="2025-12-16T10:00:00"
+echo "  Done ($(git rev-list --count HEAD) commits)"
+
 cd ..
 echo ""
-echo "All 3 repos ready. Add them as tracked repositories in Bodhiorchard settings."
+echo "All 4 repos ready. Add them as tracked repositories in Bodhiorchard settings."
