@@ -43,7 +43,15 @@ function ensureInitialized(): void {
   mermaid.initialize({
     startOnLoad: false, // we run it manually per-mount
     securityLevel: 'strict', // disallow embedded HTML / click handlers
-    theme: 'default',
+    // The app's Vuetify default theme is ``bodhiorchardDark``
+    // (see src/plugins/vuetify.ts). Mermaid's ``default`` theme uses
+    // dark edge colours that disappear against our dark surface;
+    // ``dark`` switches the entire palette (light edges, lighter
+    // node fills, white-on-dark text) and stays legible. If/when the
+    // app adds a runtime light-mode toggle, lift this into a
+    // reactive ``useTheme()`` lookup and re-init on change — for
+    // now the static dark theme matches the static dark UI.
+    theme: 'dark',
     flowchart: {
       htmlLabels: false, // render labels as SVG text, not foreign HTML
       curve: 'basis',
