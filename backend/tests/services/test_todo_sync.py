@@ -91,7 +91,7 @@ def test_completed_is_preserved() -> None:
     assert _is_preserved(_existing(1, status=BUDTodoStatus.COMPLETED)) is True
 
 
-def test_assigned_pending_is_NOT_preserved() -> None:
+def test_assigned_pending_is_not_preserved() -> None:
     # assign_all_todos_to_lead auto-stamps every PENDING row on transition.
     # Treating that stamp as "developer work" would freeze the todos forever.
     # Only active work (status left PENDING, or explicit summary) protects a row.

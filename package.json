@@ -15,7 +15,8 @@
     "dev:backend": "cd backend && .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
     "dev:frontend": "npm --workspace bodhiorchard-frontend run dev",
     "dev:multiplayer": "npm --workspace bodhiorchard-multiplayer run start:dev",
-    "dev": "npm run dev:infra && npm run dev:infra:wait && concurrently -n backend,frontend,multiplayer -c blue,green,magenta \"npm:dev:backend\" \"npm:dev:frontend\" \"npm:dev:multiplayer\"",
+    "dev": "bash scripts/dev-start.sh",
+    "dev:full": "npm run dev:infra && npm run dev:infra:wait && concurrently -n backend,frontend,multiplayer -c blue,green,magenta \"npm:dev:backend\" \"npm:dev:frontend\" \"npm:dev:multiplayer\"",
     "stop": "docker compose -f docker-compose.infra.yml down",
     "stop:all": "docker compose down && docker compose -f docker-compose.infra.yml down"
   },
