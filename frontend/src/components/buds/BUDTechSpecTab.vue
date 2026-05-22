@@ -153,37 +153,16 @@ async function copyPrompt(): Promise<void> {
         </v-btn>
       </div>
     </div>
-    <!-- Auto-generate ON but spec not yet written — show the same
-         prompt panel so the developer can also write it locally if
-         they don't want to wait for the agent. -->
-    <div v-else class="local-claude-panel">
-      <AppCallout
-        variant="info"
-        eyebrow="Tech spec not yet generated"
-        icon="mdi-code-braces"
-        class="mb-4"
-      >
-        The AI agent will generate this when the BUD enters Tech Arch
-        phase. You can also paste the prompt below into your local
-        Claude Code to write it now.
-      </AppCallout>
-
-      <div class="prompt-wrapper">
-        <pre class="prompt-text">{{ promptText }}</pre>
-        <v-btn
-          variant="tonal"
-          size="small"
-          class="copy-btn"
-          @click="copyPrompt"
-        >
-          <v-icon start size="15">
-            {{ copied ? 'mdi-check' : 'mdi-content-copy' }}
-          </v-icon>
-          {{ copied ? 'Copied' : 'Copy prompt' }}
-        </v-btn>
+    <!-- Auto-generate ON but spec not yet written — simple empty state.
+         The agent handles generation on phase transition; no prompt
+         panel needed here. -->
+    <div v-else class="section-empty">
+      <v-icon icon="mdi-code-braces" size="40" class="mb-3" />
+      <div>No tech spec yet</div>
+      <div class="text-caption text-medium-emphasis mt-1 mb-3">
+        The AI agent will generate this automatically
       </div>
-
-      <div class="d-flex ga-2 mt-3">
+      <div class="d-flex ga-2">
         <v-btn
           v-if="!bud.figma_url"
           variant="tonal"
@@ -196,7 +175,7 @@ async function copyPrompt(): Promise<void> {
         </v-btn>
         <v-btn variant="text" size="small" @click="emit('startEdit')">
           <v-icon start size="15">mdi-pencil-outline</v-icon>
-          Write manually
+          Start writing
         </v-btn>
       </div>
     </div>
