@@ -91,12 +91,19 @@ def test_completed_is_preserved() -> None:
     assert _is_preserved(_existing(1, status=BUDTodoStatus.COMPLETED)) is True
 
 
-def test_assigned_is_preserved() -> None:
-    assert _is_preserved(_existing(1, assignee_id=uuid.uuid4())) is True
+def test_assigned_pending_is_NOT_preserved() -> None:
+    # assign_all_todos_to_lead auto-stamps every PENDING row on transition.
+    # Treating that stamp as "developer work" would freeze the todos forever.
+    # Only active work (status left PENDING, or explicit summary) protects a row.
+    assert _is_preserved(_existing(1, assignee_id=uuid.uuid4())) is False
 
 
 def test_summary_set_is_preserved() -> None:
     assert _is_preserved(_existing(1, summary="done")) is True
+
+
+def test_assigned_with_summary_is_preserved() -> None:
+    assert _is_preserved(_existing(1, assignee_id=uuid.uuid4(), summary="notes")) is True
 
 
 # ── reconciliation matrix ──────────────────────────────────────────
@@ -180,15 +187,38 @@ async def test_pending_unassigned_dropped_when_parser_no_longer_emits_it() -> No
 
 
 @pytest.mark.asyncio
-async def test_preserved_existing_kept_when_parser_drops_the_sequence() -> None:
-    claimed = _existing(2, assignee_id=uuid.uuid4(), title="being worked")
+async def test_in_progress_kept_when_parser_drops_the_sequence() -> None:
+    """Active work (in_progress) is never deleted even when the parser drops the seq."""
+    active = _existing(2, status=BUDTodoStatus.IN_PROGRESS, title="being worked")
     db = _RecordingSession()
     _ins, _upd, pres, dlt = await _reconcile(
         db,  # type: ignore[arg-type]
         org_id=uuid.uuid4(),
         bud_id=uuid.uuid4(),
         parsed_items=[],
-        existing={2: claimed},
+        existing={2: active},
     )
     assert (pres, dlt) == (1, 0)
     assert db.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_assigned_pending_overwritten_on_phase_reenter() -> None:
+    """Auto-assigned PENDING todos are NOT preserved — they must re-sync.
+
+    assign_all_todos_to_lead stamps every PENDING row on the first
+    DEVELOPMENT transition. If the spec is edited and the BUD re-enters
+    DEVELOPMENT, those todos must be overwritten from the new spec, not
+    silently frozen because assignee_id is set.
+    """
+    auto_assigned = _existing(1, assignee_id=uuid.uuid4(), title="stale spec title")
+    db = _RecordingSession()
+    _ins, upd, pres, _dlt = await _reconcile(
+        db,  # type: ignore[arg-type]
+        org_id=uuid.uuid4(),
+        bud_id=uuid.uuid4(),
+        parsed_items=[_parsed(1, title="updated spec title")],
+        existing={1: auto_assigned},
+    )
+    assert (upd, pres) == (1, 0)
+    assert auto_assigned.title == "updated spec title"

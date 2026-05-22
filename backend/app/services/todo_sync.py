@@ -115,12 +115,15 @@ async def _load_existing_by_sequence(
 
 
 def _is_preserved(todo: BUDTodo) -> bool:
-    """Anything a developer has touched stays exactly as-is on re-sync."""
-    return (
-        todo.status != BUDTodoStatus.PENDING
-        or todo.assignee_id is not None
-        or todo.summary is not None
-    )
+    """True only when a developer has actively worked on the TODO.
+
+    Claim (``assignee_id`` set) alone is NOT enough — ``assign_all_todos_to_lead``
+    stamps the lead on every PENDING row the moment they're created, so a
+    freshly-generated, never-touched TODO would be permanently frozen by that
+    auto-assignment. "Started" means the status left PENDING or the developer
+    left a manual summary note.
+    """
+    return todo.status != BUDTodoStatus.PENDING or todo.summary is not None
 
 
 async def _reconcile(
