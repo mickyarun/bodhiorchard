@@ -303,6 +303,7 @@
                   @update:edit-value="editTechSpec = $event"
                   @save="saveTechSpec"
                   @start-edit="toggleTechSpecEdit"
+                  @generate="openTechSpecChat"
                 />
               </v-tabs-window-item>
 
@@ -1041,6 +1042,15 @@ async function handleSaveTitle(title: string): Promise<void> {
   if (!bud.value) return
   await budStore.updateBUD(bud.value.id, { title })
   await loadTimeline()
+}
+
+// Open the chat panel focused on the Tech Spec section.
+// Triggered by the "Generate with AI" button on BUDTechSpecTab's
+// empty state — the chat AI can then draft + save the spec via
+// update_bud after the user confirms the draft.
+function openTechSpecChat(): void {
+  activeTab.value = 'tech-spec'
+  chatOpen.value = true
 }
 
 // Unified toggle for whichever tab is active. Guarded by

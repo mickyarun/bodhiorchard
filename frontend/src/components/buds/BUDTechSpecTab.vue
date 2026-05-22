@@ -34,6 +34,7 @@ const emit = defineEmits<{
   'update:editValue': [value: string]
   save: []
   startEdit: []
+  generate: []
 }>()
 
 // True when the PM has explicitly disabled the AI tech-arch agent
@@ -135,17 +136,22 @@ async function copyPrompt(): Promise<void> {
         </v-btn>
       </div>
 
-      <div class="text-caption text-medium-emphasis mt-3">
-        Requires Figma Desktop running with "Enable Dev Mode MCP
-        Server" toggled on, and your local Claude Code connected to
-        this BUD's MCP endpoint. Or click "Start writing" to draft
-        the spec by hand.
+      <div class="d-flex ga-2 mt-3">
+        <v-btn
+          v-if="!bud.figma_url"
+          variant="tonal"
+          size="small"
+          color="primary"
+          @click="emit('generate')"
+        >
+          <v-icon start size="15">mdi-creation-outline</v-icon>
+          Generate with AI
+        </v-btn>
+        <v-btn variant="text" size="small" @click="emit('startEdit')">
+          <v-icon start size="15">mdi-pencil-outline</v-icon>
+          Write manually
+        </v-btn>
       </div>
-
-      <v-btn variant="text" size="small" class="mt-3" @click="emit('startEdit')">
-        <v-icon start size="15">mdi-pencil-outline</v-icon>
-        Start writing manually
-      </v-btn>
     </div>
     <!-- Auto-generate ON but spec not yet written — show the same
          prompt panel so the developer can also write it locally if
@@ -177,10 +183,22 @@ async function copyPrompt(): Promise<void> {
         </v-btn>
       </div>
 
-      <v-btn variant="text" size="small" class="mt-3" @click="emit('startEdit')">
-        <v-icon start size="15">mdi-pencil-outline</v-icon>
-        Start writing manually
-      </v-btn>
+      <div class="d-flex ga-2 mt-3">
+        <v-btn
+          v-if="!bud.figma_url"
+          variant="tonal"
+          size="small"
+          color="primary"
+          @click="emit('generate')"
+        >
+          <v-icon start size="15">mdi-creation-outline</v-icon>
+          Generate with AI
+        </v-btn>
+        <v-btn variant="text" size="small" @click="emit('startEdit')">
+          <v-icon start size="15">mdi-pencil-outline</v-icon>
+          Write manually
+        </v-btn>
+      </div>
     </div>
   </div>
 </template>
