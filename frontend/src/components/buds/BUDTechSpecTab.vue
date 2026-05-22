@@ -18,6 +18,7 @@
 import { computed, ref } from 'vue'
 
 import AppCallout from '@/components/common/AppCallout.vue'
+import { useMermaidRender } from '@/composables/useMermaidRender'
 import type { BUDDocument } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
 import './bud-section.css'
@@ -71,6 +72,12 @@ derive corner cases exhaustively from the flow chart. Write back via update_bud.
 
 const copied = ref(false)
 
+// Template ref to the rendered-markdown container. The composable
+// finds any ``<pre class="mermaid">`` blocks inside this element on
+// mount + every update and replaces them with rendered SVG.
+const renderedSpecRef = ref<HTMLElement | null>(null)
+useMermaidRender(renderedSpecRef)
+
 async function copyPrompt(): Promise<void> {
   try {
     await navigator.clipboard.writeText(promptText.value)
@@ -97,6 +104,7 @@ async function copyPrompt(): Promise<void> {
     />
     <div
       v-else-if="bud.tech_spec_md"
+      ref="renderedSpecRef"
       class="rendered-markdown"
       v-html="renderMarkdown(bud.tech_spec_md)"
     />
