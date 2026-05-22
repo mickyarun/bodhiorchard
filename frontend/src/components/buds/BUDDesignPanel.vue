@@ -214,8 +214,7 @@
       variant="tonal"
       size="small"
       color="primary"
-      :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
-      :title="!props.editable ? 'Move the BUD to Design to generate wireframes' : ''"
+      :disabled="extractingRepos.length > 0 && designSystemStore.items.length === 0"
       @click="triggerDesignGeneration"
     >
       <v-icon start size="15">mdi-creation-outline</v-icon>
