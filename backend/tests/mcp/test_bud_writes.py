@@ -527,3 +527,51 @@ async def test_get_bud_by_id_rejects_bad_uuid() -> None:
     result = await handle_get_bud_by_id(MagicMock(), auth, {"bud_id": "not-a-uuid"})
     assert result["success"] is False
     assert result["code"] == "bad_bud_id"
+
+
+@pytest.mark.asyncio
+async def test_get_bud_by_id_accepts_bud_number(monkeypatch: Any) -> None:
+    """BYO-AI path: external LLM only has BUD-### number, not the UUID."""
+    auth = _auth(uuid.uuid4())
+    bud = _fake_bud()
+
+    async def _get_by_number(self: Any, bud_number: int) -> MagicMock:
+        assert bud_number == 42
+        return bud
+
+    monkeypatch.setattr(BUDRepository, "get_by_number", _get_by_number)
+
+    result = await handle_get_bud_by_id(MagicMock(), auth, {"bud_number": 42})
+    assert result["bud_number"] == 42
+    assert result["id"] == str(bud.id)
+
+
+@pytest.mark.asyncio
+async def test_get_bud_by_id_bud_number_not_found(monkeypatch: Any) -> None:
+    auth = _auth(uuid.uuid4())
+
+    async def _none(self: Any, bud_number: int) -> None:
+        return None
+
+    monkeypatch.setattr(BUDRepository, "get_by_number", _none)
+
+    result = await handle_get_bud_by_id(MagicMock(), auth, {"bud_number": 999})
+    assert result["success"] is False
+    assert result["code"] == "not_found"
+    assert "BUD-999" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_bud_by_id_requires_an_identifier() -> None:
+    auth = _auth(uuid.uuid4())
+    result = await handle_get_bud_by_id(MagicMock(), auth, {})
+    assert result["success"] is False
+    assert result["code"] == "missing_identifier"
+
+
+@pytest.mark.asyncio
+async def test_get_bud_by_id_rejects_non_integer_bud_number() -> None:
+    auth = _auth(uuid.uuid4())
+    result = await handle_get_bud_by_id(MagicMock(), auth, {"bud_number": "seven"})
+    assert result["success"] is False
+    assert result["code"] == "bad_bud_number"

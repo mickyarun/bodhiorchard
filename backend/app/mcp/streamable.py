@@ -202,13 +202,18 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "get_bud_by_id",
         "description": (
-            "Fetch a single BUD by UUID with the full body of every "
-            "section (per-field truncation applied)."
+            "Fetch a single BUD with the full body of every section "
+            "(per-field truncation applied). Provide exactly one of "
+            "bud_id (UUID) or bud_number (integer — the human-visible "
+            "BUD-### number, which is usually all an external LLM has)."
         ),
         "inputSchema": {
             "type": "object",
-            "properties": {"bud_id": {"type": "string"}},
-            "required": ["bud_id"],
+            "properties": {
+                "bud_id": {"type": "string"},
+                "bud_number": {"type": "integer"},
+            },
+            "oneOf": [{"required": ["bud_id"]}, {"required": ["bud_number"]}],
         },
     },
     {

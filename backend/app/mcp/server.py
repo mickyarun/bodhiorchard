@@ -242,16 +242,25 @@ MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="get_bud_by_id",
         description=(
-            "Fetch a single BUD by UUID with the full content of every "
-            "section (truncated per field). Org-scoped — no assignee "
-            "restriction on reads."
+            "Fetch a single BUD by UUID or BUD number with the full "
+            "content of every section (truncated per field). Org-scoped "
+            "— no assignee restriction on reads. Provide exactly one of "
+            "bud_id or bud_number."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "bud_id": {"type": "string", "description": "BUD UUID."},
+                "bud_number": {
+                    "type": "integer",
+                    "description": (
+                        "Human-visible BUD number (e.g. 7 for BUD-007). "
+                        "Use this when you only have the chat-visible "
+                        "identifier and not the UUID."
+                    ),
+                },
             },
-            "required": ["bud_id"],
+            "oneOf": [{"required": ["bud_id"]}, {"required": ["bud_number"]}],
         },
     ),
     MCPToolDefinition(

@@ -137,6 +137,52 @@ async def _wire_feature_links(
     return {"linked_count": len(accepted), "dropped": dropped}
 
 
+async def _resolve_bud_for_read(
+    db: AsyncSession,
+    org_id: uuid_mod.UUID,
+    params: dict[str, Any],
+) -> BUDDocument | dict[str, Any]:
+    """Resolve a BUD from either ``bud_id`` (UUID) or ``bud_number`` (int).
+
+    Returns the BUD on success, or an error dict (shape matches
+    :func:`_err`) the caller should return verbatim.
+
+    Exactly one identifier must be provided. UUID takes precedence
+    when both are sent so callers that already round-tripped the UUID
+    keep their existing semantics; ``bud_number`` is the BYO-AI path
+    where the external LLM only has the human-visible number.
+    """
+    bud_id_raw = params.get("bud_id")
+    bud_number_raw = params.get("bud_number")
+
+    if not bud_id_raw and bud_number_raw is None:
+        return _err(
+            "missing_identifier",
+            "Provide either bud_id (UUID) or bud_number (integer).",
+        )
+
+    bud_repo = BUDRepository(db, org_id=org_id)
+
+    if bud_id_raw:
+        try:
+            bud_id = uuid_mod.UUID(str(bud_id_raw))
+        except ValueError:
+            return _err("bad_bud_id", "bud_id must be a UUID.")
+        bud = await bud_repo.get_by_id(bud_id)
+        if bud is None:
+            return _err("not_found", f"No BUD with id {bud_id} in this org.")
+        return bud
+
+    try:
+        bud_number = int(bud_number_raw)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return _err("bad_bud_number", "bud_number must be an integer.")
+    bud = await bud_repo.get_by_number(bud_number)
+    if bud is None:
+        return _err("not_found", f"No BUD-{bud_number:03d} in this org.")
+    return bud
+
+
 def _err(code: str, message: str, **extra: Any) -> dict[str, Any]:
     """Build a soft-failure result dict picked up by the remote dispatcher.
 
@@ -496,6 +542,11 @@ async def handle_get_bud_by_id(
 ) -> dict[str, Any]:
     """Return full content for a single BUD, org-scoped.
 
+    Accepts either ``bud_id`` (UUID) or ``bud_number`` (integer). The
+    BUD number is what humans see in the UI ("BUD-007") and what an
+    external LLM driving the BYO-AI surface will have on hand —
+    UUIDs aren't surfaced in chat. Exactly one identifier is required.
+
     No assignee restriction on reads — a developer drafting a related
     BUD should be able to pull context from their teammate's in-flight
     work. The response includes:
@@ -508,19 +559,9 @@ async def handle_get_bud_by_id(
       ``bud.assignee_id == caller_user_id``). Saves the LLM from
       string-comparing UUIDs in chat.
     """
-    error = require_non_empty(params, "bud_id")
-    if error:
-        return error
-
-    try:
-        bud_id = uuid_mod.UUID(str(params["bud_id"]))
-    except ValueError:
-        return _err("bad_bud_id", "bud_id must be a UUID.")
-
-    bud_repo = BUDRepository(db, org_id=auth.org.id)
-    bud = await bud_repo.get_by_id(bud_id)
-    if bud is None:
-        return _err("not_found", f"No BUD with id {bud_id} in this org.")
+    bud = await _resolve_bud_for_read(db, auth.org.id, params)
+    if isinstance(bud, dict):
+        return bud
 
     def _truncate(value: str | None) -> str | None:
         if value is None:
