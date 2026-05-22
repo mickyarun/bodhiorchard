@@ -142,6 +142,8 @@ async function copyPrompt(): Promise<void> {
           variant="tonal"
           size="small"
           color="primary"
+          :disabled="bud.status !== 'tech_arch'"
+          :title="bud.status !== 'tech_arch' ? 'Move the BUD to Tech Arch phase to generate' : ''"
           @click="emit('generate')"
         >
           <v-icon start size="15">mdi-creation-outline</v-icon>
@@ -168,6 +170,8 @@ async function copyPrompt(): Promise<void> {
           variant="tonal"
           size="small"
           color="primary"
+          :disabled="bud.status !== 'tech_arch'"
+          :title="bud.status !== 'tech_arch' ? 'Move the BUD to Tech Arch phase to generate' : ''"
           @click="emit('generate')"
         >
           <v-icon start size="15">mdi-creation-outline</v-icon>

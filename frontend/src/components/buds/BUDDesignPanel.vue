@@ -213,7 +213,8 @@
       variant="tonal"
       size="small"
       color="primary"
-      :disabled="extractingRepos.length > 0 && designSystemStore.items.length === 0"
+      :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
+      :title="!props.editable ? 'Move the BUD to Design phase to generate wireframes' : ''"
       @click="triggerDesignGeneration"
     >
       <v-icon start size="15">mdi-creation-outline</v-icon>
@@ -232,7 +233,8 @@
       variant="tonal"
       size="small"
       color="primary"
-      :disabled="extractingRepos.length > 0 && designSystemStore.items.length === 0"
+      :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
+      :title="!props.editable ? 'Move the BUD to Design phase to generate wireframes' : ''"
       @click="triggerDesignGeneration"
     >
       <v-icon start size="15">mdi-creation-outline</v-icon>
