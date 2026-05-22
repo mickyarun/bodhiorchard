@@ -44,16 +44,13 @@ const techArchAutoOff = computed(
   () => props.bud.auto_generate_phases?.tech_arch !== true,
 )
 
-// Show the local-Claude prompt panel only when the BUD is genuinely
-// Figma-driven: ``figma_url`` is set AND auto-tech-arch is off AND
-// the spec is still empty. Without a Figma URL the prompt has
-// nothing to extract from, so the panel would be useless noise — we
-// fall back to the original "Start writing" empty state instead.
+// Show the local-Claude prompt panel whenever the PM has opted out of
+// auto-generation AND the spec is still empty — regardless of whether
+// a Figma URL is set. When ``figma_url`` is absent the template shows
+// a "<PASTE FIGMA URL HERE>" placeholder so the prompt is still
+// copy-paste ready.
 const showLocalClaudePanel = computed(
-  () =>
-    !props.bud.tech_spec_md
-    && techArchAutoOff.value
-    && !!props.bud.figma_url,
+  () => !props.bud.tech_spec_md && techArchAutoOff.value,
 )
 
 // Prompt template the developer pastes into their local Claude
