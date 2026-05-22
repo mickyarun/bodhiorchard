@@ -85,12 +85,15 @@ When `figma_url` is set and local Figma MCP is reachable, the design is your pri
    - **Implementation TODO**: Numbered checklist — one task per logical unit. See the format rules below; the backend's `todo_parser` extracts BUDTodo rows directly from this section.
    - **Open Questions** *(Figma-driven BUDs only)*: **Product / design questions** for the PM or designer to answer LATER — e.g. "Should mark-all-read also dismiss the panel?" or "Confirm 99+ pill width on RTL languages." NOT a place to ask for source-code access or pending confirmations — those block drafting and live in the chat per rule 4. Leave this section empty (or omit) when there are no genuine product-level open questions.
    - **Code Review Standards**: Include this checklist at the end for developers to verify at each phase:
-     - [ ] Modularity: functions <50 lines, files <300 lines
-     - [ ] Security: org-scoped queries, auth on endpoints, no PII, input validation
-     - [ ] Reusability: use existing patterns, no duplicated code
-     - [ ] No large files: split if >300 lines (backend) / >250 lines (frontend)
-     - [ ] No hacks: no hardcoded values, no TODO/FIXME, no bypassed validations
-     - [ ] Standards: type hints, docstrings, lint clean
+     - [ ] Modularity: functions <50 lines, files <300 lines (backend) / <250 lines (frontend) — split if exceeded
+     - [ ] Security: org-scoped queries, auth on all endpoints, no PII in logs, input validation at the boundary
+     - [ ] Reusability: use existing patterns and utilities, no duplicated logic across files
+     - [ ] Scalability & maintainability: no hardcoded values, no magic numbers, no TODO/FIXME left in, no bypassed validations; logic is easy to extend without touching unrelated code
+     - [ ] No silent failures: every `except` / `catch` / fallback either re-raises, returns an error response, or logs at `warning`/`error` with enough context to diagnose — bare `except: pass` and swallowed errors are a defect, not a style choice
+     - [ ] Structured logging on critical paths: `info` at entry/exit of non-trivial operations, `warning` on recoverable anomalies (unexpected-but-handled state), `error` on failures that affect correctness; log the relevant IDs (org_id, bud_id, user_id) so traces are searchable
+     - [ ] Corner cases handled: empty collections, null/None fields, zero counts, concurrent duplicate requests, and auth-boundary inputs are all explicitly considered and tested
+     - [ ] Performance: no N+1 queries, no unbounded list fetches without a limit, no synchronous blocking calls inside async handlers; bulk operations are batched; expensive work is deferred to background tasks when it would stall the response
+     - [ ] Standards: type hints on all signatures, docstrings on public functions, lint clean (ruff/vue-tsc passes with zero new errors)
 
 ## Implementation TODO Format
 
@@ -176,10 +179,13 @@ Order: migration → model → API → frontend route → component
 
 ## Code Review Standards
 
-- [ ] Modularity: functions <50 lines, files <300 lines
-- [ ] Security: org-scoped queries, auth on endpoints, no PII, input validation
-- [ ] Reusability: use existing patterns, no duplicated code
-- [ ] No large files: split if >300 lines (backend) / >250 lines (frontend)
-- [ ] No hacks: no hardcoded values, no TODO/FIXME, no bypassed validations
-- [ ] Standards: type hints, docstrings, lint clean
+- [ ] Modularity: functions <50 lines, files <300 lines (backend) / <250 lines (frontend) — split if exceeded
+- [ ] Security: org-scoped queries, auth on all endpoints, no PII in logs, input validation at the boundary
+- [ ] Reusability: use existing patterns and utilities, no duplicated logic across files
+- [ ] Scalability & maintainability: no hardcoded values, no magic numbers, no TODO/FIXME left in, no bypassed validations; logic is easy to extend without touching unrelated code
+- [ ] No silent failures: every `except` / `catch` / fallback either re-raises, returns an error response, or logs at `warning`/`error` with enough context to diagnose — bare `except: pass` and swallowed errors are a defect, not a style choice
+- [ ] Structured logging on critical paths: `info` at entry/exit of non-trivial operations, `warning` on recoverable anomalies, `error` on failures that affect correctness; always include relevant IDs (org_id, bud_id, user_id)
+- [ ] Corner cases handled: empty collections, null/None fields, zero counts, concurrent duplicate requests, and auth-boundary inputs are all explicitly considered and tested
+- [ ] Performance: no N+1 queries, no unbounded list fetches without a limit, no synchronous blocking calls inside async handlers; bulk operations batched; expensive work deferred to background tasks
+- [ ] Standards: type hints on all signatures, docstrings on public functions, lint clean (ruff/vue-tsc passes with zero new errors)
 </example>
