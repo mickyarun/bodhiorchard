@@ -160,6 +160,33 @@
   text-decoration: underline;
 }
 
+/* ── Mermaid diagram blocks ────────────────────────
+ * Mermaid v11 injects style="max-width: Npx" (absolute px) on the
+ * SVG — NOT a percentage — so the SVG renders at its computed natural
+ * width regardless of the container. The pre's overflow-x: auto
+ * (inherited from .rendered-markdown pre) therefore correctly provides
+ * horizontal scroll for wide diagrams without any extra rules here.
+ *
+ * What these rules add:
+ *   - Center diagrams that are narrower than the panel (text-align +
+ *     margin: 0 auto on the SVG).
+ *   - Visual distinction from fenced code blocks — Mermaid blocks are
+ *     rendered visualisations, not source; a near-transparent background
+ *     and slightly more breathing room look cleaner.
+ *   - display: block on the SVG prevents the default 4 px inline gap
+ *     that browsers add below inline SVG elements.
+ */
+.rendered-markdown pre.mermaid {
+  background: rgba(var(--v-theme-on-surface), 0.02);
+  padding: 20px 16px;
+  text-align: center;
+}
+
+.rendered-markdown pre.mermaid > svg {
+  display: block;
+  margin: 0 auto; /* centers diagrams narrower than the panel */
+}
+
 /* ── Empty state ───────────────────────────────── */
 .section-empty {
   display: flex;
