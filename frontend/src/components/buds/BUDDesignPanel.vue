@@ -169,9 +169,8 @@
     </v-tabs-window>
   </div>
 
-  <!-- Empty state — prompt panel + generate button -->
-  <div v-else class="phase-prompt-panel">
-    <!-- Extraction in progress hint -->
+  <!-- Auto-generate OFF — show local-Claude prompt panel -->
+  <div v-else-if="designAutoOff" class="phase-prompt-panel">
     <AppCallout
       v-if="extractingRepos.length > 0"
       variant="info"
@@ -210,6 +209,25 @@
       </v-btn>
     </div>
 
+    <v-btn
+      variant="tonal"
+      size="small"
+      color="primary"
+      :disabled="extractingRepos.length > 0 && designSystemStore.items.length === 0"
+      @click="triggerDesignGeneration"
+    >
+      <v-icon start size="15">mdi-creation-outline</v-icon>
+      Generate with AI
+    </v-btn>
+  </div>
+
+  <!-- Auto-generate ON — simple empty state; agent handles generation -->
+  <div v-else class="section-empty">
+    <v-icon icon="mdi-palette-outline" size="40" class="mb-3" />
+    <div>No design yet</div>
+    <div class="text-caption text-medium-emphasis mt-1 mb-3">
+      The AI agent will generate wireframes automatically
+    </div>
     <v-btn
       variant="tonal"
       size="small"
@@ -313,6 +331,12 @@ const currentBUD = computed(() => budStore.currentBUD)
 // Repos with design system extraction in progress
 const extractingRepos = computed(() =>
   settingsStore.repos.filter(r => r.designSystemStatus === 'extracting'),
+)
+
+// True when the PM has disabled the AI design agent for this BUD.
+// Mirrors the same pattern used in BUDTechSpecTab for tech_arch.
+const designAutoOff = computed(
+  () => currentBUD.value?.auto_generate_phases?.design !== true,
 )
 
 // Multi-design state
