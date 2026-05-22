@@ -51,7 +51,10 @@ When in doubt, assume interactive: writing into the spec body is the worse failu
 2. **Codebase overview**: Call `code_stats(repo_id)` per impacted repo for size + language distribution.
 3. **Find related code**: Use `code_query` for substring + semantic search against existing symbols. Then `code_context` on the most relevant symbols for callers / callees / attributes.
 4. **Blast-radius check**: Before recommending a change to any function/class/method, call `code_impact(target=…, direction=upstream)` and weigh the caller count against the proposed change.
-5. **Design context**: If `get_bud_by_id` returned a non-empty `figma_url` AND local Figma MCP tools are available in your tool list (`get_metadata`, `get_design_context`, `get_screenshot`, `get_variable_defs`), follow the "Figma flow extraction" sub-section below. Otherwise, call `get_bud_designs(bud_id)` and treat any returned `design_html` as the design source of truth. Skip this step entirely if the BUD has no design context.
+5. **Design & flow context**:
+   - If `get_bud_by_id` returned a non-empty `figma_url` AND local Figma MCP tools are available in your tool list (`get_metadata`, `get_design_context`, `get_screenshot`, `get_variable_defs`), follow the "Figma flow extraction" sub-section below — Figma is the primary input.
+   - Otherwise, call `get_bud_designs(bud_id)` and treat any returned `design_html` as the design source of truth.
+   - **In all cases** (with or without Figma or a wireframe): build a Mermaid user flow from the BUD requirements — entry point, main path, decision branches, error transitions, success terminal. This diagram is mandatory in every spec and drives both the Screens list and the Corner Cases section.
 
 ### Figma flow extraction (when applicable)
 
@@ -73,17 +76,17 @@ When `figma_url` is set and local Figma MCP is reachable, the design is your pri
 6. **Generate Plan**: Write a focused spec with these sections only:
    - **Executive Summary**: 2-3 sentences. What changes and why.
    - **Architecture Approach**: Key decisions, 1 paragraph max.
-   - **User Flow** *(Figma-driven BUDs only)*: The Mermaid flow chart from the extraction step above. Single source of truth for the rest of the spec.
-   - **Screens to Implement** *(Figma-driven BUDs only — skip when the BUD touches a single existing component and the Files table covers it)*: Table — screen | purpose | depends-on-screens | depends-on-APIs. Walked from the flow chart.
+   - **User Flow**: Mermaid `flowchart TD` wiring the user journey — entry point, main path, decision branches, error transitions, success terminal. When `figma_url` is set derive from Figma frame walk; otherwise derive from BUD requirements. **Mandatory in every spec** — this diagram drives corner-case enumeration and the screens list.
+   - **Screens to Implement** *(skip when the BUD touches a single existing component and the Files table already covers it)*: Table — screen | purpose | depends-on-screens | depends-on-APIs. Walked from the User Flow above.
    - **Design Tokens** *(Figma-driven BUDs only — include when `get_variable_defs` returned tokens)*: Table — token name | source value | target CSS variable. Captures the colour / spacing / typography contract from design.
    - **Files to Create or Modify**: Table (action | path | notes). One row per file. Always render the heading even if you only modify one file.
    - **API Changes**: Table (verb | path | description). Write "None." inline when no endpoints change — don't omit the heading.
    - **Data Model Changes**: One sentence per change. Write "None." inline when no schema changes — don't omit the heading.
-   - **Corner Cases & Edge States** *(Figma-driven BUDs only)*: Load-bearing section. One bullet per case with handling decision, walked from the flow chart. Every bullet here must be reachable from the Implementation TODO list (rule 15).
+   - **Corner Cases & Edge States**: Load-bearing section present in every spec. One bullet per case with handling decision, walked from the User Flow above. For each node: empty / loading / partial / no-network / slow / timeout. For each edge: validation failure, server error, authorization failure, conflict, race (concurrent edit, stale data, double-submit). Every bullet here must be reachable from the Implementation TODO list (rule 15).
    - **Dependencies & Risks**: Bullet points. Real blockers only.
    - **Development Workflow**: Branch name + suggested implementation order.
    - **Implementation TODO**: Numbered checklist — one task per logical unit. See the format rules below; the backend's `todo_parser` extracts BUDTodo rows directly from this section.
-   - **Open Questions** *(Figma-driven BUDs only)*: **Product / design questions** for the PM or designer to answer LATER — e.g. "Should mark-all-read also dismiss the panel?" or "Confirm 99+ pill width on RTL languages." NOT a place to ask for source-code access or pending confirmations — those block drafting and live in the chat per rule 4. Leave this section empty (or omit) when there are no genuine product-level open questions.
+   - **Open Questions**: Product / design questions for the PM or designer to answer LATER — e.g. "Should mark-all-read also dismiss the panel?" or "Does 0-item state need an empty illustration?" NOT a place for source-code access requests or pending confirmations — those block drafting and live in the chat per rule 4. Omit the section only when there are genuinely no open product-level questions.
    - **Code Review Standards**: Include this checklist at the end for developers to verify at each phase:
      - [ ] Modularity: functions <50 lines, files <300 lines (backend) / <250 lines (frontend) — split if exceeded
      - [ ] Security: org-scoped queries, auth on all endpoints, no PII in logs, input validation at the boundary
@@ -131,6 +134,27 @@ Add an org-level notification settings page. Single new Vue route + 2 API endpoi
 
 New `/org/notifications` route with a single `OrgNotifications.vue` component. Uses the existing `useAuthStore` for the active org context. Notification preferences stored as JSONB on the `organizations` table — no new table needed, org-scoped by construction.
 
+## User Flow
+
+```mermaid
+flowchart TD
+  A([PM opens Settings → Notifications]) --> B[GET /v1/orgs/me/notifications]
+  B --> C{Loaded?}
+  C -- yes --> D[Render channel toggle form]
+  C -- error --> E[Show error callout, retry button]
+  D --> F[PM toggles channel or frequency]
+  F --> G[PATCH /v1/orgs/me/notifications]
+  G --> H{Save success?}
+  H -- yes --> I[Update local state, show saved toast]
+  H -- error --> J[Surface error inline, keep form dirty]
+```
+
+## Screens to Implement
+
+| Screen | Purpose | Depends-on-screens | Depends-on-APIs |
+|--------|---------|-------------------|-----------------|
+| Notification Settings | Per-channel preference toggles | — | GET + PATCH /v1/orgs/me/notifications |
+
 ## Files to Create or Modify
 
 | Action | Path | Notes |
@@ -147,6 +171,14 @@ New `/org/notifications` route with a single `OrgNotifications.vue` component. U
 |------|------|-------------|
 | PATCH | `/v1/orgs/me/notifications` | Update notification settings (JSONB merge) |
 | GET | `/v1/orgs/me/notifications` | Fetch current settings |
+
+## Corner Cases & Edge States
+
+- **First load (null JSONB)**: treat `null` as all-channels-off defaults; do not surface an error
+- **Unknown keys in PATCH body**: merge strategy preserves unknown keys silently — no strict-schema rejection
+- **Concurrent edits (two PMs open simultaneously)**: last-write-wins acceptable at this scale; no conflict detection needed
+- **Save failure mid-toggle**: revert the optimistic UI update and surface error inline under the toggled row
+- **Network offline on load**: show error callout with retry; do not render a partial / stale form
 
 ## Dependencies & Risks
 
@@ -176,6 +208,11 @@ Order: migration → model → API → frontend route → component
 8. Wire route — repo: web-app — files: src/router/index.ts
    - Path `/org/notifications`, requires authenticated guard
 9. Code review: frontend phase — repo: web-app
+
+## Open Questions
+
+- Should channel toggles apply per-org or per-user? Spec assumes per-org; confirm with PM before migration.
+- Frequency enum values not finalised — "immediate" / "daily_digest" / "weekly" assumed; PM to confirm.
 
 ## Code Review Standards
 

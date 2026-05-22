@@ -45,6 +45,16 @@ export default defineConfig({
           if (id.includes('node_modules/colyseus.js') || id.includes('node_modules/@colyseus')) {
             return 'colyseus'
           }
+          // Mermaid has internal circular dependencies between its class
+          // constructors. When bundled alongside app code, Rollup's module
+          // evaluation order can leave a constructor undefined at the moment
+          // another class writes to its .prototype — causing the runtime error
+          // "Cannot set properties of undefined (setting 'prototype')".
+          // Isolating it into its own chunk ensures Mermaid's module graph is
+          // evaluated atomically before any app code references it.
+          if (id.includes('node_modules/mermaid') || id.includes('node_modules/@mermaid-js')) {
+            return 'mermaid'
+          }
           if (id.includes('/src/engine/')) return 'engine'
         },
       },
