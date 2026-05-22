@@ -42,7 +42,8 @@ const hasDescription = computed(() => !!props.todo.description)
 const locations = computed(() => props.todo.codeLocations ?? [])
 const visibleLocations = computed(() => locations.value.slice(0, MAX_VISIBLE_LOCATIONS))
 const overflowCount = computed(() => Math.max(0, locations.value.length - MAX_VISIBLE_LOCATIONS))
-const canExpand = computed(() => hasContext.value || hasDescription.value)
+// context_md is always shown; only description still needs click-to-expand
+const canExpand = computed(() => hasDescription.value)
 
 function renderInline(md: string): string {
   return DOMPurify.sanitize(marked.parseInline(md, { async: false }) as string)
@@ -74,7 +75,11 @@ function toggleExpanded() {
 <template>
   <div
     class="todo-row"
-    :class="{ 'todo-row--checkpoint': todo.isCheckpoint, 'todo-row--yours': isYours }"
+    :class="{
+      'todo-row--checkpoint': todo.isCheckpoint,
+      'todo-row--yours': isYours,
+      'todo-row--expandable': canExpand,
+    }"
     @click="toggleExpanded"
   >
     <div class="todo-row__status">
@@ -113,7 +118,7 @@ function toggleExpanded() {
         </span>
       </div>
       <div
-        v-if="expanded && hasContext"
+        v-if="hasContext"
         class="todo-row__context"
         v-html="renderBlock(todo.contextMd!)"
       />
@@ -172,7 +177,10 @@ function toggleExpanded() {
   cursor: default;
   transition: background-color 120ms ease;
 }
-.todo-row:hover {
+.todo-row--expandable {
+  cursor: pointer;
+}
+.todo-row--expandable:hover {
   background-color: rgba(var(--v-theme-on-surface), 0.03);
 }
 .todo-row--yours {
