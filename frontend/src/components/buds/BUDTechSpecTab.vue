@@ -57,17 +57,27 @@ const showLocalClaudePanel = computed(
 )
 
 // Prompt template the developer pastes into their local Claude
-// Code. Single source of truth — keeps the wording aligned with
-// the tech-planner skill's "Figma flow extraction" sub-section.
-// When ``figma_url`` is unset we leave the placeholder so the PM
-// can paste the URL inline before sending.
+// Code. Mirrors the tech-planner skill's contract: walk Figma
+// frames, understand the user flow, embed it as a Mermaid source
+// block (NOT a rendered image), derive corner cases from that
+// flow understanding, and ask for source-code clarity whenever
+// requirements are ambiguous. Keeping the template terse — the
+// real instructions live in get_prompt(task_type="tech_plan").
 const promptText = computed(
   () => `Generate tech spec for BUD-${props.bud.bud_number} (id: ${props.bud.id}).
 Figma URL: ${props.bud.figma_url || '<PASTE FIGMA URL HERE>'}
 
-Use get_prompt(task_type="tech_plan"). Follow its Figma flow extraction sub-section:
-read frames via local Figma MCP frame-by-frame, build a Mermaid flow chart,
-derive corner cases exhaustively from the flow chart. Write back via update_bud.`,
+Call get_prompt(task_type="tech_plan") and follow it precisely. Key contract:
+  - Walk frames via local Figma MCP frame-by-frame to understand the user flow
+    (entry → main path → exits, including decision branches and error transitions).
+  - Embed the flow as a fenced \`\`\`mermaid\`\`\` source block in the spec markdown
+    — do NOT render to PNG / base64 / image; the frontend renders Mermaid inline.
+  - Derive corner cases FROM the flow understanding above (not as a standalone
+    checklist): per node + per edge edge states, errors, races, auth gates.
+  - Ask me for source-code access on any ambiguous repo / file / symbol or
+    requirement — name what you need. Do not guess.
+
+Write the spec back via update_bud(content=<markdown>, expected_phase="tech_arch").`,
 )
 
 const copied = ref(false)
