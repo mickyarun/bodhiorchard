@@ -60,8 +60,9 @@ const showLocalClaudePanel = computed(
 // Code. Mirrors the tech-planner skill's contract: walk Figma
 // frames, understand the user flow, embed it as a Mermaid source
 // block (NOT a rendered image), derive corner cases from that
-// flow understanding, and ask for source-code clarity whenever
-// requirements are ambiguous. Keeping the template terse — the
+// flow understanding, ask for source-code clarity in CHAT (never
+// in the spec), and present the draft for approval before
+// persisting via update_bud. Keeping the template terse — the
 // real instructions live in get_prompt(task_type="tech_plan").
 const promptText = computed(
   () => `Generate tech spec for BUD-${props.bud.bud_number} (id: ${props.bud.id}).
@@ -74,10 +75,15 @@ Call get_prompt(task_type="tech_plan") and follow it precisely. Key contract:
     — do NOT render to PNG / base64 / image; the frontend renders Mermaid inline.
   - Derive corner cases FROM the flow understanding above (not as a standalone
     checklist): per node + per edge edge states, errors, races, auth gates.
-  - Ask me for source-code access on any ambiguous repo / file / symbol or
-    requirement — name what you need. Do not guess.
+  - Ambiguous repo / file / symbol or requirement? ASK ME IN THIS CHAT, naming
+    what you need. NEVER write "source code access needed" / "TBD" /
+    "needs clarification" into the spec body. Unresolved questions stay in
+    the conversation; the spec ships clean.
+  - When the spec is complete, SHOW the full markdown here and ask "Ready
+    to save?" Wait for my "yes" before calling update_bud. Never save
+    speculatively.
 
-Write the spec back via update_bud(content=<markdown>, expected_phase="tech_arch").`,
+Once I approve, save via update_bud(content=<markdown>, expected_phase="tech_arch").`,
 )
 
 const copied = ref(false)
