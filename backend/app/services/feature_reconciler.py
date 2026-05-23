@@ -22,12 +22,24 @@ entrypoint.
 
 The reconciler matches each synthesised entry to an existing row via a
 layered identity strategy (cluster_signature → Jaccard ≥ 0.7 →
-embedding cosine ≥ 0.85), then UPDATEs / REVIVEs / INSERTs accordingly.
-Existing active rows that nothing matched are flipped ``is_active=False``
-so removed features are preserved (and revivable on re-introduction)
-rather than silently disappearing.
+asymmetric containment ≥ 0.5 → embedding cosine ≥ 0.85), then UPDATEs /
+ABSORBs / REVIVEs / INSERTs accordingly. Existing active rows that
+nothing matched are flipped ``is_active=False`` so removed features are
+preserved (and revivable on re-introduction) rather than silently
+disappearing.
 
-Logging at every fork (``match_via=signature|jaccard|cosine|insert``,
+The containment tier exists for the "narrow PR adds a sub-component to
+a broader feature" case: a 1-file PR re-synthesised on its own cluster
+emits a tiny feature whose files are a strict subset of an existing
+broader feature's files. Symmetric Jaccard misses this (the broader
+feature dilutes the score) and the new title's embedding diverges from
+the broader one's. When containment matches, we run a *conservative*
+update via :func:`_absorb_into_existing`: the broader row's
+title/description/capabilities/tags/cluster_signature/embedding are
+preserved, only ``last_seen_sha`` advances and the junction's
+``code_locations`` is unioned with the new files.
+
+Logging at every fork (``match_via=signature|jaccard|containment|cosine|insert``,
 plus the chosen score) drives the threshold-tuning loop documented in
 the plan.
 """
@@ -46,7 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.feature_match_log import FeatureMatchLog
 from app.repositories.feature import FeatureRepository
 from app.repositories.feature_reads import FeatureReadRepository, ReconcilerCandidate
-from app.repositories.feature_to_repo import upsert_primary
+from app.repositories.feature_to_repo import upsert_primary, upsert_primary_merge
 
 logger = structlog.get_logger(__name__)
 
@@ -83,6 +95,12 @@ class ReconcileResult:
 # when running tuning experiments.
 JACCARD_THRESHOLD = 0.7
 COSINE_THRESHOLD = 0.85
+# Asymmetric containment fires when at least half of the synthesised
+# entry's files already live in a candidate AND the candidate is the
+# larger side. Conservatively low so narrow re-synthesis can find its
+# broader parent; the size guard prevents two unrelated tiny features
+# from collapsing into one another.
+CONTAINMENT_THRESHOLD = 0.5
 
 
 async def reconcile_features_for_repo(
@@ -94,7 +112,9 @@ async def reconcile_features_for_repo(
     synthesised: list[FeatureWrite],
     jaccard_threshold: float = JACCARD_THRESHOLD,
     cosine_threshold: float = COSINE_THRESHOLD,
+    containment_threshold: float = CONTAINMENT_THRESHOLD,
     candidate_filter: Callable[[ReconcilerCandidate], bool] | None = None,
+    deactivate_filter: Callable[[ReconcilerCandidate], bool] | None = None,
 ) -> ReconcileResult:
     """Apply ``synthesised`` to ``repo_id`` via incremental CRUD.
 
@@ -103,19 +123,31 @@ async def reconcile_features_for_repo(
     1. Bulk-load every existing feature for ``repo_id`` (active +
        inactive) so revival is single-pass.
     2. For each ``FeatureWrite``, run :func:`_match_strategy` to pick
-       an existing row by signature → Jaccard → cosine. First hit
-       wins; ties broken by score.
-    3. If matched: revive (when inactive) + ``update_in_place`` + refresh
-       PRIMARY junction. If not: ``insert`` + create PRIMARY junction.
+       an existing row by signature → Jaccard → containment → cosine.
+       First hit wins; ties broken by score.
+    3. If matched via signature / Jaccard / cosine: revive (when
+       inactive) + ``update_in_place`` + refresh PRIMARY junction. If
+       matched via containment: ``_absorb_into_existing`` — keep the
+       broader row's metadata, union code_locations. If not matched:
+       ``insert`` + create PRIMARY junction.
     4. Mark every active row that nothing matched as inactive.
 
-    ``candidate_filter`` (optional) narrows BOTH the matching pool and
-    the inactivation pool to a subset of the loaded candidates. The
-    full-scan caller leaves it ``None`` (default behaviour preserved);
-    the PR-merge narrow-synthesis caller passes a predicate that admits
-    only features whose ``cluster_signature`` is in the affected
-    signatures set — so features outside the scope are immune from
-    soft-delete even if they don't appear in ``synthesised``.
+    ``candidate_filter`` (optional) narrows the matching pool to a
+    subset of the loaded candidates. The full-scan caller leaves it
+    ``None`` (default behaviour preserved); the PR-merge narrow-
+    synthesis caller passes a predicate that admits features by either
+    cluster_signature in the affected set OR file overlap with the PR's
+    affected files (so legacy stale-signature features stay match-
+    eligible).
+
+    ``deactivate_filter`` (optional) narrows the inactivation pool
+    independently. When ``None`` it defaults to ``candidate_filter``
+    (preserves the historical behaviour where matching and deactivation
+    used the same pool). PR-merge narrow callers pass a stricter
+    predicate — typically signature-only — so a candidate admitted to
+    matching purely by file overlap is *not* subject to soft-delete
+    when no synth output claims it. This prevents a 1-file PR from
+    deactivating a broader feature that happened to own that file.
 
     Returns counts so the caller can surface "+5 added, 2 revived,
     1 removed" telemetry.
@@ -140,6 +172,7 @@ async def reconcile_features_for_repo(
             matched_ids,
             jaccard_threshold=jaccard_threshold,
             cosine_threshold=cosine_threshold,
+            containment_threshold=containment_threshold,
         )
         decision: str
         if match is None:
@@ -158,16 +191,28 @@ async def reconcile_features_for_repo(
             if was_inactive:
                 await feat_repo.revive(match.feature_id, last_seen_sha=head_sha)
                 result.revived += 1
-            await _update_existing(
-                feat_repo,
-                db=db,
-                feature_id=match.feature_id,
-                repo_id=repo_id,
-                head_sha=head_sha,
-                write=write,
-            )
+            if match_via == "containment":
+                await _absorb_into_existing(
+                    feat_repo,
+                    db=db,
+                    feature_id=match.feature_id,
+                    repo_id=repo_id,
+                    head_sha=head_sha,
+                    write=write,
+                    existing_title=match.feature_title,
+                )
+                decision = "revived" if was_inactive else "absorbed"
+            else:
+                await _update_existing(
+                    feat_repo,
+                    db=db,
+                    feature_id=match.feature_id,
+                    repo_id=repo_id,
+                    head_sha=head_sha,
+                    write=write,
+                )
+                decision = "revived" if was_inactive else "updated"
             result.updated += 1
-            decision = "revived" if was_inactive else "updated"
         result.matches_by_strategy[match_via] = result.matches_by_strategy.get(match_via, 0) + 1
         result.match_log_rows.append(
             FeatureMatchLog(
@@ -193,8 +238,13 @@ async def reconcile_features_for_repo(
             decision=decision,
         )
 
+    deact_pool = (
+        [c for c in candidates if deactivate_filter(c)]
+        if deactivate_filter is not None
+        else candidates
+    )
     unmatched_active = [
-        c.feature_id for c in candidates if c.is_active and c.feature_id not in matched_ids
+        c.feature_id for c in deact_pool if c.is_active and c.feature_id not in matched_ids
     ]
     if unmatched_active:
         result.inactivated = await feat_repo.mark_inactive(unmatched_active, head_sha=head_sha)
@@ -251,6 +301,43 @@ async def _insert_new(
     )
 
 
+async def _absorb_into_existing(
+    feat_repo: FeatureRepository,
+    *,
+    db: AsyncSession,
+    feature_id: uuid.UUID,
+    repo_id: uuid.UUID,
+    head_sha: str,
+    write: FeatureWrite,
+    existing_title: str,
+) -> None:
+    """Conservative update: absorb a narrow synth output into a broader row.
+
+    Containment-tier match — the synth's files are mostly contained in a
+    larger existing candidate. Preserve every curated field on the
+    broader row (title, description, capabilities, tags, cluster names
+    + signature, embedding) and only:
+
+    * Advance ``last_seen_sha`` so the Features API can render
+      "Last touched by PR #N" against the merging commit.
+    * Union the synth's ``code_locations`` into the PRIMARY junction
+      so the broader feature's file footprint grows by exactly the new
+      files (via :func:`upsert_primary_merge`).
+
+    The ``existing_title`` carries the broader row's denormalised
+    title into the junction upsert so the partial unique index
+    (``ux_ftr_primary_title``) keeps pointing at the broader row.
+    """
+    await feat_repo.touch_last_seen(feature_id, last_seen_sha=head_sha)
+    await upsert_primary_merge(
+        db,
+        feature_id=feature_id,
+        repo_id=repo_id,
+        feature_title=existing_title,
+        code_locations=dict(write.code_locations or {}),
+    )
+
+
 async def _update_existing(
     feat_repo: FeatureRepository,
     *,
@@ -293,13 +380,22 @@ def _match_strategy(
     *,
     jaccard_threshold: float,
     cosine_threshold: float,
+    containment_threshold: float,
 ) -> tuple[ReconcilerCandidate | None, str, float]:
-    """Layered identity matcher: signature → Jaccard → cosine.
+    """Layered identity matcher: signature → Jaccard → containment → cosine.
 
     Returns ``(candidate, match_via, score)`` where ``match_via`` is
-    one of ``signature``, ``jaccard``, ``cosine``, ``insert``. Score
-    is 1.0 for an exact signature match, the Jaccard / cosine value
-    for the fallback tiers, and 0.0 for ``insert``.
+    one of ``signature``, ``jaccard``, ``containment``, ``cosine``,
+    ``insert``. Score is 1.0 for an exact signature match, the
+    Jaccard / containment / cosine value for the fallback tiers, and
+    0.0 for ``insert``.
+
+    Containment is asymmetric — ``|write ∩ cand| / |write|`` — and only
+    fires when the candidate is the larger side. It catches the case
+    where a narrow PR re-synthesises a sub-cluster (a handful of files)
+    whose files are already part of a broader existing feature; the
+    earlier symmetric Jaccard tier misses this because the union
+    blows up with the broader feature's wider footprint.
 
     Skips candidates already claimed by a prior synthesised entry
     (``matched_ids``) so two synthesised features cannot collapse onto
@@ -323,6 +419,22 @@ def _match_strategy(
                 best_jac = (cand, score)
         if best_jac is not None:
             return best_jac[0], "jaccard", best_jac[1]
+
+        best_cont: tuple[ReconcilerCandidate, float] | None = None
+        for cand in candidates:
+            if cand.feature_id in matched_ids:
+                continue
+            cand_paths = _flatten_paths(cand.code_locations)
+            # Containment requires the candidate to be strictly larger —
+            # absorbing into a smaller or equal-sized candidate would
+            # truncate the synthesis result, not the other way around.
+            if not cand_paths or len(write_paths) >= len(cand_paths):
+                continue
+            score = _containment(write_paths, cand_paths)
+            if score >= containment_threshold and (best_cont is None or score > best_cont[1]):
+                best_cont = (cand, score)
+        if best_cont is not None:
+            return best_cont[0], "containment", best_cont[1]
 
     if write.embedding:
         best_cos: tuple[ReconcilerCandidate, float] | None = None
@@ -356,6 +468,19 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     inter = len(a & b)
     union = len(a | b)
     return inter / union if union else 0.0
+
+
+def _containment(a: set[str], b: set[str]) -> float:
+    """Asymmetric containment ``|a ∩ b| / |a|``: fraction of ``a`` inside ``b``.
+
+    Returns 0 for an empty ``a``. Unlike Jaccard, this does not penalise
+    the larger side for having extra files, so it is the right signal
+    for the "is ``a`` mostly contained in ``b``?" question the
+    containment tier asks.
+    """
+    if not a:
+        return 0.0
+    return len(a & b) / len(a)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
