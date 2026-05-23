@@ -201,6 +201,7 @@ async def list_features(
     limit: int = Query(default=24, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     mode: str = Query(default="all", pattern="^(all|active|in_progress|deactivated)$"),
+    touched_sort: str | None = Query(default=None, alias="touchedSort", pattern="^(asc|desc)$"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FeaturePage:
@@ -221,6 +222,7 @@ async def list_features(
         limit=limit,
         offset=offset,
         view_mode=mode,
+        touched_sort=touched_sort,
     )
     total = await reads.count_with_links(
         repo_id=repo_id,
