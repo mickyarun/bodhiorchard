@@ -82,6 +82,107 @@ async def upsert_primary(
     await db.execute(stmt)
 
 
+async def upsert_primary_merge(
+    db: AsyncSession,
+    *,
+    feature_id: uuid.UUID,
+    repo_id: uuid.UUID,
+    feature_title: str,
+    code_locations: dict[str, list[str]] | None,
+) -> None:
+    """Insert or refresh a PRIMARY row by UNIONING ``code_locations``.
+
+    Sister of :func:`upsert_primary` for the reconciler's containment-
+    match path. The default :func:`upsert_primary` overwrites
+    ``code_locations`` on conflict — appropriate when the synth output
+    is the authoritative description of the cluster. The containment
+    path is different: the synth output represents a narrow slice
+    (e.g. a new sub-component file) being absorbed into a broader
+    existing feature. Overwriting would strand the broader feature's
+    wider file set; this variant unions instead so the broader
+    feature's footprint grows by exactly the new files.
+
+    Per-bucket merge (``frontend``, ``backend``, …): each list is
+    de-duplicated while preserving first-seen order.
+
+    Concurrency: this is a read-modify-write — SELECT the existing
+    ``code_locations`` into Python, compute the merge, then upsert.
+    Safe under the current single-writer-per-repo invariant
+    (narrow-synth and scans serialise per repo via Redis-stream
+    consumers). Do NOT call from a code path that can race against
+    another writer for the same ``(feature_id, repo_id)`` without
+    holding an external lock — the merge will be last-writer-wins.
+    """
+    merged = _merge_code_locations_payload(
+        await _existing_primary_locations(db, feature_id=feature_id, repo_id=repo_id),
+        code_locations,
+    )
+    stmt = (
+        pg_insert(FeatureToRepo)
+        .values(
+            feature_id=feature_id,
+            repo_id=repo_id,
+            role=FeatureToRepoRole.PRIMARY,
+            feature_title=feature_title,
+            code_locations=merged,
+        )
+        .on_conflict_do_update(
+            index_elements=["feature_id", "repo_id"],
+            set_={
+                "code_locations": merged,
+                "role": FeatureToRepoRole.PRIMARY,
+                "feature_title": feature_title,
+            },
+        )
+    )
+    await db.execute(stmt)
+
+
+async def _existing_primary_locations(
+    db: AsyncSession,
+    *,
+    feature_id: uuid.UUID,
+    repo_id: uuid.UUID,
+) -> dict[str, list[str]] | None:
+    """Fetch the existing PRIMARY junction's ``code_locations`` or ``None``."""
+    result = await db.execute(
+        select(FeatureToRepo.code_locations).where(
+            FeatureToRepo.feature_id == feature_id,
+            FeatureToRepo.repo_id == repo_id,
+            FeatureToRepo.role == FeatureToRepoRole.PRIMARY,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+def _merge_code_locations_payload(
+    existing: dict[str, list[str]] | None,
+    incoming: dict[str, list[str]] | None,
+) -> dict[str, list[str]] | None:
+    """Union per-bucket path lists with first-seen-wins ordering.
+
+    Either side may be ``None`` (legacy rows store null junctions; a
+    caller passing nothing to merge in). When both sides are empty,
+    returns ``None`` so the junction's existing JSON stays as-is.
+    """
+    if not existing and not incoming:
+        return None
+    out: dict[str, list[str]] = {}
+    for source in (existing, incoming):
+        if not source:
+            continue
+        for bucket, paths in source.items():
+            if not isinstance(paths, list):
+                continue
+            merged_list = out.setdefault(bucket, [])
+            seen = set(merged_list)
+            for path in paths:
+                if isinstance(path, str) and path not in seen:
+                    merged_list.append(path)
+                    seen.add(path)
+    return out or None
+
+
 async def replace_backend_links(
     db: AsyncSession,
     *,

@@ -72,6 +72,7 @@ from app.services.scan.backend_link.narrow_refresh import (
 from app.services.scan.backend_link.route_index import index_and_cache_backend_routes
 from app.services.scan.pr_narrow_loader import (
     load_existing_features_by_sig,
+    load_related_existing_features_by_files,
     load_scoped_communities,
 )
 from app.services.scan.synthesis.narrow_prompt import build_narrow_synthesis_prompt
@@ -156,6 +157,13 @@ async def run_narrow_synthesis(params: NarrowSynthesisParams) -> NarrowSynthesis
         existing_by_sig = await load_existing_features_by_sig(
             db, org_id=params.org_id, repo_id=params.repo_id, signatures=signatures
         )
+        related_existing = await load_related_existing_features_by_files(
+            db,
+            org_id=params.org_id,
+            repo_id=params.repo_id,
+            affected_files=affected_files,
+            exclude_signatures=set(existing_by_sig.keys()),
+        )
 
     if not signatures:
         logger.info(
@@ -214,6 +222,7 @@ async def run_narrow_synthesis(params: NarrowSynthesisParams) -> NarrowSynthesis
         repo_name=repo.github_repo_full_name or repo.path,
         communities=communities,
         existing_by_signature=existing_by_sig,
+        related_existing_features=related_existing,
         repo_id=str(params.repo_id),
     )
     outcome = await _run_claude_narrow(
@@ -452,35 +461,43 @@ async def _reconcile_narrow(
 ) -> dict[str, int]:
     """Drain the per-repo accumulator and reconcile scoped to the PR.
 
-    The ``candidate_filter`` admits a feature into the scope when
-    EITHER condition holds:
+    Two predicates split the candidate pool by purpose:
 
-    * its ``cluster_signature`` matches one of the affected signatures
-      (primary identity — the indexer's current view of the cluster);
-    * its ``code_locations`` files intersect any affected cluster's
-      files (Jaccard fallback — the indexer's signature algorithm has
-      changed across releases, so legacy features have stale
-      ``cluster_signature`` values that don't match the current
-      indexer output even though they still describe the same cluster
-      files). Without this fallback, a deletion PR can't reach the
-      legacy feature to soft-delete it, and orphan rows accumulate.
+    * ``candidate_filter`` (matching pool) admits a feature into the
+      scope when EITHER its ``cluster_signature`` matches one of the
+      affected signatures (primary identity — the indexer's current
+      view of the cluster), OR its ``code_locations`` files intersect
+      any affected cluster's files (file-overlap fallback — the
+      indexer's signature algorithm has changed across releases, so
+      legacy features have stale ``cluster_signature`` values that
+      don't match the current indexer output even though they still
+      describe the same cluster files). Without this fallback, a
+      deletion PR can't reach the legacy feature to soft-delete it,
+      and orphan rows accumulate.
 
-    Features outside both checks stay immune to soft-delete — the
-    per-PR scoping property is preserved.
+    * ``deactivate_filter`` (inactivation pool) is signature-only.
+      A feature that landed in the matching pool purely via file
+      overlap must NOT be deactivated when the synth output fails to
+      match it — that's the bug where a 1-file PR adding a sub-
+      component to a broad feature would soft-delete the broader
+      feature as collateral damage. Containment matching is the
+      desired outcome for that case; falling through to insert +
+      deactivate is the failure mode this guards against.
     """
     synthesised = drain(str(org_id), str(repo_id))
 
     def _in_scope(c: Any) -> bool:
         if c.cluster_signature in signatures:
             return True
-        # Flatten ``{"frontend": [...], "backend": [...]}`` into a flat
-        # set of paths and check overlap with the affected file set.
         cl = c.code_locations or {}
         feat_files: set[str] = set()
         for value in cl.values():
             if isinstance(value, list):
                 feat_files.update(p for p in value if isinstance(p, str))
         return bool(feat_files & affected_files)
+
+    def _signature_only(c: Any) -> bool:
+        return c.cluster_signature in signatures
 
     async with AsyncSessionLocal() as db:
         summary = await reconcile_features_for_repo(
@@ -490,6 +507,7 @@ async def _reconcile_narrow(
             head_sha=head_sha,
             synthesised=synthesised,
             candidate_filter=_in_scope,
+            deactivate_filter=_signature_only,
         )
         if summary.match_log_rows:
             await FeatureMatchLogRepository(db, org_id=org_id).bulk_insert(summary.match_log_rows)

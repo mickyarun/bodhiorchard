@@ -208,6 +208,20 @@ def _install_handler_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     ) -> dict[str, ExistingFeatureContext]:
         return {"sig-a": _existing("Payments")}
 
+    async def _fake_load_related(
+        _db: Any,
+        *,
+        org_id: uuid.UUID,
+        repo_id: uuid.UUID,
+        affected_files: set[str],
+        exclude_signatures: set[str],
+    ) -> list[ExistingFeatureContext]:
+        captured["related_call"] = {
+            "affected_files": set(affected_files),
+            "exclude_signatures": set(exclude_signatures),
+        }
+        return [_existing("Products Catalog")]
+
     async def _fake_run_claude(
         *, org_id: uuid.UUID, prompt: str, repo_path: str, repo_name: str
     ) -> dict[str, Any]:
@@ -249,6 +263,7 @@ def _install_handler_fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(handler_mod, "TrackedRepoRepository", _FakeRepoRepo)
     monkeypatch.setattr(handler_mod, "load_scoped_communities", _fake_load_scoped)
     monkeypatch.setattr(handler_mod, "load_existing_features_by_sig", _fake_load_existing)
+    monkeypatch.setattr(handler_mod, "load_related_existing_features_by_files", _fake_load_related)
     monkeypatch.setattr(handler_mod, "_run_claude_narrow", _fake_run_claude)
     monkeypatch.setattr(handler_mod, "_reconcile_narrow", _fake_reconcile)
     monkeypatch.setattr(handler_mod, "_refresh_backend_links_post_reconcile", _noop_refresh)
@@ -429,6 +444,121 @@ async def test_reconcile_filter_admits_features_via_file_overlap(
     # 4. Empty code_locations + sig miss → rejected.
     assert fn(_Cand("other-sig", {})) is False
     assert fn(_Cand("other-sig", {"frontend": None})) is False  # type: ignore[arg-type]
+
+
+async def test_related_features_loader_called_with_excluded_signatures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The related-features loader fires with the PR's affected_files and
+    excludes signatures already covered by ``load_existing_features_by_sig``
+    so the prompt doesn't double-list the same broader feature."""
+    captured = _install_handler_fakes(monkeypatch)
+    await handler_mod.run_narrow_synthesis(_params())
+    related_call = captured["related_call"]
+    assert related_call["affected_files"] == {"a.py", "b.py"}
+    # The fake _fake_load_existing returns ``{"sig-a": ...}`` only — so
+    # exclude_signatures must be that exact set.
+    assert related_call["exclude_signatures"] == {"sig-a"}
+
+
+async def test_related_features_appear_in_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Claude prompt must contain the related feature's title so the
+    LLM can apply rule 6 (don't emit a duplicate for a narrow slice)."""
+    _install_handler_fakes(monkeypatch)
+    captured_prompts: list[str] = []
+
+    async def _capture_prompt(*, prompt: str, **_kw: Any) -> dict[str, Any]:
+        captured_prompts.append(prompt)
+        return {"success": True, "elapsed_ms": 1, "cost_usd": 0.0, "error": None}
+
+    monkeypatch.setattr(handler_mod, "_run_claude_narrow", _capture_prompt)
+    await handler_mod.run_narrow_synthesis(_params())
+
+    assert len(captured_prompts) == 1
+    assert "Products Catalog" in captured_prompts[0]
+    assert "related_features" in captured_prompts[0].lower() or "related" in captured_prompts[0]
+
+
+async def test_reconcile_narrow_passes_signature_only_deactivate_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that the narrow reconcile path passes a stricter
+    ``deactivate_filter`` than ``candidate_filter`` — signature-only.
+    Without this, a feature admitted to the match pool via file overlap
+    gets soft-deleted as collateral damage when nothing matches it.
+    """
+    from app.services.scan import pr_narrow_synthesis as ns
+
+    captured_filters: dict[str, Any] = {}
+
+    async def _spy_reconcile(
+        *, candidate_filter: Any, deactivate_filter: Any = None, **kw: Any
+    ) -> Any:
+        captured_filters["candidate"] = candidate_filter
+        captured_filters["deactivate"] = deactivate_filter
+
+        class _Summary:
+            inserted = 0
+            updated = 0
+            revived = 0
+            inactivated = 0
+            match_log_rows: list[Any] = []
+
+        return _Summary()
+
+    class _NoopMatchLogRepo:
+        def __init__(self, *_a: Any, **_kw: Any) -> None:
+            pass
+
+        async def bulk_insert(self, _rows: list[Any]) -> None:
+            return None
+
+    class _NoopSessionCtx:
+        async def __aenter__(self) -> Any:
+            class _Db:
+                async def commit(self) -> None:
+                    return None
+
+            return _Db()
+
+        async def __aexit__(self, *_a: Any) -> None:
+            return None
+
+    monkeypatch.setattr(ns, "reconcile_features_for_repo", _spy_reconcile)
+    monkeypatch.setattr(ns, "FeatureMatchLogRepository", _NoopMatchLogRepo)
+    monkeypatch.setattr(ns, "AsyncSessionLocal", lambda: _NoopSessionCtx())
+    monkeypatch.setattr(ns, "drain", lambda *_a, **_kw: [])
+
+    await ns._reconcile_narrow(
+        org_id=uuid.uuid4(),
+        repo_id=uuid.uuid4(),
+        head_sha="HEAD",
+        signatures={"current-sig"},
+        affected_files={"sidebar.vue"},
+    )
+
+    candidate_fn = captured_filters["candidate"]
+    deactivate_fn = captured_filters["deactivate"]
+
+    class _Cand:
+        def __init__(self, sig: str, code_locations: dict[str, list[str]]) -> None:
+            self.cluster_signature = sig
+            self.code_locations = code_locations
+
+    # File-overlap-admitted candidate — signature is NOT in affected set
+    # but its code_locations overlap the affected files. The
+    # candidate_filter must admit it (for matching), but the
+    # deactivate_filter must REJECT it (to spare it from soft-delete).
+    overlap_only = _Cand("legacy-sig", {"frontend": ["sidebar.vue", "other.vue"]})
+    assert candidate_fn(overlap_only) is True
+    assert deactivate_fn(overlap_only) is False
+
+    # Signature-admitted candidate — both filters admit it.
+    sig_admitted = _Cand("current-sig", {})
+    assert candidate_fn(sig_admitted) is True
+    assert deactivate_fn(sig_admitted) is True
 
 
 def test_outcome_succeeded_helper() -> None:

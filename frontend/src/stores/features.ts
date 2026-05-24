@@ -35,6 +35,7 @@ interface FetchPageArgs {
   repoId?: string
   q?: string
   mode?: FeatureViewMode
+  touchedSort?: 'asc' | 'desc' | null
 }
 
 export const useFeaturesStore = defineStore('features', () => {
@@ -50,6 +51,7 @@ export const useFeaturesStore = defineStore('features', () => {
     repoId,
     q,
     mode = 'all',
+    touchedSort,
   }: FetchPageArgs = {}): Promise<void> {
     loading.value = true
     error.value = null
@@ -63,6 +65,7 @@ export const useFeaturesStore = defineStore('features', () => {
       // Only send mode when it deviates from default — keeps the URL
       // clean (and Network tab readable) for the most common case.
       if (mode !== 'all') params.mode = mode
+      if (touchedSort) params.touchedSort = touchedSort
       const { data } = await api.get<FeaturePage>('/v1/features', { params })
       items.value = data.items
       total.value = data.total

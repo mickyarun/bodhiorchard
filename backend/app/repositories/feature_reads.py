@@ -89,6 +89,7 @@ class FeatureReadRepository:
         limit: int = 24,
         offset: int = 0,
         view_mode: str = VIEW_MODE_ALL,
+        touched_sort: str | None = None,
     ) -> list[Feature]:
         """Paginated features with junctions eager-loaded.
 
@@ -111,11 +112,18 @@ class FeatureReadRepository:
         (PRIMARY junction match), optional case-insensitive ``q``
         substring on ``feature_title``.
         """
+        order_col = (
+            Feature.updated_at.asc()
+            if touched_sort == "asc"
+            else Feature.updated_at.desc()
+            if touched_sort == "desc"
+            else Feature.feature_title
+        )
         stmt = (
             select(Feature)
             .where(Feature.org_id == self._org_id)
             .options(selectinload(Feature.repo_links))
-            .order_by(Feature.feature_title)
+            .order_by(order_col)
             .limit(limit)
             .offset(offset)
         )

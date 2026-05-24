@@ -61,6 +61,17 @@
           label="Show"
           class="features-view__select"
         />
+        <v-select
+          v-model="lastTouchedSort"
+          :items="LAST_TOUCHED_OPTIONS"
+          item-title="label"
+          item-value="value"
+          variant="outlined"
+          density="compact"
+          hide-details
+          label="Last touched"
+          class="features-view__select"
+        />
       </div>
     </header>
 
@@ -186,6 +197,12 @@ const VISIBILITY_OPTIONS: Array<{ label: string; value: FeatureViewMode }> = [
 ]
 const visibilityMode = ref<FeatureViewMode>('all')
 
+const LAST_TOUCHED_OPTIONS: Array<{ label: string; value: 'asc' | 'desc' }> = [
+  { label: 'Asc', value: 'asc' },
+  { label: 'Desc', value: 'desc' },
+]
+const lastTouchedSort = ref<'asc' | 'desc'>('desc')
+
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
 const activeRepos = computed<RepoInfo[]>(() =>
@@ -241,6 +258,7 @@ async function reload(): Promise<void> {
     repoId: selectedRepoId.value || undefined,
     q: debouncedQuery.value || undefined,
     mode: visibilityMode.value,
+    touchedSort: lastTouchedSort.value,
   })
   if (selectedRepoId.value) {
     void store.fetchTopContributors(selectedRepoId.value)
@@ -260,7 +278,7 @@ watch(searchQuery, (q) => {
 })
 
 // Filter changes reset to page 1; the page watcher fires the reload.
-watch([selectedRepoId, debouncedQuery, visibilityMode], () => {
+watch([selectedRepoId, debouncedQuery, visibilityMode, lastTouchedSort], () => {
   if (page.value === 1) {
     void reload()
   } else {

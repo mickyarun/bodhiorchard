@@ -63,6 +63,7 @@ def build_narrow_synthesis_prompt(
     repo_name: str,
     communities: list[Community],
     existing_by_signature: dict[str, ExistingFeatureContext],
+    related_existing_features: list[ExistingFeatureContext] | None = None,
     files_per_community: int = DEFAULT_FILES_PER_COMMUNITY,
     repo_id: str | None = None,
 ) -> str:
@@ -74,6 +75,17 @@ def build_narrow_synthesis_prompt(
     (Claude inserts), and existing features whose signature is in the
     map but Claude doesn't re-emit will be soft-deleted by the
     reconciler downstream.
+
+    ``related_existing_features`` lists active features whose files
+    overlap the PR's affected file set but whose ``cluster_signature``
+    is not in the affected set. They are surfaced as a top-level
+    ``related_features`` block so Claude can recognise when a "new"
+    cluster is actually a narrow slice of an existing broader
+    feature — and decline to emit a duplicate. The reconciler also
+    catches this case via containment matching, but feeding Claude
+    the context makes the synthesis output match the desired data
+    shape (no duplicate write at all) rather than relying on the
+    reconciler to absorb after the fact.
     """
     payload = _payload_for_narrow(
         communities=communities,
@@ -81,12 +93,41 @@ def build_narrow_synthesis_prompt(
         files_per_community=files_per_community,
     )
     payload_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    related_block = _related_features_block(related_existing_features or [])
     scan_context = _scan_context_block(repo_id=repo_id)
     return _NARROW_PROMPT_TEMPLATE.format(
         repo_name=repo_name,
         cluster_count=len(payload),
         cluster_payload=payload_json,
+        related_features_block=related_block,
         scan_context=scan_context,
+    )
+
+
+def _related_features_block(related: list[ExistingFeatureContext]) -> str:
+    """Render the ``related_features`` JSON block, or empty when none."""
+    if not related:
+        return ""
+    payload = [
+        {
+            "title": item.feature_title,
+            "description": item.description,
+            "capabilities": list(item.capabilities),
+            "source": item.source,
+            "source_ref": item.source_ref,
+            "status": item.feature_status,
+        }
+        for item in related
+    ]
+    payload_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    return (
+        "\n## Related existing features (touched by this PR, different clusters)\n"
+        "Each of these is an ACTIVE feature whose files overlap the PR's affected\n"
+        "set but whose own cluster wasn't flagged as affected. Before you emit a\n"
+        "fresh feature for a cluster above, check whether the cluster's files are\n"
+        "mostly inside one of these — if so, DO NOT emit a separate feature; the\n"
+        "downstream reconciler will fold the cluster's files into the related one.\n"
+        f"{payload_json}\n"
     )
 
 
@@ -153,7 +194,7 @@ membership changed, they appeared, or they disappeared). For each one,
 decide whether the existing feature still describes the cluster's
 reality, and emit exactly one ``write_synthesis_feature`` call per
 cluster you want to keep active.
-{scan_context}
+{scan_context}{related_features_block}
 Affected clusters ({cluster_count}, JSON):
 {cluster_payload}
 
@@ -191,6 +232,16 @@ Affected clusters ({cluster_count}, JSON):
 5. **``existing_feature`` with ``source="bud"``** — DO NOT modify; BUD-
    owned features live alongside scan features and the BUD lifecycle path
    owns their state. Skip these clusters entirely.
+6. **Slice of a related feature** — when a cluster with NO
+   ``existing_feature`` would otherwise be treated as net-new (rule 4),
+   first check the ``related_features`` block above. If the cluster's
+   files mostly live inside one of those features (i.e. they're a sub-
+   component, sidebar, dialog, helper module, … of the broader feature),
+   DO NOT emit a separate feature. The downstream reconciler matches by
+   containment and folds the new files into the related feature's
+   ``code_locations`` while preserving its title/description/capabilities.
+   Emitting a narrow duplicate would create a sibling feature that
+   triggers the bug this prompt rule exists to prevent.
 
 ## Required write_synthesis_feature fields per emit
 - ``name``: human-readable feature title.

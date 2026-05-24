@@ -236,6 +236,26 @@ class FeatureRepository(BaseRepository[Feature]):
             .values(**values)
         )
 
+    async def touch_last_seen(
+        self,
+        feature_id: uuid.UUID,
+        *,
+        last_seen_sha: str | None,
+    ) -> None:
+        """Refresh ``last_seen_sha`` only — leave every other column intact.
+
+        Reconciler containment-match path: a narrow synth output is
+        absorbed into a broader existing feature, so we record that the
+        broader row was touched by this merge without clobbering its
+        curated title/description/capabilities/tags/cluster_signature/
+        embedding. Pairs with ``upsert_primary_merge`` on the junction.
+        """
+        await self._db.execute(
+            sql_update(Feature)
+            .where(Feature.org_id == self._org_id, Feature.id == feature_id)
+            .values(last_seen_sha=last_seen_sha)
+        )
+
     async def revive(
         self,
         feature_id: uuid.UUID,

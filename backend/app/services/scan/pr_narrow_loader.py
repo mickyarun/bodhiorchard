@@ -133,6 +133,66 @@ def row_to_community(row: ClusterCache) -> Community:
     )
 
 
+async def load_related_existing_features_by_files(
+    db: Any,
+    *,
+    org_id: uuid.UUID,
+    repo_id: uuid.UUID,
+    affected_files: set[str],
+    exclude_signatures: set[str],
+) -> list[ExistingFeatureContext]:
+    """Existing active features whose files overlap the PR's affected set.
+
+    Complements :func:`load_existing_features_by_sig`: that path keys on
+    ``cluster_signature``, which only fires when the indexer's view of
+    the affected cluster matches a feature's stored signature. When the
+    indexer carves out a fresh cluster for a new sub-component (e.g. a
+    new sidebar directory), no signature match exists for it — but the
+    broader feature whose files surround the new file is exactly what
+    we want Claude to consider before emitting a new feature.
+
+    Returns features admitted by file overlap, excluding any whose
+    ``cluster_signature`` is already in ``exclude_signatures`` (those
+    have richer per-cluster context delivered via
+    :func:`load_existing_features_by_sig`). BUD-sourced features are
+    included — Claude's decision rule treats them as off-limits to
+    edit, but seeing them prevents Claude from accidentally
+    duplicating one as a scan feature.
+    """
+    if not affected_files:
+        return []
+    all_candidates = await FeatureReadRepository(db, org_id=org_id).bulk_load_for_reconcile(
+        repo_id, include_inactive=False
+    )
+    feat_repo = FeatureRepository(db, org_id=org_id)
+    out: list[ExistingFeatureContext] = []
+    for cand in all_candidates:
+        if cand.cluster_signature in exclude_signatures:
+            continue
+        cand_files: set[str] = set()
+        for value in (cand.code_locations or {}).values():
+            if isinstance(value, list):
+                cand_files.update(p for p in value if isinstance(p, str))
+        if not (cand_files & affected_files):
+            continue
+        full = await feat_repo.find_by_signature(repo_id, cand.cluster_signature)
+        if full is None:
+            continue
+        out.append(
+            ExistingFeatureContext(
+                feature_title=full.feature_title,
+                description=full.description,
+                capabilities=list((full.capabilities or {}).get("capabilities", [])),
+                source=full.source,
+                source_ref=full.source_ref,
+                feature_status=full.feature_status,
+                is_active=full.is_active,
+                deactivated_at_sha=full.deactivated_at_sha,
+            )
+        )
+    return out
+
+
 async def load_existing_features_by_sig(
     db: Any,
     *,
