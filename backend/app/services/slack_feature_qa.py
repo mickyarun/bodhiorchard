@@ -41,7 +41,7 @@ from app.services.claude_runner import (
     run_claude_code,
 )
 from app.services.json_parser import parse_json_response
-from app.services.skill_loader import load_skill
+from app.services.skill_loader import resolve_skill_for_org
 from app.services.slack_feature_qa_reply import (
     format_bud_answer,
     format_clarify_reply,
@@ -51,7 +51,8 @@ from app.services.slack_feature_qa_reply import (
 logger = structlog.get_logger(__name__)
 
 _BOT_MENTION_RE = re.compile(r"<@[A-Z0-9]+>")
-_SKILL_NAME = "slack-feature-qa"
+_AGENT_NAME = "slackFeatureQa"
+_SKILL_SLUG = "slack-feature-qa"
 
 
 async def start_feature_qa(
@@ -156,7 +157,10 @@ async def _run_qa_agent(
     thread_messages: list[dict[str, Any]] | None,
 ) -> None:
     """Run the Q&A agent and post its response to the Slack thread."""
-    skill = load_skill(_SKILL_NAME)
+    # Pull the live skill row so admin edits in Settings → Agent Prompts
+    # (prompt body, max_turns, model, etc.) take effect at runtime. Falls
+    # back to the file-based template when no DB row exists yet.
+    skill = await resolve_skill_for_org(_AGENT_NAME, org.id, db, fallback_slug=_SKILL_SLUG)
 
     prompt = _build_qa_prompt(skill.prompt, session, thread_messages)
 
