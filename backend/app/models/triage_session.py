@@ -70,7 +70,9 @@ class TriageSession(BaseModel):
     feature_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     triage_context: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     bud_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("bud_documents.id"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("bud_documents.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
     def __repr__(self) -> str:
