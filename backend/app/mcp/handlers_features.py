@@ -357,7 +357,7 @@ async def handle_check_feature_exists(
                 "title": feature.feature_title,
                 "description": feature.description,
                 "score": score,
-                "match_strength": "strong" if score >= 0.85 else "partial",
+                "match_strength": "strong" if score >= 0.70 else "partial",
                 "feature_status": feature.feature_status or "implemented",
                 "source_ref": feature.source_ref,
             }

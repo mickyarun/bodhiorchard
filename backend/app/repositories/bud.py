@@ -192,6 +192,33 @@ class BUDRepository(BaseRepository[BUDDocument]):
         row = result.first()
         return (row[0], row[1]) if row else None
 
+    async def find_nearest_active_with_distance(
+        self,
+        candidate_vector: list[float],
+        *,
+        exclude_statuses: tuple[BUDStatus, ...] = (),
+    ) -> tuple[BUDDocument, float] | None:
+        """Nearest BUD by cosine distance, optionally excluding statuses.
+
+        Returns ``(bud, distance)`` or ``None`` when nothing qualifies.
+        Used by triage to filter out terminal-status BUDs from duplicate
+        detection so we only flag work the user can actually follow.
+        """
+        stmt = self._scoped(
+            select(
+                BUDDocument,
+                BUDDocument.embedding.cosine_distance(candidate_vector).label("distance"),
+            )
+            .where(BUDDocument.embedding.is_not(None))
+            .order_by("distance")
+            .limit(1)
+        )
+        if exclude_statuses:
+            stmt = stmt.where(BUDDocument.status.notin_(exclude_statuses))
+        result = await self._db.execute(stmt)
+        row = result.first()
+        return (row[0], row[1]) if row else None
+
     async def find_nearest_neighbor(
         self,
         candidate_vector: list[float],

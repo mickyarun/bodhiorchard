@@ -52,6 +52,7 @@ from app.models.enterprise_rule import EnterpriseRule
 from app.models.feature import Feature
 from app.models.feature_learning import FeatureLearning
 from app.models.feature_match_log import FeatureMatchLog
+from app.models.feature_qa_session import FeatureQASession, FeatureQAStatus
 from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
@@ -171,6 +172,8 @@ __all__ = [
     "SkillProfile",
     "StandupReport",
     "Feature",
+    "FeatureQASession",
+    "FeatureQAStatus",
     "FeatureToRepo",
     "FeatureToRepoRole",
     "RepoLayer",

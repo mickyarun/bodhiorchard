@@ -33,6 +33,7 @@ logger = structlog.get_logger(__name__)
 # ── Constants ──────────────────────────────────────────────────────
 JOB_BUD_CHAT = "bud_chat"
 JOB_TRIAGE = "triage"
+JOB_FEATURE_QA = "feature_qa"
 JOB_DESIGN_AGENT = "design_agent"
 JOB_DESIGN_EXTRACT = "design_extract"
 JOB_BUD_AGENT = "bud_agent"

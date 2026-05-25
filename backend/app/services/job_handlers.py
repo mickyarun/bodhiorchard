@@ -31,11 +31,13 @@ from app.services.jira_import_pipeline import handle_discovery_job, handle_impor
 from app.services.job_agents import handle_triage_job
 from app.services.job_chat import handle_chat_job
 from app.services.job_design import handle_design_agent_job, handle_design_extract_job
+from app.services.job_feature_qa import handle_feature_qa_job
 from app.services.job_queue import (
     JOB_BUD_AGENT,
     JOB_BUD_CHAT,
     JOB_DESIGN_AGENT,
     JOB_DESIGN_EXTRACT,
+    JOB_FEATURE_QA,
     JOB_JIRA_DISCOVERY,
     JOB_JIRA_ENRICH,
     JOB_JIRA_IMPORT,
@@ -50,6 +52,7 @@ __all__ = [
     "setup_job_handlers",
     "handle_bud_agent_job",
     "handle_chat_job",
+    "handle_feature_qa_job",
     "handle_triage_job",
     "handle_design_agent_job",
     "handle_design_extract_job",
@@ -78,6 +81,7 @@ def setup_job_handlers() -> None:
 
     register_job_type(JOB_BUD_CHAT, handle_chat_job, worker_count=chat_workers)
     register_job_type(JOB_TRIAGE, handle_triage_job, worker_count=1)
+    register_job_type(JOB_FEATURE_QA, handle_feature_qa_job, worker_count=1)
     register_job_type(JOB_DESIGN_AGENT, handle_design_agent_job, worker_count=2)
     # Design-extract spawns ~600MB Claude CLI subprocesses; cap workers
     # on small-RAM hosts via cpu_count proxy + ``JOB_DESIGN_EXTRACT_WORKERS``

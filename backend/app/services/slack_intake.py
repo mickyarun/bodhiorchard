@@ -23,16 +23,32 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings as app_settings
+from app.mcp.auth import create_internal_mcp_token
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.organization import Organization
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import UserRole
 from app.repositories.bud import BUDRepository
+from app.repositories.feature_reads import FeatureReadRepository
 from app.repositories.triage_session import TriageSessionRepository
 from app.repositories.user import UserRepository
 from app.services import slack_client
+from app.services.claude_runner import (
+    NO_REPO_CONTEXT,
+    ClaudeRunnerConfig,
+    MCPServerConfig,
+    run_claude_code,
+)
+from app.services.embedding_service import embedding_service
 from app.services.feature_lifecycle import create_planned_feature
+from app.services.json_parser import parse_json_response
 from app.services.prompt_builder import build_prd_prompt, build_slack_triage_prompt
+from app.services.skill_loader import load_skill
+
+_CANDIDATE_SIMILARITY_THRESHOLD = 0.60
+_MAX_DUPLICATE_CANDIDATES = 3
+_TERMINAL_BUD_STATUSES: tuple[BUDStatus, ...] = (BUDStatus.CLOSED, BUDStatus.DISCARDED)
 
 logger = structlog.get_logger(__name__)
 
@@ -334,6 +350,166 @@ async def handle_pm_approval(
 # ── Private helpers ────────────────────────────────────────────────
 
 
+async def _find_duplicate_candidates(
+    db: AsyncSession,
+    org: Organization,
+    query_text: str,
+) -> list[tuple[str, Any, float]]:
+    """Gather semantically similar active BUDs and backlog Features.
+
+    Returns up to ``_MAX_DUPLICATE_CANDIDATES`` tuples of
+    ``(kind, match_object, similarity)`` above the candidate threshold.
+    BUDs come first because in-flight work outranks backlog. The list
+    is intentionally broad — the LLM verifier filters out false
+    positives that share topic words but aren't the same feature.
+    """
+    query_text = query_text.strip()
+    if not query_text:
+        return []
+
+    try:
+        vector = await embedding_service.embed(query_text)
+    except Exception:
+        logger.warning("triage_dup_check_embed_failed", query=query_text[:120])
+        return []
+
+    candidates: list[tuple[str, Any, float]] = []
+
+    bud_repo = BUDRepository(db, org_id=org.id)
+    bud_match = await bud_repo.find_nearest_active_with_distance(
+        vector, exclude_statuses=_TERMINAL_BUD_STATUSES
+    )
+    if bud_match is not None:
+        bud, distance = bud_match
+        similarity = 1.0 - distance
+        if similarity >= _CANDIDATE_SIMILARITY_THRESHOLD:
+            candidates.append(("bud", bud, similarity))
+
+    feature_reads = FeatureReadRepository(db, org_id=org.id)
+    rows = await feature_reads.semantic_search(vector, limit=2, only_active=True)
+    for feature, distance in rows:
+        similarity = 1.0 - distance
+        if similarity >= _CANDIDATE_SIMILARITY_THRESHOLD:
+            candidates.append(("feature", feature, similarity))
+
+    return candidates[:_MAX_DUPLICATE_CANDIDATES]
+
+
+async def _verify_duplicate_with_llm(
+    query_text: str,
+    candidates: list[tuple[str, Any, float]],
+) -> tuple[str, Any, float] | None:
+    """Ask the LLM to decide whether any candidate is a true duplicate.
+
+    Semantic similarity surfaces items that share topic words, but it
+    cannot distinguish "same domain" from "same feature". This focused
+    one-shot call delegates that judgement to the LLM. Returns the
+    confirmed candidate or ``None`` if the LLM rejects all of them.
+    """
+    if not candidates:
+        return None
+
+    lines = []
+    for idx, (kind, match, sim) in enumerate(candidates, start=1):
+        if kind == "bud":
+            status_str = match.status.value if match.status else "unknown"
+            lines.append(
+                f"{idx}. [BUD-{match.bud_number:03d}] {match.title}"
+                f" — status: {status_str}, similarity: {sim:.2f}"
+            )
+        else:
+            lines.append(
+                f"{idx}. [Feature] {match.feature_title} — similarity: {sim:.2f}"
+            )
+
+    prompt = (
+        "Decide whether a Slack feature request is a DUPLICATE of any existing"
+        " item.\n\n"
+        f"USER REQUEST:\n{query_text}\n\n"
+        "CANDIDATES (semantically similar items already in the system):\n"
+        + "\n".join(lines)
+        + "\n\nTwo items are duplicates only if they describe the SAME"
+        " user-facing capability or solve the SAME problem. They are NOT"
+        " duplicates merely because they share generic topic words such as"
+        ' "user", "data", "feature", "dashboard", "settings".\n\n'
+        'Respond with exactly one JSON object, no markdown, no extra text:\n'
+        '{"verdict": "match" or "no_match", "matched_index":'
+        " <1-based index or null>}"
+    )
+
+    result = await run_claude_code(
+        prompt=prompt,
+        working_dir=NO_REPO_CONTEXT,
+        config=ClaudeRunnerConfig(max_turns=1, timeout_seconds=45, mcp=None),
+    )
+
+    if not result.success:
+        logger.warning("triage_dup_verify_failed", error=result.error)
+        return None
+
+    response = parse_json_response(result.output)
+    if response is None or response.get("verdict") != "match":
+        return None
+
+    matched_index = response.get("matched_index")
+    if not isinstance(matched_index, int) or not 1 <= matched_index <= len(candidates):
+        return None
+
+    return candidates[matched_index - 1]
+
+
+async def _post_duplicate_message(
+    bot_token: str,
+    session: TriageSession,
+    kind: str,
+    match: Any,
+    similarity: float,
+) -> None:
+    """Format and post a duplicate-found reply, including delivery date."""
+    if kind == "bud":
+        bud_ref = f"BUD-{match.bud_number:03d}"
+        status_str = match.status.value if match.status else "unknown"
+        parts = [
+            f"⚠️ *{bud_ref}* — {match.title} is already *{status_str}* and being tracked."
+            f" Similarity {similarity:.0%} — no new BUD needed."
+        ]
+        if match.prod_p70_date:
+            parts.append(
+                f"📅 Estimated delivery: *{match.prod_p70_date.strftime('%Y-%m-%d')}*"
+            )
+        elif match.current_phase_deadline:
+            parts.append(
+                "📅 Current phase deadline:"
+                f" *{match.current_phase_deadline.strftime('%Y-%m-%d')}*"
+            )
+        message = "\n".join(parts)
+    else:
+        message = (
+            f"ℹ️ *{match.feature_title}* is already tracked in the product backlog"
+            f" (similarity {similarity:.0%})."
+        )
+
+    await slack_client.chat_post_message(
+        bot_token, session.slack_channel, message, thread_ts=session.thread_ts
+    )
+
+
+def _build_duplicate_query(
+    session: TriageSession,
+    thread_messages: list[dict[str, Any]] | None,
+) -> str:
+    """Combine the original message with user replies for richer matching."""
+    parts = [session.original_text or ""]
+    if thread_messages:
+        for msg in thread_messages:
+            if msg.get("bot_id"):
+                continue
+            text = msg.get("text", "")
+            if text:
+                parts.append(text)
+    return " ".join(parts).strip()
+
+
 async def _run_triage_agent(
     db: AsyncSession,
     org: Organization,
@@ -350,6 +526,36 @@ async def _run_triage_agent(
         bot_token, session.slack_channel, session.thread_ts
     )
 
+    is_first_turn = len(thread_messages) <= 2
+    progress_msg = (
+        "_⏳ Checking for existing features and BUDs..._"
+        if is_first_turn
+        else "_🤔 Reviewing your response..._"
+    )
+    await slack_client.chat_post_message(
+        bot_token, session.slack_channel, progress_msg, thread_ts=session.thread_ts
+    )
+
+    # Duplicate detection: semantic search finds candidates (broad net at
+    # 0.60+ similarity), then an LLM call verifies whether any candidate
+    # is actually the same feature. The two-stage check stops false
+    # positives that share generic topic words (e.g. "user", "dashboard").
+    query_text = _build_duplicate_query(session, thread_messages)
+    candidates = await _find_duplicate_candidates(db, org, query_text)
+    duplicate = await _verify_duplicate_with_llm(query_text, candidates) if candidates else None
+    if duplicate is not None:
+        kind, match, similarity = duplicate
+        await _post_duplicate_message(bot_token, session, kind, match, similarity)
+        session.status = TriageStatus.REJECTED
+        logger.info(
+            "triage_duplicate_detected",
+            session_id=str(session.id),
+            kind=kind,
+            similarity=round(similarity, 4),
+            candidate_count=len(candidates),
+        )
+        return
+
     skill_name = "slack-triage"
     prompt = await build_slack_triage_prompt(
         skill_name=skill_name,
@@ -361,32 +567,14 @@ async def _run_triage_agent(
         db=db,
     )
 
-    from app.services.claude_runner import (
-        NO_REPO_CONTEXT,
-        ClaudeRunnerConfig,
-        MCPServerConfig,
-        run_claude_code,
-    )
-    from app.services.skill_loader import load_skill
-
     skill = load_skill(skill_name)
 
-    # Only set up MCP auth when the agent has enough context to check for
-    # existing features. On the first turn (INTERVIEWING, no thread replies)
-    # the agent just asks questions — no MCP tools needed.
-    needs_mcp = len(thread_messages) > 2 or session.status != TriageStatus.INTERVIEWING
-
-    mcp: MCPServerConfig | None = None
-    if needs_mcp:
-        from app.config import settings as app_settings
-        from app.mcp.auth import create_internal_mcp_token
-
-        token = create_internal_mcp_token(org.id)
-        mcp = MCPServerConfig(
-            backend_url=app_settings.mcp_backend_url,
-            mcp_token=token,
-            tool_names=["check_feature_exists", "search_bugs"],
-        )
+    token = create_internal_mcp_token(org.id)
+    mcp: MCPServerConfig | None = MCPServerConfig(
+        backend_url=app_settings.mcp_backend_url,
+        mcp_token=token,
+        tool_names=["check_feature_exists", "get_bud_context", "search_bugs"],
+    )
 
     result = await run_claude_code(
         prompt=prompt,
@@ -408,14 +596,19 @@ async def _run_triage_agent(
         )
         return
 
-    # Parse agent response
-    response = _parse_agent_response(result.output)
+    response = parse_json_response(result.output)
     if response is None:
-        # Agent output wasn't valid JSON — post raw output as fallback
+        logger.warning(
+            "triage_agent_parse_failed",
+            session_id=str(session.id),
+            output_length=len(result.output),
+            output_head=result.output[:500],
+            output_tail=result.output[-500:] if len(result.output) > 500 else "",
+        )
         await slack_client.chat_post_message(
             bot_token,
             session.slack_channel,
-            result.output[:3000],
+            "⚠️ Couldn't read the triage response. Please react 🧠 again to retry.",
             thread_ts=session.thread_ts,
         )
         return
@@ -430,6 +623,47 @@ async def _run_triage_agent(
             session.slack_channel,
             data.get("message", "Could you provide more details?"),
             thread_ts=session.thread_ts,
+        )
+
+    elif action == "exists":
+        # Duplicate feature or active BUD found — close the session without creating a BUD
+        kind = data.get("kind", "feature")
+        title = data.get("title", "Unknown feature")
+
+        if kind == "bud":
+            bud_number = data.get("bud_number")
+            status_str = data.get("status", "")
+            bud_ref = f"BUD-{int(bud_number):03d}" if bud_number is not None else "BUD-???"
+            parts = [
+                f"⚠️ *{bud_ref}* — {title} is already *{status_str}* and being tracked."
+                " No new BUD needed."
+            ]
+            if bud_number is not None:
+                bud_repo = BUDRepository(db, org_id=org.id)
+                existing_bud = await bud_repo.get_by_number(int(bud_number))
+                if existing_bud:
+                    if existing_bud.prod_p70_date:
+                        date_str = existing_bud.prod_p70_date.strftime("%Y-%m-%d")
+                        parts.append(f"📅 Estimated delivery: *{date_str}*")
+                    elif existing_bud.current_phase_deadline:
+                        date_str = existing_bud.current_phase_deadline.strftime("%Y-%m-%d")
+                        parts.append(f"📅 Current phase deadline: *{date_str}*")
+            message = "\n".join(parts)
+        else:
+            message = f"ℹ️ *{title}* is already tracked in the product backlog."
+
+        await slack_client.chat_post_message(
+            bot_token,
+            session.slack_channel,
+            message,
+            thread_ts=session.thread_ts,
+        )
+        session.status = TriageStatus.REJECTED
+        logger.info(
+            "triage_duplicate_detected",
+            session_id=str(session.id),
+            kind=kind,
+            title=title,
         )
 
     elif action == "summary":
@@ -455,13 +689,6 @@ async def _run_triage_agent(
             feature_name=session.feature_name,
             priority=session.priority,
         )
-
-
-def _parse_agent_response(output: str) -> dict[str, Any] | None:
-    """Parse the agent's JSON response, handling common formatting issues."""
-    from app.services.json_parser import parse_json_response
-
-    return parse_json_response(output)
 
 
 async def _run_prd_agent(

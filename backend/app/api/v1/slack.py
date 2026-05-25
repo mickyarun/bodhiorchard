@@ -29,9 +29,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal
 from app.models.organization import Organization
 from app.repositories.organization import OrganizationRepository
-from app.schemas.jobs import TriageJobPayload
+from app.schemas.jobs import FeatureQAJobPayload, TriageJobPayload
 from app.schemas.slack import SlackEventWrapper, SlackMessageEvent, SlackReactionEvent
-from app.services.job_queue import JOB_TRIAGE, create_job
+from app.services.job_queue import JOB_FEATURE_QA, JOB_TRIAGE, create_job
 
 logger = structlog.get_logger(__name__)
 
@@ -130,8 +130,9 @@ async def slack_events(
 
     Handles:
     - url_verification (challenge handshake)
-    - reaction_added (brain emoji → triage, checkmark → approval)
-    - message (thread replies → triage continuation)
+    - reaction_added (brain/bug → triage, ✅/❌ → approval, ❓ → feature Q&A)
+    - app_mention (@-mention → feature Q&A)
+    - message (thread replies → triage or Q&A continuation)
 
     Returns 200 immediately for all event callbacks; processing is dispatched
     to the async job queue to stay within Slack's 3-second timeout.
@@ -196,32 +197,31 @@ async def slack_events(
     # Dispatch based on event type
     event_data = payload.event
     event_type = event_data.get("type", "")
+    team_id = payload.team_id or ""
 
     if event_type == "reaction_added":
         event = SlackReactionEvent.model_validate(event_data)
-        if event.item.type == "message" and event.reaction in (
-            "brain",
-            "bug",
-            "white_check_mark",
-            "x",
-        ):
+        if event.item.type != "message":
+            return Response(status_code=200)
+
+        if event.reaction in ("brain", "bug", "white_check_mark", "x"):
             if event.reaction == "brain":
                 triage_payload = TriageJobPayload(
-                    team_id=payload.team_id or "",
+                    team_id=team_id,
                     action="start_triage",
                     event_type="reaction_added",
                     event_data=event.model_dump(),
                 )
             elif event.reaction == "bug":
                 triage_payload = TriageJobPayload(
-                    team_id=payload.team_id or "",
+                    team_id=team_id,
                     action="start_bug_triage",
                     event_type="reaction_added",
                     event_data=event.model_dump(),
                 )
             else:
                 triage_payload = TriageJobPayload(
-                    team_id=payload.team_id or "",
+                    team_id=team_id,
                     action="pm_approval",
                     event_type="reaction_added",
                     event_data=event.model_dump(),
@@ -229,16 +229,46 @@ async def slack_events(
                 )
             create_job(JOB_TRIAGE, payload=triage_payload.model_dump())
 
+        elif event.reaction == "question":
+            # ❓ reaction — start a feature Q&A session for the reacted message
+            qa_payload = FeatureQAJobPayload(
+                team_id=team_id,
+                action="start_qa",
+                event_type="reaction_added",
+                event_data=event.model_dump(),
+            )
+            create_job(JOB_FEATURE_QA, payload=qa_payload.model_dump())
+
+    elif event_type == "app_mention":
+        # @mention in a channel — start a feature Q&A session
+        msg = SlackMessageEvent.model_validate(event_data)
+        if not msg.bot_id:
+            qa_payload = FeatureQAJobPayload(
+                team_id=team_id,
+                action="start_qa",
+                event_type="app_mention",
+                event_data=msg.model_dump(),
+            )
+            create_job(JOB_FEATURE_QA, payload=qa_payload.model_dump())
+
     elif event_type == "message":
         msg = SlackMessageEvent.model_validate(event_data)
         # Only handle thread replies from humans (not bot messages, not top-level)
         if msg.thread_ts and not msg.bot_id and not msg.subtype:
             triage_payload = TriageJobPayload(
-                team_id=payload.team_id or "",
+                team_id=team_id,
                 action="continue_triage",
                 event_type="message",
                 event_data=msg.model_dump(),
             )
             create_job(JOB_TRIAGE, payload=triage_payload.model_dump())
+            # Also dispatch to feature Q&A; the handler silently no-ops if there's no Q&A session
+            qa_payload = FeatureQAJobPayload(
+                team_id=team_id,
+                action="continue_qa",
+                event_type="message",
+                event_data=msg.model_dump(),
+            )
+            create_job(JOB_FEATURE_QA, payload=qa_payload.model_dump())
 
     return Response(status_code=200)

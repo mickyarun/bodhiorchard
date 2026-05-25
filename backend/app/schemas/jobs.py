@@ -98,6 +98,15 @@ class TriageJobPayload(BaseModel):
     approved: bool | None = None
 
 
+class FeatureQAJobPayload(BaseModel):
+    """Payload for Slack feature Q&A jobs."""
+
+    team_id: str
+    action: str  # "start_qa" | "continue_qa"
+    event_type: str
+    event_data: dict[str, Any]
+
+
 class PRDAgentJobPayload(BaseModel):
     """Payload for PRD agent enrichment jobs."""
 
