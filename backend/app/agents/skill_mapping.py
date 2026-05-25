@@ -51,6 +51,7 @@ AGENT_SKILL_MAP: dict[str, str] = {
     "testPlan": "testing",
     "design": "designer",
     "slackTriage": "slack-triage",
+    "slackFeatureQa": "slack-feature-qa",
 }
 
 # Maps BUD section keys to the skill that handles chat for that section.

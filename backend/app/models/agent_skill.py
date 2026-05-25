@@ -62,6 +62,7 @@ class AgentType(StrEnum):
     TEST_PLAN = "testPlan"
     DESIGN = "design"
     SLACK_TRIAGE = "slackTriage"
+    SLACK_FEATURE_QA = "slackFeatureQa"
 
 
 class AgentSkill(BaseModel):
