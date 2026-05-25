@@ -21,10 +21,37 @@
       <div>
         <div class="text-h5 font-weight-bold">BUD Board</div>
         <div class="text-body-2 text-medium-emphasis">
-          {{ budStore.buds.length }} document{{ budStore.buds.length !== 1 ? 's' : '' }}
+          {{ filteredCount }} of {{ budStore.buds.length }} document{{ budStore.buds.length !== 1 ? 's' : '' }}
         </div>
       </div>
-      <div class="d-flex align-center ga-2">
+      <div class="d-flex align-center ga-2 board-filters">
+        <v-text-field
+          v-model="nameFilter"
+          placeholder="Filter by title or BUD-###"
+          prepend-inner-icon="mdi-magnify"
+          density="compact"
+          variant="solo-filled"
+          flat
+          hide-details
+          clearable
+          single-line
+          class="board-filter-search"
+        />
+        <v-select
+          v-model="assigneeFilter"
+          :items="assigneeOptions"
+          item-title="label"
+          item-value="value"
+          placeholder="All assignees"
+          prepend-inner-icon="mdi-account-outline"
+          density="compact"
+          variant="solo-filled"
+          flat
+          hide-details
+          clearable
+          single-line
+          class="board-filter-assignee"
+        />
         <!-- Customize lifecycle stages — same permission gate as the
              settings route. Visible to users who can actually change
              the UAT toggle / framework; hidden for plain viewers. -->
@@ -91,7 +118,7 @@
                 variant="flat"
                 label
               >
-                {{ budStore.budsByStatus[status]?.length || 0 }}
+                {{ filteredBudsByStatus[status]?.length || 0 }}
               </v-chip>
               <span class="text-body-2 font-weight-medium">{{ BUD_STATUS_LABELS[status] }}</span>
             </div>
@@ -100,7 +127,7 @@
           <!-- Cards -->
           <div class="column-cards">
             <v-card
-              v-for="bud in budStore.budsByStatus[status]"
+              v-for="bud in filteredBudsByStatus[status]"
               :key="bud.id"
               class="bud-card pa-4 mb-2 cursor-pointer"
               color="surface"
@@ -177,11 +204,11 @@
             </v-card>
 
             <div
-              v-if="!budStore.budsByStatus[status]?.length"
+              v-if="!filteredBudsByStatus[status]?.length"
               class="text-caption text-medium-emphasis text-center pa-4"
               style="opacity: 0.4;"
             >
-              No items
+              {{ nameFilter ? 'No matches' : 'No items' }}
             </div>
           </div>
         </div>
@@ -307,6 +334,57 @@ import { usePermissions } from '@/composables/usePermissions'
 const router = useRouter()
 const budStore = useBUDStore()
 const skillsStore = useAgentSkillsStore()
+
+const nameFilter = ref('')
+// Sentinel value (string, not null) for the "Unassigned" option — v-select's
+// `clearable` resets to null, which we treat as "no filter".
+const UNASSIGNED = '__unassigned__'
+const assigneeFilter = ref<string | null>(null)
+
+// Dropdown options derived from the currently-loaded buds so we only show
+// assignees that actually exist on the board. "Unassigned" is appended
+// only if at least one BUD has no assignee.
+const assigneeOptions = computed(() => {
+  const seen = new Map<string, string>()
+  let hasUnassigned = false
+  for (const bud of budStore.buds) {
+    if (bud.assignee_id && bud.assignee_name) seen.set(bud.assignee_id, bud.assignee_name)
+    else hasUnassigned = true
+  }
+  const opts = [...seen.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+  if (hasUnassigned) opts.push({ value: UNASSIGNED, label: 'Unassigned' })
+  return opts
+})
+
+// Filter buds by title (case-insensitive substring) OR by BUD reference
+// like "BUD-014" / "014" / "14", AND by assignee. Applied after the store's
+// status grouping so kanban columns stay intact and the filter is purely
+// visual.
+const filteredBudsByStatus = computed<Record<string, typeof budStore.buds>>(() => {
+  const q = nameFilter.value?.trim().toLowerCase() ?? ''
+  const assignee = assigneeFilter.value
+  const grouped = budStore.budsByStatus
+  if (!q && !assignee) return grouped
+  const numericQ = q.replace(/^bud-?/, '').replace(/^0+/, '')
+  const out: Record<string, typeof budStore.buds> = {}
+  for (const status of Object.keys(grouped)) {
+    out[status] = grouped[status].filter((bud) => {
+      if (assignee === UNASSIGNED && bud.assignee_id) return false
+      if (assignee && assignee !== UNASSIGNED && bud.assignee_id !== assignee) return false
+      if (!q) return true
+      if (bud.title?.toLowerCase().includes(q)) return true
+      const num = String(bud.bud_number)
+      return numericQ !== '' && num.includes(numericQ)
+    })
+  }
+  return out
+})
+
+const filteredCount = computed(() =>
+  Object.values(filteredBudsByStatus.value).reduce((n, list) => n + list.length, 0),
+)
 
 const showCreateDialog = ref(false)
 const newTitle = ref('')
@@ -516,6 +594,20 @@ function deadlineColor(deadline: string): string {
 
 .dot-empty {
   background: rgba(255, 255, 255, 0.12);
+}
+
+.board-filters :deep(.v-field) {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+}
+.board-filters :deep(.v-field--focused) {
+  background: rgba(255, 255, 255, 0.06);
+}
+.board-filter-search {
+  width: 260px;
+}
+.board-filter-assignee {
+  width: 200px;
 }
 
 .stage-label {
