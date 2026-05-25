@@ -418,9 +418,7 @@ async def _verify_duplicate_with_llm(
                 f" — status: {status_str}, similarity: {sim:.2f}"
             )
         else:
-            lines.append(
-                f"{idx}. [Feature] {match.feature_title} — similarity: {sim:.2f}"
-            )
+            lines.append(f"{idx}. [Feature] {match.feature_title} — similarity: {sim:.2f}")
 
     prompt = (
         "Decide whether a Slack feature request is a DUPLICATE of any existing"
@@ -432,7 +430,7 @@ async def _verify_duplicate_with_llm(
         " user-facing capability or solve the SAME problem. They are NOT"
         " duplicates merely because they share generic topic words such as"
         ' "user", "data", "feature", "dashboard", "settings".\n\n'
-        'Respond with exactly one JSON object, no markdown, no extra text:\n'
+        "Respond with exactly one JSON object, no markdown, no extra text:\n"
         '{"verdict": "match" or "no_match", "matched_index":'
         " <1-based index or null>}"
     )
@@ -474,13 +472,10 @@ async def _post_duplicate_message(
             f" Similarity {similarity:.0%} — no new BUD needed."
         ]
         if match.prod_p70_date:
-            parts.append(
-                f"📅 Estimated delivery: *{match.prod_p70_date.strftime('%Y-%m-%d')}*"
-            )
+            parts.append(f"📅 Estimated delivery: *{match.prod_p70_date.strftime('%Y-%m-%d')}*")
         elif match.current_phase_deadline:
             parts.append(
-                "📅 Current phase deadline:"
-                f" *{match.current_phase_deadline.strftime('%Y-%m-%d')}*"
+                f"📅 Current phase deadline: *{match.current_phase_deadline.strftime('%Y-%m-%d')}*"
             )
         message = "\n".join(parts)
     else:
