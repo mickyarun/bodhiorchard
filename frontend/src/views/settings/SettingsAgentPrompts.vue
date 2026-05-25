@@ -568,6 +568,7 @@ const AGENT_ICONS: Record<AgentType, string> = {
   testPlan: 'mdi-test-tube',
   design: 'mdi-palette-outline',
   slackTriage: 'mdi-slack',
+  slackFeatureQa: 'mdi-message-question-outline',
 }
 
 const AGENT_ACCENTS: Record<AgentType, string> = {
@@ -583,6 +584,7 @@ const AGENT_ACCENTS: Record<AgentType, string> = {
   testPlan: 'rgb(160, 220, 160)',
   design: 'rgb(230, 150, 220)',
   slackTriage: 'rgb(180, 140, 220)',
+  slackFeatureQa: 'rgb(140, 200, 230)',
 }
 
 const AGENT_BLURBS: Record<AgentType, string> = {
@@ -598,6 +600,7 @@ const AGENT_BLURBS: Record<AgentType, string> = {
   testPlan: 'Designs test plans and QA cases',
   design: 'Produces visual designs from the design system',
   slackTriage: 'Triages Slack messages into actions',
+  slackFeatureQa: 'Answers Slack questions about feature delivery, status, and ownership',
 }
 
 function agentIcon(at: AgentType): string {
@@ -618,7 +621,7 @@ function agentBlurb(at: AgentType): string {
 const AGENT_ORDER: AgentType[] = [
   'bud', 'design', 'techPlan', 'testPlan', 'skill',
   'triage', 'bugLinker', 'reassignment', 'standup',
-  'learning', 'status', 'slackTriage',
+  'learning', 'status', 'slackTriage', 'slackFeatureQa',
 ]
 
 interface AgentGroup {

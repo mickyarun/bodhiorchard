@@ -32,6 +32,7 @@ export type AgentType =
   | 'testPlan'
   | 'design'
   | 'slackTriage'
+  | 'slackFeatureQa'
 
 export const AGENT_TYPE_LABELS: Record<AgentType, string> = {
   triage: 'Triage',
@@ -46,6 +47,7 @@ export const AGENT_TYPE_LABELS: Record<AgentType, string> = {
   testPlan: 'Test plan',
   design: 'Design',
   slackTriage: 'Slack triage',
+  slackFeatureQa: 'Slack feature Q&A',
 }
 
 export interface AgentSkill {
