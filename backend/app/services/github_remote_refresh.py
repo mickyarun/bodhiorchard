@@ -32,6 +32,7 @@ classifier now surfaces as ``git_auth_failed`` with an actionable banner.
 """
 
 import uuid
+from pathlib import Path
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,16 +84,33 @@ async def refresh_origin_token(
         )
         return False
 
+    # Surface the common dev-machine failure (stale TrackedRepository row
+    # pointing at a path that was moved or deleted) BEFORE we try to spawn
+    # the subprocess — otherwise the only signal is a cryptic uvloop
+    # FileNotFoundError stack that's indistinguishable from "git binary
+    # missing".
+    if not Path(working_dir).is_dir():
+        logger.error(
+            "origin_refresh_skip_missing_working_dir",
+            org_id=str(org_id),
+            repo=repo.github_repo_full_name,
+            repo_path=working_dir,
+            hint=(
+                "TrackedRepository.local_path points at a directory that"
+                " does not exist on disk. Re-clone the repo or update the"
+                " tracked path in the DB."
+            ),
+        )
+        return False
+
     # ``x-access-token`` is the documented username for installation-token
     # auth. Kept inline rather than importing the App-clone-URL template
     # to avoid a heavier dependency chain.
     new_url = f"https://x-access-token:{token}@github.com/{repo.github_repo_full_name}.git"
 
-    # Catch OSError so the call honours its "Never raises" contract even
-    # when the subprocess machinery itself fails before git runs — git
-    # missing from PATH, or ``working_dir`` not existing on disk, both
-    # surface as FileNotFoundError (an OSError subclass) from
-    # ``asyncio.create_subprocess_exec``.
+    # Catch OSError as a backstop for the only other subprocess failure
+    # mode that bypasses git's own exit codes: ``git`` missing from PATH.
+    # The working-dir-missing case is handled above with a clearer log.
     try:
         _, stderr, rc = await run_git(
             ["remote", "set-url", "origin", new_url],
