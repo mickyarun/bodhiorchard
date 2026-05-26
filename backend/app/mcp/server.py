@@ -247,6 +247,14 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "— no assignee restriction on reads. Provide exactly one of "
             "bud_id or bud_number."
         ),
+        # Schema deliberately omits a top-level ``oneOf`` exclusive
+        # constraint: the Anthropic Tools API rejects ``oneOf`` /
+        # ``allOf`` / ``anyOf`` at the input_schema root with
+        # ``400 input_schema does not support oneOf, allOf, or anyOf
+        # at the top level``. The "exactly one of" contract is stated
+        # in the tool description above and enforced at runtime by
+        # ``_resolve_bud_for_read`` (returns the ``missing_identifier``
+        # error when neither is provided; UUID wins when both are sent).
         input_schema={
             "type": "object",
             "properties": {
@@ -260,7 +268,6 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     ),
                 },
             },
-            "oneOf": [{"required": ["bud_id"]}, {"required": ["bud_number"]}],
         },
     ),
     MCPToolDefinition(
