@@ -37,6 +37,7 @@ import structlog
 
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.scan.session import with_session
+from app.scan.soft_delete import rollback_soft_deleted_for_repo as _rollback_for_repo_impl
 
 logger = structlog.get_logger(__name__)
 
@@ -142,9 +143,7 @@ async def rollback_soft_deleted_for_repo(
     if not feature_ids:
         return
     try:
-        from app.scan.soft_delete import rollback_soft_deleted_for_repo as _impl
-
-        await _impl(
+        await _rollback_for_repo_impl(
             org_id=org_id,
             scan_id=str(scan_id),
             repo_id=repo_id,
