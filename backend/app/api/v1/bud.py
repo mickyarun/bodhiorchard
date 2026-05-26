@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFi
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.skill_mapping import resolve_skill_for_agent
 from app.api.v1.bud_chat import router as chat_router
 from app.api.v1.bud_designs import router as designs_router
 from app.api.v1.bud_estimates import router as estimates_router
@@ -33,14 +34,23 @@ from app.api.v1.bud_todos import router as todos_router
 from app.api.v1.bud_versions import router as versions_router
 from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, require_permissions
-from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus, BUDTimelineEvent
+from app.models.bud import (
+    BUDDesignStatus,
+    BUDDocument,
+    BUDStatus,
+    BUDTimelineEvent,
+    BUDTimelineEventType,
+)
+from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.bud_version import BUDEditSource
 from app.models.user import User
 from app.repositories import bud_version as bud_version_repo
 from app.repositories.agent_activity import AgentActivityLogRepository
+from app.repositories.agent_skill import AgentSkillRepository
 from app.repositories.bud import BUDDesignRepository, BUDRepository
 from app.repositories.bud_agent_task import BUDAgentTaskRepository
+from app.repositories.bud_section_session import BUDSectionSessionRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.bug import BugRepository
 from app.schemas.bud import (
@@ -54,9 +64,10 @@ from app.schemas.bud import (
 from app.schemas.bud_code_review import (
     CodeReviewOverrideRequest,
     CodeReviewRepoStatus,
+    CodeReviewRerunRequest,
     CodeReviewStatusResponse,
 )
-from app.schemas.bud_constants import EXPORTABLE_SECTIONS
+from app.schemas.bud_constants import BUD_AGENT_SECTIONS, EXPORTABLE_SECTIONS
 from app.schemas.bud_design import BUDDesignRead
 from app.schemas.dev_activity import (
     CommitRepoRead,
@@ -67,6 +78,7 @@ from app.schemas.dev_activity import (
     DevStatsRead,
     UntrackedRepoRead,
 )
+from app.schemas.jobs import BUDAgentTaskPayload
 from app.services.agent_activity_logger import PHASE_WORKER_SLUGS
 from app.services.agent_result_handlers import persist_linked_features_from_markdown
 from app.services.agent_task_cancel import (
@@ -79,6 +91,8 @@ from app.services.bud_agent_trigger import (
     should_auto_generate_phase,
 )
 from app.services.bud_edit_policy import assert_section_editable
+from app.services.bud_timeline import record_event
+from app.services.job_queue import JOB_BUD_AGENT, create_job
 
 logger = structlog.get_logger(__name__)
 
@@ -1219,6 +1233,173 @@ async def override_code_review(
     if refreshed is None:
         raise HTTPException(status_code=500, detail="BUD vanished after override")
     return await _bud_response(refreshed, current_user.org_id, db)
+
+
+@router.post(
+    "/{bud_id}/code-review/regenerate",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def regenerate_code_review(
+    bud_id: uuid.UUID,
+    payload: CodeReviewRerunRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Re-run the code-review agent on a BUD that already has findings.
+
+    Clears the prior ``code_review_comments`` array (GitHub-side inline
+    comments are intentionally left alone), then spawns a fresh
+    ``code_review`` agent task. By default the new task carries the
+    stored Claude CLI session id from ``bud_section_sessions`` so the
+    runner invokes ``claude --resume`` — warm prompt cache, no repo
+    re-index. Pass ``start_fresh=true`` to mint a brand new session.
+
+    Guarded to ``code_review`` status only, and blocked while another
+    agent task is in flight for the BUD.
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id_for_update(bud_id)
+    if not bud:
+        raise HTTPException(status_code=404, detail="BUD not found")
+    if bud.status != BUDStatus.CODE_REVIEW:
+        raise HTTPException(
+            status_code=409,
+            detail=f"BUD is not in code_review status (current: {bud.status})",
+        )
+
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    if await task_repo.get_active_for_bud(bud_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot re-review while an agent task is running",
+        )
+
+    # Snapshot the prior comments before clearing them. If ``create_job``
+    # later fails (Redis down, queue full, etc.) we put them back so the
+    # user is not left with a wiped findings list AND an orphan PENDING
+    # task that no worker will ever pick up. Lists are JSONB so a shallow
+    # copy is enough — agents only ever replace the list, not mutate it.
+    prior_comments = list(bud.code_review_comments or [])
+    cleared_comment_count = len(prior_comments)
+    bud.code_review_comments = []
+
+    # Resume the prior CLI session unless the caller explicitly asked
+    # for a clean slate. ``code_review`` shares ``BUD_AGENT_SECTIONS``
+    # with ``test_plan_md``, so the session row we resume is whatever
+    # thread is currently active on (bud, test_plan_md) — fine for
+    # prompt-cache + repo-index warmth.
+    resume_session_id: uuid.UUID | None = None
+    if not payload.start_fresh:
+        section_repo = BUDSectionSessionRepository(db, org_id=current_user.org_id)
+        existing_session = await section_repo.get_active(bud_id, BUD_AGENT_SECTIONS["code_review"])
+        if existing_session is not None:
+            resume_session_id = existing_session.session_id
+
+    resumed = resume_session_id is not None
+
+    await record_event(
+        db,
+        current_user.org_id,
+        bud_id,
+        BUDTimelineEventType.CODE_REVIEW_RERUN.value,
+        detail={
+            "cleared_comment_count": cleared_comment_count,
+            "resumed": resumed,
+            "start_fresh": payload.start_fresh,
+            "triggered_by": str(current_user.id),
+        },
+    )
+
+    # Resolve the code-review skill via per-BUD override, then org
+    # default, then legacy stage mapping. Matches ``regenerate_design``
+    # so a custom skill assigned in Advanced Settings actually runs.
+    reviewer_skill = await resolve_skill_for_agent(
+        "code_review",
+        current_user.org_id,
+        db,
+        bud_id=bud_id,
+        bud_status=BUDStatus.CODE_REVIEW,
+    )
+    if reviewer_skill is None:
+        skill_repo = AgentSkillRepository(db, org_id=current_user.org_id)
+        reviewer_skill = await skill_repo.get_by_slug("code-reviewer")
+    if reviewer_skill is None:
+        raise HTTPException(
+            status_code=500,
+            detail="No code-reviewer skill is configured for this org",
+        )
+
+    prior = await task_repo.get_latest_for_type(bud_id, "code_review")
+    next_attempt = (prior.attempt + 1) if prior else 1
+
+    new_task = BUDAgentTask(
+        org_id=current_user.org_id,
+        bud_id=bud_id,
+        skill_id=reviewer_skill.id,
+        task_type="code_review",
+        status=AgentTaskStatus.PENDING,
+        attempt=next_attempt,
+        triggered_by=current_user.id,
+        resume_session_id=resume_session_id,
+    )
+    db.add(new_task)
+    # Commit BEFORE enqueueing. The worker opens its own session at
+    # READ COMMITTED and otherwise races us to a row that doesn't
+    # exist yet — pattern documented in bud_agent_trigger.py.
+    await db.commit()
+    await db.refresh(new_task)
+
+    try:
+        job = create_job(
+            JOB_BUD_AGENT,
+            payload=BUDAgentTaskPayload(
+                org_id=str(current_user.org_id),
+                bud_id=str(bud_id),
+                task_id=str(new_task.id),
+            ).model_dump(),
+            user_id=str(current_user.id),
+        )
+    except Exception as exc:
+        # Queue is unreachable. Roll back the user-visible damage:
+        # restore the cleared comments and mark the task FAILED so the
+        # one-active-task unique index does not block the next retry.
+        # We deliberately re-fetch the BUD because the prior commit
+        # detached our snapshot from the session.
+        bud_after = await bud_repo.get_by_id(bud_id)
+        if bud_after is not None:
+            bud_after.code_review_comments = prior_comments
+        new_task.status = AgentTaskStatus.FAILED
+        new_task.error_message = f"Failed to enqueue agent job: {exc}"
+        await db.commit()
+        logger.exception(
+            "code_review_rerun_enqueue_failed",
+            bud_id=str(bud_id),
+            task_id=str(new_task.id),
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Job queue unavailable; please retry the re-review",
+        ) from exc
+
+    new_task.job_id = job.job_id
+    await db.commit()
+
+    logger.info(
+        "code_review_rerun_enqueued",
+        bud_id=str(bud_id),
+        task_id=str(new_task.id),
+        job_id=job.job_id,
+        resumed=resumed,
+        cleared_comment_count=cleared_comment_count,
+        triggered_by=str(current_user.id),
+    )
+
+    return {
+        "taskId": str(new_task.id),
+        "jobId": job.job_id,
+        "resumed": resumed,
+    }
 
 
 @router.post(

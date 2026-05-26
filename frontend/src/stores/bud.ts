@@ -415,6 +415,29 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function regenerateCodeReview(
+    budId: string,
+    startFresh: boolean,
+  ): Promise<{ taskId: string, jobId: string, resumed: boolean } | null> {
+    error.value = ''
+    try {
+      const { data } = await api.post(
+        `/v1/buds/${budId}/code-review/regenerate`,
+        { start_fresh: startFresh },
+      )
+      return data
+    } catch (err) {
+      const axiosErr = err as AxiosError<{ detail?: string }>
+      const detail = axiosErr.response?.data?.detail
+      if (axiosErr.response?.status === 409) {
+        error.value = detail || 'Cannot re-review — BUD is not in code_review or an agent task is running'
+      } else {
+        error.value = 'Failed to start re-review'
+      }
+      return null
+    }
+  }
+
   async function requestReassignment(budId: string, reason: string): Promise<BUDDocument | null> {
     error.value = ''
     try {
@@ -539,6 +562,7 @@ export const useBUDStore = defineStore('bud', () => {
     updateDesignHtml,
     updateDesignNotes,
     regenerateDesign,
+    regenerateCodeReview,
     fetchChatHistory,
     fetchActiveChatJob,
     cancelActiveChat,
