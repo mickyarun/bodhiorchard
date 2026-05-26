@@ -207,13 +207,17 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "bud_id (UUID) or bud_number (integer — the human-visible "
             "BUD-### number, which is usually all an external LLM has)."
         ),
+        # Schema deliberately omits a top-level ``oneOf`` exclusive
+        # constraint — the Anthropic Tools API rejects combinators at
+        # the input_schema root. The "exactly one of" contract is in
+        # the description above and enforced at runtime by
+        # ``_resolve_bud_for_read``.
         "inputSchema": {
             "type": "object",
             "properties": {
                 "bud_id": {"type": "string"},
                 "bud_number": {"type": "integer"},
             },
-            "oneOf": [{"required": ["bud_id"]}, {"required": ["bud_number"]}],
         },
     },
     {

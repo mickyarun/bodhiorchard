@@ -50,14 +50,19 @@ _HTTP_METHODS = "get|post|put|patch|delete|head|options|all"
 _IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
 
 # Constants-map detector. Recognises:
-#   const NAME = "/path"          (declaration)
+#   const NAME = "/path"               (JS declaration)
 #   const NAME = `${anything}/path`
-#   NAME: "/path"                 (object-literal key, NOT member assignment)
+#   final NAME = '/path'                (Dart immutable variable)
+#   const String NAME = '/path'         (Dart typed const, also class field)
+#   static const NAME = '/path'         (Dart class-static const)
+#   NAME: "/path"                       (object-literal key, NOT member assignment)
 #   NAME: `${anything}/path`
-# The declaration form requires ``const|let|var`` so we don't pick up member
-# assignments like ``ref.value = "/x"`` — that would have matched ``value``
-# as a global constant and polluted every leaf-identifier lookup. The
-# object-key form forbids a preceding ``.`` for the same reason.
+# The declaration form still requires one of ``const|final|let|var`` so we
+# don't pick up member assignments like ``ref.value = "/x"`` — that would
+# have matched ``value`` as a global constant and polluted every leaf-
+# identifier lookup. The object-key form forbids a preceding ``.`` for the
+# same reason. The optional type group covers Dart only; JS code has no
+# declaration form with a leading type so it's unaffected.
 _STRING_LITERAL = (
     r"(?:"
     r"`(?P<bt>[^`]*)`"
@@ -66,7 +71,9 @@ _STRING_LITERAL = (
     r")"
 )
 _URL_DECL_RE = re.compile(
-    rf"\b(?:const|let|var)\s+({_IDENT})\s*=\s*{_STRING_LITERAL}",
+    rf"\b(?:static\s+)?(?:const|final|let|var)\s+"
+    rf"(?:{_IDENT}\s+)?"  # optional type identifier (Dart: ``String NAME``)
+    rf"({_IDENT})\s*=\s*{_STRING_LITERAL}",
 )
 _URL_OBJ_KEY_RE = re.compile(
     rf"(?<![.\w])({_IDENT})\s*:\s*{_STRING_LITERAL}",
@@ -237,16 +244,17 @@ def _is_source_path(fp: Path, repo_root: Path) -> bool:
 def build_url_constants_map(repo_root: Path) -> dict[str, str]:
     """Return ``{NAME: normalised_path}`` for the whole repo tree.
 
-    Walks every ``.ts`` / ``.js`` file outside hidden, vendored, and build
-    output directories. The matcher picks up both object-literal style
-    entries (``NAME: "/path"``) and declaration style (``const NAME =
-    "/path"``). Multi-occurrence keys keep the first match.
+    Walks every ``.ts`` / ``.js`` / ``.mjs`` / ``.dart`` file outside hidden,
+    vendored, and build output directories. The matcher picks up both
+    object-literal style entries (``NAME: "/path"``) and declaration style
+    (``const NAME = "/path"``, also Dart ``final``/``static const`` with
+    optional type). Multi-occurrence keys keep the first match.
     """
     out: dict[str, str] = {}
     if not repo_root.is_dir():
         return out
     for fp in repo_root.rglob("*"):
-        if not fp.is_file() or fp.suffix not in (".ts", ".js", ".mjs"):
+        if not fp.is_file() or fp.suffix not in (".ts", ".js", ".mjs", ".dart"):
             continue
         if not _is_source_path(fp, repo_root):
             continue

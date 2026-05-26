@@ -260,9 +260,20 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             # Mint a CLI session id for this run when the agent owns a BUD
             # section that chat will resume against. Sections not in
             # ``BUD_AGENT_SECTIONS`` (e.g. ad-hoc tasks) get no session id
-            # and behave as before.
+            # and behave as before. When ``task.resume_session_id`` is set
+            # (re-run / regenerate endpoints), resume that session instead
+            # of minting a fresh one — keeps the prompt cache warm and the
+            # repo working tree already indexed.
             section_for_session = BUD_AGENT_SECTIONS.get(task.task_type)
-            originating_session_id = mint_session_id() if section_for_session is not None else None
+            if section_for_session is None:
+                originating_session_id = None
+                is_resume_flag = False
+            elif task.resume_session_id is not None:
+                originating_session_id = task.resume_session_id
+                is_resume_flag = True
+            else:
+                originating_session_id = mint_session_id()
+                is_resume_flag = False
 
             config = ClaudeRunnerConfig(
                 max_turns=max(skill.max_turns, 0),
@@ -273,7 +284,7 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 cli_session_id=(
                     str(originating_session_id) if originating_session_id is not None else None
                 ),
-                is_resume=False,
+                is_resume=is_resume_flag,
             )
 
             # Code review needs JSON output

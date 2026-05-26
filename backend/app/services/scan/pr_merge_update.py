@@ -71,10 +71,32 @@ from app.services.scan.runner import ScanAlreadyActiveError, start_scan
 logger = structlog.get_logger(__name__)
 
 # Cap on the number of affected clusters that go through the narrow
-# synthesis path. Above this, fall back to today's full-repo scan path —
-# at that point the prompt savings stop justifying a second LLM run vs.
-# letting the standard pipeline's stage cache shortcut what it can.
-NARROW_CAP = 10
+# synthesis path. The effective cap is
+# ``max(NARROW_CAP_ABS, NARROW_CAP_PCT * total_head_clusters)`` — a
+# fixed floor for tiny repos, scaled by repo size for everything
+# else. Above the effective cap, fall back to the full-repo scan
+# path; at that point the prompt savings stop justifying a second
+# LLM run vs letting the standard pipeline's stage cache shortcut
+# what it can.
+#
+# History: a flat ``NARROW_CAP = 10`` proved too aggressive on
+# refactor-heavy PRs (e.g. a "production readiness" omnibus touching
+# 21 of 180 clusters — 12% — fell through to full scan, which then
+# tripped a separate empty-synthesis bug and wiped the repo's feature
+# set). The percentage track keeps that class of PR on the narrow
+# path while the absolute floor still protects tiny repos from a
+# proportional cap collapsing to 1–2 clusters.
+NARROW_CAP_ABS = 25
+NARROW_CAP_PCT = 0.25
+
+
+def effective_narrow_cap(total_head_clusters: int) -> int:
+    """Compute the per-call narrow cap for a repo with ``N`` head clusters.
+
+    Public so the dispatcher and tests share one definition; the
+    plain ``max`` would otherwise drift between call sites.
+    """
+    return max(NARROW_CAP_ABS, int(NARROW_CAP_PCT * total_head_clusters))
 
 
 class PrMergeDeliveryMissingError(RuntimeError):
@@ -226,7 +248,7 @@ async def _run_dispatch(
         await _trigger_repo_scan(org_id=org_id, repo_id=repo_id, reason="cache_miss")
         return None
 
-    affected, effective_base_sha = affected_result
+    affected, effective_base_sha, total_head_clusters = affected_result
     if not affected:
         # No semantic change in the code graph at head_sha. Still advance
         # tracked_repositories.head_sha so the BACKEND-route index
@@ -243,14 +265,18 @@ async def _run_dispatch(
         )
         return None
 
+    cap = effective_narrow_cap(total_head_clusters)
     logger.info(
         "pr_merge_update_clusters_affected",
         repo_id=str(repo_id),
         pr_number=pr_number,
         affected_count=len(affected),
-        narrow_cap=NARROW_CAP,
+        total_head_clusters=total_head_clusters,
+        narrow_cap=cap,
+        narrow_cap_abs=NARROW_CAP_ABS,
+        narrow_cap_pct=NARROW_CAP_PCT,
     )
-    if len(affected) <= NARROW_CAP:
+    if len(affected) <= cap:
         return NarrowSynthesisParams(
             org_id=org_id,
             repo_id=repo_id,
@@ -267,7 +293,11 @@ async def _run_dispatch(
     await _trigger_repo_scan(
         org_id=org_id,
         repo_id=repo_id,
-        reason=f"{len(affected)} clusters affected (above narrow cap {NARROW_CAP})",
+        reason=(
+            f"{len(affected)} clusters affected "
+            f"(above narrow cap {cap}: max({NARROW_CAP_ABS}, "
+            f"{NARROW_CAP_PCT:.2f}*{total_head_clusters}))"
+        ),
     )
     return None
 
@@ -373,8 +403,14 @@ async def _find_affected_clusters(
     head_sha: str,
     changed_paths: set[str],
     tracked_head_sha: str | None = None,
-) -> tuple[set[str], str] | None:
-    """Cluster-level diff. Returns ``(affected_signatures, effective_base_sha)`` or ``None``.
+) -> tuple[set[str], str, int] | None:
+    """Cluster-level diff.
+
+    Returns ``(affected_signatures, effective_base_sha, total_head_clusters)``
+    or ``None`` when the cache lacks rows at both ``base_sha`` and any
+    fallback. ``total_head_clusters`` is what feeds the dispatcher's
+    adaptive narrow cap — surfacing it here avoids a duplicate
+    ``list_for_repo_sha`` call at the call site.
 
     Algorithm:
       * Look up cluster_cache rows for the PR's ``base_sha``. If empty
@@ -415,6 +451,7 @@ async def _find_affected_clusters(
     head_rows = await cache.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
     if not base_rows or not head_rows:
         return None
+    total_head_clusters = len(head_rows)
 
     # NOTE: identify affected clusters by SIGNATURE, not ``cluster_id``.
     # The indexer reassigns numeric cluster_ids (c0, c1, …) when the set
@@ -438,7 +475,7 @@ async def _find_affected_clusters(
         if files & changed_paths:
             modified.add(row.signature)
 
-    return (added | modified | removed, effective_base_sha)
+    return (added | modified | removed, effective_base_sha, total_head_clusters)
 
 
 async def _trigger_repo_scan(

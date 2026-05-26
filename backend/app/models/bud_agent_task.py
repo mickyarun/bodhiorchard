@@ -92,6 +92,11 @@ class BUDAgentTask(BaseModel):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # If set, the agent runner invokes Claude with ``--resume <id>`` against
+    # this stored CLI session instead of minting a fresh one. Populated by
+    # re-run / regenerate endpoints; the section session it points at must
+    # exist in ``bud_section_sessions``.
+    resume_session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     # Relationships
     skill: Mapped["AgentSkill"] = relationship(lazy="joined")

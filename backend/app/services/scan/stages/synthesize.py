@@ -245,6 +245,31 @@ async def run(
     if outcome.success and repo_id is not None:
         reconcile_summary = await _reconcile_synthesised_batch(config, repo_id=repo_id)
         extras.update(reconcile_summary)
+        # Guard against silent-empty synthesis: ``outcome.success`` is
+        # the subprocess returncode, not a count check. Anthropic's
+        # Tools API rejecting a malformed input_schema, an MCP token
+        # rotation between scans, or a hook blocking the first tool
+        # call can all leave us here with exit 0 + zero tool calls
+        # captured. Without this guard, the pre-scan soft-delete +
+        # zero reconcile inserts/revives/updates = wholesale feature
+        # loss for the repo. Raising flows up to ``_run_one`` which
+        # reactivates this repo's soft-deleted slice.
+        persisted = (
+            int(reconcile_summary.get("reconcile_inserted", 0))
+            + int(reconcile_summary.get("reconcile_updated", 0))
+            + int(reconcile_summary.get("reconcile_revived", 0))
+        )
+        if persisted == 0 and len(communities) > 0:
+            extras["empty_output_guard_tripped"] = True
+            if runtime is not None:
+                reset_for_org(str(runtime.org_id))
+                reset_tool_progress_for_org(str(runtime.org_id))
+            raise RuntimeError(
+                f"synthesis produced 0 features from {len(communities)} "
+                f"communities (Claude emitted no write_synthesis_feature "
+                f"calls — likely MCP registration rejected by the Tools "
+                f"API). Failing repo run so soft-deleted features roll back."
+            )
 
     # Replace the placeholder kept_count with the live row count
     # actually persisted via the reconciler. Logged for ops too.

@@ -101,6 +101,8 @@ async def upsert_skill_profiles(
 
         if profile:
             profile.touch_count = entry.touch_count
+            profile.lines_added = entry.lines_added
+            profile.lines_removed = entry.lines_removed
             profile.skill_score = entry.skill_score
             profile.languages = entry.languages
             profile.last_touch = entry.last_touch
@@ -114,6 +116,8 @@ async def upsert_skill_profiles(
                 languages=entry.languages,
                 skill_score=entry.skill_score,
                 touch_count=entry.touch_count,
+                lines_added=entry.lines_added,
+                lines_removed=entry.lines_removed,
                 last_touch=entry.last_touch,
             )
             db.add(profile)

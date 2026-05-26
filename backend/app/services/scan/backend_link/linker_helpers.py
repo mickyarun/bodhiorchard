@@ -30,7 +30,11 @@ from pathlib import Path
 
 from app.services.scan.backend_link.backend_indexer import BackendIndex
 
-_SEED_FILE_EXTS = (".ts", ".tsx", ".js", ".mjs", ".vue")
+# Frontend source-file extensions that count as seed material when a
+# feature's ``code_locations`` lists a directory. ``.dart`` is the gate
+# for Flutter backend-linking — without it, Dart features never reach the
+# call-site regex pass.
+_SEED_FILE_EXTS = (".ts", ".tsx", ".js", ".mjs", ".vue", ".dart")
 
 
 @dataclass(frozen=True)

@@ -219,13 +219,43 @@ def test_elixir_vendored_is_dropped(rel_path: str) -> None:
 @pytest.mark.parametrize(
     "rel_path",
     [
+        # Cache / SDK / build dirs
         ".dart_tool/build/x.json",
         ".pub-cache/hosted/pub.dev/foo-1.0.0/lib/foo.dart",
+        ".pub/bin/snapshot/foo.dart",
+        ".fvm/flutter_sdk/bin/cache/x.json",
         "build/app/intermediates/x.json",
+        # Flutter-by-convention test directories
+        "integration_test/login_test.dart",
+        "test_driver/perf_test.dart",
+        # Generated Dart artefacts (file-pattern rules)
+        "lib/models/user.g.dart",
+        "lib/state/auth.freezed.dart",
+        "lib/router/router.gr.dart",
+        "lib/config/env.config.dart",
+        "test/auth/auth_service.mocks.dart",
+        # Dart test files anywhere in the tree
+        "lib/widgets/button_test.dart",
+        # Flutter tooling files at root
+        ".packages",
+        ".flutter-plugins",
     ],
 )
 def test_dart_vendored_is_dropped(rel_path: str) -> None:
     assert _run(rel_path), f"failed to skip {rel_path}"
+
+
+@pytest.mark.parametrize(
+    "rel_path",
+    [
+        # Plain Dart source (no code-gen suffix) must NOT match. Validates
+        # the regex is anchored to ``.<kind>.dart$`` rather than ``.dart$``.
+        "lib/widgets/button.dart",
+        "lib/main.dart",
+    ],
+)
+def test_dart_real_source_is_kept(rel_path: str) -> None:
+    assert not _run(rel_path), f"unexpectedly skipped {rel_path}"
 
 
 # ── C / C++ / Bazel ─────────────────────────────────────────────────
@@ -321,10 +351,39 @@ def test_bodhi_internals_dropped(rel_path: str) -> None:
         "src/Foo.obj",
         "src/lib.a",
         "tests/__snapshots__/Component.test.tsx.snap",
+        # Coverage report file (regardless of directory depth)
+        "lcov.info",
+        "reports/lcov.info",
+        "frontend/packages/web/coverage/lcov.info",
+        # Signing / keystore / secret artefacts
+        "android/app/release.jks",
+        "android/app/signing.keystore",
+        "ios/certs/distribution.p12",
+        "infra/ca/server.pem",
+        "android/app/google-services.json",
+        "ios/Runner/GoogleService-Info.plist",
+        "android/key.properties",
     ],
 )
 def test_file_patterns(rel_path: str) -> None:
     assert _run(rel_path), f"failed to skip {rel_path}"
+
+
+@pytest.mark.parametrize(
+    "rel_path",
+    [
+        # ``local.properties`` is a Gradle convention but the basename is
+        # too generic to skip globally — only the Flutter platform's
+        # ``android/`` dir skip should catch it (verified separately in
+        # ``test_indexer_platform_exclusions.py``).
+        "subproject/local.properties",
+        # ``service-account*.json`` is intentionally NOT in the global
+        # list; legitimate fixtures use that prefix.
+        "tests/fixtures/service-account-stub.json",
+    ],
+)
+def test_basenames_not_globally_skipped(rel_path: str) -> None:
+    assert not _run(rel_path), f"unexpectedly skipped {rel_path}"
 
 
 # ── Edge cases ──────────────────────────────────────────────────────
