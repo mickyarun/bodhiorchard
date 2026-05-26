@@ -79,7 +79,7 @@ from app.schemas.dev_activity import (
     UntrackedRepoRead,
 )
 from app.schemas.jobs import BUDAgentTaskPayload
-from app.services.agent_activity_logger import PHASE_WORKER_SLUGS
+from app.services.agent_activity_logger import PHASE_WORKER_SLUGS, log_agent_activity
 from app.services.agent_result_handlers import persist_linked_features_from_markdown
 from app.services.agent_task_cancel import (
     AgentTaskCancelError,
@@ -1383,6 +1383,34 @@ async def regenerate_code_review(
         ) from exc
 
     new_task.job_id = job.job_id
+    await db.commit()
+
+    # Record the rerun on agent_activity_logs (separate from the timeline
+    # event above — that one feeds the BUD timeline rail; this one feeds
+    # the activity panel that lists per-skill invocations). Mirrors the
+    # ``agent_retried`` pattern in ``bud_agent_retry.py`` so the panel
+    # shows re-reviews next to the original code-review entries instead
+    # of leaving the user staring at a silently-spawned task.
+    await log_agent_activity(
+        db,
+        org_id=current_user.org_id,
+        event_type="agent_rerun",
+        skill_slug=reviewer_skill.skill_slug,
+        message=(
+            f"Code review re-run ({'fresh session' if payload.start_fresh else 'resumed'}) "
+            f"by user; cleared {cleared_comment_count} prior finding(s)"
+        ),
+        bud_id=bud_id,
+        skill_id=reviewer_skill.id,
+        task_id=new_task.id,
+        bud_number=bud.bud_number,
+        bud_title=bud.title,
+        metadata_={
+            "resumed": resumed,
+            "start_fresh": payload.start_fresh,
+            "cleared_comment_count": cleared_comment_count,
+        },
+    )
     await db.commit()
 
     logger.info(
