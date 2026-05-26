@@ -44,7 +44,7 @@ from app.services.embedding_service import embedding_service
 from app.services.feature_lifecycle import create_planned_feature
 from app.services.json_parser import parse_json_response
 from app.services.prompt_builder import build_prd_prompt, build_slack_triage_prompt
-from app.services.skill_loader import load_skill
+from app.services.skill_loader import resolve_skill_for_org
 
 _CANDIDATE_SIMILARITY_THRESHOLD = 0.60
 _MAX_DUPLICATE_CANDIDATES = 3
@@ -562,7 +562,7 @@ async def _run_triage_agent(
         db=db,
     )
 
-    skill = load_skill(skill_name)
+    skill = await resolve_skill_for_org("slackTriage", org.id, db, fallback_slug=skill_name)
 
     token = create_internal_mcp_token(org.id)
     mcp: MCPServerConfig | None = MCPServerConfig(
@@ -705,18 +705,8 @@ async def _run_prd_agent(
         bud: The newly created BUD document.
         session: The triage session that produced this BUD.
     """
-    from app.config import settings as app_settings
-    from app.mcp.auth import create_internal_mcp_token
-    from app.services.claude_runner import (
-        NO_REPO_CONTEXT,
-        ClaudeRunnerConfig,
-        MCPServerConfig,
-        run_claude_code,
-    )
-    from app.services.skill_loader import load_skill
-
     bud_ref = f"BUD-{bud.bud_number:03d}"
-    skill = load_skill("product-manager")
+    skill = await resolve_skill_for_org("bud", org.id, db, fallback_slug="product-manager")
 
     try:
         prompt = await build_prd_prompt(
