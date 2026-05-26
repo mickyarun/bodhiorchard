@@ -100,6 +100,17 @@ def build_inline_settings_json() -> str:
                     "hooks": [{"type": "command", "command": post_hook}],
                 },
             ],
+            # Neutralise any user-global SessionStart / SessionEnd hooks
+            # (configured in ``~/.claude/settings.json``) that would
+            # otherwise follow Claude into the subprocess. The dev's
+            # global config often uses relative script paths like
+            # ``.claude/hooks/session-end.sh`` which resolve against the
+            # subprocess cwd — a scan-target repo that does not contain
+            # the script. That produced sh-cannot-open errors on stderr
+            # and, when the same pattern hit SessionStart, aborted the
+            # session before any API call (returncode 0 / empty stdout).
+            "SessionStart": [],
+            "SessionEnd": [],
         },
     }
     return json.dumps(payload)

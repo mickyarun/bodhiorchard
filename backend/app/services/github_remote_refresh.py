@@ -88,10 +88,24 @@ async def refresh_origin_token(
     # to avoid a heavier dependency chain.
     new_url = f"https://x-access-token:{token}@github.com/{repo.github_repo_full_name}.git"
 
-    _, stderr, rc = await run_git(
-        ["remote", "set-url", "origin", new_url],
-        cwd=working_dir,
-    )
+    # Catch OSError so the call honours its "Never raises" contract even
+    # when the subprocess machinery itself fails before git runs — git
+    # missing from PATH, or ``working_dir`` not existing on disk, both
+    # surface as FileNotFoundError (an OSError subclass) from
+    # ``asyncio.create_subprocess_exec``.
+    try:
+        _, stderr, rc = await run_git(
+            ["remote", "set-url", "origin", new_url],
+            cwd=working_dir,
+        )
+    except OSError as exc:
+        logger.warning(
+            "origin_refresh_subprocess_failed",
+            org_id=str(org_id),
+            repo_path=working_dir,
+            error=str(exc),
+        )
+        return False
     if rc != 0:
         scrubbed = stderr.replace(token, "<redacted>")
         logger.warning(
