@@ -13,6 +13,7 @@ URL with ``x-access-token`` and the freshly-minted token.
 """
 
 import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -86,7 +87,40 @@ async def test_returns_false_when_no_installation_token(org_id: uuid.UUID) -> No
     assert result is False
 
 
-async def test_happy_path_composes_x_access_token_url(org_id: uuid.UUID) -> None:
+async def test_returns_false_when_working_dir_missing(org_id: uuid.UUID, tmp_path: Path) -> None:
+    repo = MagicMock()
+    repo.github_repo_full_name = "octocat/hello"
+    db = _mock_db_with_repo(repo)
+    db.get.return_value = MagicMock()
+
+    missing_dir = str(tmp_path / "not-cloned")
+    ran_git = False
+
+    async def should_not_run(args: list[str], cwd: str) -> tuple[str, str, int]:
+        nonlocal ran_git
+        ran_git = True
+        return ("", "", 0)
+
+    with (
+        _patch_get_by_path(db),
+        patch.object(
+            github_remote_refresh,
+            "get_installation_token",
+            new=AsyncMock(return_value="ghs_TOKEN"),
+        ),
+        patch.object(github_remote_refresh, "run_git", new=should_not_run),
+    ):
+        result = await github_remote_refresh.refresh_origin_token(
+            working_dir=missing_dir,
+            org_id=org_id,
+            db=db,
+        )
+
+    assert result is False
+    assert ran_git is False, "guard must short-circuit before spawning git"
+
+
+async def test_happy_path_composes_x_access_token_url(org_id: uuid.UUID, tmp_path: Path) -> None:
     repo = MagicMock()
     repo.github_repo_full_name = "octocat/hello"
     db = _mock_db_with_repo(repo)
@@ -99,6 +133,7 @@ async def test_happy_path_composes_x_access_token_url(org_id: uuid.UUID) -> None
         captured["cwd"] = cwd
         return ("", "", 0)
 
+    working_dir = str(tmp_path)
     with (
         _patch_get_by_path(db),
         patch.object(
@@ -109,20 +144,20 @@ async def test_happy_path_composes_x_access_token_url(org_id: uuid.UUID) -> None
         patch.object(github_remote_refresh, "run_git", new=fake_run_git),
     ):
         result = await github_remote_refresh.refresh_origin_token(
-            working_dir="/clone/octocat-hello",
+            working_dir=working_dir,
             org_id=org_id,
             db=db,
         )
 
     assert result is True
-    assert captured["cwd"] == "/clone/octocat-hello"
+    assert captured["cwd"] == working_dir
     args = captured["args"]
     assert isinstance(args, list)
     assert args[:3] == ["remote", "set-url", "origin"]
     assert "x-access-token:ghs_FRESH_TOKEN@github.com/octocat/hello.git" in args[3]
 
 
-async def test_token_redacted_from_failure_log(org_id: uuid.UUID) -> None:
+async def test_token_redacted_from_failure_log(org_id: uuid.UUID, tmp_path: Path) -> None:
     repo = MagicMock()
     repo.github_repo_full_name = "octocat/hello"
     db = _mock_db_with_repo(repo)
@@ -148,7 +183,7 @@ async def test_token_redacted_from_failure_log(org_id: uuid.UUID) -> None:
         ),
     ):
         result = await github_remote_refresh.refresh_origin_token(
-            working_dir="/clone/x",
+            working_dir=str(tmp_path),
             org_id=org_id,
             db=db,
         )
