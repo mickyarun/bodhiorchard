@@ -55,7 +55,10 @@ The directory list is drawn from these ecosystems:
   Ruby         — vendor, .bundle, pkg, tmp, log
   PHP          — vendor
   Elixir       — _build, deps, cover, .elixir_ls
-  Dart/Flutter — .dart_tool, .pub-cache, .flutter-plugins
+  Dart/Flutter — .dart_tool, .pub-cache, .pub, .fvm, integration_test,
+                 test_driver, plus *.g.dart / *.freezed.dart / *.gr.dart /
+                 *.config.dart / *.mocks.dart / *_test.dart file patterns
+                 and .packages / .flutter-plugins root files
   C/C++/Bazel  — third_party, third-party, external, bazel-* (symlinks)
   Generic      — build, dist, out, coverage, .coverage, tmp, temp,
                  .idea, .vscode, .fleet, .vs, .cache, cdk.out,
@@ -156,6 +159,15 @@ _VENDORED_DIRS: frozenset[str] = frozenset(
         # ── Dart / Flutter ──────────────────────────────────────
         ".dart_tool",
         ".pub-cache",
+        ".pub",
+        ".fvm",
+        # ``integration_test`` and ``test_driver`` are Flutter-specific
+        # by convention — no other ecosystem squats these names as a
+        # source root, so safe to skip globally. The generic ``test``
+        # directory is NOT here because Go/Rust/JS use it for first-class
+        # source; it is added on a per-platform basis in flutter.py.
+        "integration_test",
+        "test_driver",
         # ── C / C++ / Bazel / monorepo ──────────────────────────
         "third_party",
         "third-party",
@@ -227,6 +239,47 @@ _VENDORED_FILE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\.a$"),
     # Jest / snapshot output
     re.compile(r"\.snap$"),
+    # ── Dart code-gen artefacts ────────────────────────────────────
+    # Produced by build_runner / freezed / auto_route / injectable /
+    # mockito. They mirror hand-written code in a verbose machine form
+    # and double-count every symbol in the call graph.
+    re.compile(r"\.g\.dart$"),
+    re.compile(r"\.freezed\.dart$"),
+    re.compile(r"\.gr\.dart$"),
+    re.compile(r"\.config\.dart$"),
+    re.compile(r"\.mocks\.dart$"),
+    # ── Dart test files ────────────────────────────────────────────
+    # Suffix is language-namespaced — no risk of skipping Python /
+    # Go ``*_test.<ext>`` files which use different extensions.
+    re.compile(r"_test\.dart$"),
+    # ── Flutter tooling files at the repo root ─────────────────────
+    re.compile(r"^\.packages$"),
+    re.compile(r"^\.flutter-plugins$"),
+    # ── Coverage report ────────────────────────────────────────────
+    re.compile(r"^lcov\.info$"),
+    # ── Signing / keystore / secret artefacts ──────────────────────
+    # Cross-ecosystem (Android, iOS, generic TLS, GCP service accounts).
+    # Skipping prevents these from being parsed as code AND keeps them
+    # out of any prompt context built from indexed files.
+    # NB: ``local.properties`` is NOT here — same basename used by Java
+    # / Gradle multi-module repos. The Flutter platform's ``android``
+    # dir skip (flutter.py) handles it for Flutter repos.
+    # NB: ``service-account*.json`` is NOT here — basename varies and
+    # legitimate fixture files in test repos use that prefix.
+    # NB: ``*.pem`` is broad — security tooling repos legitimately commit
+    # sample / fixture certificates under that extension. We accept the
+    # over-match because (a) certs are not parseable as code by graphify
+    # so indexing them only adds dead nodes, and (b) the worst case is
+    # a single fixture file dropping out of one cluster, vs the worst
+    # case of NOT skipping (a real private key being read into prompt
+    # context).
+    re.compile(r"\.jks$"),
+    re.compile(r"\.keystore$"),
+    re.compile(r"\.p12$"),
+    re.compile(r"\.pem$"),
+    re.compile(r"^google-services\.json$"),
+    re.compile(r"^GoogleService-Info\.plist$"),
+    re.compile(r"^key\.properties$"),
 )
 
 
@@ -245,6 +298,42 @@ _VENDORED_DIR_SUFFIXES: tuple[str, ...] = (
 )
 
 
+def _is_vendored_for_skipset(
+    path: str | Path,
+    repo_root: Path,
+    skip_set: frozenset[str],
+) -> bool:
+    """Hot-path predicate: shared by ``is_vendored`` and ``filter_paths``.
+
+    ``repo_root`` is expected resolved by the caller and ``skip_set`` is
+    the union of ``_VENDORED_DIRS`` + ``extra_skip_dirs`` precomputed
+    once. Hoisting both out of the per-file loop avoids ~N redundant
+    ``Path.resolve()`` and set-union calls on large repos.
+    """
+    try:
+        rel_parts = Path(path).resolve().relative_to(repo_root).parts
+    except ValueError:
+        # ``path`` is not under ``repo_root`` — out of scope, skip it
+        # to be safe (treat as vendored).
+        return True
+
+    if not rel_parts:
+        return False
+
+    if _BAZEL_SYMLINK_PATTERN.match(rel_parts[0]):
+        return True
+
+    for component in rel_parts[:-1]:  # directories above the file
+        if component in skip_set:
+            return True
+        for suffix in _VENDORED_DIR_SUFFIXES:
+            if component.endswith(suffix):
+                return True
+
+    basename = rel_parts[-1]
+    return any(pattern.search(basename) for pattern in _VENDORED_FILE_PATTERNS)
+
+
 def is_vendored(
     path: str | Path,
     repo_root: str | Path,
@@ -259,35 +348,11 @@ def is_vendored(
     ``vendor`` is fine — we only skip ``./vendor/``).
 
     ``extra_skip_dirs`` lets callers extend the rule per-repo without
-    monkey-patching the module-level set. Pass-through to a future
-    per-org config knob.
+    monkey-patching the module-level set. Currently driven by the
+    detected platform's ``skip_dirs`` tuple in ``index_repo``.
     """
-    p = Path(path)
-    root = Path(repo_root).resolve()
-    try:
-        rel_parts = p.resolve().relative_to(root).parts
-    except ValueError:
-        # ``path`` is not under ``repo_root`` — out of scope, skip it
-        # to be safe (treat as vendored).
-        return True
-
-    if not rel_parts:
-        return False
-
-    # First-component-only Bazel symlink check
-    if _BAZEL_SYMLINK_PATTERN.match(rel_parts[0]):
-        return True
-
-    skip_set: set[str] = set(_VENDORED_DIRS) | set(extra_skip_dirs)
-    for component in rel_parts[:-1]:  # directories above the file
-        if component in skip_set:
-            return True
-        for suffix in _VENDORED_DIR_SUFFIXES:
-            if component.endswith(suffix):
-                return True
-
-    basename = rel_parts[-1]
-    return any(pattern.search(basename) for pattern in _VENDORED_FILE_PATTERNS)
+    skip_set = _VENDORED_DIRS | frozenset(extra_skip_dirs)
+    return _is_vendored_for_skipset(path, Path(repo_root).resolve(), skip_set)
 
 
 def filter_paths(
@@ -301,11 +366,12 @@ def filter_paths(
     Returns ``(kept, dropped_count)`` so callers can log how aggressive
     the filter was on this repo.
     """
-    extra = list(extra_skip_dirs)
+    skip_set = _VENDORED_DIRS | frozenset(extra_skip_dirs)
+    root = Path(repo_root).resolve()
     kept: list[Path] = []
     dropped = 0
     for p in paths:
-        if is_vendored(p, repo_root, extra_skip_dirs=extra):
+        if _is_vendored_for_skipset(p, root, skip_set):
             dropped += 1
             continue
         kept.append(p)

@@ -61,6 +61,7 @@ from app.services.code_indexer.labeling import build_corpus_tokens, label_cluste
 from app.services.code_indexer.merge_by_dir import merge_clusters_by_directory
 from app.services.code_indexer.seed import cluster_signature, order_partition
 from app.services.code_indexer.skip_lists import filter_paths
+from app.services.platforms.registry import detect_platform
 from app.services.scan._async_compute import to_thread_with_metric
 
 logger = structlog.get_logger(__name__)
@@ -174,6 +175,23 @@ async def index_repo(
         result.error = f"repo path not found: {repo!s}"
         return result
 
+    # Platform-aware exclusions: a Flutter repo's ``test/``, ``android/``
+    # and ``ios/`` trees are noise for the call graph, but those names are
+    # legitimate source roots in Go / Rust / native iOS projects so they
+    # live on the platform tuple (flutter.py) rather than in the global
+    # ``_VENDORED_DIRS`` set.
+    #
+    # ``detect_platform`` always returns a concrete platform in production
+    # (the backend fallback matches universally with an empty ``skip_dirs``);
+    # ``None`` is a defensive guard for an empty registry.
+    #
+    # Contract: ``Platform.skip_dirs`` entries are matched against directory
+    # components above each file. Entries that name files (rather than
+    # directories) are silently ignored by ``is_vendored`` — file-level
+    # exclusions belong in ``_VENDORED_FILE_PATTERNS`` instead.
+    platform = detect_platform(repo)
+    extra_skip_dirs: set[str] = set(platform.skip_dirs) if platform else set()
+
     try:
         raw_files = await asyncio.to_thread(_collect_repo_files, repo)
     except Exception as exc:  # noqa: BLE001 — narrow on next iter
@@ -186,7 +204,7 @@ async def index_repo(
     # rules (node_modules, target, vendor, Pods, _build, …). Without
     # this, a Node.js project's node_modules drowns the actual src
     # tree by 20:1 and Leiden produces giant library-symbol clusters.
-    files, dropped = filter_paths(raw_files, repo)
+    files, dropped = filter_paths(raw_files, repo, extra_skip_dirs=extra_skip_dirs)
     if dropped:
         logger.info(
             "code_indexer_skip_filter",
@@ -194,6 +212,7 @@ async def index_repo(
             kept=len(files),
             dropped=dropped,
             ratio=f"{dropped / (dropped + len(files)):.0%}",
+            platform=platform.slug if platform else None,
         )
 
     result.file_count = len(files)
