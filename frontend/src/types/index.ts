@@ -589,6 +589,8 @@ export interface ModuleSkill {
   score: number
   languages: string[]
   touchCount: number
+  linesAdded: number
+  linesRemoved: number
 }
 
 export interface SkillProfile {

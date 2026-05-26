@@ -137,6 +137,9 @@
                 bg-color="surface-variant"
               />
               <div class="text-caption text-medium-emphasis mt-1">
+                <template v-if="mod.linesAdded || mod.linesRemoved">
+                  +{{ mod.linesAdded }} / −{{ mod.linesRemoved }} ·
+                </template>
                 {{ mod.touchCount }} commit{{ mod.touchCount !== 1 ? 's' : '' }}
               </div>
             </div>
@@ -198,6 +201,9 @@
                 bg-color="surface-variant"
               />
               <div class="text-caption text-medium-emphasis mt-1">
+                <template v-if="dev.linesAdded || dev.linesRemoved">
+                  +{{ dev.linesAdded }} / −{{ dev.linesRemoved }} ·
+                </template>
                 {{ dev.touchCount }} commit{{ dev.touchCount !== 1 ? 's' : '' }}
               </div>
             </div>
@@ -252,7 +258,14 @@ const filteredProfiles = computed(() => {
 interface ModuleGroup {
   name: string
   languages: string[]
-  developers: { userName: string; email: string; score: number; touchCount: number }[]
+  developers: {
+    userName: string
+    email: string
+    score: number
+    touchCount: number
+    linesAdded: number
+    linesRemoved: number
+  }[]
 }
 
 const moduleGroups = computed<ModuleGroup[]>(() => {
@@ -269,6 +282,8 @@ const moduleGroups = computed<ModuleGroup[]>(() => {
         email: profile.email,
         score: mod.score,
         touchCount: mod.touchCount,
+        linesAdded: mod.linesAdded,
+        linesRemoved: mod.linesRemoved,
       })
       for (const lang of mod.languages) {
         if (!group.languages.includes(lang)) group.languages.push(lang)

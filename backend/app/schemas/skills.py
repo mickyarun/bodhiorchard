@@ -158,6 +158,8 @@ class ModuleSkill(BaseModel):
     score: float
     languages: list[str] = []
     touch_count: int = Field(alias="touchCount")
+    lines_added: int = Field(default=0, alias="linesAdded")
+    lines_removed: int = Field(default=0, alias="linesRemoved")
 
     model_config = {"populate_by_name": True}
 
