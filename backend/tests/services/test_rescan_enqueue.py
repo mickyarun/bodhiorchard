@@ -53,6 +53,21 @@ class _FakeTrackedRepoRepo:
         return self.repo
 
 
+class _FakeOrganizationRepo:
+    """Returns a sentinel "org" object — the helper only forwards it to
+    ``refresh_origin_auth``, which the tests stub out, so the value never
+    needs real ``Organization`` fields.
+    """
+
+    org: Any = object()
+
+    def __init__(self, *_a: Any, **_kw: Any) -> None:
+        pass
+
+    async def get_by_id(self, _org_id: uuid.UUID) -> Any:
+        return self.org
+
+
 class _FakeWebhookLogRepo:
     """Captures the kwargs passed to :meth:`record_replay_row`."""
 
@@ -101,8 +116,19 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     async def _fake_session(_org_id: uuid.UUID) -> Any:
         yield _FakeDb()
 
-    async def _fake_run_git(args: list[str], cwd: str, **_kw: Any) -> tuple[str, str, int]:
-        assert args[0] == "ls-remote"
+    async def _fake_run_git(args: list[str], cwd: str, **kwargs: Any) -> tuple[str, str, int]:
+        # ``ls-remote`` may be invoked with a leading ``-c
+        # remote.origin.url=...`` override on the App-HTTPS fallback path
+        # — find the first non-``-c`` token so this fake works for both
+        # the primary call and the retry.
+        i = 0
+        while i < len(args) and args[i] == "-c":
+            i += 2
+        assert args[i] == "ls-remote"
+        # Capture kwargs so tests can assert ``env`` propagation —
+        # without this, dropping ``env=env`` on the primary call would
+        # silently regress the SSH-refresh half of the fix.
+        captured["ls_remote_calls"].append({"args": list(args), "kwargs": dict(kwargs)})
         return captured["ls_remote_result"]
 
     async def _fake_publish(*, org_id: uuid.UUID, repo_id: uuid.UUID, delivery_id: str) -> bool:
@@ -114,12 +140,25 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     async def _fake_detect_main(_repo_path: str) -> str | None:
         return "main"
 
+    async def _fake_refresh_origin_auth(_repo_path: str, _org: Any) -> dict[str, str] | None:
+        captured["refresh_calls"].append({"repo_path": _repo_path, "org": _org})
+        return None
+
+    async def _fake_build_app_https_url(_repo_path: str, _org: Any) -> str | None:
+        return None
+
+    captured["ls_remote_calls"] = []
+    captured["refresh_calls"] = []
+
     monkeypatch.setattr(mod, "with_session", _fake_session)
     monkeypatch.setattr(mod, "TrackedRepoRepository", _FakeTrackedRepoRepo)
+    monkeypatch.setattr(mod, "OrganizationRepository", _FakeOrganizationRepo)
     monkeypatch.setattr(mod, "WebhookLogRepository", _FakeWebhookLogRepo)
     monkeypatch.setattr(mod, "run_git", _fake_run_git)
     monkeypatch.setattr(mod, "publish_pr_merge_delivery", _fake_publish)
     monkeypatch.setattr(mod, "_detect_main_branch", _fake_detect_main)
+    monkeypatch.setattr(mod, "refresh_origin_auth", _fake_refresh_origin_auth)
+    monkeypatch.setattr(mod, "build_app_https_url_for_origin", _fake_build_app_https_url)
     return captured
 
 
@@ -272,6 +311,121 @@ async def test_raises_collision_when_record_replay_row_returns_false(
     # And critically — no XADD landed on the stream for a delivery the
     # consumer would never find a fresh row for.
     assert _patched["publish_calls"] == []
+
+
+async def test_refreshes_origin_auth_before_ls_remote(
+    _patched: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``refresh_origin_auth`` must run before ls-remote, and its env
+    (e.g. ``GIT_SSH_COMMAND`` for SSH origins) must propagate to git.
+
+    Regression for the failure mode where rescan reused the clone-time
+    GitHub App installation token (TTL ~1h) and GitHub returned
+    "Invalid username or token. Password authentication is not supported"
+    once that token expired. Also pins the SSH half of the fix: dropping
+    the ``env=env`` kwarg on the primary call would silently break
+    SSH-deploy-key repos.
+    """
+    ssh_env = {"GIT_SSH_COMMAND": "ssh -i /fake/key"}
+
+    async def _fake_refresh(_repo_path: str, _org: Any) -> dict[str, str] | None:
+        _patched["refresh_calls"].append({"repo_path": _repo_path, "org": _org})
+        return ssh_env
+
+    monkeypatch.setattr(mod, "refresh_origin_auth", _fake_refresh)
+
+    await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
+
+    assert len(_patched["refresh_calls"]) == 1
+    assert _patched["refresh_calls"][0]["repo_path"] == "/tmp/fakerepo"
+    # The org loaded from ``OrganizationRepository.get_by_id`` is what
+    # ``refresh_origin_auth`` receives — not ``None`` — so the helper
+    # actually has the credentials it needs to mint a fresh token.
+    assert _patched["refresh_calls"][0]["org"] is _FakeOrganizationRepo.org
+    # The env returned by ``refresh_origin_auth`` reached ``run_git``.
+    assert _patched["ls_remote_calls"][0]["kwargs"].get("env") == ssh_env
+
+
+async def test_falls_back_to_app_https_override_on_ls_remote_failure(
+    _patched: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SSH ls-remote fail → retry with ``-c remote.origin.url=<App-HTTPS>``.
+
+    Mirrors the fallback in ``scan.stages.ingest_worktree._reset_to_remote``
+    so SSH-cloned repos whose deploy key isn't registered still resolve
+    head SHA via the org's GitHub App token.
+    """
+    calls: list[list[str]] = []
+    ssh_failure = ("", "fatal: Could not read from remote", 128)
+    https_success = (
+        "abcdef0123456789abcdef0123456789abcdef01\trefs/heads/main\n",
+        "",
+        0,
+    )
+
+    async def _fake_run_git(args: list[str], cwd: str, **_kw: Any) -> tuple[str, str, int]:
+        calls.append(list(args))
+        return ssh_failure if len(calls) == 1 else https_success
+
+    async def _fake_build_app_https_url(_repo_path: str, _org: Any) -> str | None:
+        return "https://x-access-token:fresh@github.com/owner/repo.git"
+
+    monkeypatch.setattr(mod, "run_git", _fake_run_git)
+    monkeypatch.setattr(mod, "build_app_https_url_for_origin", _fake_build_app_https_url)
+
+    await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
+
+    assert len(calls) == 2
+    # First attempt: vanilla ls-remote against persistent origin.
+    assert calls[0] == ["ls-remote", "origin", "main"]
+    # Second attempt: one-shot ``-c remote.origin.url=...`` override so
+    # the persistent SSH remote in ``.git/config`` stays untouched.
+    assert calls[1][0] == "-c"
+    assert calls[1][1].startswith("remote.origin.url=https://x-access-token:")
+    assert calls[1][2:] == ["ls-remote", "origin", "main"]
+
+
+async def test_error_message_scrubs_app_token_from_stderr(
+    _patched: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A leaked App token in git stderr must not surface in the raised error.
+
+    The App-HTTPS fallback passes the URL via ``-c remote.origin.url=...``.
+    Git can echo that URL back into stderr on failure (e.g. ``fatal:
+    unable to access 'https://x-access-token:ghs_xxx@github.com/...'``).
+    The error message must redact the credential segment before raising,
+    so live tokens never reach logs, the API response, or webhook_logs.
+    """
+    leaked_url = "https://x-access-token:ghs_SECRETTOKEN@github.com/owner/repo.git"
+    primary_failure = (
+        "",
+        f"fatal: unable to access '{leaked_url}/': forbidden",
+        128,
+    )
+    fallback_failure = ("", "fatal: still broken", 128)
+    seq = iter([primary_failure, fallback_failure])
+
+    async def _fake_run_git(args: list[str], cwd: str, **_kw: Any) -> tuple[str, str, int]:
+        return next(seq)
+
+    async def _fake_build_app_https_url(_repo_path: str, _org: Any) -> str | None:
+        return leaked_url
+
+    monkeypatch.setattr(mod, "run_git", _fake_run_git)
+    monkeypatch.setattr(mod, "build_app_https_url_for_origin", _fake_build_app_https_url)
+
+    with pytest.raises(mod.RescanHeadResolutionError) as exc_info:
+        await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
+
+    msg = str(exc_info.value)
+    assert "ghs_SECRETTOKEN" not in msg
+    assert "x-access-token:ghs_" not in msg
+    # Both legs' stderrs are preserved (after scrubbing) so operators
+    # can tell which attempt failed without reading the raw git log.
+    assert "primary=" in msg and "fallback=" in msg
 
 
 async def test_base_sha_empty_when_tracked_head_sha_null(

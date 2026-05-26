@@ -39,14 +39,24 @@ from __future__ import annotations
 
 import re
 import uuid
+from typing import TYPE_CHECKING
 
 import structlog
 
+from app.repositories.organization import OrganizationRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.repositories.webhook_log import WebhookLogRepository
 from app.scan.session import with_session
 from app.services.git_operations import _detect_main_branch, run_git
 from app.services.pr_merge_worker import publish_pr_merge_delivery
+from app.services.repo_cloner import _sanitize
+from app.services.scan.stages._origin_auth import (
+    build_app_https_url_for_origin,
+    refresh_origin_auth,
+)
+
+if TYPE_CHECKING:
+    from app.models.organization import Organization
 
 logger = structlog.get_logger(__name__)
 
@@ -129,9 +139,13 @@ async def enqueue_rescan_delivery(
         repo_path = repo.path
         configured_main_branch = repo.main_branch
         full_name = repo.name or ""
+        # ``_resolve_remote_head_sha`` needs the org to mint a fresh
+        # App installation token via :func:`refresh_origin_auth`; the
+        # token baked into ``.git/config`` at clone time has a ~1h TTL.
+        org = await OrganizationRepository(db).get_by_id(org_id)
 
     main_branch = configured_main_branch or await _detect_main_branch(repo_path) or "main"
-    head_sha = await _resolve_remote_head_sha(repo_path=repo_path, branch=main_branch)
+    head_sha = await _resolve_remote_head_sha(repo_path=repo_path, branch=main_branch, org=org)
 
     delivery_id = f"rescan-{uuid.uuid4()}"
     payload = {
@@ -187,8 +201,18 @@ async def enqueue_rescan_delivery(
     return delivery_id
 
 
-async def _resolve_remote_head_sha(*, repo_path: str, branch: str) -> str:
+async def _resolve_remote_head_sha(
+    *,
+    repo_path: str,
+    branch: str,
+    org: Organization | None,
+) -> str:
     """Resolve the remote HEAD SHA for ``branch`` via ``git ls-remote``.
+
+    Refreshes ``origin``'s credentials first (fresh GitHub App
+    installation token for HTTPS, or ``GIT_SSH_COMMAND`` for SSH deploy
+    keys — see :mod:`.stages._origin_auth`) so the network call doesn't
+    re-use the clone-time token, which has a ~1h TTL for App-auth orgs.
 
     Validates that the response is a single ``<sha>\\t<ref>`` line whose
     first token is a hex object ID. Refuses ambiguous matches (multiple
@@ -197,10 +221,45 @@ async def _resolve_remote_head_sha(*, repo_path: str, branch: str) -> str:
     that would otherwise flow into ``payload["head_sha"]`` and surface
     much later as a confusing indexer/git-checkout failure.
     """
-    stdout, stderr, rc = await run_git(["ls-remote", "origin", branch], cwd=repo_path)
+    env = await refresh_origin_auth(repo_path, org)
+    stdout, primary_stderr, rc = await run_git(
+        ["ls-remote", "origin", branch], cwd=repo_path, env=env
+    )
+    fallback_stderr: str | None = None
     if rc != 0 or not stdout.strip():
+        # SSH ls-remote can fail when the per-repo deploy key isn't
+        # registered on GitHub. The org's GitHub App token covers every
+        # selected repo over HTTPS, so retry with a one-shot ``-c
+        # remote.origin.url=...`` override — mirrors the fallback in
+        # ``scan.stages.ingest_worktree._reset_to_remote``. The
+        # persistent remote in ``.git/config`` stays SSH so the user's
+        # own ``git push`` workflow is unaffected.
+        override_url = await build_app_https_url_for_origin(repo_path, org)
+        if override_url is not None:
+            stdout, fallback_stderr, rc = await run_git(
+                [
+                    "-c",
+                    f"remote.origin.url={override_url}",
+                    "ls-remote",
+                    "origin",
+                    branch,
+                ],
+                cwd=repo_path,
+            )
+    if rc != 0 or not stdout.strip():
+        # Scrub before formatting: the fallback URL embeds an App
+        # installation token that git can echo back into stderr on
+        # failure (``fatal: unable to access 'https://x-access-token:…'``).
+        # ``_sanitize`` strips ``https://user:token@host`` segments via
+        # the codebase's canonical regex.
+        primary = _sanitize(primary_stderr, None)[:200]
+        if fallback_stderr is not None:
+            fallback = _sanitize(fallback_stderr, None)[:200]
+            detail = f"primary={primary!r} fallback={fallback!r}"
+        else:
+            detail = primary
         raise RescanHeadResolutionError(
-            f"git ls-remote origin {branch} failed (rc={rc}): {stderr[:200]}"
+            f"git ls-remote origin {branch} failed (rc={rc}): {detail}"
         )
     lines = [line for line in stdout.splitlines() if line.strip()]
     if len(lines) != 1:
