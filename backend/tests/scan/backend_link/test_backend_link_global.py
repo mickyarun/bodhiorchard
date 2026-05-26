@@ -372,3 +372,111 @@ async def test_backend_without_head_sha_excluded_from_index(
 
     assert counters["indexed_routes"] == 0
     assert counters["features_processed"] == 0
+
+
+def _build_flutter_frontend(tmp_path: Path) -> Path:
+    """Plant a Flutter frontend whose feature lives entirely in ``.dart`` files.
+
+    Covers two Dart idioms ``_URL_DECL_RE`` recognises: a class-static
+    ``static const`` API holder, and a Dio-style HTTP call that references
+    the holder via a dotted leaf identifier.
+    """
+    root = tmp_path / "flutter_app"
+    (root / "lib" / "feature").mkdir(parents=True)
+    # Marker for FlutterPlatform.detect() — not strictly read by the
+    # backend_link phase but mirrors what a real Flutter repo looks like.
+    (root / "pubspec.yaml").write_text("name: demo\ndependencies:\n  flutter:\n    sdk: flutter\n")
+    (root / "lib" / "api.dart").write_text(
+        "class ApiEndpoints {\n  static const users = '/api/users';\n}\n"
+    )
+    (root / "lib" / "feature" / "users_service.dart").write_text(
+        "import '../api.dart';\n"
+        "Future<void> fetch(Dio dio) async {\n"
+        "  await dio.get(ApiEndpoints.users);\n"
+        "}\n"
+    )
+    return root
+
+
+async def test_flutter_frontend_links_to_matching_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """End-to-end: a Dart feature calling ``/api/users`` links to the matching backend.
+
+    Pins both ``.dart`` gates — directory-seed expansion in
+    ``resolve_seed_paths`` and the constants-map suffix tuple in
+    ``build_url_constants_map`` — so removing either gate fails loudly.
+    """
+    frontend_root = _build_flutter_frontend(tmp_path)
+
+    backend_id = uuid.uuid4()
+    frontend = _FakeTracked(name="flutter_fe", path=str(frontend_root), head_sha="ff")
+    backend = _FakeTracked(name="be", path="/unused", head_sha="bb", repo_id=backend_id)
+
+    cache = _FakeCacheRepo(
+        rows_by_repo={
+            backend_id: [
+                _FakeCacheRow(
+                    normalised_path="/api/users",
+                    file_path="src/controllers/users.ts",
+                ),
+            ]
+        }
+    )
+    tracked_repo = _FakeTrackedRepoRepo(frontends=[frontend], backends=[backend])
+
+    monkeypatch.setattr(
+        phase,
+        "TrackedRepoRepository",
+        lambda _db, *, org_id: tracked_repo,  # noqa: ARG005
+    )
+    monkeypatch.setattr(
+        phase,
+        "BackendRouteCacheRepository",
+        lambda _db, *, org_id: cache,  # noqa: ARG005
+    )
+
+    feature = _FakeFeature(uuid.uuid4(), feature_title="Feature: users")
+    # Directory seed — exercises the ``.dart`` rglob expansion in
+    # ``resolve_seed_paths``. Listing the file directly would side-step
+    # the very gate this test is meant to pin.
+    primary = _FakePrimaryLink(code_locations={"frontend": ["lib/feature"]})
+    feature_repo = _FakeFeatureRepo([(feature, primary)])
+
+    monkeypatch.setattr(
+        phase,
+        "FeatureRepository",
+        lambda _db, *, org_id: feature_repo,  # noqa: ARG005
+    )
+
+    writes: list[
+        tuple[uuid.UUID, str, list[tuple[uuid.UUID, list[str], dict[str, list[str]] | None]]]
+    ] = []
+
+    async def _fake_replace(
+        _db: Any,
+        *,
+        feature_id: uuid.UUID,
+        feature_title: str,
+        backend_repos: list[tuple[uuid.UUID, list[str], dict[str, list[str]] | None]],
+    ) -> None:
+        writes.append((feature_id, feature_title, list(backend_repos)))
+
+    monkeypatch.setattr(phase, "replace_backend_links", _fake_replace)
+
+    async def _fake_count(_db: Any, *, feature_id: uuid.UUID) -> int:  # noqa: ARG001
+        return 0
+
+    monkeypatch.setattr(phase, "count_backend_links", _fake_count)
+
+    _patch_session(monkeypatch)
+
+    counters = await phase.run_backend_link(org_id=uuid.uuid4(), scan_id=uuid.uuid4())
+
+    assert counters["features_processed"] == 1
+    assert counters["features_linked"] == 1
+    assert len(writes) == 1
+    _, _, buckets = writes[0]
+    assert buckets == [
+        (backend_id, ["/api/users"], {"backend": ["src/controllers/users.ts"]}),
+    ]

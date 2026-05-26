@@ -25,11 +25,13 @@ alongside ``api_paths``.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 from app.services.scan.backend_link import (
     BackendBucket,
     BackendIndex,
     bucket_per_repo,
+    resolve_seed_paths,
 )
 
 
@@ -135,3 +137,60 @@ def test_no_match_returns_empty_dict() -> None:
     idx = _index_with({})
     buckets = bucket_per_repo(["/never/declared"], idx)
     assert buckets == {}
+
+
+# ── resolve_seed_paths ──────────────────────────────────────────────
+
+
+def _touch(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("// stub\n")
+
+
+def test_resolve_seed_paths_expands_directory_to_web_files(tmp_path: Path) -> None:
+    """A directory seed expands to its TS/Vue/JS leaves (baseline)."""
+    _touch(tmp_path / "src" / "feature" / "view.vue")
+    _touch(tmp_path / "src" / "feature" / "service.ts")
+    _touch(tmp_path / "src" / "feature" / "README.md")  # not a code suffix
+
+    out = resolve_seed_paths(tmp_path, {"frontend": ["src/feature"]})
+
+    rels = sorted(p.relative_to(tmp_path).as_posix() for p in out)
+    assert rels == ["src/feature/service.ts", "src/feature/view.vue"]
+
+
+def test_resolve_seed_paths_expands_directory_to_dart_files(tmp_path: Path) -> None:
+    """A directory seed in a Flutter repo expands to its .dart leaves.
+
+    Without ``.dart`` in ``_SEED_FILE_EXTS`` every Flutter feature whose
+    ``code_locations`` lists ``lib/features/x`` resolves to an empty
+    file list and silently fails to link to any backend.
+    """
+    _touch(tmp_path / "lib" / "features" / "auth" / "view.dart")
+    _touch(tmp_path / "lib" / "features" / "auth" / "service.dart")
+    _touch(tmp_path / "lib" / "features" / "auth" / "notes.md")  # not a code suffix
+
+    out = resolve_seed_paths(tmp_path, {"frontend": ["lib/features/auth"]})
+
+    rels = sorted(p.relative_to(tmp_path).as_posix() for p in out)
+    assert rels == [
+        "lib/features/auth/service.dart",
+        "lib/features/auth/view.dart",
+    ]
+
+
+def test_resolve_seed_paths_keeps_explicit_file_entries(tmp_path: Path) -> None:
+    """File-shaped seed entries pass through unchanged regardless of suffix."""
+    direct = tmp_path / "lib" / "main.dart"
+    _touch(direct)
+
+    out = resolve_seed_paths(tmp_path, {"frontend": ["lib/main.dart"]})
+
+    assert out == [direct]
+
+
+def test_resolve_seed_paths_returns_empty_for_invalid_blob(tmp_path: Path) -> None:
+    """Malformed ``code_locations`` payloads must not raise."""
+    assert resolve_seed_paths(tmp_path, None) == []
+    assert resolve_seed_paths(tmp_path, {"frontend": "not-a-list"}) == []  # type: ignore[dict-item]
+    assert resolve_seed_paths(tmp_path, {"frontend": [42, None]}) == []  # type: ignore[list-item]
