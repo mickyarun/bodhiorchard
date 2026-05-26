@@ -172,3 +172,122 @@ def test_double_chained_replace_still_resolves(tmp_path: Path) -> None:
     cmap = build_url_constants_map(tmp_path)
     paths = extract_api_paths([seed], constants_map=cmap, repo_root=tmp_path)
     assert paths == ["/integration/dentally/:param/appointment/:param/status"], paths
+
+
+# ── Dart / Flutter coverage ─────────────────────────────────────────
+#
+# Mirrors the JS/TS suite above for the Dart declaration and call-site
+# idioms ``_URL_DECL_RE`` accepts: ``const`` and ``final`` with optional
+# type, plus ``static const`` class fields. Fixtures use generic
+# identifiers so they exercise the regex itself, not any specific app.
+
+
+def test_dart_typed_const_string_is_indexed(tmp_path: Path) -> None:
+    """Dart ``const String NAME = '/path'`` populates the constants map."""
+    _write(tmp_path / "lib" / "api.dart", "const String LOGIN_URL = '/auth/login';\n")
+    cmap = build_url_constants_map(tmp_path)
+    assert cmap["LOGIN_URL"] == "/auth/login"
+
+
+def test_dart_untyped_const_is_indexed(tmp_path: Path) -> None:
+    """Dart ``const NAME = '/path'`` (no type identifier) also indexes."""
+    _write(tmp_path / "lib" / "api.dart", "const loginUrl = '/auth/login';\n")
+    cmap = build_url_constants_map(tmp_path)
+    assert cmap["loginUrl"] == "/auth/login"
+
+
+def test_dart_final_typed_is_indexed(tmp_path: Path) -> None:
+    """Dart ``final String NAME = '/path'`` (immutable variable) indexes."""
+    _write(tmp_path / "lib" / "api.dart", "final String loginUrl = '/auth/login';\n")
+    cmap = build_url_constants_map(tmp_path)
+    assert cmap["loginUrl"] == "/auth/login"
+
+
+def test_dart_final_untyped_is_indexed(tmp_path: Path) -> None:
+    _write(tmp_path / "lib" / "api.dart", "final loginUrl = '/auth/login';\n")
+    cmap = build_url_constants_map(tmp_path)
+    assert cmap["loginUrl"] == "/auth/login"
+
+
+def test_dart_static_const_class_field_is_indexed(tmp_path: Path) -> None:
+    """Dart ``class X { static const NAME = '/path'; }`` indexes the field.
+
+    Class-static constants are the canonical Flutter idiom for grouping
+    API endpoints (``ApiEndpoints.login``). Both typed and untyped forms
+    must reach the constants map so dotted call-site references
+    (``ApiEndpoints.login``) resolve via the leaf-identifier walk.
+    """
+    _write(
+        tmp_path / "lib" / "api.dart",
+        "class ApiEndpoints {\n"
+        "  static const String login = '/auth/login';\n"
+        "  static const verify = '/auth/verify';\n"
+        "}\n",
+    )
+    cmap = build_url_constants_map(tmp_path)
+    assert cmap["login"] == "/auth/login"
+    assert cmap["verify"] == "/auth/verify"
+
+
+def test_dart_member_assignment_does_not_pollute(tmp_path: Path) -> None:
+    """Same pollution guard as the JS test, restated for Dart.
+
+    ``notifier.value = '/x'`` must NOT make ``value`` a constants-map
+    entry — every later ``something.value`` reference would otherwise
+    resolve to the last assigned URL.
+    """
+    _write(
+        tmp_path / "lib" / "store.dart",
+        "void f(ValueNotifier notifier) {\n"
+        "  notifier.value = '/should-not-leak';\n"
+        "}\n"
+        "const REAL = '/api/users';\n",
+    )
+    cmap = build_url_constants_map(tmp_path)
+    assert "value" not in cmap
+    assert cmap["REAL"] == "/api/users"
+
+
+def test_dart_http_get_uri_parse_is_extracted(tmp_path: Path) -> None:
+    """``await http.get(Uri.parse('/path'))`` surfaces the path.
+
+    The captured call-site arg is ``Uri.parse('/path'`` (open paren
+    consumed before the inner close). ``_first_path_in_string`` walks
+    the arg and finds the first quoted segment that looks like a path.
+    """
+    src = tmp_path / "lib" / "feature.dart"
+    _write(src, "await http.get(Uri.parse('/api/users'));\n")
+    paths = extract_api_paths([src], constants_map={}, repo_root=tmp_path)
+    assert paths == ["/api/users"]
+
+
+def test_dart_dio_post_with_keyword_arg_is_extracted(tmp_path: Path) -> None:
+    """``_dio.post('/path', data: payload)`` surfaces the path.
+
+    Dart keyword args (``data: payload``) follow a comma; the call-site
+    regex's ``(?=[,)])`` lookahead stops at that comma, leaving the
+    string literal as the captured arg.
+    """
+    src = tmp_path / "lib" / "feature.dart"
+    _write(src, "await _dio.post('/api/orders', data: payload);\n")
+    paths = extract_api_paths([src], constants_map={}, repo_root=tmp_path)
+    assert paths == ["/api/orders"]
+
+
+def test_dart_dotted_constant_reference_resolves(tmp_path: Path) -> None:
+    """``client.post(ApiEndpoints.login)`` resolves through the constants map.
+
+    End-to-end check: declaration regex indexes the class field; call-site
+    leaf-identifier walk picks ``login`` from the dotted chain; constants
+    map lookup yields the path. Without all three steps, Flutter features
+    that route through an ``ApiEndpoints``-style holder stay unlinked.
+    """
+    _write(
+        tmp_path / "lib" / "api.dart",
+        "class ApiEndpoints { static const login = '/auth/login'; }\n",
+    )
+    src = tmp_path / "lib" / "feature.dart"
+    _write(src, "await client.post(ApiEndpoints.login);\n")
+    cmap = build_url_constants_map(tmp_path)
+    paths = extract_api_paths([src], constants_map=cmap, repo_root=tmp_path)
+    assert "/auth/login" in paths

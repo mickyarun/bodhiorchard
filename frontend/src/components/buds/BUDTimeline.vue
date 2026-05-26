@@ -299,6 +299,17 @@
               </div>
             </template>
 
+            <!-- Code Review Rerun -->
+            <template v-else-if="event.event_type === 'code_review_rerun'">
+              <div class="tl-primary">
+                <span v-if="event.actor_name" class="tl-actor">{{ event.actor_name }}</span>
+                <span>re-ran code review ({{ event.detail?.start_fresh ? 'fresh session' : 'resumed' }})</span>
+              </div>
+              <div v-if="(event.detail?.cleared_comment_count as number) > 0" class="tl-meta">
+                Cleared {{ event.detail?.cleared_comment_count }} prior finding(s)
+              </div>
+            </template>
+
             <!-- Fallback -->
             <template v-else>
               <div class="tl-primary">
@@ -351,6 +362,7 @@ const EVENT_MAP: Record<string, EventConfig> = {
   ac_verification_passed: { icon: 'mdi-check-decagram', color: 'success', label: 'ACs verified' },
   ac_verification_failed: { icon: 'mdi-alert-circle', color: 'error', label: 'ACs incomplete' },
   status_override: { icon: 'mdi-shield-alert', color: 'orange', label: 'Manual override' },
+  code_review_rerun: { icon: 'mdi-refresh', color: 'info', label: 'Code review re-run' },
   feature_linked: { icon: 'mdi-link-plus', color: 'teal', label: 'Feature linked' },
   feature_unlinked: { icon: 'mdi-link-off', color: 'grey', label: 'Feature unlinked' },
   features_auto_linked: { icon: 'mdi-robot', color: 'teal', label: 'Features auto-linked' },

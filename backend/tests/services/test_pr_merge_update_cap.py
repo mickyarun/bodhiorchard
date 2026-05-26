@@ -14,13 +14,15 @@
 
 """Dispatcher cap on ``handle_pr_merge_delivery``.
 
-When the PR-merge dispatcher identifies *N* affected clusters:
+When the PR-merge dispatcher identifies *N* affected clusters out of
+*T* total clusters at head, the effective cap is
+``effective_narrow_cap(T) = max(NARROW_CAP_ABS, NARROW_CAP_PCT * T)``:
 
 * ``N == 0`` → no-op (no narrow synth, no full scan).
-* ``0 < N <= NARROW_CAP`` → :func:`run_narrow_synthesis` is called
-  inline with the affected signatures.
-* ``N > NARROW_CAP`` → :func:`_trigger_repo_scan` is called and the
-  narrow path is skipped.
+* ``0 < N <= cap`` → :func:`run_narrow_synthesis` is called inline
+  with the affected signatures.
+* ``N > cap`` → :func:`_trigger_repo_scan` is called and the narrow
+  path is skipped.
 
 Tests target the dispatcher branch points only — the narrow synth
 itself is covered by ``test_pr_narrow_synthesis``.
@@ -141,11 +143,16 @@ def _install_replay_row(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
 async def test_dispatcher_picks_narrow_under_cap(
     monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
 ) -> None:
-    """``len(affected) <= NARROW_CAP`` → narrow path, no full scan."""
-    affected = {f"sig-{i}" for i in range(mod.NARROW_CAP)}  # exactly == cap
+    """``len(affected) <= effective_cap`` → narrow path, no full scan.
 
-    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
-        return (affected, "BASE")
+    With ``NARROW_CAP_ABS = 25`` and a small total (50 head clusters,
+    yielding ``max(25, 0.25*50) = 25``), 25 affected clusters lands
+    exactly on the cap and must still go narrow.
+    """
+    affected = {f"sig-{i}" for i in range(mod.NARROW_CAP_ABS)}  # exactly == cap
+
+    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str, int] | None:
+        return (affected, "BASE", 50)
 
     monkeypatch.setattr(mod, "_find_affected_clusters", _resolved)
 
@@ -162,7 +169,7 @@ async def test_dispatcher_picks_narrow_under_cap(
     assert captured["scan_triggered"] is False
     assert captured["narrow_params"] is not None
     params: NarrowSynthesisParams = captured["narrow_params"]
-    assert len(params.affected_signatures) == mod.NARROW_CAP
+    assert len(params.affected_signatures) == mod.NARROW_CAP_ABS
     # Affected signatures are sorted for deterministic comparison.
     assert params.affected_signatures == sorted(affected)
     # Narrow synth succeeded → tracked_repositories.head_sha must advance
@@ -174,11 +181,16 @@ async def test_dispatcher_picks_narrow_under_cap(
 async def test_dispatcher_falls_back_to_full_scan_above_cap(
     monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
 ) -> None:
-    """``len(affected) > NARROW_CAP`` → full ``start_scan`` path, no narrow."""
-    affected = {f"sig-{i}" for i in range(mod.NARROW_CAP + 1)}
+    """``len(affected) > effective_cap`` → full ``start_scan`` path, no narrow.
 
-    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
-        return (affected, "BASE")
+    With 50 head clusters → cap of 25, 26 affected trips the
+    escalation. The reason string surfaces the computed cap so
+    operators can reverse-engineer the decision from logs alone.
+    """
+    affected = {f"sig-{i}" for i in range(mod.NARROW_CAP_ABS + 1)}
+
+    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str, int] | None:
+        return (affected, "BASE", 50)
 
     monkeypatch.setattr(mod, "_find_affected_clusters", _resolved)
 
@@ -205,8 +217,8 @@ async def test_dispatcher_noop_when_no_clusters_affected(
 ) -> None:
     """``len(affected) == 0`` → neither path runs."""
 
-    async def _empty(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
-        return (set(), "BASE")
+    async def _empty(*_a: Any, **_kw: Any) -> tuple[set[str], str, int] | None:
+        return (set(), "BASE", 50)
 
     monkeypatch.setattr(mod, "_find_affected_clusters", _empty)
 
@@ -237,8 +249,8 @@ async def test_dispatcher_raises_when_narrow_synthesis_fails(
     """
     affected = {"sig-1"}
 
-    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
-        return (affected, "BASE")
+    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str, int] | None:
+        return (affected, "BASE", 50)
 
     async def _failed_narrow(params: NarrowSynthesisParams) -> NarrowSynthesisOutcome:
         captured["narrow_params"] = params
@@ -315,9 +327,9 @@ async def test_backfill_runs_before_find_affected_clusters(
     """
     call_log: list[str] = []
 
-    async def _logged_find(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
+    async def _logged_find(*_a: Any, **_kw: Any) -> tuple[set[str], str, int] | None:
         call_log.append("find_affected_clusters")
-        return ({"sig-1"}, "BASE")
+        return ({"sig-1"}, "BASE", 50)
 
     async def _logged_backfill(**kw: Any) -> int:
         call_log.append("index_and_cache")
@@ -357,7 +369,7 @@ async def test_backfill_failure_falls_through_to_cache_miss_full_scan(
     async def _exploding_backfill(**_kw: Any) -> int:
         raise RuntimeError("synthetic: indexer crash")
 
-    async def _cache_miss(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
+    async def _cache_miss(*_a: Any, **_kw: Any) -> tuple[set[str], str, int] | None:
         return None  # mimics empty head_rows after a failed backfill
 
     monkeypatch.setattr(mod, "index_and_cache", _exploding_backfill)
@@ -405,7 +417,7 @@ async def test_backfill_skipped_when_repo_has_no_path(
         indexer_calls.append(_kw)
         return 0
 
-    async def _empty(*_a: Any, **_kw: Any) -> tuple[set[str], str] | None:
+    async def _empty(*_a: Any, **_kw: Any) -> tuple[set[str], str, int] | None:
         return None
 
     monkeypatch.setattr(mod, "_load_repo_and_org", _no_path_repo_and_org)
@@ -486,9 +498,10 @@ async def test_find_affected_clusters_detects_removed_cluster(
         changed_paths={"src/reminders/x.py"},
     )
     assert result is not None
-    affected, effective_base = result
+    affected, effective_base, total = result
     assert affected == {"sig-reminders"}
     assert effective_base == "BASE"
+    assert total == 1  # head has one row after the deletion
 
 
 async def test_find_affected_clusters_added_modified_removed_combine(
@@ -515,8 +528,9 @@ async def test_find_affected_clusters_added_modified_removed_combine(
         changed_paths={"src/auth/router.py", "src/search/router.py"},
     )
     assert result is not None
-    affected, _effective_base = result
+    affected, _effective_base, total = result
     assert affected == {"sig-auth-old", "sig-new", "sig-old"}
+    assert total == 3  # head has three rows
 
 
 async def test_find_affected_clusters_falls_back_to_tracked_head_sha(
@@ -552,9 +566,10 @@ async def test_find_affected_clusters_falls_back_to_tracked_head_sha(
         tracked_head_sha="SHA_A",
     )
     assert result is not None
-    affected, effective_base = result
+    affected, effective_base, total = result
     assert affected == {"sig-old"}
     assert effective_base == "SHA_A"
+    assert total == 1  # head (SHA_C) has one row
 
 
 async def test_find_affected_clusters_returns_none_when_both_shas_empty(
@@ -625,3 +640,94 @@ async def test_advance_tracked_head_sha_commits_advance(
         {"org_id": str(org_id), "repo_id": str(repo_id), "head_sha": "HEAD_SHA"}
     ]
     assert commits == [True]
+
+
+# --- effective_narrow_cap (adaptive cap formula) ----------------------------
+
+
+def test_effective_narrow_cap_uses_absolute_floor_for_tiny_repos() -> None:
+    """A 20-cluster repo: pct-track gives 5, abs floor of 25 wins.
+
+    The absolute floor protects tiny repos from a proportional cap
+    that would otherwise force a full scan whenever 6+ clusters
+    change — which is most PRs on small repos.
+    """
+    assert mod.effective_narrow_cap(20) == mod.NARROW_CAP_ABS
+    assert mod.effective_narrow_cap(0) == mod.NARROW_CAP_ABS
+
+
+def test_effective_narrow_cap_uses_pct_track_for_large_repos() -> None:
+    """A 200-cluster repo: pct-track gives 50, beats the abs floor.
+
+    Large repos can absorb proportionally larger changes on the
+    narrow path before the prompt-savings argument flips. The
+    incident repo had 180 head clusters; 21 affected (12%) should
+    have stayed narrow, but the old flat cap of 10 escalated it.
+    """
+    assert mod.effective_narrow_cap(200) == 50
+    # The exact incident shape: 180 head clusters → cap of 45,
+    # which keeps a 21-affected PR on the narrow path.
+    assert mod.effective_narrow_cap(180) == 45
+
+
+async def test_dispatcher_picks_narrow_when_pct_track_dominates(
+    monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
+) -> None:
+    """Regression of the 2026-05-26 incident shape: 21 affected of 180 head
+    clusters. Under the old flat cap of 10, this escalated to full scan
+    and tripped the empty-synthesis bug, wiping the repo's feature set.
+    Under the adaptive cap (45 for 180 clusters), it must stay narrow.
+    """
+    affected = {f"sig-{i}" for i in range(21)}
+
+    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str, int] | None:
+        return (affected, "BASE", 180)
+
+    monkeypatch.setattr(mod, "_find_affected_clusters", _resolved)
+
+    payload = {
+        "org_id": str(uuid.uuid4()),
+        "repo_id": str(uuid.uuid4()),
+        "pr_number": 115,
+        "base_sha": "b",
+        "head_sha": "h",
+        "full_name": "owner/r",
+    }
+    _install_replay_row(monkeypatch, payload)
+    await mod.handle_pr_merge_delivery("d1")
+    assert captured["scan_triggered"] is False
+    assert captured["narrow_params"] is not None
+
+
+async def test_dispatcher_escalates_above_pct_track(
+    monkeypatch: pytest.MonkeyPatch, _patched: None, captured: dict[str, Any]
+) -> None:
+    """46 affected of 180 head clusters: above cap of 45 → full scan.
+
+    Pins the upper boundary so a future formula change can't silently
+    raise the threshold past where prompt-savings stop paying for the
+    extra LLM call.
+    """
+    affected = {f"sig-{i}" for i in range(46)}
+
+    async def _resolved(*_a: Any, **_kw: Any) -> tuple[set[str], str, int] | None:
+        return (affected, "BASE", 180)
+
+    monkeypatch.setattr(mod, "_find_affected_clusters", _resolved)
+
+    payload = {
+        "org_id": str(uuid.uuid4()),
+        "repo_id": str(uuid.uuid4()),
+        "pr_number": 7,
+        "base_sha": "b",
+        "head_sha": "h",
+        "full_name": "owner/r",
+    }
+    _install_replay_row(monkeypatch, payload)
+    await mod.handle_pr_merge_delivery("d1")
+    assert captured["scan_triggered"] is True
+    # Reason string surfaces both the cap and the formula inputs so
+    # operators can reverse-engineer the decision from logs alone.
+    reason = captured["scan_reason"] or ""
+    assert "above narrow cap 45" in reason
+    assert "180" in reason

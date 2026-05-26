@@ -69,6 +69,8 @@ async def list_profiles(
                 score=float(profile.skill_score),
                 languages=profile.languages or [],
                 touch_count=profile.touch_count,
+                lines_added=profile.lines_added,
+                lines_removed=profile.lines_removed,
             )
         )
 

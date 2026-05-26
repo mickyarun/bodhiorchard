@@ -269,16 +269,22 @@ async def remove_repo(
     # repo. The junction rows themselves stay (they cascade out only
     # if the tracked_repository row is hard-deleted), so a future
     # un-remove + re-scan will revive matching features via the
-    # reconciler.
+    # reconciler. Pass the repo's last-known head SHA so the
+    # ``deactivated_at_sha`` column gets stamped — lets the UI later
+    # show "deactivated when repo removed at PR #X" instead of a blank.
     feat_scan = FeatureScanRepository(db, org_id=org.id)
-    deactivated_ids = await feat_scan.soft_delete_by_repo_ids([repo.id])
+    head_sha_by_repo = {repo.id: repo.head_sha} if repo.head_sha else None
+    deactivated_by_repo = await feat_scan.soft_delete_by_repo_ids(
+        [repo.id], head_sha_by_repo=head_sha_by_repo
+    )
+    deactivated_count = sum(len(ids) for ids in deactivated_by_repo.values())
 
     # Invalidate the bulk-import picker's cache so the removed repo
     # immediately becomes re-importable instead of waiting up to 60s
     # for the TTL to lapse.
     await delete_key(INSTALLABLE_CACHE_KEY_TEMPLATE.format(org_id=str(org.id)))
 
-    return {"removed": body.path, "deactivated": len(deactivated_ids)}
+    return {"removed": body.path, "deactivated": deactivated_count}
 
 
 @router.patch("/repos/{repo_id}/status", response_model=RepoInfo)

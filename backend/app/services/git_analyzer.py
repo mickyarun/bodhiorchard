@@ -32,6 +32,12 @@ logger = structlog.get_logger(__name__)
 # How far back to scan by default
 DEFAULT_SINCE = "6.months.ago"
 
+# Weighted lines that saturate a skill_score to 1.0. Tuned so a developer
+# who wrote ~1k lines of feature code recently lands at score 1.0, and a
+# developer with a few hundred old lines stays well above the downstream
+# ``list_active_skill_devs`` floor of 0.1.
+_SCORE_NORMALIZER = 1000.0
+
 # Directories/files to skip during skill analysis (tooling, not code)
 _SKIP_SKILL_PATHS = frozenset(
     {
@@ -43,6 +49,22 @@ _SKIP_SKILL_PATHS = frozenset(
         ".idea",
     }
 )
+
+# Generated / lock / minified files that bloat line counts without
+# reflecting authorship. Matched by basename suffix.
+_NOISE_BASENAMES = frozenset(
+    {
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "poetry.lock",
+        "uv.lock",
+        "Gemfile.lock",
+        "composer.lock",
+    }
+)
+_NOISE_SUFFIXES = (".min.js", ".min.css", ".map")
 
 
 # Extension-to-language mapping
@@ -71,9 +93,18 @@ LANG_MAP: dict[str, str] = {
 
 @dataclass
 class ModuleStats:
-    """Aggregated stats for a single author in a single module."""
+    """Aggregated stats for a single author in a single module.
+
+    ``weighted_contribution`` is the sum of ``lines_added * recency_weight``
+    over each commit — recency is baked in per-commit so older commits
+    decay individually rather than the whole score being scaled by
+    ``last_touch``.
+    """
 
     touch_count: int = 0
+    lines_added: int = 0
+    lines_removed: int = 0
+    weighted_contribution: float = 0.0
     languages: set[str] = field(default_factory=set)
     last_touch: datetime | None = None
 
@@ -87,6 +118,8 @@ class DevSkillEntry:
     module: str
     languages: list[str]
     touch_count: int
+    lines_added: int
+    lines_removed: int
     skill_score: float
     last_touch: datetime | None
     feature_id: uuid.UUID | None = None
@@ -126,6 +159,7 @@ async def analyze_repo_skills(
     repo_path: str,
     since: str = DEFAULT_SINCE,
     feature_map: FeatureMap | None = None,
+    branch: str | None = None,
 ) -> list[DevSkillEntry]:
     """Scan git log for per-author, per-module skill data.
 
@@ -136,6 +170,9 @@ async def analyze_repo_skills(
         since: Git log --since value (e.g. "6.months.ago").
         feature_map: Optional feature-name-to-paths mapping. When provided,
             files are mapped to feature names instead of directory names.
+        branch: Optional branch to walk instead of HEAD. Gitflow repos
+            should pass ``develop_branch`` so squash-merged authorship
+            survives — main only retains the squasher's name.
 
     Returns:
         List of DevSkillEntry objects with computed skill scores.
@@ -146,67 +183,63 @@ async def analyze_repo_skills(
         return []
 
     # Step 1: Get commit hashes with author info
-    commits = await _get_commits(repo_path, since)
+    commits = await _get_commits(repo_path, since, branch=branch)
     if not commits:
-        logger.info("git_analyzer_no_commits", repo=repo_path, since=since)
+        logger.info("git_analyzer_no_commits", repo=repo_path, since=since, branch=branch)
         return []
 
-    logger.info("git_analyzer_commits_found", repo=repo_path, count=len(commits))
+    logger.info(
+        "git_analyzer_commits_found",
+        repo=repo_path,
+        count=len(commits),
+        branch=branch,
+    )
 
-    # Step 2: For each commit, get changed files and accumulate per-author stats
-    # author_key = email, module = top-level directory or feature name
+    # Step 2: For each commit, accumulate per-author stats weighted by
+    # the commit's own age. Per-commit weighting (instead of a single
+    # last_touch multiplier) lets an old high-volume initial commit
+    # dominate over many small recent fixes.
+    now = datetime.now(UTC)
     author_modules: dict[str, dict[str, ModuleStats]] = {}
     author_names: dict[str, str] = {}
-    # Track which module name maps to which feature_id (if any)
     module_feature_ids: dict[str, uuid.UUID | None] = {}
 
     for commit_hash, email, name, commit_date in commits:
         author_names[email] = name
-        files = await _get_commit_files(repo_path, commit_hash)
+        commit_weight = _recency_weight(commit_date, now)
+        numstat = await _get_commit_numstat(repo_path, commit_hash)
 
-        for file_path in files:
-            # Skip tooling/config directories and non-code files
-            fp = Path(file_path)
-            top_dir = fp.parts[0] if fp.parts else ""
-            if top_dir in _SKIP_SKILL_PATHS:
+        for file_path, added, deleted in numstat:
+            if _should_skip_path(file_path):
                 continue
-            if top_dir.startswith("."):
-                continue  # Skip all dotfile directories
-            if _file_to_language(file_path) is None and len(fp.parts) <= 1:
-                continue  # Skip root-level non-code files
+
+            lang = _file_to_language(file_path)
+            if lang is None:
+                continue  # Code files only — drops fixtures, lock files, data dumps
 
             if feature_map:
                 match = _file_to_feature(file_path, feature_map)
                 if match is None:
-                    continue  # Skip files not linked to any feature
+                    continue
                 module, feat_id = match
                 module_feature_ids[module] = feat_id
             else:
                 module = _file_to_module(file_path)
-            lang = _file_to_language(file_path)
 
-            if email not in author_modules:
-                author_modules[email] = {}
-            if module not in author_modules[email]:
-                author_modules[email][module] = ModuleStats()
-
-            stats = author_modules[email][module]
+            stats = author_modules.setdefault(email, {}).setdefault(module, ModuleStats())
             stats.touch_count += 1
-            if lang:
-                stats.languages.add(lang)
+            stats.lines_added += added
+            stats.lines_removed += deleted
+            stats.weighted_contribution += added * commit_weight
+            stats.languages.add(lang)
             if commit_date and (stats.last_touch is None or commit_date > stats.last_touch):
                 stats.last_touch = commit_date
 
-    # Step 3: Compute skill scores
-    now = datetime.now(UTC)
+    # Step 3: Compute skill scores from accumulated weighted contribution
     entries: list[DevSkillEntry] = []
-
     for email, modules in author_modules.items():
         for module, stats in modules.items():
-            recency_weight = _recency_weight(stats.last_touch, now)
-            skill_score = min(1.0, stats.touch_count / 50.0) * recency_weight
-            skill_score = round(skill_score, 2)
-
+            skill_score = round(min(1.0, stats.weighted_contribution / _SCORE_NORMALIZER), 2)
             entries.append(
                 DevSkillEntry(
                     email=email,
@@ -214,6 +247,8 @@ async def analyze_repo_skills(
                     module=module,
                     languages=sorted(stats.languages),
                     touch_count=stats.touch_count,
+                    lines_added=stats.lines_added,
+                    lines_removed=stats.lines_removed,
                     skill_score=skill_score,
                     last_touch=stats.last_touch,
                     feature_id=module_feature_ids.get(module),
@@ -227,6 +262,20 @@ async def analyze_repo_skills(
         entries=len(entries),
     )
     return entries
+
+
+def _should_skip_path(file_path: str) -> bool:
+    """Return True for tooling directories, dotfiles, or noise files."""
+    fp = Path(file_path)
+    if not fp.parts:
+        return True
+    top_dir = fp.parts[0]
+    if top_dir in _SKIP_SKILL_PATHS or top_dir.startswith("."):
+        return True
+    name = fp.name
+    if name in _NOISE_BASENAMES:
+        return True
+    return any(name.endswith(suffix) for suffix in _NOISE_SUFFIXES)
 
 
 async def get_head_sha(repo_path: str) -> str | None:
@@ -358,19 +407,25 @@ async def get_changed_files_since(repo_path: str, since_sha: str) -> list[str]:
 async def _get_commits(
     repo_path: str,
     since: str,
+    branch: str | None = None,
 ) -> list[tuple[str, str, str, datetime | None]]:
     """Get commit metadata from git log.
 
     Args:
         repo_path: Absolute path to the git repository root.
         since: Git log --since value.
+        branch: Optional branch to walk. ``None`` walks HEAD as ``git log``
+            does by default. If the named branch doesn't exist, falls
+            back to HEAD so misconfigured repos still produce output.
 
     Returns:
         List of (hash, email, author_name, commit_date) tuples.
     """
+    walk_ref = await _resolve_walk_ref(repo_path, branch)
     proc = await asyncio.create_subprocess_exec(
         "git",
         "log",
+        walk_ref,
         "--format=%H|%ae|%an|%aI",
         "--no-merges",
         f"--since={since}",
@@ -400,22 +455,33 @@ async def _get_commits(
     return commits
 
 
-async def _get_commit_files(repo_path: str, commit_hash: str) -> list[str]:
-    """Get files changed in a specific commit.
+async def _get_commit_numstat(repo_path: str, commit_hash: str) -> list[tuple[str, int, int]]:
+    """Get per-file line-change counts for one commit.
+
+    Runs ``git diff-tree --numstat -M`` and parses the output into
+    ``(path, added, deleted)`` triples. The ``-M`` flag is essential:
+    without it, a directory rename re-attributes every line of the
+    moved files to whoever did the rename.
+
+    Binary files (numstat emits ``-\\t-`` for them) are filtered out
+    so they don't contribute to line totals.
 
     Args:
         repo_path: Absolute path to the git repository root.
         commit_hash: The commit SHA to inspect.
 
     Returns:
-        List of file paths changed in the commit.
+        List of (path, lines_added, lines_removed) triples.
     """
     proc = await asyncio.create_subprocess_exec(
         "git",
         "diff-tree",
         "--no-commit-id",
         "-r",
-        "--name-only",
+        "-M",
+        "--root",
+        "-z",
+        "--numstat",
         commit_hash,
         cwd=repo_path,
         stdout=asyncio.subprocess.PIPE,
@@ -426,11 +492,85 @@ async def _get_commit_files(repo_path: str, commit_hash: str) -> list[str]:
     if proc.returncode != 0:
         return []
 
-    return [
-        line
-        for line in stdout.decode("utf-8", errors="replace").strip().split("\n")
-        if line.strip()
-    ]
+    return _parse_numstat_z(stdout.decode("utf-8", errors="replace"))
+
+
+def _parse_numstat_z(raw: str) -> list[tuple[str, int, int]]:
+    """Parse ``git diff-tree --numstat -z`` output into (path, added, deleted).
+
+    The ``-z`` format avoids the three rename-encoding shapes that
+    plain ``--numstat`` produces (``old => new``, ``dir/{old => new}/f``,
+    ``{old => new}``) by emitting each record NUL-terminated:
+
+    - Non-rename: ``"<added>\\t<deleted>\\t<path>\\0"``
+    - Rename:     ``"<added>\\t<deleted>\\t\\0<old>\\0<new>\\0"`` — the
+      tail is empty after the second tab, then ``<old>`` and ``<new>``
+      arrive as the next two NUL-delimited chunks.
+
+    Binary files emit ``-\\t-`` and are filtered out.
+    """
+    chunks = raw.split("\0")
+    results: list[tuple[str, int, int]] = []
+    i = 0
+    while i < len(chunks):
+        head = chunks[i]
+        if not head:
+            i += 1
+            continue
+        fields = head.split("\t")
+        if len(fields) < 3:
+            i += 1
+            continue
+        added_s, deleted_s, inline_path = fields[0], fields[1], fields[2]
+        if added_s == "-" or deleted_s == "-":
+            i += 1 if inline_path else 3
+            continue
+        try:
+            added = int(added_s)
+            deleted = int(deleted_s)
+        except ValueError:
+            i += 1
+            continue
+        if inline_path:
+            results.append((inline_path, added, deleted))
+            i += 1
+        elif i + 2 < len(chunks):
+            # Rename: <old>, <new> follow as separate NUL records;
+            # credit the new path so future commits aggregate cleanly.
+            results.append((chunks[i + 2], added, deleted))
+            i += 3
+        else:
+            i += 1
+    return results
+
+
+async def _resolve_walk_ref(repo_path: str, branch: str | None) -> str:
+    """Resolve which ref ``git log`` should walk.
+
+    Returns ``branch`` when it exists locally; otherwise falls back to
+    ``HEAD`` so a missing/misconfigured branch can't silently produce
+    zero commits. ``None`` always means HEAD.
+    """
+    if not branch:
+        return "HEAD"
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"refs/heads/{branch}",
+        cwd=repo_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        await asyncio.wait_for(proc.communicate(), timeout=10)
+    except TimeoutError:
+        return "HEAD"
+    if proc.returncode == 0:
+        return branch
+    logger.warning("git_analyzer_branch_missing", repo=repo_path, branch=branch, fallback="HEAD")
+    return "HEAD"
 
 
 def _file_to_module(file_path: str) -> str:

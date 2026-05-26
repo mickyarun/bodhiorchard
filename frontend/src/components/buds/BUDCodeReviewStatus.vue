@@ -38,6 +38,15 @@ const lastRunStatus = ref<CodeReviewRunStatus>('never_run')
 const lastRunMessage = ref<string | null>(null)
 const loading = ref(false)
 
+// Re-review dialog state. `startFresh` controls whether the backend
+// resumes the prior Claude CLI session (default, faster) or mints a
+// brand new one (use when the PR has new commits since the last run
+// or the previous session went off the rails).
+const showRerunDialog = ref(false)
+const startFresh = ref(false)
+const rerunning = ref(false)
+const rerunError = ref('')
+
 // Only surfaces parse_failed / failed states. The other states (running,
 // ok, never_run) communicate via the existing per-repo PR list and the
 // agent-running indicators elsewhere on the BUD page — a banner for
@@ -93,6 +102,29 @@ async function submitOverride(): Promise<void> {
     emit('transitioned')
   } else {
     overrideError.value = budStore.error || 'Failed to override code review'
+  }
+}
+
+function openRerunDialog(): void {
+  startFresh.value = false
+  rerunError.value = ''
+  showRerunDialog.value = true
+}
+
+async function submitRerun(): Promise<void> {
+  if (rerunning.value) return
+  rerunning.value = true
+  rerunError.value = ''
+  const result = await budStore.regenerateCodeReview(props.budId, startFresh.value)
+  rerunning.value = false
+  if (result) {
+    showRerunDialog.value = false
+    // Refresh so the banner flips to `running` and the per-repo list
+    // reflects the cleared comment counts. The agent worker drives
+    // subsequent updates via the existing job socket.
+    await loadStatus()
+  } else {
+    rerunError.value = budStore.error || 'Failed to start re-review'
   }
 }
 
@@ -155,6 +187,18 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
       <v-icon size="18" class="mr-1">mdi-source-pull</v-icon>
       <span class="text-subtitle-1 font-weight-medium">Code Review</span>
       <v-spacer />
+      <v-btn
+        v-if="!loading && repos.length > 0 && lastRunStatus !== 'running'"
+        variant="outlined"
+        size="small"
+        prepend-icon="mdi-refresh"
+        color="info"
+        class="mr-2"
+        :disabled="rerunning"
+        @click="openRerunDialog"
+      >
+        Re-review
+      </v-btn>
       <v-btn
         v-if="!loading && repos.length > 0 && !allMerged"
         variant="outlined"
@@ -297,6 +341,67 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
             @click="submitOverride"
           >
             Override & Push to QA
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Re-review dialog -->
+    <v-dialog v-model="showRerunDialog" max-width="500" persistent>
+      <v-card class="pa-2">
+        <v-card-title class="text-h6 pb-1">Re-run code review?</v-card-title>
+        <v-card-text class="pb-2">
+          <p class="text-body-2 text-medium-emphasis mb-2">
+            This will clear the current findings on this BUD and re-run the
+            code-review agent.
+          </p>
+          <p class="text-body-2 text-medium-emphasis mb-2">
+            By default the agent resumes its previous session — faster, cheaper,
+            and the repo doesn't need to be re-indexed. Comments already posted
+            on GitHub PRs stay on GitHub.
+          </p>
+          <v-checkbox
+            v-model="startFresh"
+            density="compact"
+            hide-details
+            label="Start fresh (ignore previous context)"
+            :disabled="rerunning"
+            class="mb-1"
+          />
+          <p class="text-caption text-medium-emphasis ml-8 mb-0">
+            Use this if the PR has new commits since the last review, or if
+            the previous run went off the rails.
+          </p>
+          <v-alert
+            v-if="rerunError"
+            type="error"
+            variant="tonal"
+            density="compact"
+            class="mt-3"
+          >
+            {{ rerunError }}
+          </v-alert>
+        </v-card-text>
+        <v-card-actions class="px-4 pb-3 pt-0">
+          <v-spacer />
+          <v-btn
+            variant="text"
+            size="small"
+            :disabled="rerunning"
+            @click="showRerunDialog = false"
+          >
+            Cancel
+          </v-btn>
+          <v-btn
+            color="info"
+            variant="flat"
+            size="small"
+            class="ml-2"
+            :loading="rerunning"
+            :disabled="rerunning"
+            @click="submitRerun"
+          >
+            Re-review
           </v-btn>
         </v-card-actions>
       </v-card>

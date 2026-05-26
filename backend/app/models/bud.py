@@ -71,6 +71,7 @@ class BUDTimelineEventType(StrEnum):
     AC_VERIFICATION_PASSED = "ac_verification_passed"
     AC_VERIFICATION_FAILED = "ac_verification_failed"
     STATUS_OVERRIDE = "status_override"
+    CODE_REVIEW_RERUN = "code_review_rerun"
 
 
 class BUDStatus(StrEnum):

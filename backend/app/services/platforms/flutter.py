@@ -76,6 +76,15 @@ class FlutterPlatform:
 
     @property
     def skip_dirs(self) -> tuple[str, ...]:
+        # Consumed by two pipelines:
+        # 1. ``design_system_extractor.py`` — filters file globs before
+        #    the LLM extraction prompt.
+        # 2. ``code_indexer.index_repo`` — passed as ``extra_skip_dirs``
+        #    so platform-specific exclusions reach the call graph too.
+        # Names listed here must therefore be unambiguous *inside Flutter
+        # repos* but may be common source roots elsewhere (``test``,
+        # ``generated``) — that's why they live here instead of in the
+        # cross-language ``_VENDORED_DIRS`` set.
         return (
             ".dart_tool",
             ".flutter-plugins-dependencies",
@@ -85,6 +94,10 @@ class FlutterPlatform:
             "windows",
             "linux",
             "macos",
+            "test",
+            "test_driver",
+            "integration_test",
+            "generated",
         )
 
     @property

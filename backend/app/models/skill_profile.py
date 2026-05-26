@@ -59,6 +59,8 @@ class SkillProfile(BaseModel):
         Numeric(precision=3, scale=2), nullable=False, default=0.0
     )
     touch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lines_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lines_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_touch: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:

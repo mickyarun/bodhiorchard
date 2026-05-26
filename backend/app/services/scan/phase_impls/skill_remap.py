@@ -42,6 +42,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.git_analyzer import analyze_repo_skills
 from app.services.scan_helpers import load_feature_map, upsert_skill_profiles
 
@@ -96,10 +97,26 @@ async def phase_e2_skill_remap(
     )
     sp_repo_e2 = SkillProfileRepository(db, org_id=org_id)
 
+    # Resolve per-repo branch once. Gitflow repos walk ``develop_branch``
+    # so squash-merged authorship survives; trunk-based repos fall back
+    # to ``main_branch``; misconfigured repos fall back to HEAD inside
+    # the analyzer.
+    tracked_repo = TrackedRepoRepository(db, org_id=org_id)
+    branch_by_path: dict[str, str | None] = {}
+    for repo_path_e2 in repo_paths:
+        tracked = await tracked_repo.get_by_path(repo_path_e2)
+        branch_by_path[repo_path_e2] = (
+            (tracked.develop_branch or tracked.main_branch) if tracked else None
+        )
+
     # Run new analysis first (before deleting anything).
     new_entries = []
     for repo_path_e2 in repo_paths:
-        entries_e2 = await analyze_repo_skills(repo_path_e2, feature_map=feature_map_e2)
+        entries_e2 = await analyze_repo_skills(
+            repo_path_e2,
+            feature_map=feature_map_e2,
+            branch=branch_by_path[repo_path_e2],
+        )
         new_entries.extend(entries_e2)
 
     existing_count = await sp_repo_e2.count_profiles()

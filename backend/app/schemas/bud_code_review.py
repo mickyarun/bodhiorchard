@@ -117,3 +117,16 @@ class CodeReviewOverrideRequest(BaseModel):
     """
 
     reason: str = Field(..., min_length=10, max_length=2000)
+
+
+class CodeReviewRerunRequest(BaseModel):
+    """Body for POST /buds/{id}/code-review/regenerate.
+
+    Re-runs the code-review agent on a BUD that already has findings.
+    By default the agent resumes its prior CLI session (warm prompt
+    cache, repo already indexed). Set ``start_fresh`` to mint a brand
+    new session — use when the PR has new commits since the last run
+    or the prior session got contaminated.
+    """
+
+    start_fresh: bool = False

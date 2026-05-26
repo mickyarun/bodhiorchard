@@ -30,6 +30,7 @@ from typing import Any
 
 import structlog
 
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.stages import StageContext, StageOutput
@@ -58,6 +59,7 @@ async def run(
     if runtime is None:
         return StageOutput(communities=communities, dropped=[], extras=skipped_runtime_output())
 
+    skill_branch: str | None = None
     repo_id_raw = config.get("repo_id")
     if repo_id_raw is not None:
         repo_id = uuid.UUID(str(repo_id_raw))
@@ -69,6 +71,11 @@ async def run(
                 repo_path=ctx.repo_path,
                 full_rescan=bool(config.get("full_rescan", False)),
             )
+            tracked = await TrackedRepoRepository(db, org_id=runtime.org_id).get_by_path(
+                ctx.repo_path
+            )
+            if tracked is not None:
+                skill_branch = tracked.develop_branch or tracked.main_branch
         if decision.skip:
             extras = stage_output_for_skip(
                 decision, io_label="git authors → skill profiles"
@@ -79,7 +86,7 @@ async def run(
     from app.services.git_analyzer import analyze_repo_skills
     from app.services.scan.phase_impls.skill_extraction import phase_e_skills
 
-    skill_entries = await analyze_repo_skills(ctx.repo_path)
+    skill_entries = await analyze_repo_skills(ctx.repo_path, branch=skill_branch)
     if not skill_entries:
         logger.info(
             "scan_skill_extraction_no_entries",
