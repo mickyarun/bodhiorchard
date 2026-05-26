@@ -63,15 +63,18 @@ class FeatureScanRepository:
         self,
         repo_ids: list[uuid.UUID],
         *,
+        head_sha_by_repo: dict[uuid.UUID, str] | None = None,
         source: str = SCAN_SOURCE,
-    ) -> list[uuid.UUID]:
+    ) -> dict[uuid.UUID, list[uuid.UUID]]:
         """Soft-delete scan-sourced features linked to any of these repos.
 
         Called by the reconciler's pre-run rollback hook in
         :mod:`app.scan.soft_delete`: we only dirty the feature set for
         repos whose SHA actually changed, leaving unchanged repos
-        untouched. The returned IDs are stashed for the failure-rollback
-        path so a crashed scan reactivates only what it deactivated.
+        untouched. The returned mapping (repo_id → feature_ids) is
+        stashed for the failure-rollback path so a crashed scan
+        reactivates only what its own per-repo slice deactivated —
+        not its siblings'.
 
         Filters by ``source='scan'`` so BUD-authored features
         (``source='bud'``) are never touched by a scan run.
@@ -79,16 +82,24 @@ class FeatureScanRepository:
         Args:
             repo_ids: Tracked-repository UUIDs whose scan-sourced
                 feature rows should be soft-deleted.
+            head_sha_by_repo: Optional mapping repo_id → head SHA at
+                the moment of soft-delete. When provided, stamped
+                into ``deactivated_at_sha`` so the UI can resolve
+                "deactivated by PR #X" without an audit-log join.
+                Rows for repos absent from the dict keep
+                ``deactivated_at_sha`` NULL (legacy behaviour).
             source: ``source`` column value to target. Defaults to
                 ``'scan'``.
 
         Returns:
-            IDs that were deactivated, in PRIMARY-junction order.
+            ``{repo_id: [feature_id, ...]}`` for every repo that had
+            at least one row soft-deleted. Repos with no matching
+            active rows are absent from the dict.
         """
         if not repo_ids:
-            return []
+            return {}
         id_stmt = (
-            select(Feature.id)
+            select(Feature.id, FeatureToRepo.repo_id)
             .join(FeatureToRepo, FeatureToRepo.feature_id == Feature.id)
             .where(
                 Feature.org_id == self._org_id,
@@ -100,15 +111,28 @@ class FeatureScanRepository:
             .distinct()
         )
         id_rows = await self._db.execute(id_stmt)
-        ids = [row[0] for row in id_rows.all()]
-        if not ids:
-            return []
-        await self._db.execute(
-            sql_update(Feature)
-            .where(Feature.id.in_(ids))
-            .values(is_active=False, deactivated_at=datetime.now(UTC))
-        )
-        return ids
+        by_repo: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for feature_id, repo_id in id_rows.all():
+            by_repo.setdefault(repo_id, []).append(feature_id)
+        if not by_repo:
+            return {}
+        now = datetime.now(UTC)
+        sha_map = head_sha_by_repo or {}
+        # Run one UPDATE per repo so each row gets stamped with its
+        # own repo's head SHA. Per-repo grouping is bounded by the
+        # caller's ``repo_ids`` (typically <= 50 changed repos), so
+        # the loop cost is negligible next to the synthesis it
+        # precedes.
+        for repo_id, ids in by_repo.items():
+            values: dict[str, object] = {
+                "is_active": False,
+                "deactivated_at": now,
+            }
+            sha = sha_map.get(repo_id)
+            if sha:
+                values["deactivated_at_sha"] = sha
+            await self._db.execute(sql_update(Feature).where(Feature.id.in_(ids)).values(**values))
+        return by_repo
 
     async def reactivate_by_ids(self, feature_ids: list[uuid.UUID]) -> int:
         """Re-activate features previously soft-deleted by this repo.
@@ -128,6 +152,6 @@ class FeatureScanRepository:
                 Feature.id.in_(feature_ids),
                 Feature.is_active.is_(False),
             )
-            .values(is_active=True, deactivated_at=None)
+            .values(is_active=True, deactivated_at=None, deactivated_at_sha=None)
         )
         return max(int(getattr(result, "rowcount", 0) or 0), 0)

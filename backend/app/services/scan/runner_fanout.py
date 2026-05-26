@@ -41,6 +41,7 @@ from app.services.scan.runner_config import load_scan_cfg, mint_mcp_credentials
 from app.services.scan.setup import RepoDescriptor
 from app.services.scan.soft_delete_hook import (
     rollback_soft_deleted,
+    rollback_soft_deleted_for_repo,
     soft_delete_changed_repos,
 )
 from app.services.scan.workflow import start_run
@@ -158,9 +159,13 @@ async def _execute_scan(
 
     # Match the legacy pipeline's data-safety invariant: deactivate
     # changed-repo features before fanout so fresh synthesis writes
-    # under the same titles, then keep the deactivated id list for
-    # rollback on orchestration failure.
-    deactivated_ids = await soft_delete_changed_repos(
+    # under the same titles, then keep the per-repo partition for
+    # rollback. Per-repo failures (synthesis crashed / produced 0
+    # features) restore *just* that repo's slice in ``_run_one``;
+    # the orchestration-level rollback below catches the catastrophic
+    # case where ``gather_repos`` itself raises (cancellation,
+    # interpreter shutdown) before any ``_run_one`` got to handle.
+    deactivated_by_repo = await soft_delete_changed_repos(
         org_id=org_id,
         scan_id=scan_id,
         repo_paths=repo_paths,
@@ -235,6 +240,22 @@ async def _execute_scan(
                 scan_id=str(scan_id),
                 repo_id=str(descriptor.repo_id),
             )
+            # Restore this repo's soft-deleted slice so a single repo's
+            # synthesis failure (Claude empty output, MCP registration
+            # rejected, indexer crash) doesn't leave the org with
+            # silently-wiped features. Siblings whose synthesis
+            # succeeded are untouched — only this repo's slice
+            # reactivates. The orchestration-level rollback below
+            # remains as a backstop for cancellation paths that skip
+            # this handler entirely.
+            slice_ids = deactivated_by_repo.get(descriptor.repo_id, [])
+            if slice_ids:
+                await rollback_soft_deleted_for_repo(
+                    org_id=org_id,
+                    scan_id=scan_id,
+                    repo_id=descriptor.repo_id,
+                    feature_ids=slice_ids,
+                )
             await observer.on_run_failed(error=f"{type(exc).__name__}: {exc}"[:500])
 
     try:
@@ -242,7 +263,7 @@ async def _execute_scan(
     except Exception:
         logger.exception("scan_orchestration_failed", scan_id=str(scan_id))
         await rollback_soft_deleted(
-            org_id=org_id, scan_id=scan_id, deactivated_ids=deactivated_ids
+            org_id=org_id, scan_id=scan_id, deactivated_by_repo=deactivated_by_repo
         )
         await _mark_scan_terminal(
             org_id=org_id, scan_id=scan_id, status=ScanAggregateStatus.FAILED
