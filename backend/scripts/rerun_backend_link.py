@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
-# Local-only smoke harness — not part of any PR.
-"""Re-run the global ``backend_link`` phase against the local DB.
+# Copyright 2025-2026 Arun Rajkumar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Re-run the global ``backend_link`` phase against any org's DB.
 
 Useful when you've changed the linker (added language coverage, fixed a
 regex, etc.) and want to see the effect on real org data without rerunning
@@ -83,7 +96,7 @@ async def _resolve_org_id(arg: str | None) -> uuid.UUID:
         result = await db.execute(select(Organization.id).limit(1))
         row = result.scalar_one_or_none()
     if row is None:
-        raise SystemExit("no organizations in local DB — run setup first")
+        raise SystemExit("no organizations found — check DATABASE_URL points at the right DB")
     return row
 
 
