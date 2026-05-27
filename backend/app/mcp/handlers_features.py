@@ -354,6 +354,7 @@ async def handle_check_feature_exists(
             continue
         features.append(
             {
+                "id": str(feature.id),
                 "title": feature.feature_title,
                 "description": feature.description,
                 "score": score,

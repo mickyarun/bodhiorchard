@@ -142,6 +142,16 @@ async def continue_feature_qa(
 
     logger.info("feature_qa_continue", session_id=str(session.id))
 
+    # Ack so the thread shows activity while the agent runs (~5s of silence
+    # otherwise looks frozen, especially after a clarify turn where the user
+    # is actively waiting on a follow-up).
+    await slack_client.chat_post_message(
+        bot_token,
+        channel,
+        "🔍 Still looking that up...",
+        thread_ts=thread_ts,
+    )
+
     thread_messages = await slack_client.conversations_replies(bot_token, channel, thread_ts)
     await _run_qa_agent(db, org, bot_token, session, thread_messages=thread_messages)
 
@@ -202,12 +212,14 @@ async def _run_qa_agent(
     action = response.get("action", "")
     data = response.get("data", {})
 
+    # Session stays AWAITING_USER across answer/summary/clarify/not_found —
+    # the thread IS the conversation, so any later reply should re-enter
+    # the agent. Only parse/agent failures terminate the session (ERRORED).
     if action == "answer":
         reply = await _build_answer_reply(db, org, data)
         await slack_client.chat_post_message(
             bot_token, session.channel, reply, thread_ts=session.thread_ts
         )
-        session.status = FeatureQAStatus.RESOLVED
 
     elif action == "clarify":
         reply = format_clarify_reply(
@@ -221,6 +233,21 @@ async def _run_qa_agent(
             session, {"candidates": data.get("candidates", [])}
         )
 
+    elif action == "summary":
+        text = data.get("text", "").strip()
+        if not text:
+            logger.warning("feature_qa_summary_empty", session_id=str(session.id))
+            await slack_client.chat_post_message(
+                bot_token,
+                session.channel,
+                "⚠️ Couldn't generate a summary. Try asking about one feature at a time.",
+                thread_ts=session.thread_ts,
+            )
+        else:
+            await slack_client.chat_post_message(
+                bot_token, session.channel, text, thread_ts=session.thread_ts
+            )
+
     elif action == "not_found":
         await slack_client.chat_post_message(
             bot_token,
@@ -232,7 +259,6 @@ async def _run_qa_agent(
             ),
             thread_ts=session.thread_ts,
         )
-        session.status = FeatureQAStatus.RESOLVED
 
     else:
         logger.warning("feature_qa_unknown_action", session_id=str(session.id), action=action)
