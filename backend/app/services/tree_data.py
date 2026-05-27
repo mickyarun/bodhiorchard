@@ -57,6 +57,17 @@ logger = structlog.get_logger(__name__)
 _cache: TTLCache[str, TreeData] = TTLCache(maxsize=64, ttl=300)
 
 
+def invalidate_tree_cache(org_id: uuid.UUID) -> None:
+    """Drop the cached TreeData for ``org_id`` so the next dashboard read rebuilds it.
+
+    Called after events that mutate the data the tree visualizes
+    (scan completion, repo registration, etc.) so newly-discovered
+    features and leaves surface without waiting for the 5-minute TTL.
+    Safe to call when no entry exists.
+    """
+    _cache.pop(str(org_id), None)
+
+
 async def get_tree_data(
     db: AsyncSession,
     org_id: uuid.UUID,

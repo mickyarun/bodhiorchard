@@ -45,6 +45,7 @@ from app.services.scan.soft_delete_hook import (
     soft_delete_changed_repos,
 )
 from app.services.scan.workflow import start_run
+from app.services.tree_data import invalidate_tree_cache
 
 logger = structlog.get_logger(__name__)
 
@@ -321,3 +322,9 @@ async def _mark_scan_terminal(
             await db.commit()
     except Exception:
         logger.exception("scan_terminal_write_failed")
+
+    # A successful scan may have produced new features, leaves, or branches.
+    # Drop the dashboard tree cache so the next /tree-data read rebuilds it
+    # instead of serving the pre-scan snapshot until the 5-minute TTL expires.
+    if status is ScanAggregateStatus.COMPLETED:
+        invalidate_tree_cache(org_id)
