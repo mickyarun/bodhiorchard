@@ -58,6 +58,7 @@ dev = [
     "respx>=0.21.0",
     "ruff>=0.1.0",
     "mypy>=1.7.0",
+    "types-cachetools",
     "httpx>=0.27.0",
     # Opt-in: integration tests that need a real Postgres spin up an
     # ephemeral container via testcontainers. The default ``pytest``
