@@ -16,7 +16,7 @@
 
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
@@ -90,6 +90,7 @@ from app.services.bud_agent_trigger import (
     create_agent_task_for_stage,
     should_auto_generate_phase,
 )
+from app.services.bud_assignment_actions import assign_bud, unassign_bud
 from app.services.bud_edit_policy import assert_section_editable
 from app.services.bud_timeline import record_event
 from app.services.job_queue import JOB_BUD_AGENT, create_job
@@ -252,6 +253,9 @@ router.include_router(versions_router, prefix="/{bud_id}", tags=["bud-versions"]
 )
 async def list_buds(
     status_filter: str | None = Query(None, alias="status"),
+    order_by: Literal["priority"] | None = Query(
+        None, description="Sort key. Omit for default (bud_number desc)."
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[BUDDocument]:
@@ -266,7 +270,10 @@ async def list_buds(
             ) from None
 
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
-    buds = await bud_repo.list_buds(status_filter=status_filter)
+    buds = await bud_repo.list_buds(
+        status_filter=status_filter,
+        order_by_priority=order_by == "priority",
+    )
 
     # Batch-fetch open bug counts for all BUDs in one query
     bug_repo = BugRepository(db, org_id=current_user.org_id)
@@ -303,6 +310,7 @@ async def create_bud(
         bud_number=next_number,
         title=body.title,
         status=BUDStatus.BUD,
+        priority=body.priority,
         requirements_md=body.requirements_md,
         figma_url=body.figma_url,
         metadata_=body.metadata_,
@@ -522,6 +530,15 @@ async def update_bud(
     update_data = body.model_dump(exclude_unset=True)
     update_data.pop("status_override_reason", None)  # consumed separately, not a model field
 
+    # priority is NOT NULL on the column; explicit null in the payload would
+    # silently flip the row to None and fail at the DB. Reject with 400 so
+    # the client gets a clear signal instead of a 500.
+    if "priority" in update_data and update_data["priority"] is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="priority cannot be null; omit the field to leave it unchanged",
+        )
+
     # Capture the pre-edit snapshot AS A DICT here, before any of the
     # auto_generate_phases / assignee / status mutations below. The
     # actual DB insert happens at the end, after every guard has passed
@@ -599,8 +616,6 @@ async def update_bud(
 
     # Handle manual assignee_id changes (before status logic which may auto-assign)
     if "assignee_id" in update_data:
-        from app.services.bud_assignment import assign_bud, unassign_bud
-
         new_aid = update_data.pop("assignee_id")
         if new_aid and new_aid != old_assignee_id:
             await assign_bud(

@@ -46,6 +46,7 @@ from app.api.v1.standups import router as standups_router
 from app.api.v1.triage_sessions import router as triage_router
 from app.api.v1.ws import router as ws_router
 from app.api.v1.xp import router as xp_router
+from app.api.v1.yield_offers import router as yield_offers_router
 from app.mcp.server import router as mcp_router
 from app.mcp.streamable import router as mcp_remote_router
 
@@ -77,6 +78,7 @@ api_router.include_router(me_router, prefix="/api/v1")
 api_router.include_router(ws_router, prefix="/api/v1")
 api_router.include_router(public_router, prefix="/api/v1/public")
 api_router.include_router(xp_router, prefix="/api/v1")
+api_router.include_router(yield_offers_router, prefix="/api/v1")
 api_router.include_router(mcp_router)
 # Remote MCP endpoint for external LLM clients (Claude Desktop / Cursor /
 # Continue). Shares /mcp/ prefix and Bearer auth with the existing tool

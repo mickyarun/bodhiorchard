@@ -92,6 +92,7 @@ from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
 from app.models.user_mcp_token import UserMCPToken
 from app.models.webhook_log import WebhookLog
+from app.models.yield_offer import YieldOffer, YieldOfferStatus
 
 __all__ = [
     "AgentActivityLog",
@@ -186,6 +187,8 @@ __all__ = [
     "MCPAuditLogEntry",
     "UserRole",
     "WebhookLog",
+    "YieldOffer",
+    "YieldOfferStatus",
     "RewardEvent",
     "RewardType",
 ]

@@ -40,9 +40,11 @@
             :agent-locked="agentLocked"
             :chat-open="chatOpen"
             :chatable="currentSectionChatable"
+            :can-edit-priority="canEditBud"
             @back="router.push('/buds')"
             @update:chat-open="chatOpen = $event"
             @change-assignee="handleAssigneeChange"
+            @change-priority="handlePriorityChange"
             @update-status="updateStatus"
             @delete="confirmDelete = true"
             @save-title="handleSaveTitle"
@@ -500,7 +502,8 @@ import {
   isSectionEditable,
   isSectionChatable,
 } from '@/types'
-import type { BUDSectionKey, TimelineEvent } from '@/types'
+import type { BUDPriority, BUDSectionKey, TimelineEvent } from '@/types'
+import { usePermissions } from '@/composables/usePermissions'
 import ChatPanel from '@/components/buds/ChatPanel.vue'
 import BUDEstimationSection from '@/components/buds/BUDEstimationSection.vue'
 import BUDActivitySection from '@/components/buds/BUDActivitySection.vue'
@@ -530,6 +533,12 @@ const router = useRouter()
 const budStore = useBUDStore()
 const authStore = useAuthStore()
 const membersStore = useMembersStore()
+const { hasPermission } = usePermissions()
+
+// Priority chip in the header becomes a clickable menu when the user
+// has buds:edit (mirrors the PATCH endpoint's permission gate); for
+// everyone else it's a read-only badge.
+const canEditBud = computed(() => hasPermission('buds:edit'))
 const settingsStore = useSettingsStore()
 const budLinkedFeaturesStore = useBudLinkedFeaturesStore()
 
@@ -1116,6 +1125,12 @@ async function loadTimeline(): Promise<void> {
 async function handleAssigneeChange(memberId: string | null): Promise<void> {
   if (!bud.value) return
   await budStore.updateBUD(bud.value.id, { assignee_id: memberId } as never)
+  await loadTimeline()
+}
+
+async function handlePriorityChange(priority: BUDPriority): Promise<void> {
+  if (!bud.value || bud.value.priority === priority) return
+  await budStore.updateBUD(bud.value.id, { priority } as never)
   await loadTimeline()
 }
 

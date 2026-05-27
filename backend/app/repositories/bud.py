@@ -18,11 +18,18 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, lazyload
 
-from app.models.bud import BUDChatMessage, BUDDesign, BUDDesignStatus, BUDDocument, BUDStatus
+from app.models.bud import (
+    BUDChatMessage,
+    BUDDesign,
+    BUDDesignStatus,
+    BUDDocument,
+    BUDPriority,
+    BUDStatus,
+)
 from app.models.tracked_repository import TrackedRepository
 from app.repositories.base import BaseRepository, rowcount
 
@@ -110,6 +117,7 @@ class BUDRepository(BaseRepository[BUDDocument]):
         exclude_statuses: Sequence[BUDStatus] | None = None,
         query: str | None = None,
         limit: int | None = None,
+        order_by_priority: bool = False,
     ) -> list[BUDDocument]:
         """List BUDs ordered by bud_number descending.
 
@@ -127,8 +135,16 @@ class BUDRepository(BaseRepository[BUDDocument]):
                 ``FeatureReadRepository.keyword_search`` so the BYO-AI
                 experience is consistent across the two MCP read tools.
             limit: Maximum number of results.
+            order_by_priority: When True, sort by priority ASC (P0 first)
+                then bud_number DESC. Postgres orders enum values by
+                declared position, so P0 < P1 < P2 < P3 naturally.
         """
-        stmt = self._scoped(select(BUDDocument).order_by(BUDDocument.bud_number.desc()))
+        order_clauses = (
+            (BUDDocument.priority.asc(), BUDDocument.bud_number.desc())
+            if order_by_priority
+            else (BUDDocument.bud_number.desc(),)
+        )
+        stmt = self._scoped(select(BUDDocument).order_by(*order_clauses))
         if status_filter:
             stmt = stmt.where(BUDDocument.status == status_filter)
         if exclude_statuses:
@@ -262,6 +278,61 @@ class BUDRepository(BaseRepository[BUDDocument]):
         )
         result = await self._db.execute(stmt)
         return {row[0]: row[1] for row in result.all()}
+
+    async def lowest_priority_active_for_assignee(
+        self,
+        user_id: uuid.UUID,
+        excluded_statuses: list[str],
+    ) -> BUDDocument | None:
+        """Return ``user_id``'s lowest-priority active BUD, or ``None`` if idle.
+
+        "Lowest priority" = largest ``BUDPriority`` value (P3 < P2 < P1
+        < P0 in urgency, so we want the largest enum-declared position
+        among the user's active rows). Used by the yield-offer picker
+        to find the most-displaceable BUD per saturated candidate.
+        """
+        stmt = self._scoped(
+            select(BUDDocument)
+            .where(
+                BUDDocument.assignee_id == user_id,
+                BUDDocument.status.notin_(excluded_statuses),
+            )
+            .order_by(BUDDocument.priority.desc())
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def weighted_active_loads_for_assignees(
+        self,
+        assignee_ids: list[uuid.UUID],
+        excluded_statuses: list[str],
+        *,
+        weights: dict[BUDPriority, int],
+    ) -> dict[uuid.UUID, int]:
+        """Priority-weighted active-BUD load per assignee.
+
+        Sums ``weights[bud.priority]`` over each candidate's non-terminal
+        BUDs in one grouped query. The weight policy is owned by
+        ``smart_assignment.BUD_PRIORITY_WEIGHTS`` — passed in so the SQL
+        builder and the Python scoring code never drift.
+        """
+        if not assignee_ids:
+            return {}
+        weight_expr = case(
+            *((BUDDocument.priority == p, w) for p, w in weights.items()),
+            else_=0,
+        )
+        stmt = self._scoped(
+            select(BUDDocument.assignee_id, func.sum(weight_expr))
+            .where(
+                BUDDocument.assignee_id.in_(assignee_ids),
+                BUDDocument.status.notin_(excluded_statuses),
+            )
+            .group_by(BUDDocument.assignee_id)
+        )
+        result = await self._db.execute(stmt)
+        return {row[0]: int(row[1] or 0) for row in result.all()}
 
     async def count_assignee_workload(
         self,

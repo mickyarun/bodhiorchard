@@ -34,7 +34,7 @@ from app.schemas.triage_session import TriageApprovalRequest, TriageSessionRead
 from app.services import slack_client
 from app.services.bud_agent_trigger import create_agent_task_for_stage
 from app.services.feature_lifecycle import create_planned_feature
-from app.services.slack_intake import _build_bud_content
+from app.services.slack_intake import _build_bud_content, normalize_triage_priority
 
 logger = structlog.get_logger(__name__)
 
@@ -159,6 +159,7 @@ async def approve_triage_session(
         bud_number=next_number,
         title=session.feature_name or "Untitled Feature Request",
         status=BUDStatus.BUD,
+        priority=normalize_triage_priority(session.priority),
         requirements_md=requirements_md,
         metadata_={"source": "slack_triage", "triage_session_id": str(session.id)},
     )

@@ -28,6 +28,17 @@ Transform backlog items into focused Business Understanding Documents (BUDs) tha
 8. No preamble. Output the document directly. No "Here is..." or meta-commentary.
 9. Quantify over adjectives: "reduce load time by 40%" not "significantly improve performance"
 
+## Priority awareness
+
+The BUD has a structured priority field (P0..P3) set upstream by
+triage. Smart assignment uses it to bias developer selection and to
+raise yield-offer notifications when higher-priority work arrives.
+You do not set the field — `write_bud` doesn't accept it — but if
+your spec reveals signals the triage analyst missed (e.g.
+regulatory deadline, named enterprise customer impact, P0-incident
+follow-up), call them out explicitly in the Problem Statement so
+the tech lead can bump the priority via the BUD detail header.
+
 ## Working with existing features
 
 1. The prompt includes "Possibly-related existing features" — these are top-K semantic matches against the brief. Read them first.

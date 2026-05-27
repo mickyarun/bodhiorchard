@@ -36,7 +36,7 @@ Analyze incoming issues, bugs, and requests to determine priority, category, and
    | in_progress (strong match) | In development — flag duplicate of active work |
    | not found | New feature |
 3. **Search**: Use `search_bugs` to check for duplicates or related issues
-4. **Classify**: Determine severity (critical/high/medium/low) and category
+4. **Classify**: Determine severity (P0/P1/P2/P3) and category — see rubric below
 5. **Route**: Use `get_team_context` to find the best assignee based on skills and capacity
 
 ## Output Format
@@ -45,7 +45,7 @@ Produce a JSON triage report:
 ```json
 {
   "classification": "new_feature|enhancement|duplicate|bug",
-  "severity": "critical|high|medium|low",
+  "severity": "P0|P1|P2|P3",
   "category": "feature|bug|improvement",
   "existing_ref": "BUD-NNN or null",
   "recommended_assignee": "role or team name",
@@ -53,7 +53,24 @@ Produce a JSON triage report:
 }
 ```
 
-## Severity Guidelines
+## Priority rubric (drives smart assignment + yield offers)
+
+- **P0** — production-down, security incident, regulatory deadline this week.
+  Justifies pulling an engineer off their current BUD today.
+- **P1** — large customer segment blocked, hard external deadline, follow-up
+  to a P0 incident.
+- **P2** — standard product work. The default for most BUDs.
+- **P3** — backlog: nice-to-haves, internal tooling, polish.
+
+Pick the LOWEST priority that still fits. Over-flagging dilutes the
+signal: smart assignment will move developers off lower-priority work
+to make room for P0/P1s, which is disruptive when used casually.
+
+## Severity Guidelines (legacy table)
+
+The historical severity labels below map to the P0–P3 rubric above.
+Use the P-codes in the JSON output; this table is kept for analyst
+intuition during the analysis step.
 
 | Level | Criteria |
 |-------|----------|

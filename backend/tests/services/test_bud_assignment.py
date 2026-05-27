@@ -34,7 +34,17 @@ import pytest
 
 from app.models.bud import BUDStatus
 from app.models.user import UserRole
-from app.services import bud_assignment
+from app.services import bud_assignment, bud_assignment_actions
+
+
+@pytest.fixture(autouse=True)
+def _stub_yield_offer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default: at-capacity branches don't raise a yield offer.
+
+    Tests that exercise yield-offer behaviour explicitly override this
+    via their own ``monkeypatch.setattr`` on ``bud_assignment.maybe_raise_yield_offer``.
+    """
+    monkeypatch.setattr(bud_assignment, "maybe_raise_yield_offer", AsyncMock(return_value=None))
 
 
 @pytest.fixture
@@ -94,6 +104,12 @@ def _patch_repos(
     bud_repo.count_active_loads_for_assignees = AsyncMock(
         return_value=load_map if load_map is not None else {c.id: 0 for c in candidates}
     )
+    # Priority-weighted load used by smart scoring; default to the count
+    # map so existing tests stay deterministic (effective load == count
+    # when every BUD has the same P2 priority).
+    bud_repo.weighted_active_loads_for_assignees = AsyncMock(
+        return_value=load_map if load_map is not None else {c.id: 0 for c in candidates}
+    )
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
 
     timeline_repo = MagicMock()
@@ -125,7 +141,7 @@ async def test_no_candidates_short_circuits_and_clears_stale_assignee(
     bud.assignee_id = uuid.uuid4()  # stale previous assignment
     log_activity = _patch_repos(monkeypatch, candidates=[])
     smart = AsyncMock(side_effect=AssertionError("smart picker called with empty pool"))
-    monkeypatch.setattr("app.services.smart_assignment.assign_best_for_role", smart)
+    monkeypatch.setattr("app.services.bud_assignment.assign_best_for_role", smart)
 
     result = await bud_assignment.auto_assign_for_phase(
         fake_db, org_id, bud, BUDStatus.DEVELOPMENT
@@ -172,6 +188,9 @@ async def test_all_at_capacity_emits_warning_and_leaves_unassigned(
     bud_repo.count_active_loads_for_assignees = AsyncMock(
         return_value={d.id: cap for d in devs}  # exactly at cap → excluded
     )
+    bud_repo.weighted_active_loads_for_assignees = AsyncMock(
+        return_value={d.id: cap for d in devs}
+    )
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
 
     timeline_repo = MagicMock()
@@ -185,7 +204,7 @@ async def test_all_at_capacity_emits_warning_and_leaves_unassigned(
     monkeypatch.setattr(bud_assignment, "log_agent_activity", log_activity)
     monkeypatch.setattr(bud_assignment, "record_event", AsyncMock(return_value=None))
     smart = AsyncMock(side_effect=AssertionError("smart picker called when all at cap"))
-    monkeypatch.setattr("app.services.smart_assignment.assign_best_for_role", smart)
+    monkeypatch.setattr("app.services.bud_assignment.assign_best_for_role", smart)
 
     bud.assignee_id = uuid.uuid4()  # stale prior assignment to clear
 
@@ -227,7 +246,7 @@ async def test_pm_cap_strictly_higher_than_developer_cap(
     pm = SimpleNamespace(id=uuid.uuid4(), name="Priya", created_at="2026-01-01")
     _patch_repos(monkeypatch, candidates=[pm], load_map={pm.id: pm_cap - 1})
     monkeypatch.setattr(
-        "app.services.smart_assignment.assign_best_for_role",
+        "app.services.bud_assignment.assign_best_for_role",
         AsyncMock(return_value=pm),
     )
 
@@ -257,6 +276,7 @@ async def test_fallback_role_used_when_primary_empty(
 
     bud_repo = MagicMock()
     bud_repo.count_active_loads_for_assignees = AsyncMock(return_value={developer.id: 0})
+    bud_repo.weighted_active_loads_for_assignees = AsyncMock(return_value={developer.id: 0})
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
 
     timeline_repo = MagicMock()
@@ -270,7 +290,7 @@ async def test_fallback_role_used_when_primary_empty(
     monkeypatch.setattr(bud_assignment, "log_agent_activity", log_activity)
     monkeypatch.setattr(bud_assignment, "record_event", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        "app.services.smart_assignment.assign_best_for_role",
+        "app.services.bud_assignment.assign_best_for_role",
         AsyncMock(return_value=developer),
     )
 
@@ -298,7 +318,7 @@ async def test_smart_match_emits_invoked_then_completed(
     candidate = SimpleNamespace(id=uuid.uuid4(), name="Alice", created_at="2026-01-01")
     log_activity = _patch_repos(monkeypatch, candidates=[candidate])
     monkeypatch.setattr(
-        "app.services.smart_assignment.assign_best_for_role",
+        "app.services.bud_assignment.assign_best_for_role",
         AsyncMock(return_value=candidate),
     )
 
@@ -326,7 +346,7 @@ async def test_smart_returns_none_falls_back_to_round_robin(
     candidate = SimpleNamespace(id=uuid.uuid4(), name="Bob", created_at="2026-01-01")
     log_activity = _patch_repos(monkeypatch, candidates=[candidate])
     monkeypatch.setattr(
-        "app.services.smart_assignment.assign_best_for_role",
+        "app.services.bud_assignment.assign_best_for_role",
         AsyncMock(return_value=None),
     )
 
@@ -359,7 +379,7 @@ async def test_all_smart_phases_invoke_skill_picker(
     candidate = SimpleNamespace(id=uuid.uuid4(), name="Pat", created_at="2026-01-01")
     _patch_repos(monkeypatch, candidates=[candidate])
     smart = AsyncMock(return_value=candidate)
-    monkeypatch.setattr("app.services.smart_assignment.assign_best_for_role", smart)
+    monkeypatch.setattr("app.services.bud_assignment.assign_best_for_role", smart)
 
     await bud_assignment.auto_assign_for_phase(fake_db, org_id, bud, phase)
 
@@ -428,6 +448,9 @@ def _patch_continuity_world(
     bud_repo.count_active_loads_for_assignees = AsyncMock(
         return_value={prev_user.id: load_for_prev}
     )
+    bud_repo.weighted_active_loads_for_assignees = AsyncMock(
+        return_value={prev_user.id: load_for_prev}
+    )
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
 
     timeline_repo = MagicMock()
@@ -447,7 +470,7 @@ def _patch_continuity_world(
 
     if skill_pick is not None:
         monkeypatch.setattr(
-            "app.services.smart_assignment.assign_best_for_role",
+            "app.services.bud_assignment.assign_best_for_role",
             AsyncMock(return_value=skill_pick),
         )
     return log_activity
@@ -603,7 +626,7 @@ async def test_continuity_no_history_falls_through(
     candidate = SimpleNamespace(id=uuid.uuid4(), name="Alice", created_at="2026-01-01")
     log_activity = _patch_repos(monkeypatch, candidates=[candidate], continuity_hit=None)
     monkeypatch.setattr(
-        "app.services.smart_assignment.assign_best_for_role",
+        "app.services.bud_assignment.assign_best_for_role",
         AsyncMock(return_value=candidate),
     )
 
@@ -651,6 +674,7 @@ async def test_chain_message_attributes_primary_when_fallback_at_cap(
     )
     bud_repo = MagicMock()
     bud_repo.count_active_loads_for_assignees = AsyncMock(return_value={pm.id: 1})
+    bud_repo.weighted_active_loads_for_assignees = AsyncMock(return_value={pm.id: 1})
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
     timeline_repo = MagicMock()
     timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=None)
@@ -722,6 +746,7 @@ async def test_chain_never_falls_through_to_org_owner(
 
     bud_repo = MagicMock()
     bud_repo.count_active_loads_for_assignees = AsyncMock(side_effect=loads)
+    bud_repo.weighted_active_loads_for_assignees = AsyncMock(side_effect=loads)
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
     timeline_repo = MagicMock()
     timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=None)
@@ -734,7 +759,7 @@ async def test_chain_never_falls_through_to_org_owner(
     monkeypatch.setattr(bud_assignment, "record_event", AsyncMock(return_value=None))
     # Smart picker would assign owner if reached — but it must not be reached.
     smart = AsyncMock(side_effect=AssertionError("smart picker called with org_owner pool"))
-    monkeypatch.setattr("app.services.smart_assignment.assign_best_for_role", smart)
+    monkeypatch.setattr("app.services.bud_assignment.assign_best_for_role", smart)
 
     bud = _make_bud()
     result = await bud_assignment.auto_assign_for_phase(fake_db, org_id, bud, BUDStatus.DESIGN)
@@ -761,11 +786,15 @@ async def test_manual_assign_records_role_for_continuity_lookups(
     assignee_id = uuid.uuid4()
     assignee = SimpleNamespace(id=assignee_id, name="Manual", email="m@x")
 
+    # ``assign_bud`` lives in ``bud_assignment_actions``; patch there
+    # since the function reads its module-level imports at call time.
     user_repo = MagicMock()
     user_repo.get_role = AsyncMock(return_value=UserRole.PM)
-    monkeypatch.setattr(bud_assignment, "UserRepository", MagicMock(return_value=user_repo))
+    monkeypatch.setattr(
+        bud_assignment_actions, "UserRepository", MagicMock(return_value=user_repo)
+    )
     record_event = AsyncMock(return_value=None)
-    monkeypatch.setattr(bud_assignment, "record_event", record_event)
+    monkeypatch.setattr(bud_assignment_actions, "record_event", record_event)
 
     db = MagicMock(name="AsyncSession")
     db.get = AsyncMock(return_value=assignee)
@@ -819,6 +848,7 @@ async def test_first_design_entry_does_not_carry_pm_from_bud_phase(
     )
     bud_repo = MagicMock()
     bud_repo.count_active_loads_for_assignees = AsyncMock(return_value={designer.id: 0})
+    bud_repo.weighted_active_loads_for_assignees = AsyncMock(return_value={designer.id: 0})
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
     timeline_repo = MagicMock()
     # Phase-scoped query for "design" must return None even though the
@@ -832,7 +862,7 @@ async def test_first_design_entry_does_not_carry_pm_from_bud_phase(
     monkeypatch.setattr(bud_assignment, "log_agent_activity", log_activity)
     monkeypatch.setattr(bud_assignment, "record_event", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        "app.services.smart_assignment.assign_best_for_role",
+        "app.services.bud_assignment.assign_best_for_role",
         AsyncMock(return_value=designer),
     )
 
@@ -882,6 +912,7 @@ async def test_testing_picks_qa_even_when_developer_was_just_assigned(
     )
     bud_repo = MagicMock()
     bud_repo.count_active_loads_for_assignees = AsyncMock(return_value={qa.id: 0})
+    bud_repo.weighted_active_loads_for_assignees = AsyncMock(return_value={qa.id: 0})
     monkeypatch.setattr(bud_assignment, "BUDRepository", MagicMock(return_value=bud_repo))
     timeline_repo = MagicMock()
     timeline_repo.latest_assignee_for_phase = AsyncMock(return_value=None)
@@ -893,7 +924,7 @@ async def test_testing_picks_qa_even_when_developer_was_just_assigned(
     monkeypatch.setattr(bud_assignment, "log_agent_activity", log_activity)
     monkeypatch.setattr(bud_assignment, "record_event", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        "app.services.smart_assignment.assign_best_for_role",
+        "app.services.bud_assignment.assign_best_for_role",
         AsyncMock(return_value=qa),
     )
 

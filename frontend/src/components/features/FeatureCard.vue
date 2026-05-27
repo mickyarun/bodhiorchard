@@ -40,7 +40,7 @@
       </div>
 
       <div class="feature-card__repos">
-        <span class="repo-chip repo-chip--primary">
+        <span v-if="feature.primary" class="repo-chip repo-chip--primary">
           <v-icon icon="mdi-source-repository" size="13" />
           {{ feature.primary.repoName }}
         </span>
@@ -418,7 +418,7 @@ const codeLocationLines = computed<LocationLine[]>(() => {
       merged.set(layer, set)
     }
   }
-  ingest(props.feature.primary.codeLocations)
+  if (props.feature.primary) ingest(props.feature.primary.codeLocations)
   for (const link of props.feature.backendLinks) ingest(link.codeLocations)
   const lines: LocationLine[] = []
   for (const [layer, paths] of merged.entries()) {

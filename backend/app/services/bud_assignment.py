@@ -31,47 +31,34 @@ from app.repositories.bud import BUDRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.user import UserRepository
 from app.services.agent_activity_logger import log_agent_activity
+from app.services.assignment_policy import (
+    BUD_PRIORITY_WEIGHTS,
+    MAX_ACTIVE_BUDS_PER_ROLE,
+    TERMINAL_BUD_STATUSES,
+    max_active_buds_for,
+)
+from app.services.bud_assignment_actions import assign_bud, unassign_bud
 from app.services.bud_timeline import record_event
 
 # Single source of truth for the phase→role chain — see app/services/phase_roles.py.
 from app.services.phase_roles import PHASE_ROLE_CHAIN
+from app.services.smart_assignment import assign_best_for_role
 from app.services.todo_assignment import (
     assign_all_todos_to_lead,
-    cascade_assignee_to_todos,
 )
+from app.services.yield_offer_service import maybe_raise_yield_offer
 
-# NOTE: ``app.services.smart_assignment`` imports ``_TERMINAL_STATUSES`` from
-# this module, so the inverse import has to stay function-local to avoid a
-# circular import on app startup. Tested by ``tests/services/test_bud_assignment.py``.
+# Re-export for callers (and tests) that still patch this attribute name.
+__all__ = [
+    "BUDStatus",
+    "MAX_ACTIVE_BUDS_PER_ROLE",
+    "assign_bud",
+    "auto_assign_for_phase",
+    "max_active_buds_for",
+    "unassign_bud",
+]
 
 logger = structlog.get_logger(__name__)
-
-# Statuses that don't count toward a user's active workload
-_TERMINAL_STATUSES = {BUDStatus.CLOSED, BUDStatus.DISCARDED, BUDStatus.PROD}
-
-# Per-role limit on concurrent active BUDs. A candidate with this many
-# (or more) active BUDs is excluded — auto-assignment leaves the BUD
-# unassigned with an ``all_at_capacity`` warning rather than overloading
-# someone further. Tuned by role realities: PMs juggle many; devs work
-# deeply on a few; designers + QA sit in between.
-#
-# ``ORG_OWNER`` is intentionally NOT a key — the owner isn't a working
-# role in ``PHASE_ROLE_CHAIN`` either. They can still be assigned
-# manually if needed.
-MAX_ACTIVE_BUDS_PER_ROLE: dict[UserRole, int] = {
-    UserRole.PM: 10,
-    UserRole.MANAGER: 8,
-    UserRole.DESIGNER: 5,
-    UserRole.QA: 5,
-    UserRole.TECH_LEAD: 4,
-    UserRole.DEVELOPER: 3,
-}
-_DEFAULT_MAX_ACTIVE_BUDS = 3
-
-
-def max_active_buds_for(role: UserRole) -> int:
-    """Return the active-BUD cap for ``role``, falling back to the default."""
-    return MAX_ACTIVE_BUDS_PER_ROLE.get(role, _DEFAULT_MAX_ACTIVE_BUDS)
 
 
 # Phases that use smart (skill-based) assignment instead of round-robin.
@@ -188,6 +175,42 @@ async def auto_assign_for_phase(
 
     if outcome.reason == "all_at_capacity":
         assert outcome.over_cap_role is not None  # narrowed by reason
+        # Before declaring failure, try to raise a yield offer. If a
+        # saturated candidate is holding a strictly lower-priority BUD,
+        # the service writes a YieldOffer row + publishes an event; the
+        # developer's Accept/Reject is what actually moves assignment
+        # forward. Returning None here keeps the BUD unassigned for now
+        # — same as the old behaviour, but with a pending offer in play.
+        offer = await maybe_raise_yield_offer(
+            db,
+            org_id=org_id,
+            incoming_bud=bud,
+            saturated_candidates=list(outcome.saturated_candidates),
+        )
+        if offer is not None:
+            await log_agent_activity(
+                db,
+                org_id=org_id,
+                event_type="skill_invoked",
+                skill_slug=_PHASE_ASSIGNER_SLUG,
+                message=(
+                    f"All {primary_role.value}s at capacity — yield offer "
+                    f"sent for a lower-priority BUD"
+                ),
+                bud_id=bud.id,
+                bud_number=bud.bud_number,
+                bud_title=bud.title,
+                metadata_={
+                    "reason": "yield_offer_pending",
+                    "role": primary_role.value,
+                    "phase": phase_value,
+                    "offer_id": str(offer.id),
+                },
+            )
+            return await _clear_stale_assignment(
+                db, org_id, bud, actor_id=actor_id, actor_name=actor_name
+            )
+
         # Post-rewrite, at_capacity fires only when the PRIMARY role is
         # full (fallback-at-cap continues the walk). The metadata always
         # reports the primary regardless — that's the frontend contract.
@@ -256,9 +279,6 @@ async def auto_assign_for_phase(
     chosen: User | None = None
     method = ""
     if new_status in _SMART_ASSIGNMENT_PHASES:
-        # Inline import: see module-header NOTE on the circular dep.
-        from app.services.smart_assignment import assign_best_for_role
-
         try:
             chosen = await assign_best_for_role(
                 db,
@@ -266,7 +286,7 @@ async def auto_assign_for_phase(
                 bud,
                 role=role_name,
                 candidates=candidates,
-                load_map=load_map,
+                load_map=outcome.weighted_load_map,
             )
         except Exception as exc:
             # Smart picker can raise on LLM-tiebreak crash, DB hiccup, etc.
@@ -369,12 +389,20 @@ class _ChainOutcome:
 
     candidates: list[User]
     load_map: dict[uuid.UUID, int]
+    # Priority-weighted variant of ``load_map`` for skill-based scoring.
+    # Round-robin still uses the count-based ``load_map`` because that
+    # matches its "least loaded by raw count" semantics.
+    weighted_load_map: dict[uuid.UUID, int]
     role: UserRole | None
     is_fallback: bool
     reason: Literal["ok", "all_at_capacity", "no_candidates"]
     over_cap_role: UserRole | None = None
     over_cap_count: int = 0
     over_cap_limit: int = 0
+    # When ``reason == "all_at_capacity"``, this carries the saturated
+    # candidate list so the yield-offer service can try displacing a
+    # lower-priority BUD. Empty in every other branch.
+    saturated_candidates: tuple[User, ...] = ()
 
 
 async def _resolve_via_chain(
@@ -412,15 +440,25 @@ async def _resolve_via_chain(
             continue  # no members for this role; try next
 
         load_map = await bud_repo.count_active_loads_for_assignees(
-            [c.id for c in candidates], [s.value for s in _TERMINAL_STATUSES]
+            [c.id for c in candidates], [s.value for s in TERMINAL_BUD_STATUSES]
         )
         cap = max_active_buds_for(role)
         under_cap = [c for c in candidates if load_map.get(c.id, 0) < cap]
 
         if under_cap:
+            # Second query: priority-weighted load for the under-cap
+            # subset only. Used by ``assign_best_for_role`` so candidates
+            # holding lower-priority work get preferred over those
+            # already loaded with P0/P1s, while the cap stays count-based.
+            weighted_load_map = await bud_repo.weighted_active_loads_for_assignees(
+                [c.id for c in under_cap],
+                [s.value for s in TERMINAL_BUD_STATUSES],
+                weights=BUD_PRIORITY_WEIGHTS,
+            )
             return _ChainOutcome(
                 candidates=under_cap,
                 load_map=load_map,
+                weighted_load_map=weighted_load_map,
                 role=role,
                 is_fallback=role != primary_role,
                 reason="ok",
@@ -434,12 +472,14 @@ async def _resolve_via_chain(
             return _ChainOutcome(
                 candidates=[],
                 load_map={},
+                weighted_load_map={},
                 role=primary_role,
                 is_fallback=False,
                 reason="all_at_capacity",
                 over_cap_role=primary_role,
                 over_cap_count=len(candidates),
                 over_cap_limit=cap,
+                saturated_candidates=tuple(candidates),
             )
 
         # Fallback role at cap. Keep walking — the primary is missing
@@ -452,6 +492,7 @@ async def _resolve_via_chain(
     return _ChainOutcome(
         candidates=[],
         load_map={},
+        weighted_load_map={},
         role=primary_role,
         is_fallback=False,
         reason="no_candidates",
@@ -615,7 +656,7 @@ async def _previous_assignee_for_phase(
     cap = max_active_buds_for(eligible_role)
     bud_repo = BUDRepository(db, org_id=org_id)
     load_map = await bud_repo.count_active_loads_for_assignees(
-        [user.id], [s.value for s in _TERMINAL_STATUSES]
+        [user.id], [s.value for s in TERMINAL_BUD_STATUSES]
     )
     if load_map.get(user.id, 0) >= cap:
         return None
@@ -797,71 +838,7 @@ async def _assign_todos_to_lead_if_development(
         logger.warning("todo_lead_assignment_failed", bud_id=str(bud_id))
 
 
-async def assign_bud(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    bud: BUDDocument,
-    assignee_id: uuid.UUID,
-    actor_id: uuid.UUID | None,
-    actor_name: str | None,
-) -> None:
-    """Manually assign a BUD. Records timeline event.
-
-    During DEVELOPMENT, also cascades the new assignee onto every
-    non-checkpoint TODO — UNLESS any TODO is already in_progress,
-    completed, or has been taken over via ``takeover_todo``. In that
-    case the cascade is skipped to preserve developer claims, and the
-    top-level reassignment still goes through for visibility.
-    """
-    assignee = await db.get(User, assignee_id)
-    bud.assignee_id = assignee_id
-    # Record the assignee's current role too, so continuity lookups on
-    # phase re-entry can match this manual event. Falls back to None
-    # when the role can't be resolved (legacy data, no membership row).
-    user_role = await UserRepository(db).get_role(assignee_id, org_id)
-    detail: dict[str, Any] = {
-        "assignee_id": str(assignee_id),
-        "assignee_name": assignee.name if assignee else None,
-        "method": "manual",
-        "phase": bud.status.value,
-    }
-    if user_role is not None:
-        detail["role"] = user_role.value
-    await record_event(
-        db,
-        org_id,
-        bud.id,
-        "assigned",
-        actor_id=actor_id,
-        actor_name=actor_name,
-        detail=detail,
-    )
-
-    if bud.status == BUDStatus.DEVELOPMENT:
-        # The cascade returns -1 (and is a no-op) when any TODO has been
-        # claimed or progressed — no exception, so no try/except needed.
-        # A genuine DB error must propagate so the outer transaction rolls
-        # back; silently logging would leave the BUD assignee changed but
-        # the TODOs stale, which is worse than failing the whole request.
-        await cascade_assignee_to_todos(db, org_id, bud.id, assignee_id)
-
-
-async def unassign_bud(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    bud: BUDDocument,
-    actor_id: uuid.UUID | None,
-    actor_name: str | None,
-) -> None:
-    """Remove assignment from a BUD. Records timeline event."""
-    old_id = bud.assignee_id
-    bud.assignee_id = None
-    await record_event(
-        db,
-        org_id,
-        bud.id,
-        "unassigned",
-        actor_id=actor_id,
-        actor_name=actor_name,
-        detail={"previous_assignee_id": str(old_id) if old_id else None},
-    )
+# ``assign_bud`` / ``unassign_bud`` were extracted to
+# ``app.services.bud_assignment_actions`` so the yield-offer service
+# can call them without a cycle. Re-exported here for callers that
+# still import from this module.

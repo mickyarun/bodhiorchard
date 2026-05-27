@@ -113,6 +113,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     if topic.startswith("xp:") and topic != f"xp:{user_id}":
                         await websocket.send_json({"error": "forbidden", "topic": topic})
                         continue
+                    if topic.startswith("yield_offer:") and topic != f"yield_offer:{user_id}":
+                        await websocket.send_json({"error": "forbidden", "topic": topic})
+                        continue
                     # Org-scoped topics: ``org:{org_id}:{channel}`` — the
                     # second segment must match the JWT's ``org_id`` claim.
                     if topic.startswith("org:"):

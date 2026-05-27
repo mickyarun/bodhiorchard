@@ -76,7 +76,7 @@ or for a Feature in the backlog:
   "action": "summary",
   "data": {
     "feature_name": "Short descriptive name for the BUD",
-    "priority": "critical|high|medium|low",
+    "priority": "P0|P1|P2|P3",
     "message": "Formatted triage summary in Slack mrkdwn (see format below)",
     "context": {
       "merchant_name": "Name of requesting merchant/customer or empty string",
@@ -88,6 +88,27 @@ or for a Feature in the backlog:
   }
 }
 ```
+
+### Priority rubric
+
+Pick the lowest priority that still fits. Smart assignment uses
+priority to bias which developer gets the work and to raise
+yield-offer notifications when higher-priority work needs a slot,
+so over-flagging dilutes the signal.
+
+- **P0** — production-down, security incident, named enterprise
+  customer escalation, regulatory deadline within the week. Anything
+  that justifies pulling an engineer off their current BUD today.
+- **P1** — strategic feature with a hard external deadline, large
+  customer segment blocked, or a follow-up to a P0 incident. The
+  team's next big push, but not "drop everything".
+- **P2** — standard product work. The default for most BUDs.
+- **P3** — backlog: nice-to-haves, internal tooling, polish.
+
+Legacy values `critical / urgent / blocker` (→ P0), `high` (→ P1),
+`medium / normal` (→ P2), and `low / minor / nice-to-have` (→ P3)
+are also accepted by the backend normalizer, but prefer the
+structured `P0..P3` form so the rubric above is explicit.
 
 ## Step 1 — Duplicate Check (MANDATORY on every turn)
 

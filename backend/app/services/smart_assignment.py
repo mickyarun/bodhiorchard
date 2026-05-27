@@ -37,8 +37,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bud import BUDDocument
 from app.models.skill_profile import SkillProfile
 from app.models.user import User, UserRole
+from app.repositories.bud import BUDRepository
 from app.repositories.skill_profile import SkillProfileRepository
+from app.repositories.user import UserRepository
+from app.services.assignment_policy import (
+    BUD_PRIORITY_WEIGHTS,
+    TERMINAL_BUD_STATUSES,
+    max_active_buds_for,
+)
 from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+
+# Re-exported for callers that still import the constant from this module.
+__all__ = [
+    "BUD_PRIORITY_WEIGHTS",
+    "assign_best_for_role",
+    "reassign_developer",
+    "score_candidates",
+]
 
 logger = structlog.get_logger(__name__)
 
@@ -64,8 +79,11 @@ async def score_candidates(
     """Score each candidate for this BUD; return descending by score.
 
     Caller has already filtered ``candidates`` to those eligible (under
-    their role's capacity cap) and pre-fetched ``load_map`` (active-BUD
-    count per candidate). We do the scoring math here only.
+    their role's capacity cap) and pre-fetched ``load_map`` — the
+    **priority-weighted** active load per candidate (sum of
+    ``BUD_PRIORITY_WEIGHTS`` over each candidate's active BUDs, not the
+    raw count). Capacity caps stay count-based; only scoring uses the
+    weighted view.
 
     Layer 1 short-circuit: if the BUD has no ``impacted_repos`` or none
     of the candidates have any ``skill_profile`` rows, drop the skill +
@@ -181,10 +199,6 @@ async def reassign_developer(
     ``load_map`` (this path isn't part of the chain walk) and applies
     the developer-role capacity cap.
     """
-    from app.repositories.bud import BUDRepository
-    from app.repositories.user import UserRepository
-    from app.services.bud_assignment import _TERMINAL_STATUSES, max_active_buds_for
-
     user_repo = UserRepository(db)
     bud_repo = BUDRepository(db, org_id=org_id)
     all_devs = await user_repo.list_active_with_role(org_id, UserRole.DEVELOPER)
@@ -193,16 +207,20 @@ async def reassign_developer(
         logger.info("reassign_no_candidates", bud_id=str(bud.id), reason=reason)
         return None
 
-    load_map = await bud_repo.count_active_loads_for_assignees(
-        [c.id for c in eligible], [s.value for s in _TERMINAL_STATUSES]
-    )
+    terminal = [s.value for s in TERMINAL_BUD_STATUSES]
+    load_map = await bud_repo.count_active_loads_for_assignees([c.id for c in eligible], terminal)
     cap = max_active_buds_for(UserRole.DEVELOPER)
     under_cap = [c for c in eligible if load_map.get(c.id, 0) < cap]
     if not under_cap:
         logger.info("reassign_all_at_capacity", bud_id=str(bud.id), reason=reason)
         return None
 
-    scored = await score_candidates(db, org_id, bud, under_cap, load_map)
+    weighted_load_map = await bud_repo.weighted_active_loads_for_assignees(
+        [c.id for c in under_cap],
+        terminal,
+        weights=BUD_PRIORITY_WEIGHTS,
+    )
+    scored = await score_candidates(db, org_id, bud, under_cap, weighted_load_map)
     return scored[0][0] if scored else None
 
 

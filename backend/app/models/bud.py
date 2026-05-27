@@ -89,6 +89,15 @@ class BUDStatus(StrEnum):
     DISCARDED = "discarded"
 
 
+class BUDPriority(StrEnum):
+    """Priority of a BUD. P0 is highest, P3 is lowest."""
+
+    P0 = "P0"
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
+
+
 class BUDDocument(BaseModel):
     """Business Understanding Document with embedded vector representation."""
 
@@ -96,6 +105,7 @@ class BUDDocument(BaseModel):
     __table_args__ = (
         UniqueConstraint("org_id", "bud_number", name="uq_bud_org_number"),
         Index("ix_bud_org_status", "org_id", "status"),
+        Index("ix_bud_org_priority", "org_id", "priority"),
         Index("ix_bud_prod_p70", "org_id", "prod_p70_date"),
         Index("ix_bud_phase_deadline", "org_id", "current_phase_deadline"),
     )
@@ -109,6 +119,12 @@ class BUDDocument(BaseModel):
         Enum(BUDStatus, name="bud_status", values_callable=lambda e: [x.value for x in e]),
         nullable=False,
         default=BUDStatus.BUD,
+    )
+    priority: Mapped[BUDPriority] = mapped_column(
+        Enum(BUDPriority, name="bud_priority", values_callable=lambda e: [x.value for x in e]),
+        nullable=False,
+        default=BUDPriority.P2,
+        server_default=BUDPriority.P2.value,
     )
     requirements_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     tech_spec_md: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -52,6 +52,33 @@
           single-line
           class="board-filter-assignee"
         />
+        <v-select
+          v-model="priorityFilter"
+          :items="priorityFilterOptions"
+          item-title="label"
+          item-value="value"
+          placeholder="All priorities"
+          prepend-inner-icon="mdi-flag-outline"
+          density="compact"
+          variant="solo-filled"
+          flat
+          hide-details
+          clearable
+          single-line
+          class="board-filter-priority"
+        />
+        <v-tooltip text="Sort cards by priority (P0 first) within each column" location="bottom">
+          <template #activator="{ props: tipProps }">
+            <v-btn
+              v-bind="tipProps"
+              :icon="sortByPriority ? 'mdi-sort-descending' : 'mdi-sort-variant'"
+              variant="text"
+              size="small"
+              :color="sortByPriority ? 'primary' : undefined"
+              @click="sortByPriority = !sortByPriority"
+            />
+          </template>
+        </v-tooltip>
         <!-- Customize lifecycle stages — same permission gate as the
              settings route. Visible to users who can actually change
              the UAT toggle / framework; hidden for plain viewers. -->
@@ -71,6 +98,11 @@
         </v-btn>
       </div>
     </div>
+
+    <!-- Yield-offer notices addressed to the current user (or every
+         org-wide offer if the viewer has team:manage). Renders nothing
+         when there are no pending offers. -->
+    <YieldOfferNotice />
 
     <!-- Loading -->
     <div v-if="budStore.loading" class="d-flex justify-center py-12">
@@ -133,10 +165,21 @@
               color="surface"
               @click="openBUD(bud.id)"
             >
-              <!-- Row 1: BUD number + complexity dots -->
+              <!-- Row 1: BUD number + priority chip + complexity dots -->
               <div class="d-flex align-center justify-space-between mb-1">
-                <div class="text-caption text-medium-emphasis">
-                  BUD-{{ String(bud.bud_number).padStart(3, '0') }}
+                <div class="d-flex align-center ga-2">
+                  <div class="text-caption text-medium-emphasis">
+                    BUD-{{ String(bud.bud_number).padStart(3, '0') }}
+                  </div>
+                  <v-chip
+                    size="x-small"
+                    variant="tonal"
+                    :color="priorityColor(bud.priority)"
+                    :title="`Priority ${bud.priority}`"
+                    label
+                  >
+                    {{ bud.priority }}
+                  </v-chip>
                 </div>
                 <div v-if="bud.complexity" class="d-flex ga-1">
                   <span
@@ -236,6 +279,14 @@
           variant="outlined"
         />
 
+        <!-- Priority: defaults to P2 (normal). Drives the assignment
+             scorer (lower-priority work is preferred for displacement)
+             and the yield-offer flow. -->
+        <div class="d-flex align-center ga-3 mb-3">
+          <div class="text-body-2 text-medium-emphasis" style="min-width: 70px;">Priority</div>
+          <AppPillToggle v-model="newPriority" :options="PRIORITY_OPTIONS" size="sm" />
+        </div>
+
         <!-- Advanced Settings: per-stage skill picker -->
         <v-expansion-panels v-model="advancedPanel" variant="accordion" class="mt-3">
           <v-expansion-panel value="advanced">
@@ -326,10 +377,24 @@ import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/agentSkills'
-import { BUD_STATUS_LABELS, BUD_STATUS_COLORS } from '@/types'
-import type { BUDStatus } from '@/types'
+import { BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_PRIORITIES } from '@/types'
+import type { BUDStatus, BUDPriority } from '@/types'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { usePermissions } from '@/composables/usePermissions'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import YieldOfferNotice from '@/components/buds/YieldOfferNotice.vue'
+
+// Theme-token color for each priority. Used by the chip on each card
+// AND by the filter / sort surface so the visual contract is identical
+// across the board.
+const PRIORITY_COLORS: Record<BUDPriority, string> = {
+  P0: 'error',
+  P1: 'warning',
+  P2: 'on-surface-variant',
+  P3: 'on-surface-variant',
+}
+const PRIORITY_WEIGHTS: Record<BUDPriority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
+const PRIORITY_OPTIONS = BUD_PRIORITIES.map(p => ({ label: p, value: p }))
 
 const router = useRouter()
 const budStore = useBUDStore()
@@ -340,6 +405,8 @@ const nameFilter = ref('')
 // `clearable` resets to null, which we treat as "no filter".
 const UNASSIGNED = '__unassigned__'
 const assigneeFilter = ref<string | null>(null)
+const priorityFilter = ref<BUDPriority | null>(null)
+const sortByPriority = ref(false)
 
 // Dropdown options derived from the currently-loaded buds so we only show
 // assignees that actually exist on the board. "Unassigned" is appended
@@ -358,6 +425,8 @@ const assigneeOptions = computed(() => {
   return opts
 })
 
+const priorityFilterOptions = BUD_PRIORITIES.map(p => ({ label: p, value: p }))
+
 // Filter buds by title (case-insensitive substring) OR by BUD reference
 // like "BUD-014" / "014" / "14", AND by assignee. Applied after the store's
 // status grouping so kanban columns stay intact and the filter is purely
@@ -365,19 +434,25 @@ const assigneeOptions = computed(() => {
 const filteredBudsByStatus = computed<Record<string, typeof budStore.buds>>(() => {
   const q = nameFilter.value?.trim().toLowerCase() ?? ''
   const assignee = assigneeFilter.value
+  const priority = priorityFilter.value
+  const sort = sortByPriority.value
   const grouped = budStore.budsByStatus
-  if (!q && !assignee) return grouped
+  if (!q && !assignee && !priority && !sort) return grouped
   const numericQ = q.replace(/^bud-?/, '').replace(/^0+/, '')
   const out: Record<string, typeof budStore.buds> = {}
   for (const status of Object.keys(grouped)) {
-    out[status] = grouped[status].filter((bud) => {
+    const filtered = grouped[status].filter((bud) => {
       if (assignee === UNASSIGNED && bud.assignee_id) return false
       if (assignee && assignee !== UNASSIGNED && bud.assignee_id !== assignee) return false
+      if (priority && bud.priority !== priority) return false
       if (!q) return true
       if (bud.title?.toLowerCase().includes(q)) return true
       const num = String(bud.bud_number)
       return numericQ !== '' && num.includes(numericQ)
     })
+    out[status] = sort
+      ? [...filtered].sort((a, b) => PRIORITY_WEIGHTS[a.priority] - PRIORITY_WEIGHTS[b.priority])
+      : filtered
   }
   return out
 })
@@ -389,6 +464,7 @@ const filteredCount = computed(() =>
 const showCreateDialog = ref(false)
 const newTitle = ref('')
 const newContent = ref('')
+const newPriority = ref<BUDPriority>('P2')
 const creating = ref(false)
 const advancedPanel = ref<string | null>(null)
 const stageSkillPicks = ref<Record<string, string | null>>({})
@@ -494,12 +570,14 @@ async function createBUD(): Promise<void> {
     newContent.value.trim() || undefined,
     Object.keys(overrides).length > 0 ? overrides : undefined,
     phases,
+    newPriority.value,
   )
   creating.value = false
   if (bud) {
     showCreateDialog.value = false
     newTitle.value = ''
     newContent.value = ''
+    newPriority.value = 'P2'
     stageSkillPicks.value = {}
     advancedPanel.value = null
     autoGeneratePhases.value = {}
@@ -516,6 +594,10 @@ function formatDate(dateStr: string): string {
 
 function initials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+}
+
+function priorityColor(priority: BUDPriority): string {
+  return PRIORITY_COLORS[priority]
 }
 
 // Phase order filtered by org settings (e.g. UAT may be disabled). The

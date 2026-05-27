@@ -23,7 +23,7 @@
       color="surface"
       :width="240"
       rail-width="68"
-      expand-on-hover
+      :expand-on-hover="!notificationMenuOpen"
       class="app-sidebar"
     >
       <div
@@ -31,7 +31,17 @@
         :class="rail ? 'justify-center' : 'justify-space-between'"
       >
         <BodhiorchardLogo :size="28" :show-text="!rail" />
-        <NotificationBell v-if="!rail && authStore.user?.id" :user-id="authStore.user.id" />
+        <!-- v-show (not v-if) so the menu stays mounted even when the
+             drawer briefly collapses to rail — moving the mouse to a
+             dropdown item shouldn't unmount its trigger. The drawer
+             also disables ``expand-on-hover`` while the menu is open
+             (see ``notificationMenuOpen`` above) so the user can
+             actually reach the dropdown without it dismissing. -->
+        <NotificationBell
+          v-show="!rail && authStore.user?.id"
+          :user-id="authStore.user?.id || ''"
+          @update:menu-open="notificationMenuOpen = $event"
+        />
       </div>
 
       <v-list density="compact" nav class="px-2">
@@ -287,6 +297,13 @@ const {
 // flipping this flag.
 const RAIL_KEY = 'bodhiorchard_sidebar_rail'
 const rail = ref(localStorage.getItem(RAIL_KEY) === 'true')
+
+// While the notification bell's dropdown is open, freeze the drawer's
+// auto-collapse behaviour. Without this, moving the mouse off the
+// drawer to click a dropdown item collapses the drawer (rail mode),
+// which unmounts the bell trigger and dismisses the menu before the
+// click lands.
+const notificationMenuOpen = ref(false)
 watch(rail, (v) => localStorage.setItem(RAIL_KEY, String(v)))
 
 function toggleRail(): void {

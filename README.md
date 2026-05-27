@@ -383,7 +383,8 @@ Bodhiorchard ships with **12 specialized agents**, each triggered automatically 
 |---|---|---|
 | **Test Plan Agent** | Dev complete | Auto-generates Playwright e2e, unit/integration tests, manual UAT cases, and security tests |
 | **Bug Linker Agent** | New bug filed | Links bugs to BUDs via vector search, monitors thresholds, triggers reassignment |
-| **Reassignment Agent** | Bug threshold exceeded | Reassigns devs to bug review, rotates QA, rebalances workloads |
+| **Reassignment Agent** | Bug threshold exceeded | Reassigns devs to bug review, rotates QA |
+| **Yield-offer flow** | Higher-priority BUD has no free slot | Offers the developer holding a lower-priority BUD a chance to yield it; rebalancing is always opt-in (Accept / Reject). No background rebalancer. |
 
 ### Post-Deploy & Continuous
 

@@ -142,11 +142,55 @@ export const ROLE_LABELS: Record<UserRoleName, string> = {
   viewer: 'Viewer',
 }
 
+/** P0 is highest (drop everything); P3 is lowest (backlog). */
+export type BUDPriority = 'P0' | 'P1' | 'P2' | 'P3'
+
+export const BUD_PRIORITIES: readonly BUDPriority[] = ['P0', 'P1', 'P2', 'P3'] as const
+
+export type YieldOfferStatus = 'pending' | 'accepted' | 'rejected' | 'expired'
+
+/** A pending request asking a developer to yield a lower-priority BUD
+ *  so a higher-priority one can take its slot. Shape matches
+ *  ``backend/app/schemas/yield_offer.py:YieldOfferRead``. */
+export interface YieldOffer {
+  id: string
+  incoming_bud_id: string
+  incoming_bud_number: number | null
+  incoming_bud_title: string | null
+  incoming_bud_priority: BUDPriority | null
+  yieldable_bud_id: string
+  yieldable_bud_number: number | null
+  yieldable_bud_title: string | null
+  yieldable_bud_priority: BUDPriority | null
+  target_user_id: string
+  status: YieldOfferStatus
+  created_at: string
+}
+
+/** WS payload shape for ``yield_offer:{user_id}`` topic. */
+export interface YieldOfferSocketEvent {
+  event: 'created' | 'resolved'
+  offer_id: string
+  org_id: string
+  target_user_id: string
+  // Created-event only:
+  incoming_bud_id?: string
+  incoming_bud_priority?: BUDPriority
+  yieldable_bud_id?: string
+  yieldable_bud_priority?: BUDPriority
+  // Resolved-event only. The backend publishes ``reassigned`` when an
+  // admin re-routes an offer (the old target's UI drops the row) and
+  // may publish ``expired`` if the TTL job ever moves there. Keep the
+  // union honest so any future reader handles every case.
+  resolution?: 'accepted' | 'rejected' | 'reassigned' | 'expired'
+}
+
 export interface BUDListItem {
   id: string
   bud_number: number
   title: string
   status: BUDStatus
+  priority: BUDPriority
   complexity: number | null
   prod_p70_date: string | null
   current_phase_deadline: string | null
@@ -515,7 +559,10 @@ export interface Feature {
   source: string | null
   sourceRef: string | null
   synthesizedAt: string
-  primary: PrimaryLink
+  // Null on BUD-authored rows whose work is still planned/in-progress
+  // — those have no repo binding by design. Populated once the BUD's
+  // implementation lands and the reconciler attaches a PRIMARY row.
+  primary: PrimaryLink | null
   backendLinks: BackendLink[]
   // Creation lineage — when + how + by-which-PR the row was born.
   // ``createdAtSha`` is null only on legacy pre-column rows; PR fields

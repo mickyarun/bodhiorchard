@@ -26,7 +26,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.models.bud import BUDStatus
+from app.models.bud import BUDPriority, BUDStatus
 
 # Re-export design schemas so legacy imports keep working; new code
 # should import directly from :mod:`app.schemas.bud_design`.
@@ -68,6 +68,7 @@ class BUDCreate(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=500)
     requirements_md: str | None = None
+    priority: BUDPriority = BUDPriority.P2
     # Optional Figma file URL — see the bud_documents.figma_url column
     # comment in app.models.bud for the full rationale (Design-tab embed
     # + local-Claude tech-spec prompt). Validated against
@@ -97,6 +98,7 @@ class BUDUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=500)
     status: str | None = None
     status_override_reason: str | None = Field(None, max_length=2000)
+    priority: BUDPriority | None = None
     requirements_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
@@ -157,6 +159,7 @@ class BUDRead(BaseModel):
     bud_number: int
     title: str
     status: str
+    priority: BUDPriority
     requirements_md: str | None = None
     tech_spec_md: str | None = None
     test_plan_md: str | None = None
@@ -206,6 +209,7 @@ class BUDListItem(BaseModel):
     bud_number: int
     title: str
     status: str
+    priority: BUDPriority
     complexity: int | None = None
     prod_p70_date: datetime | None = None
     current_phase_deadline: datetime | None = None

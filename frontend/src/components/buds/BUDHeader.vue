@@ -17,9 +17,18 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useMembersStore } from '@/stores/members'
-import { BUD_STATUS_LABELS } from '@/types'
-import type { BUDDocument, BUDStatus } from '@/types'
+import { BUD_STATUS_LABELS, BUD_PRIORITIES } from '@/types'
+import type { BUDDocument, BUDStatus, BUDPriority } from '@/types'
 import { formatDate } from '@/utils/date'
+
+// Color contract for the priority chip — mirrors BUDBoard.vue so the
+// detail header and the kanban card use identical theme tokens.
+const PRIORITY_COLORS: Record<BUDPriority, string> = {
+  P0: 'error',
+  P1: 'warning',
+  P2: 'on-surface-variant',
+  P3: 'on-surface-variant',
+}
 
 const props = defineProps<{
   bud: BUDDocument
@@ -33,12 +42,17 @@ const props = defineProps<{
   // the user can't even open the panel for a section that would be
   // rejected on first send.
   chatable: boolean
+  // True when the current user is allowed to edit the BUD's priority
+  // (tech lead / PM / org owner roles). When false, the chip is
+  // read-only and the menu activator is suppressed.
+  canEditPriority: boolean
 }>()
 
 const emit = defineEmits<{
   back: []
   'update:chatOpen': [value: boolean]
   'change-assignee': [memberId: string | null]
+  'change-priority': [priority: BUDPriority]
   'update-status': [status: BUDStatus]
   delete: []
   'save-title': [title: string]
@@ -88,6 +102,47 @@ function saveTitle(): void {
         </span>
         <v-chip :color="statusColor" variant="tonal" size="x-small" label>
           {{ BUD_STATUS_LABELS[bud.status] }}
+        </v-chip>
+        <!-- Priority chip: read-only badge for most users; clickable
+             menu for tech lead / PM / org owner. The menu directly
+             emits ``change-priority`` so the parent can call updateBUD
+             without us caring about API plumbing here. -->
+        <v-menu v-if="canEditPriority" location="bottom">
+          <template #activator="{ props: priorityProps }">
+            <v-chip
+              v-bind="priorityProps"
+              :color="PRIORITY_COLORS[bud.priority]"
+              variant="tonal"
+              size="x-small"
+              label
+              class="cursor-pointer"
+              :title="`Priority ${bud.priority} — click to change`"
+            >
+              <v-icon start size="12">mdi-flag-outline</v-icon>
+              {{ bud.priority }}
+            </v-chip>
+          </template>
+          <v-list density="compact" min-width="120">
+            <v-list-item
+              v-for="p in BUD_PRIORITIES"
+              :key="p"
+              :active="bud.priority === p"
+              @click="emit('change-priority', p)"
+            >
+              <v-list-item-title class="text-body-2">{{ p }}</v-list-item-title>
+            </v-list-item>
+          </v-list>
+        </v-menu>
+        <v-chip
+          v-else
+          :color="PRIORITY_COLORS[bud.priority]"
+          variant="tonal"
+          size="x-small"
+          label
+          :title="`Priority ${bud.priority}`"
+        >
+          <v-icon start size="12">mdi-flag-outline</v-icon>
+          {{ bud.priority }}
         </v-chip>
         <v-menu location="bottom" :close-on-content-click="false">
           <template #activator="{ props: assigneeProps }">

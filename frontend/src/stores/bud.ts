@@ -15,7 +15,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { AxiosError } from 'axios'
-import type { BUDListItem, BUDDocument, BUDStatus, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatInProgressDetail, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewStatusResponse, JobStatusRead } from '@/types'
+import type { BUDListItem, BUDDocument, BUDStatus, BUDPriority, BUDDesign, BUDEstimates, DesignJobCreated, ChatJobCreatedResponse, ChatInProgressDetail, ChatMessageRead, TimelineEvent, PRChecklistItem, CodeReviewStatusResponse, JobStatusRead } from '@/types'
 import { BUD_STATUS_ORDER, CODE_REVIEW_OVERRIDE_REASON_MIN } from '@/types'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
@@ -54,12 +54,16 @@ export const useBUDStore = defineStore('bud', () => {
     return grouped
   })
 
-  async function fetchBUDs(statusFilter?: BUDStatus): Promise<void> {
+  async function fetchBUDs(
+    statusFilter?: BUDStatus,
+    options: { orderBy?: 'priority' } = {},
+  ): Promise<void> {
     loading.value = true
     error.value = ''
     try {
       const params: Record<string, string> = {}
       if (statusFilter) params.status = statusFilter
+      if (options.orderBy) params.order_by = options.orderBy
       const { data } = await api.get('/v1/buds/', { params })
       buds.value = data
     } catch {
@@ -89,6 +93,7 @@ export const useBUDStore = defineStore('bud', () => {
     requirements_md?: string,
     stage_skill_overrides?: Record<string, string>,
     auto_generate_phases: Record<string, boolean> = {},
+    priority: BUDPriority = 'P2',
   ): Promise<BUDDocument | null> {
     error.value = ''
     try {
@@ -99,6 +104,7 @@ export const useBUDStore = defineStore('bud', () => {
       const payload: Record<string, unknown> = {
         title,
         requirements_md,
+        priority,
         auto_generate_phases,
       }
       if (stage_skill_overrides && Object.keys(stage_skill_overrides).length > 0) {
