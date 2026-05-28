@@ -23,6 +23,15 @@ env/
 # Node / Frontend
 node_modules/
 frontend/dist/
+frontend/dist-landing/
+# vite-ssg leaves a temp dir at the build root and another inside the configured
+# entry root (frontend/landing-src/) — match both with a recursive glob.
+**/.vite-ssg-temp/
+
+# Legacy hand-coded landing page — deploy now comes from frontend/landing-src/
+# Anchor to repo root so it doesn't also swallow `frontend/public/landing/`
+# (in-app dev assets) or `frontend/landing-src/public/landing/` (landing-only).
+/landing/
 
 # IDE
 .vscode/
@@ -91,5 +100,8 @@ examples/BUD-001-tech-spec.md
 # Plan and experiment artefacts. These tend to accumulate snapshots of
 # real-world tuning data (customer repo names, dataset measurements) that
 # don't belong in source control. Keep them local-only.
-docs/
+# Pattern: exclude everything directly under docs/ but re-include the
+# README screenshots that ship with the repo.
+docs/*
+!docs/images/
 backend/experiments/

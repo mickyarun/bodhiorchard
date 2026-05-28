@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "build:landing": "vite-ssg build --config vite.landing.config.ts",
     "preview": "vite preview",
+    "preview:landing": "vite preview --config vite.landing.config.ts --outDir dist-landing",
     "lint": "eslint . --ext .vue,.ts",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -38,6 +40,7 @@
     "typescript": "^5.3.3",
     "vite": "^5.1.0",
     "vite-plugin-vuetify": "^2.0.0",
+    "vite-ssg": "^0.23.8",
     "vitest": "^1.6.1",
     "vue-tsc": "^2.0.0"
   }

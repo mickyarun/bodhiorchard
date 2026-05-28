@@ -92,8 +92,8 @@ Bodhiorchard is a **local-first, multi-tenant AI dev-ops platform** with three c
 
 ```
 api/v1/          HTTP handlers — thin; validate via schemas, delegate to services
-agents/          Agent definitions & orchestrators (11 agents: Triage, BUD, TechPlan, ...)
-mcp/             MCP server exposing 10 tools to Claude Code
+agents/          Agent definitions & orchestrators (12 agents: Triage, BUD, TechPlan, ...)
+mcp/             MCP server (BUD-lifecycle writes, feature registry, code graph, team context) for Claude Code
 services/        Business logic — LLM calls, scanning, synthesis, bud_closure, bug_linker
 repositories/    Data access — all queries filter by organization_id
 models/          SQLAlchemy ORM

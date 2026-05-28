@@ -1,6 +1,6 @@
 # TaskFlow — Sample Repositories for Scan Testing
 
-Three sample repos that exercise the scan pipeline's cross-repo feature detection, skill profiling, and code location tracking.
+Four sample repos that exercise the scan pipeline's cross-repo feature detection, skill profiling, code location tracking — plus an end-to-end test suite that drives the UI of the running app.
 
 ## Repos
 
@@ -9,6 +9,7 @@ Three sample repos that exercise the scan pipeline's cross-repo feature detectio
 | `taskflow-api` | FastAPI backend | 9001 | auth, tasks, notifications, billing |
 | `taskflow-worker` | Python background jobs | — | auth, notifications, reminders, billing |
 | `taskflow-web` | Vue 3 frontend | 9002 | auth, tasks, notifications, billing |
+| `taskflow-qa` | Playwright + Cucumber BDD e2e suite | — | drives `taskflow-web` at 9002 via `taskflow-api` at 9001 |
 
 ## Setup Git History
 
@@ -41,12 +42,17 @@ python -m src.main
 cd examples/taskflow-web
 npm install
 npm run dev -- --port 9002
+
+# 4. QA suite (optional — once 9001/9002 are up)
+cd examples/taskflow-qa
+npm install
+npm test                # Playwright + Cucumber against the running web app
 ```
 
 ## Testing the Scan Pipeline
 
 1. Start Bodhiorchard (`uvicorn` on default port 8000)
-2. In Settings > Repositories, add all 3 repos:
+2. In Settings > Repositories, add the 3 source repos (the QA suite isn't a scan target):
    - `/path/to/examples/taskflow-api`
    - `/path/to/examples/taskflow-worker`
    - `/path/to/examples/taskflow-web`

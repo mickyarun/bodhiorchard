@@ -41,6 +41,82 @@
       </v-btn>
     </div>
 
+    <!-- Section 1.5: Demo videos (tabbed) -->
+    <div class="mb-10">
+      <v-tabs v-model="videoTab" align-tabs="center" color="primary" density="compact">
+        <v-tab value="setup">Setup walkthrough</v-tab>
+        <v-tab value="world">Inside the virtual world</v-tab>
+      </v-tabs>
+      <v-card class="mt-3" variant="outlined">
+        <v-window v-model="videoTab">
+          <v-window-item value="setup">
+            <div class="methodology-video-frame">
+              <iframe
+                src="https://www.youtube-nocookie.com/embed/ot-BmKxRgRA"
+                title="Bodhiorchard — Setup walkthrough"
+                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowfullscreen
+                loading="lazy"
+              ></iframe>
+            </div>
+            <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
+              Clone, configure, and bring the stack up locally.
+            </p>
+          </v-window-item>
+          <v-window-item value="world">
+            <div class="methodology-video-frame">
+              <iframe
+                src="https://www.youtube-nocookie.com/embed/OxoqBI7BNxU"
+                title="Bodhiorchard — Inside the virtual world"
+                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowfullscreen
+                loading="lazy"
+              ></iframe>
+            </div>
+            <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
+              The Living Tree: your org as a tended orchard.
+            </p>
+          </v-window-item>
+        </v-window>
+      </v-card>
+    </div>
+
+    <!-- Section 1.6: Platform screenshots -->
+    <div class="mb-8">
+      <div class="d-flex flex-column align-center text-center mb-5">
+        <v-icon icon="mdi-image-multiple-outline" size="32" color="primary" class="mb-2" />
+        <div class="text-h6 font-weight-medium">See it</div>
+        <p class="text-caption text-medium-emphasis" style="max-width: 520px;">
+          The Living Tree, the BUD board where features move through their lifecycle, and the Feature registry of what shipped.
+        </p>
+      </div>
+      <v-row dense>
+        <v-col v-for="shot in platformShots" :key="shot.src" cols="12" sm="4">
+          <v-card class="methodology-shot-card" variant="outlined" @click="openLightbox(shot.src, shot.alt)">
+            <img :src="shot.src" :alt="shot.alt" loading="lazy" class="methodology-shot-img" />
+          </v-card>
+        </v-col>
+      </v-row>
+    </div>
+
+    <!-- Section 1.7: Gamification screenshots -->
+    <div class="mb-10">
+      <div class="d-flex flex-column align-center text-center mb-5">
+        <v-icon icon="mdi-trophy-outline" size="32" color="secondary" class="mb-2" />
+        <div class="text-h6 font-weight-medium">The gamification layer</div>
+        <p class="text-caption text-medium-emphasis" style="max-width: 560px;">
+          The Skill Agent rebuilds developer profiles nightly. Skills compound, badges unlock, and the leaderboard reflects what people shipped — not how many tickets they touched.
+        </p>
+      </div>
+      <v-row dense>
+        <v-col v-for="shot in gamificationShots" :key="shot.src" cols="12" sm="6" lg="3">
+          <v-card class="methodology-shot-card" variant="outlined" @click="openLightbox(shot.src, shot.alt)">
+            <img :src="shot.src" :alt="shot.alt" loading="lazy" class="methodology-shot-img" />
+          </v-card>
+        </v-col>
+      </v-row>
+    </div>
+
     <!-- Section 2: The Flow (Lifecycle Flowchart) -->
     <div class="mb-8">
       <div class="text-h6 font-weight-medium mb-4 text-center">The Flow</div>
@@ -127,6 +203,13 @@
         </v-col>
       </v-row>
     </div>
+
+    <!-- Lightbox dialog -->
+    <v-dialog v-model="lightboxOpen" max-width="90vw">
+      <v-card class="methodology-lightbox" @click="lightboxOpen = false">
+        <img :src="lightboxSrc" :alt="lightboxAlt" class="methodology-lightbox-img" />
+      </v-card>
+    </v-dialog>
 
     <!-- Section 6: Human + AI Loop — side by side -->
     <v-row class="mb-8" justify="center">
@@ -416,6 +499,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import LifecycleFlowchart from '@/components/setup/LifecycleFlowchart.vue'
 import AgentCard from '@/components/setup/AgentCard.vue'
 import { agents } from '@/data/agents'
@@ -423,6 +507,30 @@ import { agents } from '@/data/agents'
 const emit = defineEmits<{
   startBuilding: []
 }>()
+
+const videoTab = ref<string>('setup')
+
+const lightboxOpen = ref(false)
+const lightboxSrc = ref('')
+const lightboxAlt = ref('')
+function openLightbox(src: string, alt: string): void {
+  lightboxSrc.value = src
+  lightboxAlt.value = alt
+  lightboxOpen.value = true
+}
+
+const platformShots = [
+  { src: '/landing/livingtree.png', alt: 'Living Tree dashboard — 3D visualisation of your repos' },
+  { src: '/landing/board.png', alt: 'BUD board — backlog and lifecycle view' },
+  { src: '/landing/Feature.png', alt: 'Feature registry — BUDs that graduated to shipped features' },
+]
+
+const gamificationShots = [
+  { src: '/landing/skills.png', alt: 'Developer skill profile — module-by-module scoring' },
+  { src: '/landing/gamification.png', alt: 'XP and progression' },
+  { src: '/landing/LeaderBoard.png', alt: 'Leaderboard — ranked by shipped value' },
+  { src: '/landing/unlocks.png', alt: 'Unlocks — badges earned through contribution patterns' },
+]
 
 const principles = [
   { value: 'AI-generated first drafts', over: 'blank-page paralysis', icon: 'mdi-file-edit-outline' },
@@ -579,7 +687,7 @@ const knowledgeAdvantages = [
 ]
 
 const skillItems = [
-  { icon: 'mdi-history', label: 'Daily Profile Rebuilds', detail: 'Analyzes git history, BUDassignments, and bug fixes to build skill scores (0–1.0) per module.' },
+  { icon: 'mdi-history', label: 'Daily Profile Rebuilds', detail: 'Analyzes git history, BUD assignments, and bug fixes to build skill scores (0–1.0) per module.' },
   { icon: 'mdi-alert-outline', label: 'Bus Factor Alerts', detail: 'Detects modules touched by only one person — flags knowledge concentration risk.' },
   { icon: 'mdi-account-arrow-right-outline', label: 'Assignment Recommendations', detail: 'Recommends developers for new BUDs based on expertise match + available capacity.' },
   { icon: 'mdi-trending-up', label: 'Evolving Skills', detail: 'Skills grow automatically as developers contribute — no manual profile updates needed.' },
@@ -595,3 +703,46 @@ const budFeatures = [
   'Vector-indexed for semantic search by all agents',
 ]
 </script>
+
+<style scoped>
+.methodology-video-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  background: #0d1b0f;
+}
+.methodology-video-frame iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.methodology-shot-card {
+  cursor: zoom-in;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+  overflow: hidden;
+}
+.methodology-shot-card:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--v-theme-primary)) !important;
+}
+.methodology-shot-img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+.methodology-lightbox {
+  cursor: zoom-out;
+  background: rgba(8, 14, 9, 0.96);
+}
+.methodology-lightbox-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 90vh;
+  object-fit: contain;
+}
+</style>

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bodhiorchard™ — Agent-Driven Development · The modern alternative to sprint, scrum, and agile</title>
+    <meta
+      name="description"
+      content="Agent-Driven Development (ADD) is a modern methodology that replaces sprint, scrum, and agile ceremony with 12 specialised AI agents. Bodhiorchard is the open-source reference implementation — self-hosted, your data stays local, your choice of inference engine. Apache 2.0."
+    />
+    <meta name="keywords" content="agent-driven development, ADD methodology, alternative to agile, alternative to scrum, alternative to sprint, AI development methodology, self-hosted Jira alternative, Atlassian DC alternative, Claude Code, MCP server, BUD methodology, AI agents, open-source project management, Apache 2.0" />
+    <link rel="canonical" href="https://bodhiorchard.ai/" />
+    <link rel="icon" type="image/png" href="/landing/bodhiorchard-logo-sm.png" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bodhiorchard.ai/" />
+    <meta property="og:title" content="Bodhiorchard™ — Agent-Driven Development methodology" />
+    <meta property="og:description" content="The modern alternative to sprint, scrum, and agile. 12 AI agents working alongside humans. Self-hosted, Apache 2.0. Bodhiorchard is the open-source reference implementation of Agent-Driven Development." />
+    <meta property="og:image" content="https://bodhiorchard.ai/landing/bodhiorchard-logo.png" />
+    <meta property="og:site_name" content="Bodhiorchard" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Bodhiorchard™ — Agent-Driven Development methodology" />
+    <meta name="twitter:description" content="The modern alternative to sprint, scrum, and agile. 12 AI agents from conversation to production. Open-source, self-hosted, Apache 2.0." />
+    <meta name="twitter:image" content="https://bodhiorchard.ai/landing/bodhiorchard-logo.png" />
+
+    <!-- JSON-LD: SoftwareApplication -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Bodhiorchard",
+      "alternateName": "Bodhiorchard™",
+      "description": "Bodhiorchard is the open-source reference implementation of Agent-Driven Development — a modern methodology that replaces sprint, scrum, and agile ceremony with 12 specialised AI agents working alongside humans across every phase of the software lifecycle.",
+      "url": "https://bodhiorchard.ai/",
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Project Management",
+      "operatingSystem": "macOS, Linux, Windows (WSL2)",
+      "softwareVersion": "0.1.0",
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": {
+        "@type": "Person",
+        "name": "Arun Rajkumar",
+        "url": "https://github.com/mickyarun"
+      },
+      "sameAs": [
+        "https://github.com/mickyarun/bodhiorchard"
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD: FAQPage -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "What is Agent-Driven Development?", "acceptedAnswer": { "@type": "Answer", "text": "Agent-Driven Development (ADD) is a way of building software where specialised AI agents drive every phase of the lifecycle — intake, spec, design, tech architecture, implementation, testing, UAT, deployment, retrospective — and humans review, decide, and steer. Bodhiorchard is the open-source reference implementation." } },
+        { "@type": "Question", "name": "Is Bodhiorchard a self-hosted Jira alternative?", "acceptedAnswer": { "@type": "Answer", "text": "Yes — for the workflow layer. Bodhiorchard sits between IDE-side AI coding assistants and traditional PM tools. It is especially relevant to teams looking for an Atlassian DC alternative, since Atlassian is sunsetting new self-hosted Jira licences in March 2026 with full shutdown in 2029." } },
+        { "@type": "Question", "name": "Does my code leave my machine when I use Bodhiorchard?", "acceptedAnswer": { "@type": "Answer", "text": "The data plane is always local — Postgres, embeddings, BUDs, scanned repos, and the audit log all sit on your hardware. Only the LLM prompts leave your machine, and only when you choose a cloud inference mode." } },
+        { "@type": "Question", "name": "What does BUD mean in Bodhiorchard?", "acceptedAnswer": { "@type": "Answer", "text": "BUD stands for Business Understanding Document. Every feature lives in one BUD containing spec, tech spec, test plan, acceptance criteria, and full history — all in markdown." } },
+        { "@type": "Question", "name": "What is Bodhiorchard's licence? Can I use it commercially?", "acceptedAnswer": { "@type": "Answer", "text": "Bodhiorchard is licensed under the Apache License 2.0, which permits commercial use including embedding in proprietary products. Contributions require DCO sign-off via git commit -s." } }
+      ]
+    }
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
