@@ -70,12 +70,16 @@ def _build_feature_read(
     *,
     repo_names: dict[uuid.UUID, str],
     pr_meta_by_sha: dict[str, tuple[int, str | None]] | None = None,
-) -> FeatureRead | None:
+) -> FeatureRead:
     """Assemble a ``FeatureRead`` from the ORM row + a repo-name lookup.
 
-    Returns ``None`` when the feature has no PRIMARY junction — that
-    is a data-integrity violation that the audit will surface; the
-    API simply skips it so a single bad row does not blank the page.
+    ``primary`` is null on BUD-authored rows whose work hasn't shipped
+    yet — those are repo-agnostic by design (see
+    ``feature_lifecycle.create_planned_feature_for_bud``) and must
+    still render in the Features tab so the "In progress" filter has
+    something to show. For scan-authored rows the missing PRIMARY is a
+    data-integrity violation that the audit will surface; we log a
+    warning and continue so a single bad row doesn't blank the page.
 
     ``pr_meta_by_sha`` is an optional bulk-resolved lookup table from
     any merge SHA on the feature (created / last-seen / deactivated)
@@ -91,18 +95,19 @@ def _build_feature_read(
             primary_row = link
         elif link.role == FeatureToRepoRole.BACKEND:
             backend_rows.append(link)
-    if primary_row is None:
+    primary: PrimaryLinkRead | None = None
+    if primary_row is not None:
+        primary = PrimaryLinkRead(
+            repoId=primary_row.repo_id,
+            repoName=repo_names.get(primary_row.repo_id, "Unknown"),
+            codeLocations=primary_row.code_locations,
+        )
+    elif feature.source != "bud":
         logger.warning(
             "feature_missing_primary_link",
             feature_id=str(feature.id),
             org_id=str(feature.org_id),
         )
-        return None
-    primary = PrimaryLinkRead(
-        repoId=primary_row.repo_id,
-        repoName=repo_names.get(primary_row.repo_id, "Unknown"),
-        codeLocations=primary_row.code_locations,
-    )
     backend_links = [
         BackendLinkRead(
             repoId=row.repo_id,
@@ -232,11 +237,7 @@ async def list_features(
     repo_names = await _repo_name_lookup(db, org_id=org.id)
     pr_meta = await resolve_pr_meta_for_features(db, org_id=org.id, features=features)
     items = [
-        r
-        for r in (
-            _build_feature_read(f, repo_names=repo_names, pr_meta_by_sha=pr_meta) for f in features
-        )
-        if r
+        _build_feature_read(f, repo_names=repo_names, pr_meta_by_sha=pr_meta) for f in features
     ]
     return FeaturePage(items=items, total=total)
 
@@ -273,7 +274,11 @@ async def list_features_by_repo(
     grouped: dict[uuid.UUID, list[FeatureRead]] = defaultdict(list)
     for f in features:
         read = _build_feature_read(f, repo_names=repo_names, pr_meta_by_sha=pr_meta)
-        if read is not None:
+        # The grouped-by-repo view only makes sense for rows with a
+        # PRIMARY junction — BUD-authored planned rows have no repo
+        # binding yet and are skipped here (they still appear in the
+        # flat list_features view).
+        if read.primary is not None:
             grouped[read.primary.repo_id].append(read)
     return [
         FeaturesByRepoRead(
@@ -378,10 +383,4 @@ async def get_feature(
         )
     repo_names = await _repo_name_lookup(db, org_id=org.id)
     pr_meta = await resolve_pr_meta_for_features(db, org_id=org.id, features=[feature])
-    read = _build_feature_read(feature, repo_names=repo_names, pr_meta_by_sha=pr_meta)
-    if read is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Feature is missing its PRIMARY junction row — run the audit.",
-        )
-    return read
+    return _build_feature_read(feature, repo_names=repo_names, pr_meta_by_sha=pr_meta)

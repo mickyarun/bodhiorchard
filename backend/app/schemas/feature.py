@@ -35,9 +35,12 @@ class PrimaryLinkRead(BaseModel):
     """The single PRIMARY junction row that owns a feature.
 
     The repo where the feature was synthesised, plus the source-side
-    file map captured at synthesis time. Always present for an active
-    feature; the API treats its absence as a data-integrity violation
-    surfaced by the audit.
+    file map captured at synthesis time. Present on scan-authored rows
+    and on BUD rows once their implementation lands. Null on
+    BUD-authored rows whose work is still planned/in-progress — those
+    are repo-agnostic by design (see ``feature_lifecycle.py``). For
+    scan-authored rows a missing PRIMARY is still a data-integrity
+    violation surfaced by the audit.
     """
 
     repo_id: uuid.UUID = Field(alias="repoId")
@@ -100,7 +103,9 @@ class FeatureRead(BaseModel):
     source: str | None = None
     source_ref: str | None = Field(default=None, alias="sourceRef")
     synthesized_at: datetime = Field(alias="synthesizedAt")
-    primary: PrimaryLinkRead
+    # Nullable on BUD-authored rows whose work hasn't shipped — those
+    # have no repo binding yet by design. See ``PrimaryLinkRead``.
+    primary: PrimaryLinkRead | None = None
     backend_links: list[BackendLinkRead] = Field(default_factory=list, alias="backendLinks")
     # Creation lineage
     created_at: datetime = Field(alias="createdAt")

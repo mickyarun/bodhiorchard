@@ -195,7 +195,7 @@ const VISIBILITY_OPTIONS: Array<{ label: string; value: FeatureViewMode }> = [
   { label: 'In progress', value: 'in_progress' },
   { label: 'Deactivated', value: 'deactivated' },
 ]
-const visibilityMode = ref<FeatureViewMode>('all')
+const visibilityMode = ref<FeatureViewMode>('active')
 
 const LAST_TOUCHED_OPTIONS: Array<{ label: string; value: 'asc' | 'desc' }> = [
   { label: 'Asc', value: 'asc' },

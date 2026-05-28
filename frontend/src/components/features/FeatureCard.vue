@@ -39,10 +39,18 @@
         </div>
       </div>
 
-      <div class="feature-card__repos">
+      <div v-if="hasOriginChips" class="feature-card__repos">
         <span v-if="feature.primary" class="repo-chip repo-chip--primary">
           <v-icon icon="mdi-source-repository" size="13" />
           {{ feature.primary.repoName }}
+        </span>
+        <span
+          v-else-if="budRefLabel"
+          class="repo-chip repo-chip--bud"
+          :title="`Planned via ${budRefLabel} — no repo binding until the implementation lands`"
+        >
+          <v-icon icon="mdi-lightbulb-on-outline" size="13" />
+          {{ budRefLabel }}
         </span>
         <span
           v-for="link in feature.backendLinks"
@@ -203,6 +211,19 @@ const titleWithoutPrefix = computed(() =>
   props.feature.featureTitle.replace(/^Feature:\s*/i, '').trim() || props.feature.featureTitle,
 )
 
+// BUD-authored features carry their origin in ``sourceRef`` (e.g.
+// "BUD-021") rather than a PRIMARY repo junction. We surface that ref
+// as a chip in the same slot the primary-repo chip normally occupies
+// so the card always answers "where did this come from?" — repo for
+// scan-authored rows, BUD number for planned/in-progress rows.
+const budRefLabel = computed<string | null>(() =>
+  props.feature.source === 'bud' ? props.feature.sourceRef : null,
+)
+
+const hasOriginChips = computed(
+  () => !!props.feature.primary || !!budRefLabel.value || props.feature.backendLinks.length > 0,
+)
+
 const visibleTags = computed(() => props.feature.tags.slice(0, 6))
 
 const capabilityList = computed<string[]>(() => {
@@ -247,9 +268,10 @@ const badges = computed(() => {
     // ``main_branch``.
     out.push({ key: 'lifecycle', label: 'Live', color: 'success' })
   }
-  if (props.feature.source === 'bud') {
-    out.push({ key: 'bud', label: 'BUD', color: 'cyan' })
-  }
+  // Drop the standalone "BUD" badge — the BUD number now renders as
+  // its own chip in the repos row alongside the primary chip, which
+  // is both more informative (shows the actual number) and visually
+  // parallel to repo-bound features.
   return out
 })
 
@@ -418,7 +440,7 @@ const codeLocationLines = computed<LocationLine[]>(() => {
       merged.set(layer, set)
     }
   }
-  if (props.feature.primary) ingest(props.feature.primary.codeLocations)
+  ingest(props.feature.primary?.codeLocations ?? null)
   for (const link of props.feature.backendLinks) ingest(link.codeLocations)
   const lines: LocationLine[] = []
   for (const [layer, paths] of merged.entries()) {
@@ -580,6 +602,15 @@ async function copyLocations(): Promise<void> {
   background: rgba(var(--v-theme-warning), 0.12);
   color: rgba(var(--v-theme-warning), 1);
   border: 1px solid rgba(var(--v-theme-warning), 0.25);
+  cursor: help;
+}
+.repo-chip--bud {
+  /* Cyan tint mirrors the BUD lifecycle's accent colour used elsewhere
+     (BUDBoard, BUD detail header) so a BUD-origin chip reads as
+     "planned work" at a glance and doesn't get confused for a repo. */
+  background: rgba(var(--v-theme-info), 0.14);
+  color: rgba(var(--v-theme-info), 1);
+  border: 1px solid rgba(var(--v-theme-info), 0.3);
   cursor: help;
 }
 
