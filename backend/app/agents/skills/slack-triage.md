@@ -126,16 +126,40 @@ Call BOTH tools simultaneously with the extracted noun-phrase query:
 - `check_feature_exists(feature_description=<extracted noun phrase>)`
 - `get_bud_context(query=<extracted noun phrase>)`
 
-Evaluate results:
+Evaluate results — **score alone is not enough; you must also pass the scope gate below.**
 
 | Situation | Action |
 |-----------|--------|
-| `check_feature_exists` returns any feature with `match_strength: "strong"` (score ≥ 0.70) | Return `{action: "exists", kind: "feature", ...}` and stop |
-| `get_bud_context` returns any BUD whose title shares 2+ core nouns with the request, in a non-closed status | Return `{action: "exists", kind: "bud", ...}` and stop |
-| `check_feature_exists` returns `match_strength: "partial"` (score 0.50–0.69) | Proceed to Step 2, but open with: "Note: there's a similar feature already tracked (*X*) — please confirm this is a distinct request." |
+| `check_feature_exists` returns a feature with `match_strength: "strong"` (score ≥ 0.70) AND the scope gate confirms it is the same deliverable | Return `{action: "exists", kind: "feature", ...}` and stop |
+| `get_bud_context` returns a non-closed BUD whose title shares 2+ core nouns AND the scope gate confirms it is the same deliverable | Return `{action: "exists", kind: "bud", ...}` and stop |
+| Strong score / shared nouns BUT scope gate fails | Treat as **no match** — proceed to Step 2 without the "similar feature" preamble |
+| `check_feature_exists` returns `match_strength: "partial"` (score 0.50–0.69) | Proceed to Step 2, opening with: "Note: there's a similar feature already tracked (*X*) — please confirm this is a distinct request." |
 | No match | Proceed to Step 2 below |
 
-⛔ **If a match is found: return `{action: "exists"}` immediately. Do NOT proceed to Step 2. Do NOT embed duplicate information inside a `{action: "summary"}` response. This applies on every turn, not just the first.**
+### Scope gate — apply before declaring `exists`
+
+Two items are duplicates only if they describe the **same user-facing capability** or solve the **same problem**. They are NOT duplicates merely because they share generic topic words (`user`, `data`, `feature`, `dashboard`, `settings`, `notification`, `login`).
+
+Before returning `{action: "exists"}`, ask yourself:
+
+1. **Is the new request a narrower change to an existing capability?** Tweaking an icon, copy, colour, label, single-field behaviour, button position, or a single screen of a broader feature is **not** a duplicate of the parent feature. Proceed to Step 2.
+2. **Is the new request a bug fix or polish for an existing feature?** Bug reports and follow-up enhancements are **not** duplicates of the parent feature/BUD. Proceed to Step 2.
+3. **Would the new request and the candidate produce essentially the same deliverable?** If yes, it's a real duplicate — return `exists`. If no, proceed to Step 2.
+
+**Concrete examples — do NOT call these duplicates:**
+- Request: "Change the notification icon to modern design" vs candidate Feature "Notifications" → **no match** (icon redesign is a UI tweak, not the notification system).
+- Request: "Login fails for passwords with `&`" vs candidate Feature "User authentication" → **no match** (bug report against parent feature).
+- Request: "Show last login time on profile page" vs candidate Feature "User authentication" → **no match** (different scope: display vs auth flow).
+- Request: "Make the Submit button blue" vs candidate Feature "BUD authoring" → **no match** (UI polish, not the feature).
+
+**Concrete examples — these ARE duplicates:**
+- Request: "Add a CSV export for users" vs candidate Feature "Export user list" with description mentioning CSV → **match**.
+- Request: "Add dark mode toggle in settings" vs in-flight BUD "Dark mode support across all screens" → **match**.
+- Request: "Slack DM when a BUD is assigned to me" vs in-flight BUD "Slack alerts for BUD assignment" → **match**.
+
+**When in doubt, prefer no match.** A false duplicate silently drops the request and frustrates the user; a missed duplicate just creates one extra BUD that PMs can merge later.
+
+⛔ **If both score AND scope gate pass: return `{action: "exists"}` immediately. Do NOT proceed to Step 2. Do NOT embed duplicate information inside a `{action: "summary"}` response. This applies on every turn, not just the first.**
 
 ## Step 2 — Interview
 

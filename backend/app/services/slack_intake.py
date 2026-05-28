@@ -48,6 +48,9 @@ from app.services.skill_loader import resolve_skill_for_org
 
 _CANDIDATE_SIMILARITY_THRESHOLD = 0.60
 _MAX_DUPLICATE_CANDIDATES = 3
+# ~100 tokens of description per candidate — enough to disambiguate scope
+# (narrow tweak vs broad capability) without blowing the verifier prompt.
+_CANDIDATE_CONTEXT_CHARS = 400
 _TERMINAL_BUD_STATUSES: tuple[BUDStatus, ...] = (BUDStatus.CLOSED, BUDStatus.DISCARDED)
 
 logger = structlog.get_logger(__name__)
@@ -396,6 +399,37 @@ async def _find_duplicate_candidates(
     return candidates[:_MAX_DUPLICATE_CANDIDATES]
 
 
+def _candidate_context(text: str | None) -> str:
+    """Collapse whitespace and truncate to keep the verifier prompt focused."""
+    if not text:
+        return ""
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= _CANDIDATE_CONTEXT_CHARS:
+        return collapsed
+    return collapsed[:_CANDIDATE_CONTEXT_CHARS].rstrip() + "…"
+
+
+def _format_candidate_line(idx: int, kind: str, match: Any, sim: float) -> str:
+    """One numbered candidate block with title + truncated description.
+
+    Title alone is too thin: a narrow request ("change icon") collapses
+    against a broad title ("Notifications") even though the underlying
+    capability is different. Including the description gives the
+    verifier enough signal to distinguish scope from topic.
+    """
+    if kind == "bud":
+        header = (
+            f"{idx}. [BUD-{match.bud_number:03d}] {match.title}"
+            f" — status: {match.status.value if match.status else 'unknown'},"
+            f" similarity: {sim:.2f}"
+        )
+        body = _candidate_context(match.requirements_md)
+    else:
+        header = f"{idx}. [Feature] {match.feature_title} — similarity: {sim:.2f}"
+        body = _candidate_context(match.description)
+    return f"{header}\n   description: {body}" if body else header
+
+
 async def _verify_duplicate_with_llm(
     query_text: str,
     candidates: list[tuple[str, Any, float]],
@@ -410,16 +444,10 @@ async def _verify_duplicate_with_llm(
     if not candidates:
         return None
 
-    lines = []
-    for idx, (kind, match, sim) in enumerate(candidates, start=1):
-        if kind == "bud":
-            status_str = match.status.value if match.status else "unknown"
-            lines.append(
-                f"{idx}. [BUD-{match.bud_number:03d}] {match.title}"
-                f" — status: {status_str}, similarity: {sim:.2f}"
-            )
-        else:
-            lines.append(f"{idx}. [Feature] {match.feature_title} — similarity: {sim:.2f}")
+    lines = [
+        _format_candidate_line(idx, kind, match, sim)
+        for idx, (kind, match, sim) in enumerate(candidates, start=1)
+    ]
 
     prompt = (
         "Decide whether a Slack feature request is a DUPLICATE of any existing"
@@ -430,7 +458,18 @@ async def _verify_duplicate_with_llm(
         + "\n\nTwo items are duplicates only if they describe the SAME"
         " user-facing capability or solve the SAME problem. They are NOT"
         " duplicates merely because they share generic topic words such as"
-        ' "user", "data", "feature", "dashboard", "settings".\n\n'
+        ' "user", "data", "feature", "dashboard", "settings", "notification".'
+        "\n\nIMPORTANT — scope rules:\n"
+        "- A narrower change to an existing capability (e.g. tweaking an"
+        " icon, copy, colour, or behaviour of one screen) is NOT a duplicate"
+        " of the broader feature it touches. Reply no_match.\n"
+        "- A bug report, UI polish, or follow-up enhancement is NOT a"
+        " duplicate of the parent feature/BUD. Reply no_match.\n"
+        '- Only reply "match" when the user request and the candidate would'
+        " produce essentially the same deliverable.\n"
+        "When in doubt, prefer no_match — a false duplicate silently drops"
+        " the request, while a missed duplicate just creates one extra BUD"
+        " that PMs can merge later.\n\n"
         "Respond with exactly one JSON object, no markdown, no extra text:\n"
         '{"verdict": "match" or "no_match", "matched_index":'
         " <1-based index or null>}"
