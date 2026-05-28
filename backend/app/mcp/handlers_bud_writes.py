@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.auth import MCPAuthResult
 from app.mcp.handler_utils import require_non_empty
-from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus
+from app.models.bud import BUDDesignStatus, BUDDocument, BUDPriority, BUDStatus
 from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.bud_version import BUDEditSource
 from app.repositories import bud_version as bud_version_repo
@@ -194,6 +194,32 @@ def _err(code: str, message: str, **extra: Any) -> dict[str, Any]:
     return {"success": False, "error": message, "code": code, **extra}
 
 
+def _parse_priority(
+    raw: Any,
+) -> tuple[BUDPriority | None, dict[str, Any] | None]:
+    """Validate an optional MCP priority param.
+
+    Returns ``(None, None)`` when the param is absent (caller decides
+    the default), ``(BUDPriority.X, None)`` on a valid P0..P3 value,
+    or ``(None, error_dict)`` when present-but-invalid so the caller
+    can short-circuit.
+    """
+    if raw is None:
+        return None, None
+    if not isinstance(raw, str):
+        return None, _err(
+            "bad_priority",
+            "priority must be a string — one of 'P0', 'P1', 'P2', 'P3'.",
+        )
+    try:
+        return BUDPriority(raw.strip()), None
+    except ValueError:
+        return None, _err(
+            "bad_priority",
+            f"Unknown priority '{raw}'. Allowed values: P0, P1, P2, P3.",
+        )
+
+
 async def handle_create_bud(
     db: AsyncSession,
     auth: MCPAuthResult,
@@ -216,6 +242,10 @@ async def handle_create_bud(
     if error:
         return error
 
+    priority, priority_err = _parse_priority(params.get("priority"))
+    if priority_err:
+        return priority_err
+
     title = params["title"]
     body = params["requirements_md"]
 
@@ -227,6 +257,9 @@ async def handle_create_bud(
         bud_number=next_number,
         title=title,
         status=BUDStatus.BUD,
+        # Falls back to the column's server_default ('P2') when the MCP
+        # caller doesn't pass one, matching the REST POST behaviour.
+        priority=priority or BUDPriority.P2,
         requirements_md=body,
         assignee_id=auth.user.id,
     )
@@ -402,9 +435,25 @@ async def handle_update_bud(
     if auth.user is None:
         return _err("user_token_required", "update_bud requires a per-user MCP token.")
 
-    error = require_non_empty(params, "bud_id", "content")
-    if error:
-        return error
+    # ``content`` is optional ONLY when ``priority`` is the change being
+    # made; the helper below catches the empty-call case after we've
+    # parsed both. A content edit still requires the full guard chain
+    # (expected_phase, assignee check, phase whitelist).
+    bud_id_err = require_non_empty(params, "bud_id")
+    if bud_id_err:
+        return bud_id_err
+
+    priority, priority_err = _parse_priority(params.get("priority"))
+    if priority_err:
+        return priority_err
+
+    has_content = isinstance(params.get("content"), str) and bool(params["content"].strip())
+    if not has_content and priority is None:
+        return _err(
+            "nothing_to_update",
+            "Pass either 'content' (phase-owned edit) or 'priority' "
+            "(P0..P3) — update_bud needs something to change.",
+        )
 
     try:
         bud_id = uuid_mod.UUID(str(params["bud_id"]))
@@ -434,90 +483,123 @@ async def handle_update_bud(
             f"BUD is in '{bud.status.value}'; create a new BUD instead of editing this one.",
         )
 
-    if bud.status not in _MCP_EDITABLE_PHASES:
-        return _err(
-            "phase_not_writable",
-            (
-                f"MCP writes are limited to the BUD, DESIGN, and TECH_ARCH phases. "
-                f"BUD is currently in '{bud.status.value}'."
-            ),
-            current_status=bud.status.value,
-        )
+    # ── Content-edit path ─────────────────────────────────────────────
+    # Skipped entirely on a priority-only update so phase guards don't
+    # block setting priority on a BUD that's, say, already in testing.
+    result: dict[str, Any] = {"success": True, "id": str(bud.id)}
+    content = ""
 
-    # Intent declaration. The caller (LLM) must state which phase it
-    # believes it is writing content for; the server compares against
-    # the BUD's actual current phase. Mismatch means the BUD moved
-    # between the LLM's pre-flight read and this write call (manual
-    # status change, racing agent, stale chat context) — abort loudly
-    # rather than silently writing, say, design HTML into
-    # requirements_md.
-    #
-    # expected_phase is a sanity check only — it never routes the
-    # write. The field still comes from ``bud.status``, so this
-    # parameter cannot be abused to write to a different phase.
-    expected_phase_raw = params.get("expected_phase")
-    if not isinstance(expected_phase_raw, str) or not expected_phase_raw.strip():
-        return _err(
-            "missing_expected_phase",
-            "update_bud requires expected_phase ('bud' | 'design' | 'tech_arch'). "
-            "Declare what kind of content you're writing so the server can "
-            "abort if the BUD has changed phase since your last read.",
-        )
-    expected_phase = expected_phase_raw.strip().lower()
-    if expected_phase != bud.status.value:
-        return _err(
-            "phase_mismatch",
-            (
-                f"You said you were writing '{expected_phase}' content but the BUD "
-                f"is in '{bud.status.value}' now. Refetch via get_bud_by_id and "
-                "reconsider — do NOT submit content composed for a different phase."
-            ),
-            current_status=bud.status.value,
-            expected_phase=expected_phase,
-        )
-
-    content = str(params["content"])
-
-    if bud.status == BUDStatus.DESIGN:
-        # Design-phase writes target a specific (bud_id, repo_id)
-        # row in ``bud_designs``. The caller picks which repo —
-        # there is no BUD-level default, because that would create
-        # a "default" tab that doesn't match what the design agent
-        # produces (per-repo rows with the actual repo name as the
-        # tab label).
-        repo_id_raw = params.get("repo_id")
-        if not isinstance(repo_id_raw, str) or not repo_id_raw.strip():
+    if has_content:
+        if bud.status not in _MCP_EDITABLE_PHASES:
             return _err(
-                "missing_repo_id",
-                "Design-phase update_bud requires repo_id. List "
-                "design systems via list_design_systems and ask the "
-                "user which repo this design targets before composing.",
-            )
-        try:
-            repo_id = uuid_mod.UUID(repo_id_raw.strip())
-        except ValueError:
-            return _err("bad_repo_id", "repo_id must be a UUID.")
-
-        repo_repo = TrackedRepoRepository(db, org_id=auth.org.id)
-        repo_row = await repo_repo.get_by_id(repo_id)
-        if repo_row is None:
-            return _err(
-                "repo_not_found",
-                f"No tracked repo with id {repo_id} in this org. "
-                "Call list_design_systems again — the id may be stale "
-                "or from a different tenant.",
+                "phase_not_writable",
+                (
+                    f"MCP writes are limited to the BUD, DESIGN, and TECH_ARCH phases. "
+                    f"BUD is currently in '{bud.status.value}'."
+                ),
+                current_status=bud.status.value,
             )
 
-        result = await _apply_design_content(db, auth, bud, content, repo_id)
-    else:
-        field = _STATUS_TO_OWNING_FIELD[bud.status]
-        result = await _apply_markdown_content(db, auth, bud, field, content)
+        # Intent declaration. The caller (LLM) must state which phase it
+        # believes it is writing content for; the server compares against
+        # the BUD's actual current phase. Mismatch means the BUD moved
+        # between the LLM's pre-flight read and this write call (manual
+        # status change, racing agent, stale chat context) — abort loudly
+        # rather than silently writing, say, design HTML into
+        # requirements_md.
+        #
+        # expected_phase is a sanity check only — it never routes the
+        # write. The field still comes from ``bud.status``, so this
+        # parameter cannot be abused to write to a different phase.
+        expected_phase_raw = params.get("expected_phase")
+        if not isinstance(expected_phase_raw, str) or not expected_phase_raw.strip():
+            return _err(
+                "missing_expected_phase",
+                "update_bud requires expected_phase ('bud' | 'design' | 'tech_arch') "
+                "when 'content' is provided. Declare what kind of content you're "
+                "writing so the server can abort if the BUD has changed phase since "
+                "your last read.",
+            )
+        expected_phase = expected_phase_raw.strip().lower()
+        if expected_phase != bud.status.value:
+            return _err(
+                "phase_mismatch",
+                (
+                    f"You said you were writing '{expected_phase}' content but the BUD "
+                    f"is in '{bud.status.value}' now. Refetch via get_bud_by_id and "
+                    "reconsider — do NOT submit content composed for a different phase."
+                ),
+                current_status=bud.status.value,
+                expected_phase=expected_phase,
+            )
+
+        content = str(params["content"])
+
+        if bud.status == BUDStatus.DESIGN:
+            # Design-phase writes target a specific (bud_id, repo_id)
+            # row in ``bud_designs``. The caller picks which repo —
+            # there is no BUD-level default, because that would create
+            # a "default" tab that doesn't match what the design agent
+            # produces (per-repo rows with the actual repo name as the
+            # tab label).
+            repo_id_raw = params.get("repo_id")
+            if not isinstance(repo_id_raw, str) or not repo_id_raw.strip():
+                return _err(
+                    "missing_repo_id",
+                    "Design-phase update_bud requires repo_id. List "
+                    "design systems via list_design_systems and ask the "
+                    "user which repo this design targets before composing.",
+                )
+            try:
+                repo_id = uuid_mod.UUID(repo_id_raw.strip())
+            except ValueError:
+                return _err("bad_repo_id", "repo_id must be a UUID.")
+
+            repo_repo = TrackedRepoRepository(db, org_id=auth.org.id)
+            repo_row = await repo_repo.get_by_id(repo_id)
+            if repo_row is None:
+                return _err(
+                    "repo_not_found",
+                    f"No tracked repo with id {repo_id} in this org. "
+                    "Call list_design_systems again — the id may be stale "
+                    "or from a different tenant.",
+                )
+
+            result = await _apply_design_content(db, auth, bud, content, repo_id)
+        else:
+            field = _STATUS_TO_OWNING_FIELD[bud.status]
+            result = await _apply_markdown_content(db, auth, bud, field, content)
+
+    # ── Priority update ───────────────────────────────────────────────
+    # Metadata change, independent of phase. Applied after any content
+    # write so a failed content edit doesn't leave a half-applied state.
+    # Snapshots BEFORE the mutation so the version row captures the
+    # pre-edit priority — matches the REST PATCH's behaviour
+    # (``bud.py`` ``commit_snapshot`` on any priority change) so a P0
+    # set via MCP can be reverted through the same History UI as a
+    # P0 set in the browser.
+    priority_changed = False
+    if priority is not None and bud.priority != priority:
+        await bud_version_repo.insert_snapshot(
+            db,
+            bud=bud,
+            phase=bud.status,
+            source=BUDEditSource.MCP,
+            edited_by=auth.user.id,
+            mcp_token_id=auth.token_id,
+            reason="priority_change",
+        )
+        bud.priority = priority
+        await db.flush()
+        result["priority"] = priority.value
+        priority_changed = True
 
     # Same explicit-link path as create_bud. Linking happens AFTER the
     # content write so a failed write doesn't produce orphan link rows.
     # ``link_features`` is idempotent — re-passing existing ids is a
     # no-op, which makes update_bud safe to call with the same
-    # ``linked_feature_ids`` on every edit.
+    # ``linked_feature_ids`` on every edit. Priority-only updates also
+    # get a chance to wire links — small but consistent.
     link_summary = await _wire_feature_links(db, auth, bud.id, params.get("linked_feature_ids"))
     result["linked_features"] = link_summary
 
@@ -530,6 +612,7 @@ async def handle_update_bud(
         phase=bud.status.value,
         field=result.get("field"),
         content_len=len(content),
+        priority_changed=priority_changed,
         linked_count=link_summary["linked_count"],
     )
     return result

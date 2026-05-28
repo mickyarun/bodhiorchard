@@ -168,6 +168,19 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                         "acceptance criteria, edge cases, dependencies."
                     ),
                 },
+                "priority": {
+                    "type": "string",
+                    "enum": ["P0", "P1", "P2", "P3"],
+                    "description": (
+                        "Optional. Drives smart assignment scoring and "
+                        "yield-offer routing. Defaults to P2 (normal). "
+                        "Pick the LOWEST priority that fits: P0 = "
+                        "production-down / regulatory deadline this "
+                        "week; P1 = strategic deadline or large segment "
+                        "blocked; P2 = standard product work; P3 = "
+                        "backlog / nice-to-have."
+                    ),
+                },
                 "linked_feature_ids": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -201,19 +214,27 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "type": "string",
                     "description": (
                         "New content for whichever field the BUD's current "
-                        "phase owns. Empty strings are rejected."
+                        "phase owns. Empty strings are rejected. When you "
+                        "supply content you MUST also supply expected_phase "
+                        "(the server enforces this at runtime — the "
+                        "top-level required list only includes bud_id "
+                        "because content is optional in priority-only "
+                        "updates). Provide content, priority, or both — "
+                        "but at least one."
                     ),
                 },
                 "expected_phase": {
                     "type": "string",
                     "enum": ["bud", "design", "tech_arch"],
                     "description": (
-                        "The phase you believe you're writing content for. "
-                        "Server rejects with phase_mismatch if the BUD's "
-                        "actual status differs — prevents content composed "
-                        "for one phase being silently written to another "
-                        "when the BUD moved between your read and your "
-                        "write (e.g. manual status change in another tab)."
+                        "Required when content is provided — the phase you "
+                        "believe you're writing content for. Server rejects "
+                        "with phase_mismatch if the BUD's actual status "
+                        "differs, preventing content composed for one phase "
+                        "from being silently written to another when the BUD "
+                        "moved between your read and your write. Omit for "
+                        "priority-only updates (priority is metadata, not "
+                        "phase-owned)."
                     ),
                 },
                 "repo_id": {
@@ -227,6 +248,17 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                         "Ignored for other phases."
                     ),
                 },
+                "priority": {
+                    "type": "string",
+                    "enum": ["P0", "P1", "P2", "P3"],
+                    "description": (
+                        "Optional. Update the BUD's structured priority. "
+                        "Independent of phase — can be set even when the "
+                        "BUD is past the MCP-writable phases (e.g. while "
+                        "in testing). Drives smart assignment scoring and "
+                        "yield-offer routing."
+                    ),
+                },
                 "linked_feature_ids": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -236,7 +268,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     ),
                 },
             },
-            "required": ["bud_id", "content", "expected_phase"],
+            "required": ["bud_id"],
         },
     ),
     MCPToolDefinition(
