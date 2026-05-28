@@ -33,7 +33,7 @@ from app.api.v1.bud_qa import router as qa_router
 from app.api.v1.bud_todos import router as todos_router
 from app.api.v1.bud_versions import router as versions_router
 from app.api.v1.bud_workflows import router as workflows_router
-from app.core.deps import get_current_user, get_db, require_permissions
+from app.core.deps import get_current_user, get_db, get_user_permissions, require_permissions
 from app.models.bud import (
     BUDDesignStatus,
     BUDDocument,
@@ -502,10 +502,54 @@ async def set_stage_skill_overrides(
     return body
 
 
+# Status transitions QA owns directly via PATCH. Matches the manual-testing
+# guard further down in update_bud (search for "Manual testing → uat"): QA
+# is the final gate out of testing, advancing to uat normally or to prod
+# when the org config has UAT disabled. Other transitions (uat → prod,
+# sending back to development) remain PM/dev territory.
+_QA_OWNED_TRANSITIONS: frozenset[tuple[BUDStatus, BUDStatus]] = frozenset(
+    {
+        (BUDStatus.TESTING, BUDStatus.UAT),
+        (BUDStatus.TESTING, BUDStatus.PROD),
+    }
+)
+
+
+def _enforce_qa_scope(
+    perms: set[str], current_status: BUDStatus, update_data: dict[str, Any]
+) -> None:
+    """Restrict buds:test-only callers to QA-owned status promotions.
+
+    Raises 403 if a QA caller tries to update non-status fields or
+    transition to a status outside ``_QA_OWNED_TRANSITIONS``. Callers
+    with ``buds:edit`` (PMs, owners) skip this check entirely.
+    Permissions drive the decision rather than role names so custom
+    roles that grant ``buds:test`` get the same scope automatically.
+    """
+    if "buds:edit" in perms or "buds:test" not in perms:
+        return
+    if set(update_data) != {"status"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="QA role can only update BUD status, not other fields.",
+        )
+    if (current_status, update_data["status"]) not in _QA_OWNED_TRANSITIONS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"QA role cannot transition {current_status.value} → "
+                f"{update_data['status'].value}."
+            ),
+        )
+
+
 @router.patch(
     "/{bud_id}",
     response_model=BUDRead,
-    dependencies=[Depends(require_permissions("buds:edit"))],
+    # buds:test is accepted so QA users can complete the testing phase
+    # (testing → uat / prod). Field-level enforcement inside the handler
+    # restricts buds:test-only callers to that single transition.
+    dependencies=[Depends(require_permissions("buds:edit", "buds:test", mode="any"))],
 )
 async def update_bud(
     bud_id: uuid.UUID,
@@ -557,6 +601,11 @@ async def update_bud(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid status: {update_data['status']}",
             ) from None
+
+    # Field-level QA gate. Runs before any side-effect-producing code
+    # so a rejected QA request never mutates state.
+    user_perms = await get_user_permissions(current_user, db)
+    _enforce_qa_scope(user_perms, bud.status, update_data)
 
     # Guard: closed/discarded BUDs cannot be reopened. Placed before ANY
     # side-effect-producing code (transition_feature_for_bud, assignments)

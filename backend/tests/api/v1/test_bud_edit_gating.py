@@ -136,6 +136,87 @@ async def test_patch_title_is_always_allowed(
     )
 
 
+# ── QA permission gate on PATCH /buds/{id} ────────────────────────────
+#
+# These cover ``_enforce_qa_scope`` directly — the helper is pure, so we
+# don't scaffold the full PATCH handler (which would also exercise
+# version snapshots, feature lifecycle, and other downstream services
+# that are out of scope for the permission rule under test).
+
+
+def test_qa_can_promote_testing_to_uat() -> None:
+    """buds:test-only callers may PATCH status from testing → uat."""
+    bud_handlers._enforce_qa_scope(
+        {"buds:view", "buds:test"},
+        BUDStatus.TESTING,
+        {"status": BUDStatus.UAT},
+    )
+
+
+def test_qa_can_promote_testing_to_prod() -> None:
+    """testing → prod is also QA-owned (UAT-disabled org configs)."""
+    bud_handlers._enforce_qa_scope(
+        {"buds:view", "buds:test"},
+        BUDStatus.TESTING,
+        {"status": BUDStatus.PROD},
+    )
+
+
+def test_qa_cannot_transition_outside_testing() -> None:
+    """buds:test-only callers may NOT promote bud → design."""
+    with pytest.raises(HTTPException) as excinfo:
+        bud_handlers._enforce_qa_scope(
+            {"buds:view", "buds:test"},
+            BUDStatus.BUD,
+            {"status": BUDStatus.DESIGN},
+        )
+    assert excinfo.value.status_code == 403
+    assert "QA role cannot transition bud → design" in excinfo.value.detail
+
+
+def test_qa_cannot_promote_uat_to_prod() -> None:
+    """uat → prod remains PM territory — guard rejects it for QA."""
+    with pytest.raises(HTTPException) as excinfo:
+        bud_handlers._enforce_qa_scope(
+            {"buds:view", "buds:test"},
+            BUDStatus.UAT,
+            {"status": BUDStatus.PROD},
+        )
+    assert excinfo.value.status_code == 403
+
+
+def test_qa_cannot_edit_non_status_field() -> None:
+    """QA may not piggy-back a title edit onto a status PATCH."""
+    with pytest.raises(HTTPException) as excinfo:
+        bud_handlers._enforce_qa_scope(
+            {"buds:view", "buds:test"},
+            BUDStatus.TESTING,
+            {"status": BUDStatus.UAT, "title": "QA-renamed"},
+        )
+    assert excinfo.value.status_code == 403
+    assert "QA role can only update BUD status" in excinfo.value.detail
+
+
+def test_pm_with_edit_bypasses_qa_gate() -> None:
+    """buds:edit callers skip the QA-only branch entirely."""
+    bud_handlers._enforce_qa_scope(
+        {"buds:view", "buds:edit"},
+        BUDStatus.BUD,
+        {"title": "Renamed by PM"},
+    )
+
+
+def test_caller_without_test_or_edit_skips_gate() -> None:
+    """The QA branch must not trigger for unrelated permission sets —
+    the dependency injector is the gate for those callers, not this
+    helper."""
+    bud_handlers._enforce_qa_scope(
+        {"buds:view"},
+        BUDStatus.TESTING,
+        {"status": BUDStatus.UAT},
+    )
+
+
 # ── POST /buds/{id}/import/{section} ───────────────────────────────────
 
 
