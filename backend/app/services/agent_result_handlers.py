@@ -30,9 +30,13 @@ from app.models.bud_agent_task import BUDAgentTask
 from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.bud_version import BUDEditSource
 from app.repositories import bud_version as bud_version_repo
+from app.repositories.bud import BUDRepository
 from app.repositories.bud_feature_link import BUDFeatureLinkRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
+from app.services.bud_estimation import estimate_bud_dates
 from app.services.bud_timeline import record_event
 from app.services.json_parser import parse_json_response, strip_insight_blocks
+from app.services.notification_service import send_lifecycle_notification
 
 logger = structlog.get_logger(__name__)
 
@@ -96,18 +100,27 @@ async def handle_prd_result(
     TechPlanner, Code Reviewer, Tester) inherit the grounding.
     """
     linked_count = await _persist_pm_linked_features(bud_id, org_id, output, db)
+    # Flush the linked-feature inserts to the outer transaction proper
+    # before opening the savepoint below — otherwise an autoflush triggered
+    # inside the savepoint would scope those inserts to it, and an
+    # estimation failure would roll the links back too.
+    await db.flush()
 
-    # Generate initial delivery estimates now that PRD content exists
-    try:
-        from app.repositories.bud import BUDRepository
-        from app.services.bud_estimation import estimate_bud_dates
-
-        bud_repo = BUDRepository(db, org_id=org_id)
-        bud = await bud_repo.get_by_id(bud_id)
-        if bud:
-            await estimate_bud_dates(db, org_id, bud, trigger="prd_completed")
-    except Exception:
-        logger.warning("estimation_failed_after_prd", bud_id=str(bud_id))
+    # Generate initial delivery estimates now that PRD content exists.
+    # Wrap in a SAVEPOINT so a query failure inside the estimator only
+    # rolls back the estimator's own writes — the outer transaction stays
+    # alive, its prior writes survive, and the next log_agent_activity
+    # call doesn't trip InFailedSQLTransactionError.
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is not None:
+        try:
+            async with db.begin_nested():
+                await estimate_bud_dates(db, org_id, bud, trigger="prd_completed")
+        except Exception:
+            logger.warning(
+                "estimation_failed_after_prd", bud_id=str(bud_id), exc_info=True
+            )
 
     return {
         "section": "requirements_md",
@@ -254,9 +267,6 @@ async def handle_tech_arch_result(
     We parse that JSON to determine which repos actually need changes,
     then strip the JSON block before storing the markdown.
     """
-    from app.repositories.bud import BUDRepository
-    from app.repositories.tracked_repository import TrackedRepoRepository
-
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud:
@@ -292,17 +302,24 @@ async def handle_tech_arch_result(
         # todos crystallize from the *approved* plan at the DEVELOPMENT-phase
         # transition — see services/bud_development.on_bud_development_started.
 
-        # Re-estimate with richer context (now has tech spec + impacted repos)
+        # Re-estimate with richer context (now has tech spec + impacted repos).
+        # Wrap in a SAVEPOINT so a query failure inside the estimator only
+        # rolls back the estimator's own writes — the outer transaction
+        # stays alive (preserving the tech_spec_md / impacted_repos writes
+        # flushed just above), and the next log_agent_activity call doesn't
+        # trip InFailedSQLTransactionError. Same-session also means the
+        # estimator sees the in-memory bud writes without a refetch + mirror.
         try:
-            from app.services.bud_estimation import estimate_bud_dates
-
-            await estimate_bud_dates(db, org_id, bud, trigger="tech_arch_completed")
+            async with db.begin_nested():
+                await estimate_bud_dates(
+                    db, org_id, bud, trigger="tech_arch_completed"
+                )
         except Exception:
-            logger.warning("estimation_failed_after_tech_arch", bud_id=str(bud_id))
+            logger.warning(
+                "estimation_failed_after_tech_arch", bud_id=str(bud_id), exc_info=True
+            )
 
     if bud and bud.assignee_id:
-        from app.services.notification_service import send_lifecycle_notification
-
         bud_ref = f"BUD-{bud.bud_number:03d}"
         send_lifecycle_notification(
             org_id=str(org_id),
@@ -476,14 +493,24 @@ async def handle_testing_result(
             f"- **{manual_count}** manual test cases\n\n"
             f"{parsed_data['test_execution_plan']}"
         )
-        # Re-estimate with QA test case context
-        try:
-            from app.services.bud_estimation import estimate_bud_dates
-
-            await estimate_bud_dates(db, org_id, bud, trigger="testing_completed")
-        except Exception:
-            logger.warning("estimation_failed_after_testing", bud_id=str(bud_id))
+        # Flush the QA writes to the outer transaction proper BEFORE the
+        # savepoint — otherwise an autoflush triggered inside the savepoint
+        # would scope them to it, and an estimation failure would roll the
+        # qa_* / test_plan_md back too.
         await db.flush()
+        # Re-estimate with QA test case context. Wrap in a SAVEPOINT so a
+        # query failure inside the estimator only rolls back the estimator's
+        # own writes — the QA writes above and the subsequent notification
+        # all stay on the live outer transaction.
+        try:
+            async with db.begin_nested():
+                await estimate_bud_dates(
+                    db, org_id, bud, trigger="testing_completed"
+                )
+        except Exception:
+            logger.warning(
+                "estimation_failed_after_testing", bud_id=str(bud_id), exc_info=True
+            )
 
     if bud and bud.assignee_id:
         from app.services.notification_service import send_lifecycle_notification

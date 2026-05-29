@@ -31,6 +31,7 @@ from app.models.bud import BUDDocument, BUDStatus
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_todo import BUDTodoRepository
 from app.repositories.pull_request import PullRequestRepository
+from app.services.bud_estimation import estimate_bud_dates
 from app.services.bud_timeline import record_event
 
 logger = structlog.get_logger(__name__)
@@ -178,10 +179,15 @@ async def check_all_prs_merged(
 
     await create_agent_task_for_stage(bud, "testing", org_id, db, force=True)
 
+    # create_agent_task_for_stage above already committed the status
+    # transition, timeline events, and new agent-task row. The SAVEPOINT
+    # below exists purely so a query failure inside the estimator doesn't
+    # poison the webhook's trailing flushes with InFailedSQLTransaction.
     try:
-        from app.services.bud_estimation import estimate_bud_dates
-
-        await estimate_bud_dates(db, org_id, bud, trigger="prs_merged")
+        async with db.begin_nested():
+            await estimate_bud_dates(db, org_id, bud, trigger="prs_merged")
     except Exception:
-        logger.warning("estimation_failed_after_prs_merged", bud_id=str(bud_id))
+        logger.warning(
+            "estimation_failed_after_prs_merged", bud_id=str(bud_id), exc_info=True
+        )
     logger.info("auto_transition_to_testing", bud_id=str(bud_id))

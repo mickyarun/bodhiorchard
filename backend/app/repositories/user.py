@@ -284,13 +284,18 @@ class UserRepository(BaseRepository[User]):
         ``role_id``-less rows fall out because they have no pool semantics.
         """
         base_role = aliased(Role)
+        # The CASE must be the SAME expression object in SELECT and GROUP BY;
+        # calling ``_effective_role_case`` twice would emit two distinct
+        # parameterised CASEs and Postgres would reject the GROUP BY as not
+        # covering the SELECT's underlying ``roles.scope_type`` reference.
+        role_expr = _effective_role_case(base_role).label("effective_role")
         stmt = (
-            select(_effective_role_case(base_role), func.count())
+            select(role_expr, func.count())
             .select_from(OrgToUser)
             .outerjoin(Role, Role.id == OrgToUser.role_id)
             .outerjoin(base_role, base_role.id == Role.base_role_id)
             .where(OrgToUser.org_id == org_id)
-            .group_by(_effective_role_case(base_role))
+            .group_by(role_expr)
         )
         result = await self._db.execute(stmt)
         counts: dict[UserRole, int] = {}

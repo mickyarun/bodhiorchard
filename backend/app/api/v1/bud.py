@@ -34,6 +34,7 @@ from app.api.v1.bud_todos import router as todos_router
 from app.api.v1.bud_versions import router as versions_router
 from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, get_user_permissions, require_permissions
+from app.database import AsyncSessionLocal
 from app.models.bud import (
     BUDDesignStatus,
     BUDDocument,
@@ -92,6 +93,7 @@ from app.services.bud_agent_trigger import (
 )
 from app.services.bud_assignment_actions import assign_bud, unassign_bud
 from app.services.bud_edit_policy import assert_section_editable
+from app.services.bud_estimation import estimate_bud_dates
 from app.services.bud_timeline import record_event
 from app.services.job_queue import JOB_BUD_AGENT, create_job
 
@@ -1126,13 +1128,8 @@ async def _bg_estimate(
     actor_name: str,
 ) -> None:
     """Run estimation in the background with its own DB session."""
-    from app.database import AsyncSessionLocal
-    from app.services.bud_estimation import estimate_bud_dates
-
     try:
         async with AsyncSessionLocal() as db:
-            from app.repositories.bud import BUDRepository
-
             bud_repo = BUDRepository(db, org_id=org_id)
             bud = await bud_repo.get_by_id(bud_id)
             if bud is None:
@@ -1274,23 +1271,31 @@ async def override_code_review(
             bud_id=str(bud_id),
         )
 
-    # Refresh estimates so dashboards reflect the new phase.
+    # Refresh estimates so dashboards reflect the new phase. Run in a
+    # fresh session so a DB failure inside the estimator can't poison
+    # the request session — the trailing _bud_response below queries
+    # the same session and would otherwise 500 with the confusing
+    # InFailedSQLTransactionError instead of the real cause.  The
+    # status transition was already committed above, so a fresh
+    # refetch sees status=testing without any mirroring.
     try:
-        from app.services.bud_estimation import estimate_bud_dates
-
-        refreshed_for_est = await bud_repo.get_by_id(bud_id)
-        if refreshed_for_est is not None:
-            await estimate_bud_dates(
-                db,
-                current_user.org_id,
-                refreshed_for_est,
-                trigger="code_review_override",
-            )
-            await db.commit()
+        async with AsyncSessionLocal() as est_db:
+            est_bud = await BUDRepository(
+                est_db, org_id=current_user.org_id
+            ).get_by_id(bud_id)
+            if est_bud is not None:
+                await estimate_bud_dates(
+                    est_db,
+                    current_user.org_id,
+                    est_bud,
+                    trigger="code_review_override",
+                )
+                await est_db.commit()
     except Exception:
         logger.warning(
             "code_review_override_estimation_failed",
             bud_id=str(bud_id),
+            exc_info=True,
         )
 
     refreshed = await bud_repo.get_by_id(bud_id)
