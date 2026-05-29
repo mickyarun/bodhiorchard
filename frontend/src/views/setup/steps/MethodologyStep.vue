@@ -45,6 +45,7 @@
     <div class="mb-10">
       <v-tabs v-model="videoTab" align-tabs="center" color="primary" density="compact">
         <v-tab value="setup">Setup walkthrough</v-tab>
+        <v-tab value="slack">Slack triage &amp; MCP tools</v-tab>
         <v-tab value="world">Inside the virtual world</v-tab>
       </v-tabs>
       <v-card class="mt-3" variant="outlined">
@@ -61,6 +62,20 @@
             </div>
             <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
               Clone, configure, and bring the stack up locally.
+            </p>
+          </v-window-item>
+          <v-window-item value="slack">
+            <div class="methodology-video-frame">
+              <iframe
+                src="https://www.youtube-nocookie.com/embed/i8kZdcL1bME"
+                title="Bodhiorchard — Slack triage &amp; MCP tools"
+                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowfullscreen
+                loading="lazy"
+              ></iframe>
+            </div>
+            <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
+              Chat-to-BUD in Slack: the Triage Agent drafts the spec, Claude Code drives the BUD lifecycle through MCP tools.
             </p>
           </v-window-item>
           <v-window-item value="world">
