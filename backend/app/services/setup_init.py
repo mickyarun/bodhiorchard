@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.encryption import encrypt_secret
 from app.core.security import create_access_token, hash_password
 from app.models.organization import Organization
-from app.models.user import OrgToUser, User, UserRole
+from app.models.user import OrgToUser, User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
 from app.schemas.setup import InitOrgRequest
@@ -164,7 +164,6 @@ async def setup_init_org(req: InitOrgRequest, db: AsyncSession) -> InitOrgResult
     membership = OrgToUser(
         user_id=user.id,
         org_id=org.id,
-        role=UserRole.ORG_OWNER,
         role_id=owner_role.id if owner_role else None,
     )
     db.add(membership)

@@ -17,7 +17,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import Select, and_, func, or_, select, true
+from sqlalchemy import Select, and_, case, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -26,6 +26,39 @@ from app.models.role import Role, RoleScopeType
 from app.models.skill_profile import SkillProfile
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
 from app.repositories.base import BaseRepository, SelectT
+
+
+def _effective_role_case(base_role_alias: Any) -> Any:
+    """SQL CASE that resolves an ``OrgToUser`` row to its canonical role name.
+
+    CUSTOM roles fall through to ``base_role.name`` so an org-defined
+    "Senior PM" still resolves to :class:`UserRole.PM`.  Memberships with
+    ``role_id IS NULL`` resolve to ``NULL`` — callers decide whether that
+    means "no role" or some default.
+
+    The base_role join must already exist on the calling query:
+    ``.outerjoin(Role, Role.id == OrgToUser.role_id)`` and
+    ``.outerjoin(base_role_alias, base_role_alias.id == Role.base_role_id)``.
+    """
+    return case(
+        (Role.scope_type == RoleScopeType.CUSTOM, base_role_alias.name),
+        else_=Role.name,
+    )
+
+
+def _role_from_name(name: str | None) -> UserRole | None:
+    """Convert a canonical role string to :class:`UserRole`, or ``None``.
+
+    Returns ``None`` for unknown strings rather than raising — custom roles
+    without a ``base_role_id`` cannot be canonicalised and the caller
+    should treat them as ungated.
+    """
+    if not name:
+        return None
+    try:
+        return UserRole(name)
+    except ValueError:
+        return None
 
 
 class UserRepository(BaseRepository[User]):
@@ -116,10 +149,20 @@ class UserRepository(BaseRepository[User]):
     async def get_by_slack_id_with_role(
         self, org_id: uuid.UUID, slack_id: str
     ) -> tuple[User, UserRole | None] | None:
-        """Look up an org member by Slack ID and return ``(user, role)``."""
+        """Look up an org member by Slack ID and return ``(user, effective_role)``.
+
+        ``effective_role`` is resolved from ``OrgToUser.role_id`` — SYSTEM
+        roles map directly via ``Role.name``; CUSTOM roles inherit via
+        ``base_role.name`` so a custom "Senior PM" still gates as
+        :class:`UserRole.PM`.  Memberships with ``role_id IS NULL`` return
+        ``None`` — the caller decides whether to default or reject.
+        """
+        base_role = aliased(Role)
         stmt = (
-            select(User, OrgToUser.role)
+            select(User, _effective_role_case(base_role))
             .join(OrgToUser, OrgToUser.user_id == User.id)
+            .outerjoin(Role, Role.id == OrgToUser.role_id)
+            .outerjoin(base_role, base_role.id == Role.base_role_id)
             .where(
                 OrgToUser.org_id == org_id,
                 User.slack_id == slack_id,
@@ -129,7 +172,7 @@ class UserRepository(BaseRepository[User]):
         row = result.one_or_none()
         if row is None:
             return None
-        return (row[0], row[1])
+        return (row[0], _role_from_name(row[1]))
 
     async def list_active_with_role(self, org_id: uuid.UUID, role: UserRole) -> list[User]:
         """Active org members **explicitly** assigned a role whose identity equals ``role``.
@@ -143,9 +186,8 @@ class UserRepository(BaseRepository[User]):
         Requiring ``OrgToUser.role_id IS NOT NULL`` (via inner join) keeps
         members who were imported through scan / Slack / GitHub paths
         without an explicit role assignment out of the candidate pool —
-        the SQLAlchemy ORM default of ``OrgToUser.role = developer`` would
-        otherwise silently make them eligible for every development BUD
-        despite the org admin never granting them a role.
+        otherwise they would silently become eligible for every
+        development BUD despite the org admin never granting them a role.
         """
         # Alias the parent system role so we can join self-referentially.
         base_role = aliased(Role)
@@ -189,13 +231,74 @@ class UserRepository(BaseRepository[User]):
         return result.scalar_one_or_none()
 
     async def get_role(self, user_id: uuid.UUID, org_id: uuid.UUID) -> UserRole | None:
-        """Return the user's ``OrgToUser.role`` value within the org, or ``None``."""
-        stmt = select(OrgToUser.role).where(
-            OrgToUser.user_id == user_id,
-            OrgToUser.org_id == org_id,
+        """Return the user's canonical :class:`UserRole` within the org, or ``None``.
+
+        Resolves ``OrgToUser.role_id`` → ``Role.name`` (with CUSTOM →
+        ``base_role.name``).  Memberships without ``role_id`` return ``None``.
+        """
+        base_role = aliased(Role)
+        stmt = (
+            select(_effective_role_case(base_role))
+            .select_from(OrgToUser)
+            .outerjoin(Role, Role.id == OrgToUser.role_id)
+            .outerjoin(base_role, base_role.id == Role.base_role_id)
+            .where(
+                OrgToUser.user_id == user_id,
+                OrgToUser.org_id == org_id,
+            )
         )
         result = await self._db.execute(stmt)
-        return result.scalar_one_or_none()
+        return _role_from_name(result.scalar_one_or_none())
+
+    async def get_membership_with_role(
+        self, user_id: uuid.UUID, org_id: uuid.UUID
+    ) -> tuple[OrgToUser, UserRole | None] | None:
+        """Fetch ``(membership, effective_role)`` for an authenticated request.
+
+        Single query that powers ``deps.get_current_user`` — joins through
+        ``Role`` + ``base_role`` so the canonical role is resolved without
+        a follow-up SELECT per request.
+        """
+        base_role = aliased(Role)
+        stmt = (
+            select(OrgToUser, _effective_role_case(base_role))
+            .outerjoin(Role, Role.id == OrgToUser.role_id)
+            .outerjoin(base_role, base_role.id == Role.base_role_id)
+            .where(
+                OrgToUser.user_id == user_id,
+                OrgToUser.org_id == org_id,
+            )
+        )
+        result = await self._db.execute(stmt)
+        row = result.one_or_none()
+        if row is None:
+            return None
+        return (row[0], _role_from_name(row[1]))
+
+    async def count_active_by_role(self, org_id: uuid.UUID) -> dict[UserRole, int]:
+        """Return ``{role: member_count}`` for an org, grouped by canonical role.
+
+        Used by capacity planning.  Counts every membership row in the
+        org (matching the pre-refactor query); only those that resolve to
+        a canonical :class:`UserRole` are kept — CUSTOM-without-base and
+        ``role_id``-less rows fall out because they have no pool semantics.
+        """
+        base_role = aliased(Role)
+        stmt = (
+            select(_effective_role_case(base_role), func.count())
+            .select_from(OrgToUser)
+            .outerjoin(Role, Role.id == OrgToUser.role_id)
+            .outerjoin(base_role, base_role.id == Role.base_role_id)
+            .where(OrgToUser.org_id == org_id)
+            .group_by(_effective_role_case(base_role))
+        )
+        result = await self._db.execute(stmt)
+        counts: dict[UserRole, int] = {}
+        for name, count in result.all():
+            role = _role_from_name(name)
+            if role is not None:
+                counts[role] = counts.get(role, 0) + int(count)
+        return counts
 
     async def get_first_member_id(self, org_id: uuid.UUID) -> uuid.UUID | None:
         """Return any one user_id from ``OrgToUser`` for the given org, else None."""
@@ -490,16 +593,17 @@ class UserRepository(BaseRepository[User]):
     ) -> User | None:
         """Load a user and set transient org/role attrs from OrgToUser.
 
-        Args:
-            user_id: The user UUID.
-            org_id: The organization UUID.
-
-        Returns:
-            User with org_id, role, role_id, role_ref set, or None.
+        ``user.role`` is the canonical :class:`UserRole` resolved through
+        ``Role`` (with CUSTOM → ``base_role``).  Memberships without a
+        ``role_id`` get ``UserRole.DEVELOPER`` so downstream identity
+        checks have a stable value to compare against.
         """
+        base_role = aliased(Role)
         result = await self._db.execute(
-            select(User, OrgToUser)
+            select(User, OrgToUser, _effective_role_case(base_role))
             .join(OrgToUser, OrgToUser.user_id == User.id)
+            .outerjoin(Role, Role.id == OrgToUser.role_id)
+            .outerjoin(base_role, base_role.id == Role.base_role_id)
             .where(User.id == user_id, OrgToUser.org_id == org_id)
         )
         row = result.one_or_none()
@@ -508,7 +612,7 @@ class UserRepository(BaseRepository[User]):
         user: User = row[0]
         membership: OrgToUser = row[1]
         user.org_id = membership.org_id
-        user.role = membership.role
+        user.role = _role_from_name(row[2]) or UserRole.DEVELOPER
         user.role_id = membership.role_id
         user.role_ref = membership.role_ref
         return user
@@ -516,21 +620,21 @@ class UserRepository(BaseRepository[User]):
     async def list_with_membership(self, org_id: uuid.UUID) -> list[User]:
         """List users in an org with transient role attrs set from OrgToUser.
 
-        Args:
-            org_id: The organization UUID.
-
-        Returns:
-            List of User instances with org_id, role, role_id, role_ref set.
+        ``user.role`` resolves via the canonical-role join (see
+        :meth:`get_by_id_with_membership`).
         """
+        base_role = aliased(Role)
         result = await self._db.execute(
-            select(User, OrgToUser)
+            select(User, OrgToUser, _effective_role_case(base_role))
             .join(OrgToUser, OrgToUser.user_id == User.id)
+            .outerjoin(Role, Role.id == OrgToUser.role_id)
+            .outerjoin(base_role, base_role.id == Role.base_role_id)
             .where(OrgToUser.org_id == org_id)
         )
         users = []
-        for user, membership in result.all():
+        for user, membership, role_name in result.all():
             user.org_id = membership.org_id
-            user.role = membership.role
+            user.role = _role_from_name(role_name) or UserRole.DEVELOPER
             user.role_id = membership.role_id
             user.role_ref = membership.role_ref
             users.append(user)

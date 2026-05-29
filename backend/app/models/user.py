@@ -18,7 +18,7 @@ import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -79,6 +79,9 @@ class User(BaseModel):
     # org_id, role, role_id, role_ref are NOT columns.
     # They are set as transient instance attributes by get_current_user
     # from the OrgToUser membership validated via JWT org_id.
+    # ``role`` carries the canonical UserRole resolved through
+    # ``OrgToUser.role_id`` (with CUSTOM → ``base_role.name``); see
+    # ``UserRepository.get_membership_with_role``.
     if TYPE_CHECKING:
         org_id: uuid.UUID
         role: UserRole
@@ -122,11 +125,6 @@ class OrgToUser(BaseModel):
     )
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
-    )
-    role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole, name="user_role", values_callable=lambda e: [x.value for x in e]),
-        nullable=False,
-        default=UserRole.DEVELOPER,
     )
     role_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("roles.id"), nullable=True

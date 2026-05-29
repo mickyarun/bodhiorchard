@@ -99,21 +99,12 @@ async def approve_tech_arch(
 
     # If tech_lead approving, check if manager exists
     if approver_role == UserRole.TECH_LEAD:
-        from sqlalchemy import select as sa_select
+        from app.repositories.user import UserRepository
 
-        from app.models.user import OrgToUser
-
-        manager_result = await db.execute(
-            sa_select(User)
-            .join(OrgToUser, OrgToUser.user_id == User.id)
-            .where(
-                OrgToUser.org_id == current_user.org_id,
-                OrgToUser.role == UserRole.MANAGER,
-                User.is_active == True,  # noqa: E712
-            )
-            .limit(1)
+        managers = await UserRepository(db).list_active_with_role(
+            current_user.org_id, UserRole.MANAGER
         )
-        manager_user = manager_result.scalar_one_or_none()
+        manager_user = managers[0] if managers else None
 
         if manager_user is not None:
             # Partial approval — store state, notify manager

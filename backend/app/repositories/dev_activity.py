@@ -19,11 +19,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, String, and_, case, cast, func, or_, select, update
+from sqlalchemy import Select, and_, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.dev_activity import DevActivityLog
-from app.models.role import Role
+from app.models.role import Role, RoleScopeType
 from app.models.tracked_repository import TrackedRepository
 from app.models.user import OrgToUser
 from app.repositories.base import BaseRepository
@@ -77,49 +78,40 @@ def _apply_role_filter(
 ) -> Any:
     """Apply optional committer-role filter to a SELECT statement.
 
-    Effective role is computed at READ time by joining through
-    ``org_to_user → roles``. The canonical role name lives in
-    ``Role.name`` (set by the Members API via ``OrgToUser.role_id``); the
-    legacy ``OrgToUser.role`` enum is used as a fallback for memberships
-    that haven't been assigned a role_id yet (the enum defaults to
-    ``developer``). The ``CASE`` expression below picks whichever is set.
+    Effective role is computed by joining ``org_to_user → roles → base_role``
+    so CUSTOM roles resolve through their inherited system role name.
 
     Semantics:
     - ``role="qa"`` → effective role == 'qa' (testing tab)
     - ``exclude_role="qa"`` → row has no user_id (anonymous events fall
       through to the dev-tab default) OR effective role != 'qa'
     - both None → no filter
-
-    This approach eliminates the stale-snapshot drift we hit when
-    ``actor_role`` was cached on ``dev_activity_logs``: the Members API
-    only updates ``role_id``, never the enum column, so any snapshot
-    reading the enum silently returned stale data.
     """
     if role is None and exclude_role is None:
         return stmt
 
+    base_role = aliased(Role)
     # LEFT JOIN so rows with user_id=NULL (anonymous webhook events) are
     # not dropped — they need to reach the exclude_role fall-through below.
-    stmt = stmt.outerjoin(
-        OrgToUser,
-        and_(
-            OrgToUser.user_id == DevActivityLog.user_id,
-            OrgToUser.org_id == DevActivityLog.org_id,
-        ),
-    ).outerjoin(Role, Role.id == OrgToUser.role_id)
+    stmt = (
+        stmt.outerjoin(
+            OrgToUser,
+            and_(
+                OrgToUser.user_id == DevActivityLog.user_id,
+                OrgToUser.org_id == DevActivityLog.org_id,
+            ),
+        )
+        .outerjoin(Role, Role.id == OrgToUser.role_id)
+        .outerjoin(base_role, base_role.id == Role.base_role_id)
+    )
 
-    # Prefer the canonical Role.name (set by the Members API) and fall
-    # back to the legacy enum when role_id is unset. Users with no
-    # membership at all produce NULL — they fall through to the dev tab
-    # via the exclude_role branch below.
-    #
-    # The cast(..., String) is required because OrgToUser.role is a
-    # Postgres enum type (user_role) while Role.name is varchar — CASE
-    # branches must return the same type. Casting the enum to text is
-    # free for Postgres and unifies the two branches.
+    # CUSTOM roles inherit their canonical identity from ``base_role.name``;
+    # SYSTEM roles use ``Role.name`` directly.  Memberships with no
+    # role_id (or no membership at all) produce NULL — they fall through
+    # to the dev tab via the exclude_role branch below.
     effective_role = case(
-        (OrgToUser.role_id.is_not(None), Role.name),
-        else_=cast(OrgToUser.role, String),
+        (Role.scope_type == RoleScopeType.CUSTOM, base_role.name),
+        else_=Role.name,
     )
 
     if role is not None:

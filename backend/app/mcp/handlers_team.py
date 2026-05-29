@@ -48,12 +48,10 @@ async def handle_get_team_context(
             team[key] = {
                 "user_name": user.name if user else "Unknown",
                 "email": user.email if user else "",
-                "role": (
-                    user_role.value
-                    if (user_role := getattr(user, "role", None)) is not None
-                    and hasattr(user_role, "value")
-                    else ""
-                ),
+                # Role is not loaded by SkillProfileRepository.list_with_users
+                # and surfacing it here would require an extra fetch — kept
+                # blank intentionally so the MCP contract stays stable.
+                "role": "",
                 "modules": [],
             }
         team[key]["modules"].append(

@@ -240,8 +240,9 @@ async def register(
     )
     created = await user_repo.create(user)
 
-    # Create org membership
-    membership = OrgToUser(user_id=created.id, org_id=org.id, role=UserRole.DEVELOPER)
+    # Create org membership — no role_id yet; admins assign via the
+    # Members UI, which is when the user becomes eligible for BUDs.
+    membership = OrgToUser(user_id=created.id, org_id=org.id)
     db.add(membership)
     await db.flush()
 

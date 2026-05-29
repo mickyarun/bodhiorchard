@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db
 from app.core.encryption import decrypt_secret
 from app.core.security import hash_password
-from app.models.user import OrgToUser, User, UserRole
+from app.models.user import OrgToUser, User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 
@@ -317,7 +317,6 @@ async def import_slack_members(
         membership = OrgToUser(
             user_id=created.id,
             org_id=org.id,
-            role=UserRole.DEVELOPER,
         )
         db.add(membership)
         imported += 1

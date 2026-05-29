@@ -141,8 +141,7 @@ async def handle_bug_approval(
         )
         return
 
-    approver, approver_role = row
-    approver_role_val = UserRole(approver_role) if approver_role else None
+    approver, approver_role_val = row
     if approver_role_val not in _PM_ROLES:
         await slack_client.chat_post_message(
             bot_token,

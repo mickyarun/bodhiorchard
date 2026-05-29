@@ -44,7 +44,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
-from app.models.user import OrgToUser, User, UserRole
+from app.models.user import OrgToUser, User
 from app.repositories.user import UserRepository
 from app.services.scan_helpers import upsert_skill_profiles
 
@@ -103,7 +103,7 @@ async def phase_e_skills(
             db.add(new_user)
             await db.flush()
             # Create org membership for the auto-created user
-            membership = OrgToUser(user_id=new_user.id, org_id=org_id, role=UserRole.DEVELOPER)
+            membership = OrgToUser(user_id=new_user.id, org_id=org_id)
             db.add(membership)
         await db.flush()
         _refresh_email_map(email_to_user, await user_repo.get_email_map(org_id))

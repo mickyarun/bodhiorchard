@@ -50,12 +50,9 @@ router = APIRouter(tags=["members"])
 def _user_to_member(user: User, aliases: list[str] | None = None) -> MemberRead:
     """Convert a User model to MemberRead schema.
 
-    Args:
-        user: The User ORM instance.
-        aliases: Optional list of alias email strings.
-
-    Returns:
-        MemberRead with role information.
+    ``role`` exposes the canonical :class:`UserRole` value (set on
+    ``user.role`` by the repo / auth dependency); ``role_name`` is the
+    raw role row name so the UI can show e.g. "Senior PM" for CUSTOM roles.
     """
     role_name: str | None = None
     if user.role_ref:
@@ -128,19 +125,16 @@ async def add_member(
     membership = OrgToUser(
         user_id=created.id,
         org_id=org.id,
-        role=UserRole.DEVELOPER,
         role_id=body.role_id,
     )
     db.add(membership)
     await db.flush()
-    await db.refresh(created)
-    await db.refresh(membership)
 
-    # Set transient org/role attrs for _user_to_member serialization
-    created.org_id = org.id
-    created.role = membership.role
-    created.role_id = membership.role_id
-    created.role_ref = membership.role_ref
+    # Re-fetch with canonical-role resolution so _user_to_member sees the
+    # CUSTOM → base_role projection (a manual attr set would miss it).
+    hydrated = await user_repo.get_by_id_with_membership(created.id, org.id)
+    if hydrated is not None:
+        created = hydrated
 
     logger.info(
         "member_added",
@@ -244,11 +238,12 @@ async def assign_role(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found.")
     membership.role_id = body.role_id
     await db.flush()
-    await db.refresh(membership)
 
-    # Re-set transient attrs so _user_to_member sees the updated role
-    user.role_id = membership.role_id
-    user.role_ref = membership.role_ref
+    # Re-fetch with the canonical-role join so _user_to_member sees the
+    # CUSTOM → base_role projection on the freshly-assigned role.
+    hydrated = await user_repo.get_by_id_with_membership(user_id, org.id)
+    if hydrated is not None:
+        user = hydrated
 
     logger.info(
         "role_assigned",

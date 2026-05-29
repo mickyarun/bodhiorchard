@@ -38,7 +38,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument, BUDStatus
-from app.models.user import OrgToUser, UserRole
+from app.models.user import UserRole
+from app.repositories.user import UserRepository
 from app.services.estimation_engine import MIN_CAPACITY
 from app.services.phase_roles import PHASE_ROLE_MAP
 
@@ -62,13 +63,7 @@ async def get_role_capacity(
     gap is observable rather than silently absorbing the over-load
     signal. Roles never seen in this org default to 1.0 too.
     """
-    pool_query = (
-        select(OrgToUser.role, func.count())
-        .where(OrgToUser.org_id == org_id)
-        .group_by(OrgToUser.role)
-    )
-    pool_rows = (await db.execute(pool_query)).all()
-    pool_by_role: dict[UserRole, int] = {row[0]: row[1] for row in pool_rows}
+    pool_by_role = await UserRepository(db).count_active_by_role(org_id)
 
     active_query = (
         select(BUDDocument.status, func.count())

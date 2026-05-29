@@ -21,12 +21,11 @@ from typing import Any, Literal
 import structlog
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import verify_token
 from app.database import AsyncSessionLocal
-from app.models.user import OrgToUser, User, UserRole
+from app.models.user import User, UserRole
 from app.repositories.permission import PermissionRepository
 from app.repositories.role import RoleRepository
 from app.repositories.user import UserRepository
@@ -99,23 +98,18 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
 
-    # Validate org membership via OrgToUser
-    result = await db.execute(
-        select(OrgToUser).where(
-            OrgToUser.user_id == user_id,
-            OrgToUser.org_id == org_id,
-        )
-    )
-    membership = result.scalar_one_or_none()
-    if membership is None:
+    # Validate org membership + resolve canonical role in one query
+    pair = await user_repo.get_membership_with_role(user_id, org_id)
+    if pair is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this organization",
         )
+    membership, effective_role = pair
 
     # Set transient org context on the user instance
     user.org_id = membership.org_id
-    user.role = membership.role
+    user.role = effective_role or UserRole.DEVELOPER
     user.role_id = membership.role_id
     user.role_ref = membership.role_ref
 
@@ -164,21 +158,16 @@ async def get_current_user_pending_password(
     if user is None:
         raise credentials_exception
 
-    result = await db.execute(
-        select(OrgToUser).where(
-            OrgToUser.user_id == user_id,
-            OrgToUser.org_id == org_id,
-        )
-    )
-    membership = result.scalar_one_or_none()
-    if membership is None:
+    pair = await user_repo.get_membership_with_role(user_id, org_id)
+    if pair is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this organization",
         )
+    membership, effective_role = pair
 
     user.org_id = membership.org_id
-    user.role = membership.role
+    user.role = effective_role or UserRole.DEVELOPER
     user.role_id = membership.role_id
     user.role_ref = membership.role_ref
 
@@ -188,24 +177,16 @@ async def get_current_user_pending_password(
 async def get_user_permissions(user: User, db: AsyncSession) -> set[str]:
     """Return the set of permission resource_id strings for a user's role.
 
-    Looks up permissions via the role_id FK first.  When role_id is NULL
-    (legacy users created before the RBAC roles table), falls back to the
-    default permission set for the user's role enum from permissions.py.
-
-    Args:
-        user: The user whose permissions to look up.
-        db: The async database session.
-
-    Returns:
-        A set of resource_id strings (e.g. {"backlog:view", "backlog:create"}).
+    Resolves permissions through ``role_id``.  Defence-in-depth: if the
+    membership has no ``role_id`` (post-migration this should not happen),
+    falls back to the default permission set for the canonical
+    :class:`UserRole` carried on ``user.role``.
     """
     role_id = getattr(user, "role_id", None)
     if role_id is not None:
         perm_repo = PermissionRepository(db)
         return await perm_repo.get_user_permission_ids(role_id)
 
-    # Fallback: derive permissions from the legacy role enum when role_id
-    # is NULL (users created before the RBAC roles table was seeded).
     role_enum = getattr(user, "role", None)
     if role_enum is not None:
         from app.core.permissions import DEFAULT_SYSTEM_ROLES
@@ -214,7 +195,7 @@ async def get_user_permissions(user: User, db: AsyncSession) -> set[str]:
         for role_def in DEFAULT_SYSTEM_ROLES:
             if role_def.name == role_name:
                 logger.info(
-                    "permissions_from_role_enum_fallback",
+                    "permissions_from_default_role_set",
                     user_id=str(user.id),
                     role=role_name,
                 )
@@ -247,11 +228,10 @@ def require_permissions(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ) -> User:
-        # org_owner bypasses all permission checks (enum check first for
-        # legacy users without role_id, then DB lookup as defense-in-depth
-        # in case the enum attribute is missing but the role row exists).
-        role_enum = getattr(current_user, "role", None)
-        if role_enum == UserRole.ORG_OWNER:
+        # org_owner bypasses all permission checks — first the canonical
+        # role on the user instance, then a DB lookup through role_id as
+        # defence-in-depth.
+        if getattr(current_user, "role", None) == UserRole.ORG_OWNER:
             return current_user
 
         role_id = getattr(current_user, "role_id", None)
