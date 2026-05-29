@@ -1280,9 +1280,7 @@ async def override_code_review(
     # refetch sees status=testing without any mirroring.
     try:
         async with AsyncSessionLocal() as est_db:
-            est_bud = await BUDRepository(
-                est_db, org_id=current_user.org_id
-            ).get_by_id(bud_id)
+            est_bud = await BUDRepository(est_db, org_id=current_user.org_id).get_by_id(bud_id)
             if est_bud is not None:
                 await estimate_bud_dates(
                     est_db,

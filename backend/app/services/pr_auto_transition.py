@@ -187,7 +187,5 @@ async def check_all_prs_merged(
         async with db.begin_nested():
             await estimate_bud_dates(db, org_id, bud, trigger="prs_merged")
     except Exception:
-        logger.warning(
-            "estimation_failed_after_prs_merged", bud_id=str(bud_id), exc_info=True
-        )
+        logger.warning("estimation_failed_after_prs_merged", bud_id=str(bud_id), exc_info=True)
     logger.info("auto_transition_to_testing", bud_id=str(bud_id))

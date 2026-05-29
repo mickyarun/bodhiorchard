@@ -118,9 +118,7 @@ async def handle_prd_result(
             async with db.begin_nested():
                 await estimate_bud_dates(db, org_id, bud, trigger="prd_completed")
         except Exception:
-            logger.warning(
-                "estimation_failed_after_prd", bud_id=str(bud_id), exc_info=True
-            )
+            logger.warning("estimation_failed_after_prd", bud_id=str(bud_id), exc_info=True)
 
     return {
         "section": "requirements_md",
@@ -311,13 +309,9 @@ async def handle_tech_arch_result(
         # estimator sees the in-memory bud writes without a refetch + mirror.
         try:
             async with db.begin_nested():
-                await estimate_bud_dates(
-                    db, org_id, bud, trigger="tech_arch_completed"
-                )
+                await estimate_bud_dates(db, org_id, bud, trigger="tech_arch_completed")
         except Exception:
-            logger.warning(
-                "estimation_failed_after_tech_arch", bud_id=str(bud_id), exc_info=True
-            )
+            logger.warning("estimation_failed_after_tech_arch", bud_id=str(bud_id), exc_info=True)
 
     if bud and bud.assignee_id:
         bud_ref = f"BUD-{bud.bud_number:03d}"
@@ -504,13 +498,9 @@ async def handle_testing_result(
         # all stay on the live outer transaction.
         try:
             async with db.begin_nested():
-                await estimate_bud_dates(
-                    db, org_id, bud, trigger="testing_completed"
-                )
+                await estimate_bud_dates(db, org_id, bud, trigger="testing_completed")
         except Exception:
-            logger.warning(
-                "estimation_failed_after_testing", bud_id=str(bud_id), exc_info=True
-            )
+            logger.warning("estimation_failed_after_testing", bud_id=str(bud_id), exc_info=True)
 
     if bud and bud.assignee_id:
         from app.services.notification_service import send_lifecycle_notification
