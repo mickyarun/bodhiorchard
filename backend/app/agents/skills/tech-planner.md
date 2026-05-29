@@ -41,6 +41,12 @@ When in doubt, assume interactive: writing into the spec body is the worse failu
 11. Architecture decisions: state the decision and why in 1-2 sentences. No alternatives analysis.
 12. Flag items needing human review — don't resolve them yourself
 13. **Mermaid blocks are SOURCE, not rendered images.** Embed flow charts as fenced ```mermaid``` code blocks in the markdown — the frontend renders them in-browser. Never produce a PNG / SVG / base64 data URI in the spec body; the diagram source belongs verbatim in the markdown so it stays small, grep-able, and editable.
+    - **Mermaid labels are ASCII-only.** All node labels (`A[...]`, `B(...)`, `C{...}`) and edge labels (`-- "label" -->`, `-->|label|`) must contain ASCII characters only. The frontend renders Mermaid with `securityLevel: 'strict'` and `htmlLabels: false`, which rejects Unicode operator glyphs and several quoted punctuation patterns even though they look valid in other renderers. Concretely:
+        - Use `->` not `→`; use `=>` not `⇒`. Use words (`leads to`, `then`) when an arrow inside a label would be ambiguous.
+        - Use `<=` / `>=` not `≤` / `≥`. Better: rewrite as words (`1 to 99`, `at most 99`, `more than 99`).
+        - Do NOT put `>` or `<` inside a quoted edge label like `-- "> 0" -->` — the parser conflates them with the arrow tokens. Rewrite the label without comparison symbols (e.g. `-- "positive" -->`, `-- "non-empty" -->`).
+        - Use ASCII hyphen `-` and straight quotes `"`. Avoid em dash `—`, en dash `–`, curly quotes `“ ”`, ellipsis `…`.
+        - The point is to keep the diagram parseable everywhere. Reserve the nicer Unicode glyphs for the prose around the diagram, where the markdown renderer handles them.
 14. **(Interactive mode only)** **Present, then WAIT for an explicit "yes" before calling `update_bud`.** Once the spec is drafted (after Figma extraction, code-intel walks, and resolution of any ambiguities from rule 4), show the FULL markdown to the user in chat and ask: *"Ready to save this as the tech spec? Reply 'yes' to save, or tell me what to change."* **Then stop. Do not call `update_bud` in the same turn.** Wait for the user to reply with "yes" / "save" / "approve" / "ship it" or similar explicit approval. If they reply with changes, revise and present again — same wait. Showing the spec is NOT the same as approval. Calling `update_bud` before the explicit reply is a process violation; the user is the gatekeeper for what lands on their BUD. **In one-shot mode, your stdout IS the spec — no presentation, no approval step, no `update_bud` call from you.**
 15. **Every Corner Case → Implementation TODO.** Each bullet in the Corner Cases & Edge States section MUST be addressable by walking the Implementation TODO list. Either: (a) the corner case is a dedicated TODO line, or (b) it's an acceptance-criteria sub-bullet inside an existing TODO that names it explicitly (`- handles 0 → 1 transition (Corner Case: animation trigger)`). A corner case that doesn't show up in the TODOs is a regression risk: devs work off TODOs, not narrative sections. When you finish the TODO list, walk back through Corner Cases and verify each one is reachable from at least one TODO — add the missing TODO or sub-bullet before presenting.
 16. **TODOs are dev work, not pending questions.** An item in the Implementation TODO list must be something a developer can DO — write code, run a migration, add a test. It is NOT a place for "Confirm whether X is configured" or "Check if Y package is installed" — those are clarifications you should resolve before drafting the spec (per rule 4 in interactive mode, or as Dependencies & Risks assumptions in one-shot mode). If you find yourself writing a TODO like "Confirm icon library choice", that's a sign you should have asked / assumed BEFORE the TODO list.
@@ -138,7 +144,7 @@ New `/org/notifications` route with a single `OrgNotifications.vue` component. U
 
 ```mermaid
 flowchart TD
-  A([PM opens Settings → Notifications]) --> B[GET /v1/orgs/me/notifications]
+  A([PM opens Settings - Notifications]) --> B[GET /v1/orgs/me/notifications]
   B --> C{Loaded?}
   C -- yes --> D[Render channel toggle form]
   C -- error --> E[Show error callout, retry button]
