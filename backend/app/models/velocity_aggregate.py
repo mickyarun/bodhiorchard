@@ -68,8 +68,18 @@ class VelocityAggregate(BaseModel):
         index=True,
     )
     complexity: Mapped[int] = mapped_column(Integer, nullable=False)
+    # ``values_callable`` mirrors what ``BUDDocument.status`` does: the
+    # existing ``bud_status`` Postgres enum holds the .value strings
+    # ('bud', 'design', ...), not the Python enum names ('BUD',
+    # 'DESIGN', ...). Without this kwarg SQLAlchemy serializes by name
+    # and every INSERT fails with InvalidTextRepresentationError.
     phase: Mapped[BUDStatus] = mapped_column(
-        Enum(BUDStatus, name="bud_status", create_type=False),
+        Enum(
+            BUDStatus,
+            name="bud_status",
+            create_type=False,
+            values_callable=lambda e: [x.value for x in e],
+        ),
         nullable=False,
     )
     n_samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
