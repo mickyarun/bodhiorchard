@@ -33,6 +33,7 @@ from app.core.middleware import RequestLoggingMiddleware
 from app.services.mcp_audit_cleanup import run_forever as run_audit_cleanup
 from app.services.pr_merge_worker import WorkerPool, start_pr_merge_workers
 from app.services.scan.pr_merge_update import handle_pr_merge_delivery
+from app.services.velocity_snapshot_roller import run_forever as run_velocity_snapshot_roller
 
 # Configure structured JSON logging before anything else
 setup_logging(
@@ -241,6 +242,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # so duplicate deletes don't race across pods.
     mcp_audit_cleanup_task = asyncio.create_task(run_audit_cleanup())
 
+    # 8b. Daily roll-forward of the 30-day baseline on
+    # velocity_aggregates so the Learnings overview's trend_30d_pct
+    # field has a stable comparison point. Same single-instance
+    # caveat as 8a — Redis lock comes when we go multi-pod.
+    velocity_snapshot_task = asyncio.create_task(run_velocity_snapshot_roller())
+
     # 9. PR-merge Redis-stream worker pool. One consumer per
     # (org, repo) stream; supervisor task spawns consumers lazily as
     # streams appear in the registry. Orphan recovery re-publishes
@@ -261,6 +268,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     presence_task.cancel()
     embedding_warmup_task.cancel()
     mcp_audit_cleanup_task.cancel()
+    velocity_snapshot_task.cancel()
     if pr_merge_pool is not None:
         await pr_merge_pool.stop()
     await stop_workers()
