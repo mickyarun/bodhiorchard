@@ -47,6 +47,7 @@ from app.services.bud_metrics_phases import (
     build_phase_metrics,
     original_estimated_days_from_metrics,
 )
+from app.services.velocity_aggregate_writer import roll_bud_into_aggregates
 
 logger = structlog.get_logger(__name__)
 
@@ -138,10 +139,20 @@ async def compute_and_persist(
         metrics=metrics,
     )
 
-    # NOTE: roll-forward into ``velocity_aggregates`` is wired in the
-    # commit that introduces that table. Until then, the estimator
-    # continues to read history via the legacy proportional split — no
-    # behaviour change at this point.
+    # Roll the per-phase actuals into ``velocity_aggregates`` so the
+    # estimator's next read is O(1). Failures are logged but don't
+    # block the per-BUD recap pipeline — a missing aggregate update
+    # falls back to the legacy proportional-split path on the next
+    # estimation, which is the same behaviour as before this PR.
+    try:
+        await roll_bud_into_aggregates(db, org_id, bud, metrics)
+    except Exception:
+        logger.warning(
+            "velocity_aggregate_roll_failed",
+            bud_id=str(bud.id),
+            bud_number=bud.bud_number,
+            exc_info=True,
+        )
 
     logger.info(
         "bud_metrics_recorded",

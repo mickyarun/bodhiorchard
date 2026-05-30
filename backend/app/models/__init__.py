@@ -91,6 +91,7 @@ from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
 from app.models.user_mcp_token import UserMCPToken
+from app.models.velocity_aggregate import VelocityAggregate
 from app.models.webhook_log import WebhookLog
 from app.models.yield_offer import YieldOffer, YieldOfferStatus
 
@@ -186,6 +187,7 @@ __all__ = [
     "UserMCPToken",
     "MCPAuditLogEntry",
     "UserRole",
+    "VelocityAggregate",
     "WebhookLog",
     "YieldOffer",
     "YieldOfferStatus",
