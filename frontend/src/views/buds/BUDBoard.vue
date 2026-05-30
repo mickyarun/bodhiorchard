@@ -377,6 +377,7 @@ import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/agentSkills'
+import { useSettingsStore } from '@/stores/settings'
 import { BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_PRIORITIES } from '@/types'
 import type { BUDStatus, BUDPriority } from '@/types'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
@@ -399,6 +400,7 @@ const PRIORITY_OPTIONS = BUD_PRIORITIES.map(p => ({ label: p, value: p }))
 const router = useRouter()
 const budStore = useBUDStore()
 const skillsStore = useAgentSkillsStore()
+const settingsStore = useSettingsStore()
 
 const nameFilter = ref('')
 // Sentinel value (string, not null) for the "Unassigned" option — v-select's
@@ -539,6 +541,10 @@ watch(
 
 onMounted(() => {
   budStore.fetchBUDs()
+  // usePhaseOrder() reads budStages.uatEnabled to decide whether the UAT
+  // column shows. Without this fetch a cold page load uses the default
+  // (UAT enabled) regardless of what the org has saved.
+  if (!settingsStore.connectionsLoaded) settingsStore.fetchConnections()
 })
 
 function openBUD(id: string): void {

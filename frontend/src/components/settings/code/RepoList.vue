@@ -202,8 +202,10 @@ async function onScan(): Promise<void> {
   // failed subset of the prior scan".
   await scanStore.startScan()
   // Nudge the page-wide BUD-stages flag so it stays current after a
-  // settings change elsewhere on the page.
-  if (!settingsStore.connections.budStages) {
+  // settings change elsewhere on the page. Gate on the loaded flag —
+  // emptyState() always populates budStages so the sub-object is not
+  // a reliable "have we fetched?" signal.
+  if (!settingsStore.connectionsLoaded) {
     void settingsStore.fetchConnections()
   }
 }

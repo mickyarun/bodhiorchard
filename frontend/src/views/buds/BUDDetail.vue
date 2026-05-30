@@ -911,9 +911,10 @@ onMounted(async () => {
   // explicit call needed here.
   // Settings store powers the UAT toggle visibility (uatStageEnabled)
   // and the release-stage panels' "configure branch" CTA
-  // (hasUatBranchConfigured / hasMainBranchConfigured). Both actions
-  // are no-ops if the data is already cached, so this is cheap.
-  if (!settingsStore.connections.budStages) settingsStore.fetchConnections()
+  // (hasUatBranchConfigured / hasMainBranchConfigured). Gate on the
+  // store's loaded flag — the sub-objects always exist as defaults from
+  // emptyState() so they are not a valid "have we fetched?" signal.
+  if (!settingsStore.connectionsLoaded) settingsStore.fetchConnections()
   if (settingsStore.repos.length === 0) settingsStore.fetchRepos()
 
   // Subscribe to BUD activity events (PR opened/merged/comment via webhook)

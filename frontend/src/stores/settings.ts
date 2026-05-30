@@ -136,6 +136,12 @@ function emptyState(): ConnectionsState {
 
 export const useSettingsStore = defineStore('settings', () => {
   const connections = ref<ConnectionsState>(emptyState())
+  // True once fetchConnections() has succeeded at least once this session.
+  // Consumers must gate "lazy-fetch if unloaded" on this flag — gating on
+  // the presence of sub-objects (e.g. !connections.budStages) is broken
+  // because emptyState() always populates them with defaults, so the guard
+  // never fires on a cold page load and stale defaults shadow saved values.
+  const connectionsLoaded = ref(false)
   const loading = ref(false)
   const saving = ref(false)
   const error = ref<string | null>(null)
@@ -171,6 +177,7 @@ export const useSettingsStore = defineStore('settings', () => {
         installUrl: github.installUrl ?? null,
       }
       connections.value = data
+      connectionsLoaded.value = true
     } catch (err) {
       error.value = extractApiError(err, 'Failed to load settings.')
     } finally {
@@ -185,6 +192,7 @@ export const useSettingsStore = defineStore('settings', () => {
     try {
       const { data } = await api.patch('/v1/settings/connections', connections.value)
       connections.value = data
+      connectionsLoaded.value = true
       saveSuccess.value = true
       return true
     } catch (err) {
@@ -334,6 +342,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     connections,
+    connectionsLoaded,
     loading,
     saving,
     error,

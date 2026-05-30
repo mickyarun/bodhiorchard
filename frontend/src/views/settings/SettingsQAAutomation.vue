@@ -236,7 +236,7 @@ async function save(): Promise<void> {
 }
 
 onMounted(async () => {
-  if (!settingsStore.connections.qaAutomation) {
+  if (!settingsStore.connectionsLoaded) {
     await settingsStore.fetchConnections()
   }
   syncChoiceFromStore()
