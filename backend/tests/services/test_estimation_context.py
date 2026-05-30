@@ -145,24 +145,81 @@ def _completed_bud(days: int) -> SimpleNamespace:
     )
 
 
-async def test_historical_empty_when_no_completed_buds() -> None:
-    """Empty bucket means the caller falls back to LLM-only (zero
-    historical_weight) — the invariant the engine relies on."""
+def _stub_aggregate(
+    phase_value: str,
+    sample_window: list[float],
+    *,
+    n_samples: int | None = None,
+) -> SimpleNamespace:
+    """Stand-in VelocityAggregate row with just the fields the helper reads."""
+    from app.models.bud import BUDStatus
+
+    return SimpleNamespace(
+        phase=BUDStatus(phase_value),
+        sample_window=sample_window,
+        n_samples=n_samples if n_samples is not None else len(sample_window),
+    )
+
+
+def _two_call_mock(first: list[object], second: list[object]) -> AsyncMock:
+    """AsyncMock whose ``execute`` returns ``first`` then ``second``.
+
+    Mirrors the helper's two-query shape: velocity_aggregates lookup
+    first, then the legacy completed-BUDs lookup as fallback.
+    """
     db = AsyncMock()
-    db.execute.return_value = _rows_result([])
+    db.execute.side_effect = [_rows_result(first), _rows_result(second)]
+    return db
+
+
+async def test_historical_empty_when_neither_aggregates_nor_completed_buds() -> None:
+    """Empty rollup + empty legacy bucket → empty result. Caller falls
+    back to LLM-only (zero historical_weight), the invariant the engine
+    relies on."""
+    db = _two_call_mock([], [])
     result = await get_historical_phase_durations(
         db, uuid.uuid4(), target_complexity=3, phase_order=["development", "testing"]
     )
     assert result == {}
 
 
+async def test_historical_reads_aggregates_when_enough_samples() -> None:
+    """A bucket with >= MIN_SAMPLES_FOR_TRUSTED real samples bypasses the
+    proportional split and emits the per-BUD sample window directly so
+    the Monte Carlo loop bootstraps over the real distribution."""
+    samples = [2.0, 3.0, 4.0, 5.0, 6.0]
+    db = _two_call_mock([_stub_aggregate("development", samples)], [])
+    result = await get_historical_phase_durations(
+        db, uuid.uuid4(), target_complexity=3, phase_order=["development"]
+    )
+    assert result["development"] == pytest.approx(samples)
+
+
+async def test_historical_tops_up_from_legacy_when_aggregates_short() -> None:
+    """A bucket with too few samples must NOT silently override the
+    proportional split — the rollup is informative only once it has
+    enough data to beat the default. The two paths are additive: short
+    rollups top up with the legacy split rather than replace it."""
+    short = _stub_aggregate("development", [1.0, 2.0], n_samples=2)
+    completed = [_completed_bud(days=10)]
+    db = _two_call_mock([short], completed)
+    result = await get_historical_phase_durations(
+        db, uuid.uuid4(), target_complexity=3, phase_order=["development"]
+    )
+    # Should NOT contain the rollup's [1.0, 2.0] (n_samples below threshold);
+    # only the legacy proportional sample lands in the result.
+    assert 1.0 not in result["development"]
+    assert 2.0 not in result["development"]
+    assert len(result["development"]) == 1  # one completed BUD → one proportional sample
+
+
 async def test_historical_splits_cycle_proportionally_by_default_phase_share() -> None:
     """Each phase's duration is its share of ``DEFAULT_PHASE_DAYS``
-    times the observed whole-BUD cycle — the Magennis bootstrap shape."""
+    times the observed whole-BUD cycle — the Magennis bootstrap shape
+    (still applied when the rollup is empty)."""
     from app.services.estimation_engine import DEFAULT_PHASE_DAYS
 
-    db = AsyncMock()
-    db.execute.return_value = _rows_result([_completed_bud(days=10)])
+    db = _two_call_mock([], [_completed_bud(days=10)])
     phases = ["development", "testing"]
     result = await get_historical_phase_durations(
         db, uuid.uuid4(), target_complexity=3, phase_order=phases
@@ -170,7 +227,6 @@ async def test_historical_splits_cycle_proportionally_by_default_phase_share() -
 
     total = sum(DEFAULT_PHASE_DAYS[p] for p in phases)
     assert set(result.keys()) == set(phases)
-    # Each phase maps to a list of samples (one per observed BUD).
     assert result["development"] == pytest.approx(
         [10.0 * DEFAULT_PHASE_DAYS["development"] / total]
     )
@@ -181,22 +237,20 @@ async def test_historical_clamps_zero_day_cycle_to_one() -> None:
     """Same-day create-and-close BUDs would otherwise emit 0-day samples
     and pull the bootstrap mean toward zero. The min-1-day clamp is the
     stated invariant in the helper's docstring."""
-    db = AsyncMock()
-    db.execute.return_value = _rows_result([_completed_bud(days=0)])
+    db = _two_call_mock([], [_completed_bud(days=0)])
     result = await get_historical_phase_durations(
         db, uuid.uuid4(), target_complexity=3, phase_order=["development"]
     )
-    # Single-phase case: the whole clamped 1.0-day cycle lands on the phase.
     assert result["development"] == pytest.approx([1.0])
 
 
 async def test_historical_aggregates_multiple_buds() -> None:
-    """Every matching BUD contributes one sample per phase; the engine
-    consumes these as a distribution, not an average, so order/count
-    across samples must be preserved."""
-    db = AsyncMock()
-    db.execute.return_value = _rows_result(
-        [_completed_bud(days=4), _completed_bud(days=8), _completed_bud(days=12)]
+    """Every matching legacy-bucket BUD contributes one sample per phase;
+    the engine consumes these as a distribution, not an average, so
+    order / count across samples must be preserved."""
+    db = _two_call_mock(
+        [],
+        [_completed_bud(days=4), _completed_bud(days=8), _completed_bud(days=12)],
     )
     result = await get_historical_phase_durations(
         db, uuid.uuid4(), target_complexity=3, phase_order=["development"]
@@ -208,8 +262,7 @@ async def test_historical_ignores_phases_absent_from_default_map() -> None:
     """The proportional split uses DEFAULT_PHASE_DAYS; a phase the engine
     doesn't know about must not leak into the result (it would divide by
     an inflated total and skew every other phase)."""
-    db = AsyncMock()
-    db.execute.return_value = _rows_result([_completed_bud(days=10)])
+    db = _two_call_mock([], [_completed_bud(days=10)])
     result = await get_historical_phase_durations(
         db, uuid.uuid4(), target_complexity=3, phase_order=["development", "not_a_real_phase"]
     )
@@ -220,9 +273,8 @@ async def test_historical_ignores_phases_absent_from_default_map() -> None:
 async def test_historical_handles_extreme_complexity_targets() -> None:
     """Bucket edges at complexity 1 and 5 must not produce out-of-range
     bounds (the SQL BETWEEN would fail) — the helper clamps via max/min."""
-    db = AsyncMock()
-    db.execute.return_value = _rows_result([])
-    # Hitting both extremes should return cleanly rather than raising.
-    low = await get_historical_phase_durations(db, uuid.uuid4(), 1, ["development"])
-    high = await get_historical_phase_durations(db, uuid.uuid4(), 5, ["development"])
+    low_db = _two_call_mock([], [])
+    high_db = _two_call_mock([], [])
+    low = await get_historical_phase_durations(low_db, uuid.uuid4(), 1, ["development"])
+    high = await get_historical_phase_durations(high_db, uuid.uuid4(), 5, ["development"])
     assert low == {} and high == {}
