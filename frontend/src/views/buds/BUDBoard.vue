@@ -486,6 +486,7 @@ const advancedStages: StageConfig[] = [
   { value: 'design' as BUDStatus, label: 'Design', agentType: 'design' },
   { value: 'tech_arch' as BUDStatus, label: 'Tech plan', agentType: 'techPlan' },
   { value: 'testing' as BUDStatus, label: 'Test plan', agentType: 'testPlan' },
+  { value: 'closed' as BUDStatus, label: 'Learning recap', agentType: 'learning' },
 ]
 
 interface StageSkillOption { id: string; label: string; isDefault: boolean }
@@ -513,8 +514,13 @@ function prefillStageDefaults(): void {
     // settings just to get the in-flight default behaviour. Users who
     // want External-LLM mode can still flip individual switches OFF
     // before creating, or change them later via the AI skills dialog.
+    //
+    // Exception: the post-close Learning recap defaults OFF so opt-in
+    // is explicit. Recap generation costs an LLM call after every
+    // close; making that an opt-in rather than a silent default
+    // protects orgs on BYO-AI workflows.
     if (autoGeneratePhases.value[stage.value] === undefined) {
-      autoGeneratePhases.value[stage.value] = true
+      autoGeneratePhases.value[stage.value] = stage.value !== ('closed' as BUDStatus)
     }
   }
 }

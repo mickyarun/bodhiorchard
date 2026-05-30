@@ -244,6 +244,7 @@
               <v-tab v-if="uatStageEnabled" value="uat">UAT</v-tab>
               <v-tab value="prod">Prod</v-tab>
               <v-tab v-if="isClosed" value="closed">{{ bud.status === 'discarded' ? 'Discarded' : 'Closed' }}</v-tab>
+              <v-tab v-if="hasLearning" value="learnings">Learnings</v-tab>
             </v-tabs>
             <BUDSectionToolbar
               v-if="!isReadOnlyTab"
@@ -389,6 +390,15 @@
                 <BUDClosedTab v-if="bud" :bud="bud" :timeline-events="timelineEvents" />
               </v-tabs-window-item>
 
+              <!-- Learnings (post-close retrospective + metrics) -->
+              <v-tabs-window-item v-if="hasLearning" value="learnings">
+                <LearningsPanel
+                  v-if="bud"
+                  :bud-id="bud.id"
+                  :refresh-key="learningRefreshKey"
+                />
+              </v-tabs-window-item>
+
               <!-- Test Plan tab removed — test plan content is now part of QA tab -->
             </v-tabs-window>
           </div>
@@ -521,6 +531,7 @@ import BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import BUDRequirementsTab from '@/components/buds/BUDRequirementsTab.vue'
 import BUDTechSpecTab from '@/components/buds/BUDTechSpecTab.vue'
 import BUDClosedTab from '@/components/buds/BUDClosedTab.vue'
+import LearningsPanel from '@/components/buds/LearningsPanel.vue'
 import BUDSectionDiffDrawer from '@/components/buds/BUDSectionDiffDrawer.vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import BUDSectionToolbar from '@/components/buds/BUDSectionToolbar.vue'
@@ -611,6 +622,15 @@ const uatStageEnabled = computed(
 const isClosed = computed(
   () => bud.value?.status === 'closed' || bud.value?.status === 'discarded',
 )
+
+// Learnings tab visibility. Backend sets ``has_learning`` true only when
+// the BUD has a feature_learnings row AND a retrospective_md \u2014 so the
+// tab appears precisely when there is something for it to render.
+const hasLearning = computed(() => Boolean(bud.value?.has_learning))
+
+// Bumped each time a ``learning_recorded`` activity event fires so the
+// panel re-fetches without us having to expose a separate refresh API.
+const learningRefreshKey = ref(0)
 
 // "Read-only" tabs hide the section toolbar (Edit/Export/Import).
 const READ_ONLY_TABS = new Set([
@@ -919,10 +939,21 @@ onMounted(async () => {
 
   // Subscribe to BUD activity events (PR opened/merged/comment via webhook)
   const budActivityTopic = `bud:${id}:activity`
-  const handleBudActivity = () => {
+  const refreshBudState = () => {
     budStore.fetchBUD(id)
     loadTimeline()
     reloadEstimates()
+  }
+  const handleBudActivity = (data: unknown) => {
+    refreshBudState()
+    // Bump the Learnings panel's refresh key when the post-close
+    // recap lands. Refetching BUD detail above already flips
+    // ``has_learning`` true if it wasn't, which exposes the tab;
+    // the key bump makes sure the panel itself pulls the new row.
+    const payload = data as { event_type?: string } | undefined
+    if (payload?.event_type === 'learning_recorded') {
+      learningRefreshKey.value += 1
+    }
   }
   subscribe(budActivityTopic, handleBudActivity)
   // Also resync on WS reconnect — webhook-driven activity events that
@@ -930,7 +961,7 @@ onMounted(async () => {
   // are not buffered. Refetching state on reconnect mirrors what a
   // page-refresh does and keeps the timeline / PR-status banners
   // accurate without the user knowing they were briefly offline.
-  const unregisterReconnect = onSocketReconnect(handleBudActivity)
+  const unregisterReconnect = onSocketReconnect(refreshBudState)
   // Stash cleanup so the top-level onUnmounted (registered synchronously
   // in setup) can fire it. Calling onUnmounted from inside an async
   // onMounted callback warns "no active component instance" in Vue 3.

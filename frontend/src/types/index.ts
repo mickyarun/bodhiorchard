@@ -249,11 +249,17 @@ export interface BUDDocument extends BUDListItem {
     metadata: Record<string, unknown>
   } | null
   // Per-phase auto-generation map. Keys: 'bud' / 'design' / 'tech_arch'
-  // / 'testing'. Value true = our agent fires for that phase; missing
-  // key or false = user drives the phase manually (typically via their
-  // local AI through the remote MCP endpoint). NULL or empty dict =
-  // all phases skip (the new default for freshly created BUDs).
+  // / 'testing' / 'closed' (post-close Learning Agent). Value true =
+  // our agent fires for that phase; missing key or false = user drives
+  // the phase manually (typically via their local AI through the
+  // remote MCP endpoint). NULL or empty dict = all phases skip (the
+  // new default for freshly created BUDs).
   auto_generate_phases: Record<string, boolean> | null
+  // True iff feature_learnings has a retrospective_md for this BUD.
+  // Gates the Learnings tab on the detail page so we don't render an
+  // empty placeholder for BUDs that haven't been closed (or that
+  // closed with the Learning Agent opted out).
+  has_learning?: boolean
 }
 
 export type AutoGeneratePhases = Record<string, boolean>
