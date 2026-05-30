@@ -188,6 +188,11 @@ class BUDRead(BaseModel):
     # Sticky last-failed-phase banner sourced from agent_activity_logs newer
     # than ``phase_failure_acknowledged_at``; cleared via the dismiss endpoint.
     last_phase_failure: dict[str, Any] | None = None
+    # Cheap tab-visibility flag for the BUD detail "Learnings" tab. Set
+    # by the BUD detail endpoint after a feature_learnings row exists.
+    # Full retrospective is fetched lazily via GET /buds/{id}/learning so
+    # the BUD list payload stays small.
+    has_learning: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -200,6 +205,28 @@ class BUDRead(BaseModel):
         if hasattr(data, "assignee") and data.assignee is not None:
             data.assignee_name = data.assignee.name
         return data
+
+
+class BUDLearningRead(BaseModel):
+    """Post-close retrospective payload for the BUD detail Learnings tab.
+
+    Exposes the FeatureLearning row's persisted fields plus the
+    ``metrics`` JSONB envelope. The retrospective markdown is rendered
+    via the existing markdown component; the metrics dict drives the
+    three summary cards (phase-drift bars, contributor table,
+    parallelism gauge).
+    """
+
+    bud_id: uuid.UUID
+    retrospective_md: str | None = None
+    cycle_time_days: float | None = None
+    estimated_days: float | None = None
+    bug_count: int = 0
+    metrics: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class BUDListItem(BaseModel):
