@@ -149,6 +149,30 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
         result = await self._db.execute(stmt)
         return {row[0]: row[1] for row in result.all() if row[0] and row[1]}
 
+    async def list_commit_tuples_for_bud(
+        self, bud_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID | None, str, datetime]]:
+        """Per-commit (user_id, commit_sha, created_at) tuples for a BUD.
+
+        Returns every commit-typed row tied to this BUD without the
+        ``limit`` / ``role`` filtering applied by ``list_commits_for_bud``
+        (which is tuned for the UI's recent-commits panel). The metrics
+        pipeline needs every commit to compute per-user totals,
+        active-day buckets, and parallelism windows in one pull.
+        """
+        stmt = self._scoped(
+            select(
+                DevActivityLog.user_id,
+                DevActivityLog.commit_sha,
+                DevActivityLog.created_at,
+            ).where(
+                DevActivityLog.bud_id == bud_id,
+                DevActivityLog.commit_sha.is_not(None),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row.user_id, row.commit_sha, row.created_at) for row in result.all()]
+
     async def get_distinct_user_ids_for_bud(self, bud_id: uuid.UUID) -> set[uuid.UUID]:
         """Distinct user_ids that have any dev_activity row for the BUD.
 

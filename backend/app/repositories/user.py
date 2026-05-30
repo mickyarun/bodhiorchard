@@ -98,6 +98,17 @@ class UserRepository(BaseRepository[User]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_many_by_ids(self, user_ids: list[uuid.UUID]) -> list[User]:
+        """Bulk-fetch users by ID. Returns matched rows in arbitrary order.
+
+        Caller is responsible for handling missing IDs (rows where the
+        user has been deleted will simply be absent from the result).
+        """
+        if not user_ids:
+            return []
+        result = await self._db.execute(select(User).where(User.id.in_(user_ids)))
+        return list(result.scalars().all())
+
     async def get_by_email_in_org(self, org_id: uuid.UUID, email: str) -> User | None:
         """Fetch a user by email in a specific organization.
 

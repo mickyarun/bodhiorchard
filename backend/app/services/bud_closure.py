@@ -35,9 +35,10 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.bud import BUDDocument
+from app.models.bud import BUDDocument, BUDStatus
 from app.models.dev_activity import DevActivityLog
 from app.models.pull_request import PullRequest
+from app.services.bud_metrics import compute_and_persist as compute_bud_metrics
 from app.services.scan.runner import ScanAlreadyActiveError, start_scan
 
 logger = structlog.get_logger(__name__)
@@ -52,12 +53,31 @@ async def on_bud_closed(
 ) -> None:
     """Run post-closure side-effects for a BUD.
 
-    Safe to call multiple times — XP awards are deduped by ``source_ref``
-    and the scan is a fresh incremental run.
+    Safe to call multiple times — XP awards are deduped by ``source_ref``,
+    the scan is a fresh incremental run, and ``compute_bud_metrics`` is
+    a no-op when the FeatureLearning row already carries a ``metrics``
+    envelope.
+
+    Note that this hook fires on PROD *and* CLOSED transitions today
+    (see ``bud.py``'s ``_completed`` gate). XP/SP/scan are correct to
+    fire at PROD; learning-metrics work only fires at CLOSED so the
+    full lifecycle is captured (PROD→CLOSED happens later via
+    auto-close).
     """
     await _award_contributor_xp(db, org_id, bud)
     await _award_bud_shipped_sp(db, org_id, bud)
     _trigger_impacted_repo_scan(org_id, bud)
+
+    if bud.status == BUDStatus.CLOSED:
+        try:
+            await compute_bud_metrics(db, org_id, bud)
+        except Exception:
+            logger.warning(
+                "bud_metrics_compute_failed",
+                bud_id=str(bud.id),
+                bud_number=bud.bud_number,
+                exc_info=True,
+            )
 
 
 async def _award_contributor_xp(

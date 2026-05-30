@@ -64,6 +64,25 @@ class BUDEstimateSnapshotRepository(BaseRepository[BUDEstimateSnapshot]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_earliest_for_bud(
+        self,
+        bud_id: uuid.UUID,
+    ) -> BUDEstimateSnapshot | None:
+        """Return the first estimate snapshot ever taken for a BUD.
+
+        Used by post-close metrics to capture the *original* estimate vs
+        the actual delivery — re-estimates happen on every phase transition,
+        so reading the latest would shadow the team's initial commitment.
+        """
+        stmt = self._scoped(
+            select(BUDEstimateSnapshot)
+            .where(BUDEstimateSnapshot.bud_id == bud_id)
+            .order_by(BUDEstimateSnapshot.created_at.asc())
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
 
 class BUDEstimateQueryRepository(BaseRepository[BUDDocument]):
     """Estimation-related queries on BUDDocument, scoped to an organization."""
