@@ -15,10 +15,11 @@
 """Feature learning model for retrospective analysis and estimation improvement."""
 
 import uuid
+from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ForeignKey, Integer, Numeric, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -43,6 +44,12 @@ class FeatureLearning(BaseModel):
     )
     bug_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     retrospective_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Versioned envelope written by ``bud_metrics.compute_and_persist``:
+    #   { schema_version, original_estimated_days, phase_metrics,
+    #     contributors, parallelism_score }
+    # Read whole by the per-BUD Learnings tab + the Learning Agent prompt;
+    # never queried into, so a single JSONB column keeps migrations cheap.
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     embedding = mapped_column(Vector(384), nullable=True)
 
     def __repr__(self) -> str:
