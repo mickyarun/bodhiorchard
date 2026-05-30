@@ -153,6 +153,17 @@ const router = createRouter({
           component: () => import('@/views/skills/SkillProfilesView.vue'),
         },
         {
+          // Org-level Learnings overview: trends across closed BUDs.
+          // Reads the velocity_aggregates rollup + last 50 feature_
+          // learnings rows. Permission gate matches Settings → QA
+          // Automation so the same admins who toggle the Learning
+          // Agent can see its aggregate output.
+          path: 'learnings',
+          name: 'learnings',
+          meta: { permission: 'org:view_settings' },
+          component: () => import('@/views/learnings/LearningsOverview.vue'),
+        },
+        {
           path: 'triage',
           name: 'triage',
           meta: { permission: 'backlog:approve' },

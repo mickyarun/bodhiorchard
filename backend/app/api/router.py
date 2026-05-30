@@ -29,6 +29,7 @@ from app.api.v1.github_webhook import router as github_webhook_router
 from app.api.v1.internal_colyseus import router as internal_colyseus_router
 from app.api.v1.jira_import import router as jira_router
 from app.api.v1.jobs import router as jobs_router
+from app.api.v1.learnings import router as learnings_router
 from app.api.v1.me import router as me_router
 from app.api.v1.members import router as members_router
 from app.api.v1.notifications import router as notifications_router
@@ -74,6 +75,7 @@ api_router.include_router(github_webhook_router, prefix="/api/v1/webhooks")
 api_router.include_router(triage_router, prefix="/api/v1/triage-sessions")
 api_router.include_router(jira_router, prefix="/api/v1/jira")
 api_router.include_router(jobs_router, prefix="/api/v1/jobs")
+api_router.include_router(learnings_router, prefix="/api/v1/learnings")
 api_router.include_router(me_router, prefix="/api/v1")
 api_router.include_router(ws_router, prefix="/api/v1")
 api_router.include_router(public_router, prefix="/api/v1/public")

@@ -82,6 +82,13 @@
           rounded="lg"
         />
         <v-list-item
+          v-if="canViewQAAutomation"
+          prepend-icon="mdi-book-open-page-variant-outline"
+          title="Learnings"
+          to="/learnings"
+          rounded="lg"
+        />
+        <v-list-item
           v-if="canApprove"
           prepend-icon="mdi-clipboard-check-outline"
           title="Approvals"
