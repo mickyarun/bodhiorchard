@@ -26,6 +26,7 @@ from typing import Any, Protocol
 import structlog
 from sqlalchemy import select
 
+from app.agents.prompts.learning_prompt import build_learning_prompt
 from app.models.bud import BUDDocument
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.tracked_repository import TrackedRepository
@@ -40,6 +41,7 @@ from app.services.agent_prompts import (
 )
 from app.services.agent_result_handlers import (
     handle_code_review_result,
+    handle_learning_result,
     handle_prd_result,
     handle_tech_arch_result,
     handle_testing_result,
@@ -111,6 +113,7 @@ PROMPT_BUILDERS: dict[str, PromptBuilder] = {
     "tech_arch": build_tech_arch_prompt,
     "code_review": build_code_review_prompt,
     "testing": build_testing_prompt,
+    "closed": build_learning_prompt,
 }
 
 RESULT_HANDLERS: dict[str, ResultHandler] = {
@@ -118,6 +121,7 @@ RESULT_HANDLERS: dict[str, ResultHandler] = {
     "tech_arch": handle_tech_arch_result,
     "code_review": handle_code_review_result,
     "testing": handle_testing_result,
+    "closed": handle_learning_result,
 }
 
 

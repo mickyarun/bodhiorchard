@@ -77,6 +77,7 @@ BUD_STAGE_AGENT_TYPE: dict[BUDStatus, AgentType] = {
     BUDStatus.DESIGN: AgentType.DESIGN,
     BUDStatus.TECH_ARCH: AgentType.TECH_PLAN,
     BUDStatus.TESTING: AgentType.TEST_PLAN,
+    BUDStatus.CLOSED: AgentType.LEARNING,
 }
 
 # Maps a BUD section key to the agent type that handles chat for that

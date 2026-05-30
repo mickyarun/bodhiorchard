@@ -38,6 +38,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.dev_activity import DevActivityLog
 from app.models.pull_request import PullRequest
+from app.services.bud_agent_trigger import (
+    create_agent_task_for_stage,
+    should_auto_generate_phase,
+)
 from app.services.bud_metrics import compute_and_persist as compute_bud_metrics
 from app.services.scan.runner import ScanAlreadyActiveError, start_scan
 
@@ -78,6 +82,27 @@ async def on_bud_closed(
                 bud_number=bud.bud_number,
                 exc_info=True,
             )
+
+        # Spawn the post-close Learning Agent if the BUD opted in via
+        # auto_generate_phases.closed. Defaults off so the External-LLM
+        # contract holds — orgs that bring their own AI tooling won't
+        # see us spawn LLM work on close unless they explicitly enable it.
+        if should_auto_generate_phase(bud.auto_generate_phases, "closed"):
+            try:
+                await create_agent_task_for_stage(
+                    bud,
+                    "closed",
+                    org_id,
+                    db,
+                    triggered_by=actor_id,
+                )
+            except Exception:
+                logger.warning(
+                    "learning_agent_trigger_failed",
+                    bud_id=str(bud.id),
+                    bud_number=bud.bud_number,
+                    exc_info=True,
+                )
 
 
 async def _award_contributor_xp(

@@ -59,6 +59,17 @@ DEFAULT_STAGE_MAPPINGS: list[dict[str, str | int]] = [
         "execution_order": 1,
         "output_section": "qa_execution_plan_md",
     },
+    # Post-close Learning Agent. ``output_section`` is intentionally
+    # absent — the recap goes into feature_learnings.retrospective_md
+    # via the result handler, not a column on bud_documents, so the
+    # content-exists guard in create_agent_task_for_stage doesn't apply.
+    {
+        "bud_status": "closed",
+        "skill_slug": "technical-writer",
+        "agent_type": "learning",
+        "execution_order": 1,
+        "output_section": "",
+    },
 ]
 
 
