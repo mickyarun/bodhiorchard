@@ -119,19 +119,35 @@ def _estimated_days_for_phase(
     phase: str,
     phase_estimates: dict[str, Any] | None,
 ) -> float | None:
-    """Pull the original p70-derived estimated_days for a single phase.
+    """Pull the original per-phase duration estimate (in days).
 
     ``BUDEstimateSnapshot.phase_estimates`` is the JSONB the estimator
-    writes — its inner per-phase dicts carry ``p70_days`` (and p50, p85).
-    We track p70 because that's what the UI surfaces as the committed
-    delivery date.
+    writes — each per-phase entry carries ``expected_days`` (the PERT-
+    derived mean duration). ``p50_date / p70_date / p85_date`` are ISO
+    date strings, not durations, and ``std_dev_days`` is a spread.
+    ``expected_days`` is the only scalar that means "how long this phase
+    was supposed to take" in the same units the actuals are reported in.
+
+    The fallback aliases (``p70_days``, ``days``) survive in case a
+    future estimator version emits the shape this helper originally
+    expected — never matched today, kept so a contract change doesn't
+    silently fall back to None.
     """
     if not phase_estimates:
         return None
     entry = phase_estimates.get(phase) or {}
     if not isinstance(entry, dict):
         return None
-    raw = entry.get("p70_days") or entry.get("days") or entry.get("p70")
+    # Prefer keys in priority order. A naive ``or`` chain skips 0.0
+    # because Python treats it as falsy — but 0.0 is a legitimate
+    # estimate ("this phase is instantaneous"), so we walk the keys
+    # explicitly and take the first one that is present and non-null.
+    raw: Any = None
+    for key in ("expected_days", "p70_days", "days"):
+        candidate = entry.get(key)
+        if candidate is not None:
+            raw = candidate
+            break
     if raw is None:
         return None
     try:

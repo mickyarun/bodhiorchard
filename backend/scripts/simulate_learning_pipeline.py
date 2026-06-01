@@ -162,9 +162,21 @@ async def _make_bud(
     db.add(bud)
     await db.flush()
 
-    # Snapshot the original estimate
-    estimate_payload = {
-        phase.value: {"p70_days": days} for phase, days in phase_estimates_days.items()
+    # Snapshot the original estimate using the SAME JSONB shape that
+    # ``bud_estimation.build_estimated_dates`` writes in production:
+    # each per-phase entry carries ``expected_days`` (PERT-derived
+    # mean) and the p50/p70/p85 date strings. Writing a synthetic
+    # ``p70_days`` field instead — as an earlier version of this
+    # script did — papered over a real bug in ``bud_metrics_phases``
+    # because the broken reader was looking for the same wrong key.
+    estimate_payload: dict[str, Any] = {
+        phase.value: {
+            "expected_days": days,
+            "p50_date": "2026-01-01",
+            "p70_date": "2026-01-01",
+            "p85_date": "2026-01-01",
+        }
+        for phase, days in phase_estimates_days.items()
     }
     snapshot = BUDEstimateSnapshot(
         org_id=org.id,
