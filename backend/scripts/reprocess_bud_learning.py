@@ -37,12 +37,20 @@ from app.services.bud_metrics import compute_and_persist
 
 
 async def _purge_existing_state(db: Any, bud: BUDDocument) -> None:
-    """Remove the BUD's contribution from feature_learnings + velocity_aggregates.
+    """Reset the BUD's contribution so compute_and_persist will re-run.
 
-    Without this the idempotency guard inside ``compute_and_persist``
-    short-circuits and the new envelope is never written. Also walks
-    every velocity_aggregates bucket the BUD touched and removes its
-    sample from the rolling window so the re-run lands on a clean slate.
+    We do NOT delete the FeatureLearning row — the LLM-written
+    ``retrospective_md`` and its embedding are expensive to regenerate
+    (one Claude subprocess at ~$0.16 a pop) and are still valid even
+    when the structured metrics envelope changes. Clearing only the
+    ``metrics`` field is enough to defeat the idempotency guard inside
+    ``compute_and_persist`` (which short-circuits when ``metrics is
+    not None``). The cycle/estimated/bug fields will be overwritten by
+    the upsert anyway.
+
+    Walks every velocity_aggregates bucket the BUD touched and removes
+    its sample from the rolling window so the re-run lands on a clean
+    slate for the rollup math too.
     """
     fl_row = (
         await db.execute(
@@ -53,7 +61,7 @@ async def _purge_existing_state(db: Any, bud: BUDDocument) -> None:
         )
     ).scalar_one_or_none()
     if fl_row is not None:
-        await db.delete(fl_row)
+        fl_row.metrics = None
         await db.flush()
 
     aggs = (
