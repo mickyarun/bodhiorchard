@@ -35,12 +35,19 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        // Split heavy 3rd-party + engine code into stable chunks so:
-        //  - dashboard route doesn't ship 1.5MB of PlayCanvas as one bundle
-        //  - engine edits don't invalidate the playcanvas chunk hash
-        //  - browser parallelises the network fetches
+        // PlayCanvas is intentionally NOT split into its own manualChunk.
+        // A dedicated `playcanvas` chunk surfaced a cross-chunk module-eval
+        // race: a minified class identifier inside the playcanvas chunk
+        // was undefined at the moment an engine-chunk module called `new`
+        // on it, manifesting as "q is not a constructor" at runtime. The
+        // failure depends on Rollup version, native-binary platform, and
+        // Node major — so Mac and Linux builds can disagree on the same
+        // source. Letting Rollup co-locate playcanvas with the engine
+        // code that imports it keeps the class definition and its
+        // instantiation inside the same module record, removing the race.
+        // The engine chunk is still lazy-loaded by the dashboard route,
+        // so non-dashboard pages remain unaffected.
         manualChunks(id) {
-          if (id.includes('node_modules/playcanvas')) return 'playcanvas'
           if (id.includes('node_modules/@dimforge/rapier3d')) return 'rapier'
           if (id.includes('node_modules/colyseus.js') || id.includes('node_modules/@colyseus')) {
             return 'colyseus'

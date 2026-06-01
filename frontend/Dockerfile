@@ -16,6 +16,15 @@ RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 COPY shared/ /app/shared/
 
+# Node's default old-space heap (~1.7 GB) is enough headroom for the
+# build today, but the engine chunk now bundles PlayCanvas inline (see
+# vite.config.ts — the dedicated playcanvas chunk was removed because
+# it caused a cross-chunk module-eval race in production). The larger
+# engine chunk pushes Rollup's rendering pass close to the default
+# limit; lifting to 4 GB gives comfortable margin and keeps the build
+# deterministic across hosts with different system memory.
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+
 RUN npx vite build && \
     # Ensure every static asset is world-readable. macOS sometimes hands us
     # 0600 files (e.g. items saved by image tools or copied with cp -p) and
