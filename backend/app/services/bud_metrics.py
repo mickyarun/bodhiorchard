@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
 from app.models.feature_learning import FeatureLearning
+from app.repositories.bug import BugRepository
 from app.repositories.feature_learning import FeatureLearningRepository
 from app.services.bud_metrics_contributors import (
     build_contributor_breakdown,
@@ -57,17 +58,23 @@ logger = structlog.get_logger(__name__)
 METRICS_SCHEMA_VERSION = 1
 
 
-def _bug_count(bud: BUDDocument) -> int:
-    """Total QA test-case count (automation + manual) as a bug-volume proxy.
+async def _bug_count(db: AsyncSession, org_id: uuid.UUID, bud: BUDDocument) -> int:
+    """Number of real bugs linked to this BUD via the ``bugs`` table.
 
-    Matches the existing field used by ``_record_feature_learning`` so
-    downstream consumers see the same number after this service replaces
-    that function. When real bug-tracking lands, swap to a query against
-    the ``bugs`` table.
+    The legacy ``_record_feature_learning`` used
+    ``len(qa_automation_cases) + len(qa_manual_cases)`` and labelled
+    the result ``bug_count``. That was misleading — those are QA test
+    cases (the test plan size), not bugs. A BUD with 0 actual bugs
+    but a comprehensive 24-case test plan would show "Bugs: 24" on
+    the Learnings tab while "No bugs linked" on the Prod tab,
+    contradicting itself.
+
+    Now reads the real signal: ``bugs`` table count where
+    ``bud_id == bud.id``. Includes all statuses (open / in_progress /
+    resolved / closed) so the retrospective sees the full bug volume
+    accumulated during the BUD's lifecycle, not just unresolved ones.
     """
-    auto = len(bud.qa_automation_cases or [])
-    manual = len(bud.qa_manual_cases or [])
-    return auto + manual
+    return await BugRepository(db, org_id=org_id).count_for_bud(bud.id)
 
 
 def _resolve_closed_at(bud: BUDDocument) -> datetime:
@@ -135,7 +142,7 @@ async def compute_and_persist(
         bud.id,
         cycle_time_days=cycle_time_days(bud, bud_closed_at),
         estimated_days=metrics.get("original_estimated_days"),
-        bug_count=_bug_count(bud),
+        bug_count=await _bug_count(db, org_id, bud),
         metrics=metrics,
     )
 
