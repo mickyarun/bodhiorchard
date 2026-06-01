@@ -67,6 +67,20 @@
             <strong>Settings → MCP Connect</strong>). The skill picker
             only matters for phases that are ON.
           </div>
+          <AppCallout
+            v-if="autoPhases.closed === false"
+            variant="warning"
+            eyebrow="Learning recap disabled"
+            icon="mdi-alert-outline"
+            class="mb-2"
+          >
+            The post-close retrospective won't be generated for this BUD.
+            Per-phase actuals still feed the velocity rollup so future
+            estimates keep improving — only the written recap and its
+            embedding (used for trend grounding on similar BUDs) are
+            lost. Leave this on unless you're driving retrospectives
+            through your own LLM workflow.
+          </AppCallout>
           <div
             v-for="stage in advancedStages"
             :key="stage.value"
@@ -121,6 +135,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import api from '@/services/api'
 import {
   AGENT_TYPE_LABELS,
@@ -163,6 +178,10 @@ const advancedStages: StageConfig[] = [
   { value: 'design', label: 'Design', agentType: 'design' },
   { value: 'tech_arch', label: 'Tech plan', agentType: 'techPlan' },
   { value: 'testing', label: 'Test plan', agentType: 'testPlan' },
+  // Post-close Learning recap. Matches BUDBoard.vue's stage list and
+  // backend BUD_STAGE_AGENT_TYPE so the per-stage skill override
+  // includes the technical-writer for the closed phase.
+  { value: 'closed', label: 'Learning recap', agentType: 'learning' },
 ]
 
 interface StageSkillOption { id: string; label: string }
@@ -210,7 +229,17 @@ async function load(): Promise<void> {
     const incomingPhases = props.autoGeneratePhases ?? {}
     for (const stage of advancedStages) {
       nextPicks[stage.value] = data[stage.value] ?? defaultSkillIdForAgent(stage.agentType)
-      nextPhases[stage.value] = !!incomingPhases[stage.value]
+      // For BUDs created before a phase toggle existed, treat the
+      // missing key as "default" rather than "off". Today this only
+      // matters for the closed (Learning recap) toggle — every other
+      // stage has been part of auto_generate_phases since the BUD was
+      // first persisted, so the !! coercion is correct for them.
+      const stored = incomingPhases[stage.value]
+      if (stored === undefined && stage.value === 'closed') {
+        nextPhases[stage.value] = true
+      } else {
+        nextPhases[stage.value] = !!stored
+      }
     }
     picks.value = nextPicks
     autoPhases.value = nextPhases

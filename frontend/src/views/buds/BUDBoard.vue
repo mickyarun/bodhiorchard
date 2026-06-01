@@ -319,6 +319,20 @@
                   inset
                 />
               </div>
+              <AppCallout
+                v-if="autoGeneratePhases.closed === false"
+                variant="warning"
+                eyebrow="Learning recap disabled"
+                icon="mdi-alert-outline"
+                class="mb-4"
+              >
+                Without the post-close recap, this BUD's per-phase actuals
+                still feed the velocity rollup that powers future
+                estimates — but you lose the written retrospective and
+                the trend signal that recap embeddings provide to similar
+                BUDs. Leave this on unless you're explicitly using your
+                own LLM workflow for retrospectives.
+              </AppCallout>
               <v-progress-circular
                 v-if="skillsStore.loading"
                 indeterminate
@@ -375,6 +389,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import AppCallout from '@/components/common/AppCallout.vue'
 import { useBUDStore } from '@/stores/bud'
 import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/agentSkills'
 import { useSettingsStore } from '@/stores/settings'
@@ -509,18 +524,14 @@ function defaultSkillIdForAgent(agentType: AgentType): string | null {
 function prefillStageDefaults(): void {
   for (const stage of advancedStages) {
     stageSkillPicks.value[stage.value] = defaultSkillIdForAgent(stage.agentType)
-    // Default each phase to ON for new BUDs — user feedback was that
-    // the previous all-skip default required clicking through Advanced
-    // settings just to get the in-flight default behaviour. Users who
-    // want External-LLM mode can still flip individual switches OFF
-    // before creating, or change them later via the AI skills dialog.
-    //
-    // Exception: the post-close Learning recap defaults OFF so opt-in
-    // is explicit. Recap generation costs an LLM call after every
-    // close; making that an opt-in rather than a silent default
-    // protects orgs on BYO-AI workflows.
+    // Default every phase ON for new BUDs (including the post-close
+    // Learning recap). The recap costs a Claude API call per close,
+    // but skipping it loses the calibration signal the estimator
+    // depends on, so the right default is "on" with a visible warning
+    // shown next to the switch when the user flips it off (see the
+    // closed-stage warning callout in the template).
     if (autoGeneratePhases.value[stage.value] === undefined) {
-      autoGeneratePhases.value[stage.value] = stage.value !== ('closed' as BUDStatus)
+      autoGeneratePhases.value[stage.value] = true
     }
   }
 }
