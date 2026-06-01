@@ -48,6 +48,14 @@ class OrganizationRepository(BaseRepository[Organization]):
         result = await self._db.execute(select(Organization).where(Organization.slug == slug))
         return result.scalar_one_or_none()
 
+    async def list_all_ids(self) -> list[uuid.UUID]:
+        """Return every organization id. Used by daily org-wide sweepers
+        (audit retention, velocity snapshot roll-forward) so the
+        services don't have to embed SQL of their own.
+        """
+        result = await self._db.execute(select(Organization.id))
+        return [row[0] for row in result.all()]
+
     async def get_for_user(self, user: User) -> Organization:
         """Load the active organization for an authenticated user.
 

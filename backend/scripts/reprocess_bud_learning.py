@@ -89,13 +89,25 @@ async def _purge_existing_state(db: Any, bud: BUDDocument) -> None:
         agg.contributing_bud_ids = contributing
         agg.sample_window = window
         agg.n_samples = max(0, agg.n_samples - 1)
-        # Re-derive percentiles from the surviving window. When the
-        # window is empty after removal, zero out the derived fields.
+        # Re-derive EVERY downstream field from the surviving window.
+        # Specifically: percentiles, PERT triple, AND the Welford
+        # running_mean / running_m2. If we skip Welford here, the
+        # next compute_and_persist re-rolls the BUD's actual_days
+        # back through the running statistics on top of values that
+        # still include the prior contribution — silently double-
+        # counting the sample. The simple two-pass mean + variance
+        # below is exact for the window size cap (≤50 elements).
         if window:
             sorted_w = sorted(window)
             agg.p50_days = sorted_w[min(len(sorted_w) - 1, int(len(sorted_w) * 0.5))]
             agg.p70_days = sorted_w[min(len(sorted_w) - 1, int(len(sorted_w) * 0.7))]
             agg.p85_days = sorted_w[min(len(sorted_w) - 1, int(len(sorted_w) * 0.85))]
+            agg.pert_optimistic = sorted_w[0]
+            agg.pert_most_likely = agg.p50_days
+            agg.pert_pessimistic = sorted_w[-1]
+            new_mean = sum(window) / len(window)
+            agg.running_mean = new_mean
+            agg.running_m2 = sum((x - new_mean) ** 2 for x in window)
         else:
             agg.p50_days = None
             agg.p70_days = None
@@ -103,6 +115,8 @@ async def _purge_existing_state(db: Any, bud: BUDDocument) -> None:
             agg.pert_optimistic = None
             agg.pert_most_likely = None
             agg.pert_pessimistic = None
+            agg.running_mean = 0
+            agg.running_m2 = 0
     await db.flush()
 
 

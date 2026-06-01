@@ -31,10 +31,9 @@ import uuid
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
-from app.models.organization import Organization
+from app.repositories.organization import OrganizationRepository
 from app.repositories.velocity_aggregate import VelocityAggregateRepository
 
 logger = structlog.get_logger(__name__)
@@ -70,8 +69,7 @@ async def _roll_org(org_id: uuid.UUID) -> int:
 async def sweep_once() -> int:
     """Roll every org once. Returns total rows updated across orgs."""
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Organization.id))
-        org_ids = [row[0] for row in result.all()]
+        org_ids = await OrganizationRepository(session).list_all_ids()
 
     total = 0
     for oid in org_ids:
