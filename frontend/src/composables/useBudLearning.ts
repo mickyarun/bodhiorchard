@@ -30,7 +30,11 @@ export interface BudLearningPhaseMetric {
 }
 
 export interface BudLearningContributor {
-  user_id: string
+  // ``null`` for external collaborators whose GitHub login doesn't
+  // resolve to a local users row. ``github_login`` carries the handle
+  // in that case so the table can still display the author.
+  user_id: string | null
+  github_login: string | null
   name: string
   commits: number
   prs_merged: number

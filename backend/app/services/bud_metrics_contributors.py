@@ -47,21 +47,30 @@ async def build_contributor_breakdown(
     org_id: uuid.UUID,
     bud: BUDDocument,
 ) -> list[dict[str, Any]]:
-    """Per-user commits / PRs merged / TODOs completed / active days.
+    """Per-contributor commits / PRs merged / TODOs completed / active days.
 
-    Seeded from ``contributor_resolver.get_bud_contributors`` (the same
-    union used by stage-XP awards), so the contributor set stays
-    consistent across systems. NULL-user_id activity rows are excluded
-    upstream by that helper.
+    Contributors are identified two ways:
+    - ``user_id``: internal team members. Seeded from
+      ``contributor_resolver.get_bud_contributors`` (the same union
+      used by stage-XP awards) and matched against dev_activity rows,
+      PR ``author_user_id``, and BUDTodo ``assignee_id``.
+    - ``github_login``: external collaborators whose PRs are linked
+      to the BUD but who don't have a local users row yet. The PR
+      counts toward the BUD's learning recap under their GitHub
+      identity so the work isn't silently dropped just because the
+      author was never on-boarded.
+
+    The returned dicts always carry ``user_id`` (UUID string or None)
+    and ``github_login`` (the GitHub handle, or None for purely-internal
+    contributors). Sort order is commits desc, then prs_merged desc,
+    so internal contributors with code-level activity rank ahead of
+    PR-only external collaborators.
     """
     user_ids = await get_bud_contributors(db, org_id, bud.id)
-    if not user_ids:
-        return []
-
     commits = await DevActivityLogRepository(db, org_id=org_id).list_commit_tuples_for_bud(bud.id)
     prs = await PullRequestRepository(db, org_id=org_id).list_for_bud(bud.id)
     todos = await BUDTodoRepository(db, org_id=org_id).list_for_bud(bud.id)
-    users = await UserRepository(db).get_many_by_ids(list(user_ids))
+    users = await UserRepository(db).get_many_by_ids(list(user_ids)) if user_ids else []
     name_by_id = {u.id: u.name or u.email for u in users}
 
     per_user_commits: dict[uuid.UUID, set[str]] = {uid: set() for uid in user_ids}
@@ -73,11 +82,22 @@ async def build_contributor_breakdown(
         per_user_days[uid].add(_date_bucket(created_at))
 
     per_user_prs: dict[uuid.UUID, int] = {uid: 0 for uid in user_ids}
-    for pr in prs:
-        if pr.author_user_id in per_user_prs and pr.state == PRState.MERGED:
-            per_user_prs[pr.author_user_id] += 1
-
     per_user_todos: dict[uuid.UUID, int] = {uid: 0 for uid in user_ids}
+    # External-author PR counts keyed by github_login. Only PRs whose
+    # author_user_id couldn't be resolved land here; resolved authors
+    # roll into per_user_prs above.
+    per_login_prs: dict[str, int] = {}
+
+    for pr in prs:
+        if pr.state != PRState.MERGED:
+            continue
+        if pr.author_user_id is not None and pr.author_user_id in per_user_prs:
+            per_user_prs[pr.author_user_id] += 1
+            continue
+        login = (pr.author_github_login or "").strip()
+        if login:
+            per_login_prs[login] = per_login_prs.get(login, 0) + 1
+
     for todo in todos:
         if todo.assignee_id in per_user_todos and todo.status == BUDTodoStatus.COMPLETED.value:
             per_user_todos[todo.assignee_id] += 1
@@ -87,11 +107,24 @@ async def build_contributor_breakdown(
         out.append(
             {
                 "user_id": str(uid),
+                "github_login": None,
                 "name": name_by_id.get(uid) or "(unknown)",
                 "commits": len(per_user_commits[uid]),
                 "prs_merged": per_user_prs[uid],
                 "todos_completed": per_user_todos[uid],
                 "active_days": len(per_user_days[uid]),
+            }
+        )
+    for login, count in per_login_prs.items():
+        out.append(
+            {
+                "user_id": None,
+                "github_login": login,
+                "name": f"{login} (external)",
+                "commits": 0,
+                "prs_merged": count,
+                "todos_completed": 0,
+                "active_days": 0,
             }
         )
     out.sort(key=lambda r: (r["commits"], r["prs_merged"]), reverse=True)

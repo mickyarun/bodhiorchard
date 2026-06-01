@@ -111,7 +111,12 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in contributorRows" :key="row.user_id">
+              <!-- External collaborators have user_id=null but
+                   github_login set, so key on whichever is present. -->
+              <tr
+                v-for="row in contributorRows"
+                :key="row.user_id ?? row.github_login ?? row.name"
+              >
                 <td>{{ row.name }}</td>
                 <td class="text-right">{{ row.commits }}</td>
                 <td class="text-right">{{ row.prs_merged }}</td>

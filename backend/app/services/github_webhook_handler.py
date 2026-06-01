@@ -111,6 +111,16 @@ async def _handle_pr_opened(
     if existing:
         return  # Already tracked
 
+    # Best-effort link of the PR author to a local user row. When the
+    # github_login matches a known user we record their user_id so all
+    # downstream consumers (contributor breakdown, stage-XP split,
+    # team-context) see consistent attribution. When it doesn't match
+    # — e.g. external collaborator — author_user_id stays NULL and
+    # downstream consumers fall back to ``author_github_login`` so the
+    # PR still appears in the BUD's contributor list, just keyed by
+    # GitHub identity instead of internal identity.
+    author_user_id = await _resolve_github_user(db, org_id, pr_data.user.login)
+
     pr = PullRequest(
         org_id=org_id,
         bud_id=bud_id,
@@ -125,6 +135,7 @@ async def _handle_pr_opened(
         base_branch=pr_data.base.ref,
         state=PRState.OPEN,
         author_github_login=pr_data.user.login,
+        author_user_id=author_user_id,
     )
     db.add(pr)
     await db.flush()
