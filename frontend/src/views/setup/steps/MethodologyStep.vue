@@ -46,6 +46,7 @@
       <v-tabs v-model="videoTab" align-tabs="center" color="primary" density="compact">
         <v-tab value="setup">Setup walkthrough</v-tab>
         <v-tab value="slack">Slack triage &amp; MCP tools</v-tab>
+        <v-tab value="estimation">Requirements &amp; estimation</v-tab>
         <v-tab value="design">Design phase &amp; agent prompts</v-tab>
         <v-tab value="world">Inside the virtual world</v-tab>
       </v-tabs>
@@ -79,10 +80,24 @@
               Chat-to-BUD in Slack: the Triage Agent drafts the spec, Claude Code drives the BUD lifecycle through MCP tools.
             </p>
           </v-window-item>
+          <v-window-item value="estimation">
+            <div class="methodology-video-frame">
+              <iframe
+                src="https://www.youtube-nocookie.com/embed/YBwdTes0Fno"
+                title="Bodhiorchard — Requirements &amp; estimation"
+                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowfullscreen
+                loading="lazy"
+              ></iframe>
+            </div>
+            <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
+              AI-drafted requirements, AI-PERT + Monte Carlo cycle-time forecasts, and the collaborative editor with full version history.
+            </p>
+          </v-window-item>
           <v-window-item value="design">
             <div class="methodology-video-frame">
               <iframe
-                src="https://www.youtube-nocookie.com/embed/vDdj8p17AQQ"
+                src="https://www.youtube-nocookie.com/embed/lV71qhmfzzw"
                 title="Bodhiorchard — Design phase &amp; agent prompts"
                 allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowfullscreen
