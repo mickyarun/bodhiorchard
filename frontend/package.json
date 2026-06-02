@@ -10,7 +10,8 @@
     "preview:landing": "vite preview --config vite.landing.config.ts --outDir dist-landing",
     "lint": "eslint . --ext .vue,.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare": "test -d ../.git && npx --yes npm-merge-driver install --driver-name=npm-merge-driver || true"
   },
   "dependencies": {
     "@colyseus/sdk": "^0.17.42",
