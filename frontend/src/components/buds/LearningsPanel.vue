@@ -71,7 +71,7 @@
 
       <!-- Phase drift -->
       <v-card v-if="phaseRows.length" variant="outlined" class="learnings-panel__card">
-        <v-card-title class="text-body-1 font-weight-medium">Phase drift</v-card-title>
+        <v-card-title class="learnings-panel__card-title">Phase drift</v-card-title>
         <v-card-text>
           <v-table density="compact">
             <thead>
@@ -98,7 +98,7 @@
 
       <!-- Contributors -->
       <v-card v-if="contributorRows.length" variant="outlined" class="learnings-panel__card">
-        <v-card-title class="text-body-1 font-weight-medium">Contributors</v-card-title>
+        <v-card-title class="learnings-panel__card-title">Contributors</v-card-title>
         <v-card-text>
           <v-table density="compact">
             <thead>
@@ -130,10 +130,10 @@
 
       <!-- Retrospective markdown -->
       <v-card v-if="learning.retrospective_md" variant="outlined" class="learnings-panel__card">
-        <v-card-title class="text-body-1 font-weight-medium">Retrospective</v-card-title>
-        <v-card-text>
+        <v-card-title class="learnings-panel__card-title">Retrospective</v-card-title>
+        <v-card-text class="learnings-panel__retro-body">
           <!-- eslint-disable-next-line vue/no-v-html -->
-          <div class="learnings-panel__markdown" v-html="renderedRetro" />
+          <article class="markdown-body markdown-body--numeric" v-html="renderedRetro" />
         </v-card-text>
       </v-card>
     </template>
@@ -233,20 +233,16 @@ function driftClass(value: number | null | undefined): string {
   border-color: rgba(var(--v-theme-on-surface), 0.08);
 }
 
-.learnings-panel__markdown :deep(h2) {
-  font-size: 16px;
-  font-weight: 500;
-  margin-top: 16px;
-  margin-bottom: 8px;
+.learnings-panel__card-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(var(--v-theme-on-surface), 0.7);
+  padding-bottom: 4px;
 }
 
-.learnings-panel__markdown :deep(h3) {
-  font-size: 14px;
-  font-weight: 500;
-  margin-top: 12px;
-}
-
-.learnings-panel__markdown :deep(ul) {
-  padding-left: 20px;
+.learnings-panel__retro-body {
+  padding-top: 0;
 }
 </style>

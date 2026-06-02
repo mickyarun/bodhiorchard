@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+@use './markdown-body';
+
 body {
   font-family: 'Inter', sans-serif;
   -webkit-font-smoothing: antialiased;

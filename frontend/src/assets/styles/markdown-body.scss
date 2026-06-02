@@ -1,0 +1,175 @@
+/*
+ * Copyright 2025-2026 Arun Rajkumar
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* Shared markdown-rendered content styles.
+ *
+ * Applied to any container that renders trusted Markdown via
+ * ``renderMarkdown(...)`` and ``v-html``. Two panels rely on this:
+ * the post-close Learning recap (LearningsPanel.vue) and the QA
+ * test/execution plan (BUDQAPanel.vue). Keeping the rules global
+ * (not scoped) prevents visual drift between them.
+ *
+ * Variants:
+ *   .markdown-body--numeric  → opt-in for tables whose 2nd+ columns
+ *                              are numeric. Right-aligns those cells
+ *                              and applies tabular numerals.
+ *
+ * Sizing ladder (px): 12, 13, 14, 16, 20 — kept small on purpose so
+ * every value is choosable from this list when adding new selectors.
+ */
+
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.65;
+  color: rgba(var(--v-theme-on-surface), 0.92);
+}
+
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body > :last-child { margin-bottom: 0; }
+
+.markdown-body h1 {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 24px 0 12px;
+  letter-spacing: -0.01em;
+}
+
+.markdown-body h2 {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 24px 0 8px;
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.markdown-body h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 18px 0 6px;
+  color: rgba(var(--v-theme-on-surface), 0.85);
+}
+
+.markdown-body p { margin: 0 0 12px; }
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 22px;
+  margin: 0 0 12px;
+}
+
+.markdown-body ol { list-style-type: decimal; }
+
+.markdown-body li { margin: 4px 0; }
+
+.markdown-body li p { margin: 0; }
+
+.markdown-body strong {
+  font-weight: 600;
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  margin: 20px 0;
+  height: 0;
+}
+
+.markdown-body code {
+  font-family: var(--markdown-mono-stack, ui-monospace, SFMono-Regular, monospace);
+  font-size: 0.88em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  color: rgba(var(--v-theme-on-surface), 0.92);
+}
+
+.markdown-body pre {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+}
+
+.markdown-body blockquote {
+  margin: 0 0 12px;
+  padding: 4px 12px;
+  border-left: 3px solid rgba(var(--v-theme-primary), 0.6);
+  background: rgba(var(--v-theme-on-surface), 0.025);
+  color: rgba(var(--v-theme-on-surface), 0.8);
+  border-radius: 0 6px 6px 0;
+}
+
+.markdown-body a {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+  border-bottom: 1px solid rgba(var(--v-theme-primary), 0.3);
+}
+
+.markdown-body a:hover { border-bottom-color: rgb(var(--v-theme-primary)); }
+
+/* Tables — match the surrounding v-table look so an embedded
+   markdown table doesn't read as a third visual table style. */
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 16px;
+  font-size: 13px;
+}
+
+.markdown-body thead {
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.16);
+}
+
+.markdown-body th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: rgba(var(--v-theme-on-surface), 0.65);
+  padding: 8px 12px;
+}
+
+.markdown-body tbody tr {
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+}
+
+.markdown-body tbody tr:last-child { border-bottom: none; }
+
+.markdown-body td {
+  padding: 8px 12px;
+  vertical-align: top;
+}
+
+/* --numeric: caller asserts that columns 2..N are numeric.
+   Used by panels whose generating prompt structures tables that
+   way (e.g. Phase | Estimated | Actual | Drift). Keeping it opt-in
+   so panels with mixed/text tables aren't mis-aligned. */
+.markdown-body--numeric td:not(:first-child),
+.markdown-body--numeric th:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
