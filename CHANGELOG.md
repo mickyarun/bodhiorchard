@@ -25,7 +25,7 @@ First public release. Bodhiorchard™ ships as an open-source, local-first AI de
 - **Async job pattern** — backend returns `202` + job ID; frontend tracks via `useJobSocket` over `/ws/jobs/{job_id}`.
 - **Event bus fan-out** — `event_bus.publish(...)` reaches in-process subscribers (dashboard `/ws`) and external transports (Colyseus, future Slack/metrics sinks) via a single `register_transport()` hook.
 - **Bug auto-linking** — pgvector cosine search at 0.40 threshold links new bug reports to the BUDs that introduced them.
-- **Contributor-XP economy** — closing a BUD awards XP and triggers a repo re-scan via the single `on_bud_closed()` entry point.
+- **Contributor-XP economy** — closing a BUD awards XP and SP, computes learning metrics, and spawns the post-close Learning Agent via the single `on_bud_closed()` entry point.
 - **Apache 2.0 license + NOTICE** — explicit IP-independence statement; no AGPL remnants.
 - **DCO sign-off workflow** — every commit requires `Signed-off-by:` via `git commit -s`.
 

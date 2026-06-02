@@ -113,7 +113,9 @@ bud → design → development → testing → uat → prod → closed   (discar
 
 - Markdown doc with spec / tech spec / test plan sections, numbered per org (`BUD-001`, …).
 - Embeddings generated at creation time; bug-linker uses pgvector cosine distance, threshold 0.40.
-- `on_bud_closed()` in `services/bud_closure.py` is the single entry point for contributor-XP + repo-scan side effects — called from both manual PATCH and auto-close.
+- `on_bud_closed()` in `services/bud_closure.py` is the single entry point for contributor-XP, BUD-shipped SP, learning metrics, and the post-close Learning Agent — called from both manual PATCH and auto-close.
+- Repo scans are NOT triggered on BUD close. They are owned by the PR-merge GitHub webhook (`api/v1/github_webhook.py` → `services/scan/pr_merge_update.py`), which gates on the repo's `main_branch`.
+- Linked-feature `in_progress → done` transitions run in `api/v1/bud.py` via `services/feature_lifecycle.transition_feature_for_bud` on every status change, independent of `on_bud_closed`.
 - Release detection has two paths: fast (`bud_id` on PR) and SHA-walk (release PRs without `bud_id`).
 
 ### Shared code
@@ -147,7 +149,7 @@ The stored `claude_auth_mode` on the org decides which path agent runs take.
 ## BUD Lifecycle Completeness
 
 - BUDs get embeddings at creation time (for bug linker vector search)
-- `on_bud_closed()` in `bud_closure.py` handles: contributor XP + repo scan (called from both manual PATCH and auto-close)
+- `on_bud_closed()` in `bud_closure.py` handles: contributor XP, BUD-shipped SP, BUD learning metrics, and the post-close Learning Agent (called from both manual PATCH and auto-close). Repo scans live in the PR-merge webhook, not here.
 - Release detection: fast path (bud_id on PR) vs SHA-walk path (release PRs without bud_id)
 - Bug auto-linking: `bug_linker.py` uses pgvector cosine distance with 0.40 threshold
 

@@ -983,7 +983,7 @@ async def update_bud(
             except Exception:
                 logger.warning("xp_award_failed_bud_completion", exc_info=True)
 
-        # Post-closure side-effects: award contributor XP + trigger scan
+        # Post-closure side-effects: XP, SP, learning metrics, Learning Agent
         if _completed:
             try:
                 from app.services.bud_closure import on_bud_closed

@@ -15,7 +15,7 @@
 """Compute and persist per-BUD learning metrics on close.
 
 Single entry point ``compute_and_persist(db, org_id, bud)``, called
-from ``on_bud_closed()`` after the existing XP/SP/scan side-effects.
+from ``on_bud_closed()`` after the existing XP/SP side-effects.
 Produces the structured envelope written to
 ``feature_learnings.metrics`` (versioned dict with ``phase_metrics``,
 ``contributors``, ``parallelism_score``, ``original_estimated_days``)

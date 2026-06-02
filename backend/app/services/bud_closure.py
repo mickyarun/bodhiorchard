@@ -16,19 +16,30 @@
 
 Called from both the manual PATCH handler (bud.py) and the automatic
 closure path (_maybe_auto_close_bud in release_detection.py). Centralizes
-two post-closure actions:
+the post-closure rewards and learning hooks:
 
 1. **Award XP to all contributors** — every user who committed code or
    authored a PR for this BUD receives contributor XP. The assignee's
    50 XP award is handled upstream (bud.py) and is NOT duplicated here.
-2. **Trigger a background repo scan** — impacted repos are re-scanned so
-   features and skills are updated to reflect the shipped work.
+2. **Award role-based SP to the assignee** for shipping a BUD to prod.
+3. **Compute BUD learning metrics** (only on CLOSED transitions).
+4. **Spawn the post-close Learning Agent** when the BUD opted in via
+   ``auto_generate_phases.closed``.
 
-Both actions are fire-and-forget: failures are logged but never block
-the caller. XP awards are idempotent via ``source_ref`` dedup.
+Repo scans are NOT triggered from here — they are owned by the PR-merge
+GitHub webhook (``api/v1/github_webhook.py`` → ``services/scan/pr_merge_update.py``)
+which gates on the repo's ``main_branch``. Closing a BUD on its own does
+not advance any tracked SHA, so firing a scan from this path was both
+unnecessary work and a source of false-positive feature deactivations.
+
+Linked-features ``in_progress → done`` transition runs upstream in
+``bud.py`` via ``feature_lifecycle.transition_feature_for_bud`` on every
+status change, independent of this module.
+
+Failures are logged but never block the caller. XP and SP awards are
+idempotent via ``source_ref`` dedup.
 """
 
-import asyncio
 import uuid
 
 import structlog
@@ -43,7 +54,6 @@ from app.services.bud_agent_trigger import (
     should_auto_generate_phase,
 )
 from app.services.bud_metrics import compute_and_persist as compute_bud_metrics
-from app.services.scan.runner import ScanAlreadyActiveError, start_scan
 
 logger = structlog.get_logger(__name__)
 
@@ -57,20 +67,18 @@ async def on_bud_closed(
 ) -> None:
     """Run post-closure side-effects for a BUD.
 
-    Safe to call multiple times — XP awards are deduped by ``source_ref``,
-    the scan is a fresh incremental run, and ``compute_bud_metrics`` is
-    a no-op when the FeatureLearning row already carries a ``metrics``
-    envelope.
+    Safe to call multiple times — XP and SP awards are deduped by
+    ``source_ref``, and ``compute_bud_metrics`` is a no-op when the
+    FeatureLearning row already carries a ``metrics`` envelope.
 
     Note that this hook fires on PROD *and* CLOSED transitions today
-    (see ``bud.py``'s ``_completed`` gate). XP/SP/scan are correct to
-    fire at PROD; learning-metrics work only fires at CLOSED so the
-    full lifecycle is captured (PROD→CLOSED happens later via
-    auto-close).
+    (see ``bud.py``'s ``_completed`` gate). XP and SP are correct to
+    fire at PROD; learning-metrics and the post-close Learning Agent
+    only fire at CLOSED so the full lifecycle is captured (PROD→CLOSED
+    happens later via auto-close).
     """
     await _award_contributor_xp(db, org_id, bud)
     await _award_bud_shipped_sp(db, org_id, bud)
-    _trigger_impacted_repo_scan(org_id, bud)
 
     if bud.status == BUDStatus.CLOSED:
         try:
@@ -186,88 +194,6 @@ async def _award_contributor_xp(
             bud_number=bud.bud_number,
             contributors=awarded,
             total_found=len(contributor_ids),
-        )
-
-
-def _trigger_impacted_repo_scan(
-    org_id: uuid.UUID,
-    bud: BUDDocument,
-) -> None:
-    """Trigger a background scan for the BUD's impacted repos.
-
-    Uses its own DB session so the caller returns immediately. Runs an
-    incremental scan (not full rescan) to update features and skills
-    for the repos that shipped new code.
-    """
-    impacted = bud.impacted_repos
-    if not isinstance(impacted, list) or not impacted:
-        return
-
-    repo_ids: list[str] = [
-        str(rid) for r in impacted if isinstance(r, dict) and (rid := r.get("repo_id"))
-    ]
-    if not repo_ids:
-        return
-
-    task = asyncio.create_task(
-        _bg_scan(org_id, repo_ids, bud.bud_number),
-        name=f"bg_scan_bud_{bud.bud_number}",
-    )
-    # _bg_scan wraps its body in try/except, so success / known failures
-    # are already logged. The callback exists only to retrieve any
-    # exception that escapes _bg_scan itself (otherwise asyncio prints a
-    # warning about an unretrieved exception at GC time).
-    task.add_done_callback(_log_bg_scan_exception)
-
-
-def _log_bg_scan_exception(task: asyncio.Task[None]) -> None:
-    """Drain the task's exception (if any) and log it.
-
-    Calling ``task.exception()`` marks the exception as retrieved,
-    which prevents the asyncio "Task exception was never retrieved"
-    warning at GC time.
-    """
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.warning("bud_closure_bg_scan_unhandled", exc_info=exc)
-
-
-async def _bg_scan(
-    org_id: uuid.UUID,
-    repo_ids: list[str],
-    bud_number: int,
-) -> None:
-    """Background task: kick off a scan for the impacted repos."""
-    try:
-        repo_uuids: list[uuid.UUID] = []
-        for rid in repo_ids:
-            try:
-                repo_uuids.append(uuid.UUID(rid))
-            except ValueError:
-                logger.warning("bud_closure_invalid_repo_id", bud_number=bud_number, repo_id=rid)
-        if not repo_uuids:
-            return
-
-        scan_id = await start_scan(org_id=org_id, repo_ids=repo_uuids)
-        logger.info(
-            "bud_closure_scan_started",
-            bud_number=bud_number,
-            repos_scanned=len(repo_uuids),
-            scan_id=str(scan_id),
-        )
-    except ScanAlreadyActiveError as exc:
-        logger.info(
-            "bud_closure_scan_skipped_already_active",
-            bud_number=bud_number,
-            active_scan_id=str(exc.scan_id),
-        )
-    except Exception:
-        logger.warning(
-            "bud_closure_scan_failed",
-            bud_number=bud_number,
-            exc_info=True,
         )
 
 
