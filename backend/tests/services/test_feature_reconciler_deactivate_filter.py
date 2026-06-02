@@ -71,9 +71,25 @@ class _FakeReads:
         return list(self._candidates)
 
 
+class _EmptyScalars:
+    def all(self) -> list[Any]:
+        return []
+
+
+class _EmptyResult:
+    """Mimics SQLAlchemy ``Result`` so the reconciler's cluster_cache
+    SELECT returns an empty list and the preserved pass sees an empty
+    indexed_files set."""
+
+    rowcount = 0
+
+    def scalars(self) -> _EmptyScalars:
+        return _EmptyScalars()
+
+
 class _NoopSession:
-    async def execute(self, *_a: Any, **_kw: Any) -> Any:
-        return None
+    async def execute(self, *_a: Any, **_kw: Any) -> _EmptyResult:
+        return _EmptyResult()
 
 
 async def test_deactivate_filter_default_matches_candidate_filter(

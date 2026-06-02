@@ -22,9 +22,10 @@ entrypoint.
 
 The reconciler matches each synthesised entry to an existing row via a
 layered identity strategy (cluster_signature → Jaccard ≥ 0.7 →
-asymmetric containment ≥ 0.5 → embedding cosine ≥ 0.85), then UPDATEs /
-ABSORBs / REVIVEs / INSERTs accordingly. Existing active rows that
-nothing matched are flipped ``is_active=False`` so removed features are
+asymmetric containment ≥ 0.5 → embedding cosine ≥ 0.85 → reverse-
+direction "absorbed" containment ≥ 0.6), then UPDATEs / ABSORBs /
+REVIVEs / INSERTs accordingly. Existing active rows that nothing
+matched are flipped ``is_active=False`` so removed features are
 preserved (and revivable on re-introduction) rather than silently
 disappearing.
 
@@ -46,7 +47,39 @@ title/description/capabilities/tags/cluster_signature/embedding are
 preserved, only ``last_seen_sha`` advances and the junction's
 ``code_locations`` is unioned with the new files.
 
-Logging at every fork (``match_via=signature|jaccard|containment|cosine|insert``,
+The absorbed tier covers the inverse direction: a re-synthesis run
+merges several narrow legacy features into one broader new cluster.
+The new write engulfs an old candidate's file set — ``|w ∩ c| / |c| ≥
+0.6`` with a strict ``len(w) > len(c)`` guard — but Jaccard whiffs
+because the union is dominated by the new write's extra files, the
+containment tier skips because its asymmetry is the opposite, and
+cosine misses because the LLM re-titled the merged cluster. Without
+this tier the old candidate has no match and gets swept inactive even
+though its code is still present and now lives inside the broader
+feature. When the absorbed tier fires we route through
+:func:`_absorb_into_existing` with ``which_wins="new"``: the surviving
+``feature_id`` is preserved (so linked BUDs stay valid) while the
+row's curated fields are refreshed to the new write's view and
+``code_locations`` are unioned via :func:`upsert_primary_merge` so any
+file in the old candidate that isn't in the new write is retained.
+
+After all tiers and the multi-absorb secondary rescue, a final
+file-presence preservation pass scans the still-unmatched active
+candidates: when ≥70% of a candidate's files appear inside *some*
+synthesised write's ``code_locations`` AND no other matched feature
+already owns ≥30% jaccard of those files, the candidate's code is
+still present at ``head_sha`` (just claimed by writes the matcher
+couldn't tie to its identity) and the row is preserved via
+``touch_last_seen`` instead of swept. This catches the failure mode
+where a feature's files are *fragmented* across several new writes —
+no single write engulfs ≥60% so tier 5 misses, no other tier matches
+because titles/embeddings/signatures diverged, but the code is still
+in the repo. The dedup guard ensures genuine duplicates (a smaller
+feature whose files are now mostly owned by a larger active row) fall
+through to sweep as they should.
+
+Logging at every fork
+(``match_via=signature|jaccard|containment|cosine|absorbed|preserved|insert``,
 plus the chosen score) drives the threshold-tuning loop documented in
 the plan.
 """
@@ -57,12 +90,13 @@ import math
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.feature_match_log import FeatureMatchLog
+from app.repositories.cluster_cache import ClusterCacheRepository
 from app.repositories.feature import FeatureRepository
 from app.repositories.feature_reads import FeatureReadRepository, ReconcilerCandidate
 from app.repositories.feature_to_repo import upsert_primary, upsert_primary_merge
@@ -88,7 +122,19 @@ class FeatureWrite:
 
 @dataclass
 class ReconcileResult:
-    """Summary of one reconcile pass."""
+    """Summary of one reconcile pass.
+
+    ``matches_by_strategy`` counts match decisions by ``match_via`` value
+    (``signature`` / ``jaccard`` / ``containment`` / ``cosine`` /
+    ``absorbed`` / ``preserved`` / ``insert``). For most strategies the
+    total equals the number of ``FeatureWrite`` entries: each write
+    contributes exactly one decision. ``absorbed`` and ``preserved``
+    are the exceptions — their counts include per-CANDIDATE rescues
+    (secondary multi-absorb and file-presence preservation
+    respectively), so the totals for those two strategies can exceed
+    ``len(synthesised)`` when one new write covers several old narrow
+    features.
+    """
 
     inserted: int = 0
     updated: int = 0
@@ -108,6 +154,29 @@ COSINE_THRESHOLD = 0.85
 # broader parent; the size guard prevents two unrelated tiny features
 # from collapsing into one another.
 CONTAINMENT_THRESHOLD = 0.5
+# Reverse-direction containment for the "merged into broader new
+# cluster" pattern: the new write absorbs ≥60% of an old candidate's
+# files AND is strictly larger. Slightly higher than CONTAINMENT_THRESHOLD
+# because the structural risk of a false match is higher when the new
+# write is the bigger side (more candidates with partial overlap).
+ABSORBED_THRESHOLD = 0.6
+# Aggregate file-presence threshold for the final preservation pass:
+# if ≥70% of an unmatched candidate's files appear in *any* synthesised
+# write's code_locations, the code itself is still present at head_sha
+# (just claimed by writes the matcher couldn't tie back to the
+# candidate's identity) and the safer action is to keep the row alive
+# rather than sweep it. Higher than ABSORBED_THRESHOLD (0.6) because
+# coverage here is over the *aggregate* of all writes (looser
+# aggregation needs a stricter threshold) and the action is gentler
+# (touch_last_seen only, no metadata refresh).
+PRESERVED_FILE_THRESHOLD = 0.7
+# Dedup guard for the preservation pass: a candidate whose files are
+# already ≥30% jaccard-overlapped by some *other* feature post-scan is
+# almost certainly a duplicate (same code now owned by a real active
+# row) and should fall through to the sweep instead of being preserved.
+# Matches the SAFE_RESTORE / DUP_ACTIVE boundary in the file-presence
+# audit script.
+PRESERVED_DEDUP_JACCARD = 0.3
 
 
 async def reconcile_features_for_repo(
@@ -120,6 +189,7 @@ async def reconcile_features_for_repo(
     jaccard_threshold: float = JACCARD_THRESHOLD,
     cosine_threshold: float = COSINE_THRESHOLD,
     containment_threshold: float = CONTAINMENT_THRESHOLD,
+    absorbed_threshold: float = ABSORBED_THRESHOLD,
     candidate_filter: Callable[[ReconcilerCandidate], bool] | None = None,
     deactivate_filter: Callable[[ReconcilerCandidate], bool] | None = None,
 ) -> ReconcileResult:
@@ -135,9 +205,15 @@ async def reconcile_features_for_repo(
        (global resolution, not per-write greedy).
     3. If matched via signature / Jaccard / cosine: revive (when
        inactive) + ``update_in_place`` + refresh PRIMARY junction. If
-       matched via containment: ``_absorb_into_existing`` — keep the
-       broader row's metadata, union code_locations. If not matched:
-       ``insert`` + create PRIMARY junction.
+       matched via containment: ``_absorb_into_existing`` with
+       ``which_wins="existing"`` — keep the broader row's metadata,
+       union code_locations. If matched via absorbed:
+       ``_absorb_into_existing`` with ``which_wins="new"`` — preserve
+       the surviving ``feature_id`` but refresh the row's curated
+       fields to the new write's view (so linked BUDs stay valid while
+       title/description/embedding reflect the merged cluster), with
+       code_locations still unioned. If not matched: ``insert`` +
+       create PRIMARY junction.
     4. Mark every active row that nothing matched as inactive.
 
     ``candidate_filter`` (optional) narrows the matching pool to a
@@ -175,6 +251,7 @@ async def reconcile_features_for_repo(
         jaccard_threshold=jaccard_threshold,
         cosine_threshold=cosine_threshold,
         containment_threshold=containment_threshold,
+        absorbed_threshold=absorbed_threshold,
     )
     matched_ids: set[uuid.UUID] = set()
     feat_repo = FeatureRepository(db, org_id=org_id)
@@ -198,7 +275,7 @@ async def reconcile_features_for_repo(
             if was_inactive:
                 await feat_repo.revive(match.feature_id, last_seen_sha=head_sha)
                 result.revived += 1
-            if match_via == "containment":
+            if match_via in ("containment", "absorbed"):
                 await _absorb_into_existing(
                     feat_repo,
                     db=db,
@@ -207,6 +284,7 @@ async def reconcile_features_for_repo(
                     head_sha=head_sha,
                     write=write,
                     existing_title=match.feature_title,
+                    which_wins="new" if match_via == "absorbed" else "existing",
                 )
                 decision = "revived" if was_inactive else "absorbed"
             else:
@@ -243,6 +321,115 @@ async def reconcile_features_for_repo(
             feature_title=write.feature_title,
             matched_id=str(match.feature_id) if match else None,
             decision=decision,
+        )
+
+    # Secondary absorbed rescue: tier 5 in ``_resolve_pairings`` claims
+    # at most one candidate per new write (1:1, like every other tier).
+    # The "many old narrow features merged into one broader new write"
+    # case leaves the other engulfed candidates unclaimed → they would
+    # be swept here. Rescue them: any unmatched active candidate whose
+    # files are mostly inside ANY synthesised write — matched or
+    # inserted-as-new — is preserved as a distinct feature with only
+    # ``last_seen_sha`` advanced. The "any write" scope is intentional:
+    # the candidate's files are still present in the codebase under
+    # whichever new feature row carries them, so the candidate isn't
+    # stale regardless of whether the write matched or inserted. This
+    # keeps ``feature_id`` stable (so linked BUDs / external refs stay
+    # valid) without inflating the candidate's metadata with files that
+    # aren't really "its". match_via='absorbed' + decision='rescued'
+    # makes the rescue distinguishable in the audit log from primary
+    # absorbs.
+    rescues = _compute_absorbed_rescues(
+        synthesised, candidates, matched_ids, threshold=absorbed_threshold
+    )
+    for cand, score in rescues:
+        await feat_repo.touch_last_seen(cand.feature_id, last_seen_sha=head_sha)
+        matched_ids.add(cand.feature_id)
+        result.matches_by_strategy["absorbed"] = result.matches_by_strategy.get("absorbed", 0) + 1
+        result.match_log_rows.append(
+            FeatureMatchLog(
+                org_id=org_id,
+                repo_id=repo_id,
+                head_sha=head_sha,
+                match_via="absorbed",
+                score=round(score, 4),
+                feature_title=cand.feature_title[:500],
+                matched_feature_id=cand.feature_id,
+                decision="rescued",
+            )
+        )
+        logger.info(
+            "reconcile_match",
+            org_id=str(org_id),
+            repo_id=str(repo_id),
+            head_sha=head_sha[:8] if head_sha else "",
+            match_via="absorbed",
+            score=round(score, 4),
+            feature_title=cand.feature_title,
+            matched_id=str(cand.feature_id),
+            decision="rescued",
+        )
+
+    # File-presence preservation pass: last-line defense against the
+    # narrow-synthesis failure mode where a feature's files are
+    # *fragmented* across multiple new writes — no single write engulfs
+    # ≥ ABSORBED_THRESHOLD so tier 5 misses, jaccard/cosine miss because
+    # the cluster decomposition / titles diverged, but the code itself
+    # is still in the codebase. Aggregating across every synthesised
+    # write's code_locations is the deterministic ground-truth signal
+    # for "files still present". The dedup guard excludes candidates
+    # whose files are now mostly owned by another active feature (real
+    # duplicates that the sweep should resolve).
+    # Pull the indexer's view of every file at head_sha (cluster_cache
+    # rows). This is the *ground-truth* "files still in the repo" signal
+    # — broader than synthesis output, since the LLM may filter some
+    # indexed files out of its cluster writes (e.g., low-cohesion files
+    # or files outside the synthesis's affected scope on narrow paths).
+    indexed_files: set[str] = set()
+    if head_sha:
+        cache_repo = ClusterCacheRepository(db, org_id=org_id)
+        rows = await cache_repo.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
+        for row in rows:
+            for path in row.files or []:
+                if isinstance(path, str):
+                    indexed_files.add(path)
+    preserves = _compute_file_preserved_rescues(
+        synthesised,
+        candidates,
+        pairings,
+        matched_ids,
+        indexed_files=indexed_files,
+        threshold=PRESERVED_FILE_THRESHOLD,
+        dedup_jaccard=PRESERVED_DEDUP_JACCARD,
+    )
+    for cand, score in preserves:
+        await feat_repo.touch_last_seen(cand.feature_id, last_seen_sha=head_sha)
+        matched_ids.add(cand.feature_id)
+        result.matches_by_strategy["preserved"] = (
+            result.matches_by_strategy.get("preserved", 0) + 1
+        )
+        result.match_log_rows.append(
+            FeatureMatchLog(
+                org_id=org_id,
+                repo_id=repo_id,
+                head_sha=head_sha,
+                match_via="preserved",
+                score=round(score, 4),
+                feature_title=cand.feature_title[:500],
+                matched_feature_id=cand.feature_id,
+                decision="preserved",
+            )
+        )
+        logger.info(
+            "reconcile_match",
+            org_id=str(org_id),
+            repo_id=str(repo_id),
+            head_sha=head_sha[:8] if head_sha else "",
+            match_via="preserved",
+            score=round(score, 4),
+            feature_title=cand.feature_title,
+            matched_id=str(cand.feature_id),
+            decision="preserved",
         )
 
     deact_pool = (
@@ -317,30 +504,59 @@ async def _absorb_into_existing(
     head_sha: str,
     write: FeatureWrite,
     existing_title: str,
+    which_wins: Literal["existing", "new"] = "existing",
 ) -> None:
-    """Conservative update: absorb a narrow synth output into a broader row.
+    """Absorb a synth output into an existing row, preserving the feature_id.
 
-    Containment-tier match — the synth's files are mostly contained in a
-    larger existing candidate. Preserve every curated field on the
-    broader row (title, description, capabilities, tags, cluster names
-    + signature, embedding) and only:
+    Two callers, distinguished by ``which_wins``:
 
-    * Advance ``last_seen_sha`` so the Features API can render
-      "Last touched by PR #N" against the merging commit.
-    * Union the synth's ``code_locations`` into the PRIMARY junction
-      so the broader feature's file footprint grows by exactly the new
-      files (via :func:`upsert_primary_merge`).
+    * ``"existing"`` — containment-tier match. The synth's files are
+      mostly contained in a *larger* existing candidate. Preserve every
+      curated field on the broader row (title, description,
+      capabilities, tags, cluster names + signature, embedding); only
+      advance ``last_seen_sha`` (so the Features API can render "Last
+      touched by PR #N" against the merging commit) and union the
+      synth's files into the PRIMARY junction's ``code_locations``.
 
-    The ``existing_title`` carries the broader row's denormalised
-    title into the junction upsert so the partial unique index
-    (``ux_ftr_primary_title``) keeps pointing at the broader row.
+    * ``"new"`` — absorbed-tier match. The new write engulfs a *smaller*
+      existing candidate (legacy narrow feature merged into a broader
+      new cluster). Refresh the row's curated fields to the new write's
+      view via ``update_in_place`` — the surviving ``feature_id``
+      remains stable so linked BUDs / external references stay valid,
+      but title / description / capabilities / tags / cluster_signature
+      / cluster_names / embedding all advance. ``code_locations`` are
+      still unioned via :func:`upsert_primary_merge` so any file on the
+      old candidate that the new write doesn't include is retained.
+
+    Both branches end with the same merging junction upsert; what
+    differs is whether the parent ``features`` row receives a
+    metadata refresh first. The junction's denormalised
+    ``feature_title`` mirrors the surviving row's title — i.e.
+    ``existing_title`` for ``"existing"`` and ``write.feature_title``
+    for ``"new"``.
     """
-    await feat_repo.touch_last_seen(feature_id, last_seen_sha=head_sha)
+    if which_wins == "new":
+        await feat_repo.update_in_place(
+            feature_id,
+            feature_title=write.feature_title,
+            description=write.description,
+            capabilities=write.capabilities,
+            cluster_names=list(write.cluster_names),
+            cluster_signature=write.cluster_signature,
+            tags=list(write.tags),
+            embedding=write.embedding,
+            last_seen_sha=head_sha,
+            feature_status=write.feature_status,
+        )
+        junction_title = write.feature_title
+    else:
+        await feat_repo.touch_last_seen(feature_id, last_seen_sha=head_sha)
+        junction_title = existing_title
     await upsert_primary_merge(
         db,
         feature_id=feature_id,
         repo_id=repo_id,
-        feature_title=existing_title,
+        feature_title=junction_title,
         code_locations=dict(write.code_locations or {}),
     )
 
@@ -387,20 +603,29 @@ def _resolve_pairings(
     jaccard_threshold: float,
     cosine_threshold: float,
     containment_threshold: float,
+    absorbed_threshold: float,
 ) -> list[tuple[ReconcilerCandidate | None, str, float]]:
     """Globally resolve write→candidate pairings, tier-then-score order.
 
-    Tier priority is signature → Jaccard → containment → cosine. Within
-    each tier the resolver claims the highest-scoring (write, candidate)
-    edge first, then the next, until no candidate edges remain — instead
-    of resolving each write in input order and letting the first write
-    that walks the candidate list win.
+    Tier priority is signature → Jaccard → containment → cosine →
+    absorbed. Within each tier the resolver claims the highest-scoring
+    (write, candidate) edge first, then the next, until no candidate
+    edges remain — instead of resolving each write in input order and
+    letting the first write that walks the candidate list win.
 
     The old per-write greedy left "Cache Service ↔ Cache Service" pairs
     unmatched whenever a sibling write reached the candidate first via a
     borderline Jaccard. The displaced candidate then had no match and
     was swept inactive. Score-descending within-tier resolution gives
     the strongest pair first dibs on the candidate.
+
+    The absorbed tier is the mirror image of containment: it fires when
+    the new write engulfs a smaller candidate (``|w ∩ c| / |c| ≥
+    absorbed_threshold`` with ``len(w) > len(c)``). This catches the
+    "old narrow feature merged into a broader new cluster" pattern that
+    Jaccard misses (the union is dominated by the write's extra files),
+    containment skips (its asymmetry runs the other way), and cosine
+    misses (the LLM re-titled the merged cluster).
 
     Returns one ``(candidate, match_via, score)`` per synthesised entry,
     in input order. ``match_via=='insert'`` and ``candidate is None``
@@ -507,7 +732,178 @@ def _resolve_pairings(
                 cos_edges.append((score, i, cand))
     assign_tier(cos_edges, "cosine")
 
+    # Tier 5: reverse-direction "absorbed" containment. New write must
+    # be strictly larger than the candidate — equal-size sets fall
+    # through to let the upstream Jaccard tier handle them (or stay
+    # unmatched if they truly are different features). Score is the
+    # fraction of the OLD candidate's files retained inside the NEW
+    # write: |w ∩ c| / |c|.
+    abs_edges: list[tuple[float, int, ReconcilerCandidate]] = []
+    for i in range(n):
+        if i in claimed_writes:
+            continue
+        wp = write_paths(i)
+        if not wp:
+            continue
+        for cand in candidates:
+            if cand.feature_id in claimed_candidates:
+                continue
+            cp = cand_paths(cand)
+            if not cp or len(wp) <= len(cp):
+                continue
+            score = _containment(cp, wp)
+            if score >= absorbed_threshold:
+                abs_edges.append((score, i, cand))
+    assign_tier(abs_edges, "absorbed")
+
     return pairings
+
+
+def _compute_absorbed_rescues(
+    synthesised: list[FeatureWrite],
+    candidates: list[ReconcilerCandidate],
+    matched_ids: set[uuid.UUID],
+    *,
+    threshold: float,
+) -> list[tuple[ReconcilerCandidate, float]]:
+    """Find candidates engulfed by any synthesised write (multi-absorb rescue).
+
+    Tier 5 in :func:`_resolve_pairings` is 1:1 per tier-resolver
+    invariant. When synthesis re-clustering merges N old narrow features
+    into one broader new write, only the highest-scoring (write,
+    candidate) edge survives there — the other engulfed candidates would
+    fall through to ``unmatched_active`` and get swept inactive. This
+    pass closes that gap: any unmatched active candidate whose files are
+    ≥ ``threshold`` contained in *some* synthesised write (regardless of
+    whether that write matched a candidate in tiers 1-5 or was inserted
+    as a new feature) is returned with its best containment score so
+    the caller can ``touch_last_seen`` instead of sweeping. The
+    "matched-or-inserted" scope is intentional: the candidate's files
+    live on inside whichever feature row the engulfing write produces.
+
+    Skips candidates already in ``matched_ids`` (those are primary
+    matches and have already been routed). Empty file sets on either
+    side disqualify the pair — no files means no containment signal.
+
+    Returns at most one row per candidate. The score is the maximum
+    containment ratio observed across any qualifying write.
+    """
+    out: list[tuple[ReconcilerCandidate, float]] = []
+    write_paths_cache: list[set[str] | None] = [None] * len(synthesised)
+    for cand in candidates:
+        if not cand.is_active or cand.feature_id in matched_ids:
+            continue
+        cp = _flatten_paths(cand.code_locations)
+        if not cp:
+            continue
+        best: float = 0.0
+        for i, write in enumerate(synthesised):
+            wp = write_paths_cache[i]
+            if wp is None:
+                wp = _flatten_paths(write.code_locations)
+                write_paths_cache[i] = wp
+            if not wp or len(wp) <= len(cp):
+                continue
+            score = _containment(cp, wp)
+            if score >= threshold and score > best:
+                best = score
+        if best > 0.0:
+            out.append((cand, best))
+    return out
+
+
+def _compute_file_preserved_rescues(
+    synthesised: list[FeatureWrite],
+    candidates: list[ReconcilerCandidate],
+    pairings: list[tuple[ReconcilerCandidate | None, str, float]],
+    matched_ids: set[uuid.UUID],
+    *,
+    indexed_files: set[str],
+    threshold: float,
+    dedup_jaccard: float,
+) -> list[tuple[ReconcilerCandidate, float]]:
+    """Find unmatched-active candidates whose files are still in the repo.
+
+    File-presence signal is the union of:
+
+    * ``indexed_files`` — every file the indexer placed into any
+      cluster_cache row at ``head_sha``. Ground-truth "still in the
+      codebase at this SHA", broader than synthesis output.
+    * Every synthesised write's ``code_locations`` — usually a subset of
+      ``indexed_files`` but kept as a fallback if a caller passes an
+      empty ``indexed_files`` (e.g. tests that don't model cluster_cache).
+
+    Rescues each unmatched-active candidate whose own files are ≥
+    ``threshold`` covered by that combined set AND aren't already
+    mostly owned (≥ ``dedup_jaccard`` jaccard) by another feature
+    alive after this scan.
+
+    Two guard rails:
+
+    * Coverage threshold (``threshold``) — the candidate's code must
+      still be substantially present. Less than that and the candidate
+      genuinely lost code, so the sweep should fire.
+    * Dedup jaccard (``dedup_jaccard``) — if some other feature alive
+      post-scan (a matched candidate OR an inserted write that just
+      became a new feature) overlaps the unmatched candidate's files
+      heavily enough to be a true duplicate, fall through to the
+      sweep. Preserving a duplicate creates a stale active row
+      pointing at code another active feature already owns.
+
+    Skips candidates already in ``matched_ids`` (already routed via
+    tiers 1-5 or the absorbed secondary rescue). Empty file sets on
+    either side disqualify the pair.
+
+    Returns at most one row per candidate. Score is the actual coverage
+    ratio observed (≥ ``threshold``).
+    """
+    write_paths: list[set[str]] = [_flatten_paths(w.code_locations) for w in synthesised]
+    files_present: set[str] = set(indexed_files)
+    for wp in write_paths:
+        files_present |= wp
+    if not files_present:
+        return []
+
+    # Build the post-scan "claimed file sets" — every feature alive after
+    # this scan covers one of these footprints. A matched candidate's
+    # post-scan footprint is its original code_locations UNION the matching
+    # write's code_locations (the merging junction upsert grows it that
+    # way). An inserted write becomes a fresh feature whose footprint is
+    # exactly the write's code_locations.
+    claimed_file_sets: list[set[str]] = []
+    for i, (match, _via, _score) in enumerate(pairings):
+        wp = write_paths[i]
+        if match is None:
+            if wp:
+                claimed_file_sets.append(wp)
+        else:
+            cand_paths = _flatten_paths(match.code_locations)
+            combined = cand_paths | wp
+            if combined:
+                claimed_file_sets.append(combined)
+
+    out: list[tuple[ReconcilerCandidate, float]] = []
+    for cand in candidates:
+        if not cand.is_active or cand.feature_id in matched_ids:
+            continue
+        cp = _flatten_paths(cand.code_locations)
+        if not cp:
+            continue
+        coverage = len(cp & files_present) / len(cp)
+        if coverage < threshold:
+            continue
+        # Dedup guard: skip if any feature alive post-scan (matched
+        # candidate OR inserted write) now owns most of this candidate's
+        # files (genuine duplicate).
+        is_dup = False
+        for cf in claimed_file_sets:
+            if _jaccard(cp, cf) >= dedup_jaccard:
+                is_dup = True
+                break
+        if is_dup:
+            continue
+        out.append((cand, coverage))
+    return out
 
 
 def _flatten_paths(locations: dict[str, list[str]] | None) -> set[str]:
