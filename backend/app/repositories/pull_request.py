@@ -17,7 +17,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pull_request import PRState, PullRequest
@@ -172,22 +172,40 @@ class PullRequestRepository(BaseRepository[PullRequest]):
     ) -> list[tuple[PullRequest, TrackedRepository | None]]:
         """List open PRs for a BUD joined with their tracked repository.
 
-        When ``impacted_repo_ids`` is provided, the result includes any open
-        PR that is either linked to ``bud_id`` directly OR targets one of
-        the impacted repos. Used by release-stage views that need to surface
-        open PRs in repos affected by the BUD even if the PR forgot to set
-        a ``bud_id``.
+        Three-way predicate so the release-stage views (UAT / PROD tabs)
+        only surface PRs that genuinely relate to ``bud_id``:
+
+        * ``bud_id == X`` — the PR is directly linked to this BUD.
+        * ``bud_id IS NULL AND repo_id IN impacted_repo_ids`` — aggregate
+          release PRs like ``develop → main`` legitimately carry no single
+          owning BUD; we keep them visible on the impacted repo's stage tab
+          because the SHA-walk in the release detector uses them to attribute
+          merges back to multiple BUDs.
+
+        A plain ``OR(bud_id == X, repo_id IN impacted)`` would also let
+        through PRs linked to a **different** BUD that happens to touch the
+        same impacted repo — which is the over-matching bug this method now
+        prevents.
 
         Args:
             bud_id: The BUD UUID to filter on.
-            impacted_repo_ids: Additional repo UUIDs to include open PRs for.
+            impacted_repo_ids: Repo UUIDs whose unlinked release PRs should
+                stay visible. When ``None`` / empty, only directly-linked
+                PRs are returned.
 
         Returns:
             List of ``(PullRequest, TrackedRepository | None)`` tuples.
         """
-        filters = [PullRequest.bud_id == bud_id]
         if impacted_repo_ids:
-            filters.append(PullRequest.repo_id.in_(impacted_repo_ids))
+            bud_predicate = or_(
+                PullRequest.bud_id == bud_id,
+                and_(
+                    PullRequest.bud_id.is_(None),
+                    PullRequest.repo_id.in_(impacted_repo_ids),
+                ),
+            )
+        else:
+            bud_predicate = PullRequest.bud_id == bud_id
 
         stmt = self._scoped(
             select(PullRequest, TrackedRepository)
@@ -198,7 +216,7 @@ class PullRequestRepository(BaseRepository[PullRequest]):
             )
             .where(
                 PullRequest.state == PRState.OPEN,
-                or_(*filters),
+                bud_predicate,
             )
         )
         result = await self._db.execute(stmt)

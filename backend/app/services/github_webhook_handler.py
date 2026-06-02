@@ -19,7 +19,6 @@ Links PRs to BUDs via branch naming convention (bud-NNN/...).
 Triggers auto-transitions when all impacted repos have PRs or all merge.
 """
 
-import re
 import uuid
 from typing import Any
 
@@ -43,7 +42,7 @@ from app.services.org_settings import is_uat_enabled
 from app.services.pr_auto_transition import (
     check_all_prs_merged,
     check_all_repos_have_prs,
-    resolve_bud_from_branch,
+    resolve_bud_from_pr,
 )
 from app.services.release_detection import detect_release_promotion
 from app.services.stage_award import award_stage_xp_to_contributors
@@ -51,8 +50,6 @@ from app.services.stage_types import ReleaseStage
 from app.utils.branch_matching import branch_matches
 
 logger = structlog.get_logger(__name__)
-
-_BUD_BRANCH_RE = re.compile(r"bud-0*(\d+)/", re.IGNORECASE)
 
 
 async def handle_github_event(
@@ -79,6 +76,13 @@ async def handle_github_event(
             await _handle_pr_closed(org_id, repo, pr_data, db)
         elif action == "synchronize":
             await _handle_pr_synchronize(org_id, pr_data, db)
+        elif action == "edited" and "title" in (payload.get("changes") or {}):
+            # GitHub's ``edited`` action fires on every body / label / title
+            # change. Restrict to title edits — that's the path where a PR
+            # opened without a BUD reference gets retitled to ``[BUD-008] X``
+            # and needs to be relinked. Body / label edits would otherwise
+            # churn the log without changing PR → BUD attribution.
+            await _handle_pr_edited(org_id, pr_data, db)
     elif event_type == "pull_request_review" and action == "submitted":
         review = GitHubReview.model_validate(payload["review"])
         pr_data = GitHubPullRequest.model_validate(payload["pull_request"])
@@ -104,7 +108,7 @@ async def _handle_pr_opened(
     db: AsyncSession,
 ) -> None:
     """Create PR record and check if all impacted repos have PRs."""
-    bud_id, bud = await resolve_bud_from_branch(db, org_id, pr_data.head.ref)
+    bud_id, bud = await resolve_bud_from_pr(db, org_id, pr_data.head.ref, pr_data.title)
 
     pr_repo = PullRequestRepository(db, org_id=org_id)
     existing = await pr_repo.get_by_github_pr_id(pr_data.id)
@@ -406,6 +410,89 @@ async def _handle_pr_synchronize(
     if pr:
         pr.head_branch = pr_data.head.ref
         await db.commit()
+
+
+async def _handle_pr_edited(
+    org_id: uuid.UUID,
+    pr_data: GitHubPullRequest,
+    db: AsyncSession,
+) -> None:
+    """Re-resolve the owning BUD when a PR title changes.
+
+    Catches the case where a PR opened without a BUD reference is later
+    retitled to ``[BUD-008] X`` — without this, the PR stays orphaned
+    (``bud_id IS NULL``) and only surfaces through the impacted-repos
+    fallback in the release-stage views, which is the very over-matching
+    behaviour the rest of this PR is fixing.
+
+    Only writes when the resolution actually changes — title edits that
+    don't shift the BUD link are a no-op so the timeline stays quiet.
+    """
+    pr_repo = PullRequestRepository(db, org_id=org_id)
+    pr = await pr_repo.get_by_github_pr_id(pr_data.id)
+    if pr is None:
+        return
+
+    pr.title = pr_data.title
+
+    new_bud_id, new_bud = await resolve_bud_from_pr(db, org_id, pr_data.head.ref, pr_data.title)
+    if new_bud_id == pr.bud_id:
+        await db.commit()
+        return
+
+    old_bud_id = pr.bud_id
+    pr.bud_id = new_bud_id
+
+    # Audit symmetry: both BUDs record the rebind. Skipping the unlink
+    # event would leave the previous BUD's timeline showing a PR that
+    # quietly stopped belonging to it.
+    if old_bud_id is not None and old_bud_id != new_bud_id:
+        await record_event(
+            db,
+            org_id,
+            old_bud_id,
+            "pr_unlinked",
+            detail={
+                "pr_number": pr_data.number,
+                "reason": "title_edited",
+                "new_bud_id": str(new_bud_id) if new_bud_id else None,
+            },
+        )
+
+    if new_bud is not None:
+        await record_event(
+            db,
+            org_id,
+            new_bud.id,
+            "pr_linked",
+            detail={
+                "pr_number": pr_data.number,
+                "reason": "title_edited",
+                "previous_bud_id": str(old_bud_id) if old_bud_id else None,
+            },
+        )
+
+    await db.commit()
+
+    # Re-run the auto-advance check on both sides. ``check_all_repos_have_prs``
+    # only fires forward transitions (development → code_review) and no-ops
+    # outside that stage, so the old-BUD call is defensive: it covers the
+    # case where stripping a PR drops the old BUD back below the "all
+    # impacted repos have PRs" threshold while it's still in development.
+    if old_bud_id is not None and old_bud_id != new_bud_id:
+        bud_repo = BUDRepository(db, org_id=org_id)
+        old_bud = await bud_repo.get_by_id(old_bud_id)
+        if old_bud is not None:
+            await check_all_repos_have_prs(db, org_id, old_bud)
+    if new_bud is not None:
+        await check_all_repos_have_prs(db, org_id, new_bud)
+
+    logger.info(
+        "pr_relinked_on_title_edit",
+        pr_number=pr_data.number,
+        from_bud=str(old_bud_id) if old_bud_id else None,
+        to_bud=str(new_bud_id) if new_bud_id else None,
+    )
 
 
 async def _handle_review_submitted(

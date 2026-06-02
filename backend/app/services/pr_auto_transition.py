@@ -36,7 +36,40 @@ from app.services.bud_timeline import record_event
 
 logger = structlog.get_logger(__name__)
 
-_BUD_BRANCH_RE = re.compile(r"bud-0*(\d+)/", re.IGNORECASE)
+# Match ``bud-NNN`` anywhere in a string when it is not glued to an
+# alphanumeric character or a hyphen on the left. The negative lookbehind
+# ``(?<![A-Za-z0-9-])`` reads as "the character before ``bud`` is not a
+# letter, digit, or hyphen", which subsumes both the mid-word case
+# (``auth-bud-7`` — preceded by ``-``) and the run-on case
+# (``abcbud-5`` — preceded by ``c``), while letting through everything
+# else: start-of-string, whitespace, brackets, parens, slashes, dots,
+# commas, semicolons, colons, hashes — the punctuation real PR titles
+# actually use to introduce a BUD reference.
+#
+#   ``bud-008``, ``BUD-8``, ``bud8``  (case-insensitive, optional dash,
+#   leading zeros stripped) — accepted.
+#   ``feat/BUD-7-rename``, ``[BUD-12]``, ``(bud-77)``, ``BUD-8 fix x``,
+#   ``Closes #BUD-4``, ``fix,BUD-3``, ``.BUD-2`` — accepted.
+#   ``auth-bud-7`` — rejected (preceded by hyphen).
+#   ``abcbud-5`` — rejected (preceded by letter).
+#   ``bud2name`` — rejected (no ``\b`` between digit and following word
+#   char, so the trailing boundary fails).
+#
+# Used to drive PR → BUD linking (both head branch and PR title) and the
+# Claude-Code dev-activity hook below.
+_BUD_RE = re.compile(r"(?<![A-Za-z0-9-])bud-?0*(\d+)\b", re.IGNORECASE)
+
+
+def extract_bud_number(text: str | None) -> int | None:
+    """Return the first BUD number found in ``text``, or ``None``.
+
+    Single seam for both the webhook resolver and the MCP dev-activity
+    hook so the matcher cannot drift between call sites.
+    """
+    if not text:
+        return None
+    match = _BUD_RE.search(text)
+    return int(match.group(1)) if match else None
 
 
 async def resolve_bud_from_branch(
@@ -45,14 +78,38 @@ async def resolve_bud_from_branch(
     branch: str,
 ) -> tuple[uuid.UUID | None, BUDDocument | None]:
     """Extract BUD number from branch name and find the BUD."""
-    match = _BUD_BRANCH_RE.match(branch)
-    if not match:
+    bud_number = extract_bud_number(branch)
+    if bud_number is None:
         return None, None
 
-    bud_number = int(match.group(1))
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_number(bud_number)
     return (bud.id, bud) if bud else (None, None)
+
+
+async def resolve_bud_from_pr(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    head_ref: str | None,
+    title: str | None,
+) -> tuple[uuid.UUID | None, BUDDocument | None]:
+    """Resolve the owning BUD for a PR by scanning head branch, then title.
+
+    Head ref is checked first because it is the most reliable signal —
+    a branch named ``bud-008/x`` was almost certainly created for that
+    BUD intentionally. Title is the fallback: it catches manual PRs whose
+    branch lacks the ``bud-NNN/`` prefix but whose author tagged the BUD
+    in the title (``[BUD-008] Fix Y``). Stops at the first match.
+    """
+    for source in (head_ref, title):
+        bud_number = extract_bud_number(source)
+        if bud_number is None:
+            continue
+        bud_repo = BUDRepository(db, org_id=org_id)
+        bud = await bud_repo.get_by_number(bud_number)
+        if bud is not None:
+            return bud.id, bud
+    return None, None
 
 
 async def check_all_repos_have_prs(

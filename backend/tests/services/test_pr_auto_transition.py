@@ -1,0 +1,88 @@
+# Copyright 2025-2026 Arun Rajkumar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Unit tests for the BUD-number extraction matcher.
+
+Pins the accept / reject set of ``extract_bud_number`` so the regex
+cannot regress silently. The matcher is the single seam between
+PR-title / branch parsing and the BUD lookup — drifting on what counts
+as a BUD reference would re-introduce either the pre-fix orphan rate
+or false-positive links across BUDs.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from app.services.pr_auto_transition import extract_bud_number
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # Bare references — most common forms.
+        ("BUD-8", 8),
+        ("bud-008", 8),
+        ("bud8", 8),
+        ("BUD8", 8),
+        # Branch-style separators.
+        ("feat/BUD-7-rename", 7),
+        ("bugfix/bud-12-x", 12),
+        ("bud-001/feature-x", 1),
+        # Title-style separators — full punctuation set users actually type.
+        ("[BUD-12] Update X", 12),
+        ("(bud-77) inline", 77),
+        ("Fix the thing — BUD-3 follow up", 3),
+        ("BUD-8 fix x", 8),
+        ("Closes #BUD-4", 4),
+        ("fix,BUD-3 quick", 3),
+        ("revert: BUD-21 cleanup", 21),
+        ("Notes; BUD-99 next", 99),
+        (".BUD-2 release notes", 2),
+        # First match wins when multiple are present.
+        ("BUD-5 references BUD-9", 5),
+    ],
+)
+def test_extract_bud_number_accepts_real_world_forms(text: str, expected: int) -> None:
+    """Branches and titles users actually write should resolve."""
+    assert extract_bud_number(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Mid-word: the leading ``-`` would falsely word-boundary under a naive
+        # regex. The matcher must reject when the BUD prefix is preceded by a
+        # letter rather than a separator.
+        "auth-bud-7",
+        "feature-prebud-2",
+        # Glued to other digits.
+        "bud2name",
+        "abcbud-5",
+        # No number.
+        "feature/bud-x",
+        "release/uat",
+        # Nothing.
+        "",
+        " ",
+    ],
+)
+def test_extract_bud_number_rejects_mid_word_and_garbage(text: str) -> None:
+    """False-positives across BUDs would be worse than orphan PRs."""
+    assert extract_bud_number(text) is None
+
+
+def test_extract_bud_number_handles_none() -> None:
+    """None input must not raise — webhook payload titles can be None."""
+    assert extract_bud_number(None) is None
