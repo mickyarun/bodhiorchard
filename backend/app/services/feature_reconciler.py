@@ -28,6 +28,13 @@ nothing matched are flipped ``is_active=False`` so removed features are
 preserved (and revivable on re-introduction) rather than silently
 disappearing.
 
+Within each tier the resolver picks pairings globally by score-descending
+edge order, not by write-iteration order. That avoids the failure where
+an earlier write claims a candidate via a borderline match, leaving the
+later write that would have been a clean pair to insert-as-new while the
+displaced candidate gets swept inactive ("Cache Service ↔ Cache Service"
+deactivations seen in PR-merge synthesis on large repos).
+
 The containment tier exists for the "narrow PR adds a sub-component to
 a broader feature" case: a 1-file PR re-synthesised on its own cluster
 emits a tiny feature whose files are a strict subset of an existing
@@ -122,9 +129,10 @@ async def reconcile_features_for_repo(
 
     1. Bulk-load every existing feature for ``repo_id`` (active +
        inactive) so revival is single-pass.
-    2. For each ``FeatureWrite``, run :func:`_match_strategy` to pick
-       an existing row by signature → Jaccard → containment → cosine.
-       First hit wins; ties broken by score.
+    2. Call :func:`_resolve_pairings` to assign each ``FeatureWrite``
+       to an existing row by signature → Jaccard → containment → cosine.
+       Within each tier the highest-scoring edge claims its pair first
+       (global resolution, not per-write greedy).
     3. If matched via signature / Jaccard / cosine: revive (when
        inactive) + ``update_in_place`` + refresh PRIMARY junction. If
        matched via containment: ``_absorb_into_existing`` — keep the
@@ -160,20 +168,19 @@ async def reconcile_features_for_repo(
         else all_candidates
     )
     by_signature: dict[str, ReconcilerCandidate] = {c.cluster_signature: c for c in candidates}
+    pairings = _resolve_pairings(
+        synthesised,
+        candidates,
+        by_signature,
+        jaccard_threshold=jaccard_threshold,
+        cosine_threshold=cosine_threshold,
+        containment_threshold=containment_threshold,
+    )
     matched_ids: set[uuid.UUID] = set()
     feat_repo = FeatureRepository(db, org_id=org_id)
     result = ReconcileResult()
 
-    for write in synthesised:
-        match, match_via, score = _match_strategy(
-            write,
-            candidates,
-            by_signature,
-            matched_ids,
-            jaccard_threshold=jaccard_threshold,
-            cosine_threshold=cosine_threshold,
-            containment_threshold=containment_threshold,
-        )
+    for write, (match, match_via, score) in zip(synthesised, pairings, strict=True):
         decision: str
         if match is None:
             await _insert_new(
@@ -371,83 +378,136 @@ async def _update_existing(
     )
 
 
-# O(n*m) — fine at hundreds; revisit at 5k+ features per repo.
-def _match_strategy(
-    write: FeatureWrite,
+# O(n*m) per tier — fine at hundreds; revisit at 5k+ features per repo.
+def _resolve_pairings(
+    synthesised: list[FeatureWrite],
     candidates: list[ReconcilerCandidate],
     by_signature: dict[str, ReconcilerCandidate],
-    matched_ids: set[uuid.UUID],
     *,
     jaccard_threshold: float,
     cosine_threshold: float,
     containment_threshold: float,
-) -> tuple[ReconcilerCandidate | None, str, float]:
-    """Layered identity matcher: signature → Jaccard → containment → cosine.
+) -> list[tuple[ReconcilerCandidate | None, str, float]]:
+    """Globally resolve write→candidate pairings, tier-then-score order.
 
-    Returns ``(candidate, match_via, score)`` where ``match_via`` is
-    one of ``signature``, ``jaccard``, ``containment``, ``cosine``,
-    ``insert``. Score is 1.0 for an exact signature match, the
-    Jaccard / containment / cosine value for the fallback tiers, and
-    0.0 for ``insert``.
+    Tier priority is signature → Jaccard → containment → cosine. Within
+    each tier the resolver claims the highest-scoring (write, candidate)
+    edge first, then the next, until no candidate edges remain — instead
+    of resolving each write in input order and letting the first write
+    that walks the candidate list win.
 
-    Containment is asymmetric — ``|write ∩ cand| / |write|`` — and only
-    fires when the candidate is the larger side. It catches the case
-    where a narrow PR re-synthesises a sub-cluster (a handful of files)
-    whose files are already part of a broader existing feature; the
-    earlier symmetric Jaccard tier misses this because the union
-    blows up with the broader feature's wider footprint.
+    The old per-write greedy left "Cache Service ↔ Cache Service" pairs
+    unmatched whenever a sibling write reached the candidate first via a
+    borderline Jaccard. The displaced candidate then had no match and
+    was swept inactive. Score-descending within-tier resolution gives
+    the strongest pair first dibs on the candidate.
 
-    Skips candidates already claimed by a prior synthesised entry
-    (``matched_ids``) so two synthesised features cannot collapse onto
-    the same existing row.
+    Returns one ``(candidate, match_via, score)`` per synthesised entry,
+    in input order. ``match_via=='insert'`` and ``candidate is None``
+    when no tier claimed the write.
     """
-    sig_match = by_signature.get(write.cluster_signature)
-    if sig_match is not None and sig_match.feature_id not in matched_ids:
-        return sig_match, "signature", 1.0
+    n = len(synthesised)
+    pairings: list[tuple[ReconcilerCandidate | None, str, float]] = [(None, "insert", 0.0)] * n
+    claimed_writes: set[int] = set()
+    claimed_candidates: set[uuid.UUID] = set()
 
-    write_paths = _flatten_paths(write.code_locations)
-    if write_paths:
-        best_jac: tuple[ReconcilerCandidate, float] | None = None
-        for cand in candidates:
-            if cand.feature_id in matched_ids:
-                continue
-            cand_paths = _flatten_paths(cand.code_locations)
-            if not cand_paths:
-                continue
-            score = _jaccard(write_paths, cand_paths)
-            if score >= jaccard_threshold and (best_jac is None or score > best_jac[1]):
-                best_jac = (cand, score)
-        if best_jac is not None:
-            return best_jac[0], "jaccard", best_jac[1]
+    # Tier 1: signature — exact cluster_signature, 1:1 by definition.
+    for i, write in enumerate(synthesised):
+        cand = by_signature.get(write.cluster_signature)
+        if cand is not None and cand.feature_id not in claimed_candidates:
+            pairings[i] = (cand, "signature", 1.0)
+            claimed_writes.add(i)
+            claimed_candidates.add(cand.feature_id)
 
-        best_cont: tuple[ReconcilerCandidate, float] | None = None
-        for cand in candidates:
-            if cand.feature_id in matched_ids:
-                continue
-            cand_paths = _flatten_paths(cand.code_locations)
-            # Containment requires the candidate to be strictly larger —
-            # absorbing into a smaller or equal-sized candidate would
-            # truncate the synthesis result, not the other way around.
-            if not cand_paths or len(write_paths) >= len(cand_paths):
-                continue
-            score = _containment(write_paths, cand_paths)
-            if score >= containment_threshold and (best_cont is None or score > best_cont[1]):
-                best_cont = (cand, score)
-        if best_cont is not None:
-            return best_cont[0], "containment", best_cont[1]
+    # Memoise flattened paths so each side is built once across tiers.
+    write_paths_memo: dict[int, set[str]] = {}
+    cand_paths_memo: dict[uuid.UUID, set[str]] = {}
 
-    if write.embedding:
-        best_cos: tuple[ReconcilerCandidate, float] | None = None
+    def write_paths(i: int) -> set[str]:
+        cached = write_paths_memo.get(i)
+        if cached is None:
+            cached = _flatten_paths(synthesised[i].code_locations)
+            write_paths_memo[i] = cached
+        return cached
+
+    def cand_paths(c: ReconcilerCandidate) -> set[str]:
+        cached = cand_paths_memo.get(c.feature_id)
+        if cached is None:
+            cached = _flatten_paths(c.code_locations)
+            cand_paths_memo[c.feature_id] = cached
+        return cached
+
+    def assign_tier(
+        edges: list[tuple[float, int, ReconcilerCandidate]],
+        label: str,
+    ) -> None:
+        # Sort key, in order: score descending; lower write index wins
+        # on ties (matches the old greedy by-iteration-order semantics);
+        # candidate feature_id as the final deterministic tiebreak so
+        # output never depends on the candidate-list order the upstream
+        # loader happens to produce.
+        edges.sort(key=lambda e: (-e[0], e[1], str(e[2].feature_id)))
+        for score, i, cand in edges:
+            if i in claimed_writes or cand.feature_id in claimed_candidates:
+                continue
+            pairings[i] = (cand, label, score)
+            claimed_writes.add(i)
+            claimed_candidates.add(cand.feature_id)
+
+    # Tier 2: Jaccard over file paths.
+    jacc_edges: list[tuple[float, int, ReconcilerCandidate]] = []
+    for i in range(n):
+        if i in claimed_writes:
+            continue
+        wp = write_paths(i)
+        if not wp:
+            continue
         for cand in candidates:
-            if cand.feature_id in matched_ids or cand.embedding is None:
+            if cand.feature_id in claimed_candidates:
+                continue
+            cp = cand_paths(cand)
+            if not cp:
+                continue
+            score = _jaccard(wp, cp)
+            if score >= jaccard_threshold:
+                jacc_edges.append((score, i, cand))
+    assign_tier(jacc_edges, "jaccard")
+
+    # Tier 3: asymmetric containment. Candidate must be strictly larger
+    # — absorbing into a smaller candidate would truncate the synthesis
+    # result, not the other way around.
+    cont_edges: list[tuple[float, int, ReconcilerCandidate]] = []
+    for i in range(n):
+        if i in claimed_writes:
+            continue
+        wp = write_paths(i)
+        if not wp:
+            continue
+        for cand in candidates:
+            if cand.feature_id in claimed_candidates:
+                continue
+            cp = cand_paths(cand)
+            if not cp or len(wp) >= len(cp):
+                continue
+            score = _containment(wp, cp)
+            if score >= containment_threshold:
+                cont_edges.append((score, i, cand))
+    assign_tier(cont_edges, "containment")
+
+    # Tier 4: embedding cosine.
+    cos_edges: list[tuple[float, int, ReconcilerCandidate]] = []
+    for i, write in enumerate(synthesised):
+        if i in claimed_writes or not write.embedding:
+            continue
+        for cand in candidates:
+            if cand.feature_id in claimed_candidates or cand.embedding is None:
                 continue
             score = _cosine(write.embedding, cand.embedding)
-            if score >= cosine_threshold and (best_cos is None or score > best_cos[1]):
-                best_cos = (cand, score)
-        if best_cos is not None:
-            return best_cos[0], "cosine", best_cos[1]
+            if score >= cosine_threshold:
+                cos_edges.append((score, i, cand))
+    assign_tier(cos_edges, "cosine")
 
-    return None, "insert", 0.0
+    return pairings
 
 
 def _flatten_paths(locations: dict[str, list[str]] | None) -> set[str]:

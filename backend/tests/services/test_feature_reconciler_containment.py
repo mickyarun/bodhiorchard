@@ -23,7 +23,7 @@ expanding ``code_locations``.
 
 Three properties under test:
 
-1. ``_match_strategy`` returns ``match_via="containment"`` when the
+1. ``_resolve_pairings`` returns ``match_via="containment"`` when the
    synth's files are mostly inside a larger candidate.
 2. The containment tier does not fire when the synth side is the same
    size or larger than the candidate (no false absorbs into smaller
@@ -48,8 +48,30 @@ from app.services.feature_reconciler import (
     JACCARD_THRESHOLD,
     FeatureWrite,
     ReconcilerCandidate,
-    _match_strategy,
+    _resolve_pairings,
 )
+
+
+def _pair_one(
+    write: FeatureWrite,
+    candidates: list[ReconcilerCandidate],
+) -> tuple[ReconcilerCandidate | None, str, float]:
+    """Run :func:`_resolve_pairings` for a single write and return its slot.
+
+    The matcher is now global (resolves an entire batch at once), so the
+    single-write tier-behavior tests below wrap the write in a one-element
+    list and read pairings[0].
+    """
+    by_signature = {c.cluster_signature: c for c in candidates}
+    pairings = _resolve_pairings(
+        [write],
+        candidates,
+        by_signature,
+        jaccard_threshold=JACCARD_THRESHOLD,
+        cosine_threshold=COSINE_THRESHOLD,
+        containment_threshold=CONTAINMENT_THRESHOLD,
+    )
+    return pairings[0]
 
 
 def _candidate(
@@ -104,15 +126,7 @@ def test_containment_matches_when_synth_files_are_subset_of_larger_candidate() -
     )
     write = _write(signature="sig-narrow", files=["sidebar.vue"])
 
-    match, via, score = _match_strategy(
-        write,
-        [cand],
-        by_signature={cand.cluster_signature: cand},
-        matched_ids=set(),
-        jaccard_threshold=JACCARD_THRESHOLD,
-        cosine_threshold=COSINE_THRESHOLD,
-        containment_threshold=CONTAINMENT_THRESHOLD,
-    )
+    match, via, score = _pair_one(write, [cand])
 
     assert match is cand
     assert via == "containment"
@@ -130,15 +144,7 @@ def test_containment_skips_when_synth_is_not_smaller() -> None:
     cand = _candidate(signature="sig-cand", files=["a.vue", "b.vue"])
     write = _write(signature="sig-write", files=["a.vue", "c.vue"])
 
-    match, via, _score = _match_strategy(
-        write,
-        [cand],
-        by_signature={cand.cluster_signature: cand},
-        matched_ids=set(),
-        jaccard_threshold=JACCARD_THRESHOLD,
-        cosine_threshold=COSINE_THRESHOLD,
-        containment_threshold=CONTAINMENT_THRESHOLD,
-    )
+    match, via, _score = _pair_one(write, [cand])
 
     assert match is None
     assert via == "insert"
@@ -149,15 +155,7 @@ def test_signature_match_beats_containment() -> None:
     cand = _candidate(signature="sig-shared", files=["a.vue", "b.vue", "c.vue", "d.vue"])
     write = _write(signature="sig-shared", files=["a.vue"])
 
-    _match, via, score = _match_strategy(
-        write,
-        [cand],
-        by_signature={cand.cluster_signature: cand},
-        matched_ids=set(),
-        jaccard_threshold=JACCARD_THRESHOLD,
-        cosine_threshold=COSINE_THRESHOLD,
-        containment_threshold=CONTAINMENT_THRESHOLD,
-    )
+    _match, via, score = _pair_one(write, [cand])
 
     assert via == "signature"
     assert score == pytest.approx(1.0)
@@ -170,15 +168,7 @@ def test_jaccard_match_beats_containment() -> None:
     # Containment would also match (3/4 = 0.75) — but Jaccard runs first.
     write = _write(signature="sig-write", files=["a.vue", "b.vue", "c.vue", "d.vue"])
 
-    _match, via, _score = _match_strategy(
-        write,
-        [cand],
-        by_signature={cand.cluster_signature: cand},
-        matched_ids=set(),
-        jaccard_threshold=JACCARD_THRESHOLD,
-        cosine_threshold=COSINE_THRESHOLD,
-        containment_threshold=CONTAINMENT_THRESHOLD,
-    )
+    _match, via, _score = _pair_one(write, [cand])
 
     # Jaccard cares about |∩| / |∪|. Containment is asymmetric. The synth
     # is the LARGER side here, so containment is structurally disallowed
@@ -195,15 +185,7 @@ def test_containment_below_threshold_falls_through_to_insert() -> None:
     # 1 of 4 synth files in candidate → containment = 0.25 < 0.5.
     write = _write(signature="sig-write", files=["a.vue", "x.vue", "y.vue", "z.vue"])
 
-    match, via, _score = _match_strategy(
-        write,
-        [cand],
-        by_signature={cand.cluster_signature: cand},
-        matched_ids=set(),
-        jaccard_threshold=JACCARD_THRESHOLD,
-        cosine_threshold=COSINE_THRESHOLD,
-        containment_threshold=CONTAINMENT_THRESHOLD,
-    )
+    match, via, _score = _pair_one(write, [cand])
 
     assert match is None
     assert via == "insert"
