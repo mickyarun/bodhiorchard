@@ -36,9 +36,11 @@ Self-hosted on your hardware. Your data stays local. Inference engine is your ch
 &nbsp;
 <a href="https://youtu.be/lV71qhmfzzw"><img src="https://img.youtube.com/vi/lV71qhmfzzw/maxresdefault.jpg" width="48%" alt="Design phase & agent prompts"></a>
 
+<a href="https://youtu.be/YjRihN_SKaw"><img src="https://img.youtube.com/vi/YjRihN_SKaw/maxresdefault.jpg" width="48%" alt="Development & retrospective"></a>
+&nbsp;
 <a href="https://youtu.be/OxoqBI7BNxU"><img src="https://img.youtube.com/vi/OxoqBI7BNxU/maxresdefault.jpg" width="48%" alt="Inside the virtual world"></a>
 
-**[Setup walkthrough](https://youtu.be/ot-BmKxRgRA)** &nbsp;·&nbsp; **[Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME)** &nbsp;·&nbsp; **[Requirements & estimation](https://youtu.be/YBwdTes0Fno)** &nbsp;·&nbsp; **[Design phase & agent prompts](https://youtu.be/lV71qhmfzzw)** &nbsp;·&nbsp; **[Inside the virtual world](https://youtu.be/OxoqBI7BNxU)**
+**[Setup walkthrough](https://youtu.be/ot-BmKxRgRA)** &nbsp;·&nbsp; **[Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME)** &nbsp;·&nbsp; **[Requirements & estimation](https://youtu.be/YBwdTes0Fno)** &nbsp;·&nbsp; **[Design phase & agent prompts](https://youtu.be/lV71qhmfzzw)** &nbsp;·&nbsp; **[Development & retrospective](https://youtu.be/YjRihN_SKaw)** &nbsp;·&nbsp; **[Inside the virtual world](https://youtu.be/OxoqBI7BNxU)**
 
 ![Bodhiorchard Living Tree Dashboard](docs/images/livingtree.png)
 

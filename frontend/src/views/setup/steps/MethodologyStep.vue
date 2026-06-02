@@ -41,89 +41,56 @@
       </v-btn>
     </div>
 
-    <!-- Section 1.5: Demo videos (tabbed) -->
+    <!-- Section 1.5: Demo videos (active player + thumbnail picker) -->
     <div class="mb-10">
-      <v-tabs v-model="videoTab" align-tabs="center" color="primary" density="compact">
-        <v-tab value="setup">Setup walkthrough</v-tab>
-        <v-tab value="slack">Slack triage &amp; MCP tools</v-tab>
-        <v-tab value="estimation">Requirements &amp; estimation</v-tab>
-        <v-tab value="design">Design phase &amp; agent prompts</v-tab>
-        <v-tab value="world">Inside the virtual world</v-tab>
-      </v-tabs>
-      <v-card class="mt-3" variant="outlined">
-        <v-window v-model="videoTab">
-          <v-window-item value="setup">
-            <div class="methodology-video-frame">
-              <iframe
-                src="https://www.youtube-nocookie.com/embed/ot-BmKxRgRA"
-                title="Bodhiorchard — Setup walkthrough"
-                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowfullscreen
-                loading="lazy"
-              ></iframe>
-            </div>
-            <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
-              Clone, configure, and bring the stack up locally.
-            </p>
-          </v-window-item>
-          <v-window-item value="slack">
-            <div class="methodology-video-frame">
-              <iframe
-                src="https://www.youtube-nocookie.com/embed/i8kZdcL1bME"
-                title="Bodhiorchard — Slack triage &amp; MCP tools"
-                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowfullscreen
-                loading="lazy"
-              ></iframe>
-            </div>
-            <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
-              Chat-to-BUD in Slack: the Triage Agent drafts the spec, Claude Code drives the BUD lifecycle through MCP tools.
-            </p>
-          </v-window-item>
-          <v-window-item value="estimation">
-            <div class="methodology-video-frame">
-              <iframe
-                src="https://www.youtube-nocookie.com/embed/YBwdTes0Fno"
-                title="Bodhiorchard — Requirements &amp; estimation"
-                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowfullscreen
-                loading="lazy"
-              ></iframe>
-            </div>
-            <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
-              AI-drafted requirements, AI-PERT + Monte Carlo cycle-time forecasts, and the collaborative editor with full version history.
-            </p>
-          </v-window-item>
-          <v-window-item value="design">
-            <div class="methodology-video-frame">
-              <iframe
-                src="https://www.youtube-nocookie.com/embed/lV71qhmfzzw"
-                title="Bodhiorchard — Design phase &amp; agent prompts"
-                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowfullscreen
-                loading="lazy"
-              ></iframe>
-            </div>
-            <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
-              Generating wireframes and the tech architecture — and how the AI agent prompts shape each handoff.
-            </p>
-          </v-window-item>
-          <v-window-item value="world">
-            <div class="methodology-video-frame">
-              <iframe
-                src="https://www.youtube-nocookie.com/embed/OxoqBI7BNxU"
-                title="Bodhiorchard — Inside the virtual world"
-                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowfullscreen
-                loading="lazy"
-              ></iframe>
-            </div>
-            <p class="text-caption text-center text-medium-emphasis py-3 mb-0">
-              The Living Tree: your org as a tended orchard.
-            </p>
-          </v-window-item>
-        </v-window>
+      <v-card variant="outlined">
+        <div class="methodology-video-frame">
+          <iframe
+            :key="activeVideo.youTubeId"
+            :src="`https://www.youtube-nocookie.com/embed/${activeVideo.youTubeId}`"
+            :title="`Bodhiorchard — ${activeVideo.title}`"
+            allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen
+            loading="lazy"
+          ></iframe>
+        </div>
+        <p class="text-caption text-center text-medium-emphasis py-3 mb-0 px-4">
+          {{ activeVideo.caption }}
+        </p>
       </v-card>
+
+      <v-row class="mt-3" dense>
+        <v-col v-for="v in videos" :key="v.value" cols="6" sm="4" md="2">
+          <v-card
+            :variant="v.value === videoTab ? 'flat' : 'outlined'"
+            :color="v.value === videoTab ? 'primary' : undefined"
+            class="methodology-video-thumb"
+            :class="{ 'methodology-video-thumb--active': v.value === videoTab }"
+            @click="videoTab = v.value"
+          >
+            <div class="methodology-video-thumb-img-wrap">
+              <img
+                :src="`https://img.youtube.com/vi/${v.youTubeId}/mqdefault.jpg`"
+                :alt="v.title"
+                loading="lazy"
+                class="methodology-video-thumb-img"
+              />
+              <v-icon
+                v-if="v.value !== videoTab"
+                class="methodology-video-thumb-play"
+                icon="mdi-play-circle"
+                size="36"
+              />
+            </div>
+            <div
+              class="text-caption text-center px-2 py-2"
+              :class="v.value === videoTab ? 'font-weight-bold' : 'text-medium-emphasis'"
+            >
+              {{ v.title }}
+            </div>
+          </v-card>
+        </v-col>
+      </v-row>
     </div>
 
     <!-- Section 1.6: Platform screenshots -->
@@ -544,7 +511,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import LifecycleFlowchart from '@/components/setup/LifecycleFlowchart.vue'
 import AgentCard from '@/components/setup/AgentCard.vue'
 import { agents } from '@/data/agents'
@@ -553,7 +520,60 @@ const emit = defineEmits<{
   startBuilding: []
 }>()
 
-const videoTab = ref<string>('setup')
+interface DemoVideo {
+  value: string
+  title: string
+  youTubeId: string
+  caption: string
+}
+
+const videos: DemoVideo[] = [
+  {
+    value: 'setup',
+    title: 'Setup walkthrough',
+    youTubeId: 'ot-BmKxRgRA',
+    caption: 'Clone, configure, and bring the stack up locally.',
+  },
+  {
+    value: 'slack',
+    title: 'Slack triage & MCP tools',
+    youTubeId: 'i8kZdcL1bME',
+    caption:
+      'Chat-to-BUD in Slack: the Triage Agent drafts the spec, Claude Code drives the BUD lifecycle through MCP tools.',
+  },
+  {
+    value: 'estimation',
+    title: 'Requirements & estimation',
+    youTubeId: 'YBwdTes0Fno',
+    caption:
+      'AI-drafted requirements, AI-PERT + Monte Carlo cycle-time forecasts, and the collaborative editor with full version history.',
+  },
+  {
+    value: 'design',
+    title: 'Design phase & agent prompts',
+    youTubeId: 'lV71qhmfzzw',
+    caption:
+      'Generating wireframes and the tech architecture — and how the AI agent prompts shape each handoff.',
+  },
+  {
+    value: 'dev',
+    title: 'Development & retrospective',
+    youTubeId: 'YjRihN_SKaw',
+    caption:
+      'Development, automated code review, post-deploy retrospective, and the Learning Agent feeding insights back into estimation.',
+  },
+  {
+    value: 'world',
+    title: 'Inside the virtual world',
+    youTubeId: 'OxoqBI7BNxU',
+    caption: 'The Living Tree: your org as a tended orchard.',
+  },
+]
+
+const videoTab = ref<string>(videos[0].value)
+const activeVideo = computed<DemoVideo>(
+  () => videos.find((v) => v.value === videoTab.value) ?? videos[0],
+)
 
 const lightboxOpen = ref(false)
 const lightboxSrc = ref('')
@@ -763,6 +783,47 @@ const budFeatures = [
   height: 100%;
   border: 0;
   display: block;
+}
+.methodology-video-thumb {
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  overflow: hidden;
+  height: 100%;
+}
+.methodology-video-thumb:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--v-theme-primary)) !important;
+}
+.methodology-video-thumb--active {
+  box-shadow: 0 0 0 2px rgb(var(--v-theme-primary));
+}
+.methodology-video-thumb-img-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #0d1b0f;
+  overflow: hidden;
+}
+.methodology-video-thumb-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.methodology-video-thumb-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.methodology-video-thumb:hover .methodology-video-thumb-play {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.08);
 }
 .methodology-shot-card {
   cursor: zoom-in;
