@@ -125,8 +125,18 @@
   </div>
 
   <!-- Empty state -->
-  <div v-else-if="!loading" class="text-caption text-medium-emphasis text-center pa-4">
-    No estimates yet
+  <div v-else-if="!loading" class="text-center pa-4">
+    <div class="text-caption text-medium-emphasis mb-2">No estimates yet</div>
+    <v-btn
+      size="small"
+      variant="tonal"
+      color="primary"
+      prepend-icon="mdi-chart-timeline-variant"
+      :loading="recalculating"
+      @click="$emit('recalculate')"
+    >
+      Run estimation
+    </v-btn>
   </div>
 </template>
 
