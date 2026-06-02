@@ -711,6 +711,33 @@ class UserRepository(BaseRepository[User]):
         self._db.add(alias)
         return alias
 
+    async def find_user_by_alias_email(
+        self, org_id: uuid.UUID, email: str
+    ) -> User | None:
+        """Return the user who has ``email`` listed as a UserEmailAlias.
+
+        Walks one hop of the Settings → Members merge backlink: when
+        member B is merged into A, B's primary email is recorded as an
+        alias on A. Given B's email, this returns A.
+
+        Returns the immediate target without filtering on ``is_active``
+        so multi-hop chains (A → B → C) can be traversed externally;
+        callers that need a guaranteed-active user must loop until
+        ``user.is_active`` is true.
+        """
+        if not email:
+            return None
+        result = await self._db.execute(
+            select(User)
+            .join(UserEmailAlias, UserEmailAlias.user_id == User.id)
+            .where(
+                UserEmailAlias.org_id == org_id,
+                UserEmailAlias.email == email,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def list_aliases(self, user_id: uuid.UUID) -> list[UserEmailAlias]:
         """List all email aliases for a user.
 

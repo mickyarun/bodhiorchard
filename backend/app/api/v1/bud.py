@@ -96,6 +96,7 @@ from app.services.bud_agent_trigger import (
 from app.services.bud_assignment_actions import assign_bud, unassign_bud
 from app.services.bud_edit_policy import assert_section_editable
 from app.services.bud_estimation import estimate_bud_dates
+from app.services.bud_learning_alias_resolver import resolve_aliased_contributors
 from app.services.bud_timeline import record_event
 from app.services.job_queue import JOB_BUD_AGENT, create_job
 
@@ -544,7 +545,18 @@ async def get_bud_learning(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No learning recorded for this BUD yet",
         )
-    return BUDLearningRead.model_validate(learning)
+    read = BUDLearningRead.model_validate(learning)
+    # Apply the Settings → Members merge backlink to the stored
+    # contributor snapshot so deactivated / "(external)" rows fold into
+    # their currently-active target. The stored JSONB is left alone —
+    # the resolver runs on every fetch so later alias changes apply
+    # immediately without a backfill.
+    if read.metrics and read.metrics.get("contributors"):
+        contribs = await resolve_aliased_contributors(
+            db, current_user.org_id, read.metrics["contributors"]
+        )
+        read = read.model_copy(update={"metrics": {**read.metrics, "contributors": contribs}})
+    return read
 
 
 # Status transitions QA owns directly via PATCH. Matches the manual-testing
