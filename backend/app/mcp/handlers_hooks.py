@@ -253,7 +253,7 @@ async def _resolve_repo_id(
     Exact-path match is attempted first — that works when the hook fires
     from the same machine the scan pipeline indexed (single-host dev).
     When the developer's laptop path doesn't match the server's clone
-    path (the common case for remote teams talking to garden.atoa.me),
+    path,
     fall back to matching by the repo's basename within the org. The
     repository lookups are org-scoped, so collisions across orgs that
     happen to use the same repo basename don't matter.
