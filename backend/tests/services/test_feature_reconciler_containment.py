@@ -43,6 +43,7 @@ import pytest
 
 from app.services import feature_reconciler
 from app.services.feature_reconciler import (
+    ABSORBED_THRESHOLD,
     CONTAINMENT_THRESHOLD,
     COSINE_THRESHOLD,
     JACCARD_THRESHOLD,
@@ -70,6 +71,7 @@ def _pair_one(
         jaccard_threshold=JACCARD_THRESHOLD,
         cosine_threshold=COSINE_THRESHOLD,
         containment_threshold=CONTAINMENT_THRESHOLD,
+        absorbed_threshold=ABSORBED_THRESHOLD,
     )
     return pairings[0]
 
@@ -225,9 +227,25 @@ class _FakeReads:
         return list(self._candidates)
 
 
+class _EmptyScalars:
+    def all(self) -> list[Any]:
+        return []
+
+
+class _EmptyResult:
+    """Mimics SQLAlchemy ``Result`` so the reconciler's cluster_cache
+    SELECT returns an empty list and the preserved pass sees an empty
+    indexed_files set."""
+
+    rowcount = 0
+
+    def scalars(self) -> _EmptyScalars:
+        return _EmptyScalars()
+
+
 class _NoopSession:
-    async def execute(self, *_a: Any, **_kw: Any) -> Any:
-        return None
+    async def execute(self, *_a: Any, **_kw: Any) -> _EmptyResult:
+        return _EmptyResult()
 
 
 async def test_containment_match_routes_through_absorb_not_update_in_place(

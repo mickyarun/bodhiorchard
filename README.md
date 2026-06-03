@@ -34,9 +34,23 @@ Self-hosted on your hardware. Your data stays local. Inference engine is your ch
 
 **More walkthroughs:** [Setup](https://youtu.be/ot-BmKxRgRA) &nbsp;·&nbsp; [Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME) &nbsp;·&nbsp; [Requirements & estimation](https://youtu.be/YBwdTes0Fno) &nbsp;·&nbsp; [Design phase & agent prompts](https://youtu.be/lV71qhmfzzw) &nbsp;·&nbsp; [Development & retrospective](https://youtu.be/YjRihN_SKaw)
 
-![Bodhiorchard Living Tree Dashboard](docs/images/livingtree.png)
-
 </div>
+
+---
+
+## Screenshots
+
+**The platform** — what AI agents drive end-to-end:
+
+| Living Tree dashboard | BUD board | Feature registry |
+|---|---|---|
+| ![Living Tree dashboard](docs/images/livingtree.png) | ![BUD board](docs/images/board.png) | ![Feature registry](docs/images/Feature.png) |
+
+**The gamification layer** — the Skill Agent rebuilds developer profiles nightly. Skills compound, badges unlock, and the leaderboard reflects shipped value, not ticket count:
+
+| Skill profile | XP progression | Leaderboard | Unlocks |
+|---|---|---|---|
+| ![Developer skill profile](docs/images/skills.png) | ![XP progression](docs/images/gamification.png) | ![Leaderboard](docs/images/LeaderBoard.png) | ![Unlocks](docs/images/unlocks.png) |
 
 ---
 
@@ -662,22 +676,6 @@ curl -X POST http://localhost:8000/api/v1/buds \
 ### Async-job pattern
 
 Long-running operations (repo scans, embedding builds, BUD generation) return `202 Accepted` with a `job_id`. Subscribe to `ws://localhost:8000/ws/jobs/{job_id}` for progress events instead of polling the REST endpoint.
-
----
-
-## Screenshots
-
-**The platform** — what AI agents drive end-to-end:
-
-| Living Tree dashboard | BUD board | Feature registry |
-|---|---|---|
-| ![Living Tree dashboard](docs/images/livingtree.png) | ![BUD board](docs/images/board.png) | ![Feature registry](docs/images/Feature.png) |
-
-**The gamification layer** — the Skill Agent rebuilds developer profiles nightly. Skills compound, badges unlock, and the leaderboard reflects shipped value, not ticket count:
-
-| Skill profile | XP progression | Leaderboard | Unlocks |
-|---|---|---|---|
-| ![Developer skill profile](docs/images/skills.png) | ![XP progression](docs/images/gamification.png) | ![Leaderboard](docs/images/LeaderBoard.png) | ![Unlocks](docs/images/unlocks.png) |
 
 ---
 

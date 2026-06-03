@@ -33,6 +33,7 @@ import math
 import uuid
 
 from app.services.feature_reconciler import (
+    ABSORBED_THRESHOLD,
     CONTAINMENT_THRESHOLD,
     COSINE_THRESHOLD,
     JACCARD_THRESHOLD,
@@ -96,6 +97,7 @@ def _resolve(
         jaccard_threshold=JACCARD_THRESHOLD,
         cosine_threshold=COSINE_THRESHOLD,
         containment_threshold=CONTAINMENT_THRESHOLD,
+        absorbed_threshold=ABSORBED_THRESHOLD,
     )
 
 
@@ -255,3 +257,156 @@ def test_jaccard_tier_still_beats_cosine_for_same_pair() -> None:
     assert match is cand
     assert via == "jaccard"
     assert score == 1.0
+
+
+def test_absorbed_tier_fires_when_new_write_engulfs_smaller_old_candidate() -> None:
+    """The structural fix this tier exists for.
+
+    Old candidate "Cache Service" had 3 files. New synthesis re-clustered
+    them into a broader "Caching Layer" with 10 files (all 3 olds plus 7
+    new). Jaccard = 3/10 = 0.30 ✗; containment skips (synth larger, not
+    smaller) ✗; cosine N/A (different titles, different embeddings).
+
+    Without tier 5: old candidate falls through to sweep → false-positive
+    deactivation. With tier 5: |old ∩ new| / |old| = 1.0 ≥ 0.6 AND
+    len(new) > len(old) → ``absorbed`` claim.
+    """
+    cand = _candidate(
+        signature="sig-old",
+        files=["cache_service.ts", "cache_keys.ts", "cache_ttl.ts"],
+        title="Cache Service",
+    )
+    write = _write(
+        signature="sig-new",
+        files=[
+            "cache_service.ts",
+            "cache_keys.ts",
+            "cache_ttl.ts",
+            "cache_redis.ts",
+            "cache_layer.ts",
+            "cache_invalidate.ts",
+            "cache_metrics.ts",
+            "cache_admin.ts",
+            "cache_serializer.ts",
+            "cache_eviction.ts",
+        ],
+        title="Caching Layer",
+    )
+
+    match, via, score = _resolve([write], [cand])[0]
+
+    assert match is cand
+    assert via == "absorbed"
+    assert score == 1.0
+
+
+def test_absorbed_tier_below_threshold_does_not_match() -> None:
+    """Reverse-containment under 0.6 must NOT trigger absorption.
+
+    Candidate has 10 files. New write has 20 files, only 5 overlap.
+    |cand ∩ write| / |cand| = 5/10 = 0.5 — below the 0.6 absorbed
+    threshold even though the new write is structurally larger.
+    """
+    cand = _candidate(
+        signature="sig-old",
+        files=[f"c{i}.ts" for i in range(10)],
+    )
+    write = _write(
+        signature="sig-new",
+        files=[f"c{i}.ts" for i in range(5)] + [f"d{i}.ts" for i in range(15)],
+    )
+
+    match, via, _score = _resolve([write], [cand])[0]
+
+    assert match is None
+    assert via == "insert"
+
+
+def test_absorbed_tier_skipped_when_write_equal_size_to_candidate() -> None:
+    """Equal-size sets must not absorb in either direction.
+
+    Tier 3 (containment) requires len(write) < len(cand). Tier 5
+    (absorbed) requires len(write) > len(cand). When sizes match, both
+    tiers skip — either the pair qualifies via Jaccard or it stays
+    unmatched. The 1:1 size flip is the structural guard against two
+    unrelated equal-size features collapsing into one another.
+    """
+    files_a = ["a.ts", "b.ts", "c.ts"]
+    files_b = ["a.ts", "b.ts", "x.ts"]  # 2/3 overlap, |a∩b|/|min| = 2/3 ≈ 0.67
+    cand = _candidate(signature="sig-old", files=files_a)
+    write = _write(signature="sig-new", files=files_b)
+
+    match, via, _score = _resolve([write], [cand])[0]
+
+    assert match is None
+    assert via == "insert"
+
+
+def test_absorbed_tier_runs_after_cosine_so_retitled_overlapping_features_match() -> None:
+    """Tier ordering invariant: a pair that qualifies in both cosine and
+    absorbed must claim via cosine — absorbed is the rescue tier for the
+    retitled case, not a preferred path.
+
+    Without this ordering, cosine-stable renames would suddenly start
+    surfacing as ``absorbed`` in the audit log, breaking ops measurement
+    of how often the rescue tier fires.
+    """
+    cand_emb = _unit([1.0, 0.0, 0.0])
+    cand = _candidate(
+        signature="sig-old",
+        files=["a.ts", "b.ts", "c.ts"],
+        embedding=cand_emb,
+        title="Cache Service",
+    )
+    # write engulfs cand AND has high cosine — cosine should still win.
+    write = _write(
+        signature="sig-new",
+        files=[
+            "a.ts",
+            "b.ts",
+            "c.ts",
+            "d.ts",
+            "e.ts",
+            "f.ts",
+            "g.ts",
+            "h.ts",
+        ],
+        embedding=_unit([0.99, 0.141, 0.0]),  # cosine ≈ 0.99 with cand
+        title="Cache Service",
+    )
+
+    _match, via, _score = _resolve([write], [cand])[0]
+
+    assert via == "cosine"
+
+
+def test_absorbed_strongest_pair_wins_when_two_writes_compete_for_one_candidate() -> None:
+    """Within tier 5, global score-descending claim — same invariant as
+    every other tier. The write that absorbs more of the candidate's
+    files (higher reverse-containment) gets the match.
+    """
+    # Candidate: 5 files.
+    cand = _candidate(signature="sig-old", files=["a", "b", "c", "d", "e"])
+    # weak_write absorbs 3/5 = 0.60 of cand's files (threshold-edge).
+    weak_write = _write(
+        signature="sig-w1",
+        files=["a", "b", "c", "extra1", "extra2", "extra3"],
+        title="weak",
+    )
+    # strong_write absorbs 5/5 = 1.00 of cand's files.
+    strong_write = _write(
+        signature="sig-w2",
+        files=["a", "b", "c", "d", "e", "x", "y", "z"],
+        title="strong",
+    )
+
+    pairings = _resolve([weak_write, strong_write], [cand])
+
+    weak_match, weak_via, _ = pairings[0]
+    strong_match, strong_via, strong_score = pairings[1]
+
+    assert strong_match is cand
+    assert strong_via == "absorbed"
+    assert strong_score == 1.0
+    assert weak_match is None
+    assert weak_via == "insert"
