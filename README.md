@@ -28,19 +28,11 @@ Self-hosted on your hardware. Your data stays local. Inference engine is your ch
 
 ### 📺 Watch the demo
 
-<a href="https://youtu.be/ot-BmKxRgRA"><img src="https://img.youtube.com/vi/ot-BmKxRgRA/maxresdefault.jpg" width="48%" alt="Setup walkthrough"></a>
-&nbsp;
-<a href="https://youtu.be/i8kZdcL1bME"><img src="https://img.youtube.com/vi/i8kZdcL1bME/maxresdefault.jpg" width="48%" alt="Slack triage & MCP tools"></a>
+<a href="https://youtu.be/OxoqBI7BNxU"><img src="https://img.youtube.com/vi/OxoqBI7BNxU/maxresdefault.jpg" width="80%" alt="Inside the virtual world"></a>
 
-<a href="https://youtu.be/YBwdTes0Fno"><img src="https://img.youtube.com/vi/YBwdTes0Fno/maxresdefault.jpg" width="48%" alt="Requirements & estimation"></a>
-&nbsp;
-<a href="https://youtu.be/lV71qhmfzzw"><img src="https://img.youtube.com/vi/lV71qhmfzzw/maxresdefault.jpg" width="48%" alt="Design phase & agent prompts"></a>
+**[▶ Inside the virtual world](https://youtu.be/OxoqBI7BNxU)** — the Living Tree, your org as a tended orchard.
 
-<a href="https://youtu.be/YjRihN_SKaw"><img src="https://img.youtube.com/vi/YjRihN_SKaw/maxresdefault.jpg" width="48%" alt="Development & retrospective"></a>
-&nbsp;
-<a href="https://youtu.be/OxoqBI7BNxU"><img src="https://img.youtube.com/vi/OxoqBI7BNxU/maxresdefault.jpg" width="48%" alt="Inside the virtual world"></a>
-
-**[Setup walkthrough](https://youtu.be/ot-BmKxRgRA)** &nbsp;·&nbsp; **[Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME)** &nbsp;·&nbsp; **[Requirements & estimation](https://youtu.be/YBwdTes0Fno)** &nbsp;·&nbsp; **[Design phase & agent prompts](https://youtu.be/lV71qhmfzzw)** &nbsp;·&nbsp; **[Development & retrospective](https://youtu.be/YjRihN_SKaw)** &nbsp;·&nbsp; **[Inside the virtual world](https://youtu.be/OxoqBI7BNxU)**
+**More walkthroughs:** [Setup](https://youtu.be/ot-BmKxRgRA) &nbsp;·&nbsp; [Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME) &nbsp;·&nbsp; [Requirements & estimation](https://youtu.be/YBwdTes0Fno) &nbsp;·&nbsp; [Design phase & agent prompts](https://youtu.be/lV71qhmfzzw) &nbsp;·&nbsp; [Development & retrospective](https://youtu.be/YjRihN_SKaw)
 
 ![Bodhiorchard Living Tree Dashboard](docs/images/livingtree.png)
 
