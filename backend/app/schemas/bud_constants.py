@@ -71,6 +71,20 @@ SECTION_REQUIRED_STAGES: dict[str, frozenset[str]] = {
     "testing": frozenset({"testing"}),
 }
 
+# Permission gate per chat-enabled section. A user with ANY of the listed
+# permissions may submit / cancel an AI-editor chat on that section. The
+# ``testing`` row also accepts ``buds:test`` so the QA role (which never
+# carries ``buds:edit``) can drive the Testing-tab AI editor while still
+# being blocked from authoring requirements / tech specs / wireframes.
+# Sections absent from this map fall through the route-level gate only,
+# matching the legacy contract.
+SECTION_REQUIRED_PERMISSIONS: dict[str, frozenset[str]] = {
+    "requirements_md": frozenset({"buds:edit"}),
+    "tech_spec_md": frozenset({"buds:edit"}),
+    "design": frozenset({"buds:edit"}),
+    "testing": frozenset({"buds:edit", "buds:test"}),
+}
+
 # BUD agent task type -> section authored by that agent. Used by the
 # originating-agent session bookkeeping so each agent claims a CLI
 # session id keyed by the section it owns; chat resumes that exact

@@ -22,12 +22,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, require_permissions
+from app.core.deps import get_current_user, get_db, get_user_permissions, require_permissions
 from app.models.user import User
 from app.repositories.bud import BUDChatMessageRepository, BUDDesignRepository, BUDRepository
 from app.repositories.bud_section_session import BUDSectionSessionRepository
 from app.schemas.bud import ChatMessageRead
-from app.schemas.bud_constants import SECTION_PATTERN, SECTION_REQUIRED_STAGES
+from app.schemas.bud_constants import (
+    SECTION_PATTERN,
+    SECTION_REQUIRED_PERMISSIONS,
+    SECTION_REQUIRED_STAGES,
+)
 from app.schemas.jobs import ChatJobCreatedResponse, ChatJobPayload, JobState, JobStatusRead
 from app.services.bud_chat_cancel import BUDChatCancelError, cancel_chat
 from app.services.job_queue import (
@@ -131,6 +135,34 @@ async def get_active_chat_job(
     return live
 
 
+async def _assert_section_chat_permission(user: User, db: AsyncSession, section: str) -> None:
+    """Raise 403 if ``user`` lacks any permission that gates chat on ``section``.
+
+    The route-level dependency keeps the door open for either ``buds:edit``
+    or ``buds:test``; this helper narrows it back down per-section so the
+    QA role (``buds:test`` only) can chat on the Testing tab without also
+    gaining write access to Requirements / Design / Tech Spec. Sections
+    absent from :data:`SECTION_REQUIRED_PERMISSIONS` inherit the legacy
+    contract (route-level gate only).
+    """
+    required = SECTION_REQUIRED_PERMISSIONS.get(section)
+    if required is None:
+        return
+    user_perms = await get_user_permissions(user, db)
+    if required & user_perms:
+        return
+    logger.warning(
+        "permission_denied",
+        user_id=str(user.id),
+        section=section,
+        required=sorted(required),
+    )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Insufficient permissions.",
+    )
+
+
 class BUDChatRequest(BaseModel):
     """Schema for a chat message about a BUD's content."""
 
@@ -152,7 +184,7 @@ class BUDChatRequest(BaseModel):
     "/chat",
     response_model=ChatJobCreatedResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_permissions("buds:edit"))],
+    dependencies=[Depends(require_permissions("buds:edit", "buds:test", mode="any"))],
 )
 async def chat_bud(
     bud_id: uuid.UUID,
@@ -179,6 +211,8 @@ async def chat_bud(
     bud = await bud_repo.get_by_id(bud_id)
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+
+    await _assert_section_chat_permission(current_user, db, body.section)
 
     allowed_stages = SECTION_REQUIRED_STAGES.get(body.section)
     if allowed_stages is None:
@@ -324,7 +358,7 @@ class CancelChatResponse(BaseModel):
 @router.post(
     "/chat/cancel",
     response_model=CancelChatResponse,
-    dependencies=[Depends(require_permissions("buds:edit"))],
+    dependencies=[Depends(require_permissions("buds:edit", "buds:test", mode="any"))],
 )
 async def cancel_active_chat(
     bud_id: uuid.UUID,
@@ -342,6 +376,8 @@ async def cancel_active_chat(
     the ``active_job_id`` pointer — the response just acknowledges
     that the signal landed.
     """
+    await _assert_section_chat_permission(current_user, db, section)
+
     try:
         job_id = await cancel_chat(
             db,

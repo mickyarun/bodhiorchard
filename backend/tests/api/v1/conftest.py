@@ -23,8 +23,9 @@ such test needs the same two stand-ins, so they live here.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -42,3 +43,21 @@ def fake_db() -> MagicMock:
     db.flush = AsyncMock()
     db.refresh = AsyncMock()
     return db
+
+
+@pytest.fixture(autouse=True)
+def _bud_chat_permissive_perms() -> Iterator[None]:
+    """Default permission set for direct-handler BUD-chat tests.
+
+    The ``require_permissions`` ``Depends`` chain never runs when these
+    tests call handler functions directly, so the per-section check inside
+    :mod:`app.api.v1.bud_chat` is the only permission gate they hit. By
+    default we satisfy both ``buds:edit`` and ``buds:test`` so existing
+    coverage stays focused on its own concern. Tests asserting permission
+    denial re-patch ``get_user_permissions`` with a narrower set.
+    """
+    with patch(
+        "app.api.v1.bud_chat.get_user_permissions",
+        new=AsyncMock(return_value={"buds:edit", "buds:test", "buds:view"}),
+    ):
+        yield
