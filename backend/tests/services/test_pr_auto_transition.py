@@ -145,3 +145,12 @@ def test_pr_references_bud(
     """Stage-tab content filter pins the user's reported behaviour:
     only PRs whose head ref or title carry this BUD's number appear."""
     assert pr_references_bud(bud_number, head_ref, title) is expected
+
+
+def test_pr_references_bud_with_space_form_in_title() -> None:
+    """``Bud 004/...`` (with a space) does NOT match — the regex requires
+    ``bud-?`` immediately followed by digits. Branch naming is the
+    reliable link source; loose space-form titles need the developer
+    to add a proper tag (``[BUD-004]``)."""
+    assert pr_references_bud(4, None, "Bud 004/processing loader") is False
+    assert pr_references_bud(4, "bud-004/processing-loader", "Bud 004/processing loader") is True

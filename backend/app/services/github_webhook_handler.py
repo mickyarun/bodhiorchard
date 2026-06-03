@@ -76,13 +76,16 @@ async def handle_github_event(
             await _handle_pr_closed(org_id, repo, pr_data, db)
         elif action == "synchronize":
             await _handle_pr_synchronize(org_id, pr_data, db)
-        elif action == "edited" and "title" in (payload.get("changes") or {}):
-            # GitHub's ``edited`` action fires on every body / label / title
-            # change. Restrict to title edits — that's the path where a PR
-            # opened without a BUD reference gets retitled to ``[BUD-008] X``
-            # and needs to be relinked. Body / label edits would otherwise
-            # churn the log without changing PR → BUD attribution.
-            await _handle_pr_edited(org_id, pr_data, db)
+        elif action == "edited":
+            # GitHub's ``edited`` action fires on every body / label / title /
+            # base / head change. We act on the subset that affects either
+            # the BUD link (title edits relink to a different BUD-NNN) or
+            # the release-stage filter (base change moves the PR off the
+            # tab that watches ``main`` / ``release/*``). Body and label
+            # edits stay silent to keep the log quiet.
+            changes = payload.get("changes") or {}
+            if changes.keys() & {"title", "base"}:
+                await _handle_pr_edited(org_id, pr_data, db)
     elif event_type == "pull_request_review" and action == "submitted":
         review = GitHubReview.model_validate(payload["review"])
         pr_data = GitHubPullRequest.model_validate(payload["pull_request"])
@@ -417,16 +420,23 @@ async def _handle_pr_edited(
     pr_data: GitHubPullRequest,
     db: AsyncSession,
 ) -> None:
-    """Re-resolve the owning BUD when a PR title changes.
+    """Pick up the title + base/head changes GitHub reports on edit.
 
-    Catches the case where a PR opened without a BUD reference is later
-    retitled to ``[BUD-008] X`` — without this, the PR stays orphaned
-    (``bud_id IS NULL``) and only surfaces through the impacted-repos
-    fallback in the release-stage views, which is the very over-matching
-    behaviour the rest of this PR is fixing.
+    Two concerns share this handler because both ride the same webhook:
 
-    Only writes when the resolution actually changes — title edits that
-    don't shift the BUD link are a no-op so the timeline stays quiet.
+    * **Title edits** can relink the PR to a different BUD. We re-run
+      ``resolve_bud_from_pr`` and emit ``pr_linked`` / ``pr_unlinked``
+      timeline events so the audit trail stays symmetric.
+    * **Base-branch edits** move the PR between release-stage tabs.
+      Without syncing ``pr.base_branch``, a PR retargeted from ``main``
+      to ``develop`` keeps showing on the PROD tab indefinitely because
+      ``branch_matches`` runs against the stale value. ``head_branch``
+      is synced for the same reason (force-pushes that rename the
+      branch land here too).
+
+    Stale state is what makes ``BUD-004`` keep ``#1997`` on its PROD
+    tab even after the PR was retargeted to ``develop`` — fixing the
+    sync side closes that loop for future edits.
     """
     pr_repo = PullRequestRepository(db, org_id=org_id)
     pr = await pr_repo.get_by_github_pr_id(pr_data.id)
@@ -434,6 +444,8 @@ async def _handle_pr_edited(
         return
 
     pr.title = pr_data.title
+    pr.base_branch = pr_data.base.ref
+    pr.head_branch = pr_data.head.ref
 
     new_bud_id, new_bud = await resolve_bud_from_pr(db, org_id, pr_data.head.ref, pr_data.title)
     if new_bud_id == pr.bud_id:
