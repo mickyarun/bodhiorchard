@@ -49,9 +49,11 @@
       </v-btn>
     </div>
     <div class="text-caption text-medium-emphasis mt-1">
-      Open PRs are matched against this pattern on each impacted repo.
-      Supports fnmatch wildcards — e.g. <code>release/*</code> matches
-      <code>release/2026-08-01</code>.
+      A PR appears here when its base branch matches this pattern
+      <strong>and</strong> its head branch or title carries
+      <code>bud-{{ budNumber }}</code>. Multi-BUD release branches like
+      <code>release/bud-001-bud-{{ paddedBudNumber }}</code> show up on
+      every referenced BUD.
     </div>
   </v-card>
 
@@ -68,6 +70,22 @@
           <code>{{ stage === 'uat' ? 'uat_branch' : 'main_branch' }}</code>
           setting.
         </p>
+        <p class="text-caption text-medium-emphasis mb-3">
+          A PR is surfaced only when both rules hold:
+        </p>
+        <ul class="text-caption text-medium-emphasis mb-3 ps-4">
+          <li>
+            Its base branch matches this pattern. Supports fnmatch
+            wildcards — <code>release/*</code> matches
+            <code>release/2026-08-01</code>.
+          </li>
+          <li>
+            Its head branch or title contains
+            <code>bud-{{ budNumber }}</code>. Release branches like
+            <code>release/bud-001-bud-{{ paddedBudNumber }}</code> match
+            this BUD and any other BUD also named in the branch.
+          </li>
+        </ul>
         <p
           v-if="impactedRepoCount > 1"
           class="text-caption text-medium-emphasis mb-3"
@@ -127,6 +145,10 @@ import type { ReleaseStage } from '@/types'
 
 const props = defineProps<{
   budId: string
+  /** This BUD's number — used by the helper copy so the rendered
+   *  example matches the actual BUD (``bud-4`` / ``bud-004``) instead
+   *  of a placeholder. */
+  budNumber: number
   stage: ReleaseStage
   /** The per-BUD pattern when set, ``null`` to fall back to the repo default. */
   override: string | null
@@ -160,6 +182,11 @@ const displayPattern = computed(() => props.override ?? props.defaultBranch ?? '
 const impactedRepoCount = computed(() => props.impactedRepoCount ?? 0)
 
 const stageLabel = computed(() => (props.stage === 'uat' ? 'UAT' : 'Production'))
+
+// Zero-padded form (``004``) for the multi-BUD example so the copy
+// mirrors the convention developers actually use when chaining BUDs
+// into a release branch.
+const paddedBudNumber = computed(() => String(props.budNumber).padStart(3, '0'))
 
 function cancel(): void {
   if (saving.value) return

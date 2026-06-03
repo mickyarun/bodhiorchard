@@ -21,6 +21,7 @@
          PR to materialise. -->
     <BUDStageBranchOverride
       :bud-id="budId"
+      :bud-number="budNumber"
       :stage="stage"
       :override="stageOverride"
       :default-branch="defaultStageBranch"
@@ -289,6 +290,10 @@ interface ImpactedRepo {
 
 const props = defineProps<{
   budId: string
+  /** This BUD's number. Threaded into the override widget so the helper
+   *  copy can reference ``bud-NNN`` concretely rather than as a
+   *  placeholder. */
+  budNumber: number
   stage: ReleaseStage
   /** Whether ANY impacted repo of this BUD has the relevant branch configured.
    *  Drives the empty-state CTA. Pass through from the parent. */
