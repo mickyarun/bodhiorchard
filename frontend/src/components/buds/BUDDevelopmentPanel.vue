@@ -113,6 +113,37 @@
         <div v-if="branchCopied" class="text-caption text-success d-flex align-center ml-1">Copied!</div>
       </div>
 
+      <!-- Impacted repos — same Edit affordance as the empty-state. Once
+           a BUD has activity the user can still need to correct scope
+           (tech-arch guessed wrong, repos added mid-build); without this
+           row there is no place to do so on the development tab. -->
+      <div class="d-flex align-center flex-wrap ga-2 mb-4 dev-panel__impacted-row">
+        <v-icon icon="mdi-source-repository-multiple" size="16" color="medium-emphasis" />
+        <span class="text-caption text-medium-emphasis">Impacted:</span>
+        <template v-if="impactedRepos && impactedRepos.length">
+          <v-chip
+            v-for="r in impactedRepos"
+            :key="r.repo_id || r.repo_name"
+            size="x-small"
+            variant="tonal"
+            prepend-icon="mdi-source-repository"
+          >
+            {{ r.repo_name }}
+          </v-chip>
+        </template>
+        <span v-else class="text-caption text-medium-emphasis">none yet</span>
+        <v-spacer />
+        <v-btn
+          size="x-small"
+          variant="text"
+          density="compact"
+          prepend-icon="mdi-pencil-outline"
+          @click="editReposOpen = true"
+        >
+          Edit
+        </v-btn>
+      </div>
+
       <!-- Stats Row: only real, useful numbers -->
       <div class="stats-row mb-5">
         <div class="stat-card">
