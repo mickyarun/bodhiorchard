@@ -245,9 +245,7 @@ async def get_bud_release_stage(
         # and BUD-004 tabs, while an unrelated PR to ``main`` does not
         # leak through. Directly-linked PRs (``bud_id == bud_id``)
         # short-circuit so the user-edited link wins over text matching.
-        if pr.bud_id != bud_id and not pr_references_bud(
-            bud.bud_number, pr.head_branch, pr.title
-        ):
+        if pr.bud_id != bud_id and not pr_references_bud(bud.bud_number, pr.head_branch, pr.title):
             continue
         seen_pr_ids.add(pr.github_pr_id)
         open_prs.append(

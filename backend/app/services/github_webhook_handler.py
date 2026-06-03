@@ -443,9 +443,24 @@ async def _handle_pr_edited(
     if pr is None:
         return
 
+    # Title / base / head are always synced — the dispatcher only fires
+    # this handler when at least one of them changed, so the writes are
+    # never wasted.
+    title_changed = pr.title != pr_data.title
     pr.title = pr_data.title
     pr.base_branch = pr_data.base.ref
     pr.head_branch = pr_data.head.ref
+
+    # Only re-resolve the BUD link when the title actually changed. A
+    # base-only edit (the BUD-004 / PR-1997 case) must NOT trigger a
+    # re-resolution that could unlink a PR whose old title once carried
+    # a now-rejected reference shape (``auth1-bud-7``-style strings the
+    # previous, looser regex used to accept). The auto-transition checks
+    # downstream key off ``pr.bud_id``; leaving the link intact keeps
+    # the development → code_review threshold stable across base edits.
+    if not title_changed:
+        await db.commit()
+        return
 
     new_bud_id, new_bud = await resolve_bud_from_pr(db, org_id, pr_data.head.ref, pr_data.title)
     if new_bud_id == pr.bud_id:

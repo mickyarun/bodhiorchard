@@ -74,6 +74,18 @@ def test_extract_bud_number_accepts_real_world_forms(text: str, expected: int) -
         # Glued to other digits.
         "bud2name",
         "abcbud-5",
+        # Run-on with a leading digit / sha-like prefix — the prior relaxed
+        # regex accepted these; the strict prefix now rejects them.
+        "1bud-3",
+        "sha7bud-5",
+        "v2bud-5",
+        # Hyphen-separated label with a trailing digit: ``a1-bud-7``-style
+        # patterns are NOT valid BUD chains (multi-BUD chains start with
+        # a fresh ``bud-NNN``, not a non-BUD token). Locked in so the
+        # next regex tweak doesn't widen here.
+        "auth1-bud-7",
+        "repo2-bud-3",
+        "team42-bud-9",
         # No number.
         "feature/bud-x",
         "release/uat",
