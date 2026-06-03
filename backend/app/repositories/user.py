@@ -18,6 +18,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import Select, and_, case, func, or_, select, true
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -711,9 +712,48 @@ class UserRepository(BaseRepository[User]):
         self._db.add(alias)
         return alias
 
-    async def find_user_by_alias_email(
-        self, org_id: uuid.UUID, email: str
-    ) -> User | None:
+    async def create_stub_member(
+        self,
+        org_id: uuid.UUID,
+        *,
+        email: str,
+        name: str,
+        github_username: str,
+        password_hash: str,
+    ) -> User:
+        """Insert a stub User + ``OrgToUser`` membership in one shot.
+
+        Used to surface GitHub PR authors who don't yet have an account
+        so admins can merge them into a real member via Settings →
+        Members. Caller chooses ``password_hash`` — typically a random
+        bcrypt-hashed string so the account cannot authenticate.
+
+        Concurrent BUD closures may race on the same unknown
+        ``email`` — the insert is wrapped in a SAVEPOINT and, on the
+        ``uq_users_email`` violation, the loser re-fetches the winning
+        row instead of poisoning the outer transaction.
+        """
+        try:
+            async with self._db.begin_nested():
+                user = User(
+                    email=email,
+                    name=name,
+                    password_hash=password_hash,
+                    github_username=github_username,
+                    is_active=True,
+                )
+                self._db.add(user)
+                await self._db.flush()
+                self._db.add(OrgToUser(user_id=user.id, org_id=org_id))
+                await self._db.flush()
+            return user
+        except IntegrityError:
+            existing = await self.get_by_email_in_org(org_id, email)
+            if existing is None:
+                raise
+            return existing
+
+    async def find_user_by_alias_email(self, org_id: uuid.UUID, email: str) -> User | None:
         """Return the user who has ``email`` listed as a UserEmailAlias.
 
         Walks one hop of the Settings → Members merge backlink: when

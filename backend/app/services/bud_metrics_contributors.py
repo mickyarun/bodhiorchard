@@ -35,6 +35,7 @@ from app.repositories.dev_activity import DevActivityLogRepository
 from app.repositories.pull_request import PullRequestRepository
 from app.repositories.user import UserRepository
 from app.services.contributor_resolver import get_bud_contributors
+from app.services.external_user_provisioner import ensure_user_for_github_login
 
 
 def _date_bucket(ts: datetime) -> str:
@@ -70,6 +71,22 @@ async def build_contributor_breakdown(
     commits = await DevActivityLogRepository(db, org_id=org_id).list_commit_tuples_for_bud(bud.id)
     prs = await PullRequestRepository(db, org_id=org_id).list_for_bud(bud.id)
     todos = await BUDTodoRepository(db, org_id=org_id).list_for_bud(bud.id)
+
+    # Materialise stub members for any merged PRs whose author never
+    # mapped to a User (author_user_id IS NULL but author_github_login
+    # is known). Surfacing them in Members lets the admin merge them
+    # into the right person via Settings → Members; the BUD-learning
+    # alias resolver then folds the row at read time. Backfilling
+    # pr.author_user_id keeps subsequent runs short-circuit cheap.
+    for pr in prs:
+        if pr.state != PRState.MERGED or pr.author_user_id is not None:
+            continue
+        stub = await ensure_user_for_github_login(db, org_id, pr.author_github_login or "")
+        if stub is None:
+            continue
+        pr.author_user_id = stub.id
+        user_ids.add(stub.id)
+
     users = await UserRepository(db).get_many_by_ids(list(user_ids)) if user_ids else []
     name_by_id = {u.id: u.name or u.email for u in users}
 
