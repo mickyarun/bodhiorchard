@@ -753,9 +753,7 @@ class UserRepository(BaseRepository[User]):
                 raise
             return existing
 
-    async def find_user_by_alias_email(
-        self, org_id: uuid.UUID, email: str
-    ) -> User | None:
+    async def find_user_by_alias_email(self, org_id: uuid.UUID, email: str) -> User | None:
         """Return the user who has ``email`` listed as a UserEmailAlias.
 
         Walks one hop of the Settings → Members merge backlink: when
