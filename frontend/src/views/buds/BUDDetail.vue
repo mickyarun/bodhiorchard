@@ -324,6 +324,7 @@
                   :has-tech-spec="!!bud.tech_spec_md"
                   :impacted-repos="bud.impacted_repos"
                   @download-tech-spec="downloadSection('tech_spec_md')"
+                  @refresh-bud="budStore.fetchBUD(bud.id)"
                 />
               </v-tabs-window-item>
 

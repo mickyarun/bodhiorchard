@@ -34,9 +34,23 @@
       <MCPSetupHint purpose="development" class="mb-4" />
 
       <!-- Impacted repos hint -->
-      <div v-if="impactedRepos && impactedRepos.length" class="mb-4">
-        <div class="text-caption text-medium-emphasis mb-1">Impacted repositories</div>
-        <div class="d-flex ga-2 flex-wrap justify-center">
+      <div class="mb-4">
+        <div class="d-flex align-center justify-center ga-2 mb-1">
+          <span class="text-caption text-medium-emphasis">Impacted repositories</span>
+          <v-btn
+            size="x-small"
+            variant="text"
+            density="compact"
+            prepend-icon="mdi-pencil-outline"
+            @click="editReposOpen = true"
+          >
+            Edit
+          </v-btn>
+        </div>
+        <div
+          v-if="impactedRepos && impactedRepos.length"
+          class="d-flex ga-2 flex-wrap justify-center"
+        >
           <v-chip
             v-for="r in impactedRepos"
             :key="r.repo_id || r.repo_name"
@@ -46,6 +60,10 @@
           >
             {{ r.repo_name }}
           </v-chip>
+        </div>
+        <div v-else class="text-caption text-medium-emphasis text-center">
+          No impacted repositories yet. Add the repos this BUD touches
+          so PRs and merges link back here.
         </div>
       </div>
 
@@ -232,11 +250,19 @@
         </v-expansion-panel>
       </v-expansion-panels>
     </template>
+
+    <BUDImpactedReposDialog
+      v-model="editReposOpen"
+      :bud-id="budId"
+      :current="impactedRepos ?? null"
+      @saved="$emit('refresh-bud')"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import BUDImpactedReposDialog from '@/components/buds/BUDImpactedReposDialog.vue'
 import { useBudActivity } from '@/composables/useBudActivity'
 import { useSettingsStore } from '@/stores/settings'
 import { fileColor, fileIcon, parseFiles, timeAgo } from '@/utils/dev-activity-helpers'
@@ -252,7 +278,12 @@ const props = defineProps<{
 
 defineEmits<{
   (e: 'download-tech-spec'): void
+  /** Fired after the user saves an impacted_repos edit. Parent reloads
+   *  the BUD so the chip row updates everywhere. */
+  (e: 'refresh-bud'): void
 }>()
+
+const editReposOpen = ref(false)
 
 // When QA automation is enabled for the org, the testing tab pulls
 // commits from QA-role users into its own activity stream. We exclude
