@@ -63,9 +63,12 @@
           v-if="!visibleRepos.length && !retiredRows.length && !trackedReposLoading"
           class="text-caption text-medium-emphasis text-center py-6"
         >
-          No tracked repos match
-          <span v-if="filter">"<code>{{ filter }}</code>"</span>.
-          <span v-else>Add a repo in Settings first.</span>
+          <template v-if="filter">
+            No tracked repos match "<code>{{ filter }}</code>".
+          </template>
+          <template v-else>
+            No tracked repos yet. Add a repo in Settings first.
+          </template>
         </div>
         <div v-else class="bud-impacted-repos__list">
           <v-checkbox
