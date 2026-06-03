@@ -142,6 +142,28 @@ class BUDFeatureLinkRepository:
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
+    async def most_recent_bud_id_for_feature(self, feature_id: uuid.UUID) -> uuid.UUID | None:
+        """Most recently-linked BUD id for a feature, or ``None``.
+
+        Used by the production-bug SP service to decide who pays the
+        ``SP_DEV_BUG_PRODUCTION`` penalty when the bug is filed against
+        a Feature (not a BUD directly). Picking the most-recent BUD
+        approximates "the most recent change that touched this feature
+        and could have introduced the bug" without requiring a
+        PR-to-file-path index.
+        """
+        stmt = (
+            select(BUDFeatureLink.bud_id)
+            .where(
+                BUDFeatureLink.feature_id == feature_id,
+                BUDDocument.id == BUDFeatureLink.bud_id,
+                BUDDocument.org_id == self._org_id,
+            )
+            .order_by(BUDFeatureLink.created_at.desc())
+            .limit(1)
+        )
+        return (await self._db.execute(stmt)).scalar_one_or_none()
+
     async def titles_by_ids(self, feature_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
         """Return ``{feature_id: feature_title}`` for the given ids in this org.
 

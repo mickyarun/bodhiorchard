@@ -48,6 +48,16 @@ export function usePermissions() {
   // ability rather than splitting view-only access from action access.
   const canViewCodeSettings = computed(() => hasPermission('integrations:configure'))
 
+  // Bug board. Each helper pairs the new ``bugs:*`` perm with the
+  // legacy ``buds:*`` fallback so role tokens minted before the Step E
+  // backend rollout don't lose access. Drop the legacy half once the
+  // backend's ``TODO(step-e-cleanup)`` is resolved.
+  const canViewBugs = computed(() => hasAnyPermission('bugs:view', 'buds:view'))
+  const canReportBugs = computed(() => hasAnyPermission('bugs:report', 'buds:edit'))
+  const canEditBugs = computed(() => hasAnyPermission('bugs:edit', 'buds:edit'))
+  const canAssignBugs = computed(() => hasPermission('bugs:assign'))
+  const canCommentOnBugs = computed(() => hasAnyPermission('bugs:comment', 'buds:edit'))
+
   return {
     hasPermission,
     hasAnyPermission,
@@ -61,5 +71,10 @@ export function usePermissions() {
     canViewPresenceSettings,
     canViewJiraImport,
     canViewCodeSettings,
+    canViewBugs,
+    canReportBugs,
+    canEditBugs,
+    canAssignBugs,
+    canCommentOnBugs,
   }
 }

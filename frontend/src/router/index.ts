@@ -126,7 +126,7 @@ const router = createRouter({
         {
           path: 'bugs',
           name: 'bugs',
-          component: () => import('@/views/bugs/BugsView.vue'),
+          component: () => import('@/views/bugs/BugBoard.vue'),
         },
         {
           path: 'leaderboard',

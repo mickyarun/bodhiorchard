@@ -24,6 +24,7 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.bud import BUDDocument
 from app.models.organization import Organization
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import UserRole
@@ -167,13 +168,17 @@ async def handle_bug_approval(
     await db.flush()
     await db.refresh(bug)
 
-    # Embed + auto-link to closest BUD
+    # Embed + auto-link to closest BUD. Triage bugs default to
+    # ``bug_type='testing'`` so the linker always dispatches to the BUD
+    # pool here, but we narrow defensively in case that ever changes.
+    matched_bud: BUDDocument | None = None
     try:
         from app.services.bug_linker import embed_and_link_bug
 
-        matched_bud = await embed_and_link_bug(db, org.id, bug)
+        matched = await embed_and_link_bug(db, org.id, bug)
+        if isinstance(matched, BUDDocument):
+            matched_bud = matched
     except Exception:
-        matched_bud = None
         logger.warning("bug_triage_embed_failed", bug_id=str(bug.id), exc_info=True)
 
     session.status = TriageStatus.BUD_CREATED

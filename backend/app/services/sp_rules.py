@@ -28,7 +28,13 @@ SP_DEV_REVIEW_GIVEN = 0.25  # reviewed someone else's PR
 SP_DEV_BUD_SHIPPED = 1.0  # BUD reached PROD as assignee
 SP_DEV_QUALITY_HIGH = 0.5  # quality effectiveness score > 80
 SP_DEV_BUG_TESTING = -0.25  # bug found in testing phase on their BUD
-SP_DEV_BUG_PRODUCTION = -1.0  # bug found in production on their BUD
+# Production bug payer rule: when a prod bug is filed against a shipped
+# Feature (via the /bugs board) rather than a BUD, the penalty goes to
+# the assignee of the most recently linked BUD via ``bud_feature_link``.
+# This is a heuristic — see ``sp_service._penalise_dev_for_bug`` — and
+# captures "who most recently changed this feature" without requiring a
+# PR-to-file-path index.
+SP_DEV_BUG_PRODUCTION = -1.0  # bug found in production on their BUD or Feature
 
 # ─── QA ────────────────────────────────────────
 

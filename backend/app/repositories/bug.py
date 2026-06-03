@@ -20,8 +20,14 @@ from datetime import datetime
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.bug import Bug, BugSeverity, BugStatus
+from app.models.bug import Bug, BugSeverity, BugStatus, BugType
 from app.repositories.base import BaseRepository
+
+_OPEN_STATUSES: tuple[BugStatus, ...] = (
+    BugStatus.OPEN,
+    BugStatus.IN_PROGRESS,
+    BugStatus.BLOCKED,
+)
 
 
 class BugRepository(BaseRepository[Bug]):
@@ -49,7 +55,7 @@ class BugRepository(BaseRepository[Bug]):
         """Most-recent open / in-progress / blocked bugs, newest first."""
         stmt = self._scoped(
             select(Bug)
-            .where(Bug.status.in_([BugStatus.OPEN, BugStatus.IN_PROGRESS, BugStatus.BLOCKED]))
+            .where(Bug.status.in_(_OPEN_STATUSES))
             .order_by(Bug.created_at.desc())
             .limit(limit)
         )
@@ -88,6 +94,21 @@ class BugRepository(BaseRepository[Bug]):
         result = await self._db.execute(stmt)
         return {row.assignee_id: row.cnt for row in result.all()}
 
+    async def count_testing_bugs_by_reporter(self, reporter_id: uuid.UUID) -> int:
+        """Total testing bugs ever filed by a reporter, all-time.
+
+        Used by the QA SP batch rule — every Nth testing bug awards SP.
+        Tenant-scoped via :meth:`_scoped`.
+        """
+        stmt = self._scoped(
+            select(func.count(Bug.id)).where(
+                Bug.reporter_id == reporter_id,
+                Bug.bug_type == BugType.TESTING,
+            )
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar() or 0
+
     async def count_critical_open(self) -> int:
         """Count bugs with severity=critical and status in (open, in_progress)."""
         stmt = self._scoped(
@@ -115,7 +136,7 @@ class BugRepository(BaseRepository[Bug]):
             select(Bug.bud_id, func.count(Bug.id))
             .where(
                 Bug.bud_id.in_(bud_ids),
-                Bug.status.in_([BugStatus.OPEN, BugStatus.IN_PROGRESS, BugStatus.BLOCKED]),
+                Bug.status.in_(_OPEN_STATUSES),
             )
             .group_by(Bug.bud_id)
         )
@@ -128,6 +149,7 @@ class BugRepository(BaseRepository[Bug]):
         status: str | None = None,
         severity: str | None = None,
         bud_id: uuid.UUID | None = None,
+        feature_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Bug], int]:
@@ -136,7 +158,9 @@ class BugRepository(BaseRepository[Bug]):
         Returns (items, total_count) tuple for the paginated response.
         """
         base = self._scoped(select(Bug))
-        base = self._apply_filters(base, status=status, severity=severity, bud_id=bud_id)
+        base = self._apply_filters(
+            base, status=status, severity=severity, bud_id=bud_id, feature_id=feature_id
+        )
 
         # Total count (same filters, no pagination)
         count_stmt = select(func.count()).select_from(base.subquery())
@@ -156,6 +180,101 @@ class BugRepository(BaseRepository[Bug]):
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_for_feature(
+        self,
+        feature_id: uuid.UUID,
+        *,
+        status_filter: str | None = None,
+    ) -> list[Bug]:
+        """All bugs linked to a specific Feature, newest first.
+
+        Used by the production bug board's per-Feature drill-down.
+        ``status_filter`` accepts comma-separated statuses (e.g.
+        ``"open,in-progress"``); omit it to include all statuses.
+        """
+        stmt = self._scoped(
+            select(Bug).where(Bug.feature_id == feature_id).order_by(Bug.created_at.desc())
+        )
+        if status_filter:
+            statuses = [s.strip().lower() for s in status_filter.split(",")]
+            stmt = stmt.where(Bug.status.in_(statuses))
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_open_for_feature(self, feature_id: uuid.UUID) -> int:
+        """Open (unresolved) bug count for a Feature.
+
+        Includes ``open``, ``in-progress``, ``blocked``. Used for the
+        Feature card badge on the BUD board's Feature switcher.
+        """
+        stmt = self._scoped(
+            select(func.count(Bug.id)).where(
+                Bug.feature_id == feature_id,
+                Bug.status.in_(_OPEN_STATUSES),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar() or 0
+
+    async def open_bug_counts_by_feature(
+        self, feature_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        """Bulk-count open bugs (open / in_progress / blocked) per Feature id."""
+        if not feature_ids:
+            return {}
+        stmt = self._scoped(
+            select(Bug.feature_id, func.count(Bug.id))
+            .where(
+                Bug.feature_id.in_(feature_ids),
+                Bug.status.in_(_OPEN_STATUSES),
+            )
+            .group_by(Bug.feature_id)
+        )
+        result = await self._db.execute(stmt)
+        return {row[0]: row[1] for row in result.all() if row[0] is not None}
+
+    async def list_board(
+        self,
+        *,
+        bug_type: str | None = None,
+        severity: str | None = None,
+        feature_id: uuid.UUID | None = None,
+        assignee_id: uuid.UUID | None = None,
+        limit: int = 500,
+    ) -> list[Bug]:
+        """All non-archived bugs grouped for the Kanban board.
+
+        Returns every bug whose status is in the five board columns
+        (open, in-progress, blocked, resolved, closed) sorted by
+        ``created_at`` descending so the API handler can group them per
+        column in Python without a second query. Callers that need
+        cursor-free pagination should use :meth:`list_filtered` instead.
+
+        ``limit`` caps the row count defensively — a Kanban can't render
+        more than a few hundred cards usefully, and an unbounded fetch
+        would block the event loop on serialization for noisy orgs.
+        TODO: switch to per-column pagination once boards routinely
+        exceed the cap.
+        """
+        # Apply filters BEFORE ordering + limit. A naive ``select(Bug)
+        # .order_by().limit().where()`` composes into valid SQL but the
+        # order_by-then-limit operates on the whole org's bug set first,
+        # which truncates a noisy org's production board to whichever
+        # subset of the org's 500 newest bugs happen to be production.
+        stmt = self._scoped(select(Bug))
+        if bug_type:
+            stmt = stmt.where(Bug.bug_type == bug_type)
+        if severity:
+            severities = [s.strip().lower() for s in severity.split(",")]
+            stmt = stmt.where(Bug.severity.in_(severities))
+        if feature_id is not None:
+            stmt = stmt.where(Bug.feature_id == feature_id)
+        if assignee_id is not None:
+            stmt = stmt.where(Bug.assignee_id == assignee_id)
+        stmt = stmt.order_by(Bug.created_at.desc()).limit(limit)
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
     async def count_for_bud(self, bud_id: uuid.UUID) -> int:
         """Count bugs linked to a specific BUD."""
         stmt = self._scoped(
@@ -172,7 +291,7 @@ class BugRepository(BaseRepository[Bug]):
         stmt = self._scoped(
             select(func.count(Bug.id)).where(
                 Bug.bud_id == bud_id,
-                Bug.status.in_([BugStatus.OPEN, BugStatus.IN_PROGRESS, BugStatus.BLOCKED]),
+                Bug.status.in_(_OPEN_STATUSES),
             ),
         )
         result = await self._db.execute(stmt)
@@ -197,7 +316,7 @@ class BugRepository(BaseRepository[Bug]):
         stmt = self._scoped(select(Bug))
         if status_filter == "open":
             stmt = stmt.where(
-                Bug.status.in_([BugStatus.OPEN, BugStatus.IN_PROGRESS, BugStatus.BLOCKED]),
+                Bug.status.in_(_OPEN_STATUSES),
             )
         elif status_filter != "all":
             statuses = [s.strip().lower() for s in status_filter.split(",")]
@@ -213,6 +332,7 @@ class BugRepository(BaseRepository[Bug]):
         status: str | None = None,
         severity: str | None = None,
         bud_id: uuid.UUID | None = None,
+        feature_id: uuid.UUID | None = None,
     ) -> Select[tuple[Bug]]:
         """Apply optional filters to a Bug query."""
         if status:
@@ -223,4 +343,6 @@ class BugRepository(BaseRepository[Bug]):
             stmt = stmt.where(Bug.severity.in_(severities))
         if bud_id:
             stmt = stmt.where(Bug.bud_id == bud_id)
+        if feature_id:
+            stmt = stmt.where(Bug.feature_id == feature_id)
         return stmt

@@ -767,9 +767,14 @@ export interface BugListItem {
   module: string | null
   budId: string | null
   budNumber: number | null
+  featureId: string | null
+  featureTitle: string | null
   reporterName: string | null
+  assigneeId: string | null
   assigneeName: string | null
+  commentCount: number
   createdAt: string
+  updatedAt: string
 }
 
 export interface BugRead {
@@ -784,10 +789,13 @@ export interface BugRead {
   budId: string | null
   budNumber: number | null
   budTitle: string | null
+  featureId: string | null
+  featureTitle: string | null
   reporterId: string
   reporterName: string | null
   assigneeId: string | null
   assigneeName: string | null
+  commentCount: number
   resolvedAt: string | null
   createdAt: string
   updatedAt: string
@@ -798,6 +806,44 @@ export interface BugListResponse {
   total: number
   page: number
   pageSize: number
+}
+
+export interface BugBoardResponse {
+  columns: Record<BugStatusValue, BugListItem[]>
+  total: number
+}
+
+export interface BugComment {
+  id: string
+  bugId: string
+  authorId: string
+  authorName: string | null
+  body: string
+  editedAt: string | null
+  deletedAt: string | null
+  createdAt: string
+}
+
+export interface BugCommentListResponse {
+  items: BugComment[]
+  total: number
+}
+
+// Order matches the production Kanban left-to-right.
+export const BUG_BOARD_COLUMNS: BugStatusValue[] = [
+  'open',
+  'in-progress',
+  'blocked',
+  'resolved',
+  'closed',
+]
+
+export const BUG_STATUS_LABELS: Record<BugStatusValue, string> = {
+  open: 'Open',
+  'in-progress': 'In Progress',
+  blocked: 'Blocked',
+  resolved: 'Resolved',
+  closed: 'Closed',
 }
 
 export const BUG_SEVERITY_COLORS: Record<BugSeverity, string> = {

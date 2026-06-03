@@ -53,12 +53,24 @@ class BugStatus(StrEnum):
 
 
 class Bug(BaseModel):
-    """Bug report linked to an organization and optionally to a BUD."""
+    """Bug report linked to an organization and optionally to a BUD or Feature.
+
+    Two FKs cover the two surfaces the bug board supports:
+
+    - ``bud_id`` — testing bug raised against an in-flight BUD. Surfaced in
+      ``BUDBugsPanel`` and gated by the BUD bug-threshold reject loop.
+    - ``feature_id`` — production bug raised against a shipped
+      :class:`app.models.feature.Feature`. Surfaced on the ``/bugs`` Kanban.
+
+    Both are nullable; a bug may carry one, the other, or (briefly, before
+    auto-link runs) neither.
+    """
 
     __tablename__ = "bugs"
     __table_args__ = (
         Index("ix_bugs_org_status_created", "org_id", "status", "created_at"),
         Index("ix_bugs_bud_id_status", "bud_id", "status"),
+        Index("ix_bugs_feature_id_status", "feature_id", "status"),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -66,6 +78,11 @@ class Bug(BaseModel):
     )
     bud_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("bud_documents.id"), nullable=True, index=True
+    )
+    feature_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("features.id", name="fk_bugs_feature_id", ondelete="SET NULL"),
+        nullable=True,
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

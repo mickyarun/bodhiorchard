@@ -30,6 +30,7 @@
     "vite-plugin-wasm": "^3.6.0",
     "vue": "^3.5.34",
     "vue-router": "^4.3.0",
+    "vuedraggable": "^4.1.0",
     "vuetify": "^3.5.0",
     "yuka": "^0.7.8"
   },

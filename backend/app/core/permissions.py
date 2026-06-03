@@ -92,6 +92,19 @@ PERMISSION_CATEGORIES: list[CategoryDef] = [
         ],
     ),
     CategoryDef(
+        key="BUGS",
+        name="Bug Tracking",
+        description="Permissions for the production bug board (Feature-linked) and bug comments",
+        permissions=[
+            PermissionDef("bugs:view", "View Bugs"),
+            PermissionDef("bugs:report", "Report Bugs"),
+            PermissionDef("bugs:edit", "Edit Bugs"),
+            PermissionDef("bugs:assign", "Assign Bugs"),
+            PermissionDef("bugs:comment", "Comment on Bugs"),
+            PermissionDef("bugs:delete", "Delete (Soft-Delete) Bugs"),
+        ],
+    ),
+    CategoryDef(
         key="TEAM",
         name="Team Management",
         description="Permissions related to team and user management",
@@ -214,6 +227,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
             "agents:*",
             "nodes:*",
             "buds:*",
+            "bugs:*",
             "team:*",
             "org:*",
             "settings:*",
@@ -228,6 +242,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:*",
             "buds:*",
+            "bugs:*",
             "agents:view/trigger",
             "team:view",
             "settings:view",
@@ -243,6 +258,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
             "agents:*",
             "nodes:*",
             "buds:view/approve",
+            "bugs:view/edit/comment",
             "team:view",
             "settings:*",
             "knowledge:*",
@@ -255,6 +271,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:view/edit/approve",
             "buds:view/edit/approve",
+            "bugs:*",
             "team:view/manage/assign_roles",
             "settings:view",
             "knowledge:view",
@@ -267,6 +284,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:view",
             "buds:view/edit",
+            "bugs:view/report/edit/comment",
             "settings:view",
             "knowledge:view/contribute",
             "reports:view",
@@ -278,6 +296,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:view",
             "buds:view",
+            "bugs:view/comment",
             "settings:view",
             "knowledge:view/contribute",
         ],
@@ -288,6 +307,11 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:view/edit",
             "buds:view/test",
+            # ``bugs:edit`` lets QA transition resolved → closed when
+            # they validate the fix, per the methodology's quality-loop
+            # description. Filing, commenting and closing are the QA
+            # touchpoints on the production bug board.
+            "bugs:view/report/edit/comment",
             "settings:view",
             "knowledge:view/contribute",
             "reports:view",
@@ -298,6 +322,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         description="Support team member",
         permission_specs=[
             "backlog:view/create",
+            "bugs:view/report/comment",
             "knowledge:view",
         ],
     ),
@@ -307,6 +332,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         permission_specs=[
             "backlog:view",
             "buds:view",
+            "bugs:view",
             "knowledge:view",
             "reports:view",
         ],

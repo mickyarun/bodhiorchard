@@ -15,7 +15,7 @@
  -->
 
 <template>
-  <v-dialog :model-value="modelValue" max-width="520" @update:model-value="$emit('update:modelValue', $event)">
+  <v-dialog :model-value="modelValue" max-width="540" @update:model-value="$emit('update:modelValue', $event)">
     <v-card color="surface" class="pa-6">
       <div class="text-h6 font-weight-bold mb-4">Report a Bug</div>
 
@@ -57,16 +57,33 @@
         />
       </div>
 
-      <v-text-field
-        v-if="!budId"
-        v-model="linkedBudSearch"
-        label="Link to BUD (optional)"
-        variant="outlined"
-        density="compact"
-        placeholder="Leave empty for AI auto-linking"
-        hint="AI will auto-detect the closest BUD if left empty"
-        persistent-hint
-      />
+      <!-- BUD link path: only shown when the dialog is opened from a
+        BUD context (BUDBugsPanel passes ``budId``). The parent BUD
+        view already shows the formatted ``BUD-NNN`` number, so we
+        just acknowledge the link inline. -->
+      <div v-if="budId" class="text-caption text-medium-emphasis mb-3">
+        This bug will be linked to the current BUD.
+      </div>
+
+      <!-- Feature picker — production-bug surface only. -->
+      <template v-else-if="resolvedBugType === 'production'">
+        <v-autocomplete
+          v-model="selectedFeatureId"
+          :items="featureOptions"
+          :loading="featureLoading"
+          item-title="label"
+          item-value="value"
+          label="Link to Feature (optional)"
+          variant="outlined"
+          density="compact"
+          placeholder="Search features…"
+          hint="AI auto-detects the closest Feature when left empty."
+          persistent-hint
+          clearable
+          class="mb-3"
+          @update:search="onFeatureSearch"
+        />
+      </template>
 
       <v-card-actions class="pa-0 mt-4">
         <v-spacer />
@@ -86,13 +103,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useBugsStore } from '@/stores/bugs'
+import { useFeaturesStore } from '@/stores/features'
 import type { BugRead } from '@/types'
 
 const props = defineProps<{
   modelValue: boolean
   budId?: string | null
+  defaultBugType?: 'testing' | 'production'
 }>()
 
 const emit = defineEmits<{
@@ -101,13 +120,16 @@ const emit = defineEmits<{
 }>()
 
 const bugsStore = useBugsStore()
+const featuresStore = useFeaturesStore()
 
 const title = ref('')
 const description = ref('')
 const severity = ref('medium')
 const module = ref('')
-const linkedBudSearch = ref('')
+const selectedFeatureId = ref<string | null>(null)
+const featureLoading = ref(false)
 const saving = ref(false)
+let featureSearchTimer: ReturnType<typeof setTimeout> | null = null
 
 const severityOptions = [
   { title: 'Low', value: 'low' },
@@ -115,6 +137,42 @@ const severityOptions = [
   { title: 'High', value: 'high' },
   { title: 'Critical', value: 'critical' },
 ]
+
+// When opened from a BUD detail panel the bug is by definition a
+// testing bug; otherwise inherit the board's current scope (production
+// is the /bugs page default).
+const resolvedBugType = computed(() => {
+  if (props.budId) return 'testing'
+  return props.defaultBugType ?? 'production'
+})
+
+const featureOptions = computed(() =>
+  featuresStore.items.map((f) => ({
+    label: f.featureTitle,
+    value: f.id,
+  })),
+)
+
+watch(
+  () => props.modelValue,
+  async (open) => {
+    if (!open) return
+    if (!props.budId && featuresStore.items.length === 0) {
+      featureLoading.value = true
+      await featuresStore.fetchPage({ mode: 'active' })
+      featureLoading.value = false
+    }
+  },
+)
+
+function onFeatureSearch(query: string): void {
+  if (featureSearchTimer) clearTimeout(featureSearchTimer)
+  featureSearchTimer = setTimeout(async () => {
+    featureLoading.value = true
+    await featuresStore.fetchPage({ q: query || undefined, mode: 'active' })
+    featureLoading.value = false
+  }, 250)
+}
 
 async function submit(): Promise<void> {
   if (!title.value.trim()) return
@@ -125,6 +183,8 @@ async function submit(): Promise<void> {
     severity: severity.value,
     module: module.value.trim() || undefined,
     budId: props.budId || undefined,
+    featureId: !props.budId ? selectedFeatureId.value || undefined : undefined,
+    bugType: !props.budId ? resolvedBugType.value : undefined,
   })
   saving.value = false
   if (bug) {
@@ -132,7 +192,7 @@ async function submit(): Promise<void> {
     description.value = ''
     severity.value = 'medium'
     module.value = ''
-    linkedBudSearch.value = ''
+    selectedFeatureId.value = null
     emit('update:modelValue', false)
     emit('created', bug)
   }

@@ -462,6 +462,24 @@ class FeatureRepository(BaseRepository[Feature]):
         )
         return result.scalar_one_or_none()
 
+    async def titles_by_ids(self, feature_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Batch-resolve Feature ids to their titles within org scope.
+
+        Used by the bug board / list serialisers to avoid N+1 lookups
+        when rendering many bugs that reference Features. Out-of-org
+        ids silently drop out of the result; soft-deleted Features
+        (``is_active=False``) are included so bugs against deactivated
+        Features still render their title (the UI can badge them as
+        deactivated separately).
+        """
+        if not feature_ids:
+            return {}
+        stmt = self._scoped(
+            select(Feature.id, Feature.feature_title).where(Feature.id.in_(feature_ids))
+        )
+        result = await self._db.execute(stmt)
+        return {row.id: row.feature_title for row in result}
+
     async def get_by_source_ref(
         self, source_ref: str, *, source: str | None = None
     ) -> Feature | None:
