@@ -81,8 +81,14 @@ async def on_bud_closed(
     await _award_bud_shipped_sp(db, org_id, bud)
 
     if bud.status == BUDStatus.CLOSED:
+        # SAVEPOINT so a metrics-compute failure rolls back any side
+        # effects the compute introduced (stub members materialised by
+        # the contributor breakdown's PR-author provisioner,
+        # author_user_id backfills, the FeatureLearning upsert itself)
+        # without poisoning the outer close-handler transaction.
         try:
-            await compute_bud_metrics(db, org_id, bud)
+            async with db.begin_nested():
+                await compute_bud_metrics(db, org_id, bud)
         except Exception:
             logger.warning(
                 "bud_metrics_compute_failed",
