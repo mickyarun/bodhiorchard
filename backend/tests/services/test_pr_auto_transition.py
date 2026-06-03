@@ -25,7 +25,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.pr_auto_transition import extract_bud_number
+from app.services.pr_auto_transition import (
+    extract_all_bud_numbers,
+    extract_bud_number,
+    pr_references_bud,
+)
 
 
 @pytest.mark.parametrize(
@@ -86,3 +90,58 @@ def test_extract_bud_number_rejects_mid_word_and_garbage(text: str) -> None:
 def test_extract_bud_number_handles_none() -> None:
     """None input must not raise — webhook payload titles can be None."""
     assert extract_bud_number(None) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # Release branches carrying several BUDs at once — the case the
+        # release-stage tab content-filter needs to handle correctly.
+        ("release/bud-001-bud-004-bud-007", {1, 4, 7}),
+        ("release/2026-08-01 BUD-3 BUD-9", {3, 9}),
+        # Single reference still works.
+        ("feat/BUD-7-rename", {7}),
+        ("[BUD-12]", {12}),
+        # No reference.
+        ("hotfix/auth", set()),
+        ("", set()),
+    ],
+)
+def test_extract_all_bud_numbers(text: str, expected: set[int]) -> None:
+    """Multi-BUD branches must surface every BUD they reference."""
+    assert extract_all_bud_numbers(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("bud_number", "head_ref", "title", "expected"),
+    [
+        # Title carries this BUD — match.
+        (4, "feature/processing-loader", "[BUD-004] processing loader", True),
+        # Branch carries this BUD — match.
+        (4, "bud-004/processing", "processing loader", True),
+        # Release branch carries multiple including this one — match.
+        (4, "release/bud-001-bud-004", "Release 2026-08-01", True),
+        (1, "release/bud-001-bud-004", "Release 2026-08-01", True),
+        # Release branch does NOT carry this BUD — no match (the bug
+        # the user reported on the PROD tab).
+        (4, "release/bud-001-bud-007", "Release 2026-08-01", False),
+        # Unrelated PR to ``main`` with no BUD anywhere — no match
+        # (this is the leaking case from the screenshot:
+        # "ATOA-9396: remote payments — terminal (Dart) side").
+        (4, "feature/atoa-9396-dart", "ATOA-9396: remote payments", False),
+        # Either field can carry the reference.
+        (4, None, "Closes #BUD-4", True),
+        (4, "BUD-4/x", None, True),
+        # Both None — no match.
+        (4, None, None, False),
+    ],
+)
+def test_pr_references_bud(
+    bud_number: int,
+    head_ref: str | None,
+    title: str | None,
+    expected: bool,
+) -> None:
+    """Stage-tab content filter pins the user's reported behaviour:
+    only PRs whose head ref or title carry this BUD's number appear."""
+    assert pr_references_bud(bud_number, head_ref, title) is expected

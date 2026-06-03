@@ -36,28 +36,36 @@ from app.services.bud_timeline import record_event
 
 logger = structlog.get_logger(__name__)
 
-# Match ``bud-NNN`` anywhere in a string when it is not glued to an
-# alphanumeric character or a hyphen on the left. The negative lookbehind
-# ``(?<![A-Za-z0-9-])`` reads as "the character before ``bud`` is not a
-# letter, digit, or hyphen", which subsumes both the mid-word case
-# (``auth-bud-7`` — preceded by ``-``) and the run-on case
-# (``abcbud-5`` — preceded by ``c``), while letting through everything
-# else: start-of-string, whitespace, brackets, parens, slashes, dots,
-# commas, semicolons, colons, hashes — the punctuation real PR titles
-# actually use to introduce a BUD reference.
+# Match ``bud-NNN`` anywhere in a string. Two stacked negative
+# lookbehinds reject the mid-word cases while keeping multi-BUD release
+# branches matchable:
 #
-#   ``bud-008``, ``BUD-8``, ``bud8``  (case-insensitive, optional dash,
+#   ``(?<![A-Za-z])``    — char before ``bud`` is not a letter
+#                          (rejects ``abcbud-5``, ``prebud-2``).
+#   ``(?<![A-Za-z]-)``   — char before ``bud`` is not "letter then -"
+#                          (rejects ``auth-bud-7``, ``token-bud-3``).
+#
+# A leading hyphen preceded by a digit IS allowed, so multi-BUD release
+# branches surface every BUD they reference:
+#
+#   ``bud-008``, ``BUD-8``, ``bud8`` (case-insensitive, optional dash,
 #   leading zeros stripped) — accepted.
 #   ``feat/BUD-7-rename``, ``[BUD-12]``, ``(bud-77)``, ``BUD-8 fix x``,
 #   ``Closes #BUD-4``, ``fix,BUD-3``, ``.BUD-2`` — accepted.
-#   ``auth-bud-7`` — rejected (preceded by hyphen).
-#   ``abcbud-5`` — rejected (preceded by letter).
-#   ``bud2name`` — rejected (no ``\b`` between digit and following word
-#   char, so the trailing boundary fails).
+#   ``release/bud-001-bud-004-bud-007`` — accepted (all three) because
+#   the digit-then-hyphen prefix bypasses both lookbehinds.
+#   ``auth-bud-7`` — rejected (``h-`` matches lookbehind 2).
+#   ``abcbud-5``  — rejected (``c`` matches lookbehind 1).
+#   ``bud2name``  — rejected (no ``\b`` between digit and following
+#                   word char, so the trailing boundary fails).
 #
-# Used to drive PR → BUD linking (both head branch and PR title) and the
-# Claude-Code dev-activity hook below.
-_BUD_RE = re.compile(r"(?<![A-Za-z0-9-])bud-?0*(\d+)\b", re.IGNORECASE)
+# Used to drive PR → BUD linking (both head branch and PR title), the
+# multi-BUD content guard in the release-stage tabs, and the Claude-Code
+# dev-activity hook below.
+_BUD_RE = re.compile(
+    r"(?<![A-Za-z])(?<![A-Za-z]-)bud-?0*(\d+)\b",
+    re.IGNORECASE,
+)
 
 
 def extract_bud_number(text: str | None) -> int | None:
@@ -70,6 +78,36 @@ def extract_bud_number(text: str | None) -> int | None:
         return None
     match = _BUD_RE.search(text)
     return int(match.group(1)) if match else None
+
+
+def extract_all_bud_numbers(text: str | None) -> set[int]:
+    """Return every BUD number that appears in ``text``.
+
+    Release branches like ``release/bud-001-bud-004-bud-007`` carry
+    several BUDs at once; the release-stage tabs need to know all of
+    them so the same PR shows up on each BUD's tab when it genuinely
+    relates to that BUD. Returns an empty set on falsy / no-match input.
+    """
+    if not text:
+        return set()
+    return {int(m.group(1)) for m in _BUD_RE.finditer(text)}
+
+
+def pr_references_bud(
+    bud_number: int,
+    head_ref: str | None,
+    title: str | None,
+) -> bool:
+    """Return ``True`` iff this PR's head ref or title carries ``bud_number``.
+
+    Used by the release-stage filter to keep PRs to ``main`` /
+    ``release/*`` that don't mention this BUD off the BUD's PROD / UAT
+    tabs. Combines the head ref and title into a single match so a
+    release branch (``release/bud-001-bud-004``) and a title-only tag
+    (``[BUD-004] hotfix``) both surface correctly.
+    """
+    references = extract_all_bud_numbers(head_ref) | extract_all_bud_numbers(title)
+    return bud_number in references
 
 
 async def resolve_bud_from_branch(

@@ -35,6 +35,7 @@ from app.schemas.bud_release import (
     ReleaseTimelineEvent,
 )
 from app.schemas.pull_request import PRChecklistItem, PullRequestRead
+from app.services.pr_auto_transition import pr_references_bud
 from app.utils.branch_matching import branch_matches
 
 router = APIRouter()
@@ -232,18 +233,33 @@ async def get_bud_release_stage(
         target_branch = (
             (repo.uat_branch if typed_stage == "uat" else repo.main_branch) if repo else None
         )
-        if target_branch and branch_matches(pr.base_branch, target_branch):
-            seen_pr_ids.add(pr.github_pr_id)
-            open_prs.append(
-                ReleasePR(
-                    pr_number=pr.github_pr_number,
-                    repo_name=repo.name if repo else "",
-                    html_url=pr.html_url,
-                    title=pr.title,
-                    author_login=pr.author_github_login,
-                    merged_at=None,
-                ),
-            )
+        if not (target_branch and branch_matches(pr.base_branch, target_branch)):
+            continue
+        # Content guard for unlinked PRs (``bud_id IS NULL``): the
+        # release-PR fallback in the repository surfaces every PR
+        # targeting the stage branch on an impacted repo, but the
+        # release-stage tab must only show PRs that reference THIS BUD.
+        # ``pr_references_bud`` looks for ``bud-NNN`` in the head ref
+        # or title, so a release branch like
+        # ``release/bud-001-bud-004`` correctly appears on both BUD-001
+        # and BUD-004 tabs, while an unrelated PR to ``main`` does not
+        # leak through. Directly-linked PRs (``bud_id == bud_id``)
+        # short-circuit so the user-edited link wins over text matching.
+        if pr.bud_id != bud_id and not pr_references_bud(
+            bud.bud_number, pr.head_branch, pr.title
+        ):
+            continue
+        seen_pr_ids.add(pr.github_pr_id)
+        open_prs.append(
+            ReleasePR(
+                pr_number=pr.github_pr_number,
+                repo_name=repo.name if repo else "",
+                html_url=pr.html_url,
+                title=pr.title,
+                author_login=pr.author_github_login,
+                merged_at=None,
+            ),
+        )
 
     return BUDReleaseStage(
         bud_id=str(bud_id),
