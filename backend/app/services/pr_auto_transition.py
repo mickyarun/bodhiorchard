@@ -36,7 +36,101 @@ from app.services.bud_timeline import record_event
 
 logger = structlog.get_logger(__name__)
 
-_BUD_BRANCH_RE = re.compile(r"bud-0*(\d+)/", re.IGNORECASE)
+# Strict ``bud-NNN`` matcher. The negative lookbehind rejects every
+# letter, digit, or hyphen immediately before ``bud``, which covers all
+# the mid-word and run-on cases with one rule:
+#
+#   ``auth-bud-7``  — rejected (``-`` before).
+#   ``abcbud-5``    — rejected (``c`` before).
+#   ``1bud-3``      — rejected (``1`` before).
+#   ``sha7bud-5``   — rejected (``7`` before).
+#   ``v2-bud-5``    — rejected (``-`` before; the leading digit doesn't
+#                    rescue it because ``-`` is in the rejection class).
+#   ``bud2name``    — rejected (no ``\b`` between digit and following
+#                    word char, trailing boundary fails).
+#
+#   ``bud-008``, ``BUD-8``, ``bud8`` — accepted.
+#   ``feat/BUD-7-rename``, ``[BUD-12]``, ``(bud-77)``, ``BUD-8 fix x``,
+#   ``Closes #BUD-4``, ``fix,BUD-3``, ``.BUD-2`` — accepted.
+#
+# Multi-BUD release branches like ``release/bud-001-bud-004-bud-007``
+# only have one strict match (the first ``bud-001``); the rest are
+# discovered as a CHAIN appended to that first match — see
+# ``_BUD_CHAIN_RE`` and ``extract_all_bud_numbers`` below.
+#
+# Used to drive PR → BUD linking (head branch and title) and the
+# Claude-Code dev-activity hook.
+_BUD_RE = re.compile(r"(?<![A-Za-z0-9-])bud-?0*(\d+)\b", re.IGNORECASE)
+
+
+# Anchored variant for chain extraction. After a strict ``bud-NNN``
+# match, any number of trailing ``-bud-NNN`` segments belong to the
+# same chain (multi-BUD release branch). The chain regex is anchored
+# to start-of-string because it is applied to the captured chain tail,
+# not the full input; ``finditer`` then walks each ``bud-NNN`` token
+# inside that tail.
+_BUD_CHAIN_TAIL_RE = re.compile(r"(?:-bud-?0*\d+\b)+", re.IGNORECASE)
+_BUD_IN_CHAIN_RE = re.compile(r"bud-?0*(\d+)\b", re.IGNORECASE)
+
+
+def extract_bud_number(text: str | None) -> int | None:
+    """Return the first BUD number found in ``text``, or ``None``.
+
+    Single seam for both the webhook resolver and the MCP dev-activity
+    hook so the matcher cannot drift between call sites.
+    """
+    if not text:
+        return None
+    match = _BUD_RE.search(text)
+    return int(match.group(1)) if match else None
+
+
+def extract_all_bud_numbers(text: str | None) -> set[int]:
+    """Return every BUD number that appears in ``text``.
+
+    Release branches like ``release/bud-001-bud-004-bud-007`` carry
+    several BUDs at once; the release-stage tabs need to know all of
+    them so the same PR shows up on each BUD's tab when it genuinely
+    relates to that BUD. Two passes:
+
+    1. Strict regex finds every ``bud-NNN`` token that is not glued to
+       a letter / digit / hyphen on the left.
+    2. For each match, look at the immediately-following text for a
+       ``-bud-NNN-bud-NNN...`` chain and add every BUD number in it.
+       The chain step intentionally allows the hyphen-prefix that
+       Pass 1 rejects — within a chain, the preceding ``-`` came from
+       the previous BUD reference, not from a leading word.
+
+    Returns an empty set on falsy / no-match input.
+    """
+    if not text:
+        return set()
+    result: set[int] = set()
+    for match in _BUD_RE.finditer(text):
+        result.add(int(match.group(1)))
+        tail = _BUD_CHAIN_TAIL_RE.match(text, match.end())
+        if tail is None:
+            continue
+        for chain_match in _BUD_IN_CHAIN_RE.finditer(tail.group(0)):
+            result.add(int(chain_match.group(1)))
+    return result
+
+
+def pr_references_bud(
+    bud_number: int,
+    head_ref: str | None,
+    title: str | None,
+) -> bool:
+    """Return ``True`` iff this PR's head ref or title carries ``bud_number``.
+
+    Used by the release-stage filter to keep PRs to ``main`` /
+    ``release/*`` that don't mention this BUD off the BUD's PROD / UAT
+    tabs. Combines the head ref and title into a single match so a
+    release branch (``release/bud-001-bud-004``) and a title-only tag
+    (``[BUD-004] hotfix``) both surface correctly.
+    """
+    references = extract_all_bud_numbers(head_ref) | extract_all_bud_numbers(title)
+    return bud_number in references
 
 
 async def resolve_bud_from_branch(
@@ -45,14 +139,38 @@ async def resolve_bud_from_branch(
     branch: str,
 ) -> tuple[uuid.UUID | None, BUDDocument | None]:
     """Extract BUD number from branch name and find the BUD."""
-    match = _BUD_BRANCH_RE.match(branch)
-    if not match:
+    bud_number = extract_bud_number(branch)
+    if bud_number is None:
         return None, None
 
-    bud_number = int(match.group(1))
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_number(bud_number)
     return (bud.id, bud) if bud else (None, None)
+
+
+async def resolve_bud_from_pr(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    head_ref: str | None,
+    title: str | None,
+) -> tuple[uuid.UUID | None, BUDDocument | None]:
+    """Resolve the owning BUD for a PR by scanning head branch, then title.
+
+    Head ref is checked first because it is the most reliable signal —
+    a branch named ``bud-008/x`` was almost certainly created for that
+    BUD intentionally. Title is the fallback: it catches manual PRs whose
+    branch lacks the ``bud-NNN/`` prefix but whose author tagged the BUD
+    in the title (``[BUD-008] Fix Y``). Stops at the first match.
+    """
+    for source in (head_ref, title):
+        bud_number = extract_bud_number(source)
+        if bud_number is None:
+            continue
+        bud_repo = BUDRepository(db, org_id=org_id)
+        bud = await bud_repo.get_by_number(bud_number)
+        if bud is not None:
+            return bud.id, bud
+    return None, None
 
 
 async def check_all_repos_have_prs(

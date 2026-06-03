@@ -21,7 +21,6 @@ stored in a single unified dev_activity_logs table.
 
 import asyncio
 import os
-import re
 import uuid
 
 import structlog
@@ -35,12 +34,15 @@ from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.dev_activity import DevActivityHookRequest, DevActivityHookResponse
 from app.services.colyseus_bridge import publish_to_colyseus
 from app.services.event_bus import publish
+from app.services.pr_auto_transition import extract_bud_number
 from app.services.user_resolution import resolve_user_by_email
 from app.services.xp_service import check_and_award_streak
 
 logger = structlog.get_logger(__name__)
 
-_BUD_BRANCH_RE = re.compile(r"^bud-(\d+)/")
+# BUD number extraction is owned by ``pr_auto_transition.extract_bud_number``
+# so a single matcher governs PR linking, the dev-activity hook below, and any
+# future reuse — keeping branch heuristics from drifting between call sites.
 
 # Strong references to in-flight Colyseus publish tasks. ``asyncio.create_task``
 # only holds a weak reference to the task it returns, so without an external
@@ -297,13 +299,11 @@ async def _resolve_bud(
             return bud.id, bud.bud_number
 
     # Auto-detect from branch name: bud-001/feature → 1
-    if branch:
-        match = _BUD_BRANCH_RE.match(branch)
-        if match:
-            detected_num = int(match.group(1))
-            bud = await bud_repo.get_by_number(detected_num)
-            if bud:
-                return bud.id, bud.bud_number
+    detected_num = extract_bud_number(branch)
+    if detected_num is not None:
+        bud = await bud_repo.get_by_number(detected_num)
+        if bud:
+            return bud.id, bud.bud_number
 
     return None, None
 

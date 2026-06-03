@@ -155,12 +155,11 @@ const router = createRouter({
         {
           // Org-level Learnings overview: trends across closed BUDs.
           // Reads the velocity_aggregates rollup + last 50 feature_
-          // learnings rows. Permission gate matches Settings → QA
-          // Automation so the same admins who toggle the Learning
-          // Agent can see its aggregate output.
+          // learnings rows. Visible to every org member — the data is
+          // aggregate retrospective info with no cross-tenant exposure
+          // (repo queries filter by current_user.org_id).
           path: 'learnings',
           name: 'learnings',
-          meta: { permission: 'org:view_settings' },
           component: () => import('@/views/learnings/LearningsOverview.vue'),
         },
         {

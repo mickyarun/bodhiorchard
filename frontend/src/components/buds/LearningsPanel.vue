@@ -70,72 +70,66 @@
       </div>
 
       <!-- Phase drift -->
-      <v-card v-if="phaseRows.length" variant="outlined" class="learnings-panel__card">
-        <v-card-title class="learnings-panel__card-title">Phase drift</v-card-title>
-        <v-card-text>
-          <v-table density="compact">
-            <thead>
-              <tr>
-                <th>Phase</th>
-                <th class="text-right">Estimated</th>
-                <th class="text-right">Actual</th>
-                <th class="text-right">Drift</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in phaseRows" :key="row.phase">
-                <td>{{ row.phase }}</td>
-                <td class="text-right">{{ formatDays(row.estimated_days) }}</td>
-                <td class="text-right">{{ formatDays(row.actual_days) }}</td>
-                <td class="text-right" :class="driftClass(row.drift_pct)">
-                  {{ formatDrift(row.drift_pct) }}
-                </td>
-              </tr>
-            </tbody>
-          </v-table>
-        </v-card-text>
-      </v-card>
+      <section v-if="phaseRows.length" class="learnings-panel__section">
+        <h3 class="learnings-panel__section-title">Phase drift</h3>
+        <v-table density="compact" class="learnings-panel__table">
+          <thead>
+            <tr>
+              <th>Phase</th>
+              <th class="text-right">Estimated</th>
+              <th class="text-right">Actual</th>
+              <th class="text-right">Drift</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in phaseRows" :key="row.phase">
+              <td>{{ row.phase }}</td>
+              <td class="text-right">{{ formatDays(row.estimated_days) }}</td>
+              <td class="text-right">{{ formatDays(row.actual_days) }}</td>
+              <td class="text-right" :class="driftClass(row.drift_pct)">
+                {{ formatDrift(row.drift_pct) }}
+              </td>
+            </tr>
+          </tbody>
+        </v-table>
+      </section>
 
       <!-- Contributors -->
-      <v-card v-if="contributorRows.length" variant="outlined" class="learnings-panel__card">
-        <v-card-title class="learnings-panel__card-title">Contributors</v-card-title>
-        <v-card-text>
-          <v-table density="compact">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th class="text-right">Commits</th>
-                <th class="text-right">PRs merged</th>
-                <th class="text-right">TODOs done</th>
-                <th class="text-right">Active days</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- External collaborators have user_id=null but
-                   github_login set, so key on whichever is present. -->
-              <tr
-                v-for="row in contributorRows"
-                :key="row.user_id ?? row.github_login ?? row.name"
-              >
-                <td>{{ row.name }}</td>
-                <td class="text-right">{{ row.commits }}</td>
-                <td class="text-right">{{ row.prs_merged }}</td>
-                <td class="text-right">{{ row.todos_completed }}</td>
-                <td class="text-right">{{ row.active_days }}</td>
-              </tr>
-            </tbody>
-          </v-table>
-        </v-card-text>
-      </v-card>
+      <section v-if="contributorRows.length" class="learnings-panel__section">
+        <h3 class="learnings-panel__section-title">Contributors</h3>
+        <v-table density="compact" class="learnings-panel__table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th class="text-right">Commits</th>
+              <th class="text-right">PRs merged</th>
+              <th class="text-right">TODOs done</th>
+              <th class="text-right">Active days</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- External collaborators have user_id=null but
+                 github_login set, so key on whichever is present. -->
+            <tr
+              v-for="row in contributorRows"
+              :key="row.user_id ?? row.github_login ?? row.name"
+            >
+              <td>{{ row.name }}</td>
+              <td class="text-right">{{ row.commits }}</td>
+              <td class="text-right">{{ row.prs_merged }}</td>
+              <td class="text-right">{{ row.todos_completed }}</td>
+              <td class="text-right">{{ row.active_days }}</td>
+            </tr>
+          </tbody>
+        </v-table>
+      </section>
 
       <!-- Retrospective markdown -->
-      <v-card v-if="learning.retrospective_md" variant="outlined" class="learnings-panel__card">
-        <v-card-title class="learnings-panel__card-title">Retrospective</v-card-title>
-        <v-card-text class="learnings-panel__retro-body">
-          <!-- eslint-disable-next-line vue/no-v-html -->
-          <article class="markdown-body markdown-body--numeric" v-html="renderedRetro" />
-        </v-card-text>
-      </v-card>
+      <section v-if="learning.retrospective_md" class="learnings-panel__section">
+        <h3 class="learnings-panel__section-title">Retrospective</h3>
+        <!-- eslint-disable-next-line vue/no-v-html -->
+        <article class="markdown-body markdown-body--numeric" v-html="renderedRetro" />
+      </section>
     </template>
   </div>
 </template>
@@ -229,20 +223,31 @@ function driftClass(value: number | null | undefined): string {
   font-weight: 500;
 }
 
-.learnings-panel__card {
-  border-color: rgba(var(--v-theme-on-surface), 0.08);
+.learnings-panel__section {
+  padding: 12px 16px 16px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-radius: 8px;
+  background: rgba(var(--v-theme-surface-variant), 0.1);
 }
 
-.learnings-panel__card-title {
-  font-size: 13px;
+.learnings-panel__section-title {
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: rgba(var(--v-theme-on-surface), 0.7);
-  padding-bottom: 4px;
+  margin: 0 0 8px;
 }
 
-.learnings-panel__retro-body {
-  padding-top: 0;
+.learnings-panel__table {
+  background: transparent;
+}
+
+.learnings-panel__table :deep(.v-table__wrapper) {
+  background: transparent;
+}
+
+.learnings-panel__table :deep(table) {
+  background: transparent;
 }
 </style>
