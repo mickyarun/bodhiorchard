@@ -372,6 +372,8 @@
                   stage="uat"
                   :has-stage-branch-configured="hasUatBranchConfigured"
                   :impacted-repos="bud.impacted_repos"
+                  :branch-overrides="bud.branch_overrides"
+                  @refresh-bud="budStore.fetchBUD(bud.id)"
                 />
               </v-tabs-window-item>
 
@@ -382,6 +384,8 @@
                   stage="prod"
                   :has-stage-branch-configured="hasMainBranchConfigured"
                   :impacted-repos="bud.impacted_repos"
+                  :branch-overrides="bud.branch_overrides"
+                  @refresh-bud="budStore.fetchBUD(bud.id)"
                 />
               </v-tabs-window-item>
 

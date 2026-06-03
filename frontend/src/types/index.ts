@@ -255,6 +255,13 @@ export interface BUDDocument extends BUDListItem {
   // remote MCP endpoint). NULL or empty dict = all phases skip (the
   // new default for freshly created BUDs).
   auto_generate_phases: Record<string, boolean> | null
+  // Per-BUD tracking-branch override for the UAT / PROD tabs. Keys are
+  // stage names (``uat`` / ``prod``); values are fnmatch-style branch
+  // patterns. When the key for a stage is set, the open-PR filter on
+  // that tab uses the per-BUD pattern instead of the repo-wide
+  // ``uat_branch`` / ``main_branch``. ``null`` / missing key falls back
+  // to the repo-wide default.
+  branch_overrides: Record<string, string> | null
   // True iff feature_learnings has a retrospective_md for this BUD.
   // Gates the Learnings tab on the detail page so we don't render an
   // empty placeholder for BUDs that haven't been closed (or that

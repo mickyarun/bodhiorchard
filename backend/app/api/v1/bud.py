@@ -893,6 +893,45 @@ async def update_bud(
                 )
         bud.auto_generate_phases = merged
 
+    # Editing ``impacted_repos`` mid-development is supported (the
+    # tech-arch agent's first guess often needs correcting), but PRs
+    # already linked to a now-removed repo keep their ``bud_id`` — they
+    # just stop appearing on the release-stage tabs because the open-PR
+    # query filters by impacted_repo_ids. Log structured so an operator
+    # can audit when this happens.
+    if "impacted_repos" in update_data and bud.status not in (
+        BUDStatus.BUD,
+        BUDStatus.TECH_ARCH,
+    ):
+        logger.info(
+            "bud_impacted_repos_edited_post_planning",
+            bud_id=str(bud.id),
+            current_status=bud.status.value,
+            new_count=len(update_data["impacted_repos"] or []),
+        )
+
+    # ``branch_overrides`` follows the same per-key merge policy as
+    # ``auto_generate_phases``: saving an override for ``uat`` must not
+    # clobber an existing ``prod`` override, and ``{"uat": null}`` is the
+    # clear-this-stage signal that drops the key entirely. The schema
+    # validator has already rejected unknown stage keys and empty
+    # patterns; this block is purely about merging into the existing
+    # column. A ``None`` whole dict (rather than a per-key None) wipes
+    # the column — symmetric with how the FE clears both stages by
+    # sending ``branch_overrides: null``.
+    if "branch_overrides" in update_data:
+        incoming_overrides = update_data.pop("branch_overrides")
+        if incoming_overrides is None:
+            bud.branch_overrides = None
+        else:
+            merged_overrides: dict[str, str] = dict(bud.branch_overrides or {})
+            for stage, pattern in incoming_overrides.items():
+                if pattern is None:
+                    merged_overrides.pop(stage, None)
+                else:
+                    merged_overrides[stage] = pattern
+            bud.branch_overrides = merged_overrides or None
+
     # Commit the pre-edit snapshot captured at the top of the handler.
     # Runs only when something will actually mutate (an empty payload
     # after ``status_override_reason`` is popped means there's nothing

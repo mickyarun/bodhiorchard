@@ -171,6 +171,17 @@ class BUDDocument(BaseModel):
     # migration preserves behaviour for any in-flight pipeline.
     auto_generate_phases: Mapped[dict[str, bool] | None] = mapped_column(JSONB, nullable=True)
 
+    # Per-BUD branch overrides for the release-stage views (UAT / PROD).
+    # When set, ``bud_prs`` prefers the per-BUD pattern over the repo-wide
+    # ``tracked_repository.uat_branch`` / ``main_branch``. Values are
+    # fnmatch-style patterns (``release/*``), so a release-train BUD whose
+    # PRs target ``release/2026-08-01`` can be tracked without retraining
+    # the global repo setting. Keys are stage names: ``"uat"``, ``"prod"``.
+    # Per-stage rather than per-repo-per-stage to keep the override form
+    # tractable; multi-repo BUDs that need per-repo patterns can be added
+    # later by widening the value type.
+    branch_overrides: Mapped[dict[str, str] | None] = mapped_column(JSONB, nullable=True)
+
     # Timestamp the user last clicked "Dismiss" on the phase-failure
     # banner. Any ``skill_failed`` event in ``agent_activity_logs`` newer
     # than this is shown on the BUD detail; older ones are hidden. NULL

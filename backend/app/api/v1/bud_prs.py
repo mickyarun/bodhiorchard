@@ -222,6 +222,12 @@ async def get_bud_release_stage(
         if isinstance(r, dict) and r.get("repo_id")
     ]
 
+    # Per-BUD override falls back to the repo-wide setting. ``branch_overrides``
+    # is keyed by stage name (``uat`` / ``prod``) and holds an fnmatch pattern;
+    # the existing ``branch_matches`` utility handles wildcards transparently
+    # so no new matcher is needed at this layer.
+    bud_override = (bud.branch_overrides or {}).get(typed_stage)
+
     pr_repo = PullRequestRepository(db, org_id=current_user.org_id)
     open_pr_pairs = await pr_repo.list_open_for_bud_with_repo(
         bud_id, impacted_repo_ids=impacted_repo_ids
@@ -229,7 +235,7 @@ async def get_bud_release_stage(
     for pr, repo in open_pr_pairs:
         if pr.github_pr_id in seen_pr_ids:
             continue
-        target_branch = (
+        target_branch = bud_override or (
             (repo.uat_branch if typed_stage == "uat" else repo.main_branch) if repo else None
         )
         if target_branch and branch_matches(pr.base_branch, target_branch):

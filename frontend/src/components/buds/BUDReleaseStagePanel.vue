@@ -16,6 +16,18 @@
 
 <template>
   <div class="release-stage-panel pa-4">
+    <!-- Tracking-branch override — visible in all states so the user
+         can correct or set the per-BUD pattern without waiting for a
+         PR to materialise. -->
+    <BUDStageBranchOverride
+      :bud-id="budId"
+      :stage="stage"
+      :override="stageOverride"
+      :default-branch="defaultStageBranch"
+      :impacted-repo-count="impactedRepoCount"
+      @saved="onOverrideSaved"
+    />
+
     <!-- Loading -->
     <div v-if="loading" class="d-flex justify-center py-12">
       <v-progress-circular indeterminate size="24" width="2" />
@@ -264,6 +276,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import api from '@/services/api'
+import BUDStageBranchOverride from '@/components/buds/BUDStageBranchOverride.vue'
 import { formatDateTime } from '@/utils/date'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { useSettingsStore } from '@/stores/settings'
@@ -282,6 +295,16 @@ const props = defineProps<{
   hasStageBranchConfigured?: boolean
   /** BUD's impacted repos — shown with their branch config status. */
   impactedRepos?: ImpactedRepo[] | null
+  /** Per-BUD branch overrides for the UAT / PROD tabs. When the key for
+   *  this stage is set, the BUD's open-PR filter uses it instead of the
+   *  repo-wide ``uat_branch`` / ``main_branch``. */
+  branchOverrides?: Record<string, string> | null
+}>()
+
+const emit = defineEmits<{
+  /** Fired after the user edits the branch override. Parent should
+   *  re-fetch the BUD so ``branchOverrides`` updates everywhere. */
+  (e: 'refresh-bud'): void
 }>()
 
 const settingsStore = useSettingsStore()
@@ -342,6 +365,34 @@ const statusBannerTitle = computed(() => {
 })
 
 const formatDate = formatDateTime
+
+const stageOverride = computed<string | null>(
+  () => props.branchOverrides?.[props.stage] ?? null,
+)
+
+const impactedRepoCount = computed(() => props.impactedRepos?.length ?? 0)
+
+// First impacted repo's configured branch — the fallback shown when no
+// per-BUD override exists. If a BUD spans repos that disagree on the
+// repo-wide branch, the override dialog gives the user one place to
+// pin a single per-BUD pattern that wins everywhere via fnmatch.
+const defaultStageBranch = computed<string | null>(() => {
+  const repos = props.impactedRepos ?? []
+  for (const r of repos) {
+    const tracked = settingsStore.repos.find((tr) => tr.id === r.repo_id)
+    const branch = props.stage === 'uat' ? tracked?.uatBranch : tracked?.mainBranch
+    if (branch) return branch
+  }
+  return null
+})
+
+function onOverrideSaved(): void {
+  // Re-fetch the stage view first so PRs filter against the new
+  // pattern immediately; the parent then refreshes the BUD so the
+  // override prop on this component updates with the saved value.
+  load()
+  emit('refresh-bud')
+}
 
 async function load(): Promise<void> {
   loading.value = true

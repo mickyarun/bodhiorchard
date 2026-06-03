@@ -120,10 +120,59 @@ class BUDUpdate(BaseModel):
     # auditable, and locking the field would surprise users who want
     # to fix the config after the fact.
     auto_generate_phases: dict[str, bool] | None = None
+    # Per-BUD tracking-branch override for the UAT / PROD tabs. ``None``
+    # falls back to the repo-wide ``uat_branch`` / ``main_branch`` setting;
+    # a dict like ``{"uat": "release/*"}`` switches just that stage to the
+    # given fnmatch pattern. Per-stage None inside the dict (``{"uat": None}``)
+    # is the clear-this-stage signal — the PATCH handler MERGES with the
+    # existing column and drops keys whose value is None, so editing one
+    # stage does not clobber the other. The validator rejects unknown
+    # stage keys and any whitespace-only / empty patterns.
+    branch_overrides: dict[str, str | None] | None = None
+    # Editable post-creation so the impacted_repos list can be corrected
+    # when the tech-arch agent guessed wrong, or when scope changes
+    # mid-development. Same merge-vs-replace policy as the column itself
+    # (PATCH replaces the array verbatim — there is no merge key on a
+    # repo-row identity, so partial edits don't make sense).
+    impacted_repos: list[dict[str, Any]] | None = None
 
     model_config = {"populate_by_name": True}
 
     _validate_figma_url = field_validator("figma_url")(_validate_optional_figma_url)
+
+    @field_validator("branch_overrides")
+    @classmethod
+    def _validate_branch_overrides(
+        cls, value: dict[str, str | None] | None
+    ) -> dict[str, str | None] | None:
+        """Only ``uat`` and ``prod`` are valid override keys; values must
+        be either ``None`` (clear that stage) or a non-empty / non-whitespace
+        branch pattern.
+
+        Catches three classes of bad input at the API edge:
+        * Wrong-case / unknown stage key (``"UAT"`` / ``"production"``).
+        * Empty string (``""``) — would otherwise read as truthy in some
+          callers and break the fallback-to-repo-default contract.
+        * Whitespace-only pattern (``"   "``) — passes Python truthiness
+          but fnmatches nothing, so PRs would silently disappear from the
+          tab without an obvious cause.
+        """
+        if value is None:
+            return None
+        allowed = {"uat", "prod"}
+        unknown = sorted(set(value) - allowed)
+        if unknown:
+            raise ValueError(
+                f"Unsupported branch_overrides keys: {unknown}. Allowed: {sorted(allowed)}."
+            )
+        for stage, pattern in value.items():
+            if pattern is None:
+                continue
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError(
+                    f"branch_overrides[{stage!r}] must be a non-empty pattern or null."
+                )
+        return value
 
 
 class BUDAgentTaskRead(BaseModel):
@@ -172,6 +221,9 @@ class BUDRead(BaseModel):
     # newly created BUDs. Returned to the frontend so the BUD detail
     # banner can decide which phases are user-driven.
     auto_generate_phases: dict[str, bool] | None = None
+    # Per-stage tracking-branch overrides; falls back to the repo-wide
+    # setting when a stage is absent / the dict is null.
+    branch_overrides: dict[str, str] | None = None
     designs: list[BUDDesignRead] = []
     metadata: dict[str, Any] | None = Field(None, validation_alias="metadata_")
     impacted_repos: list[dict[str, Any]] | None = None
