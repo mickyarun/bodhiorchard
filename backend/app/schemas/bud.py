@@ -22,7 +22,7 @@ This module hosts only the request/response DTO classes.
 import re
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, get_args
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -35,6 +35,7 @@ from app.schemas.bud_design import (  # noqa: F401
     DesignGenerateRequest,
     DesignHtmlUpdate,
 )
+from app.schemas.bud_release import ReleaseStage
 
 # Single source of truth for the accepted Figma share-URL shape:
 # - ``/file/<key>/...`` (legacy)
@@ -149,7 +150,12 @@ class BUDUpdate(BaseModel):
         be either ``None`` (clear that stage) or a non-empty / non-whitespace
         branch pattern.
 
-        Catches three classes of bad input at the API edge:
+        Allowed keys are derived from the existing ``ReleaseStage`` Literal
+        in :mod:`app.schemas.bud_release` so the two contracts stay in
+        sync: the only stages that have a release-stage tab are the only
+        stages a per-BUD override can target. Surfaces three classes of
+        bad input at the API edge:
+
         * Wrong-case / unknown stage key (``"UAT"`` / ``"production"``).
         * Empty string (``""``) — would otherwise read as truthy in some
           callers and break the fallback-to-repo-default contract.
@@ -159,7 +165,7 @@ class BUDUpdate(BaseModel):
         """
         if value is None:
             return None
-        allowed = {"uat", "prod"}
+        allowed: set[str] = set(get_args(ReleaseStage))
         unknown = sorted(set(value) - allowed)
         if unknown:
             raise ValueError(
