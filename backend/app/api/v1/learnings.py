@@ -29,7 +29,7 @@ import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, require_permissions
+from app.core.deps import get_current_user, get_db
 from app.models.bud import BUDDocument
 from app.models.user import User
 from app.repositories.learnings_overview import LearningsOverviewRepository
@@ -188,10 +188,14 @@ def _build_top_contributors(
     ]
 
 
+# Intentionally no permission gate: every org member sees the org-wide
+# retrospective. The response is aggregate-only (velocity buckets, phase
+# drift, contributor leaderboard) and the repo is scoped to
+# current_user.org_id. If you ever add admin-only fields to
+# LearningsOverviewRead, re-introduce a require_permissions dependency.
 @router.get(
     "/overview",
     response_model=LearningsOverviewRead,
-    dependencies=[Depends(require_permissions("org:view_settings"))],
 )
 async def get_learnings_overview(
     current_user: User = Depends(get_current_user),

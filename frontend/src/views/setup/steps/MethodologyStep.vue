@@ -59,13 +59,14 @@
         </p>
       </v-card>
 
-      <v-row class="mt-3" dense>
-        <v-col v-for="v in videos" :key="v.value" cols="6" sm="4" md="2">
+      <div class="text-overline text-medium-emphasis text-center mt-5 mb-2">
+        More walkthroughs
+      </div>
+      <v-row dense justify="center">
+        <v-col v-for="v in secondaryVideos" :key="v.value" cols="6" sm="4" md="2">
           <v-card
-            :variant="v.value === videoTab ? 'flat' : 'outlined'"
-            :color="v.value === videoTab ? 'primary' : undefined"
+            variant="outlined"
             class="methodology-video-thumb"
-            :class="{ 'methodology-video-thumb--active': v.value === videoTab }"
             @click="videoTab = v.value"
           >
             <div class="methodology-video-thumb-img-wrap">
@@ -76,16 +77,12 @@
                 class="methodology-video-thumb-img"
               />
               <v-icon
-                v-if="v.value !== videoTab"
                 class="methodology-video-thumb-play"
                 icon="mdi-play-circle"
                 size="36"
               />
             </div>
-            <div
-              class="text-caption text-center px-2 py-2"
-              :class="v.value === videoTab ? 'font-weight-bold' : 'text-medium-emphasis'"
-            >
+            <div class="text-caption text-center text-medium-emphasis px-2 py-2">
               {{ v.title }}
             </div>
           </v-card>
@@ -570,9 +567,13 @@ const videos: DemoVideo[] = [
   },
 ]
 
-const videoTab = ref<string>(videos[0].value)
+const HERO_VIDEO_VALUE = 'world'
+const videoTab = ref<string>(HERO_VIDEO_VALUE)
 const activeVideo = computed<DemoVideo>(
   () => videos.find((v) => v.value === videoTab.value) ?? videos[0],
+)
+const secondaryVideos = computed<DemoVideo[]>(
+  () => videos.filter((v) => v.value !== videoTab.value),
 )
 
 const lightboxOpen = ref(false)
