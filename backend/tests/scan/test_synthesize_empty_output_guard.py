@@ -108,6 +108,21 @@ def _patch_no_skip(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(stage, "should_skip_feature_synthesis", _no_skip)
 
 
+def _patch_origin_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the pre-spawn token refresh so the test never hits the DB.
+
+    ``stage.run`` re-stamps ``origin`` with a fresh installation token
+    before spawning the synthesis subprocess. The real helper opens an
+    ``AsyncSessionLocal`` + queries ``tracked_repositories`` — neither
+    exists in these unit-test paths, so we stub it to a no-op.
+    """
+
+    async def _noop(*, working_dir: str, org_id: uuid.UUID) -> bool:
+        return False
+
+    monkeypatch.setattr(stage, "refresh_origin_token_for_spawn", _noop)
+
+
 async def test_raises_when_reconcile_persists_zero_for_nonempty_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -126,6 +141,7 @@ async def test_raises_when_reconcile_persists_zero_for_nonempty_input(
     _patch_runtime_context(monkeypatch, org_id)
     _patch_session(monkeypatch, fake_session)
     _patch_no_skip(monkeypatch)
+    _patch_origin_refresh(monkeypatch)
     monkeypatch.setattr(stage, "_resolve_engine", lambda _config: _FakeEngine())
 
     async def _reset_progress(_a: Any, _b: Any) -> None: ...
@@ -180,6 +196,7 @@ async def test_no_raise_when_reconcile_persisted_anything(
     _patch_runtime_context(monkeypatch, org_id)
     _patch_session(monkeypatch, fake_session)
     _patch_no_skip(monkeypatch)
+    _patch_origin_refresh(monkeypatch)
     monkeypatch.setattr(stage, "_resolve_engine", lambda _config: _FakeEngine())
     monkeypatch.setattr(stage, "reset_tool_progress", lambda _a, _b: None)
     monkeypatch.setattr(stage, "reset_tool_progress_for_org", lambda _a: None)
@@ -234,6 +251,7 @@ async def test_no_raise_when_communities_empty(
     _patch_runtime_context(monkeypatch, org_id)
     _patch_session(monkeypatch, fake_session)
     _patch_no_skip(monkeypatch)
+    _patch_origin_refresh(monkeypatch)
     monkeypatch.setattr(stage, "_resolve_engine", lambda _config: _FakeEngine())
     monkeypatch.setattr(stage, "reset_tool_progress", lambda _a, _b: None)
     monkeypatch.setattr(stage, "reset_tool_progress_for_org", lambda _a: None)
