@@ -66,6 +66,7 @@ from app.repositories.feature_match_log import FeatureMatchLogRepository
 from app.repositories.feature_to_repo import list_features_with_backend_link_to
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.feature_reconciler import reconcile_features_for_repo
+from app.services.github_remote_refresh import refresh_origin_token_for_spawn
 from app.services.scan.backend_link.narrow_refresh import (
     refresh_backend_links_for_features,
 )
@@ -296,6 +297,11 @@ async def _run_claude_narrow(
         timeout_seconds=DEFAULT_TIMEOUT_SECONDS,
         progress_callback=None,
     )
+    # The narrow-synthesis subprocess runs ``git`` over ``repo_path`` to
+    # walk the PR diff; refresh the installation token before spawn so a
+    # clone older than the 1-hour token TTL still authenticates.
+    await refresh_origin_token_for_spawn(working_dir=repo_path, org_id=org_id)
+
     t0 = time.perf_counter()
     outcome = await ClaudeCodeEngine().run(request)
     elapsed_ms = int((time.perf_counter() - t0) * 1000)

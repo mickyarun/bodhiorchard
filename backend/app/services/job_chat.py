@@ -34,6 +34,7 @@ from app.services.agent_activity_logger import log_agent_activity
 from app.services.chat_persistence import persist_chat_message, persist_chat_update
 from app.services.chat_prompts import build_chat_prompt, build_design_prompt, fetch_chat_history
 from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.github_remote_refresh import refresh_origin_token_for_spawn
 from app.services.job_queue import update_job
 from app.services.job_utils import (
     build_mcp_config,
@@ -379,6 +380,16 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             cli_session_id=session_id,
             is_resume=resume,
         )
+
+    # Re-stamp ``origin`` with a fresh installation token before each
+    # spawn. The chat agent runs ``git`` / ``gh`` against ``repo_path``;
+    # without this the token baked into ``.git/config`` at clone time
+    # rejects auth once it crosses its 1-hour TTL. Best-effort: skipped
+    # for pure-LLM chats where ``repo_path`` is None.
+    await refresh_origin_token_for_spawn(
+        working_dir=repo_path,
+        org_id=uuid_mod.UUID(_chat_org_id),
+    )
 
     try:
         result = await run_claude_code(

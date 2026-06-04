@@ -567,3 +567,57 @@ def test_outcome_succeeded_helper() -> None:
     assert ok.succeeded
     bad = NarrowSynthesisOutcome(branch="synthesised", error="oops")
     assert not bad.succeeded
+
+
+async def test_run_claude_narrow_refreshes_token_before_spawning_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression guard for the wider stale-token fix.
+
+    The narrow-synthesis subprocess runs ``git`` over the clone, so the
+    installation token must be re-stamped before the engine spawns —
+    otherwise a clone older than the 1-hour token TTL fails auth and
+    the spawn aborts. Pins the ordering by recording the sequence of
+    calls and asserting refresh precedes ``engine.run``.
+    """
+    call_sequence: list[str] = []
+
+    async def fake_refresh(*, working_dir: str, org_id: uuid.UUID) -> bool:
+        call_sequence.append(f"refresh:{working_dir}:{org_id}")
+        return True
+
+    class _FakeOutcome:
+        success = True
+        error: str | None = None
+        elapsed_s = 0.0
+        cost_usd = 0.0
+        input_tokens = 0
+        output_tokens = 0
+
+    class _FakeEngine:
+        async def run(self, request: Any) -> _FakeOutcome:
+            call_sequence.append(f"engine:{request.working_dir}")
+            return _FakeOutcome()
+
+    monkeypatch.setattr(handler_mod, "refresh_origin_token_for_spawn", fake_refresh)
+    monkeypatch.setattr(handler_mod, "ClaudeCodeEngine", _FakeEngine)
+    monkeypatch.setattr(handler_mod, "create_internal_mcp_token", lambda _org: "tok")
+    # mcp_backend_url must be truthy or the function short-circuits before
+    # reaching the refresh call we want to assert against.
+    monkeypatch.setattr(
+        handler_mod.app_settings, "mcp_backend_url", "http://mcp.test", raising=False
+    )
+
+    org_id = uuid.uuid4()
+    out = await handler_mod._run_claude_narrow(
+        org_id=org_id,
+        prompt="...",
+        repo_path="/clone/foo",
+        repo_name="foo",
+    )
+
+    assert out["success"] is True
+    assert call_sequence == [
+        f"refresh:/clone/foo:{org_id}",
+        "engine:/clone/foo",
+    ], "refresh must run BEFORE engine.run — order pins the regression"

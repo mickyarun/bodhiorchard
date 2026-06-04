@@ -32,6 +32,7 @@ from app.schemas.jobs import DesignAgentJobPayload, DesignExtractJobPayload, Job
 from app.services.agent_activity_logger import log_agent_activity
 from app.services.chat_prompts import build_design_prompt
 from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.github_remote_refresh import refresh_origin_token_for_spawn
 from app.services.job_queue import update_job
 from app.services.job_utils import (
     build_mcp_config,
@@ -157,6 +158,12 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
     # Mint a CLI session id so subsequent design-tab chats on this exact
     # (bud, design) row can ``--resume`` and keep the prompt cache warm.
     originating_session_id = mint_session_id()
+
+    # Pre-spawn token refresh: the designer agent reads source files
+    # under ``repo_path`` and may run ``git`` / ``gh`` to inspect history;
+    # without this the embedded installation token expires after 1 hour.
+    # Best-effort, skipped when ``repo_path`` is None.
+    await refresh_origin_token_for_spawn(working_dir=repo_path, org_id=_org_uuid)
 
     result = await run_claude_code(
         prompt=prompt,
@@ -373,6 +380,14 @@ async def handle_design_extract_job(job_id: str, raw_payload: dict[str, Any]) ->
             error=f"Unknown platform slug in payload: {payload.platform!r}",
         )
         return
+
+    # The extractor spawns claude in ``repo_path`` and may run ``git`` / ``gh``
+    # against the cloned remote; refresh the installation token before
+    # the spawn so a clone older than the 1-hour token TTL still works.
+    await refresh_origin_token_for_spawn(
+        working_dir=str(repo_path),
+        org_id=uuid_mod.UUID(payload.org_id),
+    )
 
     extraction = await extract_design_system(repo_path, platform)
 

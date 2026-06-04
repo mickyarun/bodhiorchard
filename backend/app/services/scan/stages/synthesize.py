@@ -65,6 +65,7 @@ from app.schemas.scan import Community
 from app.services import event_bus
 from app.services.claude_runner import ProgressCallback
 from app.services.feature_reconciler import reconcile_features_for_repo
+from app.services.github_remote_refresh import refresh_origin_token_for_spawn
 from app.services.scan.stages import StageContext, StageOutput
 from app.services.scan.stages._runtime_context import resolve_runtime_context
 from app.services.scan.stages._skip import stage_output_for_skip
@@ -217,6 +218,18 @@ async def run(
         timeout_seconds=timeout_seconds,
         progress_callback=progress_callback,
     )
+
+    # Pre-spawn token refresh. The synthesis subprocess runs ``git`` over
+    # ``ctx.repo_path`` to discover routes and walk history; without this,
+    # a clone older than the 1-hour installation-token TTL fails auth.
+    # ``runtime`` is None only when the stage is invoked without a real
+    # scan runtime (engine-mocked unit tests); skip the network round-trip
+    # there since the spawn itself is mocked out in those flows.
+    if runtime is not None:
+        await refresh_origin_token_for_spawn(
+            working_dir=ctx.repo_path,
+            org_id=runtime.org_id,
+        )
 
     t0 = time.perf_counter()
     outcome = await engine.run(request)

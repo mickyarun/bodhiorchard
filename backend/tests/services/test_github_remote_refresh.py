@@ -244,6 +244,82 @@ async def test_refresh_origin_tokens_swallows_unhandled_exception(org_id: uuid.U
     assert out == {"/a": True, "/b": False, "/c": True}
 
 
+async def test_refresh_for_spawn_opens_own_session_and_delegates(org_id: uuid.UUID) -> None:
+    """Single-shot helper: no-op when working_dir is None, otherwise opens
+    an AsyncSessionLocal and forwards to the canonical singular helper.
+
+    Pins the contract that chat / design / scanner spawn sites depend on:
+    they pass only ``working_dir`` and ``org_id``, and the helper is
+    responsible for the db lifecycle.
+    """
+    delegated: dict[str, object] = {}
+
+    async def fake_single(*, working_dir: str, org_id: uuid.UUID, db: object) -> bool:
+        delegated["working_dir"] = working_dir
+        delegated["org_id"] = org_id
+        delegated["db_present"] = db is not None
+        return True
+
+    fake_session = AsyncMock()
+    fake_session.__aenter__ = AsyncMock(return_value=MagicMock())
+    fake_session.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch.object(github_remote_refresh, "refresh_origin_token", new=fake_single),
+        patch.object(
+            github_remote_refresh,
+            "AsyncSessionLocal",
+            return_value=fake_session,
+        ),
+    ):
+        out = await github_remote_refresh.refresh_origin_token_for_spawn(
+            working_dir="/clone/foo",
+            org_id=org_id,
+        )
+
+    assert out is True
+    assert delegated["working_dir"] == "/clone/foo"
+    assert delegated["org_id"] == org_id
+    assert delegated["db_present"] is True
+
+
+async def test_refresh_for_spawn_skips_when_working_dir_none(org_id: uuid.UUID) -> None:
+    """Pure-LLM spawn sites pass ``working_dir=None``; helper must short-circuit
+    without opening a session or invoking the singular helper."""
+    invoked = False
+
+    async def should_not_run(**_: object) -> bool:
+        nonlocal invoked
+        invoked = True
+        return True
+
+    with (
+        patch.object(github_remote_refresh, "refresh_origin_token", new=should_not_run),
+        patch.object(github_remote_refresh, "AsyncSessionLocal") as session_factory,
+    ):
+        out = await github_remote_refresh.refresh_origin_token_for_spawn(
+            working_dir=None,
+            org_id=org_id,
+        )
+
+    assert out is False
+    assert invoked is False
+    session_factory.assert_not_called()
+
+
+async def test_refresh_for_spawn_skips_when_working_dir_empty_string(org_id: uuid.UUID) -> None:
+    """Empty string is treated like None — guards against falsy-but-truthy
+    bugs at the call sites (resolve_repo_path can return '' for ad-hoc repos)."""
+    with patch.object(github_remote_refresh, "AsyncSessionLocal") as session_factory:
+        out = await github_remote_refresh.refresh_origin_token_for_spawn(
+            working_dir="",
+            org_id=org_id,
+        )
+
+    assert out is False
+    session_factory.assert_not_called()
+
+
 async def test_token_redacted_from_failure_log(org_id: uuid.UUID, tmp_path: Path) -> None:
     repo = MagicMock()
     repo.github_repo_full_name = "octocat/hello"

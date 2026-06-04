@@ -42,6 +42,7 @@ from pathlib import Path
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import AsyncSessionLocal
 from app.models.organization import Organization
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.git_operations import run_git
@@ -187,3 +188,26 @@ async def refresh_origin_tokens(
             )
             results[path] = False
     return results
+
+
+async def refresh_origin_token_for_spawn(
+    *,
+    working_dir: str | None,
+    org_id: uuid.UUID,
+) -> bool:
+    """Pre-spawn refresh for callers without a db session in scope.
+
+    Same contract as :func:`refresh_origin_token` but opens its own
+    short-lived ``AsyncSessionLocal`` and short-circuits when
+    ``working_dir`` is ``None`` / empty (pure-LLM spawns have no clone
+    to re-stamp). Used by chat, design, and scanner spawn sites that
+    don't already carry a db session into the function.
+    """
+    if not working_dir:
+        return False
+    async with AsyncSessionLocal() as db:
+        return await refresh_origin_token(
+            working_dir=working_dir,
+            org_id=org_id,
+            db=db,
+        )
