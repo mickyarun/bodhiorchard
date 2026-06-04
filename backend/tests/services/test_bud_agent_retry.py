@@ -53,7 +53,7 @@ def _patch_dependencies():  # type: ignore[no-untyped-def]
     with (
         patch.object(bud_agent_retry, "invalidate_installation_token") as inv,
         patch.object(
-            bud_agent_retry, "refresh_origin_token", new=AsyncMock(return_value=True)
+            bud_agent_retry, "refresh_origin_tokens", new=AsyncMock(return_value={})
         ) as refresh,
         patch.object(bud_agent_retry, "log_agent_activity", new=AsyncMock()) as logact,
         patch.object(
@@ -136,3 +136,43 @@ async def test_retry_preserves_mcp_and_tool_allowlist(_patch_dependencies) -> No
     assert retry_config.allowed_tools == ["Bash", "Read"]
     assert retry_config.max_turns == base.max_turns
     assert retry_config.timeout_seconds == base.timeout_seconds
+
+
+async def test_retry_refreshes_every_repo_path_when_provided(_patch_dependencies) -> None:
+    """Multi-repo BUDs: retry must re-stamp every confirmed repo, not just CWD.
+
+    Regression for BUD-029 incident — refreshing only ``working_dir``
+    left the other repos on stale tokens and the retry hit the same
+    auth wall.
+    """
+    kwargs = _common_kwargs()
+    kwargs["repo_paths"] = [
+        "/clone/atoa-batch",
+        "/clone/octocat-hello",  # matches working_dir
+        "/clone/atoa-dashboard",
+    ]
+    first = _success_result(AUTH_FAIL_OUTPUT)
+
+    await bud_agent_retry.maybe_retry_on_git_auth_failure(result=first, **kwargs)  # type: ignore[arg-type]
+
+    _patch_dependencies["refresh"].assert_awaited_once()
+    refreshed = _patch_dependencies["refresh"].await_args.kwargs["working_dirs"]
+    assert refreshed == [
+        "/clone/atoa-batch",
+        "/clone/octocat-hello",
+        "/clone/atoa-dashboard",
+    ]
+
+
+async def test_retry_falls_back_to_working_dir_when_repo_paths_missing(
+    _patch_dependencies,
+) -> None:
+    """Back-compat: callers that haven't been updated still get CWD refreshed."""
+    kwargs = _common_kwargs()
+    kwargs.pop("repo_paths", None)  # default None
+    first = _success_result(AUTH_FAIL_OUTPUT)
+
+    await bud_agent_retry.maybe_retry_on_git_auth_failure(result=first, **kwargs)  # type: ignore[arg-type]
+
+    refreshed = _patch_dependencies["refresh"].await_args.kwargs["working_dirs"]
+    assert refreshed == [kwargs["working_dir"]]

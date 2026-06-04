@@ -157,6 +157,93 @@ async def test_happy_path_composes_x_access_token_url(org_id: uuid.UUID, tmp_pat
     assert "x-access-token:ghs_FRESH_TOKEN@github.com/octocat/hello.git" in args[3]
 
 
+async def test_refresh_origin_tokens_loops_every_path(org_id: uuid.UUID) -> None:
+    """Plural API must invoke the singular helper once per unique path."""
+    call_log: list[str] = []
+
+    async def fake_single(*, working_dir: str, org_id: uuid.UUID, db: object) -> bool:
+        call_log.append(working_dir)
+        return True
+
+    with patch.object(github_remote_refresh, "refresh_origin_token", new=fake_single):
+        out = await github_remote_refresh.refresh_origin_tokens(
+            working_dirs=["/a", "/b", "/c"],
+            org_id=org_id,
+            db=MagicMock(),
+        )
+
+    assert call_log == ["/a", "/b", "/c"]
+    assert out == {"/a": True, "/b": True, "/c": True}
+
+
+async def test_refresh_origin_tokens_dedupes_paths(org_id: uuid.UUID) -> None:
+    """Duplicate paths must not re-stamp the same clone twice."""
+    call_log: list[str] = []
+
+    async def fake_single(*, working_dir: str, org_id: uuid.UUID, db: object) -> bool:
+        call_log.append(working_dir)
+        return True
+
+    with patch.object(github_remote_refresh, "refresh_origin_token", new=fake_single):
+        await github_remote_refresh.refresh_origin_tokens(
+            working_dirs=["/a", "/b", "/a"],
+            org_id=org_id,
+            db=MagicMock(),
+        )
+
+    assert call_log == ["/a", "/b"]
+
+
+async def test_refresh_origin_tokens_isolates_per_path_failures(org_id: uuid.UUID) -> None:
+    """A False result on one path must not stop the loop or raise.
+
+    The whole point of the plural API for multi-repo BUDs: one stale or
+    untracked repo can't take the other N-1 refreshes down with it.
+    """
+
+    async def fake_single(*, working_dir: str, org_id: uuid.UUID, db: object) -> bool:
+        return working_dir != "/b"
+
+    with patch.object(github_remote_refresh, "refresh_origin_token", new=fake_single):
+        out = await github_remote_refresh.refresh_origin_tokens(
+            working_dirs=["/a", "/b", "/c"],
+            org_id=org_id,
+            db=MagicMock(),
+        )
+
+    assert out == {"/a": True, "/b": False, "/c": True}
+
+
+async def test_refresh_origin_tokens_empty_input(org_id: uuid.UUID) -> None:
+    out = await github_remote_refresh.refresh_origin_tokens(
+        working_dirs=[],
+        org_id=org_id,
+        db=MagicMock(),
+    )
+    assert out == {}
+
+
+async def test_refresh_origin_tokens_swallows_unhandled_exception(org_id: uuid.UUID) -> None:
+    """A raising helper (e.g. DB blip) must not abort the loop."""
+    call_log: list[str] = []
+
+    async def fake_single(*, working_dir: str, org_id: uuid.UUID, db: object) -> bool:
+        call_log.append(working_dir)
+        if working_dir == "/b":
+            raise RuntimeError("simulated db blip")
+        return True
+
+    with patch.object(github_remote_refresh, "refresh_origin_token", new=fake_single):
+        out = await github_remote_refresh.refresh_origin_tokens(
+            working_dirs=["/a", "/b", "/c"],
+            org_id=org_id,
+            db=MagicMock(),
+        )
+
+    assert call_log == ["/a", "/b", "/c"]
+    assert out == {"/a": True, "/b": False, "/c": True}
+
+
 async def test_token_redacted_from_failure_log(org_id: uuid.UUID, tmp_path: Path) -> None:
     repo = MagicMock()
     repo.github_repo_full_name = "octocat/hello"

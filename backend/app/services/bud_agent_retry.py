@@ -21,10 +21,11 @@ gets its own focused unit tests. The contract:
 * Only retries when the first spawn *succeeded* but its output carries
   a git/GitHub auth rejection (see
   :func:`app.services.agent_result_handlers.is_git_auth_failure`).
-* Invalidates the cached installation token, re-stamps ``origin`` with
-  a freshly-minted one, and spawns once more with a NEW CLI session id
-  so the retry never resumes a session that may have already triggered
-  partial MCP side-effects.
+* Invalidates the cached installation token, re-stamps ``origin`` on
+  EVERY confirmed repo (not just ``working_dir`` — multi-repo prompts
+  fetch from all of them) with a freshly-minted one, then spawns once
+  more with a NEW CLI session id so the retry never resumes a session
+  that may have already triggered partial MCP side-effects.
 * Records an ``agent_retried`` activity row so the BUD timeline shows
   both spawns and downstream cost/turn accounting reconciles.
 """
@@ -43,7 +44,7 @@ from app.services.claude_runner import (
     run_claude_code,
 )
 from app.services.github_app_auth import invalidate_installation_token
-from app.services.github_remote_refresh import refresh_origin_token
+from app.services.github_remote_refresh import refresh_origin_tokens
 from app.services.section_session import mint_session_id
 
 logger = structlog.get_logger(__name__)
@@ -55,6 +56,7 @@ async def maybe_retry_on_git_auth_failure(
     prompt: str,
     spawn_cwd: str,
     working_dir: str | None,
+    repo_paths: list[str] | None = None,
     config: ClaudeRunnerConfig,
     progress_callback: ProgressCallback | None,
     org_id: uuid.UUID,
@@ -92,8 +94,16 @@ async def maybe_retry_on_git_auth_failure(
     )
 
     invalidate_installation_token(str(org_id))
-    await refresh_origin_token(
-        working_dir=working_dir,
+    # Refresh every confirmed repo, not just ``working_dir``. The first
+    # spawn's auth-failure output is the union of fetch attempts across
+    # all repos the multi-repo prompt instructed the subprocess to
+    # touch; if we only re-stamp the CWD, the retry hits the same wall
+    # on the other repos and the user sees a second identical failure.
+    # ``working_dir`` is narrowed to ``str`` by the early-return on line 77;
+    # the explicit annotation locks the list element type for the helper.
+    paths_to_refresh: list[str] = list(repo_paths) if repo_paths else [working_dir]
+    await refresh_origin_tokens(
+        working_dirs=paths_to_refresh,
         org_id=org_id,
         db=db,
     )

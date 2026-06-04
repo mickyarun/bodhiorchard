@@ -62,13 +62,19 @@ async def _snapshot_agent_write(db: Any, bud: BUDDocument) -> None:
 
 
 # Substrings emitted by ``git`` / ``gh`` / the GitHub HTTPS endpoint when the
-# bearer token is rejected. We match on the tools' own wording rather than a
-# paraphrase so the classifier doesn't drift if we change our own copy.
+# bearer token is rejected, plus a couple of conservative LLM paraphrases.
+# Prefer tool wording, but the agent often swallows raw stderr and only
+# summarises the failure in its structured output — without those paraphrases
+# the retry path never fires (see BUD-029 incident, task 669c5641).
 # Surfaces as ``parse_failure_reason="git_auth_failed"`` — see
 # :data:`app.schemas.bud_code_review.PARSE_FAILURE_MESSAGES`.
 _GIT_AUTH_FAILURE_RE = re.compile(
     r"(Invalid username or token"
     r"|Authentication failed"
+    r"|authentication failure"
+    # Anchored to ``branch`` to avoid matching generic review prose like
+    # "the image could not be fetched from the CDN" inside a comment.
+    r"|branch[^\n]{0,200}could not be fetched"
     r"|could not read Username"
     r"|remote: Repository not found"
     r"|fatal: unable to access"

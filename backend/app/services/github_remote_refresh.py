@@ -24,6 +24,11 @@ runs the same ``git remote set-url origin`` flip that
 to a standalone call so it can be invoked right before each agent
 spawn — guaranteeing the agent's git/gh commands see a fresh token.
 
+Multi-repo BUDs need the plural :func:`refresh_origin_tokens`: a code-review
+or testing prompt instructs the subprocess to ``git fetch`` against every
+confirmed repo, so refreshing only the first one leaves the rest on stale
+tokens. Per-path failures are isolated — one bad path does not stop the loop.
+
 Best-effort by design: failures are logged and swallowed so they never
 block the agent run. If the refresh fails (no App creds, repo not
 tracked, git config write error), the agent run still starts — it may
@@ -140,3 +145,45 @@ async def refresh_origin_token(
         repo=repo.github_repo_full_name,
     )
     return True
+
+
+async def refresh_origin_tokens(
+    *,
+    working_dirs: list[str],
+    org_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict[str, bool]:
+    """Refresh ``origin`` for every clone in ``working_dirs``.
+
+    Loops :func:`refresh_origin_token` once per unique path. Isolation
+    is total: a per-path failure — git rc, OSError, or even a DB error
+    from the tracked-repo lookup — is logged and recorded as ``False``
+    so the loop still reaches the next path. The retry path needs this:
+    one un-tracked or DB-blipped repo cannot block the refresh of the
+    other N-1 repos the second spawn is about to fetch.
+
+    Returns a ``{path: succeeded}`` map so callers can log how many of
+    the N repos actually saw a fresh token.
+    """
+    results: dict[str, bool] = {}
+    for path in dict.fromkeys(working_dirs):
+        try:
+            results[path] = await refresh_origin_token(
+                working_dir=path,
+                org_id=org_id,
+                db=db,
+            )
+        except Exception as exc:
+            # The singular helper already swallows OSError + git rc, so
+            # anything reaching here is structural (DB, attribute lookup
+            # on a misshapen TrackedRepository row). Record ``False`` and
+            # keep looping — one bad clone can't take the batch down.
+            logger.warning(
+                "origin_refresh_unhandled",
+                org_id=str(org_id),
+                repo_path=path,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            results[path] = False
+    return results

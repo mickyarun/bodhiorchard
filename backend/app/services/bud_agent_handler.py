@@ -47,8 +47,9 @@ from app.services.agent_result_handlers import (
     handle_testing_result,
 )
 from app.services.bud_agent_retry import maybe_retry_on_git_auth_failure
+from app.services.bud_repo_paths import confirmed_repo_paths
 from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
-from app.services.github_remote_refresh import refresh_origin_token
+from app.services.github_remote_refresh import refresh_origin_tokens
 from app.services.job_queue import update_job
 from app.services.job_utils import build_mcp_config, make_progress_callback, record_agent_timeline
 from app.services.section_session import mint_session_id, record_originating_session
@@ -343,9 +344,15 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             # is logged but does not block the run — the agent may then
             # surface the auth error itself, classified as
             # ``git_auth_failed`` by the result parser.
-            if working_dir:
-                await refresh_origin_token(
-                    working_dir=working_dir,
+            #
+            # Multi-repo BUDs (code-review, testing) ``git fetch`` against
+            # every confirmed repo; refreshing only ``working_dir`` (the
+            # first one) leaves the rest on stale tokens. Pass the full
+            # list so all of them are re-stamped before spawn.
+            repo_paths_for_refresh = confirmed_repo_paths(bud, fallback=working_dir)
+            if repo_paths_for_refresh:
+                await refresh_origin_tokens(
+                    working_dirs=repo_paths_for_refresh,
                     org_id=org_id,
                     db=db,
                 )
@@ -370,6 +377,7 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 prompt=prompt,
                 spawn_cwd=spawn_cwd,
                 working_dir=working_dir,
+                repo_paths=repo_paths_for_refresh,
                 config=config,
                 progress_callback=make_progress_callback(job_id),
                 org_id=org_id,

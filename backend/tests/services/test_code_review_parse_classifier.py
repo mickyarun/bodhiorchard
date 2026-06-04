@@ -26,6 +26,11 @@ from app.services.agent_result_handlers import _parse_code_review_output, is_git
         "remote: Repository not found.",
         "fatal: unable to access 'https://github.com/foo/bar/': The requested URL returned 403",
         "Bad credentials",
+        # LLM paraphrases — captured from BUD-029 incident where the
+        # subprocess swallowed git stderr and only summarised the failure
+        # in its structured output, defeating the tool-wording-only match.
+        "branch `feat/x` could not be fetched (authentication failure)",
+        "Warning: file could not be fetched due to authentication failure",
     ],
 )
 def test_git_auth_failure_classified(fragment: str) -> None:
@@ -58,6 +63,22 @@ def test_is_git_auth_failure_matches_same_signals_as_parser() -> None:
     assert is_git_auth_failure("Bad credentials") is True
     assert is_git_auth_failure("nothing wrong here") is False
     assert is_git_auth_failure("") is False
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        # Review prose about asset/spec/file fetching must NOT trip the
+        # paraphrase patterns — a frontend or API-client review can write
+        # any of these naturally without an auth failure being involved.
+        "The hero image could not be fetched from the CDN",
+        "OpenAPI spec could not be fetched at build time",
+        "npm package could not be fetched due to a 404",
+        "The remote config file could not be fetched on cold start",
+    ],
+)
+def test_paraphrase_regex_does_not_match_generic_fetch_prose(prose: str) -> None:
+    assert is_git_auth_failure(prose) is False
 
 
 def test_banner_copy_exists_for_classifier_reasons() -> None:
