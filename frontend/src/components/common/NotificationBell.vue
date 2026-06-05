@@ -326,7 +326,14 @@ const reassignTargets = computed(() => {
     .map(m => ({ id: m.id, name: m.name }))
 })
 
-useNotificationSocket(props.userId)
+// Getter form (not snapshot) so the composable re-targets the WS
+// subscription when ``authStore.user.id`` hydrates after this bell
+// has already mounted via ``v-show`` in AppLayout. Without this,
+// notifications fired before hydration would only surface on tab
+// refresh (the visibility-change ``fetchAll`` path), not via the
+// live WS push. See ``useNotificationSocket.ts`` for the full
+// rationale.
+useNotificationSocket(() => props.userId)
 useYieldOfferSocket(props.userId)
 
 function loadMembersIfAdmin(): void {

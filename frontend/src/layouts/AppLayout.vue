@@ -265,6 +265,14 @@
          survive route changes while the user is signed in. -->
     <RaceInviteToast v-if="authStore.user?.id" />
     <RaceWatchBanner v-if="authStore.user?.id" />
+
+    <!-- Cross-BUD job-completion toast. Surfaces when a chat / agent
+         job finishes for a BUD the user is NOT currently on. The
+         "snapped back to previous BUD" bug was *perceived* as
+         auto-nav; replacing implicit jumps with this explicit Review
+         CTA closes that class of complaint. Reads the existing
+         notifications store, no extra socket subscriptions. -->
+    <ChatCompletionToast v-if="authStore.user?.id" />
   </v-app>
 </template>
 
@@ -275,6 +283,7 @@ import { useAuthStore } from '@/stores/auth'
 import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
 import XPToast from '@/components/common/XPToast.vue'
+import ChatCompletionToast from '@/components/common/ChatCompletionToast.vue'
 import RaceInviteToast from '@/components/race/RaceInviteToast.vue'
 import RaceWatchBanner from '@/components/race/RaceWatchBanner.vue'
 import { usePermissions } from '@/composables/usePermissions'

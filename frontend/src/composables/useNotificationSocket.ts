@@ -18,22 +18,56 @@
  * Subscribes to notifications:{userId} topic and pushes incoming
  * notifications into the Pinia store. Re-fetches from DB on
  * tab visibility change for cross-tab consistency.
+ *
+ * Accepts a *getter* (not a snapshot) so the subscription can
+ * re-target when ``authStore.user.id`` hydrates after the host
+ * component (NotificationBell) has already mounted. The host uses
+ * ``v-show`` rather than ``v-if`` to keep the bell mounted across
+ * the rail collapse — that means setup runs once at the very first
+ * render, and the userId at that moment may be empty. Without the
+ * getter + watcher, the subscription would be wedged on
+ * ``notifications:`` forever and WS pushes would never reach the
+ * store; only ``fetchAll`` on tab refresh / visibility change
+ * would populate the bell. This was the "toast only shows after
+ * refresh" bug.
  */
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { onSocketReconnect } from '@/services/wsReconnect'
 import { useNotificationStore } from '@/stores/notifications'
 import type { AppNotification } from '@/types'
 
-export function useNotificationSocket(userId: string) {
+export function useNotificationSocket(getUserId: () => string) {
   const store = useNotificationStore()
-  const topic = `notifications:${userId}`
 
   const handler = (data: unknown) => {
     store.addFromSocket(data as AppNotification)
   }
 
-  subscribe(topic, handler)
+  // Track the currently-subscribed topic so we can unsubscribe cleanly
+  // when the userId changes (e.g. team switch, or — the common case —
+  // initial render with an empty userId followed by hydration).
+  let currentTopic: string | null = null
+
+  const syncSubscription = (userId: string): void => {
+    const next = userId ? `notifications:${userId}` : null
+    if (next === currentTopic) return
+    if (currentTopic) {
+      unsubscribe(currentTopic, handler)
+    }
+    currentTopic = next
+    if (currentTopic) {
+      subscribe(currentTopic, handler)
+      // Pull any notifications missed before the subscription was
+      // active — common on the very first userId hydration since
+      // WS arrivals between mount and hydration go to the bogus
+      // topic and are lost.
+      void store.fetchAll()
+    }
+  }
+
+  watch(getUserId, syncSubscription, { immediate: true })
+
   // Refetch on every WS reconnect — notifications fired during the
   // dropped-socket window aren't replayed, so the list would silently
   // miss entries until the next visibility change.
@@ -50,7 +84,10 @@ export function useNotificationSocket(userId: string) {
   })
 
   onUnmounted(() => {
-    unsubscribe(topic, handler)
+    if (currentTopic) {
+      unsubscribe(currentTopic, handler)
+      currentTopic = null
+    }
     unregisterReconnect()
     document.removeEventListener('visibilitychange', onVisibility)
   })

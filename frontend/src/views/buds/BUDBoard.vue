@@ -391,6 +391,8 @@ import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
 import { useBUDStore } from '@/stores/bud'
+import { useNotificationStore } from '@/stores/notifications'
+import { storeToRefs } from 'pinia'
 import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/agentSkills'
 import { useSettingsStore } from '@/stores/settings'
 import { BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_PRIORITIES } from '@/types'
@@ -563,6 +565,22 @@ onMounted(() => {
   // (UAT enabled) regardless of what the org has saved.
   if (!settingsStore.connectionsLoaded) settingsStore.fetchConnections()
 })
+
+// Re-fetch the BUD list when a job-completion notification arrives.
+// Without this the board doesn't reflect newly-completed agent work
+// (status badges, agent banners, design counters) until the user
+// hits browser refresh — the bell IS updated via useNotificationSocket
+// because the badge shows, but the board cards stayed stale.
+const notificationStore = useNotificationStore()
+const { items: notificationItems } = storeToRefs(notificationStore)
+watch(
+  () => notificationItems.value.length,
+  (newLen, oldLen) => {
+    if (newLen > (oldLen ?? 0)) {
+      void budStore.fetchBUDs()
+    }
+  },
+)
 
 function openBUD(id: string): void {
   router.push(`/buds/${id}`)
