@@ -324,7 +324,7 @@
                   :has-tech-spec="!!bud.tech_spec_md"
                   :impacted-repos="bud.impacted_repos"
                   @download-tech-spec="downloadSection('tech_spec_md')"
-                  @refresh-bud="budStore.fetchBUD(bud.id)"
+                  @refresh-bud="budStore.refreshBUDIfCurrent(bud.id)"
                 />
               </v-tabs-window-item>
 
@@ -375,7 +375,7 @@
                   :has-stage-branch-configured="hasUatBranchConfigured"
                   :impacted-repos="bud.impacted_repos"
                   :branch-overrides="bud.branch_overrides"
-                  @refresh-bud="budStore.fetchBUD(bud.id)"
+                  @refresh-bud="budStore.refreshBUDIfCurrent(bud.id)"
                 />
               </v-tabs-window-item>
 
@@ -388,7 +388,7 @@
                   :has-stage-branch-configured="hasMainBranchConfigured"
                   :impacted-repos="bud.impacted_repos"
                   :branch-overrides="bud.branch_overrides"
-                  @refresh-bud="budStore.fetchBUD(bud.id)"
+                  @refresh-bud="budStore.refreshBUDIfCurrent(bud.id)"
                 />
               </v-tabs-window-item>
 
@@ -485,19 +485,22 @@
         :retry-prompt="retryPrompt"
         :designs="chatDesignOptions"
         :selected-design-id="activeDesignTabId"
+        :needs-design-generation="needsDesignGeneration"
         @close="chatOpen = false"
         @send="handleChatSend"
         @cancel="handleChatCancel"
         @new-session="startNewSession"
         @retry="manualRetry"
         @select-design="handleChatSelectDesign"
+        @open-generate-designs="openGenerateDesigns"
+        @open-autogen-settings="openAutogenSettings"
       />
     </transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useBUDStore } from '@/stores/bud'
 import { useAuthStore } from '@/stores/auth'
@@ -560,6 +563,12 @@ const canEditBud = computed(() => hasPermission('buds:edit'))
 const settingsStore = useSettingsStore()
 const budLinkedFeaturesStore = useBudLinkedFeaturesStore()
 
+// BUDDetail follows the store's ``currentBUD`` directly. The store
+// itself prevents cross-BUD pollution: only ``fetchBUD`` (foreground
+// nav) sets ``currentBUD``, while background callers route through
+// ``refreshBUDIfCurrent`` which no-ops on mismatch. See
+// ``frontend/src/stores/bud.ts`` for the rationale and the audit
+// of which callers were switched in this pass.
 const bud = computed(() => budStore.currentBUD)
 
 async function reloadBudAfterSettingsSave(): Promise<void> {
@@ -569,7 +578,11 @@ async function reloadBudAfterSettingsSave(): Promise<void> {
   // knows to refresh, instead of silently swallowing the rejection.
   if (!bud.value) return
   try {
-    await budStore.fetchBUD(bud.value.id)
+    // Background refresh: settings dialog is modal so the user can't
+    // navigate away while it's open, but use the guarded variant for
+    // consistency with the other post-action refresh sites and to
+    // prevent a parallel programmatic nav from racing the save.
+    await budStore.refreshBUDIfCurrent(bud.value.id)
   } catch (err) {
     console.error('BUD reload after settings save failed:', err)
   }
@@ -761,7 +774,10 @@ const reachedCodeReview = computed(() => {
 // so no manual activeTab assignment needed.
 async function onCodeReviewTransitioned(): Promise<void> {
   if (!bud.value) return
-  await Promise.all([budStore.fetchBUD(bud.value.id), loadTimeline()])
+  // Background refresh — emitted by BUDCodeReviewStatus after an
+  // override succeeds; user is still on this BUD, but the guard
+  // protects against a parallel nav racing the refresh.
+  await Promise.all([budStore.refreshBUDIfCurrent(bud.value.id), loadTimeline()])
 }
 
 // History-tab revert handler. Refreshes the BUD body so the section
@@ -770,7 +786,7 @@ async function onCodeReviewTransitioned(): Promise<void> {
 // the activity panel should pick up.
 async function onBudReverted(): Promise<void> {
   if (!bud.value) return
-  await Promise.all([budStore.fetchBUD(bud.value.id), loadTimeline()])
+  await Promise.all([budStore.refreshBUDIfCurrent(bud.value.id), loadTimeline()])
 }
 
 const isCurrentAssignee = computed(() =>
@@ -864,9 +880,47 @@ const currentSectionEditable = computed(() =>
 // rule via HTTP 409; this predicate keeps the AI button consistent
 // with that contract so the user can't even open chat when the gate
 // would reject the first send.
-const currentSectionChatable = computed(() =>
-  isSectionChatable(currentSection.value, bud.value?.status),
+//
+// Extra rule for the Design section: chat is only allowed once a
+// design row exists. Without this, the first user message tags
+// ``bud_chat_messages.design_id = NULL``, the agent then upserts a
+// fresh row, and the panel's auto-select filter strands those
+// messages under a non-matching ``design_id``. Backend mirrors this
+// as a 409 ``design_not_generated`` so curl / stale tabs can't
+// bypass.
+const currentSectionChatable = computed(() => {
+  const phaseOk = isSectionChatable(currentSection.value, bud.value?.status)
+  if (!phaseOk) return false
+  if (currentSection.value === 'design') {
+    return (bud.value?.designs ?? []).length > 0
+  }
+  return true
+})
+
+// True when the chat panel is open on the design section but no design
+// row exists yet. Drives the ChatPanel "Generate a design first"
+// empty-state block; the textarea hides while this is true.
+const needsDesignGeneration = computed(
+  () =>
+    currentSection.value === 'design' &&
+    (bud.value?.designs ?? []).length === 0,
 )
+
+function openGenerateDesigns(): void {
+  // Switch to the design tab first so the user sees the Generate
+  // Designs flow as it spawns the repo-picker dialog (when there's
+  // more than one frontend repo) or jumps straight to the running
+  // banner.
+  activeTab.value = 'design'
+  void designPanelRef.value?.triggerDesignGeneration()
+}
+
+function openAutogenSettings(): void {
+  // BUDSkillSettingsDialog owns the per-BUD ``auto_generate_phases``
+  // map — opening it lets the user toggle the design phase on so the
+  // designer agent runs automatically next time the BUD enters Design.
+  skillSettingsOpen.value = true
+}
 
 // Section → human label for the "Move the BUD to <X> to edit" tooltip.
 // ``development`` is here only to keep TypeScript happy — it's in
@@ -905,10 +959,11 @@ const agentLocked = computed(() => {
 })
 
 // Top-level cleanup target for the BUD-activity subscription. Populated
-// from inside onMounted once the route id is known; fired by the
-// synchronous onUnmounted below. We can't call `onUnmounted` from
-// inside the async onMounted callback — Vue 3 warns "no active
-// component instance" because setup() has long since returned by then.
+// from inside ``loadBud`` once the route id is known; fired by both the
+// route-id watcher (when navigating to a different BUD) and the
+// synchronous onUnmounted below. We can't call ``onUnmounted`` from
+// inside the async load callback — Vue 3 warns "no active component
+// instance" because setup() has long since returned by then.
 let budActivityCleanup: (() => void) | null = null
 
 onUnmounted(() => {
@@ -916,13 +971,28 @@ onUnmounted(() => {
   budActivityCleanup = null
 })
 
-onMounted(async () => {
+// Single source of truth for "set up the page for BUD id". Called from
+// the route watcher below — both on first mount AND on every navigation
+// from /buds/A → /buds/B that keeps this component instance alive.
+// Without re-running on URL change the page would render a stale BUD
+// (route reuses the component since the matched route name is the same)
+// — that was the recurring "snapped back to previous BUD" symptom.
+async function loadBud(id: string): Promise<void> {
+  // Tear down the previous BUD's subscriptions FIRST so a swap can't
+  // leave dual WS handlers firing on the new BUD's activity topic.
+  budActivityCleanup?.()
+  budActivityCleanup = null
+  // Reset chat composable state so messages / session id / banners from
+  // the previous BUD don't leak into the new one. ``startNewSession``
+  // already wipes the in-memory thread; the watcher on ``activeTab``
+  // below will refetch history for the new BUD.
+  startNewSession()
+
   const tabParam = route.query.tab as string | undefined
   if (tabParam && VALID_BUD_TABS.has(tabParam)) {
     activeTab.value = tabParam
   }
 
-  const id = route.params.id as string
   await budStore.fetchBUD(id)
 
   // Auto-select tab based on BUD status (unless explicit ?tab= param)
@@ -947,7 +1017,11 @@ onMounted(async () => {
   // Subscribe to BUD activity events (PR opened/merged/comment via webhook)
   const budActivityTopic = `bud:${id}:activity`
   const refreshBudState = () => {
-    budStore.fetchBUD(id)
+    // Background refresh: the activity topic is scoped to this BUD,
+    // but the user may have navigated to a different BUD by the time
+    // a webhook-driven event lands. The guarded variant no-ops on
+    // mismatch so we never clobber the new BUD's view.
+    void budStore.refreshBUDIfCurrent(id)
     loadTimeline()
     reloadEstimates()
   }
@@ -969,14 +1043,25 @@ onMounted(async () => {
   // page-refresh does and keeps the timeline / PR-status banners
   // accurate without the user knowing they were briefly offline.
   const unregisterReconnect = onSocketReconnect(refreshBudState)
-  // Stash cleanup so the top-level onUnmounted (registered synchronously
-  // in setup) can fire it. Calling onUnmounted from inside an async
-  // onMounted callback warns "no active component instance" in Vue 3.
   budActivityCleanup = () => {
     unsubscribe(budActivityTopic, handleBudActivity)
     unregisterReconnect()
   }
-})
+}
+
+// React to route.params.id on first mount AND on every cross-BUD nav
+// that reuses this component (notification deep-link clicks,
+// browser back/forward, bug→BUD links). Without this watcher, Vue
+// Router silently keeps BUD A's content rendered when the URL flips
+// to /buds/<B> — see ``feedback_tighten_not_patch`` for the failure
+// pattern this closes.
+watch(
+  () => route.params.id as string,
+  (id) => {
+    if (id) void loadBud(id)
+  },
+  { immediate: true },
+)
 
 // Single source of truth for status → tab mapping
 const STATUS_TAB_MAP: Record<string, string> = {

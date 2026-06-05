@@ -279,18 +279,23 @@ function trackAgentTask(task: { job_id: string | null; task_type: string; status
       taskGenerating.value = false
       taskStatusMessage.value = ''
       agentName.value = ''
-      await budStore.fetchBUD(props.bud.id)
+      // Background refresh — if the user has navigated to a different
+      // BUD while this tracker was in flight, do NOT clobber that
+      // BUD's view with the stale one's payload. ``refreshBUDIfCurrent``
+      // no-ops when ``currentBUD`` has moved on.
+      await budStore.refreshBUDIfCurrent(props.bud.id)
       emit('reload-timeline')
     },
     async onError(err, errorCode) {
       taskGenerating.value = false
       taskStatusMessage.value = friendlyAgentError(errorCode, err).headline
       agentName.value = ''
-      // Refetch so bud.active_agent_task reflects the failed status —
+      // Refresh so bud.active_agent_task reflects the failed status —
       // the unified top banner and any per-tab consumers read from
       // that field and would otherwise stay stuck on the stale
-      // "running" state until the next page load.
-      await budStore.fetchBUD(props.bud.id)
+      // "running" state until the next page load. Same store guard
+      // as the success branch above.
+      await budStore.refreshBUDIfCurrent(props.bud.id)
       emit('reload-timeline')
     },
   })
@@ -371,7 +376,10 @@ function trackAgentActivity(orgId: string, budId: string): void {
         clearWatchdog()
         phaseMessage.value = ''
         agentName.value = ''
-        void budStore.fetchBUD(budId)
+        // Background refresh: agent_activity is org-scoped, so this
+        // handler may still be subscribed when the user has navigated
+        // away. Don't clobber the new BUD's view in that case.
+        void budStore.refreshBUDIfCurrent(budId)
         emit('reload-timeline')
       } else {
         armWatchdog()

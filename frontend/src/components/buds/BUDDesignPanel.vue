@@ -503,7 +503,11 @@ async function confirmDesignGeneration(): Promise<void> {
 async function startDesignJobs(repoIds: string[]): Promise<void> {
   const jobs = await budStore.generateDesigns(props.budId, repoIds)
   await loadDesigns()
-  await budStore.fetchBUD(props.budId)  // Trigger agent banner via active_agent_task
+  // Background refresh: agent banner reads from ``bud.active_agent_task``
+  // which the generate response just updated server-side. Use the
+  // guarded variant so a navigation in flight doesn't clobber the
+  // new BUD's view.
+  await budStore.refreshBUDIfCurrent(props.budId)
   emit('switch-to-design')
   for (const job of jobs) {
     trackDesignJob(job.designId, job.jobId)

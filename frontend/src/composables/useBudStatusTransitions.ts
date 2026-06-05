@@ -160,7 +160,10 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
     // currentBUD, so bud.qa_manual_cases can be stale after marking
     // cases as pass.
     if (bud.status === 'testing' && (newStatus === 'uat' || newStatus === 'prod')) {
-      await budStore.fetchBUD(bud.id)
+      // Background refresh: still on this BUD by the time we got here
+      // (the dialog is a child of BUDDetail) — but use the guarded
+      // variant so a parallel navigation doesn't race the refresh.
+      await budStore.refreshBUDIfCurrent(bud.id)
       const refreshed = hooks.getBud()
       const pending = (refreshed?.qa_manual_cases ?? []).filter(
         tc => tc.result === 'pending',

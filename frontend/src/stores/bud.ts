@@ -88,6 +88,38 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  /**
+   * Background-safe BUD refresh: fetches ``id`` and updates
+   * ``currentBUD`` ONLY if the in-memory ``currentBUD`` is still that
+   * same BUD. Used by side-effect callers (job-completion trackers,
+   * status transitions, design generation) that want to refresh the
+   * payload after some agent action — when the user has navigated
+   * to a different BUD in the meantime, those callers must NOT
+   * clobber the new BUD's data with the old one's. Without this
+   * split, ``fetchBUD`` would unconditionally swap ``currentBUD``,
+   * silently switching the BUDDetail view to the old BUD even
+   * though the URL still points at the new one.
+   *
+   * Returns the fetched document for callers that need it, or
+   * ``null`` on network failure / cache miss.
+   */
+  async function refreshBUDIfCurrent(id: string): Promise<BUDDocument | null> {
+    if (currentBUD.value?.id !== id) return null
+    try {
+      const { data } = await api.get(`/v1/buds/${id}`)
+      if (currentBUD.value?.id === id) {
+        currentBUD.value = data
+      }
+      return data
+    } catch {
+      // Silent: this is a background refresh; a transient failure
+      // leaves the view on the previous payload until the next
+      // refresh fires. The error banner is reserved for foreground
+      // ``fetchBUD`` paths.
+      return null
+    }
+  }
+
   async function createBUD(
     title: string,
     requirements_md?: string,
@@ -189,10 +221,18 @@ export const useBUDStore = defineStore('bud', () => {
       const { data } = await api.post<ChatJobCreatedResponse>(`/v1/buds/${id}/chat`, body)
       return data
     } catch (e) {
+      // 409 ``detail`` is a discriminated union by ``error``:
+      // - ``chat_in_progress`` → existing ChatInProgressDetail with the
+      //   live job pointer.
+      // - ``design_not_generated`` (and any future named-error shape) →
+      //   ``NamedErrorDetail`` carries a human ``message`` we surface
+      //   verbatim in the hard-lock banner.
+      // - String detail → stage-gate text rendered verbatim.
+      type NamedErrorDetail = { error: string; message: string }
       const err = e as {
         response?: {
           status?: number
-          data?: { detail?: string | ChatInProgressDetail }
+          data?: { detail?: string | ChatInProgressDetail | NamedErrorDetail }
         }
       }
       const detail = err.response?.data?.detail
@@ -207,14 +247,24 @@ export const useBUDStore = defineStore('bud', () => {
         }
       }
       if (err.response?.status === 409) {
-        // Backend uses two 409 shapes for ``POST /chat``:
+        // Backend uses three 409 shapes for ``POST /chat``:
         // - chat_in_progress: ``detail`` is an object carrying the live
         //   job pointer so the panel can subscribe via resume.
+        // - design_not_generated: ``detail`` is an object with an
+        //   ``error`` code and a human ``message`` — routed onto the
+        //   hard-lock banner (same rollback semantics as stage-gate).
         // - stage-gate: ``detail`` is a string the UI renders verbatim.
-        if (
-          detail && typeof detail === 'object' && detail.error === 'chat_in_progress'
-        ) {
-          return { chatInProgressError: detail }
+        if (detail && typeof detail === 'object') {
+          if (detail.error === 'chat_in_progress') {
+            return { chatInProgressError: detail as ChatInProgressDetail }
+          }
+          // Any other named-error object (currently
+          // ``design_not_generated``) carries a human ``message`` that
+          // belongs in the hard-lock banner verbatim.
+          const named = detail as NamedErrorDetail
+          if (named.message) {
+            return { stageGateError: named.message }
+          }
         }
         return { stageGateError: detailString ?? 'Section is locked for this BUD stage.' }
       }
@@ -557,6 +607,7 @@ export const useBUDStore = defineStore('bud', () => {
     budsByStatus,
     fetchBUDs,
     fetchBUD,
+    refreshBUDIfCurrent,
     createBUD,
     updateBUD,
     deleteBUD,
