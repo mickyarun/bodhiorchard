@@ -128,9 +128,18 @@ async def handle_write_bud_design(
 ) -> dict[str, Any]:
     """Persist an iterated wireframe HTML for a BUD/repo design row.
 
-    Sanitises the HTML, upserts the ``bud_designs`` row keyed by
-    ``(bud_id, repo_id)``, and marks it ``READY``. ``notes`` are optional
-    free-form override text shown alongside the wireframe.
+    Sanitises the HTML, then updates the targeted ``bud_designs`` row
+    and marks it ``READY``. Resolution priority:
+
+    1. ``design_id`` (when supplied) — direct lookup by UUID. The row's
+       ``bud_id`` and ``org_id`` must match the caller's context;
+       mismatches return an error instead of writing. This is the path
+       chat iteration uses so a stale prompt can't accidentally insert
+       a fresh row.
+    2. ``(bud_id, repo_id)`` upsert — the initial-generation path used
+       by ``job_design`` when the row doesn't exist yet.
+
+    ``notes`` are optional free-form override text.
     """
     error = require_non_empty(params, "bud_id", "html")
     if error:
@@ -148,19 +157,57 @@ async def handle_write_bud_design(
         except (ValueError, TypeError):
             return {"success": False, "error": "repo_id is not a valid UUID"}
 
+    design_uuid: uuid_mod.UUID | None = None
+    if params.get("design_id"):
+        try:
+            design_uuid = uuid_mod.UUID(params["design_id"])
+        except (ValueError, TypeError):
+            return {"success": False, "error": "design_id is not a valid UUID"}
+
     raw_html = params["html"]
     safe_html = sanitize_design_html(raw_html)
     notes = params.get("notes")
 
     repo = BUDDesignRepository(db, org_id=org.id)
-    design = await repo.upsert(
-        bud_uuid,
-        repo_uuid,
-        design_html=safe_html,
-        status=BUDDesignStatus.READY,
-        notes=notes,
-    )
-    await db.commit()
+
+    if design_uuid is not None:
+        # Direct-update path. Verify the row belongs to the caller's
+        # org and the claimed BUD before mutating — the org_id scope on
+        # ``BUDDesignRepository`` already filters cross-org reads, but
+        # the bud_id check is explicit so a stale chat job can't
+        # silently land HTML on a different BUD's row.
+        existing = await repo.get_by_id(design_uuid)
+        if existing is None or existing.bud_id != bud_uuid:
+            logger.warning(
+                "mcp_write_bud_design_rejected",
+                org_id=str(org.id),
+                bud_id=str(bud_uuid),
+                design_id=str(design_uuid),
+                reason="design_id_not_found_or_bud_mismatch",
+                row_exists=existing is not None,
+            )
+            return {
+                "success": False,
+                "error": (
+                    f"design_id {design_uuid} not found for bud_id {bud_uuid}. "
+                    "The row may have been deleted; ask the user to retry."
+                ),
+            }
+        existing.design_html = safe_html
+        existing.status = BUDDesignStatus.READY
+        if notes is not None:
+            existing.notes = notes
+        await db.commit()
+        design = existing
+    else:
+        design = await repo.upsert(
+            bud_uuid,
+            repo_uuid,
+            design_html=safe_html,
+            status=BUDDesignStatus.READY,
+            notes=notes,
+        )
+        await db.commit()
 
     logger.info(
         "mcp_write_bud_design",
@@ -169,6 +216,7 @@ async def handle_write_bud_design(
         repo_id=str(repo_uuid) if repo_uuid else None,
         design_id=str(design.id),
         html_length=len(safe_html),
+        targeted_by_design_id=design_uuid is not None,
     )
     return {
         "saved": True,

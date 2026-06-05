@@ -235,6 +235,27 @@ async def chat_bud(
             ),
         )
 
+    # Design-section chat requires a generated design row. Without a
+    # ``design_id`` the user message gets persisted with
+    # ``design_id = NULL``, the agent then upserts a fresh row, and
+    # ``BUDDesignPanel`` auto-selects the new row — the panel's
+    # ``list_messages`` filter (``design_id = X``) then excludes the
+    # original NULL-tagged messages, presenting an empty thread. The
+    # frontend disables the textarea via ``needsDesignGeneration``;
+    # this guard is the API-level defense against curl / stale tabs.
+    if body.section == "design" and body.design_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "design_not_generated",
+                "message": (
+                    "Generate a design first. The AI Editor needs an existing "
+                    "wireframe to iterate on. Use Generate Designs, the MCP "
+                    "design tools, or enable autogen for the Design phase."
+                ),
+            },
+        )
+
     # Backend owns session_id resolution. Look up the originating-agent
     # session row for this (bud, section[, design_id]); the worker will
     # rotate / mint as needed and the response carries the *resolved*

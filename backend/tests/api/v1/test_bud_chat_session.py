@@ -69,6 +69,12 @@ async def test_chat_bud_happy_path_uses_resolved_session_id() -> None:
             body=BUDChatRequest(
                 message="iterate",
                 section="design",
+                # Design-section chat now requires a pre-existing
+                # design row; the API rejects design+no-design_id with
+                # 409 design_not_generated. The session test still
+                # targets the design section because that's where the
+                # rotation logic lives.
+                design_id=uuid.uuid4(),
                 session_id=uuid.uuid4(),  # client-supplied id is IGNORED
             ),
             current_user=user,
@@ -123,9 +129,52 @@ async def test_chat_bud_first_message_gets_session_from_claim() -> None:
     ):
         response = await chat_bud(
             bud_id=bud.id,
-            body=BUDChatRequest(message="first", section="design"),
+            body=BUDChatRequest(
+                message="first",
+                section="design",
+                design_id=uuid.uuid4(),
+            ),
             current_user=user,
             db=db,
         )
 
     assert response.session_id == str(claim_minted_session_id)
+
+
+@pytest.mark.asyncio
+async def test_chat_bud_design_section_without_design_id_rejects_with_409() -> None:
+    """Design-section chat without design_id must 409 ``design_not_generated``.
+
+    Closes the chat-before-design orphan path: a POST that lands user
+    messages with ``design_id = NULL`` would be excluded by the panel's
+    ``list_messages`` filter after the agent creates a fresh design row
+    and the picker auto-selects it.
+    """
+    from fastapi import HTTPException
+
+    user = make_user()
+    bud = make_bud(status="design")
+    db = MagicMock()
+    db.flush = AsyncMock()
+
+    patches = patch_repos(bud=bud, active_session=None)
+
+    with (
+        patch("app.api.v1.bud_chat.BUDRepository", patches["BUDRepository"]),
+        patch(
+            "app.api.v1.bud_chat.BUDSectionSessionRepository",
+            patches["BUDSectionSessionRepository"],
+        ),pytest.raises(HTTPException) as exc
+    ):
+        await chat_bud(
+            bud_id=bud.id,
+            body=BUDChatRequest(message="say hi", section="design"),
+            current_user=user,
+            db=db,
+        )
+
+    assert exc.value.status_code == 409
+    assert isinstance(exc.value.detail, dict)
+    assert exc.value.detail["error"] == "design_not_generated"
+    # User message must NOT have been persisted on the reject path.
+    patches["BUDChatMessageRepository"].return_value.add_message.assert_not_called()

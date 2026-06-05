@@ -722,10 +722,12 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         name="write_bud_design",
         description=(
             "Persist an iterated wireframe HTML back to the BUD's design "
-            "row. The HTML is sanitized server-side; the row is upserted "
-            "by (bud_id, repo_id) and marked READY. Call this as the "
-            "FINAL step of any design iteration — do NOT rely on stdout "
-            "JSON parsing for persistence."
+            "row. The HTML is sanitized server-side and the row is marked "
+            "READY. When ``design_id`` is supplied, the call updates that "
+            "exact row (preferred for chat iteration); otherwise it "
+            "upserts by ``(bud_id, repo_id)`` (initial-generation path). "
+            "Call this as the FINAL step of any design iteration — do NOT "
+            "rely on stdout JSON parsing for persistence."
         ),
         input_schema={
             "type": "object",
@@ -733,6 +735,14 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                 "bud_id": {
                     "type": "string",
                     "description": "BUD UUID to attach the wireframe to.",
+                },
+                "design_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional design-row UUID. When supplied, updates "
+                        "that exact row in place; the server rejects the "
+                        "call if the id does not belong to ``bud_id``."
+                    ),
                 },
                 "repo_id": {
                     "type": "string",

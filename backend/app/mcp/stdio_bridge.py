@@ -190,10 +190,20 @@ def main() -> None:
                 tool_name = params.get("name", "")
                 arguments = params.get("arguments", {})
                 result = _call_tool(tool_name, arguments)
+                # Handlers signal a soft failure (bad params, missing seed
+                # data, mismatched design_id, etc.) by returning a dict with
+                # an ``error`` key. Surface that as ``isError: true`` so the
+                # Claude Code subprocess routes the response through its
+                # error path rather than treating it as a successful write.
+                # Mirrors the streamable transport's envelope at
+                # ``streamable.py:300-309`` — without this flag the agent
+                # silently believes the call succeeded.
+                is_error = isinstance(result, dict) and "error" in result
                 _send_result(
                     req_id,
                     {
                         "content": [{"type": "text", "text": json.dumps(result)}],
+                        "isError": is_error,
                     },
                 )
             elif method == "ping":

@@ -92,6 +92,7 @@ async def build_design_prompt(
     history: list[dict[str, str]] | None = None,
     *,
     repo_name: str | None = None,
+    design_id: str | None = None,
 ) -> str:
     """Build the Claude prompt for design wireframe generation.
 
@@ -187,8 +188,24 @@ async def build_design_prompt(
     parts.append(f"## User Request\n\n{message}\n")
 
     repo_hint = f', `repo_id: "{repo_id}"`' if repo_id else ""
+    design_hint = f', `design_id: "{design_id}"`' if design_id else ""
     parts.append(
         "## Instructions\n\n"
+        "0. **If the user's request is conversational** — a greeting, a "
+        "question, a clarification, or any message that does not ask for a "
+        "change to the wireframe — do NOT call `write_bud_design`. Skip the "
+        "wireframe-build steps entirely and respond directly with JSON (no "
+        "markdown fences):\n"
+        '   {"reply": "<your conversational response>"}\n'
+        "   **Classification rule:** the message is a *design change* iff "
+        "it names a visual element or property to add, remove, or modify "
+        "(size, color, copy, position, layout, a component) — regardless "
+        'of polite phrasing. "Could you make the buttons bigger?" is a '
+        'design change; "how does this work?" is not. Examples of '
+        'conversational input: "say hi", "how does this work?", '
+        '"what tokens are available?", "explain the layout you chose". '
+        'Examples that ARE design changes: "make the buttons bigger", '
+        '"please add a search bar", "can we change the heading copy?".\n\n'
         "1. Build a complete, self-contained wireframe HTML using ONLY plain "
         "HTML5 + CSS. The wireframe is for visual / IA review — it does NOT "
         "need to be runnable code in the target framework (Vue / React / "
@@ -239,13 +256,24 @@ async def build_design_prompt(
         "The HTML will be served via an iframe `srcdoc`; absolute URLs "
         "(CDN fonts, images) work, relative URLs do not.\n\n"
         "2. **Persist the wireframe via the `write_bud_design` MCP tool** "
-        f'with `bud_id: "{bud_id}"`{repo_hint}, and `html: <complete_wireframe_html>`. '
-        "This is the ONLY supported persistence path — do NOT write the "
-        "HTML to a file on disk and do NOT rely on the JSON reply for "
-        "persistence.\n\n"
+        f'with `bud_id: "{bud_id}"`{repo_hint}{design_hint}, and '
+        "`html: <complete_wireframe_html>`. This is the ONLY supported "
+        "persistence path — do NOT write the HTML to a file on disk and "
+        "do NOT rely on the JSON reply for persistence. When `design_id` "
+        "is supplied above, pass it through verbatim — the server uses "
+        "it to update the exact design row this chat targets, refusing "
+        "the call if the id has been deleted out from under us.\n\n"
         "3. After `write_bud_design` succeeds, respond with JSON (no "
         "markdown fences):\n"
         '   {"reply": "<short explanation of design choices>"}\n\n'
+        "4. **If `write_bud_design` returns an error** (e.g. the targeted "
+        "design row was deleted between steps), do NOT retry the tool "
+        "call and do NOT emit free-form prose. Stop and respond with "
+        "JSON only:\n"
+        '   {"reply": "<short explanation; ask the user to refresh '
+        'and pick another design>"}\n'
+        "This prevents the iteration loop from burning turns on a row "
+        "that no longer exists.\n\n"
         "Focus on layout, information architecture, and interaction patterns."
     )
 
@@ -306,8 +334,21 @@ def build_chat_prompt(
         f"## User Request\n\n{message}\n\n"
         "## Instructions\n\n"
         "Respond with JSON (no markdown fences) with two fields:\n"
-        '- `"reply"`: Short explanation of what you changed.\n'
+        '- `"reply"`: Short explanation of what you changed, OR a '
+        "conversational response if the user is not asking for an edit.\n"
         '- `"updated_content"`: Full updated markdown, or null if no edits.\n\n'
+        "**Classification rule:** the message is a *content change* iff "
+        "it names something to add, remove, or modify in the section "
+        "(a sentence, a heading, a bullet, a value) — regardless of "
+        'polite phrasing. "Could you add an acceptance criterion for '
+        'auth?" is a content change; "what does this section cover?" '
+        "is not. Conversational examples (return `updated_content: null` "
+        'and a conversational `reply`): "say hi", "summarise this for '
+        'me", "why is this required?". Examples that ARE content '
+        'changes: "add an acceptance criterion for empty input", '
+        '"please tighten the rationale paragraph", "can we drop the '
+        'last bullet?". Do NOT rewrite the section just because the '
+        "user typed something.\n\n"
         "Preserve existing content structure. Only modify what was asked."
     )
 

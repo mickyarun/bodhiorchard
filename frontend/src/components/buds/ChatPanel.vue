@@ -114,10 +114,51 @@
     </div>
 
     <div class="chat-input">
+      <!-- Design section requires a generated design row before chat —
+           otherwise the user message gets persisted with
+           ``design_id = NULL`` and the panel's auto-select filter
+           strands it. Backend mirrors this as a 409
+           ``design_not_generated``. -->
+      <AppCallout
+        v-if="needsDesignGeneration"
+        variant="info"
+        eyebrow="Generate a design first"
+        icon="mdi-palette-outline"
+        class="mb-2"
+      >
+        The AI Editor needs a wireframe to iterate on. Pick one:
+        <div class="design-gen-ctas mt-2 d-flex flex-wrap ga-2">
+          <v-btn
+            size="small"
+            color="primary"
+            variant="flat"
+            class="text-none"
+            @click="$emit('open-generate-designs')"
+          >
+            Generate Designs
+          </v-btn>
+          <v-btn
+            size="small"
+            variant="outlined"
+            class="text-none"
+            :to="{ name: 'settings-mcp-connect' }"
+          >
+            Connect MCP
+          </v-btn>
+          <v-btn
+            size="small"
+            variant="outlined"
+            class="text-none"
+            @click="$emit('open-autogen-settings')"
+          >
+            Enable autogen
+          </v-btn>
+        </div>
+      </AppCallout>
       <!-- Stage-gate banner: BUD is in the wrong status for this section.
            Input is disabled; no optimistic local push. -->
       <v-alert
-        v-if="stageGateMessage"
+        v-else-if="stageGateMessage"
         type="warning"
         density="compact"
         variant="tonal"
@@ -165,6 +206,7 @@
         </div>
       </div>
       <v-textarea
+        v-if="!needsDesignGeneration"
         v-model="input"
         variant="outlined"
         density="compact"
@@ -195,6 +237,7 @@
 
 <script setup lang="ts">
 import { computed, ref, nextTick, watch } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 
 export interface ChatMessage {
   role: 'user' | 'ai'
@@ -222,6 +265,13 @@ const props = defineProps<{
   designs?: Array<{ id: string; repoName: string | null }>
   /** Currently-active design row id (matches the design sub-tab). */
   selectedDesignId?: string
+  /**
+   * Design section is open but no design row exists yet. When true the
+   * textarea is replaced by an empty-state callout pointing the user to
+   * Generate Designs / MCP / autogen. Required by the design-chat
+   * contract: the first user message must carry a non-NULL design_id.
+   */
+  needsDesignGeneration?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -231,6 +281,8 @@ const emit = defineEmits<{
   retry: []
   cancel: []
   'select-design': [designId: string]
+  'open-generate-designs': []
+  'open-autogen-settings': []
 }>()
 
 // Local "cancel signal is in flight" flag — toggled true on click,
