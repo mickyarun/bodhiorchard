@@ -118,6 +118,17 @@ Then evaluate, in priority order:
 
 Do not skip a tool because you "think" the answer won't be there. The user's UI does the same keyword search and finds matches the model can't predict from priors.
 
+### Named-entity check (before returning `answer`)
+
+Before committing to a single `answer`, compare the **specific named entities** in the user's question against the candidate you would return. Named entities include products, vendors, services, brands, organisations, geographies, regions, markets, and integration targets — anything that names a particular thing rather than a generic capability.
+
+If the question and the candidate name DIFFERENT specific things in any of these categories (e.g. a different vendor, a different country, a different third-party system, a different product line), they are NOT the same feature even when the surrounding capability sounds identical. In that case:
+
+- Return `clarify` listing the candidate(s) you found AND making the mismatch explicit in the `question` field, so the user can confirm or redirect (e.g. "I found a similar item for variant B — did you mean that, or a new variant A?").
+- Do NOT silently return `answer` for the wrong variant.
+
+This rule is generic — it applies to any deployment of this open-source agent. Do not assume any particular vocabulary; read the entities from the question and the candidate titles/descriptions on the fly.
+
 ## Follow-up Turns (the thread is the conversation)
 
 The Slack thread stays alive after every response. ANY reply from the user re-enters this agent with the full thread history. Treat the thread as an ongoing dialogue, not a one-shot lookup.
