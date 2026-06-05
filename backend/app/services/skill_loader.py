@@ -63,6 +63,11 @@ class Skill:
     # faster model on the hot iteration loop (Haiku) while keeping a
     # higher-quality model (Sonnet) for the initial agent run.
     iteration_model: str = ""
+    # Optional turn cap for chat-iteration paths. 0 falls back to
+    # ``max_turns``. Was previously the hard-coded
+    # ``DESIGN_ITERATION_MAX_TURNS=4`` in job_chat; surfaced onto the
+    # skill so it's admin-editable per skill, not a runtime override.
+    iteration_max_turns: int = 0
     effort: str = ""  # empty = use CLI default. Values: "low", "medium", "high", "max"
 
     def timeout_or_default(self, fallback: int) -> int:
@@ -73,6 +78,25 @@ class Skill:
         ``_build_config`` reads the same value the settings UI writes.
         """
         return self.timeout_seconds if self.timeout_seconds > 0 else fallback
+
+    def iteration_max_turns_or_base(self) -> int:
+        """Resolve the turn cap for chat-iteration paths.
+
+        Returns ``iteration_max_turns`` when set (>0), otherwise falls
+        back to ``max_turns``. Centralising the rule means the
+        ``0 = inherit`` sentinel never leaks to call sites — a future
+        reader can't accidentally use the raw field and skip the fallback.
+        """
+        return self.iteration_max_turns if self.iteration_max_turns > 0 else self.max_turns
+
+    def iteration_model_or_base(self) -> str:
+        """Resolve the model name for chat-iteration paths.
+
+        Returns ``iteration_model`` when set (non-empty), else ``model``.
+        Same sentinel-collapse pattern as :meth:`iteration_max_turns_or_base`
+        but for the string field.
+        """
+        return self.iteration_model or self.model
 
 
 def load_skill(skill_name: str) -> Skill:
@@ -125,6 +149,7 @@ def load_skill(skill_name: str) -> Skill:
         timeout_seconds=int(frontmatter.get("timeout_seconds", 0)),
         model=str(frontmatter.get("model", "") or ""),
         iteration_model=str(frontmatter.get("iteration_model", "") or ""),
+        iteration_max_turns=int(frontmatter.get("iteration_max_turns", 0)),
         effort=str(frontmatter.get("effort", "") or ""),
     )
 
@@ -153,6 +178,7 @@ def _skill_from_row(skill_row: Any) -> Skill:
         timeout_seconds=skill_row.timeout_seconds or 0,
         model=skill_row.model or "",
         iteration_model=skill_row.iteration_model or "",
+        iteration_max_turns=skill_row.iteration_max_turns or 0,
         effort=skill_row.effort or "",
     )
 
@@ -293,6 +319,7 @@ async def seed_skills_for_org(org_id: uuid.UUID, db: AsyncSession) -> int:
                 timeout_seconds=skill.timeout_seconds,
                 model=skill.model,
                 iteration_model=skill.iteration_model,
+                iteration_max_turns=skill.iteration_max_turns,
                 effort=skill.effort,
                 agent_type=agent_type,
                 is_default=True,

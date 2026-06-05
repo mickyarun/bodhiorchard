@@ -65,6 +65,7 @@ export interface AgentSkill {
   timeoutSeconds: number
   model: string
   iterationModel: string
+  iterationMaxTurns: number
   effort: string
   isCustomized: boolean
 }
@@ -84,6 +85,7 @@ interface AgentSkillApi {
   timeout_seconds: number
   model: string
   iteration_model: string
+  iteration_max_turns: number
   effort: string
   is_customized: boolean
 }
@@ -104,6 +106,7 @@ function fromApi(raw: AgentSkillApi): AgentSkill {
     timeoutSeconds: raw.timeout_seconds ?? 0,
     model: raw.model ?? '',
     iterationModel: raw.iteration_model ?? '',
+    iterationMaxTurns: raw.iteration_max_turns ?? 0,
     effort: raw.effort ?? '',
     isCustomized: raw.is_customized,
   }
@@ -130,6 +133,7 @@ export interface CustomSkillCreatePayload {
   timeoutSeconds?: number
   model?: string
   iterationModel?: string
+  iterationMaxTurns?: number
   effort?: string
 }
 
@@ -185,6 +189,7 @@ export const useAgentSkillsStore = defineStore('agentSkills', () => {
         | 'timeoutSeconds'
         | 'model'
         | 'iterationModel'
+        | 'iterationMaxTurns'
         | 'effort'
       >
     >,
@@ -203,6 +208,8 @@ export const useAgentSkillsStore = defineStore('agentSkills', () => {
       if (updates.timeoutSeconds !== undefined) payload.timeout_seconds = updates.timeoutSeconds
       if (updates.model !== undefined) payload.model = updates.model
       if (updates.iterationModel !== undefined) payload.iteration_model = updates.iterationModel
+      if (updates.iterationMaxTurns !== undefined)
+        payload.iteration_max_turns = updates.iterationMaxTurns
       if (updates.effort !== undefined) payload.effort = updates.effort
 
       const { data } = await api.put<AgentSkillApi>(
@@ -256,6 +263,7 @@ export const useAgentSkillsStore = defineStore('agentSkills', () => {
         timeout_seconds: payload.timeoutSeconds ?? 0,
         model: payload.model ?? '',
         iteration_model: payload.iterationModel ?? '',
+        iteration_max_turns: payload.iterationMaxTurns ?? 0,
         effort: payload.effort ?? '',
       }
       const { data } = await api.post<AgentSkillApi>('/v1/settings/agent-skills/', body)

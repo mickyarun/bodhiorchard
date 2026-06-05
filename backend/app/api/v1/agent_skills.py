@@ -63,7 +63,20 @@ def _check_customized(db_prompt: str, slug: str) -> bool:
 
 
 def _skill_to_read(skill_row: AgentSkill) -> AgentSkillRead:
-    """Serialize a DB skill row, including agent_type / default / custom flags."""
+    """Serialize a DB skill row, including agent_type / default / custom flags.
+
+    Materializes the ``0 = inherit`` sentinel for ``iteration_max_turns``
+    on the read path: admins see the effective turn cap as the form's
+    default (matching ``max_turns``) instead of an opaque ``0``. The DB
+    column still allows 0 as the inherit sentinel for backwards
+    compatibility; the runtime resolver (``Skill.iteration_max_turns_or_base``)
+    is the in-process safety net. When the admin saves without editing
+    the field, the explicit ``max_turns`` value is stored — predictable
+    going forward, no more "what does 0 mean here?" confusion.
+    """
+    max_turns = getattr(skill_row, "max_turns", 0) or 0
+    raw_iter = getattr(skill_row, "iteration_max_turns", 0) or 0
+    iter_max_turns = raw_iter if raw_iter > 0 else max_turns
     return AgentSkillRead(
         id=skill_row.id,
         skill_slug=skill_row.skill_slug,
@@ -75,10 +88,11 @@ def _skill_to_read(skill_row: AgentSkill) -> AgentSkillRead:
         tools=skill_row.tools,
         mcp_tools=skill_row.mcp_tools,
         prompt=skill_row.prompt,
-        max_turns=getattr(skill_row, "max_turns", 0) or 0,
+        max_turns=max_turns,
         timeout_seconds=getattr(skill_row, "timeout_seconds", 0) or 0,
         model=getattr(skill_row, "model", "") or "",
         iteration_model=getattr(skill_row, "iteration_model", "") or "",
+        iteration_max_turns=iter_max_turns,
         effort=getattr(skill_row, "effort", "") or "",
         is_customized=_check_customized(skill_row.prompt, skill_row.skill_slug),
     )
@@ -210,6 +224,8 @@ async def update_agent_skill(
         existing.model = body.model
     if body.iteration_model is not None:
         existing.iteration_model = body.iteration_model
+    if body.iteration_max_turns is not None:
+        existing.iteration_max_turns = body.iteration_max_turns
     if body.effort is not None:
         existing.effort = body.effort
 
@@ -259,6 +275,7 @@ async def reset_agent_skill(
     existing.timeout_seconds = file_skill.timeout_seconds
     existing.model = file_skill.model
     existing.iteration_model = file_skill.iteration_model
+    existing.iteration_max_turns = file_skill.iteration_max_turns
     existing.effort = file_skill.effort
     await db.flush()
 
@@ -311,6 +328,7 @@ async def create_custom_skill(
         timeout_seconds=body.timeout_seconds,
         model=body.model,
         iteration_model=body.iteration_model,
+        iteration_max_turns=body.iteration_max_turns,
         effort=body.effort,
     )
     logger.info(

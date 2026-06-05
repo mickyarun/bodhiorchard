@@ -113,6 +113,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
         timeout_seconds: int = 0,
         model: str = "",
         iteration_model: str = "",
+        iteration_max_turns: int = 0,
         effort: str = "",
     ) -> AgentSkill:
         """Insert a user-authored skill row (``is_custom = true``)."""
@@ -131,6 +132,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             timeout_seconds=timeout_seconds,
             model=model,
             iteration_model=iteration_model,
+            iteration_max_turns=iteration_max_turns,
             effort=effort,
         )
         return await self.create(skill)
@@ -180,6 +182,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
         timeout_seconds: int = 0,
         model: str = "",
         iteration_model: str = "",
+        iteration_max_turns: int = 0,
         effort: str = "",
         *,
         agent_type: AgentType,
@@ -202,6 +205,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             existing.timeout_seconds = timeout_seconds
             existing.model = model
             existing.iteration_model = iteration_model
+            existing.iteration_max_turns = iteration_max_turns
             existing.effort = effort
             await self._db.flush()
             await self._db.refresh(existing)
@@ -222,6 +226,7 @@ class AgentSkillRepository(BaseRepository[AgentSkill]):
             timeout_seconds=timeout_seconds,
             model=model,
             iteration_model=iteration_model,
+            iteration_max_turns=iteration_max_turns,
             effort=effort,
         )
         return await self.create(skill)

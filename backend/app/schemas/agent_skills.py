@@ -48,6 +48,13 @@ class AgentSkillRead(BaseModel):
             "(e.g. claude-haiku-4-5). Empty falls back to ``model``."
         ),
     )
+    iteration_max_turns: int = Field(
+        0,
+        description=(
+            "Optional turn cap for chat-iteration paths. 0 falls back to "
+            "``max_turns``. Used by the design AI Editor follow-up loop."
+        ),
+    )
     effort: str = Field(
         "", description="Reasoning effort: low, medium, high, max (empty = default)"
     )
@@ -66,7 +73,14 @@ class AgentSkillRead(BaseModel):
         agent_type: AgentType,
         is_customized: bool = False,
     ) -> "AgentSkillRead":
-        """Construct from a Skill dataclass to avoid scattered field mapping."""
+        """Construct from a Skill dataclass to avoid scattered field mapping.
+
+        Materializes ``iteration_max_turns=0`` to ``max_turns`` so the
+        admin-prompt form shows the effective value, not the opaque
+        inherit sentinel. Mirrors the DB-row serializer in
+        ``api/v1/agent_skills.py::_skill_to_read``.
+        """
+        iter_max_turns = skill.iteration_max_turns_or_base()
         return cls(
             skill_slug=slug,
             agent_type=agent_type,
@@ -79,6 +93,7 @@ class AgentSkillRead(BaseModel):
             timeout_seconds=skill.timeout_seconds,
             model=skill.model,
             iteration_model=skill.iteration_model,
+            iteration_max_turns=iter_max_turns,
             effort=skill.effort,
             is_customized=is_customized,
         )
@@ -104,6 +119,7 @@ class CustomSkillCreate(BaseModel):
     timeout_seconds: int = Field(0, ge=0, le=3600)
     model: str = Field("", max_length=100)
     iteration_model: str = Field("", max_length=100)
+    iteration_max_turns: int = Field(0, ge=0, le=100)
     effort: str = Field("", max_length=20)
 
 
@@ -129,6 +145,12 @@ class AgentSkillUpdate(BaseModel):
     iteration_model: str | None = Field(
         None, max_length=100, description="Faster model for chat iteration (empty = use model)"
     )
+    iteration_max_turns: int | None = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Turn cap for chat iteration; 0 = use max_turns. Max 100.",
+    )
     effort: str | None = Field(None, max_length=20, description="Reasoning effort level")
 
     @model_validator(mode="after")
@@ -146,6 +168,7 @@ class AgentSkillUpdate(BaseModel):
                 self.timeout_seconds,
                 self.model,
                 self.iteration_model,
+                self.iteration_max_turns,
                 self.effort,
             )
         ):

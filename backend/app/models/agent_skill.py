@@ -126,6 +126,13 @@ class AgentSkill(BaseModel):
     iteration_model: Mapped[str] = mapped_column(
         String(100), nullable=False, default="", server_default=""
     )
+    # Optional override used on chat-iteration paths. ``0`` falls back to
+    # ``max_turns``. Surfacing this onto the skill removes the previous
+    # hard-coded ``DESIGN_ITERATION_MAX_TURNS=4`` in ``job_chat`` that
+    # silently overrode the admin-configured ``max_turns`` for design.
+    iteration_max_turns: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     effort: Mapped[str] = mapped_column(String(20), nullable=False, default="", server_default="")
 
     # Relationships

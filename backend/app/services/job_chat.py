@@ -61,11 +61,6 @@ CHAT_REPLY_UNPARSEABLE = "chat_reply_unparseable"
 # whether the user is watching live or reopens the BUD after refresh.
 CHAT_CANCELLED_MESSAGE = "Cancelled by user"
 
-# A small-edit chat needs at most: fetch prior wireframe, optionally fetch
-# design system, write back. Four turns is the comfortable ceiling — the
-# initial design agent keeps its 10-turn budget via the skill config.
-DESIGN_ITERATION_MAX_TURNS = 4
-
 # Anthropic prompt-cache TTL is 5 minutes and ``--resume`` is documented to
 # invalidate the cache on very long sessions. Skip resume when the chat has
 # accumulated past these thresholds — a fresh session is faster than a
@@ -251,6 +246,7 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             repo_id=payload.repo_id,
             history=history,
             repo_name=_repo_name,
+            design_id=payload.design_id,
         )
     else:
         prompt = build_chat_prompt(
@@ -346,13 +342,15 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     is_design_iteration = payload.section == "design"
     skill_model = (skill.model or None) if skill else None
     skill_turns = skill.max_turns if skill else 0
-    # Iteration model comes from the skill's ``iteration_model`` field
-    # (configurable in the agent-prompt frontend). Falls back to the skill's
-    # main ``model`` when empty. Only the design section applies the
-    # turn-cap override — other sections keep the skill's own turn budget.
-    skill_iteration_model = (skill.iteration_model or skill.model or None) if skill else None
+    # Iteration model + turn cap come from the skill's ``iteration_model`` /
+    # ``iteration_max_turns`` fields (configurable in the agent-prompt
+    # frontend). Both fall back to their non-iteration sibling when 0/empty.
+    # Only the design section applies the iteration overrides — other
+    # sections keep the skill's own model + turn budget.
+    skill_iteration_model = (skill.iteration_model_or_base() or None) if skill else None
+    skill_iteration_turns = skill.iteration_max_turns_or_base() if skill else 0
     iteration_model = skill_iteration_model if is_design_iteration else skill_model
-    iteration_turns = DESIGN_ITERATION_MAX_TURNS if is_design_iteration else skill_turns
+    iteration_turns = skill_iteration_turns if is_design_iteration else skill_turns
 
     # CLI session wiring is now section-agnostic. The originating agent
     # claimed a session id when it authored the section; chat resumes
@@ -369,6 +367,13 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     cli_session_id: str | None = str(resolved.session_id)
     is_resume = resolved.is_resume and _should_resume_session(history)
     rotated_session = resolved.rotated
+    # Resolved session id is the single tag used for every persisted
+    # AI-side row in this turn, success or failure. Hoisted above the
+    # failure handlers so both branches persist under the same id the
+    # success path uses — without this hoist, the failure paths can't
+    # write a chat_message row and the user sees their prompt orphaned
+    # on the next page load.
+    persist_session_id = resolved.session_id
 
     def _build_config(*, session_id: str | None, resume: bool) -> ClaudeRunnerConfig:
         return ClaudeRunnerConfig(
@@ -423,6 +428,32 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             p.unlink(missing_ok=True)
 
     if not result.success:
+        # Persist the failure as an AI-role chat row BEFORE updating
+        # the job, so the WS terminal frame can't race a refresh that
+        # arrives after the user navigates away. Without this row the
+        # user sees the failure marker live, then it vanishes on the
+        # next page load because chat-history only carries
+        # server-persisted rows. Best-effort: log + continue if the DB
+        # write itself fails — the job_state update below is the
+        # durable signal either way.
+        try:
+            await persist_chat_message(
+                payload.bud_id,
+                payload.org_id,
+                payload.section,
+                "ai",
+                result.error or "AI unavailable",
+                payload.design_id,
+                session_id=str(persist_session_id),
+            )
+        except Exception:
+            # Error-level: if this write fails the user sees an empty
+            # thread (no AI-side row) once the frontend reloads
+            # history. The frontend's fallback-push covers the visible
+            # UX gap, but the ops side needs to alert so a brief DB
+            # outage doesn't turn into a stream of "where did my error
+            # go?" support tickets.
+            logger.error("persist_failure_marker_failed", job_id=job_id, exc_info=True)
         await log_agent_activity(
             None,
             org_id=uuid_mod.UUID(_chat_org_id),
@@ -449,12 +480,6 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
 
     update_job(job_id, status_message="Processing response...", progress_pct=80)
 
-    # Tag persisted chat rows with the resolved session id so chat
-    # history filtered by ``session_id`` keeps grouping correctly across
-    # rotations. The job result echoes ``session_id`` back so the UI
-    # can update its tracked thread id transparently.
-    persist_session_id = resolved.session_id
-
     response = _parse_chat_response(result.output)
     if response is None:
         # The agent emitted something we can't safely surface as a reply
@@ -471,6 +496,25 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
             output_length=len(result.output or ""),
             output_preview=result.output[:500] if result.output else "",
         )
+        # Persist the malformed-reply marker so it survives navigation
+        # — same reasoning as the generic-failure branch above. The
+        # frontend's auto-retry path re-renders the live thread by
+        # reloading history, so this row will be visible during the
+        # retry window too.
+        try:
+            await persist_chat_message(
+                payload.bud_id,
+                payload.org_id,
+                payload.section,
+                "ai",
+                "Reply was malformed — retrying.",
+                payload.design_id,
+                session_id=str(persist_session_id),
+            )
+        except Exception:
+            # See ``persist_failure_marker_failed`` above for the
+            # ops-alert rationale.
+            logger.error("persist_unparseable_marker_failed", job_id=job_id, exc_info=True)
         await log_agent_activity(
             None,
             org_id=uuid_mod.UUID(_chat_org_id),

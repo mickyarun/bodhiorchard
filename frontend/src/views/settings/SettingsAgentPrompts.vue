@@ -268,7 +268,7 @@
                     />
                   </div>
 
-                  <div class="field col-3">
+                  <div class="field col-2">
                     <label class="field-label">Model</label>
                     <v-select
                       v-model="editForm.model"
@@ -280,7 +280,7 @@
                       hide-details
                     />
                   </div>
-                  <div class="field col-3">
+                  <div class="field col-2">
                     <label class="field-label">Iteration model</label>
                     <v-select
                       v-model="editForm.iterationModel"
@@ -310,6 +310,18 @@
                       v-model.number="editForm.maxTurns"
                       type="number"
                       :min="0"
+                      :max="100"
+                      variant="outlined"
+                      density="compact"
+                      hide-details
+                    />
+                  </div>
+                  <div class="field col-2">
+                    <label class="field-label">Iteration max turns</label>
+                    <v-text-field
+                      v-model.number="editForm.iterationMaxTurns"
+                      type="number"
+                      :min="1"
                       :max="100"
                       variant="outlined"
                       density="compact"
@@ -693,6 +705,7 @@ const editForm = ref({
   timeoutSeconds: 0,
   model: '',
   iterationModel: '',
+  iterationMaxTurns: 0,
   effort: '',
 })
 
@@ -714,6 +727,7 @@ function toggle(skill: AgentSkill): void {
     timeoutSeconds: skill.timeoutSeconds ?? 0,
     model: skill.model ?? '',
     iterationModel: skill.iterationModel ?? '',
+    iterationMaxTurns: skill.iterationMaxTurns ?? 0,
     effort: skill.effort ?? '',
   }
 }
@@ -735,6 +749,7 @@ async function saveSkill(skill: AgentSkill): Promise<void> {
     timeoutSeconds: editForm.value.timeoutSeconds,
     model: editForm.value.model,
     iterationModel: editForm.value.iterationModel,
+    iterationMaxTurns: editForm.value.iterationMaxTurns,
     effort: editForm.value.effort,
   })
 }
