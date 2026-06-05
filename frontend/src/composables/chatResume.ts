@@ -81,9 +81,12 @@ export function makeResumeActiveChat(deps: ResumeActiveChatDeps): () => Promise<
 
     deps.setLoading(true)
     deps.setStatus(active.statusMessage ?? '')
+    // The resumed job was originated by *this* BUD — pass its id so
+    // ``chatJobSocket``'s bud-id guards short-circuit mutations once
+    // the user navigates away. Mirrors ``sendOnce``'s wiring.
     deps.startTracking(
       active.jobId,
-      makeChatSocketCallbacks(section, deps.socketCallbacks),
+      makeChatSocketCallbacks(section, deps.socketCallbacks, bud.id),
     )
   }
 }

@@ -85,10 +85,15 @@ export function useBudChat(hooks: BudChatHooks) {
   async function applyUpdatedContent(
     section: BUDSectionKey,
     content: string,
+    originatingBudId: string,
   ): Promise<void> {
-    if (budStore.currentBUD) {
-      (budStore.currentBUD as Record<string, unknown>)[section] = content
-    }
+    // BUD-id guard: when the user navigates BUD A → BUD B mid-flight,
+    // the in-flight tracker's onComplete is captured under A's scope.
+    // Without this check, A's JSON reply would silently overwrite B's
+    // section content. Mirrors the ``if (currentBUD.value?.id === id)``
+    // pattern in stores/bud.ts:133, 154, 237, 267, 396, 451, 467.
+    if (budStore.currentBUD?.id !== originatingBudId) return
+    (budStore.currentBUD as Record<string, unknown>)[section] = content
     if (section === 'design') {
       await hooks.onDesignContentUpdated()
     } else {
@@ -113,9 +118,14 @@ export function useBudChat(hooks: BudChatHooks) {
 
   // Shared socket-callback bag — both the originate (``sendOnce``) and
   // resume-on-remount paths feed this to ``makeChatSocketCallbacks`` so
-  // their terminal-frame handling is identical.
+  // their terminal-frame handling is identical. Bud-id-aware mutations
+  // (pushMessage / applyUpdatedContent) take ``originatingBudId`` and
+  // skip the mutation when the current BUD has changed mid-flight.
   const socketCallbacks = {
-    pushMessage: (m: ChatMessage) => chatMessages.value.push(m),
+    pushMessage: (m: ChatMessage, originatingBudId: string) => {
+      if (hooks.getBud()?.id !== originatingBudId) return
+      chatMessages.value.push(m)
+    },
     setStatus: (text: string) => { chatStatusMessage.value = text },
     setLoading: setChatLoading,
     setSessionId: (id: string) => { currentSessionId.value = id },
@@ -124,6 +134,16 @@ export function useBudChat(hooks: BudChatHooks) {
     // Hoisted reference — ``loadChatHistory`` is a function declaration
     // defined below, so it's safe to read at lambda-invocation time.
     reloadHistory: () => loadChatHistory(),
+    // Exposed so ``chatJobSocket`` can read the BUD id the page is
+    // currently displaying without re-querying ``hooks`` directly.
+    getCurrentBudId: () => hooks.getBud()?.id ?? null,
+    // Used by ``onError``'s fallback-push branch: only push a friendly
+    // headline when the post-reload transcript is missing the AI side
+    // (i.e. the worker's ``persist_chat_message`` itself failed).
+    hasLatestAiMessage: () => {
+      const last = chatMessages.value[chatMessages.value.length - 1]
+      return last?.role === 'ai'
+    },
   }
 
   const resumeActiveChat = makeResumeActiveChat({
@@ -221,7 +241,10 @@ export function useBudChat(hooks: BudChatHooks) {
     }
 
     if (result.sessionId) currentSessionId.value = result.sessionId
-    startTracking(result.jobId, makeChatSocketCallbacks(section, socketCallbacks))
+    startTracking(
+      result.jobId,
+      makeChatSocketCallbacks(section, socketCallbacks, bud.id),
+    )
     return true
   }
 
