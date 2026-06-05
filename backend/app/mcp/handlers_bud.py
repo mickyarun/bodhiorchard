@@ -17,6 +17,7 @@
 Covers: get_bud_context, write_bud.
 """
 
+from datetime import date, datetime
 from typing import Any
 
 import structlog
@@ -28,6 +29,20 @@ from app.models.organization import Organization
 from app.repositories.bud import BUDRepository
 
 logger = structlog.get_logger(__name__)
+
+
+def _format_date(value: datetime | date | None) -> str | None:
+    """Render a BUD timeline column as ``YYYY-MM-DD`` for agent prompts.
+
+    The Slack Q&A skill quotes `prod_p70_date` / `current_phase_deadline`
+    verbatim in its response schema; the user-facing reply formatter
+    (`format_bud_answer`) strftimes them to date-only. Returning the same
+    shape here keeps the agent off timezone trivia it would otherwise
+    have to strip — and matches what BYO-AI clients already expect.
+    """
+    if value is None:
+        return None
+    return value.strftime("%Y-%m-%d")
 
 
 async def handle_get_bud_context(
@@ -47,6 +62,13 @@ async def handle_get_bud_context(
     requirements_md (same tokenisation as ``get_features`` so the LLM
     can use the same query style for both tools). Callers that want
     the full set can pass ``include_terminal=true``.
+
+    Each BUD dict carries the delivery-date and ownership columns the
+    Slack Q&A skill declares in its response schema
+    (`prod_p70_date`, `current_phase_deadline`, `assignee_id`). Without
+    them the agent confabulates "no date is set" replies even when the
+    BUD has a stamped estimate — see image-2 / BUD-020 in the bug report
+    this restored.
     """
     limit = min(params.get("limit", 5), 20)
     include_terminal = bool(params.get("include_terminal", False))
@@ -68,6 +90,9 @@ async def handle_get_bud_context(
                 "title": bud.title,
                 "status": bud.status.value if bud.status else "bud",
                 "requirements_md": (bud.requirements_md or "")[:5000],
+                "prod_p70_date": _format_date(bud.prod_p70_date),
+                "current_phase_deadline": _format_date(bud.current_phase_deadline),
+                "assignee_id": str(bud.assignee_id) if bud.assignee_id else None,
             }
             for bud in buds
         ],

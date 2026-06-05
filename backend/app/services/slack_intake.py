@@ -26,10 +26,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings as app_settings
 from app.mcp.auth import create_internal_mcp_token
 from app.models.bud import BUDDocument, BUDPriority, BUDStatus
+from app.models.feature_qa_session import FeatureQASession, FeatureQAStatus
 from app.models.organization import Organization
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import UserRole
 from app.repositories.bud import BUDRepository
+from app.repositories.feature_qa_session import FeatureQASessionRepository
 from app.repositories.feature_reads import FeatureReadRepository
 from app.repositories.triage_session import TriageSessionRepository
 from app.repositories.user import UserRepository
@@ -465,6 +467,13 @@ async def _verify_duplicate_with_llm(
         " of the broader feature it touches. Reply no_match.\n"
         "- A bug report, UI polish, or follow-up enhancement is NOT a"
         " duplicate of the parent feature/BUD. Reply no_match.\n"
+        "- Named-entity scope: if the user request and the candidate name"
+        " DIFFERENT specific products, vendors, services, brands,"
+        " organisations, geographies, regions, markets, or integration"
+        " targets, they are NOT duplicates even when the surrounding"
+        " capability sounds identical. A request for variant A of a"
+        " capability is not satisfied by an in-flight item for variant B."
+        " Reply no_match and let triage create a new BUD.\n"
         '- Only reply "match" when the user request and the candidate would'
         " produce essentially the same deliverable.\n"
         "When in doubt, prefer no_match — a false duplicate silently drops"
@@ -529,6 +538,72 @@ async def _post_duplicate_message(
     )
 
 
+async def _seed_qa_session_for_match(
+    db: AsyncSession,
+    org: Organization,
+    session: TriageSession,
+    kind: str,
+    match: Any,
+    query_text: str,
+) -> None:
+    """Open a FeatureQASession on the same thread as a triage duplicate match.
+
+    The triage flow is about to mark itself ``REJECTED`` (the user's
+    request is "already tracked"). Without a Q&A session, any reply in
+    the thread — e.g. *"Including patient name?"* or *"AI is mixing up
+    the entities"* — is silently dropped, because ``continue_triage``
+    only fires for ``INTERVIEWING / CHECKING`` sessions and
+    ``continue_feature_qa`` finds no session for the thread.
+
+    Opening a Q&A session here keeps the conversation alive: the
+    matched candidate goes into ``context.candidates`` in the same
+    shape the ``clarify`` action emits, so the Q&A skill's existing
+    "Drill-down on the prior result" branch can pick it up on the
+    next reply without any new vocabulary in the skill prompt.
+
+    Idempotent: if a Q&A session already exists for this thread (which
+    can only happen if the user @-mentioned the bot first and then
+    reacted 🧠), we leave it alone. The QA session's unique constraint
+    on ``(org_id, channel, thread_ts)`` would reject a duplicate insert
+    anyway; this just avoids the round-trip.
+    """
+    qa_repo = FeatureQASessionRepository(db, org_id=org.id)
+    existing = await qa_repo.get_by_thread(session.slack_channel, session.thread_ts)
+    if existing is not None:
+        return
+
+    if kind == "bud":
+        candidate = {
+            "kind": "bud",
+            "id": str(match.id),
+            "bud_number": match.bud_number,
+            "title": match.title,
+        }
+    else:
+        candidate = {
+            "kind": "feature",
+            "id": str(match.id),
+            "title": match.feature_title,
+        }
+
+    qa_session = FeatureQASession(
+        org_id=org.id,
+        channel=session.slack_channel,
+        thread_ts=session.thread_ts,
+        requester_slack_user_id=session.requester_slack_id,
+        original_question=query_text,
+        status=FeatureQAStatus.AWAITING_USER,
+        context={"candidates": [candidate]},
+    )
+    await qa_repo.create(qa_session)
+    logger.info(
+        "triage_seeded_qa_session_on_duplicate",
+        triage_session_id=str(session.id),
+        qa_session_id=str(qa_session.id),
+        kind=kind,
+    )
+
+
 def _build_duplicate_query(
     session: TriageSession,
     thread_messages: list[dict[str, Any]] | None,
@@ -581,6 +656,12 @@ async def _run_triage_agent(
     if duplicate is not None:
         kind, match, similarity = duplicate
         await _post_duplicate_message(bot_token, session, kind, match, similarity)
+        # Hand the thread over to the Q&A flow so any follow-up reply
+        # ("Including patient name?", "AI is mixing up the entities…")
+        # is answered instead of dropped. Without this, the triage
+        # session goes REJECTED below and no other handler claims the
+        # thread — see _seed_qa_session_for_match for the seam details.
+        await _seed_qa_session_for_match(db, org, session, kind, match, query_text)
         session.status = TriageStatus.REJECTED
         logger.info(
             "triage_duplicate_detected",
