@@ -35,6 +35,7 @@ import pytest
 
 from app.models.feature_qa_session import FeatureQAStatus
 from app.services import slack_client, slack_feature_qa
+from app.services.claude_errors import ClaudeErrorCode
 from app.services.slack_feature_qa import (
     _SKILL_BY_INTENT,
     _TOOLS_BY_INTENT,
@@ -63,9 +64,7 @@ def _silence_slack_posts(monkeypatch: Any) -> dict[str, list[str]]:
     """Capture chat_post_message calls without hitting Slack."""
     posts: list[tuple[str, str | None]] = []
 
-    async def _capture(
-        token: str, channel: str, text: str, **kw: Any
-    ) -> dict[str, Any]:
+    async def _capture(token: str, channel: str, text: str, **kw: Any) -> dict[str, Any]:
         posts.append((text, kw.get("thread_ts")))
         return {"ok": True}
 
@@ -236,3 +235,48 @@ async def test_no_drill_down_when_candidates_are_feature_only(
 
     conversation = captured_runs[0]["prompt"].split("## Conversation", 1)[-1]
     assert "[HINT_BUD_NUMBER]" not in conversation
+
+
+# ── 4. Soft-fallback when the specialist exhausts its turn budget ────
+
+
+@pytest.mark.asyncio
+async def test_max_turns_returns_not_found_message_not_errored(
+    monkeypatch: Any,
+    _silence_slack_posts: dict[str, list[tuple[str, str | None]]],
+) -> None:
+    """``error_max_turns`` from the bud-fact specialist means "couldn't
+    commit to a BUD" — surface the not_found copy, keep the session
+    AWAITING_USER so the user can clarify in the same thread."""
+
+    async def _timeline_intent(**kw: Any) -> QaIntent:
+        return QaIntent.TIMELINE
+
+    monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _timeline_intent)
+
+    async def _max_turns_fail(*, prompt: str, working_dir: str, config: Any) -> Any:
+        return MagicMock(
+            success=False,
+            output="",
+            error="max turns",
+            error_code=ClaudeErrorCode.MAX_TURNS,
+        )
+
+    monkeypatch.setattr(slack_feature_qa, "run_claude_code", _max_turns_fail)
+
+    session = _make_session()
+    await _run_qa_agent(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, thread_messages=None
+    )
+
+    # Session must NOT terminate — the user should be able to reply with
+    # a BUD number / title and re-enter the dispatcher.
+    assert session.status == FeatureQAStatus.AWAITING_USER
+
+    posts = _silence_slack_posts["posts"]
+    assert any("couldn't find a BUD" in text for text, _ in posts), (
+        f"expected not_found copy, got posts={posts!r}"
+    )
+    assert not any("try again shortly" in text for text, _ in posts), (
+        "must NOT post the generic server-error fallback on a soft max_turns"
+    )

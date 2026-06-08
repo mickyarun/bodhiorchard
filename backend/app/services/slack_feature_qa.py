@@ -43,6 +43,7 @@ from app.repositories.feature import FeatureRepository
 from app.repositories.feature_qa_session import FeatureQASessionRepository
 from app.repositories.user import UserRepository
 from app.services import slack_client
+from app.services.claude_errors import ClaudeErrorCode
 from app.services.claude_runner import (
     NO_REPO_CONTEXT,
     ClaudeRunnerConfig,
@@ -296,6 +297,25 @@ async def _run_qa_agent(
         return
 
     if not result.success:
+        # error_max_turns means the model couldn't commit within its turn
+        # budget — for the bud-fact specialist that's "no clear BUD found",
+        # not a server crash. Surface the not_found copy and keep the
+        # session AWAITING_USER so the user can clarify in the same thread.
+        if result.error_code == ClaudeErrorCode.MAX_TURNS:
+            logger.info(
+                "feature_qa_specialist_max_turns_soft_fallback",
+                session_id=str(session.id),
+                intent=intent.value,
+            )
+            await slack_client.chat_post_message(
+                bot_token,
+                session.channel,
+                "I couldn't find a BUD matching that. React 🧠 on the original"
+                " message to start intake, or reply with a BUD number / title.",
+                thread_ts=session.thread_ts,
+            )
+            return
+
         await slack_client.chat_post_message(
             bot_token,
             session.channel,

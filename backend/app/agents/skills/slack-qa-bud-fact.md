@@ -3,7 +3,7 @@ name: Slack Q&A — BUD Fact Lookup
 description: Answers single-target Slack questions about a tracked BUD's timeline, current phase deadline, status, or assignee. Returns an `answer` JSON the Slack formatter renders directly.
 tools:
 mcp_tools: get_bud_context, get_features
-max_turns: 4
+max_turns: 6
 timeout_seconds: 60
 model: sonnet
 effort:
