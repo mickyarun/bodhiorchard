@@ -36,6 +36,36 @@ RUN apt-get update && \
 
 COPY --from=builder /install /usr/local
 
+# Pre-bake the embedding model (~90 MB) into the image so the backend
+# boots fully offline. fastembed defaults to caching under
+# /tmp/fastembed_cache; downloading at build time eliminates two
+# failure modes that we hit in prod:
+#
+#   1. First-request latency. A cold worker that gets a `check_feature_
+#      _exists` call has to download ~90 MB from HuggingFace before
+#      its first reply. With unauthenticated HF traffic and rate
+#      limiting this can take tens of seconds.
+#   2. Stalled-download wedging the event loop. fastembed's loader
+#      sets up an asyncio.Lock that is released only after the model
+#      file lands on disk. If the HF download hangs mid-transfer
+#      (which it did on 2026-06-08, leaving the cache dir present but
+#      missing model_optimized.onnx), every subsequent embedding call
+#      blocks behind that lock forever — observed as a 75 minute
+#      backend outage where the process was alive but answered no
+#      requests.
+#
+# Pre-baking at build time means the runtime worker always finds the
+# ONNX file on disk and never touches the network for model bytes.
+#
+# Model defaults to BAAI/bge-small-en-v1.5 (see settings.embedding.model
+# in app/config.py). Override with --build-arg EMBEDDING_MODEL=... if
+# you've switched the prod default. chown the cache to appuser so the
+# runtime user can read it (and write new revisions when the model
+# version bumps in a future PR).
+ARG EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('${EMBEDDING_MODEL}')" && \
+    chown -R appuser:appuser /tmp/fastembed_cache
+
 COPY . .
 
 # Create persistent storage roots for cloned repos and the SSH deploy
