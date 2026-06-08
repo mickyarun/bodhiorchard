@@ -11,7 +11,16 @@ ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+# --ignore-scripts is required because `vite-ssg` transitively pulls
+# `canvas`, whose `node-pre-gyp install` post-install script tries to
+# fetch a pre-built linux-musl binary that doesn't exist (alpine =
+# musl, but node-canvas only publishes glibc binaries) and falls back
+# to compiling from source — which needs Python + gcc + Cairo headers
+# we deliberately don't ship in this image. The frontend build itself
+# never invokes canvas (no SSR happens at build time; the browser
+# provides the native canvas at runtime), so the package being
+# present-without-its-binary is harmless.
+RUN npm ci --no-audit --no-fund --ignore-scripts
 
 COPY frontend/ ./
 COPY shared/ /app/shared/
