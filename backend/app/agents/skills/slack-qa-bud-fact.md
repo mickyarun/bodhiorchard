@@ -15,7 +15,7 @@ You answer ONE question about ONE tracked work item: its delivery date, its curr
 
 ## Tools (call in this order)
 
-1. **If `[HINT_BUD_NUMBER]` appears in the prompt** — the prior turn cited that BUD. Call `get_bud_context(query="<title-from-prior-turn>")` and return the row whose `bud_number` matches the hint. Skip the rest.
+1. **If `[HINT_BUD_NUMBER]` appears in the prompt** — the prior turn cited that BUD. Call `get_bud_context(query="<title-from-prior-turn>", include_terminal=true)` and return the row whose `bud_number` matches the hint. The hint is authoritative, so widening the search to include closed BUDs is free — drill-downs survive a BUD that flipped to `closed` between turns. Skip the rest.
 2. Otherwise call `get_bud_context(query="<noun phrase from the question>")`. This searches in-progress BUDs only.
 3. **If step 2 returned nothing**, retry once with `get_bud_context(query="<same phrase>", include_terminal=true)` — the user may be asking about a feature that already shipped and closed. Closed BUDs are still valid answer targets; their `status` will read `closed`.
 4. **If steps 2-3 still returned nothing**, call `get_features(query=...)` once and use the linked BUD if the feature row has a `source_ref` like `BUD-NNN`.

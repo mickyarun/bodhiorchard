@@ -237,46 +237,91 @@ async def test_no_drill_down_when_candidates_are_feature_only(
     assert "[HINT_BUD_NUMBER]" not in conversation
 
 
-# ── 4. Soft-fallback when the specialist exhausts its turn budget ────
+# ── 4. Soft-fallback when the specialist can't commit ────────────────
 
 
 @pytest.mark.asyncio
-async def test_max_turns_returns_not_found_message_not_errored(
+@pytest.mark.parametrize(
+    "soft_code",
+    [ClaudeErrorCode.MAX_TURNS, ClaudeErrorCode.TIMEOUT],
+)
+async def test_soft_fallback_returns_not_found_message_not_errored(
+    soft_code: ClaudeErrorCode,
     monkeypatch: Any,
     _silence_slack_posts: dict[str, list[tuple[str, str | None]]],
 ) -> None:
-    """``error_max_turns`` from the bud-fact specialist means "couldn't
-    commit to a BUD" — surface the not_found copy, keep the session
-    AWAITING_USER so the user can clarify in the same thread."""
+    """``MAX_TURNS`` and ``TIMEOUT`` both mean "the model couldn't commit
+    within its budget" on a fact-lookup specialist — neither is a server
+    crash. Surface the not_found copy, keep the session AWAITING_USER
+    so the user can clarify in the same thread.
+
+    Asserts by reply *identity* (against ``slack_feature_qa`` module
+    constants), not substring on the copy, so copy edits don't break
+    this regression pin."""
 
     async def _timeline_intent(**kw: Any) -> QaIntent:
         return QaIntent.TIMELINE
 
     monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _timeline_intent)
 
-    async def _max_turns_fail(*, prompt: str, working_dir: str, config: Any) -> Any:
+    async def _soft_fail(*, prompt: str, working_dir: str, config: Any) -> Any:
         return MagicMock(
             success=False,
             output="",
-            error="max turns",
-            error_code=ClaudeErrorCode.MAX_TURNS,
+            error="soft fallback",
+            error_code=soft_code,
         )
 
-    monkeypatch.setattr(slack_feature_qa, "run_claude_code", _max_turns_fail)
+    monkeypatch.setattr(slack_feature_qa, "run_claude_code", _soft_fail)
 
     session = _make_session()
     await _run_qa_agent(
         MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, thread_messages=None
     )
 
-    # Session must NOT terminate — the user should be able to reply with
-    # a BUD number / title and re-enter the dispatcher.
     assert session.status == FeatureQAStatus.AWAITING_USER
 
-    posts = _silence_slack_posts["posts"]
-    assert any("couldn't find a BUD" in text for text, _ in posts), (
-        f"expected not_found copy, got posts={posts!r}"
+    texts = [text for text, _ in _silence_slack_posts["posts"]]
+    assert slack_feature_qa._BUD_NOT_FOUND_REPLY in texts, (
+        f"expected the not_found reply constant, got posts={texts!r}"
     )
-    assert not any("try again shortly" in text for text, _ in posts), (
-        "must NOT post the generic server-error fallback on a soft max_turns"
+    assert slack_feature_qa._GENERIC_FAILURE_REPLY not in texts, (
+        "must NOT post the generic server-error reply on a soft fallback"
     )
+
+
+@pytest.mark.asyncio
+async def test_hard_error_still_marks_session_errored(
+    monkeypatch: Any,
+    _silence_slack_posts: dict[str, list[tuple[str, str | None]]],
+) -> None:
+    """``BINARY_MISSING`` is a real server-side problem — the dispatcher
+    must keep posting the generic reply and flipping the session to
+    ERRORED so it shows up loudly in logs and metrics. Pins the
+    not-soft side of the ``_SOFT_FALLBACK_ERROR_CODES`` split."""
+
+    async def _timeline_intent(**kw: Any) -> QaIntent:
+        return QaIntent.TIMELINE
+
+    monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _timeline_intent)
+
+    async def _hard_fail(*, prompt: str, working_dir: str, config: Any) -> Any:
+        return MagicMock(
+            success=False,
+            output="",
+            error="binary missing",
+            error_code=ClaudeErrorCode.BINARY_MISSING,
+        )
+
+    monkeypatch.setattr(slack_feature_qa, "run_claude_code", _hard_fail)
+
+    session = _make_session()
+    await _run_qa_agent(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, thread_messages=None
+    )
+
+    assert session.status == FeatureQAStatus.ERRORED
+
+    texts = [text for text, _ in _silence_slack_posts["posts"]]
+    assert slack_feature_qa._GENERIC_FAILURE_REPLY in texts
+    assert slack_feature_qa._BUD_NOT_FOUND_REPLY not in texts
