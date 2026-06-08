@@ -27,6 +27,7 @@ the operational primitive any future CLI/admin tool can wrap.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import structlog
@@ -40,6 +41,12 @@ from app.services.scan.phase_impls.skill_extraction import phase_e_skills
 from app.services.scan_helpers import load_feature_map
 
 logger = structlog.get_logger(__name__)
+
+
+# (repo_name, zero_based_index) -> None. Optional; the sync entry point
+# doesn't pass one. The async job handler uses it to push per-repo
+# progress to the job-status websocket.
+ProgressCallback = Callable[[str, int], Awaitable[None]]
 
 
 @dataclass
@@ -57,6 +64,7 @@ async def rerun_skill_profiles(
     org_id: uuid.UUID,
     *,
     wipe: bool,
+    on_repo_done: ProgressCallback | None = None,
 ) -> SkillRerunResult:
     """Walk every active tracked repo for ``org_id`` and rebuild skill_profiles.
 
@@ -83,7 +91,7 @@ async def rerun_skill_profiles(
     repos = await TrackedRepoRepository(db, org_id=org_id).list_active()
     total_profiles = 0
     total_unmatched = 0
-    for repo in repos:
+    for idx, repo in enumerate(repos):
         branch = repo.develop_branch or repo.main_branch
         feature_map = await load_feature_map(db, org_id, repo.id)
         entries = await analyze_repo_skills(repo.path, branch=branch, feature_map=feature_map)
@@ -105,6 +113,8 @@ async def rerun_skill_profiles(
             profiles=count,
             unmatched=len(unmatched),
         )
+        if on_repo_done is not None:
+            await on_repo_done(repo.name, idx)
 
     return SkillRerunResult(
         profiles_deleted=deleted,

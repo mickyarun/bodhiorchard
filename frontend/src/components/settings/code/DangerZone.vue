@@ -70,6 +70,27 @@
         {{ errorMessage }}
       </v-alert>
 
+      <v-alert
+        v-if="running"
+        type="info"
+        variant="tonal"
+        density="compact"
+        class="mb-3"
+      >
+        <div class="d-flex align-center ga-2">
+          <v-progress-circular indeterminate size="16" width="2" />
+          <span>{{ progressMessage || 'Walking repositories…' }}</span>
+        </div>
+        <v-progress-linear
+          v-if="progressPct > 0"
+          :model-value="progressPct"
+          height="4"
+          color="info"
+          class="mt-2"
+          rounded
+        />
+      </v-alert>
+
       <div class="text-caption text-medium-emphasis mb-2">
         Type
         <code class="confirm-phrase">{{ settingsStore.SKILL_RERUN_CONFIRMATION }}</code>
@@ -101,20 +122,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
+import { useJobSocket } from '@/composables/useJobSocket'
 
-const settingsStore = useSettingsStore()
-
-const typedConfirmation = ref('')
-const running = ref(false)
-const errorMessage = ref<string | null>(null)
-const lastResult = ref<{
+interface SkillRerunResult {
   profilesDeleted: number
   profilesUpserted: number
   unmatchedEmails: number
   reposWalked: number
-} | null>(null)
+}
+
+const settingsStore = useSettingsStore()
+const { startTracking, stopTracking } = useJobSocket()
+
+const typedConfirmation = ref('')
+const running = ref(false)
+const progressMessage = ref('')
+const progressPct = ref(0)
+const errorMessage = ref<string | null>(null)
+const lastResult = ref<SkillRerunResult | null>(null)
 
 const canSubmit = computed(
   () =>
@@ -122,19 +149,49 @@ const canSubmit = computed(
     && !running.value,
 )
 
+function reset() {
+  running.value = false
+  progressMessage.value = ''
+  progressPct.value = 0
+}
+
 async function onSubmit() {
   if (!canSubmit.value) return
   running.value = true
   errorMessage.value = null
-  const result = await settingsStore.rerunSkillProfiles(typedConfirmation.value)
-  running.value = false
-  if (result) {
-    lastResult.value = result
-    typedConfirmation.value = ''
-  } else {
-    errorMessage.value = settingsStore.error ?? 'Failed to rerun skill profiles.'
+  lastResult.value = null
+  progressMessage.value = 'Starting…'
+  progressPct.value = 0
+
+  const jobId = await settingsStore.rerunSkillProfiles(typedConfirmation.value)
+  if (!jobId) {
+    reset()
+    errorMessage.value = settingsStore.error ?? 'Failed to start skill rerun.'
+    return
   }
+
+  startTracking(jobId, {
+    onProgress: (snapshot) => {
+      if (snapshot.statusMessage) progressMessage.value = snapshot.statusMessage
+      if (typeof snapshot.progressPct === 'number') progressPct.value = snapshot.progressPct
+    },
+    onComplete: (snapshot) => {
+      reset()
+      typedConfirmation.value = ''
+      const result = snapshot.result as SkillRerunResult | undefined
+      if (result) lastResult.value = result
+    },
+    onError: (message) => {
+      reset()
+      errorMessage.value = message || 'Skill rerun failed.'
+    },
+  })
 }
+
+// If the user navigates away mid-run the websocket subscription is
+// still useful — the worker keeps going — but the tracker callbacks
+// would fire into a torn-down component, leaking warnings. Stop here.
+onUnmounted(() => stopTracking())
 </script>
 
 <style scoped>

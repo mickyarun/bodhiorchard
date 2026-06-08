@@ -31,14 +31,14 @@ from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.skill_profile import SkillProfileRepository
+from app.schemas.jobs import JobCreatedResponse, SkillRerunJobPayload
 from app.schemas.skills import (
     SKILL_RERUN_CONFIRMATION,
     ModuleSkill,
     SkillProfileRead,
     SkillRerunRequest,
-    SkillRerunResponse,
 )
-from app.services.skill_rerun import rerun_skill_profiles
+from app.services.job_queue import JOB_SKILL_RERUN, create_job, find_active_job
 
 logger = structlog.get_logger(__name__)
 
@@ -86,21 +86,28 @@ async def list_profiles(
 
 @router.post(
     "/profiles/rerun",
-    response_model=SkillRerunResponse,
+    response_model=JobCreatedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(require_permissions("org:edit_settings"))],
 )
 async def rerun_profiles(
     body: SkillRerunRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> SkillRerunResponse:
-    """Wipe and recompute every ``skill_profile`` row for the caller's org.
+) -> JobCreatedResponse:
+    """Enqueue a wipe-and-recompute of every ``skill_profile`` for the org.
 
-    Recovery path for alias-routing corruption. Walks each tracked repo
-    using the same ``analyze_repo_skills`` + ``phase_e_skills`` pair the
-    scan pipeline uses, but skips indexing, feature synthesis, design
-    extraction, and embeddings — so it finishes in seconds rather than
-    hours. ``body.confirmation`` must equal the fixed
+    Recovery path for alias-routing corruption. The handler at
+    :func:`app.services.job_skill_rerun.handle_skill_rerun_job` walks
+    each tracked repo using the same ``analyze_repo_skills`` +
+    ``phase_e_skills`` pair the scan pipeline uses, but skips indexing,
+    feature synthesis, design extraction, and embeddings. The walk runs
+    in the background so an HTTP request held open for the full duration
+    (minutes for a 20-repo org with deep history) cannot be killed by
+    an axios timeout or upstream proxy idle window — the UI polls
+    ``GET /v1/jobs/{job_id}/status`` via ``useJobSocket`` instead.
+
+    ``body.confirmation`` must equal the fixed
     ``SKILL_RERUN_CONFIRMATION`` phrase to defend against accidental
     invocation from outside the UI.
     """
@@ -116,22 +123,33 @@ async def rerun_profiles(
         )
 
     org = await OrganizationRepository(db).get_for_user(current_user)
-    result = await rerun_skill_profiles(db, org.id, wipe=body.wipe)
-    await db.commit()
 
+    existing = find_active_job(JOB_SKILL_RERUN, {"org_id": str(org.id)})
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A skill-profiles rerun is already in progress for this "
+                f"organization (job {existing.job_id})."
+            ),
+        )
+
+    payload = SkillRerunJobPayload(
+        org_id=org.id,
+        wipe=body.wipe,
+        requested_by_user_id=current_user.id,
+        requested_by_email=current_user.email,
+    )
+    job = create_job(
+        JOB_SKILL_RERUN,
+        payload=payload.model_dump(mode="json"),
+        user_id=str(current_user.id),
+    )
     logger.info(
-        "skill_profiles_rerun",
+        "skill_profiles_rerun_enqueued",
+        job_id=job.job_id,
         org_id=str(org.id),
         wipe=body.wipe,
         by=current_user.email,
-        profiles_deleted=result.profiles_deleted,
-        profiles_upserted=result.profiles_upserted,
-        repos_walked=result.repos_walked,
-        unmatched_emails=result.unmatched_emails,
     )
-    return SkillRerunResponse(
-        profiles_deleted=result.profiles_deleted,
-        profiles_upserted=result.profiles_upserted,
-        unmatched_emails=result.unmatched_emails,
-        repos_walked=result.repos_walked,
-    )
+    return JobCreatedResponse(job_id=job.job_id)

@@ -202,12 +202,9 @@ class SkillRerunRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class SkillRerunResponse(BaseModel):
-    """Result of a wipe-and-recompute run."""
-
-    profiles_deleted: int = Field(alias="profilesDeleted")
-    profiles_upserted: int = Field(alias="profilesUpserted")
-    unmatched_emails: int = Field(alias="unmatchedEmails")
-    repos_walked: int = Field(alias="reposWalked")
-
-    model_config = {"populate_by_name": True}
+# Final terminal payload published via ``update_job(..., result=...)``
+# by ``handle_skill_rerun_job``. The frontend reads this off the job
+# status when ``state == "completed"``. Kept as a TypedDict-style shape
+# in code (not a Pydantic model) because ``update_job`` stores ``Any``
+# and the worker emits it as a plain dict — declaring a class here
+# would imply a serialization step that doesn't happen.
