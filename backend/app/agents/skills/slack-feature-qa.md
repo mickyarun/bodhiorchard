@@ -118,6 +118,17 @@ Then evaluate, in priority order:
 
 Do not skip a tool because you "think" the answer won't be there. The user's UI does the same keyword search and finds matches the model can't predict from priors.
 
+### Named-entity check (before returning `answer`)
+
+Before committing to a single `answer`, compare the **specific named entities** in the user's question against the candidate you would return. Named entities include products, vendors, services, brands, organisations, geographies, regions, markets, and integration targets — anything that names a particular thing rather than a generic capability.
+
+If the question and the candidate name DIFFERENT specific things in any of these categories (e.g. a different vendor, a different country, a different third-party system, a different product line), they are NOT the same feature even when the surrounding capability sounds identical. In that case:
+
+- Return `clarify` listing the candidate(s) you found AND making the mismatch explicit in the `question` field, so the user can confirm or redirect (e.g. "I found a similar item for variant B — did you mean that, or a new variant A?").
+- Do NOT silently return `answer` for the wrong variant.
+
+This rule is generic — it applies to any deployment of this open-source agent. Do not assume any particular vocabulary; read the entities from the question and the candidate titles/descriptions on the fly.
+
 ## Follow-up Turns (the thread is the conversation)
 
 The Slack thread stays alive after every response. ANY reply from the user re-enters this agent with the full thread history. Treat the thread as an ongoing dialogue, not a one-shot lookup.
@@ -129,7 +140,8 @@ Classify each follow-up by reading the latest `[REPLY]` line in the conversation
   - A specific BUD number or name → return `answer` for that single candidate.
 
 - **Drill-down on the prior result** (user asked a deeper question about the same feature, e.g. "where in the dashboard is it shown?", "who owns this?", "what's the rollout date?"):
-  - The relevant feature(s)/BUD(s) are already in the thread context. Re-call `get_features(query=...)` or `get_bud_context(query=...)` if you need richer `description` / `code_locations` / `assignee` data, then answer as a `summary` (prose) — keep the functional/technical structure when relevant. Do NOT return `not_found` just because the new sub-question wasn't an exact title match.
+  - First, decide whether the drill-down is about a **single named item already cited in the thread**. If the prior turn surfaced one specific `BUD-NNN` (in `*Ref: BUD-NNN*`, `bud_number`, or a `BUD-NNN` mention) AND the follow-up is single-target — *timeline / ETA / go-live / when does it ship / status / owner / assignee / phase deadline* of that one thing — return `answer` with `kind: "bud"` for that exact BUD, not `summary`. Re-call `get_bud_context(query="<title from prior turn>")` first so you have the live `prod_p70_date`, `current_phase_deadline`, `assignee_id`, `status` fields; pick the row whose `bud_number` matches the previously cited BUD even if other rows look similar. The Slack reply formatter renders those fields directly — emitting `summary` prose here causes the bot to quote field names like `` `prod_p70_date` `` verbatim instead of the actual date, which is a regression.
+  - Only when the drill-down is genuinely open-ended ("explain how it's built", "what does it cover", "how does it relate to X") OR spans multiple items, fall back to `summary` (prose) — keep the functional/technical structure when relevant. Re-call `get_features(query=...)` or `get_bud_context(query=...)` if you need richer `description` / `code_locations` data first. Do NOT return `not_found` just because the new sub-question wasn't an exact title match.
 
 - **Brand new topic** (user asked about something unrelated to the prior turn):
   - Run the full mandatory three-tool flow again with the new noun phrase, exactly as on turn 1.
