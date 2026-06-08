@@ -24,14 +24,21 @@ Scan-trigger / status / cancel routes live in
 """
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.skill_profile import SkillProfileRepository
-from app.schemas.skills import ModuleSkill, SkillProfileRead
+from app.schemas.skills import (
+    SKILL_RERUN_CONFIRMATION,
+    ModuleSkill,
+    SkillProfileRead,
+    SkillRerunRequest,
+    SkillRerunResponse,
+)
+from app.services.skill_rerun import rerun_skill_profiles
 
 logger = structlog.get_logger(__name__)
 
@@ -75,3 +82,56 @@ async def list_profiles(
         )
 
     return list(profiles_map.values())
+
+
+@router.post(
+    "/profiles/rerun",
+    response_model=SkillRerunResponse,
+    dependencies=[Depends(require_permissions("org:edit_settings"))],
+)
+async def rerun_profiles(
+    body: SkillRerunRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SkillRerunResponse:
+    """Wipe and recompute every ``skill_profile`` row for the caller's org.
+
+    Recovery path for alias-routing corruption. Walks each tracked repo
+    using the same ``analyze_repo_skills`` + ``phase_e_skills`` pair the
+    scan pipeline uses, but skips indexing, feature synthesis, design
+    extraction, and embeddings — so it finishes in seconds rather than
+    hours. ``body.confirmation`` must equal the fixed
+    ``SKILL_RERUN_CONFIRMATION`` phrase to defend against accidental
+    invocation from outside the UI.
+    """
+    # Strip on the server too — a paste from chat/email commonly carries
+    # a trailing newline and the UI is not the only valid client.
+    if body.confirmation.strip() != SKILL_RERUN_CONFIRMATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Confirmation must equal {SKILL_RERUN_CONFIRMATION!r} to "
+                "proceed with a destructive skill_profiles wipe."
+            ),
+        )
+
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    result = await rerun_skill_profiles(db, org.id, wipe=body.wipe)
+    await db.commit()
+
+    logger.info(
+        "skill_profiles_rerun",
+        org_id=str(org.id),
+        wipe=body.wipe,
+        by=current_user.email,
+        profiles_deleted=result.profiles_deleted,
+        profiles_upserted=result.profiles_upserted,
+        repos_walked=result.repos_walked,
+        unmatched_emails=result.unmatched_emails,
+    )
+    return SkillRerunResponse(
+        profiles_deleted=result.profiles_deleted,
+        profiles_upserted=result.profiles_upserted,
+        unmatched_emails=result.unmatched_emails,
+        repos_walked=result.repos_walked,
+    )

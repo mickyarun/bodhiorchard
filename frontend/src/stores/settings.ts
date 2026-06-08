@@ -340,6 +340,43 @@ export const useSettingsStore = defineStore('settings', () => {
       .every(r => r.mainBranch !== null && r.developBranch !== null),
   )
 
+  // Fixed phrase the admin types into the Danger Zone confirm input.
+  // Mirrors backend ``SKILL_RERUN_CONFIRMATION``; if either side changes,
+  // change both — there is no API for fetching the phrase by design
+  // (knowing it should require reading the UI prompt, not introspection).
+  const SKILL_RERUN_CONFIRMATION = 'WIPE AND RECOMPUTE SKILLS'
+
+  interface SkillRerunResult {
+    profilesDeleted: number
+    profilesUpserted: number
+    unmatchedEmails: number
+    reposWalked: number
+  }
+
+  async function rerunSkillProfiles(
+    confirmation: string,
+  ): Promise<SkillRerunResult | null> {
+    error.value = null
+    try {
+      // The endpoint walks every active repo synchronously; on a
+      // ~20-repo org with deep history it can take a minute or so.
+      // Override the default axios timeout so a slow first-time wipe
+      // doesn't abort the request mid-walk and leave the org in a
+      // partial state (the server-side transaction rolls back on a
+      // disconnected client). TODO: convert to the async-job pattern
+      // if any org's recompute regularly exceeds ~90s.
+      const { data } = await api.post<SkillRerunResult>(
+        '/v1/skills/profiles/rerun',
+        { confirmation: confirmation.trim(), wipe: true },
+        { timeout: 180_000 },
+      )
+      return data
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to rerun skill profiles.')
+      return null
+    }
+  }
+
   return {
     connections,
     connectionsLoaded,
@@ -361,5 +398,7 @@ export const useSettingsStore = defineStore('settings', () => {
     classifyRepo,
     extractRoutes,
     allReposMapped,
+    SKILL_RERUN_CONFIRMATION,
+    rerunSkillProfiles,
   }
 })
