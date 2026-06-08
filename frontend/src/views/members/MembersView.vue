@@ -127,8 +127,24 @@
             </td>
             <td class="text-medium-emphasis">
               <div>{{ member.email }}</div>
-              <div v-if="member.emailAliases?.length" class="text-caption" style="opacity: 0.6;">
-                +{{ member.emailAliases.length }} alias{{ member.emailAliases.length !== 1 ? 'es' : '' }}
+              <div
+                v-if="member.emailAliases?.length"
+                class="d-flex flex-wrap ga-1 mt-1"
+                data-test="member-aliases"
+              >
+                <v-chip
+                  v-for="alias in member.emailAliases"
+                  :key="alias"
+                  size="x-small"
+                  variant="tonal"
+                  closable
+                  close-icon="mdi-link-variant-off"
+                  :close-label="`Unlink alias ${alias}`"
+                  :data-test-alias="alias"
+                  @click:close="confirmUnlinkAlias(member, alias)"
+                >
+                  {{ alias }}
+                </v-chip>
               </div>
             </td>
             <td>
@@ -659,6 +675,25 @@
           <v-spacer />
           <v-btn variant="text" @click="deleteRoleDialog = false">Cancel</v-btn>
           <v-btn color="error" :loading="deletingRole" @click="submitDeleteRole">Delete</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="unlinkAliasDialog" max-width="440">
+      <v-card>
+        <v-card-title>Unlink alias</v-card-title>
+        <v-card-text>
+          Remove <strong>{{ aliasToUnlink?.email }}</strong> from
+          <strong>{{ aliasToUnlink?.member.name }}</strong>?
+          The next scan will treat commits authored with this email as a
+          separate identity unless you merge them again.
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="unlinkAliasDialog = false">Cancel</v-btn>
+          <v-btn color="warning" :loading="unlinkingAlias" @click="submitUnlinkAlias">
+            Unlink
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -1240,6 +1275,24 @@ async function submitDeleteRole() {
   const ok = await store.deleteRole(roleToDelete.value.id)
   deletingRole.value = false
   if (ok) deleteRoleDialog.value = false
+}
+
+// ─── Unlink Alias ─────────────────────────────
+const unlinkAliasDialog = ref(false)
+const unlinkingAlias = ref(false)
+const aliasToUnlink = ref<{ member: Member; email: string } | null>(null)
+
+function confirmUnlinkAlias(member: Member, email: string) {
+  aliasToUnlink.value = { member, email }
+  unlinkAliasDialog.value = true
+}
+
+async function submitUnlinkAlias() {
+  if (!aliasToUnlink.value) return
+  unlinkingAlias.value = true
+  const ok = await store.unlinkAlias(aliasToUnlink.value.member.id, aliasToUnlink.value.email)
+  unlinkingAlias.value = false
+  if (ok) unlinkAliasDialog.value = false
 }
 
 // ─── Helpers ──────────────────────────────────
