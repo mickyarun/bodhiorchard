@@ -88,6 +88,7 @@ from app.models.scan_run_enums import (
 )
 from app.models.skill_profile import SkillProfile
 from app.models.standup import StandupReport
+from app.models.team import Team, TeamMember, TeamRepo, TeamStatus
 from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
@@ -176,6 +177,10 @@ __all__ = [
     "is_per_repo",
     "SkillProfile",
     "StandupReport",
+    "Team",
+    "TeamMember",
+    "TeamRepo",
+    "TeamStatus",
     "Feature",
     "FeatureQASession",
     "FeatureQAStatus",

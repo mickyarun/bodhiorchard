@@ -195,6 +195,13 @@ const router = createRouter({
           component: () => import('@/views/settings/SettingsDesignSystems.vue'),
         },
         {
+          // Legacy URL: Teams used to live at /settings/teams. They
+          // now live as a tab on /members so admins manage people and
+          // squads side-by-side. Redirect keeps old bookmarks alive.
+          path: 'settings/teams',
+          redirect: { name: 'members', query: { tab: 'teams' } },
+        },
+        {
           path: 'settings/agent-prompts',
           name: 'settings-agent-prompts',
           meta: { permission: 'agents:configure' },

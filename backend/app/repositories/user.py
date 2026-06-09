@@ -187,6 +187,35 @@ class UserRepository(BaseRepository[User]):
             return None
         return (row[0], _role_from_name(row[1]))
 
+    async def list_in_org_by_ids_with_role(
+        self, org_id: uuid.UUID, user_ids: list[uuid.UUID]
+    ) -> list[tuple[User, UserRole | None, str | None]]:
+        """Bulk-fetch users by id with their effective role + role_name.
+
+        Returns triples ``(user, effective_role, role_name)``: ``role`` is
+        the canonical :class:`UserRole` resolved through the same SYSTEM /
+        CUSTOM → base_role rules as :meth:`list_active_with_role`; the
+        second string is the raw role row name so a custom "Senior PM"
+        renders distinctly from the inherited "pm" UserRole. Empty input
+        short-circuits without a query. Order is unspecified; callers
+        sort as needed.
+        """
+        if not user_ids:
+            return []
+        base_role = aliased(Role)
+        stmt = (
+            select(User, _effective_role_case(base_role), Role.name)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .outerjoin(Role, Role.id == OrgToUser.role_id)
+            .outerjoin(base_role, base_role.id == Role.base_role_id)
+            .where(
+                OrgToUser.org_id == org_id,
+                User.id.in_(user_ids),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row[0], _role_from_name(row[1]), row[2]) for row in result.all()]
+
     async def list_active_with_role(self, org_id: uuid.UUID, role: UserRole) -> list[User]:
         """Active org members **explicitly** assigned a role whose identity equals ``role``.
 

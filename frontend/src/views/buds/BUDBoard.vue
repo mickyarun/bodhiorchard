@@ -53,6 +53,22 @@
           class="board-filter-assignee"
         />
         <v-select
+          v-model="teamFilter"
+          :items="teamOptions"
+          item-title="label"
+          item-value="value"
+          :placeholder="teamFilterPlaceholder"
+          :disabled="teamOptions.length === 0"
+          prepend-inner-icon="mdi-account-group-outline"
+          density="compact"
+          variant="solo-filled"
+          flat
+          hide-details
+          clearable
+          single-line
+          class="board-filter-team"
+        />
+        <v-select
           v-model="priorityFilter"
           :items="priorityFilterOptions"
           item-title="label"
@@ -395,6 +411,7 @@ import { useNotificationStore } from '@/stores/notifications'
 import { storeToRefs } from 'pinia'
 import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/agentSkills'
 import { useSettingsStore } from '@/stores/settings'
+import { useTeamsStore } from '@/stores/teams'
 import { BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_PRIORITIES } from '@/types'
 import type { BUDStatus, BUDPriority } from '@/types'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
@@ -418,6 +435,7 @@ const router = useRouter()
 const budStore = useBUDStore()
 const skillsStore = useAgentSkillsStore()
 const settingsStore = useSettingsStore()
+const teamsStore = useTeamsStore()
 
 const nameFilter = ref('')
 // Sentinel value (string, not null) for the "Unassigned" option — v-select's
@@ -425,7 +443,37 @@ const nameFilter = ref('')
 const UNASSIGNED = '__unassigned__'
 const assigneeFilter = ref<string | null>(null)
 const priorityFilter = ref<BUDPriority | null>(null)
+const teamFilter = ref<string | null>(null)
 const sortByPriority = ref(false)
+
+// Team filter options + placeholder. When no teams exist yet, the
+// dropdown is disabled with a placeholder pointing at Settings →
+// Teams so the user knows where to configure them.
+const teamOptions = computed(() =>
+  teamsStore.activeTeams.map(t => ({ value: t.id, label: t.name })),
+)
+const teamFilterPlaceholder = computed(() =>
+  teamOptions.value.length === 0
+    ? 'No teams configured — Settings → Teams'
+    : 'All teams',
+)
+
+// Lazy-load the selected team's full member list (the summary list
+// doesn't carry members). The filter computed waits until detail is
+// in the store before narrowing — otherwise the board would briefly
+// show "no matches" while the fetch resolves.
+watch(teamFilter, async (id) => {
+  if (id && !teamsStore.detailsById[id]) {
+    await teamsStore.fetchTeam(id)
+  }
+})
+
+const selectedTeamMemberIds = computed(() => {
+  if (!teamFilter.value) return null
+  const detail = teamsStore.detailsById[teamFilter.value]
+  if (!detail) return new Set<string>()  // still loading; show nothing
+  return new Set(detail.members.map(m => m.user_id))
+})
 
 // Dropdown options derived from the currently-loaded buds so we only show
 // assignees that actually exist on the board. "Unassigned" is appended
@@ -454,9 +502,10 @@ const filteredBudsByStatus = computed<Record<string, typeof budStore.buds>>(() =
   const q = nameFilter.value?.trim().toLowerCase() ?? ''
   const assignee = assigneeFilter.value
   const priority = priorityFilter.value
+  const teamMembers = selectedTeamMemberIds.value
   const sort = sortByPriority.value
   const grouped = budStore.budsByStatus
-  if (!q && !assignee && !priority && !sort) return grouped
+  if (!q && !assignee && !priority && !teamMembers && !sort) return grouped
   const numericQ = q.replace(/^bud-?/, '').replace(/^0+/, '')
   const out: Record<string, typeof budStore.buds> = {}
   for (const status of Object.keys(grouped)) {
@@ -464,6 +513,12 @@ const filteredBudsByStatus = computed<Record<string, typeof budStore.buds>>(() =
       if (assignee === UNASSIGNED && bud.assignee_id) return false
       if (assignee && assignee !== UNASSIGNED && bud.assignee_id !== assignee) return false
       if (priority && bud.priority !== priority) return false
+      // Team filter: show only BUDs whose current assignee is in the
+      // selected team. Unassigned BUDs are excluded by design — if
+      // nobody owns it, there's no team to attribute it to.
+      if (teamMembers !== null) {
+        if (!bud.assignee_id || !teamMembers.has(bud.assignee_id)) return false
+      }
       if (!q) return true
       if (bud.title?.toLowerCase().includes(q)) return true
       const num = String(bud.bud_number)
@@ -564,6 +619,10 @@ onMounted(() => {
   // column shows. Without this fetch a cold page load uses the default
   // (UAT enabled) regardless of what the org has saved.
   if (!settingsStore.connectionsLoaded) settingsStore.fetchConnections()
+  // Team summaries power the board's Team filter dropdown. Cheap
+  // single-page list; member detail is lazy-loaded only when the user
+  // actually picks a team.
+  if (teamsStore.teams.length === 0) teamsStore.fetchTeams(false)
 })
 
 // Re-fetch the BUD list when a job-completion notification arrives.

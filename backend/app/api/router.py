@@ -45,6 +45,7 @@ from app.api.v1.setup import router as setup_router
 from app.api.v1.skills import router as skills_router
 from app.api.v1.slack import router as slack_router
 from app.api.v1.standups import router as standups_router
+from app.api.v1.teams import router as teams_router
 from app.api.v1.triage_sessions import router as triage_router
 from app.api.v1.ws import router as ws_router
 from app.api.v1.xp import router as xp_router
@@ -73,6 +74,7 @@ api_router.include_router(members_router, prefix="/api/v1")
 api_router.include_router(notifications_router, prefix="/api/v1/notifications")
 api_router.include_router(slack_router, prefix="/api/v1/slack")
 api_router.include_router(standups_router, prefix="/api/v1/standups")
+api_router.include_router(teams_router, prefix="/api/v1")
 api_router.include_router(github_webhook_router, prefix="/api/v1/webhooks")
 api_router.include_router(triage_router, prefix="/api/v1/triage-sessions")
 api_router.include_router(jira_router, prefix="/api/v1/jira")
