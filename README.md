@@ -528,6 +528,20 @@ Bodhiorchard ships in **two deployment modes**. Pick the one that matches how yo
 
 **Pick Full Docker** for a one-command "evaluator" setup, a dedicated Mac-mini deployment, or any case where you'd rather pay-per-token via Anthropic's API than wire up a Claude subscription. **Pick Hybrid** if you already run `claude` interactively on your laptop and want agents to use that same flat-rate subscription, or you want hot-reload for development.
 
+### Fastest: one command with `npx` (no clone, no build)
+
+The quickest way to try Bodhiorchard. The [`bodhiorchard`](https://www.npmjs.com/package/bodhiorchard) npm package pulls prebuilt images from Docker Hub and runs the full Full-Docker stack — you don't clone the repo or build anything.
+
+```bash
+npx bodhiorchard init     # detect ports, generate secrets, pull images
+cd bodhiorchard
+npx bodhiorchard start     # start everything and open the setup wizard
+```
+
+Needs only **Docker (running)** and **Node.js 18+**. If Postgres (5432) or Redis (6379) — or an app port — is already in use, the installer detects it and asks whether to **remap to a free port** or **reuse the existing service**. When the stack is healthy it opens **http://localhost:3000/setup**; finish there (organization, admin account, AI provider, repositories). No keys are entered on the command line.
+
+Manage it with `bodhiorchard status | logs | stop | update | reset`. It's the same stack as **Full Docker mode** below — just pulled instead of built. Use the `git clone` paths below if you want to build from source or run in **Hybrid** mode.
+
 ### Prerequisites
 
 - **Full Docker**: Docker Desktop ≥ 4.20 (everything else is in containers)
