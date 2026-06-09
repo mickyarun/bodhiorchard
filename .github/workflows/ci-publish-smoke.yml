@@ -1,0 +1,83 @@
+name: Publish smoke test (temporary)
+
+# TEMPORARY — validates the Docker + npm publish pipelines on the feature branch
+# WITHOUT an irreversible real publish:
+#   * Docker: login + build (amd64 only, for speed) + push a disposable :smoke tag
+#     — proves credentials, Dockerfiles/contexts, and push permissions without
+#       touching the :latest / version tags users pull.
+#   * npm: `npm whoami` (proves NPM_TOKEN) + `npm publish --dry-run` (proves
+#     packaging) — does NOT consume a version number.
+# DELETE this file before merging; the real publish runs on `release: published`.
+on:
+  push:
+    branches: [feat/npx-installer]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke:
+    if: github.repository == 'mickyarun/bodhiorchard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: bodhiorchard/backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+            build_args: ""
+          - image: bodhiorchard/frontend
+            context: .
+            dockerfile: ./frontend/Dockerfile
+            build_args: |
+              VITE_API_BASE_URL=/api
+          - image: bodhiorchard/multiplayer
+            context: .
+            dockerfile: ./multiplayer/Dockerfile
+            build_args: ""
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          build-args: ${{ matrix.build_args }}
+          tags: ${{ matrix.image }}:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  npm-smoke:
+    if: github.repository == 'mickyarun/bodhiorchard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Verify npm auth
+        run: npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Dry-run publish (no version consumed)
+        run: npm publish --dry-run --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
