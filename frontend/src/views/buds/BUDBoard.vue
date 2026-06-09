@@ -161,9 +161,9 @@
             <v-card
               v-for="bud in filteredBudsByStatus[status]"
               :key="bud.id"
-              class="bud-card pa-4 mb-2 cursor-pointer"
+              class="bud-card pa-4 mb-2"
               color="surface"
-              @click="openBUD(bud.id)"
+              :to="`/buds/${bud.id}`"
             >
               <!-- Row 1: BUD number + priority chip + complexity dots -->
               <div class="d-flex align-center justify-space-between mb-1">
@@ -581,10 +581,6 @@ watch(
     }
   },
 )
-
-function openBUD(id: string): void {
-  router.push(`/buds/${id}`)
-}
 
 async function createBUD(): Promise<void> {
   if (!newTitle.value.trim()) return

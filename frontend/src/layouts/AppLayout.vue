@@ -250,6 +250,17 @@
 
     <!-- Main content -->
     <v-main class="app-main">
+      <!-- Route-navigation progress. Fixed to the top of the viewport so it
+           reads as a global "the app is working" cue the instant a link is
+           clicked — covering the lazy-chunk download that heavy views can't
+           show feedback for until after they mount. -->
+      <v-progress-linear
+        v-if="navigating"
+        indeterminate
+        color="secondary"
+        height="4"
+        class="route-progress"
+      />
       <div class="app-scroll">
         <router-view />
       </div>
@@ -288,9 +299,13 @@ import RaceInviteToast from '@/components/race/RaceInviteToast.vue'
 import RaceWatchBanner from '@/components/race/RaceWatchBanner.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useXPSocket } from '@/composables/useXPSocket'
+import { useNavigationProgress } from '@/composables/useNavigationProgress'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+// Driven by the router guards — true while any route navigation resolves.
+const { navigating } = useNavigationProgress()
 
 // Real-time XP notifications — runs for all authenticated pages
 const { toasts: xpToasts, dismissToast: xpDismiss } = useXPSocket()
@@ -360,6 +375,9 @@ function handleLogout(): void {
      win via the @supports block below. */
   height: 100vh;
   max-height: 100vh;
+  /* Positioning context for the absolutely-positioned route progress bar
+     so it pins to the top of the content area, not the whole viewport. */
+  position: relative;
 }
 
 @supports (height: 100dvh) {
@@ -372,6 +390,17 @@ function handleLogout(): void {
 .app-scroll {
   height: 100%;
   overflow-y: auto;
+}
+
+/* Pin the bar to the top of the main content area, above scrolled
+   content, without participating in layout flow (so it never shifts the
+   page as it appears/disappears). */
+.route-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2000;
 }
 
 .user-menu {
