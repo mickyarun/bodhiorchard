@@ -18,6 +18,8 @@ permissions:
 
 jobs:
   publish:
+    # Only the repo that owns the `bodhiorchard` npm name publishes; forks skip.
+    if: github.repository == 'mickyarun/bodhiorchard'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:

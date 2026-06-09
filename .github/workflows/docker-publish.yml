@@ -17,6 +17,9 @@ permissions:
 
 jobs:
   publish:
+    # Only the repo that owns the bodhiorchard Docker Hub namespace publishes.
+    # Forks skip this job cleanly instead of double-publishing or erroring.
+    if: github.repository == 'mickyarun/bodhiorchard'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
