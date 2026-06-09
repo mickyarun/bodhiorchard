@@ -61,6 +61,7 @@ export const useSetupStore = defineStore('setup', () => {
     claude: {
       authMode: 'host',
       apiKey: '',
+      oauthToken: '',
       initialized: false,
       testPassed: false,
       testedVersion: '',

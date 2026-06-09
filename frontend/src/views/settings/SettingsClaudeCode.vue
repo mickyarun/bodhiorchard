@@ -107,6 +107,27 @@
       </div>
     </v-expand-transition>
 
+    <v-expand-transition>
+      <div v-if="authMode === 'subscription'" class="mb-3">
+        <v-text-field
+          v-model="oauthToken"
+          label="Claude Code OAuth token"
+          :placeholder="hasStoredKey ? '•••••••••••••••• (stored — leave blank to keep)' : 'sk-ant-oat…'"
+          type="password"
+          variant="outlined"
+          density="compact"
+          autocomplete="off"
+          hide-details
+          class="mb-2"
+        />
+        <div class="text-caption text-medium-emphasis">
+          Generate one with <code>npx @anthropic-ai/claude-code setup-token</code>.
+          From <strong>June 15, 2026</strong>, subscription agent runs draw from a
+          monthly Agent-SDK credit — use an API key for unmetered use.
+        </div>
+      </div>
+    </v-expand-transition>
+
     <div class="d-flex ga-2 mt-2 flex-wrap">
       <v-btn
         color="primary"
@@ -155,11 +176,12 @@
 import { computed, onMounted, ref } from 'vue'
 import api from '@/services/api'
 
-type AuthMode = 'host' | 'api_key'
+type AuthMode = 'host' | 'api_key' | 'subscription'
 type Status = 'idle' | 'checking' | 'passed' | 'failed'
 
 const authMode = ref<AuthMode>('host')
 const apiKey = ref('')
+const oauthToken = ref('')
 const hasStoredKey = ref(false)
 const saving = ref(false)
 
@@ -185,6 +207,13 @@ const authOptions: ReadonlyArray<{
     description:
       'Paste an Anthropic API key. Stored encrypted with Fernet AES-128 and applied to every agent run.',
   },
+  {
+    value: 'subscription',
+    title: 'Claude Code subscription',
+    icon: 'mdi-account-key-outline',
+    description:
+      'Paste an OAuth token from `claude setup-token`. Uses your Claude Pro/Max plan, stored encrypted.',
+  },
 ]
 
 const claudeStatus = ref<Status>('idle')
@@ -194,8 +223,9 @@ const showInstallHint = ref(false)
 
 const canSave = computed(() => {
   if (authMode.value === 'host') return true
-  // api_key mode: require a key unless one is already stored
-  return hasStoredKey.value || apiKey.value.trim().length > 0
+  // Credentialed modes: require a fresh secret unless one is already stored.
+  const entered = authMode.value === 'subscription' ? oauthToken.value : apiKey.value
+  return hasStoredKey.value || entered.trim().length > 0
 })
 
 onMounted(async () => {
@@ -218,15 +248,19 @@ async function save(): Promise<void> {
   saving.value = true
   claudeError.value = ''
   try {
-    const payload: { auth_mode: AuthMode; api_key?: string } = {
+    const payload: { auth_mode: AuthMode; api_key?: string; oauth_token?: string } = {
       auth_mode: authMode.value,
     }
     if (authMode.value === 'api_key' && apiKey.value.trim().length > 0) {
       payload.api_key = apiKey.value.trim()
     }
+    if (authMode.value === 'subscription' && oauthToken.value.trim().length > 0) {
+      payload.oauth_token = oauthToken.value.trim()
+    }
     const { data } = await api.patch('/v1/settings/claude', payload)
     hasStoredKey.value = data.has_api_key
     apiKey.value = ''
+    oauthToken.value = ''
     await checkClaudeCode()
   } catch (err: unknown) {
     claudeStatus.value = 'failed'

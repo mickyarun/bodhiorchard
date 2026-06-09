@@ -43,6 +43,7 @@ from app.schemas.setup import InitOrgRequest
 from app.services.bud_stage_seeder import seed_stage_mappings_for_org
 from app.services.claude_env import (
     AUTH_MODE_API_KEY,
+    AUTH_MODE_SUBSCRIPTION,
     VALID_AUTH_MODES,
     apply_claude_auth_to_env,
 )
@@ -107,6 +108,14 @@ def _resolve_claude_auth(req: InitOrgRequest) -> tuple[str, str | None]:
                 detail="claude.api_key is required when auth_mode is 'api_key'",
             )
         encrypted_key = encrypt_secret(key)
+    elif claude_auth_mode == AUTH_MODE_SUBSCRIPTION:
+        token = (req.claude.oauth_token or "").strip()
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude.oauth_token is required when auth_mode is 'subscription'",
+            )
+        encrypted_key = encrypt_secret(token)
     return claude_auth_mode, encrypted_key
 
 

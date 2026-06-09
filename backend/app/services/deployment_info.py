@@ -15,9 +15,10 @@
 """Detect whether the backend is running inside a Docker container.
 
 The UI uses this to branch the Claude auth experience: Docker deployments
-cannot reach a host ``claude login`` session, so the only sensible option
-is an Anthropic API key entered in Settings. Host deployments default to
-trusting whatever ``claude login`` the user already has on their machine.
+cannot reach a host ``claude login`` session, so they use either an Anthropic
+API key or a Claude subscription OAuth token (``claude setup-token``) entered
+in Settings. Host deployments default to trusting whatever ``claude login`` the
+user already has on their machine.
 """
 
 from __future__ import annotations
@@ -56,9 +57,9 @@ def deployment_info() -> dict[str, Any]:
     return {
         "mode": "docker" if in_docker else "host",
         "hostname": platform.node(),
-        # The auth mode the UI should default to. Docker deployments cannot
-        # inherit a host `claude login` session, so an API key is the only
-        # workable path unless ANTHROPIC_API_KEY is injected at the compose
-        # layer. Host deployments default to trusting the user's login.
+        # The auth mode the UI should default to. Docker deployments can't
+        # inherit a host `claude login`, so they default to an API key
+        # (pay-per-token, no monthly cap); a Claude subscription OAuth token is
+        # also offered. Host deployments default to trusting the user's login.
         "claude_auth_recommended": "api_key" if in_docker else "host",
     }

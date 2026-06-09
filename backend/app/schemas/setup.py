@@ -66,28 +66,32 @@ class SetupClaude(BaseModel):
 
     ``host`` = trust the backend process env (Hybrid mode, or Full Docker
     with a compose-level ``ANTHROPIC_API_KEY``). ``api_key`` = Full Docker
-    with a user-supplied key that will be stored encrypted on the org.
+    with a user-supplied key. ``subscription`` = Full Docker with a Claude
+    Pro/Max OAuth token from ``claude setup-token``. Both credentials are
+    stored encrypted on the org.
     """
 
     model_config = {"populate_by_name": True}
 
     auth_mode: str = Field(default="host", alias="authMode")
     api_key: str | None = Field(default=None, alias="apiKey")
+    oauth_token: str | None = Field(default=None, alias="oauthToken")
 
 
 class ClaudeCheckRequest(BaseModel):
     """Body for ``POST /api/setup/check-claude`` — optional provisional creds.
 
-    Used by the setup wizard to validate a pasted API key *before* creating
-    the org. When ``api_key`` is present the endpoint swaps it into the
-    backend process env for the duration of the subprocess call, then
-    restores whatever was there before.
+    Used by the setup wizard to validate a pasted API key or subscription OAuth
+    token *before* creating the org. The provisional credential is passed to the
+    subprocess via ``env_extra`` only — the backend's process env is never
+    mutated.
     """
 
     model_config = {"populate_by_name": True}
 
     auth_mode: str = Field(default="host", alias="authMode")
     api_key: str | None = Field(default=None, alias="apiKey")
+    oauth_token: str | None = Field(default=None, alias="oauthToken")
 
 
 class SetupRequest(BaseModel):
