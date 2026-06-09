@@ -145,8 +145,13 @@
             <div class="text-body-2">
               From <strong>June 15, 2026</strong>, automated agent runs on a
               Claude subscription draw from a monthly Agent-SDK credit. For
-              unmetered use, run the backend on your host (hybrid) or use an
-              API key.
+              unmetered use, run the backend on your host
+              (<a
+                href="https://github.com/mickyarun/bodhiorchard#hybrid-mode-hot-reload"
+                target="_blank"
+                rel="noopener"
+                class="text-primary"
+              >hybrid setup</a>) or use an API key.
             </div>
           </v-alert>
         </template>

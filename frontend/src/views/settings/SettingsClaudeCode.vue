@@ -123,7 +123,12 @@
         <div class="text-caption text-medium-emphasis">
           Generate one with <code>npx @anthropic-ai/claude-code setup-token</code>.
           From <strong>June 15, 2026</strong>, subscription agent runs draw from a
-          monthly Agent-SDK credit — use an API key for unmetered use.
+          monthly Agent-SDK credit — use an API key, or run the backend on your host
+          (<a
+            href="https://github.com/mickyarun/bodhiorchard#hybrid-mode-hot-reload"
+            target="_blank"
+            rel="noopener"
+          >hybrid setup</a>), for unmetered use.
         </div>
       </div>
     </v-expand-transition>
