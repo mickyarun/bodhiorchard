@@ -78,6 +78,15 @@ RUN mkdir -p /data/repos /data/ssh && \
     chown -R appuser:appuser /app /data
 USER appuser
 
+# Force OpenSSL to skip ARM CPU-capability auto-detection. The OpenSSL bundled
+# in the `cryptography` wheel probes /proc/cpuinfo for crypto extensions, but
+# under Docker Desktop on Apple Silicon the virtualized CPU reports an
+# unidentifiable vendor, so OpenSSL enables an instruction the CPU can't run and
+# crashes with SIGILL the first time any crypto path executes (e.g. JWT via
+# python-jose during startup). Disabling armcap forces the safe baseline; it is
+# ignored on amd64 and only forgoes hardware crypto acceleration on real arm64.
+ENV OPENSSL_armcap=0
+
 EXPOSE 8000
 
 CMD ["/app/entrypoint.sh"]
