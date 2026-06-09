@@ -1,17 +1,16 @@
 name: Publish CLI to npm
 
-# Publishes the `bodhiorchard` installer CLI (cli/) to npm when a release is
-# published. The CLI is standalone (not an npm workspace), so it builds and
-# publishes on its own. The package version is set from the release tag so the
-# npm version, git tag, and Docker image tags all match.
+# Publishes the `bodhiorchard` installer CLI (cli/) to npm on merge to main,
+# using the version in cli/package.json. To release a new CLI, bump that version
+# in your PR — merging it publishes that version. If the version is already on
+# npm, the run skips, so unrelated merges are no-ops. (Docker images are heavier
+# to build and are published separately on a git tag — see docker-publish.yml.)
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - "cli/**"
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Version to publish (e.g. 1.2.3)"
-        required: true
 
 permissions:
   contents: read
@@ -33,19 +32,20 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Set version from release tag
-        # Untrusted ref is passed via env and quoted, never inlined into the shell.
-        env:
-          RAW_REF: ${{ github.event.release.tag_name || github.event.inputs.tag }}
-        run: npm version "${RAW_REF#v}" --no-git-tag-version --allow-same-version
-
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
       - name: Build
         run: npm run build
 
-      - name: Publish
-        run: npm publish --access public
+      - name: Publish if version is new
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "bodhiorchard@${VERSION}" version >/dev/null 2>&1; then
+            echo "bodhiorchard@${VERSION} is already published — skipping."
+          else
+            echo "Publishing bodhiorchard@${VERSION}"
+            npm publish --access public
+          fi

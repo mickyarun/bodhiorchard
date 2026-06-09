@@ -1,11 +1,13 @@
 name: Publish Docker images
 
 # Builds and pushes the prebuilt images the `bodhiorchard` npm installer pulls.
-# Runs when a release is published (release-please cuts vX.Y.Z releases) and can
-# be dispatched manually to (re)publish a specific tag.
+# These are expensive multi-arch builds, so they publish only on a deliberate
+# git tag: `git tag v1.2.3 && git push origin v1.2.3`. Can also be dispatched
+# manually for a specific version.
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
@@ -49,10 +51,11 @@ jobs:
 
       - name: Resolve version (tag without leading v)
         id: ver
-        # Pass the (privileged-but-untrusted) ref through env, never inline it
-        # into the shell, to avoid workflow command injection.
+        # On a tag push the ref is the tag (e.g. v1.2.3); on manual dispatch use
+        # the input. Pass through env, never inline into the shell, to avoid
+        # workflow command injection.
         env:
-          RAW_REF: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          RAW_REF: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}
         run: echo "version=${RAW_REF#v}" >> "$GITHUB_OUTPUT"
 
       # QEMU lets the amd64 runner emulate arm64 so Apple Silicon users get a

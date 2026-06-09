@@ -1,6 +1,6 @@
 {
   "name": "bodhiorchard",
-  "version": "0.1.0",
+  "version": "1.0.2",
   "description": "One-command installer for the Bodhiorchard stack — pulls prebuilt Docker images and runs the full platform locally",
   "license": "Apache-2.0",
   "type": "module",
