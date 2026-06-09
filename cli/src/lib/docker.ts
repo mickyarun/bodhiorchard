@@ -18,16 +18,29 @@ interface RunOptions {
 
 function run(command: string, args: string[], options: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
+    // Note on Windows: `docker` / `docker-compose` are real .exe files, so
+    // spawning them directly (shell: false) resolves via libuv's PATH+PATHEXT
+    // search. We deliberately avoid `shell: true` — it would re-parse args
+    // through cmd.exe and mangle ones containing spaces or quotes (e.g. the
+    // psql connection URL in the pgvector check). windowsHide stops a console
+    // window from flashing for each child process.
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env ?? process.env,
       stdio: options.inherit ? "inherit" : ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk) => (stdout += chunk.toString()));
     child.stderr?.on("data", (chunk) => (stderr += chunk.toString()));
-    child.on("error", reject);
+    child.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT") {
+        reject(new Error(`Could not run \`${command}\` — is it installed and on your PATH?`));
+      } else {
+        reject(err);
+      }
+    });
     child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
   });
 }
@@ -66,4 +79,14 @@ export async function compose(
 /** Run a one-off `docker` command (used for the throwaway pgvector probe). */
 export async function docker(args: string[]): Promise<RunResult> {
   return run("docker", args);
+}
+
+export type PullPolicy = "always" | "missing" | "never";
+
+/** Resolve the `compose up --pull` policy. Defaults to "always" (end users
+ *  should track the published images); `missing`/`never` let air-gapped or
+ *  locally-built setups run without contacting a registry. Anything else
+ *  (typo, empty) safely falls back to "always". */
+export function resolvePullPolicy(value: string | undefined): PullPolicy {
+  return value === "missing" || value === "never" ? value : "always";
 }

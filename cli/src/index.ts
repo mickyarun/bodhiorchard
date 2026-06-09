@@ -53,11 +53,13 @@ program
   .description("Scaffold an install: resolve ports, generate secrets, pull images")
   .option("--yes", "non-interactive: auto-remap port conflicts, accept defaults", false)
   .option("--allow-postgres-reuse", "permit reusing an existing Postgres (verified for pgvector)", false)
-  .action((name: string, opts: { yes: boolean; allowPostgresReuse: boolean }) =>
+  .option("--image-tag <tag>", "image tag to pull and run", "latest")
+  .action((name: string, opts: { yes: boolean; allowPostgresReuse: boolean; imageTag: string }) =>
     run(() =>
       initCommand(program.opts().projectDir ?? name, {
         yes: opts.yes,
         allowPostgresReuse: opts.allowPostgresReuse,
+        imageTag: opts.imageTag,
       }),
     ),
   );

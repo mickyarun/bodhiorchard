@@ -4,7 +4,7 @@ import path from "node:path";
 import { preflight } from "../lib/preflight.js";
 import { readConfig, PROJECT_NAME } from "../lib/config.js";
 import { materialize, loadSecrets } from "../lib/project.js";
-import { compose } from "../lib/docker.js";
+import { compose, resolvePullPolicy } from "../lib/docker.js";
 import { waitForHealth } from "../lib/health.js";
 import { log, spinner, openBrowser } from "../lib/ui.js";
 
@@ -18,8 +18,11 @@ export async function startCommand(projectDir: string): Promise<void> {
   // are preserved from the existing .env.
   await materialize(dir, config, secrets);
 
-  log.step("Starting Bodhiorchard (pulling any newer images)…");
-  const up = await compose(dir, ["-p", PROJECT_NAME, "up", "-d", "--pull", "always"], {
+  // Default: always pull so users track the published images. BODHIORCHARD_PULL
+  // can relax this to "missing"/"never" for air-gapped or locally-built images.
+  const pull = resolvePullPolicy(process.env.BODHIORCHARD_PULL);
+  log.step(pull === "always" ? "Starting Bodhiorchard (pulling any newer images)…" : "Starting Bodhiorchard…");
+  const up = await compose(dir, ["-p", PROJECT_NAME, "up", "-d", "--pull", pull], {
     inherit: true,
   });
   if (up.code !== 0) {

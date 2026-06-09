@@ -20,6 +20,7 @@ import { banner, log } from "../lib/ui.js";
 export interface InitOptions {
   yes: boolean;
   allowPostgresReuse: boolean;
+  imageTag: string;
 }
 
 export async function initCommand(projectDir: string, opts: InitOptions): Promise<void> {
@@ -53,7 +54,7 @@ export async function initCommand(projectDir: string, opts: InitOptions): Promis
   const config: ProjectConfig = {
     version: CONFIG_VERSION,
     project: PROJECT_NAME,
-    imageTag: "latest",
+    imageTag: opts.imageTag,
     services,
   };
 

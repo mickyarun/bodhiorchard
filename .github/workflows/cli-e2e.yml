@@ -1,0 +1,118 @@
+name: CLI e2e (Linux)
+
+# Runs the installer's real command lifecycle against a freshly-built stack on
+# Linux: init → start → assert the backend serves /health/ → status → logs →
+# stop → reset. Proves the CLI orchestrates docker compose correctly on Linux
+# (the OS matrix in cli-quality covers the CLI logic; this covers orchestration).
+on:
+  pull_request:
+    paths:
+      - "cli/**"
+      - "backend/**"
+      - "frontend/**"
+      - "multiplayer/**"
+      - "shared/**"
+      - ".github/workflows/cli-e2e.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: installer lifecycle (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Build CLI
+        working-directory: cli
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Build backend image (:e2e)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          load: true
+          tags: mickyarun/bodhiorchard-backend:e2e
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build frontend image (:e2e)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./frontend/Dockerfile
+          load: true
+          build-args: VITE_API_BASE_URL=/api
+          tags: mickyarun/bodhiorchard-frontend:e2e
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Build multiplayer image (:e2e)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./multiplayer/Dockerfile
+          load: true
+          tags: mickyarun/bodhiorchard-multiplayer:e2e
+          cache-from: type=gha,scope=multiplayer
+          cache-to: type=gha,mode=max,scope=multiplayer
+
+      - name: Run installer lifecycle
+        run: |
+          set -euo pipefail
+          CLI="node $GITHUB_WORKSPACE/cli/dist/index.js"
+          DIR="$RUNNER_TEMP/bodhi-e2e"
+
+          echo "::group::init"
+          $CLI --project-dir "$DIR" init --yes --image-tag e2e
+          echo "::endgroup::"
+
+          echo "::group::start (local images, no registry pull)"
+          CI=1 NO_BROWSER=1 BODHIORCHARD_PULL=missing $CLI --project-dir "$DIR" start
+          echo "::endgroup::"
+
+          BPORT=$(node -e "console.log(require('$DIR/.bodhiorchard/config.json').services.backend.hostPort)")
+          FPORT=$(node -e "console.log(require('$DIR/.bodhiorchard/config.json').services.frontend.hostPort)")
+
+          echo "Polling backend /health/ on :$BPORT ..."
+          ok=0
+          for _ in $(seq 1 60); do
+            if curl -sf "http://127.0.0.1:$BPORT/health/" | grep -q '"status":"ok"'; then ok=1; break; fi
+            sleep 3
+          done
+
+          echo "::group::status"
+          $CLI --project-dir "$DIR" status
+          echo "::endgroup::"
+
+          if [ "$ok" != "1" ]; then
+            echo "::error::backend never reported healthy"
+            docker compose -p bodhiorchard logs --tail 100 || true
+            exit 1
+          fi
+          echo "backend /health/ ok"
+          curl -sf -o /dev/null -w "frontend HTTP %{http_code}\n" "http://127.0.0.1:$FPORT/"
+
+          echo "::group::logs (bounded)"
+          timeout 5 $CLI --project-dir "$DIR" logs backend || true
+          echo "::endgroup::"
+
+          echo "::group::stop"
+          $CLI --project-dir "$DIR" stop
+          echo "::endgroup::"
+
+          echo "::group::reset"
+          $CLI --project-dir "$DIR" reset --yes
+          echo "::endgroup::"
