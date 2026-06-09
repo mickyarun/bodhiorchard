@@ -1,0 +1,49 @@
+name: Publish CLI to npm
+
+# Publishes the `bodhiorchard` installer CLI (cli/) to npm when a release is
+# published. The CLI is standalone (not an npm workspace), so it builds and
+# publishes on its own. The package version is set from the release tag so the
+# npm version, git tag, and Docker image tags all match.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version to publish (e.g. 1.2.3)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Set version from release tag
+        # Untrusted ref is passed via env and quoted, never inlined into the shell.
+        env:
+          RAW_REF: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: npm version "${RAW_REF#v}" --no-git-tag-version --allow-same-version
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

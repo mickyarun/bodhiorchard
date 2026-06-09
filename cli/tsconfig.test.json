@@ -1,0 +1,10 @@
+// Type-checks everything including *.test.ts (the build tsconfig excludes tests
+// so they stay out of dist). Used by the `typecheck` script / CI, never emits.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}
