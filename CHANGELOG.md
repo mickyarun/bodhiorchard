@@ -5,6 +5,13 @@ All notable changes to Bodhiorchard will be documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1](https://github.com/mickyarun/bodhiorchard/compare/v1.1.0...v1.1.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* **cli:** detect loopback-only ports (e.g. Vite on 127.0.0.1) ([#228](https://github.com/mickyarun/bodhiorchard/issues/228)) ([af32d48](https://github.com/mickyarun/bodhiorchard/commit/af32d48c34eb19bf0537494722dfa887bd9ee799))
+
 ## [1.1.0](https://github.com/mickyarun/bodhiorchard/compare/v1.0.1...v1.1.0) (2026-06-09)
 
 
