@@ -12,9 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { createRouter, createWebHistory } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory,
+  isNavigationFailure,
+  NavigationFailureType,
+} from 'vue-router'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
+import { useNavigationProgress } from '@/composables/useNavigationProgress'
+
+const navProgress = useNavigationProgress()
 
 let setupChecked = false
 let isSetupComplete = false
@@ -187,6 +195,13 @@ const router = createRouter({
           component: () => import('@/views/settings/SettingsDesignSystems.vue'),
         },
         {
+          // Legacy URL: Teams used to live at /settings/teams. They
+          // now live as a tab on /members so admins manage people and
+          // squads side-by-side. Redirect keeps old bookmarks alive.
+          path: 'settings/teams',
+          redirect: { name: 'members', query: { tab: 'teams' } },
+        },
+        {
           path: 'settings/agent-prompts',
           name: 'settings-agent-prompts',
           meta: { permission: 'agents:configure' },
@@ -236,6 +251,11 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // Light the top progress bar the instant a navigation begins — this is
+  // the only feedback that covers the lazy-chunk download for heavy views
+  // like BUDDetail, whose own spinner can't render until it has mounted.
+  navProgress.start()
+
   const done = await checkSetupStatus()
 
   // Setup not done — force to setup wizard
@@ -281,6 +301,25 @@ router.beforeEach(async (to) => {
       return { name: 'dashboard' }
     }
   }
+})
+
+// A ``cancelled`` failure means a newer navigation superseded this one —
+// e.g. the user clicked a second BUD before the first resolved (the exact
+// "keep clicking" behaviour this bar exists to soothe). That successor has
+// already lit the bar and owns turning it off, so clearing here would flash
+// it off mid-flight. Every other outcome is terminal and should clear:
+// a successful landing, an abort (guard returned ``false``), or a duplicate.
+// Redirects don't reach here as a distinct event — vue-router resolves the
+// redirect chain before firing ``afterEach`` once, for the final landing.
+router.afterEach((_to, _from, failure) => {
+  if (isNavigationFailure(failure, NavigationFailureType.cancelled)) return
+  navProgress.stop()
+})
+// ``afterEach`` is skipped when a guard throws or an async-component (chunk)
+// load rejects — vue-router routes those through ``onError`` instead. This
+// is the safety net that prevents the bar sticking on after a failed load.
+router.onError(() => {
+  navProgress.stop()
 })
 
 export default router

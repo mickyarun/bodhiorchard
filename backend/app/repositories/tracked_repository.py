@@ -452,6 +452,21 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         result = await self._db.execute(stmt)
         return {row for row in result.scalars().all() if row is not None}
 
+    async def list_in_org_by_ids(self, repo_ids: list[uuid.UUID]) -> list[TrackedRepository]:
+        """Bulk-fetch full TrackedRepository rows by id within the org.
+
+        Use when the caller needs more than just ``name`` / ``path``
+        (i.e. ``get_names_by_ids`` / ``get_paths_by_ids`` aren't
+        enough) — for example the Teams detail projection that
+        renders ``github_repo_full_name`` alongside name + path.
+        Empty input short-circuits without a query.
+        """
+        if not repo_ids:
+            return []
+        stmt = self._scoped(select(TrackedRepository).where(TrackedRepository.id.in_(repo_ids)))
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_by_github_full_name(
         self,
         full_name: str,

@@ -16,6 +16,28 @@
 
 <template>
   <div class="pa-6">
+    <!-- Two-tab layout: "People" (members + roles, the original page)
+         and "Teams" (the new tab). The Members route stays at /members;
+         a ``?tab=`` query param deep-links into a tab so reload
+         preserves the user's view. CLAUDE.md gotcha: ``v-tab`` and
+         ``v-tabs-window-item`` values must match exactly. -->
+    <v-tabs
+      v-model="tab"
+      color="primary"
+      density="compact"
+      slider-color="primary"
+      class="mb-6"
+    >
+      <v-tab value="people">
+        <v-icon start size="18">mdi-account-multiple-outline</v-icon>People
+      </v-tab>
+      <v-tab value="teams">
+        <v-icon start size="18">mdi-account-group-outline</v-icon>Teams
+      </v-tab>
+    </v-tabs>
+
+    <v-tabs-window v-model="tab">
+      <v-tabs-window-item value="people">
     <!-- Header -->
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
@@ -859,14 +881,36 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+      </v-tabs-window-item>
+
+      <v-tabs-window-item value="teams">
+        <MembersTeamsTab />
+      </v-tabs-window-item>
+    </v-tabs-window>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useMembersStore, type Member, type RoleOption } from '@/stores/members'
 import { useSettingsStore } from '@/stores/settings'
+import MembersTeamsTab from '@/components/members/MembersTeamsTab.vue'
 import api from '@/services/api'
+
+// Tab is kept in the URL (``?tab=teams``) so a refresh / share keeps
+// the user where they were. Default is "people" — the original
+// Members + Roles content.
+type MembersTab = 'people' | 'teams'
+const route = useRoute()
+const router = useRouter()
+const _initialTab: MembersTab = route.query.tab === 'teams' ? 'teams' : 'people'
+const tab = ref<MembersTab>(_initialTab)
+watch(tab, (next) => {
+  // Use ``replace`` to avoid polluting browser history on every tab click.
+  const target = next === 'people' ? undefined : next
+  router.replace({ query: { ...route.query, tab: target } })
+})
 import { ROLE_LABELS } from '@/types'
 import type { UserRoleName } from '@/types'
 
