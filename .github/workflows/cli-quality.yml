@@ -10,7 +10,14 @@ on:
 jobs:
   cli-checks:
     name: tsc + vitest (CLI)
-    runs-on: ubuntu-latest
+    # Run on all three host OSes so platform-specific Node behaviour (path
+    # handling, the port bind-test, child_process) is exercised everywhere
+    # the CLI will run.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     defaults:
       run:
