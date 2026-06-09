@@ -59,9 +59,9 @@
       </template>
 
       <template v-else>
-        <!-- Host mode: let the user choose between Hybrid and Cloud API.
-             Docker mode is locked to api_key — a container can't reach a
-             host claude login session, so the chooser would be a footgun. -->
+        <!-- Both modes get a chooser: host picks Hybrid login vs Cloud API key;
+             Docker picks Cloud API key vs Claude subscription token (a container
+             can't reach a host claude login, but a pasted token works). -->
         <div
           v-if="showAuthChooser"
           role="radiogroup"

@@ -86,7 +86,11 @@ def apply_claude_auth_to_env(org: Organization) -> None:
             return
 
     # host mode (or a credentialed mode with an empty/corrupt secret): don't
-    # override the process env — the compose/host credential stays authoritative.
+    # override the process env — a compose/host ANTHROPIC_API_KEY stays
+    # authoritative. But clear any OAuth token we injected on a prior call: the
+    # app is its only source, so a leftover would keep a deselected subscription
+    # token authenticating agent runs.
+    os.environ.pop(_OAUTH_ENV_VAR, None)
     logger.info(
         "claude_env_host_mode",
         org_id=str(org.id),

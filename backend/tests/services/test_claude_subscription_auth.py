@@ -78,6 +78,14 @@ def test_host_mode_leaves_process_env_untouched() -> None:
     assert _OAUTH_VAR not in os.environ
 
 
+def test_host_mode_clears_previously_injected_oauth_token() -> None:
+    # Switching subscription -> host must drop the token the app injected, or it
+    # keeps authenticating agent runs even though the user deselected it.
+    os.environ[_OAUTH_VAR] = "oat-leftover-from-subscription"
+    apply_claude_auth_to_env(_org(AUTH_MODE_HOST, None))
+    assert _OAUTH_VAR not in os.environ
+
+
 def test_apply_credential_stores_supplied_secret() -> None:
     org = _org(AUTH_MODE_SUBSCRIPTION, None)
     _apply_credential(org, supplied="oat-new", field="oauth_token", mode_unchanged=False)
