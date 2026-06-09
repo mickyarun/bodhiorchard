@@ -31,7 +31,7 @@ describe("renderComposeFile — bundled infra", () => {
   it("templates host ports and image tags", () => {
     expect(doc.services.postgres.ports).toContain("${POSTGRES_HOST_PORT}:5432");
     expect(doc.services.frontend.ports).toContain("${FRONTEND_HOST_PORT}:80");
-    expect(doc.services.backend.image).toBe("bodhiorchard/backend:${IMAGE_TAG}");
+    expect(doc.services.backend.image).toBe("mickyarun/bodhiorchard-backend:${IMAGE_TAG}");
   });
 
   it("declares the postgres_data volume and backend depends_on", () => {

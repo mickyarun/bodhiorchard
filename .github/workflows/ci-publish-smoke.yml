@@ -25,16 +25,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: bodhiorchard/backend
+          - image: mickyarun/bodhiorchard-backend
             context: ./backend
             dockerfile: ./backend/Dockerfile
             build_args: ""
-          - image: bodhiorchard/frontend
+          - image: mickyarun/bodhiorchard-frontend
             context: .
             dockerfile: ./frontend/Dockerfile
             build_args: |
               VITE_API_BASE_URL=/api
-          - image: bodhiorchard/multiplayer
+          - image: mickyarun/bodhiorchard-multiplayer
             context: .
             dockerfile: ./multiplayer/Dockerfile
             build_args: ""

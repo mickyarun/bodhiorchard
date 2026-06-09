@@ -27,19 +27,19 @@ jobs:
       matrix:
         include:
           - name: backend
-            image: bodhiorchard/backend
+            image: mickyarun/bodhiorchard-backend
             context: ./backend
             dockerfile: ./backend/Dockerfile
             build_args: ""
           - name: frontend
-            image: bodhiorchard/frontend
+            image: mickyarun/bodhiorchard-frontend
             # Context is the repo root: the frontend image copies shared/.
             context: .
             dockerfile: ./frontend/Dockerfile
             build_args: |
               VITE_API_BASE_URL=/api
           - name: multiplayer
-            image: bodhiorchard/multiplayer
+            image: mickyarun/bodhiorchard-multiplayer
             # Context is the repo root: the multiplayer image copies shared/.
             context: .
             dockerfile: ./multiplayer/Dockerfile

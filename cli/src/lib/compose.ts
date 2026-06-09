@@ -7,8 +7,9 @@
 import YAML from "yaml";
 import type { ProjectConfig } from "./config.js";
 
-/** Docker Hub namespace that owns the published images. */
-export const IMAGE_NAMESPACE = "bodhiorchard";
+/** Docker Hub image prefix; per-service repos are `${IMAGE_PREFIX}-<service>`
+ *  (e.g. mickyarun/bodhiorchard-backend). */
+export const IMAGE_PREFIX = "mickyarun/bodhiorchard";
 
 const HOST_INTERNAL = "host.docker.internal:host-gateway";
 
@@ -59,7 +60,7 @@ function backendService(config: ProjectConfig): ComposeService {
     config.services.postgres.mode === "reuse" || config.services.redis.mode === "reuse";
 
   const service: ComposeService = {
-    image: `${IMAGE_NAMESPACE}/backend:\${IMAGE_TAG}`,
+    image: `${IMAGE_PREFIX}-backend:\${IMAGE_TAG}`,
     environment: {
       DATABASE_URL: "${DATABASE_URL}",
       REDIS_URL: "${REDIS_URL}",
@@ -87,7 +88,7 @@ function backendService(config: ProjectConfig): ComposeService {
 
 function multiplayerService(): ComposeService {
   return {
-    image: `${IMAGE_NAMESPACE}/multiplayer:\${IMAGE_TAG}`,
+    image: `${IMAGE_PREFIX}-multiplayer:\${IMAGE_TAG}`,
     depends_on: ["backend"],
     environment: {
       BACKEND_URL: "http://backend:8000",
@@ -99,7 +100,7 @@ function multiplayerService(): ComposeService {
 
 function frontendService(): ComposeService {
   return {
-    image: `${IMAGE_NAMESPACE}/frontend:\${IMAGE_TAG}`,
+    image: `${IMAGE_PREFIX}-frontend:\${IMAGE_TAG}`,
     depends_on: ["backend", "multiplayer"],
     ports: ["${FRONTEND_HOST_PORT}:80"],
   };

@@ -540,7 +540,19 @@ npx bodhiorchard start     # start everything and open the setup wizard
 
 Needs only **Docker (running)** and **Node.js 18+**. If Postgres (5432) or Redis (6379) — or an app port — is already in use, the installer detects it and asks whether to **remap to a free port** or **reuse the existing service**. When the stack is healthy it opens **http://localhost:3000/setup**; finish there (organization, admin account, AI provider, repositories). No keys are entered on the command line.
 
-Manage it with `bodhiorchard status | logs | stop | update | reset`. It's the same stack as **Full Docker mode** below — just pulled instead of built. Use the `git clone` paths below if you want to build from source or run in **Hybrid** mode.
+Manage the stack with these commands (run from the install directory):
+
+| Command | What it does |
+|---|---|
+| `bodhiorchard init [name]` | Scaffold the install: resolve ports, generate secrets, pull images |
+| `bodhiorchard start` | Start the stack and open the setup wizard |
+| `bodhiorchard stop` | Stop the stack — **containers come down, your data volumes are kept** |
+| `bodhiorchard status` | Show container status and the access URLs |
+| `bodhiorchard logs [service]` | Follow logs (optionally for one service) |
+| `bodhiorchard update [--tag X.Y.Z]` | Pull newer images and restart |
+| `bodhiorchard reset` | Stop **and delete all data volumes** (destructive) |
+
+To stop everything when you're done, run `bodhiorchard stop` (your database and cloned repos persist; `bodhiorchard start` brings it back up). It's the same stack as **Full Docker mode** below — just pulled instead of built. Use the `git clone` paths below if you want to build from source or run in **Hybrid** mode.
 
 ### Prerequisites
 
