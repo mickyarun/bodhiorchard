@@ -16,7 +16,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
-import type { RepoBranchList, RepoInfo } from '@/types'
+import type { JobCreatedResponse, RepoBranchList, RepoInfo } from '@/types'
 import { GITHUB_APP_STATUS, isGitHubAppStatus, type GitHubAppStatus } from '@/types/connections'
 
 export interface ConnectionsState {
@@ -348,18 +348,18 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function rerunSkillProfiles(
     confirmation: string,
-  ): Promise<string | null> {
+  ): Promise<JobCreatedResponse | null> {
     error.value = null
     try {
       // Returns 202 with { jobId }. The walk itself can take minutes
       // on large orgs — well past any client/proxy idle window — so
       // the handler runs in the background queue and the UI polls
       // via useJobSocket. See app/services/job_skill_rerun.py.
-      const { data } = await api.post<{ jobId: string }>(
+      const { data } = await api.post<JobCreatedResponse>(
         '/v1/skills/profiles/rerun',
         { confirmation: confirmation.trim(), wipe: true },
       )
-      return data.jobId
+      return data
     } catch (err) {
       error.value = extractApiError(err, 'Failed to start skill rerun.')
       return null

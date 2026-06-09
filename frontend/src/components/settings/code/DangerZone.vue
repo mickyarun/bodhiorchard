@@ -163,10 +163,14 @@ async function onSubmit() {
   progressMessage.value = 'Starting…'
   progressPct.value = 0
 
-  const jobId = await settingsStore.rerunSkillProfiles(typedConfirmation.value)
+  const created = await settingsStore.rerunSkillProfiles(typedConfirmation.value)
+  // HMR-stale store body once handed back the bare object instead of the
+  // jobId string, producing /jobs/[object Object]/status. Narrow defensively.
+  const jobId = typeof created?.jobId === 'string' ? created.jobId : null
   if (!jobId) {
     reset()
-    errorMessage.value = settingsStore.error ?? 'Failed to start skill rerun.'
+    errorMessage.value = settingsStore.error
+      ?? (created ? 'Server did not return a job id.' : 'Failed to start skill rerun.')
     return
   }
 
