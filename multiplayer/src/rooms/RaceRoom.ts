@@ -45,6 +45,7 @@ import {
   tick as physicsTick,
   triggerSprintTap,
 } from "../../../shared/race/RacePhysics"
+import { triggerJump } from "../../../shared/race/RaceTrackFeatures"
 import { RaceRoomState } from "../schema/RaceRoomState"
 import { RacerState } from "../schema/RacerState"
 import {
@@ -158,6 +159,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     )
     this.onMessage("race_move", (_client, data: unknown) => this.handleMove(data))
     this.onMessage("race_sprint_tap", (_client, data: unknown) => this.handleSprintTap(data))
+    this.onMessage("race_jump", (_client, data: unknown) => this.handleJump(data))
   }
 
   // ─── message handlers ────────────────────
@@ -289,6 +291,14 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     const physicsRacer = this.physicsRacers.find((r) => r.id === userId)
     if (!physicsRacer) return
     triggerSprintTap(physicsRacer, this.state.runningElapsedMs)
+  }
+
+  private handleJump(raw: unknown): void {
+    const userId = parseUserIdOnly(raw)
+    if (!userId) return
+    const physicsRacer = this.physicsRacers.find((r) => r.id === userId)
+    if (!physicsRacer) return
+    triggerJump(physicsRacer, this.state.runningElapsedMs)
   }
 
   // ─── sim loop ────────────────────────────

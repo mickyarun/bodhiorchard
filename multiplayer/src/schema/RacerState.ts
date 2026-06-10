@@ -37,5 +37,11 @@ export class RacerState extends Schema {
   @type("uint32") sprintUntilMs = 0
   /** Stamina normalised to [0, 1]. HUD bars read directly. */
   @type("number") staminaPct = 1
+  /** Round-ms when the boost-pad window ends; boosted iff elapsed < this. */
+  @type("uint32") boostUntilMs = 0
+  /** Round-ms when the jump's airborne window ends; drives the jump arc. */
+  @type("uint32") jumpUntilMs = 0
+  /** Round-ms when the hurdle-clip stumble ends; drives the stumble cue. */
+  @type("uint32") stumbleUntilMs = 0
   @type("boolean") connected = false
 }

@@ -25,9 +25,13 @@
  *     capped at SPRINT_MAX_WINDOW_MS above now. The racer is "sprinting"
  *     while `nowMs < sprintUntilMs`.
  *   - Each tick velocity accelerates toward:
+ *       WALK_TARGET_MPS  if isMoving && stumbling (hurdle clip cap)
+ *       BOOST_TARGET_MPS if isMoving && boosted (pad window)
  *       RUN_TARGET_MPS   if isMoving && sprinting
- *       WALK_TARGET_MPS  if isMoving && !sprinting
+ *       WALK_TARGET_MPS  if isMoving
  *       0                otherwise (decelerates toward rest)
+ *   - Boost pads + hurdles along the track are applied per-tick by
+ *     RaceTrackFeatures.stepTrackFeatures (see that module's contract).
  *
  * Integrates at the caller's dt so movement is frame-smooth.
  */
@@ -35,10 +39,12 @@
 import {
   WALK_TARGET_MPS,
   RUN_TARGET_MPS,
+  BOOST_TARGET_MPS,
   MOVE_ACCEL_MPSS,
   MOVE_DECEL_MPSS,
   SPRINT_TAP_DURATION_MS,
   SPRINT_MAX_WINDOW_MS,
+  HURDLE_JUMP_COOLDOWN_MS,
   V_MAX_MPS,
   TRACK_LENGTH_M,
   STAMINA_MAX,
@@ -47,6 +53,7 @@ import {
   WALK_REGEN_PER_S,
   IDLE_REGEN_PER_S,
 } from './RaceConstants'
+import { isBoosted, isStumbling, stepTrackFeatures } from './RaceTrackFeatures'
 import type { Placing } from './types'
 
 /**
@@ -74,6 +81,26 @@ export interface Racer {
    * the current tick's `nowMs` so the racer drops back to walk speed.
    */
   staminaPct: number
+  /**
+   * Round-ms at which the current boost-pad window ends. Boosted iff
+   * nowMs < boostUntilMs. Granted by crossing a boost pad; free of
+   * stamina drain and faster than a sprint.
+   */
+  boostUntilMs: number
+  /**
+   * Round-ms at which the current jump's airborne window ends. Crossing
+   * a hurdle while nowMs < jumpUntilMs clears it cleanly.
+   */
+  jumpUntilMs: number
+  /** Round-ms at which the last jump started — drives the jump cooldown. */
+  lastJumpMs: number
+  /**
+   * Round-ms at which the active hurdle-clip stumble ends. While
+   * stumbling the speed target is capped at walk.
+   */
+  stumbleUntilMs: number
+  /** Bitmask of boost-pad indices already consumed (one fire per pad per race). */
+  boostPadsHit: number
 }
 
 export function makeRacer(id: string): Racer {
@@ -86,6 +113,13 @@ export function makeRacer(id: string): Racer {
     isMoving: false,
     sprintUntilMs: 0,
     staminaPct: STAMINA_INITIAL,
+    boostUntilMs: 0,
+    jumpUntilMs: 0,
+    // Backdated one full cooldown so the first jump tap of a race is
+    // honoured even at nowMs = 0.
+    lastJumpMs: -HURDLE_JUMP_COOLDOWN_MS,
+    stumbleUntilMs: 0,
+    boostPadsHit: 0,
   }
 }
 
@@ -134,13 +168,19 @@ export function tick(
     // Re-evaluate sprinting after stamina: hitting 0 mid-tick clamps
     // sprintUntilMs to nowMs, so velocity for this step uses walk target.
     const stillSprinting = nowMs < r.sprintUntilMs
-    stepVelocity(r, stillSprinting, dtSec)
+    stepVelocity(r, stillSprinting, nowMs, dtSec)
+    const prevPositionM = r.positionM
     r.positionM += r.velocityMps * dtSec
 
     if (r.positionM >= trackLengthM) {
       r.finished = true
       r.finishTimeMs = nowMs
+      continue
     }
+
+    // Pads / hurdles crossed in (prevPositionM, positionM] this tick.
+    // Effects (boost window, stumble) land on the next velocity step.
+    stepTrackFeatures(r, prevPositionM, nowMs, trackLengthM)
   }
 }
 
@@ -167,12 +207,12 @@ export function isSprinting(racer: Racer, nowMs: number): boolean {
   return nowMs < racer.sprintUntilMs
 }
 
-function stepVelocity(racer: Racer, sprinting: boolean, dtSec: number): void {
+function stepVelocity(racer: Racer, sprinting: boolean, nowMs: number, dtSec: number): void {
   let target: number
   let accel: number
 
   if (racer.isMoving) {
-    target = sprinting ? RUN_TARGET_MPS : WALK_TARGET_MPS
+    target = movingTargetSpeed(racer, sprinting, nowMs)
     accel = MOVE_ACCEL_MPSS
   } else {
     target = 0
@@ -188,6 +228,17 @@ function stepVelocity(racer: Racer, sprinting: boolean, dtSec: number): void {
   }
 
   if (racer.velocityMps > V_MAX_MPS) racer.velocityMps = V_MAX_MPS
+}
+
+/**
+ * Speed target while the move key is held. Precedence: a hurdle stumble
+ * caps everything at walk; otherwise a boost-pad window beats a sprint
+ * window beats plain walking.
+ */
+function movingTargetSpeed(racer: Racer, sprinting: boolean, nowMs: number): number {
+  if (isStumbling(racer, nowMs)) return WALK_TARGET_MPS
+  if (isBoosted(racer, nowMs)) return BOOST_TARGET_MPS
+  return sprinting ? RUN_TARGET_MPS : WALK_TARGET_MPS
 }
 
 /**

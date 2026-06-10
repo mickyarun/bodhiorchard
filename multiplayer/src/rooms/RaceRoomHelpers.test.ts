@@ -22,7 +22,7 @@ import {
 } from "./RaceRoomHelpers"
 import { PlacingState } from "../schema/PlacingState"
 import { RacerState } from "../schema/RacerState"
-import { checkFinish, type Racer } from "../../../shared/race/RacePhysics"
+import { checkFinish, makeRacer, type Racer } from "../../../shared/race/RacePhysics"
 import type { Placing } from "../../../shared/race/types"
 
 const ALLOWED = [100, 200] as const
@@ -104,30 +104,20 @@ describe("buildRacerState", () => {
   })
 })
 
+// Built on makeRacer so new Racer fields pick up real defaults instead of
+// breaking these literals on every physics-state addition.
 function makeFinishedRacer(id: string, finishTimeMs: number, positionM = 100): Racer {
-  return {
-    id,
-    positionM,
-    velocityMps: 0,
-    finished: true,
-    finishTimeMs,
-    isMoving: false,
-    sprintUntilMs: 0,
-    staminaPct: 1,
-  }
+  const r = makeRacer(id)
+  r.positionM = positionM
+  r.finished = true
+  r.finishTimeMs = finishTimeMs
+  return r
 }
 
 function makeDnfRacer(id: string, positionM: number): Racer {
-  return {
-    id,
-    positionM,
-    velocityMps: 0,
-    finished: false,
-    finishTimeMs: 0,
-    isMoving: false,
-    sprintUntilMs: 0,
-    staminaPct: 1,
-  }
+  const r = makeRacer(id)
+  r.positionM = positionM
+  return r
 }
 
 describe("checkFinish (shared/race)", () => {
@@ -330,6 +320,11 @@ describe("copyRacerToSchema", () => {
       isMoving: true,
       sprintUntilMs: 13_000,
       staminaPct: 0.42,
+      boostUntilMs: 14_000,
+      jumpUntilMs: 12_900,
+      lastJumpMs: 12_500,
+      stumbleUntilMs: 13_400,
+      boostPadsHit: 0b101,
     }
 
     copyRacerToSchema(phys, schema)
@@ -343,5 +338,8 @@ describe("copyRacerToSchema", () => {
     expect(schema.isMoving).toBe(true)
     expect(schema.sprintUntilMs).toBe(13_000)
     expect(schema.staminaPct).toBeCloseTo(0.42, 5)
+    expect(schema.boostUntilMs).toBe(14_000)
+    expect(schema.jumpUntilMs).toBe(12_900)
+    expect(schema.stumbleUntilMs).toBe(13_400)
   })
 })
