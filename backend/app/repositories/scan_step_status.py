@@ -34,6 +34,7 @@ from app.models.scan_phase import ScanPhase
 from app.models.scan_repo_run import ScanRepoRun
 from app.models.scan_repo_step import ScanRepoStep
 from app.models.scan_run_enums import StepStatus
+from app.repositories.base import rowcount
 from app.repositories.scan_step_upsert import upsert_step
 
 
@@ -229,4 +230,4 @@ async def reset_steps_for_runs(
             duration_ms=None,
         )
     )
-    return result.rowcount or 0
+    return rowcount(result) or 0

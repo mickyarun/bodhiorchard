@@ -33,7 +33,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan import ACTIVE_SCAN_STATUSES, Scan
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
 
 # Scans older than this with no updates get flipped to ``failed`` on
 # the next read. Must exceed the longest legitimate silence between
@@ -142,7 +142,7 @@ class ScanRepository(BaseRepository[Scan]):
                 bindparam(
                     "append_repo_warning",
                     [append_repo_warning],
-                    type_=JSONB(),  # type: ignore[no-untyped-call]  # SQLAlchemy stubs gap
+                    type_=JSONB(),
                 )
             )
         if not values:
@@ -235,7 +235,7 @@ async def bulk_mark_failed(
             updated_at=datetime.now(UTC),
         )
     )
-    return result.rowcount or 0
+    return rowcount(result) or 0
 
 
 async def get_by_id_unscoped(db: AsyncSession, scan_id: uuid.UUID) -> Scan | None:
