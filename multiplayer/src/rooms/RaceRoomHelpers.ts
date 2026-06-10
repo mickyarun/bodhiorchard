@@ -105,6 +105,7 @@ export function copyRacerToSchema(phys: Racer, schema: RacerState): void {
   schema.finishTimeMs = phys.finishTimeMs
   schema.isMoving = phys.isMoving
   schema.sprintUntilMs = phys.sprintUntilMs
+  schema.staminaPct = phys.staminaPct
 }
 
 function asString(v: unknown, name: string): string {

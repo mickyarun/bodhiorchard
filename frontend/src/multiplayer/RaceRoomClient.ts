@@ -48,6 +48,7 @@ export interface RacerSnapshot {
   finishTimeMs: number
   isMoving: boolean
   sprintUntilMs: number
+  staminaPct: number
   connected: boolean
 }
 
@@ -76,6 +77,7 @@ interface RawRacer {
   finishTimeMs?: number
   isMoving?: boolean
   sprintUntilMs?: number
+  staminaPct?: number
   connected?: boolean
 }
 
@@ -332,6 +334,7 @@ function racerSnapshot(r: RawRacer): RacerSnapshot {
     finishTimeMs: r.finishTimeMs ?? 0,
     isMoving: r.isMoving ?? false,
     sprintUntilMs: r.sprintUntilMs ?? 0,
+    staminaPct: r.staminaPct ?? 1,
     connected: r.connected ?? false,
   }
 }

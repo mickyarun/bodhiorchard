@@ -93,6 +93,43 @@ export const SPRINT_MAX_WINDOW_MS = 600
 /** Hard ceiling — safety cap in case of future tuning. */
 export const V_MAX_MPS = 12
 
+// ─── Stamina tuning ─────────────────────────────
+//
+// Layered on top of the tap-cadence sprint to convert "tap forever" into
+// "burst at the right moments." Each tick:
+//   * sprinting       → drains stamina at SPRINT_DRAIN_PER_S
+//   * walking (move)  → regens at WALK_REGEN_PER_S
+//   * idle (no move)  → regens at IDLE_REGEN_PER_S (faster — small
+//                       catch-up incentive for trailing racers)
+//   * stamina = 0     → sprint window force-clamps to now; further taps
+//                       have no effect until stamina recovers
+//
+// Race-time targets at the 100m distance:
+//   Pure sprint (today, stamina cap removed):  ~14s   — no decisions
+//   Pure walk:                                 ~33s
+//   Optimal pacing (2-3 well-timed bursts):    ~18-22s  — the new sweet spot
+
+/** Stamina is normalized in [0, 1]; the bar UI maps to this directly. */
+export const STAMINA_MAX = 1.0
+
+/** Initial stamina at race start. Full so the opening burst is always available. */
+export const STAMINA_INITIAL = 1.0
+
+/** Drain per second of active sprint. 0.4 means 2.5s of unbroken sprint
+ *  exhausts a full bar — long enough to feel committed, short enough that
+ *  pacing matters even on a 100m race. */
+export const SPRINT_DRAIN_PER_S = 0.4
+
+/** Regen per second while the move key is held (walking). 0.15 means a
+ *  full bar refills in ~6.7s of walking. Pacing-focused: walking can
+ *  recover stamina but doesn't out-pace a held sprint over the long run. */
+export const WALK_REGEN_PER_S = 0.15
+
+/** Regen per second while idle (no move key). Faster than walk regen so
+ *  trailing players have a cheap recovery option, but standing still is
+ *  still net-negative on a clock with finite race length. */
+export const IDLE_REGEN_PER_S = 0.3
+
 /**
  * Server / live-mode sim tick period. Matches Colyseus 20Hz.
  *

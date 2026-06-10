@@ -113,6 +113,7 @@ function makeFinishedRacer(id: string, finishTimeMs: number, positionM = 100): R
     finishTimeMs,
     isMoving: false,
     sprintUntilMs: 0,
+    staminaPct: 1,
   }
 }
 
@@ -125,6 +126,7 @@ function makeDnfRacer(id: string, positionM: number): Racer {
     finishTimeMs: 0,
     isMoving: false,
     sprintUntilMs: 0,
+    staminaPct: 1,
   }
 }
 
@@ -327,6 +329,7 @@ describe("copyRacerToSchema", () => {
       finishTimeMs: 12_340,
       isMoving: true,
       sprintUntilMs: 13_000,
+      staminaPct: 0.42,
     }
 
     copyRacerToSchema(phys, schema)
@@ -339,5 +342,6 @@ describe("copyRacerToSchema", () => {
     expect(schema.finishTimeMs).toBe(12_340)
     expect(schema.isMoving).toBe(true)
     expect(schema.sprintUntilMs).toBe(13_000)
+    expect(schema.staminaPct).toBeCloseTo(0.42, 5)
   })
 })

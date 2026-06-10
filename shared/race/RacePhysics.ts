@@ -41,6 +41,11 @@ import {
   SPRINT_MAX_WINDOW_MS,
   V_MAX_MPS,
   TRACK_LENGTH_M,
+  STAMINA_MAX,
+  STAMINA_INITIAL,
+  SPRINT_DRAIN_PER_S,
+  WALK_REGEN_PER_S,
+  IDLE_REGEN_PER_S,
 } from './RaceConstants'
 import type { Placing } from './types'
 
@@ -62,6 +67,13 @@ export interface Racer {
    * sprinting iff nowMs < sprintUntilMs. 0 = not sprinting.
    */
   sprintUntilMs: number
+  /**
+   * Stamina in [0, STAMINA_MAX]. Drains while sprinting, regenerates
+   * while walking / idle. New taps don't extend the sprint window when
+   * this is 0; mid-sprint, hitting 0 force-clamps `sprintUntilMs` to
+   * the current tick's `nowMs` so the racer drops back to walk speed.
+   */
+  staminaPct: number
 }
 
 export function makeRacer(id: string): Racer {
@@ -73,6 +85,7 @@ export function makeRacer(id: string): Racer {
     finishTimeMs: 0,
     isMoving: false,
     sprintUntilMs: 0,
+    staminaPct: STAMINA_INITIAL,
   }
 }
 
@@ -85,9 +98,13 @@ export function setMoving(racer: Racer, isMoving: boolean): void {
 /**
  * Register a sprint-key tap. Extends the sprint window by
  * SPRINT_TAP_DURATION_MS but never past SPRINT_MAX_WINDOW_MS above now.
+ *
+ * No-op when stamina is depleted — a tired racer can't sprint until
+ * walking / standing has regenerated some stamina.
  */
 export function triggerSprintTap(racer: Racer, nowMs: number): void {
   if (racer.finished) return
+  if (racer.staminaPct <= 0) return
   const currentEnd = Math.max(nowMs, racer.sprintUntilMs)
   const newEnd = currentEnd + SPRINT_TAP_DURATION_MS
   const hardCap = nowMs + SPRINT_MAX_WINDOW_MS
@@ -113,7 +130,11 @@ export function tick(
     if (r.finished) continue
 
     const sprinting = nowMs < r.sprintUntilMs
-    stepVelocity(r, sprinting, dtSec)
+    stepStamina(r, sprinting, nowMs, dtSec)
+    // Re-evaluate sprinting after stamina: hitting 0 mid-tick clamps
+    // sprintUntilMs to nowMs, so velocity for this step uses walk target.
+    const stillSprinting = nowMs < r.sprintUntilMs
+    stepVelocity(r, stillSprinting, dtSec)
     r.positionM += r.velocityMps * dtSec
 
     if (r.positionM >= trackLengthM) {
@@ -121,6 +142,24 @@ export function tick(
       r.finishTimeMs = nowMs
     }
   }
+}
+
+/**
+ * Drain stamina while sprinting, regen while not. When stamina hits 0
+ * mid-sprint, the sprint window is force-clamped to `nowMs` so the
+ * velocity step picks up walk-target speed on this same tick.
+ */
+function stepStamina(racer: Racer, sprinting: boolean, nowMs: number, dtSec: number): void {
+  if (sprinting) {
+    racer.staminaPct -= SPRINT_DRAIN_PER_S * dtSec
+    if (racer.staminaPct <= 0) {
+      racer.staminaPct = 0
+      racer.sprintUntilMs = nowMs
+    }
+    return
+  }
+  const regen = racer.isMoving ? WALK_REGEN_PER_S : IDLE_REGEN_PER_S
+  racer.staminaPct = Math.min(STAMINA_MAX, racer.staminaPct + regen * dtSec)
 }
 
 /** Is this racer currently inside a sprint burst? */

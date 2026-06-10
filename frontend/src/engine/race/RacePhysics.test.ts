@@ -29,6 +29,11 @@ import {
   SPRINT_TAP_DURATION_MS,
   SPRINT_MAX_WINDOW_MS,
   TRACK_LENGTH_M,
+  SPRINT_DRAIN_PER_S,
+  WALK_REGEN_PER_S,
+  IDLE_REGEN_PER_S,
+  STAMINA_INITIAL,
+  STAMINA_MAX,
 } from '@shared/race/RaceConstants'
 
 const FRAME_MS = 16  // ~60 fps
@@ -94,13 +99,16 @@ describe('RacePhysics.triggerSprintTap', () => {
     expect(isSprinting(r, laterMs + SPRINT_TAP_DURATION_MS - 1)).toBe(true)
   })
 
-  it('lets a sustained tap cadence keep velocity at RUN_TARGET_MPS', () => {
+  it('lets a sustained tap cadence keep velocity at RUN_TARGET_MPS while stamina lasts', () => {
     const r = makeRacer('a')
     setMoving(r, true)
-    // Tap roughly every 200ms for 3 seconds. Each tap gives 250ms of
-    // sprint, so the window always overlaps with the next tap.
+    // Tap roughly every 200ms. Each tap gives 250ms of sprint, so the
+    // window always overlaps with the next tap. Loop stays well inside
+    // the stamina budget (full bar drains in ~2.5s of unbroken sprint)
+    // so the velocity check isolates the sprint-cadence behaviour from
+    // the separate stamina-depletion path below.
     let nextTapAt = 0
-    for (let t = 0; t < 3000; t += FRAME_MS) {
+    for (let t = 0; t < 2000; t += FRAME_MS) {
       if (t >= nextTapAt) {
         triggerSprintTap(r, t)
         nextTapAt = t + 200
@@ -230,5 +238,91 @@ describe('RacePhysics.checkFinish', () => {
     ]
     const places = checkFinish(racers, true)
     expect(places.map(p => p.racerId)).toEqual(['a', 'c', 'b', 'd'])
+  })
+})
+
+describe('RacePhysics — stamina', () => {
+  it('starts at STAMINA_INITIAL', () => {
+    const r = makeRacer('a')
+    expect(r.staminaPct).toBe(STAMINA_INITIAL)
+  })
+
+  it('drains while sprinting at SPRINT_DRAIN_PER_S', () => {
+    const r = makeRacer('a')
+    setMoving(r, true)
+    triggerSprintTap(r, 0)
+    // 100ms tick at nowMs=0 (start of sprint window): drain = 0.4 * 0.1 = 0.04
+    tick([r], 100, 0, 10_000)
+    expect(r.staminaPct).toBeCloseTo(STAMINA_INITIAL - SPRINT_DRAIN_PER_S * 0.1, 5)
+  })
+
+  it('regenerates while walking at WALK_REGEN_PER_S', () => {
+    const r = makeRacer('a')
+    r.staminaPct = 0.5
+    setMoving(r, true)
+    // No sprint tap → not sprinting → walking branch regen
+    tick([r], 200, 0, 10_000)
+    expect(r.staminaPct).toBeCloseTo(0.5 + WALK_REGEN_PER_S * 0.2, 5)
+  })
+
+  it('regenerates faster while idle than while walking', () => {
+    const walker = makeRacer('w')
+    walker.staminaPct = 0.5
+    setMoving(walker, true)
+    const idler = makeRacer('i')
+    idler.staminaPct = 0.5
+    // idler.isMoving stays false (default)
+    tick([walker, idler], 200, 0, 10_000)
+    expect(idler.staminaPct).toBeCloseTo(0.5 + IDLE_REGEN_PER_S * 0.2, 5)
+    expect(idler.staminaPct).toBeGreaterThan(walker.staminaPct)
+  })
+
+  it('caps regen at STAMINA_MAX', () => {
+    const r = makeRacer('a')
+    r.staminaPct = 0.95
+    // Idle regen for 1s = +0.3 → would overshoot to 1.25 without the cap.
+    tick([r], 1000, 0, 10_000)
+    expect(r.staminaPct).toBe(STAMINA_MAX)
+  })
+
+  it('clamps drain at 0 and force-ends sprint mid-tick', () => {
+    const r = makeRacer('a')
+    r.staminaPct = 0.05
+    setMoving(r, true)
+    triggerSprintTap(r, 0)
+    // 1s tick at full sprint would drain 0.4 — much more than 0.05
+    tick([r], 1000, 0, 10_000)
+    expect(r.staminaPct).toBe(0)
+    // Sprint window must be clamped to nowMs so the racer can't keep
+    // sprinting on subsequent ticks until stamina recovers.
+    expect(r.sprintUntilMs).toBeLessThanOrEqual(0)
+  })
+
+  it('treats triggerSprintTap as no-op when stamina is depleted', () => {
+    const r = makeRacer('a')
+    r.staminaPct = 0
+    triggerSprintTap(r, 0)
+    expect(r.sprintUntilMs).toBe(0)
+  })
+
+  it('re-allows sprint taps once stamina regenerates above 0', () => {
+    const r = makeRacer('a')
+    r.staminaPct = 0
+    setMoving(r, true)
+    // Walk one full tap-duration: regen = 0.15 * 0.25 = 0.0375
+    tick([r], SPRINT_TAP_DURATION_MS, 0, 10_000)
+    expect(r.staminaPct).toBeGreaterThan(0)
+    triggerSprintTap(r, SPRINT_TAP_DURATION_MS)
+    expect(r.sprintUntilMs).toBeGreaterThan(SPRINT_TAP_DURATION_MS)
+  })
+
+  it('skips drain/regen for finished racers', () => {
+    const r = makeRacer('a')
+    r.finished = true
+    r.staminaPct = 0.4
+    setMoving(r, true)
+    triggerSprintTap(r, 0)
+    tick([r], 500, 0, 10_000)
+    expect(r.staminaPct).toBe(0.4)
   })
 })
