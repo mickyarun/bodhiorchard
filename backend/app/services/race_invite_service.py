@@ -33,10 +33,16 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from app.models.notification import Notification, NotificationType
+from app.repositories.notification import NotificationRepository
+from app.repositories.user import UserRepository
+from app.services.colyseus_bridge import publish_to_colyseus_room
 from app.services.event_bus import publish
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.user import User
 
 logger = structlog.get_logger(__name__)
 
@@ -119,8 +125,6 @@ async def send_race_invite_notification(
         distance_m=distance_m,
     )
 
-    from app.models.notification import Notification, NotificationType
-
     notif_id = uuid.uuid4()
     deep_link = f"/raceview/{room_id}"
     title = "Race invitation"
@@ -175,3 +179,167 @@ async def send_race_invite_notification(
         )
 
     return notif_id
+
+
+async def decline_race_invite(
+    db: AsyncSession,
+    *,
+    notification_id: uuid.UUID,
+    current_user: User,
+) -> uuid.UUID | None:
+    """Mark an invitee's race-invite as declined and notify the host.
+
+    Idempotent on the invitee side: dismissing-then-declining is a no-op.
+    The host receives a *new* notification — a fresh row rather than a
+    flag toggle on the original — so the bell's existing render path,
+    WS push, and unread counters all work unmodified. Returns the new
+    host-side notification id, or ``None`` if the original isn't a
+    race-invite owned by the caller (404 at the API layer).
+
+    Trade-offs worth knowing:
+
+    * The host-side notification is written unconditionally — even if
+      the race has already advanced past ``lobby``. The multiplayer's
+      ``RaceRoom.removeInvitee`` is phase-guarded and silently no-ops
+      in that case, but the host can still receive "X declined" mid
+      countdown/run. That window is short (the countdown is 3 s, the
+      race itself ~15 s), and a notification that arrives during a
+      live race is an honest signal anyway.
+    * If ``publish_to_colyseus`` fails, the invitee's notification is
+      already dismissed and the host's notification is already written
+      — Alice's lobby just keeps the declined slot up until
+      ``LOBBY_MAX_MS`` expires. Acceptable given the fire-and-forget
+      design; do not switch this to await + roll back on failure
+      without also bringing the publish inside the same transaction.
+
+    Args:
+        db: Async SQLAlchemy session.
+        notification_id: id of the invitee's pending race-invite row.
+        current_user: the invitee — used for scoping the lookup and for
+            the display name shown on the host's bell.
+    """
+    repo = NotificationRepository(db, user_id=current_user.id)
+    original = await repo.get_by_id(notification_id)
+    if original is None or original.type != NotificationType.RACE_INVITE:
+        return None
+    if original.is_dismissed:
+        return None
+
+    # Originals carry host + room + distance in meta — see send_race_invite.
+    meta = dict(original.meta or {})
+    host_user_id = meta.get("hostUserId")
+    room_id = meta.get("roomId")
+    distance_m = meta.get("distanceM")
+    if not isinstance(host_user_id, str) or not isinstance(room_id, str):
+        # Older invite from before this schema settled — dismiss but don't
+        # surface the missing meta to the user.
+        original.is_dismissed = True
+        await db.flush()
+        return None
+
+    # Cross-org safety: the host_user_id we're about to address came from
+    # the invitee's notification meta — readable but mutable surface area
+    # (whatever middleware ever touches a notification row). Verify the
+    # host actually has an OrgToUser membership in this notification's
+    # org before writing a bell entry under their account. If they don't,
+    # silently dismiss — the host that meta points at is either gone or
+    # was never legitimate, and we should not address a stranger.
+    try:
+        host_uuid = uuid.UUID(host_user_id)
+    except ValueError:
+        original.is_dismissed = True
+        await db.flush()
+        return None
+    user_repo = UserRepository(db)
+    if not await user_repo.is_member_of_org(host_uuid, original.org_id):
+        logger.warning(
+            "race_invite_decline_host_org_mismatch",
+            host_user_id=host_user_id,
+            org_id=str(original.org_id),
+            invitee_user_id=str(current_user.id),
+        )
+        original.is_dismissed = True
+        await db.flush()
+        return None
+
+    original.is_dismissed = True
+    await db.flush()
+
+    invitee_name = current_user.name or current_user.email
+    distance_label = f"{distance_m} m" if isinstance(distance_m, int) else "race"
+    host_title = "Race invitation declined"
+    host_message = f"{invitee_name} declined your {distance_label} race invite"
+    host_deep_link = f"/raceview/{room_id}"
+    # Whitelist only the fields the host actually needs — spreading
+    # `meta` would propagate `hostUserId=self`, which reads confusingly
+    # on the host's own row and risks future code conflating the two.
+    host_meta: dict[str, object] = {
+        "roomId": room_id,
+        "declinedBy": str(current_user.id),
+        "declinedByName": invitee_name,
+    }
+    if isinstance(distance_m, int):
+        host_meta["distanceM"] = distance_m
+
+    host_notif_id = uuid.uuid4()
+    host_notif = Notification(
+        id=host_notif_id,
+        org_id=original.org_id,
+        user_id=host_uuid,
+        type=NotificationType.RACE_INVITE,
+        title=host_title,
+        message=host_message,
+        deep_link=host_deep_link,
+        job_id=room_id,
+        job_type="race_invite",
+        meta=host_meta,
+    )
+    db.add(host_notif)
+    await db.flush()
+
+    try:
+        publish(
+            f"notifications:{host_user_id}",
+            {
+                "id": str(host_notif_id),
+                "type": NotificationType.RACE_INVITE.value,
+                "jobId": room_id,
+                "jobType": "race_invite",
+                "title": host_title,
+                "message": host_message,
+                "deepLink": host_deep_link,
+                "isRead": False,
+                "isDismissed": False,
+                "createdAt": _dt.datetime.now(_dt.UTC).isoformat(),
+                "meta": host_meta,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "race_invite_decline_ws_publish_failed",
+            host_user_id=host_user_id,
+            room_id=room_id,
+        )
+
+    # Tell the multiplayer to drop the declined invitee from
+    # state.invitedUserIds so the host's lobby stops rendering them as
+    # "Hasn't joined yet". Routed by room id, not org id — the RaceRoom
+    # lifecycle is independent of which OrgRoom is currently alive (the
+    # host may have left their dashboard tab the moment they hit Start).
+    # Fire-and-forget — multiplayer being down means Alice's UI just
+    # won't update until the next room state push, but the notification
+    # side of the decline already succeeded.
+    try:
+        await publish_to_colyseus_room(
+            room_id,
+            "race_invite_declined",
+            {"userId": str(current_user.id)},
+        )
+    except Exception:
+        logger.exception(
+            "race_invite_decline_colyseus_publish_failed",
+            room_id=room_id,
+            user_id=str(current_user.id),
+        )
+
+    return host_notif_id

@@ -20,8 +20,9 @@ Upgrade order matters:
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "0adad4d4dd8d"
 down_revision: str | None = "3a4087b1f022"

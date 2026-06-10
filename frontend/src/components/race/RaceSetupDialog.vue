@@ -91,7 +91,12 @@
               @click="toggle(m.id)"
             >
               <span class="setup__avatar">{{ initials(m.name) }}</span>
-              <span class="setup__member-name">{{ m.name }}</span>
+              <span class="setup__member-text">
+                <span class="setup__member-name">{{ m.name }}</span>
+                <!-- Email disambiguates same-name members ("Arun" × 3); muted
+                     so the primary visual hierarchy is still the name. -->
+                <span class="setup__member-email">{{ m.email }}</span>
+              </span>
               <span class="setup__check" :class="{ 'setup__check--on': selectedIds.includes(m.id) }">
                 <v-icon v-if="selectedIds.includes(m.id)" icon="mdi-check" size="14" />
               </span>
@@ -133,6 +138,7 @@ import { initials } from './initials'
 interface DirectoryEntry {
   id: string
   name: string
+  email: string
 }
 
 const props = defineProps<{
@@ -415,12 +421,25 @@ async function onSend(): Promise<void> {
   background: linear-gradient(135deg, #7dd57d, #5bae5b);
   color: #06130b;
 }
+.setup__member-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .setup__member-name {
   font-size: 14px;
   font-weight: 600;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.setup__member-email {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  margin-top: 1px;
 }
 .setup__check {
   width: 22px;

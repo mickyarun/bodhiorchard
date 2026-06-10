@@ -39,8 +39,11 @@
         >
           <span class="race-hud__rank">{{ r.finished ? placeFor(r.userId) : '·' }}</span>
           <span class="race-hud__name">{{ r.name }}</span>
-          <div class="race-hud__bar">
-            <div class="race-hud__bar-fill" :style="{ width: progressPct(r) + '%' }" />
+          <div class="race-hud__bars">
+            <div class="race-hud__bar">
+              <div class="race-hud__bar-fill" :style="{ width: progressPct(r) + '%' }" />
+            </div>
+            <RacerStaminaBar v-if="!r.finished" :stamina-pct="r.staminaPct" />
           </div>
           <span class="race-hud__distance">{{ r.finished ? finishedLabel(r) : r.positionM.toFixed(0) + 'm' }}</span>
         </li>
@@ -72,6 +75,7 @@ import { RaceEngine } from '@/engine/race'
 import type { RacePhase } from '@shared/race/types'
 import type { RaceRoomClientLike, RaceStateSnapshot } from '@/multiplayer/RaceRoomClient'
 import TouchControls from '@/components/touch/TouchControls.vue'
+import RacerStaminaBar from '@/components/race/RacerStaminaBar.vue'
 import { useTouchDevice } from '@/composables/useTouchDevice'
 
 const { isTouch } = useTouchDevice()
@@ -364,8 +368,17 @@ function removeKeyHandlers(): void {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.7);
 }
-.race-hud__bar {
+/* Wraps progress + stamina bars so they share grid column 2 / row 2
+   and stack with a tight gap. Keeping the wrapper grid-positioned (not
+   the individual bars) means future bars (boost charge, hurdle warning)
+   slot in without touching the row grid. */
+.race-hud__bars {
   grid-column: 2 / 3;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.race-hud__bar {
   height: 6px;
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.1);

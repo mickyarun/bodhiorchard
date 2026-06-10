@@ -119,33 +119,66 @@
         </div>
       </div>
 
-      <v-btn class="cta__leave" variant="text" size="large" @click="$emit('leave')">
-        Back to garden
-      </v-btn>
+      <div class="cta__row">
+        <!-- Host-only "Invite more" — disabled when the room is at
+             MAX_RACERS so the picker doesn't open to an empty list.
+             Styled as a pill to match the page's eyebrow language;
+             yellow accent ties it visually to the host's HOST badge. -->
+        <button
+          v-if="isHost"
+          type="button"
+          class="cta__pill cta__pill--host"
+          :disabled="!canInviteMore"
+          @click="inviteMoreOpen = true"
+        >
+          <v-icon icon="mdi-account-plus-outline" size="16" />
+          Invite more
+        </button>
+        <button
+          type="button"
+          class="cta__pill cta__pill--ghost"
+          @click="$emit('leave')"
+        >
+          <v-icon icon="mdi-arrow-left" size="16" />
+          Back to garden
+        </button>
+      </div>
     </footer>
+
+    <RaceInviteMoreDialog
+      v-if="isHost"
+      v-model="inviteMoreOpen"
+      :exclude-user-ids="existingParticipantIds"
+      :remaining-slots="remainingSlots"
+      @send="onAddInvitees"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { RaceStateSnapshot } from '@/multiplayer/RaceRoomClient'
-import { MIN_RACERS } from '@shared/race/RaceConstants'
+import { MAX_RACERS, MIN_RACERS } from '@shared/race/RaceConstants'
 import { OrgRoomClient } from '@/multiplayer/OrgRoomClient'
 import { useAuthStore } from '@/stores/auth'
 import { parseCharacterModel, type CharacterConfig } from '@/engine/characters/CharacterConfig'
 import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
 import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
+import RaceInviteMoreDialog from '@/components/race/RaceInviteMoreDialog.vue'
 
 const props = defineProps<{
   snapshot: RaceStateSnapshot
   isHost: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'start'): void
   (e: 'leave'): void
+  (e: 'add-invitees', userIds: string[]): void
 }>()
+
+const inviteMoreOpen = ref(false)
 
 const authStore = useAuthStore()
 
@@ -157,6 +190,25 @@ const pendingInvitees = computed(() => {
 })
 
 const canStart = computed(() => props.snapshot.racers.length >= MIN_RACERS)
+
+/** Already-claimed user ids — racers + pending invitees. Drives the
+ *  "Invite more" picker so the host can't re-invite someone already in. */
+const existingParticipantIds = computed(() => {
+  const ids = new Set<string>()
+  for (const r of props.snapshot.racers) ids.add(r.userId)
+  for (const id of props.snapshot.invitedUserIds) ids.add(id)
+  return [...ids]
+})
+
+const remainingSlots = computed(() =>
+  Math.max(0, MAX_RACERS - existingParticipantIds.value.length),
+)
+
+const canInviteMore = computed(() => props.isHost && remainingSlots.value > 0)
+
+function onAddInvitees(userIds: string[]): void {
+  emit('add-invitees', userIds)
+}
 
 /**
  * Names + character models for pending invitees live on the *org* room's
@@ -650,9 +702,16 @@ const allSlots = computed<LobbySlot[]>(() => {
   margin-top: 2px;
 }
 
-.cta__leave {
-  margin-top: 4px;
-  opacity: 0.7;
+.cta__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 12px;
 }
-.cta__leave:hover { opacity: 1; }
+
+/* Pill button visuals (.cta__pill, --host, --ghost, --danger) live in
+   assets/styles/race-pills.scss so the silhouette stays consistent
+   across lobby, cancel dialog, and invite-more dialog. */
 </style>

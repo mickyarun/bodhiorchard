@@ -164,6 +164,29 @@
 
             <template #append>
               <div class="d-flex align-center ga-1">
+                <!-- Decline is a *server-side* action — unlike the
+                     adjacent X (local dismiss), it tells the host to
+                     stop waiting. Only rendered on actionable race
+                     invites so the host's own "X declined" entries
+                     can't be declined back at themselves. -->
+                <!-- Decline is a real, clearly-rendered button (tonal +
+                     outlined border) so the eye separates it from the
+                     adjacent X icon. Misreading these two was the bug
+                     the user hit: an invisible "Decline" looked like
+                     they only had X (which doesn't notify the host). -->
+                <v-btn
+                  v-if="canDeclineRaceInvite(notif)"
+                  variant="tonal"
+                  size="x-small"
+                  density="comfortable"
+                  color="error"
+                  class="notif-decline-btn"
+                  :disabled="store.pendingDeclineIds.has(notif.id)"
+                  :loading="store.pendingDeclineIds.has(notif.id)"
+                  @click.stop="store.declineRaceInvite(notif.id)"
+                >
+                  Decline
+                </v-btn>
                 <v-btn
                   v-if="notif.deepLink"
                   icon
@@ -213,63 +236,6 @@
       </template>
     </v-card>
   </v-menu>
-
-  <!-- Yield-offer reject confirmation. Reject is no-undo; the modal
-       guards against misclicks. Accept fires immediately because it's
-       a reversible action (a developer can re-request assignment). -->
-  <v-dialog v-model="rejectDialog" max-width="400">
-    <v-card color="surface" class="pa-5">
-      <div class="text-h6 font-weight-bold mb-2">Reject this yield offer?</div>
-      <div class="text-body-2 text-medium-emphasis mb-4">
-        The BUD will go to the next candidate. You can't undo this.
-      </div>
-      <v-card-actions class="pa-0">
-        <v-spacer />
-        <v-btn variant="text" @click="rejectDialog = false">Cancel</v-btn>
-        <v-btn color="error" variant="flat" :loading="!!busy" @click="confirmReject">
-          Reject
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
-
-  <!-- Admin reassign: route a pending offer to a different developer.
-       Backend validates the new target holds a strictly lower-priority
-       BUD and swaps yieldable_bud_id in lockstep. -->
-  <v-dialog v-model="reassignDialog" max-width="440">
-    <v-card color="surface" class="pa-5">
-      <div class="text-h6 font-weight-bold mb-2">Reassign yield offer</div>
-      <div class="text-body-2 text-medium-emphasis mb-3">
-        Pick a different developer. They must already hold a BUD with priority
-        strictly lower than the incoming one — the backend will pick their
-        lowest-priority active BUD as the yieldable target.
-      </div>
-      <v-select
-        v-model="reassignTargetId"
-        :items="reassignTargets"
-        item-title="name"
-        item-value="id"
-        label="New target developer"
-        variant="outlined"
-        density="comfortable"
-        hide-details
-        class="mb-3"
-      />
-      <v-card-actions class="pa-0">
-        <v-spacer />
-        <v-btn variant="text" @click="reassignDialog = false">Cancel</v-btn>
-        <v-btn
-          color="primary"
-          variant="flat"
-          :loading="!!busy"
-          :disabled="!reassignTargetId"
-          @click="confirmReassign"
-        >
-          Reassign
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
 </template>
 
 <script setup lang="ts">
@@ -279,9 +245,10 @@ import { useNotificationStore } from '@/stores/notifications'
 import { useNotificationSocket } from '@/composables/useNotificationSocket'
 import { useYieldOfferStore } from '@/stores/yieldOffers'
 import { useYieldOfferSocket } from '@/composables/useYieldOfferSocket'
+import { useYieldOfferActions } from '@/composables/useYieldOfferActions'
 import { useMembersStore } from '@/stores/members'
 import { usePermissions } from '@/composables/usePermissions'
-import type { AppNotification, YieldOffer } from '@/types'
+import type { AppNotification, RaceInviteMeta, YieldOffer } from '@/types'
 
 const props = defineProps<{ userId: string }>()
 
@@ -312,19 +279,10 @@ const yieldScope = computed<'me' | 'org'>(() => (isAdmin.value ? 'org' : 'me'))
 // muscle memory consistent.
 const totalUnread = computed(() => store.unreadCount + yieldStore.items.length)
 
-const busy = ref<string | null>(null)
-const rejectDialog = ref(false)
-const pendingReject = ref<string | null>(null)
-const reassignDialog = ref(false)
-const reassignTargetId = ref<string | null>(null)
-const pendingReassign = ref<YieldOffer | null>(null)
-
-const reassignTargets = computed(() => {
-  const exclude = pendingReassign.value?.target_user_id ?? ''
-  return membersStore.members
-    .filter(m => m.isActive && m.role === 'developer' && m.id !== exclude)
-    .map(m => ({ id: m.id, name: m.name }))
-})
+// Reject / reassign dialogs are mounted layout-wide in YieldOfferDialogs;
+// the shared composable owns the in-flight `busy` flag so the row buttons
+// here and the confirm buttons there stay in lockstep.
+const { busy, onAccept, askReject, askReassign } = useYieldOfferActions()
 
 // Getter form (not snapshot) so the composable re-targets the WS
 // subscription when ``authStore.user.id`` hydrates after this bell
@@ -373,44 +331,6 @@ function pad(num: number | null): string {
   return String(num ?? 0).padStart(3, '0')
 }
 
-async function onAccept(id: string): Promise<void> {
-  busy.value = id
-  await yieldStore.accept(id)
-  busy.value = null
-}
-
-function askReject(id: string): void {
-  pendingReject.value = id
-  rejectDialog.value = true
-}
-
-async function confirmReject(): Promise<void> {
-  if (!pendingReject.value) return
-  busy.value = pendingReject.value
-  await yieldStore.reject(pendingReject.value)
-  busy.value = null
-  rejectDialog.value = false
-  pendingReject.value = null
-}
-
-function askReassign(offer: YieldOffer): void {
-  pendingReassign.value = offer
-  reassignTargetId.value = null
-  reassignDialog.value = true
-}
-
-async function confirmReassign(): Promise<void> {
-  if (!pendingReassign.value || !reassignTargetId.value) return
-  busy.value = pendingReassign.value.id
-  const ok = await yieldStore.reassign(pendingReassign.value.id, reassignTargetId.value)
-  busy.value = null
-  if (ok) {
-    reassignDialog.value = false
-    pendingReassign.value = null
-    reassignTargetId.value = null
-  }
-}
-
 function handleClick(notif: AppNotification): void {
   if (!notif.isRead) {
     store.markRead(notif.id)
@@ -428,6 +348,21 @@ function navigateTo(notif: AppNotification): void {
   if (notif.deepLink) {
     router.push(notif.deepLink)
   }
+}
+
+/**
+ * True when the row is an actionable race invite the viewer can still
+ * decline. False for: non-race notifications; the host's own "X
+ * declined" rows (which carry `declinedBy` in meta); and the host
+ * looking at their own invite (which shouldn't happen but is
+ * defensive against future invite-self bugs).
+ */
+function canDeclineRaceInvite(notif: AppNotification): boolean {
+  if (notif.type !== 'race_invite') return false
+  const meta = (notif.meta ?? {}) as RaceInviteMeta
+  if (meta.declinedBy) return false
+  if (!meta.hostUserId) return false
+  return meta.hostUserId !== props.userId
 }
 
 function handleClearAll(): void {
@@ -496,5 +431,14 @@ function relativeTime(isoString: string): string {
 .notification-item:hover {
   background: rgba(var(--v-theme-on-surface), 0.04);
   cursor: pointer;
+}
+
+/* Sharpen the Decline button's outline so it can't be visually
+   conflated with the adjacent X icon. Tonal alone leaves it looking
+   too soft against the row's hover background. */
+.notif-decline-btn {
+  border: 1px solid rgba(var(--v-theme-error), 0.45);
+  letter-spacing: 0.04em;
+  font-weight: 600;
 }
 </style>

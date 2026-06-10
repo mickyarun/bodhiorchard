@@ -35,5 +35,7 @@ export class RacerState extends Schema {
   @type("uint32") finishTimeMs = 0
   @type("boolean") isMoving = false
   @type("uint32") sprintUntilMs = 0
+  /** Stamina normalised to [0, 1]. HUD bars read directly. */
+  @type("number") staminaPct = 1
   @type("boolean") connected = false
 }

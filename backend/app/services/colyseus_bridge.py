@@ -128,6 +128,79 @@ async def publish_to_colyseus(
         )
 
 
+async def publish_to_colyseus_room(
+    room_id: str,
+    event_type: str,
+    data: dict[str, Any],
+) -> None:
+    """Publish a room-scoped event to the Colyseus multiplayer server.
+
+    Routes by `roomId` instead of `orgId` — used for race-room events
+    (e.g. `race_invite_declined`) where the destination is a specific
+    `RaceRoom` instance, not the per-org `OrgRoom`. Without this variant,
+    callers had to pass an org id that the bridge then silently ignored
+    for race events — implicit contract that bit on cross-org edges.
+
+    Fire-and-forget: failures are logged but never raised, matching the
+    org-scoped sibling's semantics.
+    """
+    url = f"{settings.colyseus.url}/internal/publish"
+    payload = {
+        "roomId": room_id,
+        "type": event_type,
+        "data": data,
+    }
+    headers = {
+        "X-Bridge-Secret": settings.colyseus.bridge_secret,
+        "Content-Type": "application/json",
+    }
+
+    logger.info(
+        "colyseus_bridge_publish_start",
+        event_type=event_type,
+        room_id=room_id,
+        url=url,
+    )
+    try:
+        client = _get_client()
+        response = await client.post(url, json=payload, headers=headers)
+        if response.status_code >= 400:
+            logger.warning(
+                "colyseus_bridge_publish_failed",
+                status=response.status_code,
+                event_type=event_type,
+                room_id=room_id,
+                response_body=response.text[:500],
+            )
+        else:
+            try:
+                body = response.json()
+            except ValueError:
+                body = {}
+            logger.info(
+                "colyseus_bridge_publish_ok",
+                event_type=event_type,
+                room_id=room_id,
+                delivered=body.get("delivered"),
+                reason=body.get("reason"),
+            )
+    except httpx.HTTPError as err:
+        logger.warning(
+            "colyseus_bridge_unreachable",
+            error=str(err),
+            event_type=event_type,
+            room_id=room_id,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as err:  # noqa: BLE001
+        logger.warning(
+            "colyseus_bridge_unexpected_error",
+            error=str(err),
+            event_type=event_type,
+        )
+
+
 async def close_client() -> None:
     """Close the shared HTTP client. Called on app shutdown."""
     global _client

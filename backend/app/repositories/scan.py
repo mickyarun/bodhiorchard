@@ -25,16 +25,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import bindparam, func, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan import ACTIVE_SCAN_STATUSES, Scan
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
 
 # Scans older than this with no updates get flipped to ``failed`` on
 # the next read. Must exceed the longest legitimate silence between
@@ -236,7 +235,7 @@ async def bulk_mark_failed(
             updated_at=datetime.now(UTC),
         )
     )
-    return cast(CursorResult[Any], result).rowcount or 0
+    return rowcount(result) or 0
 
 
 async def get_by_id_unscoped(db: AsyncSession, scan_id: uuid.UUID) -> Scan | None:

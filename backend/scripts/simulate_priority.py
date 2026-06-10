@@ -30,10 +30,9 @@ don't pollute the dev DB).
 
 from __future__ import annotations
 
-import os
-import sys
 import asyncio
-from uuid import UUID
+import contextlib
+import sys
 
 import httpx
 
@@ -78,7 +77,11 @@ async def list_developers(client: httpx.AsyncClient) -> list[dict]:
 async def create_bud(client: httpx.AsyncClient, title: str, priority: str) -> dict:
     r = await client.post(
         f"{API_BASE}/buds/",
-        json={"title": title, "priority": priority, "requirements_md": f"Simulation BUD ({priority})"},
+        json={
+            "title": title,
+            "priority": priority,
+            "requirements_md": f"Simulation BUD ({priority})",
+        },
     )
     r.raise_for_status()
     return r.json()
@@ -120,10 +123,8 @@ async def main() -> None:
         sim_buds = [b for b in r.json() if b.get("title", "").startswith("[SIM")]
         for b in sim_buds:
             if b["status"] not in ("closed", "discarded"):
-                try:
+                with contextlib.suppress(httpx.HTTPStatusError):
                     await patch_bud(client, b["id"], status="discarded")
-                except httpx.HTTPStatusError:
-                    pass
         ok(f"Pre-flight: discarded {len(sim_buds)} prior [SIM] BUDs.")
 
         devs = await list_developers(client)
@@ -248,10 +249,8 @@ async def main() -> None:
         # so this matters — we need everyone under cap with controlled
         # loads to make the weighting visible.
         for bid in created_buds:
-            try:
+            with contextlib.suppress(httpx.HTTPStatusError):
                 await patch_bud(client, bid, status="discarded")
-            except httpx.HTTPStatusError:
-                pass
         created_buds = []
         idle_devs = [d for d in devs if d.get("id")]
         if len(idle_devs) < 2:

@@ -24,17 +24,17 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy import update as sql_update
-from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan_phase import ScanPhase
 from app.models.scan_repo_run import ScanRepoRun
 from app.models.scan_repo_step import ScanRepoStep
 from app.models.scan_run_enums import StepStatus
+from app.repositories.base import rowcount
 from app.repositories.scan_step_upsert import upsert_step
 
 
@@ -230,4 +230,4 @@ async def reset_steps_for_runs(
             duration_ms=None,
         )
     )
-    return cast(CursorResult[Any], result).rowcount or 0
+    return rowcount(result) or 0
