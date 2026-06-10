@@ -116,6 +116,12 @@
     >
       {{ cancelledToastText }}
     </v-snackbar>
+
+    <!-- First-race onboarding for the stamina mechanic. Gated to lobby
+         phase + participants so the popup never competes with countdown
+         or live-race input. Self-dismissing once the player clicks
+         "Got it" (localStorage). -->
+    <RaceStaminaIntroDialog :active="staminaIntroActive" />
   </div>
 </template>
 
@@ -130,6 +136,7 @@ import RaceResultsCard from './RaceResultsCard.vue'
 import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
 import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import RaceStaminaIntroDialog from '@/components/race/RaceStaminaIntroDialog.vue'
 
 const props = defineProps<{
   roomId: string
@@ -155,6 +162,13 @@ const isParticipant = computed(() => {
   if (!snapshot.value) return false
   return snapshot.value.racers.some(r => r.userId === userId.value)
 })
+
+// Stamina-intro popup gate: only in the lobby (countdown is too short
+// to read; live phase needs the input focus). Spectators don't need
+// pacing advice — they're not the ones racing.
+const staminaIntroActive = computed(
+  () => snapshot.value?.phase === 'lobby' && isParticipant.value,
+)
 
 watch(
   () => props.roomId,
