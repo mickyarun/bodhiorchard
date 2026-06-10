@@ -36,7 +36,7 @@
     </div>
 
     <!-- Status card -->
-    <v-card variant="outlined" class="pa-5 mb-4">
+    <v-card color="surface" class="pa-5 mb-4 mcp-card">
       <div v-if="statusLoading" class="d-flex justify-center py-6">
         <v-progress-circular indeterminate size="24" width="2" />
       </div>
@@ -135,7 +135,7 @@
     </v-card>
 
     <!-- Setup instructions -->
-    <v-card variant="outlined" class="pa-5">
+    <v-card color="surface" class="pa-5 mcp-card">
       <div class="d-flex align-center ga-2 mb-3">
         <v-icon icon="mdi-wrench" size="18" color="primary" />
         <span class="text-body-1 font-weight-medium">Setup Claude Code</span>
@@ -166,22 +166,13 @@
         </li>
       </ol>
 
-      <v-alert
-        type="warning"
-        variant="tonal"
-        density="compact"
-        class="mt-4"
-        icon="mdi-alert-outline"
-      >
-        <div class="text-body-2 font-weight-medium mb-1">Common gotcha</div>
-        <div class="text-caption">
-          If you have an <strong>old</strong> <code>BODHIORCHARD_MCP_TOKEN</code>
-          exported in <code>~/.zshrc</code> or <code>~/.bashrc</code>, every
-          new terminal will re-export the stale value and override what you
-          just set. Remove or comment out the old line, then open a fresh
-          terminal.
-        </div>
-      </v-alert>
+      <AppCallout variant="warning" eyebrow="Common gotcha" class="mt-4">
+        If you have an <strong>old</strong> <code>BODHIORCHARD_MCP_TOKEN</code>
+        exported in <code>~/.zshrc</code> or <code>~/.bashrc</code>, every
+        new terminal will re-export the stale value and override what you
+        just set. Remove or comment out the old line, then open a fresh
+        terminal.
+      </AppCallout>
     </v-card>
   </v-container>
 </template>
@@ -190,6 +181,7 @@
 import { computed, onMounted, ref } from 'vue'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
+import AppCallout from '@/components/common/AppCallout.vue'
 
 const statusLoading = ref(true)
 const hasToken = ref(false)
@@ -263,6 +255,10 @@ onMounted(loadStatus)
 </script>
 
 <style scoped>
+.mcp-card {
+  border: 1px solid rgb(var(--v-theme-rule));
+}
+
 .token-row {
   display: flex;
   align-items: center;
@@ -276,7 +272,7 @@ onMounted(loadStatus)
 .token-code {
   flex: 1;
   min-width: 0;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11px;
   color: rgba(var(--v-theme-on-surface), 0.9);
   white-space: nowrap;
@@ -294,10 +290,10 @@ onMounted(loadStatus)
 
 .setup-steps code,
 .inline-cmd code {
-  background: rgba(var(--v-theme-on-surface), 0.08);
+  background: rgb(var(--v-theme-background));
   padding: 1px 6px;
   border-radius: 3px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
 }
 
