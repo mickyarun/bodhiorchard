@@ -114,7 +114,7 @@
               Your MCP token (copy now — it won't be shown again):
             </div>
             <div class="d-flex align-center ga-2">
-              <code class="flex-grow-1 pa-2" style="background: rgba(0,0,0,0.2); border-radius: 4px; word-break: break-all;">
+              <code class="flex-grow-1 pa-2" style="background: rgb(var(--v-theme-background)); border-radius: 4px; word-break: break-all;">
                 {{ newMcpToken }}
               </code>
               <v-btn
@@ -133,7 +133,7 @@
           MCP is auto-configured in your repos during scanning (<code>.mcp.json</code>).
           To activate, set your token as a persistent environment variable:
         </div>
-        <div class="config-snippet pa-3 rounded mb-3" style="background: rgba(0,0,0,0.3); position: relative;">
+        <div class="config-snippet pa-3 rounded mb-3" style="background: rgb(var(--v-theme-background)); position: relative;">
           <v-btn
             icon="mdi-content-copy"
             variant="text"

@@ -126,7 +126,7 @@
               </div>
               <pre
                 class="pa-3 rounded text-caption mb-3"
-                style="background: rgba(0, 0, 0, 0.25); overflow-x: auto; white-space: pre; max-height: 150px; overflow-y: auto; color: rgba(var(--v-theme-on-surface), 0.7);"
+                style="background: rgb(var(--v-theme-background)); overflow-x: auto; white-space: pre; max-height: 150px; overflow-y: auto; color: rgba(var(--v-theme-on-surface), 0.7);"
               >{{ slackManifest }}</pre>
               <div class="text-medium-emphasis" style="line-height: 1.6;">
                 3. Review and click <strong class="text-high-emphasis">Create</strong><br>
@@ -171,7 +171,7 @@
               <div class="d-flex align-center ga-2 mb-3">
                 <code
                   class="pa-2 rounded flex-grow-1"
-                  style="background: rgba(0, 0, 0, 0.25); font-size: 0.8rem; word-break: break-all;"
+                  style="background: rgb(var(--v-theme-background)); font-size: 0.8rem; word-break: break-all;"
                 >{{ webhookUrl }}</code>
                 <v-btn
                   size="small"

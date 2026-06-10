@@ -1053,14 +1053,14 @@ onMounted(() => {
 }
 
 .prompt-editor :deep(.v-field) {
-  background: rgba(0, 0, 0, 0.18);
+  background: rgb(var(--v-theme-background));
 }
 
 .preview-content {
   max-height: 540px;
   overflow-y: auto;
   padding: 16px 18px;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgb(var(--v-theme-background));
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
   border-radius: 8px;
   font-size: 13.5px;
@@ -1082,7 +1082,7 @@ onMounted(() => {
   font-size: 0.87em;
 }
 .preview-content :deep(pre) {
-  background: rgba(0, 0, 0, 0.32);
+  background: rgb(var(--v-theme-background));
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
   border-radius: 6px;
   padding: 12px 16px;

@@ -710,7 +710,7 @@ async function submit(): Promise<void> {
 }
 
 .prompt-textarea :deep(.v-field) {
-  background: rgba(0, 0, 0, 0.18);
+  background: rgb(var(--v-theme-background));
 }
 
 /* Shrink Vuetify's default outlined-field min-height to match label-above
