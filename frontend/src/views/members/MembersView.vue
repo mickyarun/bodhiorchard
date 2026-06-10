@@ -19,7 +19,7 @@
     <!-- Header -->
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
-        <div class="text-h5 font-weight-bold">Members</div>
+        <div class="text-h5 font-weight-bold bo-display">Members</div>
         <div class="d-flex align-center ga-3">
           <span class="text-body-2 text-medium-emphasis">
             {{ visibleMembers.length }} member{{ visibleMembers.length !== 1 ? 's' : '' }}

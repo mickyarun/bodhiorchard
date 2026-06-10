@@ -18,7 +18,7 @@
   <div class="pa-6">
     <!-- Header -->
     <div class="d-flex align-center justify-space-between mb-2">
-      <div class="text-h5 font-weight-bold">Triage Approvals</div>
+      <div class="text-h5 font-weight-bold bo-display">Triage Approvals</div>
       <v-btn-toggle v-model="statusFilter" mandatory density="compact" variant="outlined" divided>
         <v-btn value="awaiting_pm" size="small">Awaiting</v-btn>
         <v-btn value="" size="small">All</v-btn>
@@ -370,12 +370,12 @@ function formatDate(dateStr: string): string {
 
 <style scoped>
 .session-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: border-color 0.15s ease;
+  border: 1px solid rgb(var(--v-theme-rule));
+  transition: border-color var(--dur-short, 150ms) var(--ease-out, ease);
 }
 
 .session-card:hover {
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(var(--v-theme-primary), 0.45);
 }
 
 .mt-half {
@@ -383,11 +383,11 @@ function formatDate(dateStr: string): string {
 }
 
 .detail-panel {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--v-theme-surface-bright));
 }
 
 .original-message {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--v-theme-surface-bright));
   white-space: pre-wrap;
   word-break: break-word;
 }
