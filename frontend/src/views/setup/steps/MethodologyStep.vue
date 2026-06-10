@@ -16,33 +16,46 @@
 
 <template>
   <div class="methodology-page">
-    <!-- Section 1: Header -->
-    <div class="d-flex flex-column align-center text-center mb-10">
+    <!-- Section 1: Hero -->
+    <header class="methodology-hero">
       <img
         src="/assets/bodhiorchard-logo-sm.png"
-        width="48"
-        height="48"
+        width="56"
+        height="56"
         alt="Bodhiorchard"
-        class="mb-4"
+        class="methodology-hero__mark"
       />
-      <h1 class="text-h4 font-weight-bold bo-display mb-2">
+      <div class="methodology-hero__eyebrow">An AI-native way to build software</div>
+      <h1 class="methodology-hero__title bo-display">
         The Bodhiorchard Methodology
       </h1>
-      <p class="text-body-1 text-medium-emphasis mb-5" style="max-width: 600px;">
-        An AI-native way to build software. From conversation to production — every phase powered by intelligent agents working alongside humans.
+      <p class="methodology-hero__lede">
+        From conversation to production — every phase powered by intelligent
+        agents working alongside humans, in a living garden you can watch grow.
       </p>
-      <v-btn
-        color="primary"
-        variant="outlined"
-        append-icon="mdi-arrow-right"
-        @click="emit('startBuilding')"
-      >
-        Start Building
-      </v-btn>
-    </div>
+      <div class="methodology-hero__actions">
+        <v-btn
+          color="primary"
+          variant="flat"
+          size="large"
+          append-icon="mdi-arrow-right"
+          @click="emit('startBuilding')"
+        >
+          Start Building
+        </v-btn>
+        <v-btn
+          variant="text"
+          size="large"
+          prepend-icon="mdi-play-circle-outline"
+          @click="scrollToTour"
+        >
+          Watch the tour
+        </v-btn>
+      </div>
+    </header>
 
     <!-- Section 1.5: Demo videos (active player + thumbnail picker) -->
-    <div class="mb-10">
+    <div ref="tourSection" class="mb-10">
       <v-card variant="outlined">
         <div class="methodology-video-frame">
           <iframe
@@ -517,6 +530,12 @@ const emit = defineEmits<{
   startBuilding: []
 }>()
 
+// Hero "Watch the tour" smooth-scrolls down to the demo-video section.
+const tourSection = ref<HTMLElement | null>(null)
+function scrollToTour(): void {
+  tourSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 interface DemoVideo {
   value: string
   title: string
@@ -771,6 +790,48 @@ const budFeatures = [
 </script>
 
 <style scoped>
+/* ── Landing hero ───────────────────────────────────────────────────── */
+.methodology-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 28px 0 56px;
+}
+.methodology-hero__mark {
+  border-radius: 50%;
+  margin-bottom: 20px;
+}
+.methodology-hero__eyebrow {
+  font-size: var(--text-sm, 0.9rem);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label, 0.08em);
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+  margin-bottom: 14px;
+}
+.methodology-hero__title {
+  font-size: var(--text-display, clamp(2.25rem, 4vw + 1rem, 3.75rem));
+  line-height: 1.05;
+  letter-spacing: var(--tracking-display, -0.02em);
+  max-width: 16ch;
+  margin: 0 0 18px;
+  overflow-wrap: anywhere;
+}
+.methodology-hero__lede {
+  font-size: var(--text-md, 1.25rem);
+  line-height: 1.55;
+  color: rgb(var(--v-theme-on-surface-variant));
+  max-width: 58ch;
+  margin: 0 0 28px;
+}
+.methodology-hero__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 .methodology-video-frame {
   position: relative;
   aspect-ratio: 16 / 9;
