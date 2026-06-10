@@ -28,7 +28,7 @@
       />
       <v-icon icon="mdi-key-variant" size="24" />
       <div>
-        <div class="text-h6 font-weight-bold">MCP Token</div>
+        <div class="text-h6 font-weight-bold bo-display">MCP Token</div>
         <div class="text-caption text-medium-emphasis">
           Authenticate Claude Code as you for commit tracking and BUD context
         </div>
@@ -268,9 +268,9 @@ onMounted(loadStatus)
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.25);
+  background: rgb(var(--v-theme-background));
   border-radius: 4px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+  border: 1px solid rgb(var(--v-theme-rule));
 }
 
 .token-code {

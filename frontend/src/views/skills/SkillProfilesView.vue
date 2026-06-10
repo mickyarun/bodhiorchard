@@ -19,7 +19,7 @@
     <!-- Header -->
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
-        <div class="text-h5 font-weight-bold">Skill Profiles</div>
+        <div class="text-h5 font-weight-bold bo-display">Skill Profiles</div>
         <div class="text-body-2 text-medium-emphasis">
           Developer expertise extracted from git history
         </div>
@@ -341,18 +341,18 @@ onMounted(() => {
 }
 
 .profile-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: border-color 0.15s ease;
+  border: 1px solid rgb(var(--v-theme-rule));
+  transition: border-color var(--dur-short, 150ms) var(--ease-out, ease);
 }
 
 .profile-card:hover {
-  border-color: rgba(var(--v-theme-primary), 0.3);
+  border-color: rgba(var(--v-theme-primary), 0.45);
 }
 
 .module-row {
   padding: 8px 12px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--v-theme-surface-bright));
 }
 
 .module-title {
