@@ -861,17 +861,21 @@ export const BUG_STATUS_COLORS: Record<BugStatusValue, string> = {
   blocked: 'purple',
 }
 
+// Lifecycle colours grouped by stage-type rather than ten clashing Material
+// hues — keeps the kanban on the forest design system and tells the
+// plan → build → validate → ship story at a glance. All values are theme
+// tokens (see assets/styles/tokens.css), so they track light/dark.
 export const BUD_STATUS_COLORS: Record<BUDStatus, string> = {
-  'bud': 'brown',
-  'design': 'teal',
-  'tech_arch': 'deep-purple',
-  'development': 'primary',
-  'code_review': 'indigo',
-  'testing': 'purple',
-  'uat': 'orange',
-  'prod': 'success',
-  'closed': 'blue-grey',
-  'discarded': 'grey',
+  'bud': 'muted', // seed / backlog — not started
+  'design': 'info', // plan
+  'tech_arch': 'info', // plan
+  'development': 'primary', // build
+  'code_review': 'primary', // build
+  'testing': 'warning', // validate
+  'uat': 'warning', // validate
+  'prod': 'success', // shipped
+  'closed': 'muted', // archived
+  'discarded': 'error', // killed
 }
 
 // ── Job Queue Types ───────────────────────────────────────────────

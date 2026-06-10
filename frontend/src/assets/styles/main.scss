@@ -17,37 +17,117 @@
 @use './markdown-body';
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-body, 'Geist', sans-serif);
+  // Geist on the dark forest canvas reads optically heavy at 400; drop to 350
+  // (Hallmark dark-mode recipe). Light theme restores 400 below.
+  font-weight: 350;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+.v-theme--bodhiorchardLight body,
+.v-theme--bodhiorchardLight {
+  font-weight: 400;
+}
+
+// Display / wordmark register — Bricolage Grotesque, roman, tight tracking.
+.bo-display,
+.bo-wordmark {
+  font-family: var(--font-display, 'Bricolage Grotesque', sans-serif);
+  font-style: normal;
+  letter-spacing: var(--tracking-display, -0.02em);
+}
+
+// Code / terminal / tabular register — JetBrains Mono.
+.bo-mono,
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-variant-numeric: tabular-nums;
+}
+
 .setup-gradient {
-  background: linear-gradient(135deg, #0D1B0F 0%, #152415 50%, #1E3220 100%);
+  // Tracks the active theme via Vuetify's surface ramp (paper → paper-3).
+  background: linear-gradient(
+    135deg,
+    rgb(var(--v-theme-background)) 0%,
+    rgb(var(--v-theme-surface)) 55%,
+    rgb(var(--v-theme-surface-bright)) 100%
+  );
   min-height: 100vh;
 }
 
 .card-border-dark {
-  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgb(var(--v-theme-rule)) !important;
 }
 
 .step-glow {
-  box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.25);
+  box-shadow: 0 0 0 3px rgba(var(--v-theme-primary), 0.25);
 }
+
+// Token-driven tooltip (set as the global VTooltip contentClass in vuetify.ts).
+.bo-tooltip {
+  background: rgb(var(--v-theme-surface-bright)) !important;
+  color: rgb(var(--v-theme-on-surface)) !important;
+  border: 1px solid rgb(var(--v-theme-rule));
+  font-size: var(--text-sm, 0.9rem);
+  letter-spacing: 0;
+}
+
+// Visible focus ring across the app — shown instantly, never animated.
+// Uses the dedicated --color-focus token (a brighter green than the primary
+// accent) defined per-theme in tokens.css.
+:focus-visible {
+  outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(var(--v-theme-primary), 0.28);
+}
+
+// Quiet, on-brand scrollbars.
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--v-theme-rule)) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--v-theme-rule));
+  border-radius: var(--radius-pill, 999px);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: rgb(var(--v-theme-on-surface-variant)); }
 
 .fade-slide-enter-active,
 .fade-slide-leave-active {
-  transition: all 0.3s ease;
+  transition: opacity var(--dur-mid, 240ms) var(--ease-out, ease),
+              transform var(--dur-mid, 240ms) var(--ease-out, ease);
 }
 
 .fade-slide-enter-from {
   opacity: 0;
-  transform: translateX(20px);
+  transform: translateX(16px);
 }
 
 .fade-slide-leave-to {
   opacity: 0;
-  transform: translateX(-20px);
+  transform: translateX(-16px);
+}
+
+// Reduced motion: collapse spatial transitions to a short opacity crossfade.
+@media (prefers-reduced-motion: reduce) {
+  .fade-slide-enter-active,
+  .fade-slide-leave-active {
+    transition: opacity 150ms var(--ease-out, ease);
+  }
+  .fade-slide-enter-from,
+  .fade-slide-leave-to {
+    transform: none;
+  }
 }
 
 // Manifesto principles — compact with icon

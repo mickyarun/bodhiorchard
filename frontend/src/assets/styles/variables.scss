@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
+// Hallmark design system: Geist is the body/UI workhorse (replaces Inter).
+// Bricolage Grotesque carries display/wordmark; applied per-element, not here.
 @use 'vuetify/settings' with (
-  $body-font-family: ('Inter', sans-serif),
+  $body-font-family: ('Geist', sans-serif),
   $border-radius-root: 8px,
 );

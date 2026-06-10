@@ -19,7 +19,7 @@
     <!-- Header -->
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
-        <div class="text-h5 font-weight-bold">BUD Board</div>
+        <div class="text-h5 font-weight-bold bo-display">BUD Board</div>
         <div class="text-body-2 text-medium-emphasis">
           {{ filteredCount }} of {{ budStore.buds.length }} document{{ budStore.buds.length !== 1 ? 's' : '' }}
         </div>
@@ -141,19 +141,18 @@
           :key="status"
           class="board-column"
         >
-          <!-- Column header -->
-          <div class="column-header d-flex align-center justify-space-between pa-3 mb-2">
-            <div class="d-flex align-center ga-2">
-              <v-chip
-                :color="BUD_STATUS_COLORS[status]"
-                size="x-small"
-                variant="flat"
-                label
-              >
-                {{ filteredBudsByStatus[status]?.length || 0 }}
-              </v-chip>
-              <span class="text-body-2 font-weight-medium">{{ BUD_STATUS_LABELS[status] }}</span>
-            </div>
+          <!-- Column header — a ruled section head (Workbench rhythm):
+               uppercase tracked label + a flat count badge, hairline beneath. -->
+          <div class="column-header d-flex align-center justify-space-between pb-2 mb-3">
+            <span class="column-title">{{ BUD_STATUS_LABELS[status] }}</span>
+            <v-chip
+              :color="BUD_STATUS_COLORS[status]"
+              size="x-small"
+              variant="flat"
+              label
+            >
+              {{ filteredBudsByStatus[status]?.length || 0 }}
+            </v-chip>
           </div>
 
           <!-- Cards -->
@@ -686,9 +685,17 @@ function deadlineColor(deadline: string): string {
   flex-shrink: 0;
 }
 
+/* Ruled section head, not a filled box — reads as a column boundary. */
 .column-header {
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
+}
+
+.column-title {
+  font-size: var(--text-xs, 0.8rem);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label, 0.08em);
+  text-transform: uppercase;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 
 .column-cards {
@@ -696,12 +703,15 @@ function deadlineColor(deadline: string): string {
 }
 
 .bud-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: border-color 0.15s ease;
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: var(--radius-card, 10px);
+  transition: border-color var(--dur-short, 150ms) var(--ease-out, ease),
+              transform var(--dur-short, 150ms) var(--ease-out, ease);
 }
 
 .bud-card:hover {
-  border-color: rgba(var(--v-theme-primary), 0.4);
+  border-color: rgba(var(--v-theme-primary), 0.55);
+  transform: translateY(-2px);
 }
 
 .complexity-dot {
@@ -716,15 +726,15 @@ function deadlineColor(deadline: string): string {
 }
 
 .dot-empty {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgb(var(--v-theme-rule));
 }
 
 .board-filters :deep(.v-field) {
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
+  background: rgb(var(--v-theme-surface-bright));
+  border-radius: var(--radius-input, 8px);
 }
 .board-filters :deep(.v-field--focused) {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--v-theme-surface-light));
 }
 .board-filter-search {
   width: 260px;

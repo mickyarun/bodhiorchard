@@ -1,3 +1,7 @@
+# Hallmark design-skill scaffolding (provenance / diversification ledger).
+# design.md (the locked system) IS tracked; this local log is not.
+.hallmark/
+
 # Python
 __pycache__/
 *.py[cod]

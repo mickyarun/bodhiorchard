@@ -349,7 +349,48 @@ function handleLogout(): void {
 
 <style scoped>
 .app-sidebar {
-  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-right: 1px solid rgb(var(--v-theme-rule)) !important;
+}
+
+/* Hairline under the logo / notification header. */
+.app-sidebar :deep(.v-navigation-drawer__content) > .pa-4 {
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
+  margin-bottom: 4px;
+}
+
+/* Nav rhythm: quiet by default, leaf-green when active. The active item
+   carries a left indicator bar + a tonal wash so the current section reads
+   instantly without shouting. Motion is transform/opacity/colour only. */
+.app-sidebar :deep(.v-list-item) {
+  margin-block: 2px;
+  transition: background-color var(--dur-short, 150ms) var(--ease-out, ease),
+              color var(--dur-short, 150ms) var(--ease-out, ease);
+}
+
+.app-sidebar :deep(.v-list-item:hover) {
+  background: rgb(var(--v-theme-surface-bright));
+}
+
+.app-sidebar :deep(.v-list-item--active) {
+  color: rgb(var(--v-theme-primary));
+  background: var(--color-accent-soft, rgba(var(--v-theme-primary), 0.14));
+}
+
+.app-sidebar :deep(.v-list-item--active)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0 var(--radius-pill, 999px) var(--radius-pill, 999px) 0;
+  background: rgb(var(--v-theme-primary));
+  opacity: 1;
+}
+
+.app-sidebar :deep(.v-list-item--active .v-icon) {
+  color: rgb(var(--v-theme-primary));
 }
 
 .app-main {
@@ -379,6 +420,6 @@ function handleLogout(): void {
 }
 
 .user-menu:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--v-theme-surface-bright));
 }
 </style>

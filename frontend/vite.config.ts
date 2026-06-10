@@ -72,7 +72,9 @@ export default defineConfig({
     allowedHosts: ['frontendchat.ngrok.app', 'macbook-pro.taile1406f.ts.net'],
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        // Override the proxy target for side-by-side dev (e.g. a worktree
+        // backend on another port) via VITE_API_TARGET. Defaults to :8000.
+        target: process.env.VITE_API_TARGET || 'http://localhost:8000',
         changeOrigin: true,
         timeout: 300000, // 5 min — AI chat endpoints can be slow
         ws: true,

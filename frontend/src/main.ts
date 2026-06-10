@@ -18,6 +18,7 @@ import App from './App.vue'
 import router from './router'
 import vuetify from './plugins/vuetify'
 import '@mdi/font/css/materialdesignicons.css'
+import './assets/styles/tokens.css'
 import './assets/styles/main.scss'
 
 const app = createApp(App)

@@ -1,0 +1,116 @@
+/*
+ * Copyright 2025-2026 Arun Rajkumar
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Hallmark · design system tokens — Bodhiorchard
+ * The single source of truth for colour, type, space, motion, and radius.
+ * Source of record is design.md at the repo root. Dark is the default theme
+ * (:root); the light variant overrides under Vuetify's theme class so the
+ * custom properties track whichever theme Vuetify has activated.
+ *
+ * Anchor hue 150° (forest green). Vibe: cultivated dev-ops, forest-deep,
+ * harvest-gold. Display Bricolage Grotesque · body Geist · mono JetBrains Mono.
+ */
+
+:root {
+  /* ── Colour · dark (primary identity) ─────────────────────────────── */
+  --color-paper:        oklch(17% 0.025 152);   /* deep forest canvas      */
+  --color-paper-2:      oklch(21% 0.026 152);   /* card surface  (+1)      */
+  --color-paper-3:      oklch(25% 0.026 152);   /* elevated / hover (+2)   */
+  --color-ink:          oklch(94% 0.012 150);   /* primary text (sage)     */
+  --color-ink-2:        oklch(78% 0.014 150);   /* secondary text          */
+  --color-muted:        oklch(62% 0.014 150);   /* metadata / hints        */
+  --color-rule:         oklch(31% 0.018 150);   /* dividers                */
+  --color-rule-2:       oklch(27% 0.016 150);   /* faint dividers          */
+
+  --color-accent:       oklch(66% 0.15 150);    /* leaf-green — primary    */
+  --color-accent-ink:   oklch(16% 0.02 150);    /* text on accent fill     */
+  --color-accent-soft:  oklch(66% 0.15 150 / 0.14); /* tonal accent wash   */
+  --color-focus:        oklch(72% 0.19 150);    /* focus ring (instant)    */
+
+  --color-gold:         oklch(80% 0.13 85);     /* harvest signal — reward */
+  --color-gold-ink:     oklch(22% 0.03 85);     /* text on gold fill       */
+  --color-gold-soft:    oklch(80% 0.13 85 / 0.16);
+
+  /* Status — distinct from the two brand accents */
+  --color-success:      oklch(74% 0.16 145);
+  --color-error:        oklch(65% 0.17 27);
+  --color-warning:      oklch(79% 0.13 68);
+  --color-info:         oklch(70% 0.12 235);
+
+  /* ── Type ─────────────────────────────────────────────────────────── */
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-body:    "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --text-xs:      0.8rem;     /* 12.8px */
+  --text-sm:      0.9rem;     /* 14.4px */
+  --text-base:    1rem;       /* 16px   */
+  --text-md:      1.25rem;    /* 20px   */
+  --text-lg:      1.5625rem;  /* 25px   */
+  --text-xl:      1.953rem;   /* 31.25px*/
+  --text-2xl:     2.441rem;   /* 39px   */
+  --text-display: clamp(2.25rem, 4vw + 1rem, 3.75rem);
+
+  --tracking-display: -0.02em;
+  --tracking-label:   0.08em;
+  --leading-tight:    1.12;
+  --leading-body:     1.55;
+
+  /* ── Space · 4-point scale ────────────────────────────────────────── */
+  --space-3xs: 0.25rem; --space-2xs: 0.5rem;  --space-xs: 0.75rem;
+  --space-sm:  1rem;    --space-md:  1.5rem;  --space-lg: 2rem;
+  --space-xl:  3rem;    --space-2xl: 4.5rem;  --space-3xl: 7rem;
+
+  /* ── Motion ───────────────────────────────────────────────────────── */
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:     cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-short:   150ms;
+  --dur-mid:     240ms;
+  --dur-long:    360ms;
+
+  /* ── Radius ───────────────────────────────────────────────────────── */
+  --radius-card:  10px;
+  --radius-input: 8px;
+  --radius-pill:  999px;
+}
+
+/* ── Colour · light (derived — hue 150° held, lightness/chroma flipped) ─ */
+.v-theme--bodhiorchardLight {
+  --color-paper:        oklch(97% 0.012 150);
+  --color-paper-2:      oklch(99.3% 0.004 150);
+  --color-paper-3:      oklch(95% 0.014 150);
+  --color-ink:          oklch(22% 0.02 150);
+  --color-ink-2:        oklch(40% 0.018 150);
+  --color-muted:        oklch(54% 0.014 150);
+  --color-rule:         oklch(86% 0.014 150);
+  --color-rule-2:       oklch(90% 0.012 150);
+
+  --color-accent:       oklch(50% 0.14 150);
+  --color-accent-ink:   oklch(98% 0.01 150);
+  --color-accent-soft:  oklch(50% 0.14 150 / 0.12);
+  --color-focus:        oklch(52% 0.17 150);
+
+  --color-gold:         oklch(68% 0.13 80);
+  --color-gold-ink:     oklch(22% 0.03 85);
+  --color-gold-soft:    oklch(68% 0.13 80 / 0.16);
+
+  --color-success:      oklch(52% 0.15 145);
+  --color-error:        oklch(55% 0.18 27);
+  --color-warning:      oklch(70% 0.14 68);
+  --color-info:         oklch(55% 0.13 235);
+}
