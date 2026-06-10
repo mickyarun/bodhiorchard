@@ -135,6 +135,16 @@ def _is_pure_ack(text: str) -> bool:
     return normalised in _ACK_PHRASES
 
 
+def is_acknowledgement(text: str) -> bool:
+    """Public wrapper around the local ack check.
+
+    Exposed so the Slack Q&A service can short-circuit pure-ack thread
+    replies ("thanks", "ok") before resuming the CLI session — without
+    spawning a subprocess and without importing a private symbol.
+    """
+    return _is_pure_ack(text)
+
+
 def _format_thread_tail(thread_messages: list[dict[str, Any]] | None) -> str:
     """Render the last few thread messages for the router prompt."""
     if not thread_messages:

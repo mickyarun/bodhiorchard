@@ -2,9 +2,9 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License").
 
-"""Intent → specialist wire-up in ``_run_qa_agent``.
+"""Slack Q&A dispatch + one-CLI-session-per-thread wire-up.
 
-Three behaviours we need to guarantee won't regress:
+Behaviours we guarantee won't regress:
 
 1. **ACK never spawns a subprocess.** The mega-skill paid 12 s + the
    Sonnet cost for every "thanks". The ACK short-circuit must keep
@@ -13,13 +13,20 @@ Three behaviours we need to guarantee won't regress:
 2. **Each non-ACK intent loads the right specialist + tool set.**
    The pipeline only works if (a) the router's label, (b) the skill
    loaded, and (c) the MCP tool whitelist passed to the subprocess
-   are aligned. A wrong tool list silently breaks the specialist —
-   e.g., the disambiguate skill calling ``check_feature_exists``
-   when the dispatcher forgot to whitelist it.
+   are aligned.
 3. **Drill-down hint flows end-to-end.** When ``session.context``
    carries a prior BUD candidate, the bud-fact specialist must
    receive a ``[HINT_BUD_NUMBER]`` marker so it can skip its initial
-   keyword search and answer in one fewer turn.
+   keyword search.
+4. **Soft vs hard specialist failure.** ``MAX_TURNS`` / ``TIMEOUT``
+   surface the not_found copy and keep the session open; hard errors
+   flip it to ERRORED.
+5. **One CLI session per thread.** The first turn claims the row UUID
+   with ``--session-id``; follow-ups resume it (no router, reply-only
+   prompt, full tool union); a resume that can't answer falls back
+   once to the full-parse pipeline with no session affinity; pure-ack
+   follow-ups short-circuit before resuming; and ``_RESUME_MODEL`` must
+   match the specialists' declared model.
 
 All Claude calls and Slack posts are stubbed — these tests are
 hermetic and cheap.
@@ -36,10 +43,14 @@ import pytest
 from app.models.feature_qa_session import FeatureQAStatus
 from app.services import slack_client, slack_feature_qa
 from app.services.claude_errors import ClaudeErrorCode
+from app.services.skill_loader import load_skill
 from app.services.slack_feature_qa import (
+    _ALL_QA_TOOLS,
     _SKILL_BY_INTENT,
     _TOOLS_BY_INTENT,
+    _resume_qa_turn,
     _run_qa_agent,
+    continue_feature_qa,
 )
 from app.services.slack_qa_router import QaIntent
 
@@ -325,3 +336,323 @@ async def test_hard_error_still_marks_session_errored(
     texts = [text for text, _ in _silence_slack_posts["posts"]]
     assert slack_feature_qa._GENERIC_FAILURE_REPLY in texts
     assert slack_feature_qa._BUD_NOT_FOUND_REPLY not in texts
+
+
+# ── 5. One CLI session per thread: claim on first turn, resume after ──
+
+
+def _queue_runs(monkeypatch: Any, results: list[Any]) -> list[dict[str, Any]]:
+    """Stub run_claude_code to return ``results`` in order, recording calls.
+
+    Each captured record carries the prompt, the full config (so tests can
+    assert ``cli_session_id`` / ``is_resume``), and the tool whitelist.
+    """
+    runs: list[dict[str, Any]] = []
+    pending = list(results)
+
+    async def _capture(*, prompt: str, working_dir: str, config: Any) -> Any:
+        runs.append(
+            {
+                "prompt": prompt,
+                "config": config,
+                "tool_names": list(config.mcp.tool_names) if config.mcp else [],
+            }
+        )
+        nxt = pending.pop(0)
+        if isinstance(nxt, BaseException):
+            raise nxt  # exercise the resume except-branch
+        return nxt
+
+    monkeypatch.setattr(slack_feature_qa, "run_claude_code", _capture)
+    return runs
+
+
+def _ok_result(action: str = "not_found") -> Any:
+    return MagicMock(
+        success=True,
+        output=f'{{"action": "{action}", "data": {{"message": ""}}}}',
+        error=None,
+    )
+
+
+def _fail_result(code: ClaudeErrorCode = ClaudeErrorCode.UNKNOWN) -> Any:
+    return MagicMock(success=False, output="", error="boom", error_code=code)
+
+
+def _no_router(monkeypatch: Any) -> list[bool]:
+    """Replace the router with a tripwire — resume turns must NOT classify."""
+    called: list[bool] = []
+
+    async def _tripwire(**kw: Any) -> QaIntent:
+        called.append(True)
+        return QaIntent.UNKNOWN
+
+    monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _tripwire)
+    return called
+
+
+@pytest.mark.asyncio
+async def test_start_turn_claims_session_id_with_session_id_flag(
+    monkeypatch: Any,
+) -> None:
+    """The first turn must pass ``cli_session_id`` (the row UUID) with
+    ``is_resume=False`` so the CLI claims the namespace via ``--session-id``,
+    letting every follow-up resume it."""
+
+    async def _explain(**kw: Any) -> QaIntent:
+        return QaIntent.EXPLAIN
+
+    monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _explain)
+    runs = _queue_runs(monkeypatch, [_ok_result("summary")])
+
+    session = _make_session()
+    await _run_qa_agent(
+        MagicMock(),
+        MagicMock(id=uuid.uuid4()),
+        "bot-token",
+        session,
+        thread_messages=None,
+        cli_session_id=str(session.id),
+    )
+
+    assert len(runs) == 1
+    cfg = runs[0]["config"]
+    assert cfg.cli_session_id == str(session.id)
+    assert cfg.is_resume is False
+
+
+@pytest.mark.asyncio
+async def test_fallback_run_has_no_session_affinity(monkeypatch: Any) -> None:
+    """When ``_run_qa_agent`` runs without a ``cli_session_id`` (the resume
+    fallback), it must not claim any session — ``cli_session_id`` stays None."""
+
+    async def _explain(**kw: Any) -> QaIntent:
+        return QaIntent.EXPLAIN
+
+    monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _explain)
+    runs = _queue_runs(monkeypatch, [_ok_result("summary")])
+
+    await _run_qa_agent(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", _make_session(), thread_messages=None
+    )
+
+    cfg = runs[0]["config"]
+    assert cfg.cli_session_id is None
+    assert cfg.is_resume is False
+
+
+@pytest.mark.asyncio
+async def test_resume_turn_sends_only_reply_and_skips_router(monkeypatch: Any) -> None:
+    """A follow-up resumes the thread's session: ``is_resume=True`` with the
+    row UUID, the prompt carries ONLY the reply (no specialist skill body),
+    the full QA tool union is allowed, and the router never runs."""
+    router_calls = _no_router(monkeypatch)
+    runs = _queue_runs(monkeypatch, [_ok_result("answer")])
+
+    session = _make_session()
+    await _resume_qa_turn(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, "delivery date?"
+    )
+
+    assert router_calls == [], "resume must NOT re-run the intent router"
+    assert len(runs) == 1
+    cfg = runs[0]["config"]
+    assert cfg.is_resume is True
+    assert cfg.cli_session_id == str(session.id)
+    assert sorted(runs[0]["tool_names"]) == sorted(_ALL_QA_TOOLS)
+    prompt = runs[0]["prompt"]
+    assert "delivery date?" in prompt
+    # No specialist skill body is re-sent on resume — it's already in
+    # the resumed conversation. The skill headings are the cheap tell.
+    assert "# Slack BUD Fact Lookup" not in prompt
+    assert "# Slack Feature Explain" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_resume_failure_falls_back_to_full_pipeline(monkeypatch: Any) -> None:
+    """If resume can't produce an answer (e.g. the session file is gone),
+    fall back once to the full-parse pipeline: a SECOND run with
+    ``is_resume=False`` that DOES route, and the reply still lands."""
+
+    async def _timeline(**kw: Any) -> QaIntent:
+        return QaIntent.TIMELINE
+
+    monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _timeline)
+
+    async def _replies(token: str, channel: str, thread_ts: str) -> list[dict[str, Any]]:
+        return [{"user": "U777", "text": "delivery date?"}]
+
+    monkeypatch.setattr(slack_client, "conversations_replies", _replies)
+    runs = _queue_runs(monkeypatch, [_fail_result(), _ok_result("answer")])
+
+    session = _make_session()
+    await _resume_qa_turn(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, "delivery date?"
+    )
+
+    assert len(runs) == 2, "resume failure must trigger exactly one fallback run"
+    assert runs[0]["config"].is_resume is True
+    assert runs[1]["config"].is_resume is False
+    assert runs[1]["config"].cli_session_id is None
+
+
+@pytest.mark.asyncio
+async def test_triage_seeded_handover_resume_miss_builds_hint(monkeypatch: Any) -> None:
+    """The triage→Q&A seam: a session seeded with ``candidates`` but no prior
+    CLI turn. The first reply's resume misses (no session file), and the
+    fallback full-parse must build ``[HINT_BUD_NUMBER]`` from the seeded
+    candidate so the answer stays grounded in the right BUD."""
+
+    async def _timeline(**kw: Any) -> QaIntent:
+        return QaIntent.TIMELINE
+
+    monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _timeline)
+
+    async def _replies(token: str, channel: str, thread_ts: str) -> list[dict[str, Any]]:
+        return [{"user": "U777", "text": "delivery date?"}]
+
+    monkeypatch.setattr(slack_client, "conversations_replies", _replies)
+    runs = _queue_runs(monkeypatch, [_fail_result(), _ok_result("answer")])
+
+    session = _make_session(
+        context={
+            "candidates": [{"kind": "bud", "id": "u-1", "bud_number": 17, "title": "Masking"}]
+        }
+    )
+    await _resume_qa_turn(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, "delivery date?"
+    )
+
+    fallback_prompt = runs[1]["prompt"]
+    conversation = fallback_prompt.split("## Conversation", 1)[-1]
+    assert "[HINT_BUD_NUMBER]" in conversation
+    assert "BUD-017" in conversation
+
+
+@pytest.mark.asyncio
+async def test_continue_ack_short_circuits_before_resume(
+    monkeypatch: Any,
+    _silence_slack_posts: dict[str, list[tuple[str, str | None]]],
+) -> None:
+    """A pure-ack thread reply ("thanks") posts the canned reply and never
+    resumes the session — no subprocess, no router."""
+    router_calls = _no_router(monkeypatch)
+    runs = _queue_runs(monkeypatch, [])
+
+    session = _make_session()
+    repo = MagicMock()
+
+    async def _get(channel: str, thread_ts: str) -> Any:
+        return session
+
+    repo.get_by_thread = _get
+    monkeypatch.setattr(slack_feature_qa, "FeatureQASessionRepository", lambda db, *, org_id: repo)
+
+    await continue_feature_qa(
+        MagicMock(),
+        MagicMock(id=uuid.uuid4()),
+        "bot-token",
+        "C123",
+        "1780000000.0001",
+        "thanks",
+    )
+
+    assert runs == [], "ack must not spawn a subprocess"
+    assert router_calls == [], "ack must not run the router"
+    texts = [text for text, _ in _silence_slack_posts["posts"]]
+    assert slack_feature_qa._ACK_REPLY in texts
+
+
+@pytest.mark.asyncio
+async def test_continue_non_ack_resumes(
+    monkeypatch: Any,
+) -> None:
+    """A non-ack reply on an active session resumes (``is_resume=True``) and
+    does NOT re-route through the intent classifier."""
+    router_calls = _no_router(monkeypatch)
+    runs = _queue_runs(monkeypatch, [_ok_result("answer")])
+
+    session = _make_session()
+    repo = MagicMock()
+
+    async def _get(channel: str, thread_ts: str) -> Any:
+        return session
+
+    repo.get_by_thread = _get
+    monkeypatch.setattr(slack_feature_qa, "FeatureQASessionRepository", lambda db, *, org_id: repo)
+
+    await continue_feature_qa(
+        MagicMock(),
+        MagicMock(id=uuid.uuid4()),
+        "bot-token",
+        "C123",
+        "1780000000.0001",
+        "what's the delivery date?",
+    )
+
+    assert router_calls == []
+    assert len(runs) == 1
+    assert runs[0]["config"].is_resume is True
+
+
+@pytest.mark.asyncio
+async def test_resume_parse_failure_errors_without_fallback(
+    monkeypatch: Any,
+    _silence_slack_posts: dict[str, list[tuple[str, str | None]]],
+) -> None:
+    """A resume that succeeds at the subprocess level but returns
+    unparseable output must post the parse-failure copy and flip the
+    session to ERRORED — and must NOT trigger a second (fallback) run.
+    Pins that the fallback fires on subprocess failure, not on bad JSON."""
+    _no_router(monkeypatch)
+    unparseable = MagicMock(success=True, output="not json at all", error=None)
+    runs = _queue_runs(monkeypatch, [unparseable])
+
+    session = _make_session()
+    await _resume_qa_turn(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, "delivery date?"
+    )
+
+    assert len(runs) == 1, "a parse failure is not a resume failure — no fallback run"
+    assert session.status == FeatureQAStatus.ERRORED
+    texts = [text for text, _ in _silence_slack_posts["posts"]]
+    assert slack_feature_qa._PARSE_FAILURE_REPLY in texts
+
+
+@pytest.mark.asyncio
+async def test_resume_subprocess_raises_falls_back(monkeypatch: Any) -> None:
+    """If the resume subprocess *raises* (not just returns failure), the
+    except-branch must swallow-then-fall-back — one fresh full-parse run
+    that still lands a reply. Exercises the ``result is None`` path."""
+
+    async def _timeline(**kw: Any) -> QaIntent:
+        return QaIntent.TIMELINE
+
+    monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _timeline)
+
+    async def _replies(token: str, channel: str, thread_ts: str) -> list[dict[str, Any]]:
+        return [{"user": "U777", "text": "delivery date?"}]
+
+    monkeypatch.setattr(slack_client, "conversations_replies", _replies)
+    runs = _queue_runs(monkeypatch, [RuntimeError("subprocess died"), _ok_result("answer")])
+
+    session = _make_session()
+    await _resume_qa_turn(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, "delivery date?"
+    )
+
+    assert len(runs) == 2, "a raised resume must still fall back to one full-parse run"
+    assert runs[1]["config"].is_resume is False
+
+
+def test_resume_model_matches_specialist_declared_model() -> None:
+    """``_RESUME_MODEL`` must equal the model the QA specialists declare,
+    or a resumed turn would switch models mid-conversation. Loads the real
+    specialist skills so a frontmatter edit that moves a specialist off
+    Sonnet fails here loudly instead of silently drifting."""
+    for slug in set(_SKILL_BY_INTENT.values()):
+        skill = load_skill(slug)
+        assert skill.model == slack_feature_qa._RESUME_MODEL, (
+            f"specialist {slug!r} declares model {skill.model!r}, "
+            f"but _RESUME_MODEL is {slack_feature_qa._RESUME_MODEL!r} — they must match"
+        )
