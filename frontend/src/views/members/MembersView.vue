@@ -270,7 +270,7 @@
         v-for="role in store.roles"
         :key="role.id"
         color="surface"
-        variant="outlined"
+        border
         class="role-card"
       >
         <v-card-text class="pb-2">

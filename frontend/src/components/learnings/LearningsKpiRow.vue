@@ -72,7 +72,7 @@ defineProps<{
 .kpi {
   position: relative;
   padding: 14px 16px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 12px;
   background: linear-gradient(
     180deg,

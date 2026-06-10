@@ -92,10 +92,10 @@ function contributorPct(row: TopContributor): number {
 
 <style scoped>
 .card {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 12px;
   padding: 18px 20px 20px;
-  background: rgba(var(--v-theme-surface-variant), 0.04);
+  background: rgb(var(--v-theme-surface));
 }
 
 .card__head {
