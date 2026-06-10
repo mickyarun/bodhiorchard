@@ -81,7 +81,7 @@
             v-for="repo in repoStatusList"
             :key="repo.repoName"
             class="d-flex align-center ga-2 pa-2 rounded"
-            style="border: 1px solid rgba(255,255,255,0.08)"
+            style="border: 1px solid rgb(var(--v-theme-rule))"
           >
             <v-icon icon="mdi-source-repository" size="18" />
             <span class="text-body-2 flex-grow-1">{{ repo.repoName }}</span>
@@ -143,7 +143,7 @@
             v-for="repo in repoStatusList"
             :key="repo.repoName"
             class="d-flex align-center ga-2 pa-2 rounded"
-            style="border: 1px solid rgba(255,255,255,0.08)"
+            style="border: 1px solid rgb(var(--v-theme-rule))"
           >
             <v-icon
               :icon="repo.hasReleasePR ? 'mdi-check-circle' : 'mdi-clock-outline'"

@@ -1017,10 +1017,10 @@ watch(filteredCases, (list) => {
   display: inline-block;
   margin-left: 8px;
   padding: 1px 6px;
-  background: rgba(0, 0, 0, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgb(var(--v-theme-background));
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 3px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 10px;
   font-weight: 700;
   line-height: 1.2;

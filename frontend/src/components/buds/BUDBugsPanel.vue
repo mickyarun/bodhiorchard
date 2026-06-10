@@ -72,7 +72,7 @@
         v-for="bug in bugs"
         :key="bug.id"
         class="d-flex align-center ga-2 pa-2 rounded"
-        style="border: 1px solid rgba(255,255,255,0.06); cursor: pointer"
+        style="border: 1px solid rgb(var(--v-theme-rule)); cursor: pointer"
         @click="$router.push('/bugs')"
       >
         <v-chip :color="BUG_SEVERITY_COLORS[bug.severity]" size="x-small" variant="tonal">

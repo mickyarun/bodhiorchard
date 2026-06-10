@@ -344,22 +344,7 @@
                   <div class="field col-12">
                     <div class="d-flex align-center justify-space-between">
                       <label class="field-label">Prompt</label>
-                      <v-btn-toggle
-                        v-model="previewMode"
-                        mandatory
-                        density="compact"
-                        variant="outlined"
-                        divided
-                      >
-                        <v-btn value="edit" size="x-small" class="text-none">
-                          <v-icon start size="13">mdi-pencil-outline</v-icon>
-                          Edit
-                        </v-btn>
-                        <v-btn value="preview" size="x-small" class="text-none">
-                          <v-icon start size="13">mdi-eye-outline</v-icon>
-                          Preview
-                        </v-btn>
-                      </v-btn-toggle>
+                      <AppPillToggle v-model="previewMode" :options="PREVIEW_MODE_OPTIONS" size="sm" />
                     </div>
                     <v-textarea
                       v-if="previewMode === 'edit'"
@@ -531,6 +516,12 @@ import {
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import CustomSkillDialog from './CustomSkillDialog.vue'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
+
+const PREVIEW_MODE_OPTIONS: { label: string; value: 'edit' | 'preview' }[] = [
+  { label: 'Edit', value: 'edit' },
+  { label: 'Preview', value: 'preview' },
+]
 
 const store = useAgentSkillsStore()
 

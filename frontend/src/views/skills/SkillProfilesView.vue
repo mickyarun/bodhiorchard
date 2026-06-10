@@ -47,16 +47,7 @@
         style="max-width: 360px;"
       />
       <v-spacer />
-      <v-btn-toggle v-model="viewMode" density="compact" mandatory variant="outlined" divided>
-        <v-btn value="developers" size="small">
-          <v-icon icon="mdi-account-outline" size="16" class="mr-1" />
-          By Developer
-        </v-btn>
-        <v-btn value="modules" size="small">
-          <v-icon icon="mdi-cube-outline" size="16" class="mr-1" />
-          By Module
-        </v-btn>
-      </v-btn-toggle>
+      <AppPillToggle v-model="viewMode" :options="VIEW_MODE_OPTIONS" size="sm" />
     </div>
 
     <!-- Loading -->
@@ -230,6 +221,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { useSkillsStore } from '@/stores/skills'
 import type { ModuleSkill } from '@/types'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
+
+const VIEW_MODE_OPTIONS: { label: string; value: 'developers' | 'modules' }[] = [
+  { label: 'By Developer', value: 'developers' },
+  { label: 'By Module', value: 'modules' },
+]
 
 const store = useSkillsStore()
 

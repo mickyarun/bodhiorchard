@@ -245,8 +245,8 @@ async function copyExport(): Promise<void> {
   align-items: center;
   gap: 6px;
   padding: 4px 6px;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+  background: rgb(var(--v-theme-background));
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 4px;
 }
 

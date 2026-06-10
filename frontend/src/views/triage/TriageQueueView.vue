@@ -19,10 +19,7 @@
     <!-- Header -->
     <div class="d-flex align-center justify-space-between mb-2">
       <div class="text-h5 font-weight-bold bo-display">Triage Approvals</div>
-      <v-btn-toggle v-model="statusFilter" mandatory density="compact" variant="outlined" divided>
-        <v-btn value="awaiting_pm" size="small">Awaiting</v-btn>
-        <v-btn value="" size="small">All</v-btn>
-      </v-btn-toggle>
+      <AppPillToggle v-model="statusFilter" :options="STATUS_OPTIONS" size="sm" />
     </div>
     <div class="text-body-2 text-medium-emphasis mb-6">
       {{ triageStore.sessions.length }} session{{ triageStore.sessions.length !== 1 ? 's' : '' }}
@@ -253,7 +250,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import { useTriageStore, type TriageSession } from '@/stores/triage'
+
+const STATUS_OPTIONS = [
+  { label: 'Awaiting', value: 'awaiting_pm' },
+  { label: 'All', value: '' },
+]
 
 const triageStore = useTriageStore()
 
