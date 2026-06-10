@@ -67,21 +67,44 @@
 
     <!-- Host back-to-garden gate: leaving the lobby (or the 3 s countdown
          window) before the race actually runs cancels it for every
-         invitee, so the destructive default needs explicit confirmation. -->
-    <v-dialog v-model="cancelDialogOpen" max-width="420">
-      <v-card>
-        <v-card-title class="text-h6">Cancel this race?</v-card-title>
-        <v-card-text>
+         invitee, so the destructive default needs explicit confirmation.
+         Styled to match the rest of the race chrome: dark surface card,
+         AppCallout warning body, pill action row echoing the lobby's
+         "Invite more" / "Back to garden" pair. -->
+    <v-dialog v-model="cancelDialogOpen" max-width="440">
+      <v-card class="cancel-race-card" color="surface">
+        <div class="cancel-race-card__eyebrow">
+          <CheckerFlagIcon :size="12" />
+          Confirm cancellation
+        </div>
+        <h2 class="cancel-race-card__title">Cancel this race?</h2>
+        <AppCallout
+          variant="warning"
+          eyebrow="Affects everyone invited"
+          icon="mdi-flag-off-outline"
+          class="cancel-race-card__callout"
+        >
           Leaving the lobby ends the race for everyone you invited. They'll
           be sent back to the garden.
-        </v-card-text>
-        <v-card-actions class="px-4 pb-4">
-          <v-spacer />
-          <v-btn variant="text" @click="cancelDialogOpen = false">Keep racing</v-btn>
-          <v-btn color="error" variant="flat" @click="confirmCancelAndLeave">
+        </AppCallout>
+        <div class="cancel-race-card__actions">
+          <button
+            type="button"
+            class="cta__pill cta__pill--ghost"
+            @click="cancelDialogOpen = false"
+          >
+            <v-icon icon="mdi-arrow-left" size="16" />
+            Keep racing
+          </button>
+          <button
+            type="button"
+            class="cta__pill cta__pill--danger"
+            @click="confirmCancelAndLeave"
+          >
+            <v-icon icon="mdi-close-circle-outline" size="16" />
             Cancel race
-          </v-btn>
-        </v-card-actions>
+          </button>
+        </div>
       </v-card>
     </v-dialog>
 
@@ -106,6 +129,7 @@ import RaceLivePanel from './RaceLivePanel.vue'
 import RaceResultsCard from './RaceResultsCard.vue'
 import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
 import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 
 const props = defineProps<{
   roomId: string
@@ -291,5 +315,47 @@ function leaveImmediate(): void {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   font-weight: 700;
+}
+
+/* ── Cancel-race dialog ─────────────────────
+   Reuses the race-error rhythm (eyebrow → italic display title) but
+   compressed for a modal. Dark surface lets the AppCallout warning
+   tint read as the focal point; the pill actions echo the lobby's
+   CTA row so the two surfaces feel like a continuous flow. */
+.cancel-race-card {
+  padding: 26px 26px 22px;
+  border-radius: 14px;
+}
+.cancel-race-card__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 14px;
+}
+.cancel-race-card__title {
+  font-size: clamp(22px, 3vw, 28px);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0 0 14px;
+}
+.cancel-race-card__callout {
+  margin-bottom: 18px;
+}
+.cancel-race-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 </style>

@@ -711,53 +711,7 @@ const allSlots = computed<LobbySlot[]>(() => {
   margin-top: 12px;
 }
 
-/* Pill buttons that echo the page's eyebrow language
-   (uppercase, letter-spaced, soft outlined pill). They sit BELOW
-   the giant START RACE button so they need to read as secondary
-   without disappearing into the background. */
-.cta__pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 18px;
-  border-radius: 999px;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  cursor: pointer;
-  transition: background 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
-}
-.cta__pill:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.cta__pill:hover:not(:disabled) { transform: translateY(-1px); }
-
-/* Host primary-ish: golden accent matches the HOST badge + the
-   yellow status text in the page eyebrow. */
-.cta__pill--host {
-  color: #ffd75e;
-  background: rgba(255, 215, 94, 0.08);
-  border: 1px solid rgba(255, 215, 94, 0.32);
-}
-.cta__pill--host:hover:not(:disabled) {
-  background: rgba(255, 215, 94, 0.16);
-  border-color: rgba(255, 215, 94, 0.55);
-  color: #fff1c0;
-}
-
-/* Ghost: neutral pill for low-stakes exits. Same pill silhouette so
-   the two buttons read as a pair, even when the host one is hidden. */
-.cta__pill--ghost {
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-.cta__pill--ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.24);
-  color: #fff;
-}
+/* Pill button visuals (.cta__pill, --host, --ghost, --danger) live in
+   assets/styles/race-pills.scss so the silhouette stays consistent
+   across lobby, cancel dialog, and invite-more dialog. */
 </style>
