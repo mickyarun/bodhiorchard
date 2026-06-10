@@ -36,6 +36,7 @@ import { ActiveRaceSummary } from "../schema/ActiveRaceSummary"
 import { ALLOWED_DISTANCES_M, MAX_RACERS } from "../../../shared/race/RaceConstants"
 import { postRaceInvite } from "../bridge/BackendClient"
 import { registerRaceHooks } from "../bridge/RaceRegistry"
+import { RaceRoom } from "./RaceRoom"
 
 export interface RaceCreateMessage {
   invitedUserIds: string[]
@@ -114,6 +115,15 @@ async function handleRaceCreate(
           return
         }
         summary.phase = phase
+      },
+      onInviteeDeclined: (userId: string) => {
+        // `matchMaker.createRoom` resolves to an `IRoomCache` lookup stub,
+        // not the live Room instance — so `newRoom instanceof RaceRoom`
+        // is always false. Resolve the instance via `getLocalRoomById`,
+        // which is the single-process Colyseus API for "give me the actual
+        // Room object that's running right here."
+        const instance = matchMakerMod.matchMaker.getLocalRoomById(newRoom.roomId)
+        if (instance instanceof RaceRoom) instance.removeInvitee(userId)
       },
     })
 

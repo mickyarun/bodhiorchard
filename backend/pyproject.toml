@@ -84,6 +84,10 @@ ignore = ["B008"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
+# PEP 695 generic syntax (`def f[T](...)`) is used in `scan/_async_compute.py`
+# and `scan/session.py`. mypy gates the parser behind this flag until the
+# implementation stabilises; the runtime accepts it on 3.12+ already.
+enable_incomplete_feature = ["NewGenericSyntax"]
 
 [[tool.mypy.overrides]]
 module = [

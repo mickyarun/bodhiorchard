@@ -32,6 +32,7 @@
  * plain snapshot object — the consumer maps it to Vue refs / the engine.
  */
 import { Client, getStateCallbacks, Room } from "@colyseus/sdk"
+import type { ArraySchema } from "@colyseus/schema"
 import type { RacePhase, Placing } from "@shared/race/types"
 import { resolveColyseusUrl } from "./colyseusUrl"
 
@@ -86,12 +87,6 @@ interface RawPlacing {
   distanceM?: number
 }
 
-/** Minimal ArraySchema shape — just the iteration primitive we use to
- *  rebuild our plain-array snapshot. */
-interface ArrayLike<T> {
-  forEach: (fn: (v: T) => void) => void
-}
-
 interface RaceStateShape {
   orgId: string
   hostUserId: string
@@ -103,9 +98,12 @@ interface RaceStateShape {
   // Collections are populated by the first state patch but can be
   // undefined during the brief window between `joinById` resolving and
   // the first schema sync — guarded in `snapshotFromState`.
-  invitedUserIds: ArrayLike<string>
+  // `ArraySchema` typing matters: the `$(state)` callback wrapper
+  // conditionally exposes `onAdd`/`onRemove` only when the field type is
+  // recognised as a Colyseus schema collection.
+  invitedUserIds: ArraySchema<string>
   racers: Map<string, RawRacer>
-  placings: ArrayLike<RawPlacing>
+  placings: ArraySchema<RawPlacing>
 }
 
 export interface RaceAuth {
@@ -125,8 +123,11 @@ export interface RaceRoomClientLike {
   readonly isHost: boolean
   readonly roomId: string | undefined
   onStateChange: ((snapshot: RaceStateSnapshot) => void) | null
+  onRaceCancelled: ((info: { hostName: string }) => void) | null
   sendRaceJoin(): void
   sendRaceStart(): void
+  sendRaceCancel(): void
+  sendAddInvitees(userIds: string[]): void
   sendMove(isMoving: boolean): void
   sendSprintTap(): void
 }
@@ -141,6 +142,15 @@ export class RaceRoomClient {
 
   /** Fires with the latest snapshot on every server state change. */
   onStateChange: ((snapshot: RaceStateSnapshot) => void) | null = null
+
+  /**
+   * Fires when the host hits cancel in lobby/countdown — for every
+   * client in the room, including the host's own session. The server
+   * deliberately echoes the broadcast back to the sender so the host
+   * can drive their own toast + navigation from this handler instead
+   * of racing `room.send` against the `router.push`-triggered unmount.
+   */
+  onRaceCancelled: ((info: { hostName: string }) => void) | null = null
 
   /** Auth fields carried into `race_join` after `joinById` resolves. */
   private authName = ""
@@ -168,6 +178,9 @@ export class RaceRoomClient {
       name: auth.name,
       characterModel: this.authCharacterModel,
       token: auth.token ?? "",
+    })
+    this.room.onMessage("race_cancelled", (data: { hostName?: string }) => {
+      this.onRaceCancelled?.({ hostName: data.hostName ?? "" })
     })
     this.wireState()
     // Tell the server we want a racer slot (host auto-joins their own room).
@@ -199,6 +212,24 @@ export class RaceRoomClient {
     this.room?.send("race_start", {})
   }
 
+  sendRaceCancel(): void {
+    // Same host-only guard as `sendRaceStart` — server re-checks.
+    if (!this.isHost) return
+    this.room?.send("race_cancel", {})
+  }
+
+  /**
+   * Host-only "+ invite more" trigger. Server validates the host id,
+   * lobby phase, and caps total participants at MAX_RACERS — UX guard
+   * here is just to skip the send for non-host clients so the multiplayer
+   * doesn't bother authenticating obvious no-ops.
+   */
+  sendAddInvitees(userIds: string[]): void {
+    if (!this.isHost) return
+    if (userIds.length === 0) return
+    this.room?.send("race_add_invitees", { userIds })
+  }
+
   sendMove(isMoving: boolean): void {
     this.room?.send("race_move", { userId: this.userId, isMoving })
   }
@@ -210,6 +241,7 @@ export class RaceRoomClient {
   destroy(): void {
     void this.leave()
     this.onStateChange = null
+    this.onRaceCancelled = null
   }
 
   private wireState(): void {
@@ -237,9 +269,15 @@ export class RaceRoomClient {
     }, true)
     state.racers.onRemove(() => publish())
 
-    // ArraySchema: the state-level `.onChange` above fires on every mutation
-    // of any schema field, including arrays, so we don't need a dedicated
-    // listener — `publish` will rebuild placings from the current array.
+    // The state-level `onChange` above fires for scalar fields on the root
+    // schema, but NOT for mutations inside child ArraySchemas. Without these
+    // explicit listeners, invite declines and leaderboard updates never
+    // reach the snapshot.
+    state.invitedUserIds.onAdd(() => publish(), true)
+    state.invitedUserIds.onRemove(() => publish())
+
+    state.placings.onAdd(() => publish(), true)
+    state.placings.onRemove(() => publish())
 
     publish()
   }

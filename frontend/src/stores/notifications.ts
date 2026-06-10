@@ -14,6 +14,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { isAxiosError } from 'axios'
 import type { AppNotification } from '@/types'
 import api from '@/services/api'
 
@@ -21,6 +22,10 @@ export const useNotificationStore = defineStore('notifications', () => {
   const items = ref<AppNotification[]>([])
   const loading = ref(false)
   const error = ref('')
+  /** Notification ids with an in-flight decline POST. Drives the button
+   *  disabled state so a double-click can't fire parallel POSTs and
+   *  clobber the success state with a 404-on-the-second-call error. */
+  const pendingDeclineIds = ref<Set<string>>(new Set())
 
   const unreadCount = computed(() =>
     items.value.filter(n => !n.isRead && !n.isDismissed).length,
@@ -83,8 +88,38 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
   }
 
+  /**
+   * Decline a pending race-invite notification. Distinct from
+   * `dismiss` because the server-side handler also writes a fresh
+   * notification on the host's bell so they stop waiting on a no-show.
+   * Optimistically removes the row on success; on failure the user
+   * can retry from the same row since we don't touch it on error.
+   */
+  async function declineRaceInvite(id: string): Promise<void> {
+    if (pendingDeclineIds.value.has(id)) return
+    pendingDeclineIds.value.add(id)
+    try {
+      await api.post(`/v1/races/invites/${id}/decline`)
+      items.value = items.value.filter(n => n.id !== id)
+    } catch (err) {
+      // 404 is the "already declined / not yours" path — the row is
+      // stale, drop it locally so the user isn't stuck staring at it.
+      // Other failures stay visible so the user can retry.
+      const status = isAxiosError(err) ? err.response?.status : undefined
+      if (status === 404) {
+        items.value = items.value.filter(n => n.id !== id)
+        error.value = 'Race invite is no longer available'
+      } else {
+        error.value = `Failed to decline race invite${status ? ` (${status})` : ''}`
+      }
+    } finally {
+      pendingDeclineIds.value.delete(id)
+    }
+  }
+
   return {
-    items, loading, error, unreadCount,
+    items, loading, error, unreadCount, pendingDeclineIds,
     fetchAll, markRead, markAllRead, dismiss, dismissAll, addFromSocket,
+    declineRaceInvite,
   }
 })

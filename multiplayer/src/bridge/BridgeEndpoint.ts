@@ -29,6 +29,7 @@
 import type { Request, Response } from "express"
 import { timingSafeEqual } from "crypto"
 import { OrgRoom } from "../rooms/OrgRoom"
+import { fireRaceInviteDeclined } from "./RaceRegistry"
 import { safeLog } from "./logSanitize"
 
 // Fail-closed in production: if the secret isn't configured, refuse to start.
@@ -75,8 +76,23 @@ export function unregisterOrgRoom(orgId: string): void {
   console.log(`[BridgeEndpoint] Unregistered org=${orgId} (total=${orgRooms.size})`)
 }
 
+/**
+ * Two envelope shapes are accepted — exactly one of `orgId` / `roomId`
+ * must be present so the routing is unambiguous:
+ *
+ *   - `{orgId, type, data}` — org-scoped: routed to the active OrgRoom
+ *     for that org. Used by dev_activity, agent_activity, member_presence.
+ *   - `{roomId, type, data}` — room-scoped: routed through the
+ *     RaceRegistry to a specific RaceRoom. Used by race_invite_declined.
+ *
+ * Previously the single `{orgId, type, data}` shape served both, with
+ * a `type === "race_invite_declined"` branch silently ignoring `orgId`.
+ * That implicit contract drifted on cross-org edges (host's tab gone,
+ * orgId stale). The split makes the routing key explicit.
+ */
 interface BridgePayload {
-  orgId: string
+  orgId?: string
+  roomId?: string
   type: string
   data: Record<string, unknown>
 }
@@ -89,12 +105,23 @@ export function handleBridgePublish(req: Request, res: Response): void {
   }
 
   const payload = req.body as BridgePayload
-  if (!payload?.orgId || !payload?.type) {
-    res.status(400).json({ error: "missing orgId or type" })
+  if (!payload?.type) {
+    res.status(400).json({ error: "missing type" })
+    return
+  }
+  const hasOrg = typeof payload.orgId === "string" && payload.orgId.length > 0
+  const hasRoom = typeof payload.roomId === "string" && payload.roomId.length > 0
+  if (hasOrg === hasRoom) {
+    res.status(400).json({ error: "exactly one of orgId or roomId is required" })
     return
   }
 
-  const room = orgRooms.get(payload.orgId)
+  if (hasRoom) {
+    if (!dispatchRoomScoped(payload, res)) return
+    return
+  }
+
+  const room = orgRooms.get(payload.orgId!)
   if (!room) {
     // No active OrgRoom for this org — nobody is viewing the dashboard
     // for that org right now, so the event has nowhere to go. The next
@@ -109,7 +136,7 @@ export function handleBridgePublish(req: Request, res: Response): void {
   }
 
   console.log(
-    `[BridgeEndpoint] deliver type=${safeLog(payload.type)} org=${safeLog(payload.orgId)}`,
+    `[BridgeEndpoint] deliver type=${safeLog(payload.type)} org=${safeLog(payload.orgId!)}`,
   )
   try {
     room.handleBridgeEvent(payload.type, payload.data)
@@ -118,4 +145,29 @@ export function handleBridgePublish(req: Request, res: Response): void {
     console.error(`[BridgeEndpoint] Error handling event type=${payload.type}:`, err)
     res.status(500).json({ error: "internal error" })
   }
+}
+
+/**
+ * Dispatch a room-scoped event. Returns `true` if the response has been
+ * sent (always — caller bails out either way). Centralised here so the
+ * per-event routing table stays in one place as new room-scoped events
+ * are added.
+ */
+function dispatchRoomScoped(payload: BridgePayload, res: Response): true {
+  const roomId = payload.roomId!
+  const data = payload.data ?? {}
+  if (payload.type === "race_invite_declined") {
+    const userId = typeof data.userId === "string" ? data.userId : null
+    if (!userId) {
+      res.status(400).json({ error: "race_invite_declined needs userId" })
+      return true
+    }
+    fireRaceInviteDeclined(roomId, userId)
+    res.status(200).json({ delivered: true })
+    return true
+  }
+  res.status(400).json({
+    error: `unknown room-scoped event type: ${safeLog(payload.type)}`,
+  })
+  return true
 }

@@ -116,3 +116,19 @@ export const RUNNING_TIMEOUT_MS = 120000
 
 /** How long the final placings card is shown before the scene resets. */
 export const FINISHED_DISPLAY_MS = 10000
+
+/**
+ * Max lifetime of a race in the `lobby` phase with no connected clients.
+ *
+ * The host may invite a teammate who isn't currently online; the
+ * teammate's notification points at a `roomId` that has to still exist
+ * by the time they click it. So the RaceRoom disables Colyseus's default
+ * `autoDispose` while in lobby and instead falls back to this hard cap.
+ * 10 min is the rough timescale of "I sent the invite, switched tabs,
+ * and my colleague should have noticed and joined by now."
+ *
+ * Once the race transitions to `countdown` (i.e. someone hit Start),
+ * autoDispose is restored — the room cleans up normally a few seconds
+ * after the finish card is dismissed.
+ */
+export const LOBBY_MAX_MS = 10 * 60 * 1000

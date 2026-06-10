@@ -947,6 +947,15 @@ export interface RaceInviteMeta {
   hostUserId?: string
   hostName?: string
   distanceM?: number
+  /**
+   * Set when the host is reading their own bell after an invitee
+   * declined. Presence of this field flips the row from an actionable
+   * invite into a passive "X declined" entry — frontend uses it to
+   * hide the Decline button so the host can't decline their own race
+   * back at themselves.
+   */
+  declinedBy?: string
+  declinedByName?: string
 }
 
 export interface AppNotification {

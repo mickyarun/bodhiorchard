@@ -37,6 +37,7 @@ from app.config import settings
 from app.core.deps import get_current_user, get_db
 from app.models.user import User
 from app.repositories.race_result import RaceResultInput
+from app.services.race_invite_service import decline_race_invite
 from app.services.race_results_service import (
     PostRaceResultsRequest,
     RaceResultsValidationError,
@@ -194,3 +195,47 @@ async def get_race_leaderboard(
             for r in rows
         ],
     )
+
+
+class RaceInviteDeclineResponse(BaseModel):
+    host_notification_id: uuid.UUID = Field(alias="hostNotificationId")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.post(
+    "/invites/{notification_id}/decline",
+    response_model=RaceInviteDeclineResponse,
+)
+async def decline_race_invite_endpoint(
+    notification_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RaceInviteDeclineResponse:
+    """Decline a pending race invite and tell the host.
+
+    Looks up the invitee's own race-invite notification, marks it
+    dismissed, and writes a fresh notification on the host's bell so
+    they stop waiting on a no-show. 404 when the notification id is
+    unknown, owned by someone else, not a race-invite, or already
+    declined — the client treats them all as "stale, refresh and try
+    again."
+    """
+    host_notif_id = await decline_race_invite(
+        db,
+        notification_id=notification_id,
+        current_user=current_user,
+    )
+    if host_notif_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Race invite not found",
+        )
+    await db.commit()
+    logger.info(
+        "race_invite_declined",
+        notification_id=str(notification_id),
+        invitee_user_id=str(current_user.id),
+        host_notification_id=str(host_notif_id),
+    )
+    return RaceInviteDeclineResponse(host_notification_id=host_notif_id)

@@ -25,12 +25,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import bindparam, func, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan import ACTIVE_SCAN_STATUSES, Scan
@@ -143,7 +142,7 @@ class ScanRepository(BaseRepository[Scan]):
                 bindparam(
                     "append_repo_warning",
                     [append_repo_warning],
-                    type_=JSONB(),
+                    type_=JSONB(),  # type: ignore[no-untyped-call]  # SQLAlchemy stubs gap
                 )
             )
         if not values:
@@ -236,7 +235,7 @@ async def bulk_mark_failed(
             updated_at=datetime.now(UTC),
         )
     )
-    return cast(CursorResult[Any], result).rowcount or 0
+    return result.rowcount or 0
 
 
 async def get_by_id_unscoped(db: AsyncSession, scan_id: uuid.UUID) -> Scan | None:

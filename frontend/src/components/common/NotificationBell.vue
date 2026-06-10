@@ -164,6 +164,29 @@
 
             <template #append>
               <div class="d-flex align-center ga-1">
+                <!-- Decline is a *server-side* action — unlike the
+                     adjacent X (local dismiss), it tells the host to
+                     stop waiting. Only rendered on actionable race
+                     invites so the host's own "X declined" entries
+                     can't be declined back at themselves. -->
+                <!-- Decline is a real, clearly-rendered button (tonal +
+                     outlined border) so the eye separates it from the
+                     adjacent X icon. Misreading these two was the bug
+                     the user hit: an invisible "Decline" looked like
+                     they only had X (which doesn't notify the host). -->
+                <v-btn
+                  v-if="canDeclineRaceInvite(notif)"
+                  variant="tonal"
+                  size="x-small"
+                  density="comfortable"
+                  color="error"
+                  class="notif-decline-btn"
+                  :disabled="store.pendingDeclineIds.has(notif.id)"
+                  :loading="store.pendingDeclineIds.has(notif.id)"
+                  @click.stop="store.declineRaceInvite(notif.id)"
+                >
+                  Decline
+                </v-btn>
                 <v-btn
                   v-if="notif.deepLink"
                   icon
@@ -281,7 +304,7 @@ import { useYieldOfferStore } from '@/stores/yieldOffers'
 import { useYieldOfferSocket } from '@/composables/useYieldOfferSocket'
 import { useMembersStore } from '@/stores/members'
 import { usePermissions } from '@/composables/usePermissions'
-import type { AppNotification, YieldOffer } from '@/types'
+import type { AppNotification, RaceInviteMeta, YieldOffer } from '@/types'
 
 const props = defineProps<{ userId: string }>()
 
@@ -430,6 +453,21 @@ function navigateTo(notif: AppNotification): void {
   }
 }
 
+/**
+ * True when the row is an actionable race invite the viewer can still
+ * decline. False for: non-race notifications; the host's own "X
+ * declined" rows (which carry `declinedBy` in meta); and the host
+ * looking at their own invite (which shouldn't happen but is
+ * defensive against future invite-self bugs).
+ */
+function canDeclineRaceInvite(notif: AppNotification): boolean {
+  if (notif.type !== 'race_invite') return false
+  const meta = (notif.meta ?? {}) as RaceInviteMeta
+  if (meta.declinedBy) return false
+  if (!meta.hostUserId) return false
+  return meta.hostUserId !== props.userId
+}
+
 function handleClearAll(): void {
   store.dismissAll()
   menuOpen.value = false
@@ -496,5 +534,14 @@ function relativeTime(isoString: string): string {
 .notification-item:hover {
   background: rgba(var(--v-theme-on-surface), 0.04);
   cursor: pointer;
+}
+
+/* Sharpen the Decline button's outline so it can't be visually
+   conflated with the adjacent X icon. Tonal alone leaves it looking
+   too soft against the row's hover background. */
+.notif-decline-btn {
+  border: 1px solid rgba(var(--v-theme-error), 0.45);
+  letter-spacing: 0.04em;
+  font-weight: 600;
 }
 </style>

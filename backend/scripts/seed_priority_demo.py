@@ -30,6 +30,8 @@ keeps the demo set the same size. Run once and explore the UI.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+
 import httpx
 
 API_BASE = "http://localhost:8000/api/v1"
@@ -74,10 +76,8 @@ async def main() -> None:
         prior = [b for b in r.json() if b.get("title", "").startswith("[DEMO]")]
         for b in prior:
             if b["status"] not in ("closed", "discarded"):
-                try:
+                with contextlib.suppress(httpx.HTTPStatusError):
                     await patch_bud(client, b["id"], status="discarded")
-                except httpx.HTTPStatusError:
-                    pass
         print(f"Pre-flight: discarded {len(prior)} prior [DEMO] BUDs.")
 
         # ── 1. Four BUDs in bud phase at each priority ────────────

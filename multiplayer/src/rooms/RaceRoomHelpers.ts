@@ -19,7 +19,10 @@
  * so the parsers can be unit-tested without spinning up Colyseus.
  */
 import type { Racer } from "../../../shared/race/RacePhysics"
+import type { Placing } from "../../../shared/race/types"
+import { PlacingState } from "../schema/PlacingState"
 import { RacerState } from "../schema/RacerState"
+import type { RaceResultsPayload, RaceResultsPlacing } from "../bridge/BackendClient"
 
 export interface RaceCreateOptions {
   orgId: string
@@ -27,6 +30,14 @@ export interface RaceCreateOptions {
   hostName: string
   distanceM: number
   invitedUserIds: string[]
+}
+
+/** Race-identifying fields forwarded onto every results-POST payload. */
+export interface RaceResultsHeader {
+  roomId: string
+  orgId: string
+  hostUserId: string
+  distanceM: number
 }
 
 /**
@@ -112,4 +123,60 @@ function asNumber(v: unknown, name: string): number {
 
 function optionalString(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null
+}
+
+/**
+ * Promote a pure-physics `Placing` to its Colyseus-synced schema mirror.
+ *
+ * Schema construction lives here (not in RaceRoom) so RaceRoom keeps its
+ * orchestration role and the field-by-field mapping is unit-testable.
+ */
+export function placingToSchema(p: Placing): PlacingState {
+  const s = new PlacingState()
+  s.racerId = p.racerId
+  s.place = p.place
+  s.finished = p.finished
+  s.finishTimeMs = p.finishTimeMs
+  s.distanceM = p.distanceM
+  return s
+}
+
+/**
+ * Build the JSON payload posted to the backend on race dispose.
+ *
+ * Returns `null` when there's nothing meaningful to persist:
+ *   - empty placings (room disposed before `finishRound` ever ran)
+ *   - placings with zero finishers (room disposed mid-race with everyone DNF)
+ *
+ * Extracted from `RaceRoom.onDispose` so the multi-finisher contract is
+ * lockable in vitest — the test suite proves that **every** placing
+ * passed in surfaces in the outgoing payload, finishers and DNFs alike.
+ * A regression here is what would produce the "only winner appears on
+ * the leaderboard" symptom, so the test is the canary.
+ */
+export function buildRaceResultsPayload(
+  header: RaceResultsHeader,
+  placings: Iterable<PlacingState>,
+): RaceResultsPayload | null {
+  const rows: RaceResultsPlacing[] = []
+  let anyFinisher = false
+  for (const p of placings) {
+    rows.push({
+      userId: p.racerId,
+      finishTimeMs: p.finished ? p.finishTimeMs : null,
+      place: p.place,
+      finished: p.finished,
+      distanceMReached: p.distanceM,
+      distanceM: header.distanceM,
+    })
+    if (p.finished) anyFinisher = true
+  }
+  if (rows.length === 0 || !anyFinisher) return null
+  return {
+    roomId: header.roomId,
+    orgId: header.orgId,
+    hostUserId: header.hostUserId,
+    distanceM: header.distanceM,
+    placings: rows,
+  }
 }

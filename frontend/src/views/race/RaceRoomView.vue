@@ -16,9 +16,27 @@
 
 <template>
   <div class="race-room-view">
-    <div v-if="error" class="pa-6">
-      <v-alert type="error" prominent>{{ error }}</v-alert>
-      <v-btn class="mt-4" @click="goHome">Back to garden</v-btn>
+    <!-- Race-themed empty state. Replaces the bare `v-alert` that used to
+         break the visual rhythm of the rest of the lobby/results panels.
+         Backdrop + eyebrow + italic title mirror RaceLobbyPanel so the
+         page still feels like the race app, not a generic 404. -->
+    <div v-if="error" class="race-error">
+      <RaceThemeBackdrop />
+      <div class="race-error__eyebrow">
+        <CheckerFlagIcon :size="12" />
+        Race unavailable
+      </div>
+      <h1 class="race-error__title">This race isn't running</h1>
+      <p class="race-error__sub">{{ error }}</p>
+      <v-btn
+        size="large"
+        variant="flat"
+        color="primary"
+        class="race-error__cta"
+        @click="leaveImmediate"
+      >
+        Back to garden
+      </v-btn>
     </div>
 
     <template v-else-if="snapshot">
@@ -28,6 +46,7 @@
         :is-host="isHost"
         @start="onStart"
         @leave="goHome"
+        @add-invitees="onAddInvitees"
       />
       <RaceLivePanel
         v-else-if="snapshot.phase === 'countdown' || snapshot.phase === 'running'"
@@ -38,13 +57,42 @@
       <RaceResultsCard
         v-else-if="snapshot.phase === 'finished'"
         :snapshot="snapshot"
-        @leave="goHome"
+        @leave="leaveImmediate"
       />
     </template>
 
     <div v-else class="pa-6 d-flex align-center justify-center" style="min-height: 200px;">
       <v-progress-circular indeterminate />
     </div>
+
+    <!-- Host back-to-garden gate: leaving the lobby (or the 3 s countdown
+         window) before the race actually runs cancels it for every
+         invitee, so the destructive default needs explicit confirmation. -->
+    <v-dialog v-model="cancelDialogOpen" max-width="420">
+      <v-card>
+        <v-card-title class="text-h6">Cancel this race?</v-card-title>
+        <v-card-text>
+          Leaving the lobby ends the race for everyone you invited. They'll
+          be sent back to the garden.
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4">
+          <v-spacer />
+          <v-btn variant="text" @click="cancelDialogOpen = false">Keep racing</v-btn>
+          <v-btn color="error" variant="flat" @click="confirmCancelAndLeave">
+            Cancel race
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-snackbar
+      v-model="cancelledToastOpen"
+      :timeout="4000"
+      color="warning"
+      location="top"
+    >
+      {{ cancelledToastText }}
+    </v-snackbar>
   </div>
 </template>
 
@@ -56,6 +104,8 @@ import { RaceRoomClient, type RaceStateSnapshot } from '@/multiplayer/RaceRoomCl
 import RaceLobbyPanel from './RaceLobbyPanel.vue'
 import RaceLivePanel from './RaceLivePanel.vue'
 import RaceResultsCard from './RaceResultsCard.vue'
+import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
+import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
 
 const props = defineProps<{
   roomId: string
@@ -67,6 +117,9 @@ const authStore = useAuthStore()
 const client = ref<RaceRoomClient | null>(null)
 const snapshot = ref<RaceStateSnapshot | null>(null)
 const error = ref<string>('')
+const cancelDialogOpen = ref(false)
+const cancelledToastOpen = ref(false)
+const cancelledToastText = ref('')
 
 const userId = computed(() => authStore.user?.id ?? '')
 
@@ -109,6 +162,15 @@ async function connect(roomId: string): Promise<void> {
   }
   const fresh = new RaceRoomClient()
   fresh.onStateChange = (s) => { snapshot.value = s }
+  fresh.onRaceCancelled = ({ hostName }) => {
+    cancelledToastText.value = hostName
+      ? `${hostName} cancelled the race.`
+      : 'The host cancelled the race.'
+    cancelledToastOpen.value = true
+    // Short delay so the toast is visible during the route change; once
+    // the room is gone there's nothing useful to render on this page.
+    window.setTimeout(() => router.push('/dashboard'), 1200)
+  }
   try {
     await fresh.joinById(roomId, {
       userId: authStore.user.id,
@@ -119,7 +181,7 @@ async function connect(roomId: string): Promise<void> {
     client.value = fresh
   } catch (err) {
     console.error('[RaceRoomView] join failed:', err)
-    error.value = 'Could not join this race room. It may have ended or the invitation may be invalid.'
+    error.value = 'The host may have cancelled this race, or your invitation has expired.'
     fresh.destroy()
   }
 }
@@ -128,9 +190,42 @@ function onStart(): void {
   client.value?.sendRaceStart()
 }
 
+function onAddInvitees(userIds: string[]): void {
+  client.value?.sendAddInvitees(userIds)
+}
+
+/**
+ * Back-to-garden gate. For the host while the race hasn't actually run
+ * yet, this triggers the destructive-action confirmation rather than
+ * silently leaving Arun stuck in a "waiting for host" lobby forever.
+ * Non-host invitees and post-race viewers just navigate straight.
+ */
 function goHome(): void {
-  // The garden lives at /dashboard. /methodology is the unauthenticated
-  // landing page — sending users there from race log them out of context.
+  if (shouldConfirmCancel.value) {
+    cancelDialogOpen.value = true
+    return
+  }
+  leaveImmediate()
+}
+
+const shouldConfirmCancel = computed<boolean>(() => {
+  if (!isHost.value || !snapshot.value) return false
+  const phase = snapshot.value.phase
+  return phase === 'lobby' || phase === 'countdown'
+})
+
+function confirmCancelAndLeave(): void {
+  cancelDialogOpen.value = false
+  // Fire-and-let-the-echo-drive-us: the server broadcasts `race_cancelled`
+  // back to the sender alongside the invitees, so the host's own
+  // `onRaceCancelled` handler will surface the toast and schedule the
+  // navigation. Avoids a race where `router.push` unmounts the
+  // component (closing the WS) before `room.send` has actually flushed
+  // the cancel frame.
+  client.value?.sendRaceCancel()
+}
+
+function leaveImmediate(): void {
   router.push('/dashboard')
 }
 </script>
@@ -145,5 +240,56 @@ function goHome(): void {
 }
 .race-room-view > * {
   flex: 1;
+}
+
+/* ── Empty / error state ─────────────────────
+   Mirrors RaceLobbyPanel's hero rhythm (pill eyebrow → italic display
+   title → descriptive copy → primary CTA) so a missing race feels like
+   part of the same app instead of a stack trace. */
+.race-error {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: clamp(48px, 8vw, 96px) 24px;
+  gap: 18px;
+}
+.race-error__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.race-error__title {
+  font-size: clamp(32px, 6vw, 54px);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin: 0;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+.race-error__sub {
+  max-width: 460px;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 15px;
+  line-height: 1.45;
+  margin: 0;
+}
+.race-error__cta {
+  margin-top: 8px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 700;
 }
 </style>
