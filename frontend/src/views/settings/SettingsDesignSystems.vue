@@ -20,7 +20,7 @@
     <div class="settings-header pa-6 pb-4">
       <div class="d-flex align-center justify-space-between">
         <div>
-          <div class="text-h5 font-weight-bold">Design Systems</div>
+          <div class="text-h5 font-weight-bold bo-display">Design Systems</div>
           <div class="text-body-2 text-medium-emphasis">
             Extract and manage design tokens from your tracked repositories
           </div>

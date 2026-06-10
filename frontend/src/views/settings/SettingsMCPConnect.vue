@@ -27,7 +27,7 @@
           <v-icon icon="mdi-connection" size="24" color="white" />
         </v-avatar>
         <div>
-          <h1 class="text-h5 font-weight-bold mb-0">Connect your local AI</h1>
+          <h1 class="text-h5 font-weight-bold bo-display mb-0">Connect your local AI</h1>
           <div class="text-caption text-medium-emphasis text-uppercase font-weight-medium mcp-hero__eyebrow">
             MCP · Model Context Protocol
           </div>

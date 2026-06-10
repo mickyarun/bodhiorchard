@@ -21,7 +21,7 @@
         <v-icon icon="mdi-account-key-outline" size="24" />
       </v-avatar>
       <div>
-        <div class="text-h5 font-weight-bold">Admin Account</div>
+        <div class="text-h5 font-weight-bold bo-display">Admin Account</div>
         <div class="text-body-2 text-medium-emphasis">Create the first admin user</div>
       </div>
     </div>

@@ -25,7 +25,7 @@
         alt="Bodhiorchard"
         class="mb-4"
       />
-      <h1 class="text-h4 font-weight-bold mb-2">
+      <h1 class="text-h4 font-weight-bold bo-display mb-2">
         The Bodhiorchard Methodology
       </h1>
       <p class="text-body-1 text-medium-emphasis mb-5" style="max-width: 600px;">

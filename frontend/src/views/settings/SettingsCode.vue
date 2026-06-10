@@ -26,7 +26,7 @@
     <div class="settings-header pa-6 pb-4">
       <div class="d-flex align-center justify-space-between">
         <div>
-          <div class="text-h5 font-weight-bold">Code</div>
+          <div class="text-h5 font-weight-bold bo-display">Code</div>
           <div class="text-body-2 text-medium-emphasis">
             Connect repositories so Bodhiorchard can scan, embed, and synthesize
             features across them.

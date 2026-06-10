@@ -18,7 +18,7 @@
   <div>
     <div class="text-center mb-6">
       <v-icon icon="mdi-rocket-launch-outline" size="48" color="primary" class="mb-3" />
-      <div class="text-h5 font-weight-bold mb-1">Review & Launch</div>
+      <div class="text-h5 font-weight-bold bo-display mb-1">Review & Launch</div>
       <div class="text-body-2 text-medium-emphasis">
         Confirm your configuration and launch Bodhiorchard
       </div>
