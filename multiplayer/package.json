@@ -5,8 +5,8 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
-    "start": "ts-node src/main.ts",
-    "start:dev": "ts-node-dev --watch \"src/**/*\" --respawn --transpile-only src/main.ts",
+    "start": "npm run start:dev",
+    "start:dev": "ts-node-dev --watch \"src,../shared\" --respawn --transpile-only src/main.ts",
     "start:prod": "node dist/main.js",
     "test": "vitest run",
     "test:watch": "vitest"
