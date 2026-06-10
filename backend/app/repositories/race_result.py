@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,60 +107,38 @@ class RaceResultRepository:
         distance_m: int,
         limit: int,
     ) -> list[LeaderboardRow]:
-        """Fastest finishers for one distance, one row per user (their best).
+        """Top-N fastest finishes for one distance, org-scoped.
 
-        Without per-user dedup, a player who placed in three top times
-        showed up three times in the top 10, pushing other players out.
-        ROW_NUMBER() PARTITION BY user_id ORDER BY finish_time_ms keeps
-        only the user's personal best and preserves `finished_at` of
-        that specific row (which a `GROUP BY user_id, MIN(...)` would
-        lose). The composite index `(org_id, distance_m, finish_time_ms)`
-        still drives the inner ordering.
+        Every race result is its own row — a log of the fastest runs, not
+        a highscore table of personal bests. Two finishes from the same
+        player legitimately occupy two slots if both rank in the top N.
+        The composite index `(org_id, distance_m, finish_time_ms)` drives
+        the ORDER BY + LIMIT directly.
 
         DNFs (`finish_time_ms IS NULL`) are excluded — they appear only in
         per-user PR views, which aren't part of this milestone.
         """
-        rn = (
-            func.row_number()
-            .over(
-                partition_by=RaceResult.user_id,
-                order_by=RaceResult.finish_time_ms.asc(),
-            )
-            .label("rn")
-        )
-        inner = (
+        stmt = (
             select(
-                RaceResult.user_id.label("user_id"),
-                User.name.label("user_name"),
-                RaceResult.distance_m.label("distance_m"),
-                RaceResult.finish_time_ms.label("finish_time_ms"),
-                RaceResult.finished_at.label("finished_at"),
-                rn,
+                RaceResult.user_id,
+                User.name,
+                RaceResult.distance_m,
+                RaceResult.finish_time_ms,
+                RaceResult.finished_at,
             )
             .join(User, User.id == RaceResult.user_id)
             .where(RaceResult.org_id == self._org_id)
             .where(RaceResult.distance_m == distance_m)
             .where(RaceResult.finished_at.is_not(None))
             .where(RaceResult.finish_time_ms.is_not(None))
-            .subquery()
-        )
-        stmt = (
-            select(
-                inner.c.user_id,
-                inner.c.user_name,
-                inner.c.distance_m,
-                inner.c.finish_time_ms,
-                inner.c.finished_at,
-            )
-            .where(inner.c.rn == 1)
-            .order_by(inner.c.finish_time_ms.asc())
+            .order_by(RaceResult.finish_time_ms.asc())
             .limit(limit)
         )
         result = await self._db.execute(stmt)
         return [
             LeaderboardRow(
                 user_id=row.user_id,
-                user_name=row.user_name or "",
+                user_name=row.name or "",
                 distance_m=row.distance_m,
                 finish_time_ms=row.finish_time_ms,
                 finished_at=row.finished_at,

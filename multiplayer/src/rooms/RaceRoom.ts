@@ -361,14 +361,39 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
 
     const allFinished = this.physicsRacers.every((r) => r.finished)
     const timedOut = elapsed >= RUNNING_TIMEOUT_MS
-    if (allFinished || timedOut) this.finishRound(timedOut)
+    if (allFinished || timedOut) void this.finishRound(timedOut)
   }
 
-  private finishRound(timeoutFired: boolean): void {
+  private async finishRound(timeoutFired: boolean): Promise<void> {
     this.stopSim()
     const placings = checkFinish(this.physicsRacers, timeoutFired)
     this.state.placings.clear()
     for (const p of placings) this.state.placings.push(placingToSchema(p))
+
+    // Persist the result rows BEFORE flipping the phase, so the client's
+    // end-of-race leaderboard fetch (which fires the moment phase becomes
+    // "finished") sees the just-completed times. Posting on `onDispose`
+    // alone left a ~10–60 s window — long enough that the user reliably
+    // saw "old" leaderboard data sitting next to their fresh race result.
+    // Idempotent on (room_id, user_id), so the dispose-side post still
+    // works as a safety net if this one is interrupted.
+    const payload = buildRaceResultsPayload(
+      {
+        roomId: this.roomId,
+        orgId: this.state.orgId,
+        hostUserId: this.state.hostUserId,
+        distanceM: this.state.distanceM,
+      },
+      this.state.placings,
+    )
+    if (payload) {
+      try {
+        await postRaceResults(payload)
+      } catch (err) {
+        console.error(`[RaceRoom ${this.roomId}] postRaceResults failed:`, err)
+      }
+    }
+
     this.setPhase("finished")
   }
 
