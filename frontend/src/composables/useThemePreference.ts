@@ -12,53 +12,82 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Light/dark theme preference: persisted to localStorage, defaulting to the
-// OS colour-scheme on first visit. Both Vuetify themes (and the matching
-// CSS-custom-property overrides in tokens.css) already exist; this just
-// drives which one is active and remembers the user's choice.
+// Theme preference with three modes, persisted to localStorage:
+//   * 'system' (default) — follow the OS colour-scheme and live-update when
+//     it changes (e.g. macOS auto light→dark at sunset).
+//   * 'light' / 'dark'   — an explicit override the user picked.
+// Both Vuetify themes (and the matching tokens.css overrides) already exist;
+// this just decides which is active and remembers the user's choice.
 
-import { computed } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import { useTheme } from 'vuetify'
 
 export const THEME_DARK = 'bodhiorchardDark'
 export const THEME_LIGHT = 'bodhiorchardLight'
 
-const STORAGE_KEY = 'bodhiorchard_theme'
+export type ThemePreference = 'system' | 'light' | 'dark'
 
-/**
- * Resolve the theme to apply at startup, read synchronously so Vuetify can
- * render the correct theme on the first paint (no flash of the wrong theme).
- * Order: saved preference → OS `prefers-color-scheme` → dark.
- * SSR-safe: returns dark when there is no `window` (e.g. the SSG landing build).
- */
-export function resolveInitialThemeName(): string {
-  if (typeof window === 'undefined') return THEME_DARK
-  const saved = window.localStorage.getItem(STORAGE_KEY)
-  if (saved === THEME_DARK || saved === THEME_LIGHT) return saved
-  const prefersLight = window.matchMedia?.('(prefers-color-scheme: light)').matches
-  return prefersLight ? THEME_LIGHT : THEME_DARK
+const STORAGE_KEY = 'bodhiorchard_theme'
+const SYSTEM_LIGHT_QUERY = '(prefers-color-scheme: light)'
+
+function readStoredPreference(): ThemePreference {
+  if (typeof window === 'undefined') return 'system'
+  const v = window.localStorage.getItem(STORAGE_KEY)
+  return v === 'light' || v === 'dark' || v === 'system' ? v : 'system'
+}
+
+/** The Vuetify theme name the OS is currently asking for. */
+function systemThemeName(): string {
+  if (typeof window === 'undefined' || !window.matchMedia) return THEME_DARK
+  return window.matchMedia(SYSTEM_LIGHT_QUERY).matches ? THEME_LIGHT : THEME_DARK
+}
+
+/** A preference resolved to the concrete Vuetify theme name. */
+function preferenceToThemeName(pref: ThemePreference): string {
+  if (pref === 'light') return THEME_LIGHT
+  if (pref === 'dark') return THEME_DARK
+  return systemThemeName()
 }
 
 /**
- * Reactive light/dark control for use in components. Flipping the toggle
- * updates Vuetify's active theme and persists the choice.
+ * Resolve the theme to apply at startup, read synchronously so Vuetify can
+ * render the correct theme on the first paint (no flash). SSR-safe: returns
+ * dark when there is no `window` (e.g. the SSG landing build).
+ */
+export function resolveInitialThemeName(): string {
+  return preferenceToThemeName(readStoredPreference())
+}
+
+/**
+ * Reactive theme control. `preference` is the user's choice (system / light /
+ * dark); setting it persists and applies. While the preference is 'system'
+ * the active theme tracks the OS colour-scheme live.
  */
 export function useThemePreference() {
   const theme = useTheme()
 
+  const preference = ref<ThemePreference>(readStoredPreference())
   const isDark = computed(() => theme.global.name.value === THEME_DARK)
 
-  function setDark(dark: boolean): void {
-    const name = dark ? THEME_DARK : THEME_LIGHT
-    theme.global.name.value = name
+  function setPreference(pref: ThemePreference): void {
+    preference.value = pref
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, name)
+      window.localStorage.setItem(STORAGE_KEY, pref)
     }
+    theme.global.name.value = preferenceToThemeName(pref)
   }
 
-  function toggle(): void {
-    setDark(!isDark.value)
+  // Live-follow the OS while the preference is 'system'.
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    const mq = window.matchMedia(SYSTEM_LIGHT_QUERY)
+    const onSystemChange = (): void => {
+      if (preference.value === 'system') {
+        theme.global.name.value = systemThemeName()
+      }
+    }
+    mq.addEventListener?.('change', onSystemChange)
+    onScopeDispose(() => mq.removeEventListener?.('change', onSystemChange))
   }
 
-  return { isDark, toggle, setDark }
+  return { preference, isDark, setPreference }
 }

@@ -201,7 +201,7 @@
               </div>
             </template>
 
-            <v-list density="compact" min-width="200">
+            <v-list density="compact" min-width="244">
               <v-list-item
                 prepend-icon="mdi-account-circle-outline"
                 title="My Profile"
@@ -220,11 +220,25 @@
                 title="MCP Token"
                 to="/profile/mcp-token"
               />
-              <v-list-item
-                :prepend-icon="isDark ? 'mdi-weather-sunny' : 'mdi-weather-night'"
-                :title="isDark ? 'Light mode' : 'Dark mode'"
-                @click="toggleTheme"
-              />
+              <div class="theme-pref px-3 pt-2 pb-1">
+                <div class="text-caption text-medium-emphasis px-1 mb-1">Theme</div>
+                <div class="theme-seg" role="radiogroup" aria-label="Theme">
+                  <button
+                    v-for="opt in THEME_OPTIONS"
+                    :key="opt.value"
+                    type="button"
+                    role="radio"
+                    :aria-checked="themePref === opt.value"
+                    class="theme-seg__btn"
+                    :class="{ 'theme-seg__btn--active': themePref === opt.value }"
+                    :title="opt.hint"
+                    @click.stop="setThemePref(opt.value)"
+                  >
+                    <v-icon :icon="opt.icon" size="15" />
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
               <v-divider class="my-1" />
               <v-list-item
                 prepend-icon="mdi-logout"
@@ -304,14 +318,19 @@ import RaceInviteToast from '@/components/race/RaceInviteToast.vue'
 import RaceWatchBanner from '@/components/race/RaceWatchBanner.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useXPSocket } from '@/composables/useXPSocket'
-import { useThemePreference } from '@/composables/useThemePreference'
+import { useThemePreference, type ThemePreference } from '@/composables/useThemePreference'
 import { useNavigationProgress } from '@/composables/useNavigationProgress'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
 // Light/dark toggle (persisted to localStorage by the composable).
-const { isDark, toggle: toggleTheme } = useThemePreference()
+const { preference: themePref, setPreference: setThemePref } = useThemePreference()
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: string; hint: string }[] = [
+  { value: 'system', label: 'Auto', icon: 'mdi-brightness-auto', hint: 'Follow system' },
+  { value: 'light', label: 'Light', icon: 'mdi-weather-sunny', hint: 'Light theme' },
+  { value: 'dark', label: 'Dark', icon: 'mdi-weather-night', hint: 'Dark theme' },
+]
 
 // Driven by the router guards — true while any route navigation resolves.
 const { navigating } = useNavigationProgress()
@@ -459,5 +478,43 @@ function handleLogout(): void {
 
 .user-menu:hover {
   background: rgb(var(--v-theme-surface-bright));
+}
+
+/* Auto / Light / Dark segmented control in the user menu. */
+.theme-seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgb(var(--v-theme-surface-bright));
+  border-radius: var(--radius-pill, 999px);
+}
+.theme-seg__btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 6px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-pill, 999px);
+  color: rgb(var(--v-theme-on-surface-variant));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease-out, ease), color 0.15s var(--ease-out, ease);
+}
+.theme-seg__btn:hover:not(.theme-seg__btn--active) {
+  color: rgb(var(--v-theme-on-surface));
+}
+.theme-seg__btn--active {
+  background: rgb(var(--v-theme-surface));
+  color: rgb(var(--v-theme-primary));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+.theme-seg__btn:focus-visible {
+  outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));
+  outline-offset: 1px;
 }
 </style>
