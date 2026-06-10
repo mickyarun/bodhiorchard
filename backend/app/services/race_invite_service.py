@@ -33,11 +33,15 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from app.config import settings
+from app.core.encryption import decrypt_secret
 from app.models.notification import Notification, NotificationType
 from app.repositories.notification import NotificationRepository
+from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 from app.services.colyseus_bridge import publish_to_colyseus_room
 from app.services.event_bus import publish
+from app.services.slack_client import chat_post_message, conversations_open
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -178,7 +182,107 @@ async def send_race_invite_notification(
             room_id=room_id,
         )
 
+    # Fires pre-commit, same window as the WS publish above. If the
+    # commit later fails the recipient still has a working Slack DM —
+    # the Colyseus race room exists independently of the DB row, so the
+    # deep link still resolves.
+    await _send_race_invite_slack(
+        db,
+        org_id=uuid.UUID(org_id),
+        recipient_user_id=uuid.UUID(recipient_user_id),
+        host_name=host_name,
+        room_id=room_id,
+        distance_m=distance_m,
+    )
+
     return notif_id
+
+
+async def _send_race_invite_slack(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    recipient_user_id: uuid.UUID,
+    host_name: str,
+    room_id: str,
+    distance_m: int,
+) -> None:
+    """Best-effort Slack DM mirror of an in-app race invite.
+
+    Fires automatically when both the recipient has a linked ``slack_id``
+    and the org has a configured ``slack_bot_token``. Failure modes —
+    missing identity, decryption error, Slack API timeout, ``missing_scope``
+    response — all short-circuit silently so the primary in-app
+    notification path is never affected. The caller does not need to
+    handle a return value: this is fire-and-forget by design.
+    """
+    try:
+        user = await UserRepository(db).get_by_id_in_org(recipient_user_id, org_id)
+        if user is None or not user.slack_id:
+            return
+
+        encrypted_token = await OrganizationRepository(db).get_slack_bot_token(org_id)
+        if not encrypted_token:
+            return
+
+        bot_token = decrypt_secret(encrypted_token)
+        if not bot_token:
+            logger.error(
+                "race_invite_slack_token_decrypt_failed",
+                org_id=str(org_id),
+                room_id=room_id,
+            )
+            return
+
+        dm_channel = await conversations_open(bot_token, user.slack_id)
+        if dm_channel is None:
+            # slack_client already logged the underlying reason
+            # (including ``missing_scope`` if im:write hasn't been granted).
+            # Tie the failure back to this specific invite so triage
+            # ("why didn't Bob get a DM for room X?") doesn't have to
+            # correlate by timestamp.
+            logger.info(
+                "race_invite_slack_skipped",
+                reason="dm_open_failed",
+                recipient_user_id=str(recipient_user_id),
+                room_id=room_id,
+            )
+            return
+
+        deep_link = f"{settings.frontend_url.rstrip('/')}/raceview/{room_id}"
+        message = (
+            f"🏁 *{host_name}* invited you to a *{distance_m}m race*.\n"
+            f"Join: {deep_link}"
+        )
+
+        result = await chat_post_message(bot_token, dm_channel, message)
+        if result is None:
+            logger.info(
+                "race_invite_slack_skipped",
+                reason="post_message_failed",
+                recipient_user_id=str(recipient_user_id),
+                room_id=room_id,
+            )
+            return
+
+        logger.info(
+            "race_invite_sent_via_slack",
+            recipient_user_id=str(recipient_user_id),
+            room_id=room_id,
+        )
+    except Exception as exc:
+        # Defence in depth — chat_post_message does not wrap its httpx
+        # call, and decrypt_secret can raise on a corrupted key. Either
+        # way, the in-app notification has already been written and the
+        # WS publish has already fired; the user gets the invite.
+        logger.warning(
+            "race_invite_slack_send_failed",
+            recipient_user_id=str(recipient_user_id),
+            org_id=str(org_id),
+            room_id=room_id,
+            error_class=type(exc).__name__,
+            exc_info=True,
+        )
 
 
 async def decline_race_invite(
@@ -232,7 +336,13 @@ async def decline_race_invite(
     distance_m = meta.get("distanceM")
     if not isinstance(host_user_id, str) or not isinstance(room_id, str):
         # Older invite from before this schema settled — dismiss but don't
-        # surface the missing meta to the user.
+        # surface the missing meta to the user. Log so a malformed *current*
+        # invite doesn't disappear without trace.
+        logger.warning(
+            "race_invite_decline_meta_malformed",
+            notification_id=str(notification_id),
+            meta_keys=sorted(meta.keys()),
+        )
         original.is_dismissed = True
         await db.flush()
         return None
