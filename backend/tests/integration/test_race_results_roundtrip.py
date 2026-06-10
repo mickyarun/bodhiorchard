@@ -309,3 +309,79 @@ async def test_idempotent_replay_updates_in_place(
             user_ids[1]: 14_610,
             user_ids[2]: 14_710,
         }
+
+
+@pytest.mark.asyncio
+async def test_leaderboard_returns_one_row_per_user_their_best_time(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Same player across multiple races must appear once — their best.
+
+    Reproducer for the production complaint: "top 10 can be of same
+    player if they have top secs, duplicate entries when same player
+    defeated somebody else." A frequent winner was flooding the top of
+    the board, pushing other players off-screen.
+
+    Three users, three separate races, plenty of cross-rankings. The
+    leaderboard must return three rows — each user's personal best —
+    not the nine raw result rows.
+    """
+    org_id, user_ids = await _seed_org_with_racers(pg_session_factory, racer_count=3)
+    host_user_id = user_ids[0]
+
+    # User 0 races three times: best 12.0s. User 1: best 12.3s.
+    # User 2: best 12.5s. Plenty of mixed times in between.
+    races = [
+        # room_id, [(user_idx, time_ms, place), ...]
+        ("race-aaa", [(0, 13_000, 2), (1, 12_900, 1), (2, 13_500, 3)]),
+        ("race-bbb", [(0, 12_000, 1), (1, 12_300, 2), (2, 12_500, 3)]),
+        ("race-ccc", [(0, 12_400, 1), (1, 12_700, 2), (2, 13_100, 3)]),
+    ]
+    for room_id, racers in races:
+        placings = [
+            _placing(
+                user_id=user_ids[idx],
+                host_user_id=host_user_id,
+                place=place,
+                finish_time_ms=time_ms,
+                finished=True,
+            )
+            for idx, time_ms, place in racers
+        ]
+        async with pg_session_factory() as db:
+            await post_results(
+                db,
+                PostRaceResultsRequest(
+                    room_id=room_id,
+                    org_id=org_id,
+                    host_user_id=host_user_id,
+                    distance_m=100,
+                    placings=placings,
+                ),
+            )
+            await db.commit()
+
+    # Sanity: nine rows exist in the table (3 users × 3 races).
+    async with pg_session_factory() as db:
+        stored = (
+            (await db.execute(select(RaceResult).where(RaceResult.org_id == org_id)))
+            .scalars()
+            .all()
+        )
+        assert len(stored) == 9
+
+    async with pg_session_factory() as db:
+        leaderboard = await get_leaderboard(
+            db, org_id=org_id, distance_m=100, limit=10
+        )
+
+    assert len(leaderboard) == 3, (
+        f"Leaderboard must dedupe per user; got {len(leaderboard)} rows: "
+        f"{[(r.user_id, r.finish_time_ms) for r in leaderboard]}"
+    )
+    assert [row.user_id for row in leaderboard] == [
+        user_ids[0],
+        user_ids[1],
+        user_ids[2],
+    ]
+    assert [row.finish_time_ms for row in leaderboard] == [12_000, 12_300, 12_500]

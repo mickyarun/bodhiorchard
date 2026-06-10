@@ -75,6 +75,8 @@
       </li>
     </ol>
 
+    <RaceLeaderboardSection :distance-m="leaderboardDistance" />
+
     <div class="results__actions">
       <button class="results__back" @click="$emit('leave')">
         <v-icon icon="mdi-arrow-left" size="18" class="mr-1" />
@@ -93,6 +95,7 @@ import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
 import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
 import { initials } from '@/components/race/initials'
+import RaceLeaderboardSection from './RaceLeaderboardSection.vue'
 
 const props = defineProps<{
   snapshot: RaceStateSnapshot
@@ -103,6 +106,14 @@ defineEmits<{
 }>()
 
 const rows = computed(() => props.snapshot.placings)
+
+// Snapshot.distanceM is `number`; the leaderboard endpoint only honours
+// the closed set on `ALLOWED_DISTANCES_M` (100 / 200). Narrow defensively
+// — a malformed snapshot defaults to 100 so the section still renders
+// rather than fanning a never-resolving fetch.
+const leaderboardDistance = computed<100 | 200>(() =>
+  props.snapshot.distanceM === 200 ? 200 : 100,
+)
 
 const nameByUserId = computed(() => {
   const m = new Map<string, string>()
