@@ -56,7 +56,9 @@ from app.services.slack_qa_router import QaIntent
 
 
 def _make_session(
-    context: dict[str, Any] | None = None, original_question: str = "anything"
+    context: dict[str, Any] | None = None,
+    original_question: str = "anything",
+    cli_model: str | None = None,
 ) -> MagicMock:
     """A FeatureQASession-shaped mock with the fields the dispatcher reads."""
     return MagicMock(
@@ -66,6 +68,7 @@ def _make_session(
         requester_slack_user_id="U777",
         original_question=original_question,
         context=context,
+        cli_model=cli_model,
         status=FeatureQAStatus.AWAITING_USER,
     )
 
@@ -419,6 +422,9 @@ async def test_start_turn_claims_session_id_with_session_id_flag(
     cfg = runs[0]["config"]
     assert cfg.cli_session_id == str(session.id)
     assert cfg.is_resume is False
+    # The claiming turn records the model it minted the session with, so a
+    # later resume continues on that model rather than a hardcoded one.
+    assert session.cli_model == cfg.model
 
 
 @pytest.mark.asyncio
@@ -466,6 +472,37 @@ async def test_resume_turn_sends_only_reply_and_skips_router(monkeypatch: Any) -
     # the resumed conversation. The skill headings are the cheap tell.
     assert "# Slack BUD Fact Lookup" not in prompt
     assert "# Slack Feature Explain" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_resume_uses_session_recorded_model(monkeypatch: Any) -> None:
+    """A resume must continue on the model the session was minted with —
+    NOT a hardcoded default — so a per-org Agent-Prompt override that moved
+    the specialist off Sonnet doesn't switch models mid-thread."""
+    _no_router(monkeypatch)
+    runs = _queue_runs(monkeypatch, [_ok_result("answer")])
+
+    session = _make_session(cli_model="claude-opus-4-8")
+    await _resume_qa_turn(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, "delivery date?"
+    )
+
+    assert runs[0]["config"].model == "claude-opus-4-8"
+
+
+@pytest.mark.asyncio
+async def test_resume_falls_back_to_default_model_when_unrecorded(monkeypatch: Any) -> None:
+    """Legacy rows (and triage-seeded sessions that never claimed) have no
+    recorded model — resume must fall back to the module default."""
+    _no_router(monkeypatch)
+    runs = _queue_runs(monkeypatch, [_ok_result("answer")])
+
+    session = _make_session(cli_model=None)
+    await _resume_qa_turn(
+        MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, "delivery date?"
+    )
+
+    assert runs[0]["config"].model == slack_feature_qa._RESUME_MODEL
 
 
 @pytest.mark.asyncio

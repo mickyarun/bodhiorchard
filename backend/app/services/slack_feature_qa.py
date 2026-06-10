@@ -97,10 +97,14 @@ _TOOLS_BY_INTENT: dict[QaIntent, list[str]] = {
 # passing the union costs nothing, ``tool_names`` is only an allow-list.
 _ALL_QA_TOOLS = sorted({tool for tools in _TOOLS_BY_INTENT.values() for tool in tools})
 
-# Model for resumed turns. The specialists all declare ``model: sonnet``;
-# a resumed turn must stay on the same model the session was created with,
-# or the conversation would switch models mid-thread. ``test_slack_qa_intent_dispatch``
-# pins this against the specialists' declared model so the two can't drift.
+# Default model for resumed turns — used only when a session never
+# recorded the model it was minted with (legacy rows from before
+# ``cli_model`` existed, or triage-seeded sessions that never ran a
+# claiming turn). The normal path reads ``session.cli_model`` so a
+# resume stays on whatever model the first turn used, even if a per-org
+# Agent-Prompt override changes a specialist off Sonnet. The specialists
+# all declare ``model: sonnet``; ``test_slack_qa_intent_dispatch`` pins
+# this default against that declared model so the fallback can't drift.
 _RESUME_MODEL = "sonnet"
 
 # Hard ceiling on specialist agent loops. The mega-skill carried
@@ -326,6 +330,13 @@ async def _run_qa_agent(
         tool_names=_TOOLS_BY_INTENT[intent],
     )
 
+    model = skill.model or None
+    if cli_session_id is not None:
+        # Claiming the session — remember the model it was minted with so
+        # follow-up resume turns continue on the same model rather than a
+        # hardcoded one (survives per-org model overrides on the skill).
+        session.cli_model = model
+
     try:
         result = await run_claude_code(
             prompt=prompt,
@@ -333,7 +344,7 @@ async def _run_qa_agent(
             config=ClaudeRunnerConfig(
                 max_turns=_clamp_specialist_max_turns(skill),
                 timeout_seconds=skill.timeout_or_default(_SPECIALIST_TIMEOUT_SECONDS),
-                model=skill.model or None,
+                model=model,
                 mcp=mcp,
                 cli_session_id=cli_session_id,
                 is_resume=False,
@@ -511,7 +522,13 @@ async def _resume_qa_turn(
         tool_names=_ALL_QA_TOOLS,
     )
 
-    logger.info("feature_qa_resume", session_id=str(session.id))
+    # Continue on the exact model the session was minted with; only fall
+    # back to the module default for legacy / triage-seeded rows that never
+    # recorded one. Passing the model is required — the CLI does not
+    # reliably inherit the resumed session's original model from ``None``.
+    model = session.cli_model or _RESUME_MODEL
+
+    logger.info("feature_qa_resume", session_id=str(session.id), model=model)
     result: ClaudeRunResult | None = None
     try:
         result = await run_claude_code(
@@ -520,7 +537,7 @@ async def _resume_qa_turn(
             config=ClaudeRunnerConfig(
                 max_turns=_SPECIALIST_MAX_TURNS_CEILING,
                 timeout_seconds=_SPECIALIST_TIMEOUT_SECONDS,
-                model=_RESUME_MODEL,
+                model=model,
                 mcp=mcp,
                 cli_session_id=str(session.id),
                 is_resume=True,
