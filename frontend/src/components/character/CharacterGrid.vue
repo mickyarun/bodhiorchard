@@ -99,17 +99,17 @@ const characters = computed<KayKitCharacterDef[]>(() => {
 
 .character-grid__card {
   position: relative;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 12px;
   padding: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--v-theme-surface-bright));
   text-align: center;
 }
 
 .character-grid__card:hover:not(.character-grid__card--locked) {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(var(--v-theme-primary), 0.5);
   transform: translateY(-3px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
@@ -117,7 +117,7 @@ const characters = computed<KayKitCharacterDef[]>(() => {
 .character-grid__card--selected {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.12);
-  box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.3);
+  box-shadow: 0 0 0 3px rgba(var(--v-theme-primary), 0.3);
   transform: scale(1.03);
 }
 
@@ -159,7 +159,7 @@ const characters = computed<KayKitCharacterDef[]>(() => {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgb(var(--v-theme-on-surface));
 }
 
 .character-grid__level-badge {

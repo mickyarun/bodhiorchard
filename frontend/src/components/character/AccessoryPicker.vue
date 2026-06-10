@@ -177,17 +177,17 @@ const leftHandItems = computed(() => {
 
 .accessory-picker__card {
   position: relative;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 10px;
   padding: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--v-theme-surface-bright));
   text-align: center;
 }
 
 .accessory-picker__card:hover:not(.accessory-picker__card--locked) {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(var(--v-theme-primary), 0.5);
   transform: translateY(-2px);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
 }
@@ -195,7 +195,7 @@ const leftHandItems = computed(() => {
 .accessory-picker__card--selected {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.12);
-  box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.25);
+  box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.25);
 }
 
 .accessory-picker__card--locked {
@@ -214,7 +214,7 @@ const leftHandItems = computed(() => {
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgb(var(--v-theme-background));
   transition: filter 0.2s ease, opacity 0.2s ease;
 }
 
@@ -237,7 +237,7 @@ const leftHandItems = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  color: rgba(255, 255, 255, 0.75);
+  color: rgb(var(--v-theme-on-surface));
   pointer-events: none;
 }
 

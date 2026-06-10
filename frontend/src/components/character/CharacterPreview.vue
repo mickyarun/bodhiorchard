@@ -115,7 +115,7 @@ onUnmounted(() => {
   min-height: 300px;
   border-radius: 12px;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgb(var(--v-theme-background));
 }
 
 .character-preview :deep(canvas) {
