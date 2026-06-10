@@ -18,7 +18,7 @@
   <v-container class="py-6" fluid>
     <div class="d-flex align-center mb-4">
       <v-icon icon="mdi-trophy" color="secondary" size="28" class="mr-2" />
-      <div class="text-h5 font-weight-bold">Leaderboard</div>
+      <div class="text-h5 font-weight-bold bo-display">Leaderboard</div>
       <v-spacer />
       <v-chip
         v-if="activeTab === 'xp'"
@@ -47,6 +47,7 @@
 
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
 
+    <div class="lb-content">
     <!-- Podium — top 3 with staggered height -->
     <div v-if="entries.length >= 3" class="podium mb-8">
       <!-- 2nd place (left, shorter) -->
@@ -109,13 +110,14 @@
           </v-list-item-subtitle>
 
           <template #append>
-            <span class="text-body-1 font-weight-bold" style="color: rgb(var(--v-theme-secondary));">
+            <span class="text-body-1 font-weight-bold bo-display" style="color: rgb(var(--v-theme-gold));">
               {{ entry.total_xp.toLocaleString() }}
             </span>
           </template>
         </v-list-item>
       </v-list>
     </v-card>
+    </div>
       </v-window-item>
     </v-window>
   </v-container>
@@ -182,8 +184,8 @@ const PodiumCard = defineComponent({
       h('div', { class: 'podium-card__level text-caption' },
         `${LEVEL_ICONS[props.entry.level_name] || '🌱'} Lv.${props.entry.level}`),
       h('div', {
-        class: 'podium-card__xp text-h6 font-weight-bold',
-        style: 'color: rgb(var(--v-theme-secondary))',
+        class: 'podium-card__xp bo-display text-h6 font-weight-bold',
+        style: 'color: rgb(var(--v-theme-gold))',
       }, `${props.entry.total_xp.toLocaleString()} XP`),
     ])
   },
@@ -191,6 +193,13 @@ const PodiumCard = defineComponent({
 </script>
 
 <style scoped>
+/* Focused centred column — keeps the board from stretching edge-to-edge on
+   wide viewports (which marooned the XP value far to the right). */
+.lb-content {
+  max-width: 820px;
+  margin: 0 auto;
+}
+
 /* ─── Podium ──────────────────────────── */
 .podium {
   display: flex;
@@ -210,8 +219,8 @@ const PodiumCard = defineComponent({
   align-items: center;
   padding: 20px 28px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 2px solid rgba(255, 255, 255, 0.08);
+  background: rgb(var(--v-theme-surface-bright));
+  border: 1px solid rgb(var(--v-theme-rule));
   min-width: 160px;
   gap: 6px;
 }
@@ -220,23 +229,26 @@ const PodiumCard = defineComponent({
   box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.4);
 }
 
+/* 1st place is the harvest moment — the reserved gold signal, with a soft
+   glow. Silver/bronze keep their universally-read medal tints. */
 .podium__slot--gold .podium-card {
-  border-color: rgba(255, 215, 0, 0.35);
-  background: rgba(255, 215, 0, 0.05);
+  border-color: rgba(var(--v-theme-gold), 0.5);
+  background: rgba(var(--v-theme-gold), 0.08);
+  box-shadow: 0 0 24px rgba(var(--v-theme-gold), 0.18);
   padding: 24px 32px;
   min-width: 180px;
 }
 .podium__slot--silver .podium-card {
-  border-color: rgba(192, 192, 192, 0.25);
-  background: rgba(192, 192, 192, 0.04);
+  border-color: rgba(192, 192, 192, 0.3);
+  background: rgba(192, 192, 192, 0.05);
 }
 .podium__slot--bronze .podium-card {
-  border-color: rgba(205, 127, 50, 0.25);
-  background: rgba(205, 127, 50, 0.04);
+  border-color: rgba(205, 127, 50, 0.3);
+  background: rgba(205, 127, 50, 0.05);
 }
 
 .podium-card__medal { font-size: 36px; line-height: 1; }
-.podium-card__level { color: rgba(255, 255, 255, 0.5); }
+.podium-card__level { color: rgb(var(--v-theme-on-surface-variant)); }
 
 /* ─── List Rows ───────────────────────── */
 .lb-row__rank {
@@ -253,16 +265,17 @@ const PodiumCard = defineComponent({
 
 .lb-row__bar {
   flex: 1;
-  max-width: 120px;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.06);
+  max-width: 200px;
+  height: 5px;
+  border-radius: var(--radius-pill, 999px);
+  background: rgb(var(--v-theme-rule));
   overflow: hidden;
 }
+/* Growth → harvest: leaf-green ramps to gold as XP fills. */
 .lb-row__bar-fill {
   height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, rgb(var(--v-theme-primary)), rgb(var(--v-theme-secondary)));
-  transition: width 0.4s ease;
+  border-radius: var(--radius-pill, 999px);
+  background: linear-gradient(90deg, rgb(var(--v-theme-primary)), rgb(var(--v-theme-gold)));
+  transition: width var(--dur-long, 360ms) var(--ease-out, ease);
 }
 </style>

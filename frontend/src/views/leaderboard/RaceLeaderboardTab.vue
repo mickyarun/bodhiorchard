@@ -26,6 +26,7 @@
     </div>
 
     <template v-else>
+      <div class="lb-content">
       <!-- Podium -->
       <div v-if="entries.length >= 3" class="podium mb-6">
         <div class="podium__slot podium__slot--silver">
@@ -59,11 +60,17 @@
               {{ row.userName }}
             </v-list-item-title>
             <v-list-item-subtitle class="text-caption">
-              {{ formatRaceTime(row.finishTimeMs ?? 0) }} · {{ row.distanceM }} m · {{ relativeDate(row.finishedAt) }}
+              {{ row.distanceM }} m · {{ relativeDate(row.finishedAt) }}
             </v-list-item-subtitle>
+            <template #append>
+              <span class="bo-display font-weight-bold race-time">
+                {{ formatRaceTime(row.finishTimeMs ?? 0) }}
+              </span>
+            </template>
           </v-list-item>
         </v-list>
       </v-card>
+      </div>
     </template>
   </div>
 </template>
@@ -124,7 +131,7 @@ const PodiumCard = defineComponent({
     return () => h('div', { class: 'podium-card' }, [
       h('div', { class: 'podium-card__medal' }, MEDALS[props.rank - 1]),
       h('div', { class: 'podium-card__name text-body-2 font-weight-bold' }, props.row.userName),
-      h('div', { class: 'podium-card__time text-h6 font-weight-bold' },
+      h('div', { class: 'podium-card__time bo-display text-h6 font-weight-bold' },
         formatRaceTime(props.row.finishTimeMs ?? 0)),
       h('div', { class: 'podium-card__distance text-caption text-medium-emphasis' },
         `${props.row.distanceM} m`),
@@ -134,6 +141,19 @@ const PodiumCard = defineComponent({
 </script>
 
 <style scoped>
+/* Focused centred column — matches the XP tab so race results don't
+   stretch edge-to-edge with the finish time marooned on the far right. */
+.lb-content {
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+.race-time {
+  color: rgb(var(--v-theme-on-surface));
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .podium {
   display: flex;
   justify-content: center;
@@ -151,14 +171,15 @@ const PodiumCard = defineComponent({
   align-items: center;
   padding: 20px 28px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 2px solid rgba(255, 255, 255, 0.08);
+  background: rgb(var(--v-theme-surface-bright));
+  border: 1px solid rgb(var(--v-theme-rule));
   min-width: 160px;
   gap: 6px;
 }
 .podium__slot--gold .podium-card {
-  border-color: rgba(255, 215, 0, 0.35);
-  background: rgba(255, 215, 0, 0.05);
+  border-color: rgba(var(--v-theme-gold), 0.5);
+  background: rgba(var(--v-theme-gold), 0.08);
+  box-shadow: 0 0 24px rgba(var(--v-theme-gold), 0.18);
   min-width: 180px;
 }
 .podium-card__medal { font-size: 36px; line-height: 1; }
