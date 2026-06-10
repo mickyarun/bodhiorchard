@@ -40,7 +40,7 @@ from app.repositories.bud import BUDRepository
 from app.services.agent_activity_logger import log_agent_activity
 from app.services.bud_estimation import estimate_bud_dates
 from app.services.event_bus import publish
-from app.services.todo_assignment import assign_all_todos_to_lead
+from app.services.todo_assignment import assign_todos_per_repo_team
 from app.services.todo_sync import sync_todos_for_bud
 
 logger = structlog.get_logger(__name__)
@@ -91,7 +91,7 @@ async def on_bud_development_started(
         raise
 
     if bud.assignee_id is not None:
-        await assign_all_todos_to_lead(db, org_id, bud.id, bud.assignee_id)
+        await assign_todos_per_repo_team(db, org_id, bud.id, bud.assignee_id)
 
     publish(
         f"todo:{bud.id}",

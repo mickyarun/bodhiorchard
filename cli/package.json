@@ -1,0 +1,40 @@
+{
+  "name": "bodhiorchard",
+  "version": "1.0.2",
+  "description": "One-command installer for the Bodhiorchard stack — pulls prebuilt Docker images and runs the full platform locally",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "bodhiorchard": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "prepack": "npm run build",
+    "dev": "tsc -w",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "fs-extra": "^11.2.0",
+    "inquirer": "^9.3.0",
+    "ora": "^8.1.0",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^3.2.0"
+  }
+}

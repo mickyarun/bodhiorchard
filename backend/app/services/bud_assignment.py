@@ -43,8 +43,13 @@ from app.services.bud_timeline import record_event
 # Single source of truth for the phase→role chain — see app/services/phase_roles.py.
 from app.services.phase_roles import PHASE_ROLE_CHAIN
 from app.services.smart_assignment import assign_best_for_role
+from app.services.team_scope import (
+    TeamScopeResult,
+    filter_candidates_by_team_ownership,
+    user_is_in_owning_team,
+)
 from app.services.todo_assignment import (
-    assign_all_todos_to_lead,
+    assign_todos_per_repo_team,
 )
 from app.services.yield_offer_service import maybe_raise_yield_offer
 
@@ -75,6 +80,32 @@ _SMART_ASSIGNMENT_PHASES = {
 
 # Skill slug used for lifecycle events emitted by this service.
 _PHASE_ASSIGNER_SLUG = "phase_assigner"
+
+
+def _team_scope_metadata(outcome: "_ChainOutcome") -> dict[str, Any]:
+    """Build the team-scope subset of lifecycle-event metadata.
+
+    Always emits ``team_scope_applied`` so absence-of-keys vs
+    negative-presence is disambiguable on dashboards. ``fell_back``
+    explicitly differentiates "team owns the repo, pick was scoped"
+    from "no team owns the repo (or no role match in any owning
+    team), fell back to org-wide". ``input_malformed`` flags the
+    case where the BUD's ``impacted_repos`` JSONB was non-empty but
+    every entry parsed badly — the banner should surface this as a
+    data-quality warning even though scoping wasn't applied.
+    """
+    meta: dict[str, Any] = {
+        "team_scope_applied": outcome.team_scope_applied,
+    }
+    if outcome.team_scope_applied:
+        meta["team_scope_fell_back"] = outcome.team_scope_fell_back
+        meta["team_scope_impacted_repo_count"] = outcome.team_scope_impacted_repo_count
+        meta["team_scope_pool_size"] = outcome.team_scope_pool_size
+    if outcome.team_scope_input_malformed:
+        meta["team_scope_input_malformed"] = True
+    if outcome.team_scope_discarded_count > 0:
+        meta["team_scope_discarded_count"] = outcome.team_scope_discarded_count
+    return meta
 
 
 async def auto_assign_for_phase(
@@ -126,7 +157,9 @@ async def auto_assign_for_phase(
     # Skipped when the previous assignee is inactive, no longer holds
     # an eligible role, over their cap, or was explicitly unassigned
     # afterwards — see _previous_assignee_for_phase.
-    continuity = await _previous_assignee_for_phase(db, org_id, bud.id, chain, phase_value)
+    continuity = await _previous_assignee_for_phase(
+        db, org_id, bud.id, chain, phase_value, bud.impacted_repos
+    )
     if continuity is not None:
         return await _assign_via_continuity(
             db,
@@ -139,7 +172,7 @@ async def auto_assign_for_phase(
             actor_name=actor_name,
         )
 
-    outcome = await _resolve_via_chain(db, org_id, chain)
+    outcome = await _resolve_via_chain(db, org_id, chain, bud.impacted_repos)
 
     if outcome.reason == "no_candidates":
         logger.info(
@@ -167,6 +200,7 @@ async def auto_assign_for_phase(
                 "primary_role": primary_role.value,
                 "phase": phase_value,
                 "chain": [r.value for r in chain],
+                **_team_scope_metadata(outcome),
             },
         )
         return await _clear_stale_assignment(
@@ -205,6 +239,7 @@ async def auto_assign_for_phase(
                     "role": primary_role.value,
                     "phase": phase_value,
                     "offer_id": str(offer.id),
+                    **_team_scope_metadata(outcome),
                 },
             )
             return await _clear_stale_assignment(
@@ -241,6 +276,7 @@ async def auto_assign_for_phase(
                 "phase": phase_value,
                 "capacity": outcome.over_cap_limit,
                 "count": outcome.over_cap_count,
+                **_team_scope_metadata(outcome),
             },
         )
         return await _clear_stale_assignment(
@@ -254,7 +290,11 @@ async def auto_assign_for_phase(
     load_map = outcome.load_map
 
     via_fallback = role_name != primary_role
-    invoked_metadata: dict[str, Any] = {"role": role_name.value, "phase": phase_value}
+    invoked_metadata: dict[str, Any] = {
+        "role": role_name.value,
+        "phase": phase_value,
+        **_team_scope_metadata(outcome),
+    }
     if via_fallback:
         invoked_metadata["assignment_via_fallback"] = True
         invoked_metadata["fallback_from"] = primary_role.value
@@ -328,6 +368,7 @@ async def auto_assign_for_phase(
         phase_value=phase_value,
         actor_id=actor_id,
         actor_name=actor_name,
+        extra_detail=_team_scope_metadata(outcome),
     )
 
     completed_metadata: dict[str, Any] = {
@@ -336,6 +377,7 @@ async def auto_assign_for_phase(
         "role": role_name.value,
         "method": method,
         "phase": phase_value,
+        **_team_scope_metadata(outcome),
     }
     if via_fallback:
         completed_metadata["assignment_via_fallback"] = True
@@ -385,6 +427,11 @@ class _ChainOutcome:
       The handler emits a warning and leaves the BUD unassigned.
     - ``"no_candidates"`` — no role in the chain had any active members.
       Genuine org-config gap; needs admin to fill the role.
+
+    ``team_scope_*`` fields capture whether the candidate pool was
+    narrowed by repo-team ownership. Surfaced on the lifecycle banner
+    so an admin can see whether the pick was team-scoped or fell back
+    to the whole org because no team owns the impacted repo.
     """
 
     candidates: list[User]
@@ -403,12 +450,23 @@ class _ChainOutcome:
     # candidate list so the yield-offer service can try displacing a
     # lower-priority BUD. Empty in every other branch.
     saturated_candidates: tuple[User, ...] = ()
+    # Team-scope provenance for the eventually-chosen candidate set.
+    team_scope_applied: bool = False
+    team_scope_fell_back: bool = False
+    team_scope_impacted_repo_count: int = 0
+    team_scope_pool_size: int = 0
+    # Data-quality flags surfaced when the BUD's ``impacted_repos``
+    # JSONB had entries that didn't parse — so a corrupted list
+    # masquerading as a confident scoping decision is visible.
+    team_scope_input_malformed: bool = False
+    team_scope_discarded_count: int = 0
 
 
 async def _resolve_via_chain(
     db: AsyncSession,
     org_id: uuid.UUID,
     chain: tuple[UserRole, ...],
+    impacted_repos: list[Any] | None = None,
 ) -> _ChainOutcome:
     """Walk the chain; pick the first role with under-cap members.
 
@@ -435,9 +493,20 @@ async def _resolve_via_chain(
     primary_role = chain[0]
 
     for role in chain:
-        candidates = await user_repo.list_active_with_role(org_id, role)
-        if not candidates:
+        role_pool = await user_repo.list_active_with_role(org_id, role)
+        if not role_pool:
             continue  # no members for this role; try next
+
+        # Team-scope filter: narrows the role pool to members of teams
+        # that own one of the BUD's impacted repos. Returns the
+        # unfiltered pool with ``fell_back=True`` when no team owns the
+        # impacted repos OR when no team member matches this role, so
+        # assignment never stalls just because team configuration is
+        # incomplete — the banner still flags the gap.
+        scope_result: TeamScopeResult = await filter_candidates_by_team_ownership(
+            db, org_id, role_pool, impacted_repos
+        )
+        candidates = scope_result.candidates
 
         load_map = await bud_repo.count_active_loads_for_assignees(
             [c.id for c in candidates], [s.value for s in TERMINAL_BUD_STATUSES]
@@ -462,6 +531,12 @@ async def _resolve_via_chain(
                 role=role,
                 is_fallback=role != primary_role,
                 reason="ok",
+                team_scope_applied=scope_result.applied,
+                team_scope_fell_back=scope_result.fell_back,
+                team_scope_impacted_repo_count=scope_result.impacted_repo_count,
+                team_scope_pool_size=scope_result.team_pool_size,
+                team_scope_input_malformed=scope_result.input_malformed,
+                team_scope_discarded_count=scope_result.discarded_count,
             )
 
         # All members of this role are at cap.
@@ -480,6 +555,12 @@ async def _resolve_via_chain(
                 over_cap_count=len(candidates),
                 over_cap_limit=cap,
                 saturated_candidates=tuple(candidates),
+                team_scope_applied=scope_result.applied,
+                team_scope_fell_back=scope_result.fell_back,
+                team_scope_impacted_repo_count=scope_result.impacted_repo_count,
+                team_scope_pool_size=scope_result.team_pool_size,
+                team_scope_input_malformed=scope_result.input_malformed,
+                team_scope_discarded_count=scope_result.discarded_count,
             )
 
         # Fallback role at cap. Keep walking — the primary is missing
@@ -604,6 +685,7 @@ async def _previous_assignee_for_phase(
     bud_id: uuid.UUID,
     chain: tuple[UserRole, ...],
     phase_value: str,
+    impacted_repos: list[Any] | None = None,
 ) -> _ContinuityPick | None:
     """Return the previous assignee from the LAST visit to ``phase_value``.
 
@@ -620,6 +702,10 @@ async def _previous_assignee_for_phase(
     3. Validate the user is still ``is_active=True`` and still holds an
        eligible role (in ``chain``) in this org.
     4. Validate they're under their role's active-BUD cap.
+    5. When the BUD has impacted repos, validate the user is still in
+       a team that owns at least one — staleness here (user removed
+       from the owning team between visits) breaks the team-scope
+       invariant the rest of the picker enforces.
 
     Any check failing → return None; the caller falls back to the
     normal chain walk.
@@ -659,6 +745,21 @@ async def _previous_assignee_for_phase(
         [user.id], [s.value for s in TERMINAL_BUD_STATUSES]
     )
     if load_map.get(user.id, 0) >= cap:
+        return None
+
+    # Team-scope freshness: when the BUD has impacted repos, the
+    # continuity user MUST still own at least one of them. Without
+    # this check, removing a developer from the team they previously
+    # delivered for would silently re-route the next phase back to
+    # them on continuity — the exact staleness team-scoping was
+    # added to prevent.
+    if impacted_repos and not await user_is_in_owning_team(db, org_id, user.id, impacted_repos):
+        logger.info(
+            "continuity_user_no_longer_in_owning_team",
+            bud_id=str(bud_id),
+            user_id=str(user.id),
+            role=eligible_role.value,
+        )
         return None
 
     # The previous-phase role is recorded for the timeline UI's "carried
@@ -776,12 +877,18 @@ async def _record_assignment(
     phase_value: str,
     actor_id: uuid.UUID | None,
     actor_name: str | None,
+    extra_detail: dict[str, Any] | None = None,
 ) -> None:
     """Write unassigned (if re-assigning) + assigned timeline events.
 
     ``phase_value`` is stamped onto the ``assigned`` event detail so
     continuity lookups on phase re-entry can match by phase instead of
     by role-in-chain — see ``_previous_assignee_for_phase``.
+
+    ``extra_detail`` is merged into the ``assigned`` event detail —
+    used by the chain-resolver path to stamp ``team_scope_*`` keys so
+    the BUD timeline UI can render "from <Team>" or "fell back to
+    org-wide" without re-querying the team tables.
     """
     old_assignee_id = bud.assignee_id
     if old_assignee_id and old_assignee_id != chosen.id:
@@ -799,6 +906,26 @@ async def _record_assignment(
             detail={"previous_assignee_id": str(old_assignee_id), "reason": "reassigned"},
         )
     bud.assignee_id = chosen.id
+    detail: dict[str, Any] = {
+        "assignee_id": str(chosen.id),
+        "assignee_name": chosen.name,
+        "role": role_name.value,
+        "method": method,
+        "phase": phase_value,
+    }
+    if extra_detail:
+        # ``extra_detail`` is for provenance addenda (team scope,
+        # capacity context, etc.) — never for overriding who/what was
+        # assigned. A colliding key would silently corrupt the audit
+        # trail (timeline UI and XP/SP metrics read these keys), so
+        # fail loud in tests rather than ship a split-brain record.
+        overlap = set(extra_detail) & set(detail)
+        if overlap:
+            raise ValueError(
+                "_record_assignment extra_detail must not collide with core "
+                f"detail keys: {sorted(overlap)}"
+            )
+        detail.update(extra_detail)
     await record_event(
         db,
         org_id,
@@ -806,13 +933,7 @@ async def _record_assignment(
         "assigned",
         actor_id=actor_id,
         actor_name=actor_name,
-        detail={
-            "assignee_id": str(chosen.id),
-            "assignee_name": chosen.name,
-            "role": role_name.value,
-            "method": method,
-            "phase": phase_value,
-        },
+        detail=detail,
     )
 
 
@@ -833,7 +954,7 @@ async def _assign_todos_to_lead_if_development(
     if new_status != BUDStatus.DEVELOPMENT:
         return
     try:
-        await assign_all_todos_to_lead(db, org_id, bud_id, lead_user_id)
+        await assign_todos_per_repo_team(db, org_id, bud_id, lead_user_id)
     except Exception:
         logger.warning("todo_lead_assignment_failed", bud_id=str(bud_id))
 

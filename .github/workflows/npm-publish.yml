@@ -1,0 +1,51 @@
+name: Publish CLI to npm
+
+# Publishes the `bodhiorchard` installer CLI (cli/) to npm on merge to main,
+# using the version in cli/package.json. To release a new CLI, bump that version
+# in your PR — merging it publishes that version. If the version is already on
+# npm, the run skips, so unrelated merges are no-ops. (Docker images are heavier
+# to build and are published separately on a git tag — see docker-publish.yml.)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cli/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # Only the repo that owns the `bodhiorchard` npm name publishes; forks skip.
+    if: github.repository == 'mickyarun/bodhiorchard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish if version is new
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "bodhiorchard@${VERSION}" version >/dev/null 2>&1; then
+            echo "bodhiorchard@${VERSION} is already published — skipping."
+          else
+            echo "Publishing bodhiorchard@${VERSION}"
+            npm publish --access public
+          fi

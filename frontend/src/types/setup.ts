@@ -34,11 +34,14 @@ export interface SetupRepoConfig {
   source?: SetupRepoSource
 }
 
-export type ClaudeAuthMode = 'host' | 'api_key'
+export type ClaudeAuthMode = 'host' | 'api_key' | 'subscription'
 
 export interface SetupClaudeConfig {
   authMode: ClaudeAuthMode
   apiKey: string
+  // Claude Pro/Max OAuth token (from `claude setup-token`), used in
+  // `subscription` mode. Stored encrypted on the org like the API key.
+  oauthToken: string
   // True once detectDeployment has applied the backend's recommended default.
   // Guards against later remounts clobbering the user's explicit choice.
   initialized: boolean

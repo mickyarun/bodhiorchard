@@ -59,6 +59,8 @@
       />
 
       <SettingsScanTuning />
+
+      <DangerZone />
     </div>
 
     <RepoBranchMappingDialog
@@ -86,6 +88,7 @@ import { useDeploymentMode } from '@/composables/useDeploymentMode'
 import { useRepoBranches } from '@/composables/useRepoBranches'
 import RepoList from '@/components/settings/code/RepoList.vue'
 import RepoBranchMappingDialog from '@/components/settings/code/RepoBranchMappingDialog.vue'
+import DangerZone from '@/components/settings/code/DangerZone.vue'
 import SettingsScanTuning from './SettingsScanTuning.vue'
 import type { RepoInfo } from '@/types'
 

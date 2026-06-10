@@ -225,6 +225,21 @@ export const useMembersStore = defineStore('members', () => {
     }
   }
 
+  async function unlinkAlias(memberId: string, email: string): Promise<boolean> {
+    error.value = null
+    try {
+      const { data } = await api.delete(`/v1/members/${memberId}/aliases`, {
+        params: { email },
+      })
+      const idx = members.value.findIndex(m => m.id === memberId)
+      if (idx !== -1) members.value[idx] = data
+      return true
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to unlink alias.')
+      return false
+    }
+  }
+
   async function updateCharacter(
     userId: string,
     characterModel: string | null,
@@ -298,6 +313,7 @@ export const useMembersStore = defineStore('members', () => {
     toggleMemberStatus,
     assignRole,
     mergeMember,
+    unlinkAlias,
     updateCharacter,
     setPassword,
     createRole,

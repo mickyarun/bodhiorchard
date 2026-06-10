@@ -18,9 +18,15 @@
   <div class="bud-detail-layout">
     <!-- Main content area -->
     <div class="bud-main" :class="{ 'chat-open': chatOpen }">
-      <!-- Loading -->
-      <div v-if="budStore.loading" class="d-flex justify-center py-12">
-        <v-progress-circular indeterminate color="primary" />
+      <!-- Loading — a skeleton that mirrors the page's shape (title, tab
+           row, body) reads as "the page is forming" rather than a lone
+           spinner that users misread as a hang. The global route bar in
+           AppLayout already covers the preceding lazy-chunk download. -->
+      <div v-if="budStore.loading" class="pa-6">
+        <v-skeleton-loader type="heading" class="mb-2" />
+        <v-skeleton-loader type="text" width="35%" class="mb-6" />
+        <v-skeleton-loader type="button@5" class="mb-6" />
+        <v-skeleton-loader type="paragraph@4" />
       </div>
 
       <!-- Error -->

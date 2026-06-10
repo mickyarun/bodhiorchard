@@ -24,14 +24,21 @@ Scan-trigger / status / cancel routes live in
 """
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.skill_profile import SkillProfileRepository
-from app.schemas.skills import ModuleSkill, SkillProfileRead
+from app.schemas.jobs import JobCreatedResponse, SkillRerunJobPayload
+from app.schemas.skills import (
+    SKILL_RERUN_CONFIRMATION,
+    ModuleSkill,
+    SkillProfileRead,
+    SkillRerunRequest,
+)
+from app.services.job_queue import JOB_SKILL_RERUN, create_job, find_active_job
 
 logger = structlog.get_logger(__name__)
 
@@ -75,3 +82,74 @@ async def list_profiles(
         )
 
     return list(profiles_map.values())
+
+
+@router.post(
+    "/profiles/rerun",
+    response_model=JobCreatedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("org:edit_settings"))],
+)
+async def rerun_profiles(
+    body: SkillRerunRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JobCreatedResponse:
+    """Enqueue a wipe-and-recompute of every ``skill_profile`` for the org.
+
+    Recovery path for alias-routing corruption. The handler at
+    :func:`app.services.job_skill_rerun.handle_skill_rerun_job` walks
+    each tracked repo using the same ``analyze_repo_skills`` +
+    ``phase_e_skills`` pair the scan pipeline uses, but skips indexing,
+    feature synthesis, design extraction, and embeddings. The walk runs
+    in the background so an HTTP request held open for the full duration
+    (minutes for a 20-repo org with deep history) cannot be killed by
+    an axios timeout or upstream proxy idle window — the UI polls
+    ``GET /v1/jobs/{job_id}/status`` via ``useJobSocket`` instead.
+
+    ``body.confirmation`` must equal the fixed
+    ``SKILL_RERUN_CONFIRMATION`` phrase to defend against accidental
+    invocation from outside the UI.
+    """
+    # Strip on the server too — a paste from chat/email commonly carries
+    # a trailing newline and the UI is not the only valid client.
+    if body.confirmation.strip() != SKILL_RERUN_CONFIRMATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Confirmation must equal {SKILL_RERUN_CONFIRMATION!r} to "
+                "proceed with a destructive skill_profiles wipe."
+            ),
+        )
+
+    org = await OrganizationRepository(db).get_for_user(current_user)
+
+    existing = find_active_job(JOB_SKILL_RERUN, {"org_id": str(org.id)})
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A skill-profiles rerun is already in progress for this "
+                f"organization (job {existing.job_id})."
+            ),
+        )
+
+    payload = SkillRerunJobPayload(
+        org_id=org.id,
+        wipe=body.wipe,
+        requested_by_user_id=current_user.id,
+        requested_by_email=current_user.email,
+    )
+    job = create_job(
+        JOB_SKILL_RERUN,
+        payload=payload.model_dump(mode="json"),
+        user_id=str(current_user.id),
+    )
+    logger.info(
+        "skill_profiles_rerun_enqueued",
+        job_id=job.job_id,
+        org_id=str(org.id),
+        wipe=body.wipe,
+        by=current_user.email,
+    )
+    return JobCreatedResponse(job_id=job.job_id)

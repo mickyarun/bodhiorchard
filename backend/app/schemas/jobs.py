@@ -212,6 +212,22 @@ class BulkOnboardJobPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class SkillRerunJobPayload(BaseModel):
+    """Payload for the asynchronous skill-profiles rerun job.
+
+    Carries everything the worker needs to recreate the request context
+    in a fresh DB session: who the org is, whether to wipe before
+    rebuilding, and who triggered it (logged at terminal state).
+    """
+
+    org_id: uuid.UUID = Field(alias="orgId")
+    wipe: bool
+    requested_by_user_id: uuid.UUID = Field(alias="requestedByUserId")
+    requested_by_email: str = Field(alias="requestedByEmail")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class BUDAgentTaskPayload(BaseModel):
     """Standardized payload for all BUD agent tasks.
 

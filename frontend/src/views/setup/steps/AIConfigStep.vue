@@ -59,9 +59,9 @@
       </template>
 
       <template v-else>
-        <!-- Host mode: let the user choose between Hybrid and Cloud API.
-             Docker mode is locked to api_key — a container can't reach a
-             host claude login session, so the chooser would be a footgun. -->
+        <!-- Both modes get a chooser: host picks Hybrid login vs Cloud API key;
+             Docker picks Cloud API key vs Claude subscription token (a container
+             can't reach a host claude login, but a pasted token works). -->
         <div
           v-if="showAuthChooser"
           role="radiogroup"
@@ -107,23 +107,9 @@
           </button>
         </div>
 
-        <!-- Context alert for the active (deployment, authMode) combination -->
+        <!-- Context alert (+ subscription usage warning) for the active mode -->
         <v-alert
-          v-if="deploymentMode === 'docker'"
-          type="info"
-          variant="tonal"
-          density="compact"
-          class="mb-4"
-          icon="mdi-information-outline"
-        >
-          <div class="text-body-2">
-            Backend runs inside a container, so it can't reach a host
-            <code>claude login</code>. Paste an Anthropic API key and we'll
-            store it encrypted on your org.
-          </div>
-        </v-alert>
-        <v-alert
-          v-else-if="authMode === 'host'"
+          v-if="authMode === 'host'"
           type="success"
           variant="tonal"
           density="compact"
@@ -136,6 +122,39 @@
             is stored in the database.
           </div>
         </v-alert>
+        <template v-else-if="authMode === 'subscription'">
+          <v-alert
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+            icon="mdi-account-key-outline"
+          >
+            <div class="text-body-2">
+              Uses your Claude Pro/Max subscription via an OAuth token — no
+              per-token API bill. The token is encrypted on your org.
+            </div>
+          </v-alert>
+          <v-alert
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+            icon="mdi-clock-alert-outline"
+          >
+            <div class="text-body-2">
+              From <strong>June 15, 2026</strong>, automated agent runs on a
+              Claude subscription draw from a monthly Agent-SDK credit. For
+              unmetered use, run the backend on your host
+              (<a
+                href="https://github.com/mickyarun/bodhiorchard#hybrid-mode-hot-reload"
+                target="_blank"
+                rel="noopener"
+                class="text-primary"
+              >hybrid setup</a>) or use an API key.
+            </div>
+          </v-alert>
+        </template>
         <v-alert
           v-else
           type="info"
@@ -145,8 +164,8 @@
           icon="mdi-cloud-outline"
         >
           <div class="text-body-2">
-            Skip the host CLI session and call the Anthropic API directly.
-            The key is encrypted on your org and applied to every agent run.
+            Call the Anthropic API directly. The key is encrypted on your org
+            and applied to every agent run.
           </div>
         </v-alert>
 
@@ -175,6 +194,29 @@
             >
               Get a key at console.anthropic.com
             </a>
+          </div>
+        </template>
+
+        <!-- OAuth token entry — shown when the active mode is subscription -->
+        <template v-if="authMode === 'subscription'">
+          <v-text-field
+            v-model="oauthToken"
+            label="Claude Code OAuth token"
+            placeholder="sk-ant-oat…"
+            type="password"
+            variant="outlined"
+            density="comfortable"
+            autocomplete="off"
+            hide-details
+            prepend-inner-icon="mdi-account-key-outline"
+            class="mb-2"
+            :readonly="setupStore.orgInitDone"
+          />
+          <div class="text-caption text-medium-emphasis mb-4 ml-1">
+            <v-icon icon="mdi-console" size="12" class="mr-1" />
+            Generate one with
+            <code>npx @anthropic-ai/claude-code setup-token</code>, authorize
+            in your browser, and paste the token here.
           </div>
         </template>
 
@@ -272,6 +314,11 @@ const apiKey = computed<string>({
   set: (v) => { setupStore.state.claude.apiKey = v },
 })
 
+const oauthToken = computed<string>({
+  get: () => setupStore.state.claude.oauthToken,
+  set: (v) => { setupStore.state.claude.oauthToken = v },
+})
+
 // Hydrate from the persisted store so navigating away and back to this step
 // keeps the user's prior "Connected" feedback. Failures are treated as
 // transient and not persisted — the user should re-test on revisit.
@@ -285,7 +332,7 @@ const cliUnavailable = ref(false)
 // Re-prompt a new test whenever the user edits the key or flips auth mode —
 // the prior pass/fail no longer reflects the current selection. Also clear
 // the persisted "passed" flag so the green state can't survive stale inputs.
-watch([apiKey, authMode], () => {
+watch([apiKey, oauthToken, authMode], () => {
   if (testStatus.value !== 'idle' && testStatus.value !== 'checking') {
     testStatus.value = 'idle'
     testError.value = ''
@@ -294,31 +341,57 @@ watch([apiKey, authMode], () => {
   setupStore.state.claude.testedVersion = ''
 })
 
-const showAuthChooser = computed(() => deploymentMode.value === 'host')
+// Both deployment modes offer a chooser now: host mode picks between host
+// login and a cloud API key; Docker mode picks between a cloud API key and a
+// Claude subscription OAuth token (a container can't reach a host login).
+const showAuthChooser = computed(() => deploymentLoaded.value)
 
-const authOptions: ReadonlyArray<{
+interface AuthOption {
   value: ClaudeAuthMode
   title: string
   icon: string
   description: string
   badge?: string
-}> = [
-  {
-    value: 'host',
-    title: 'Hybrid / host login',
-    icon: 'mdi-laptop',
-    badge: 'Recommended',
-    description:
-      "Uses the host machine's claude login session. Best for Claude Pro/Max subscribers — nothing is stored.",
-  },
-  {
-    value: 'api_key',
-    title: 'Cloud API key',
-    icon: 'mdi-cloud-outline',
-    description:
-      'Paste an Anthropic API key. Stored encrypted with Fernet AES-128 and applied to every agent run.',
-  },
-]
+}
+
+const authOptions = computed<ReadonlyArray<AuthOption>>(() => {
+  if (deploymentMode.value === 'docker') {
+    return [
+      {
+        value: 'api_key',
+        title: 'Cloud API key',
+        icon: 'mdi-cloud-outline',
+        badge: 'No usage cap',
+        description:
+          'Paste an Anthropic API key. Pay-per-token via the API — no monthly limit.',
+      },
+      {
+        value: 'subscription',
+        title: 'Claude Code subscription',
+        icon: 'mdi-account-key-outline',
+        description:
+          'Paste an OAuth token from `claude setup-token`. Uses your Claude Pro/Max plan.',
+      },
+    ]
+  }
+  return [
+    {
+      value: 'host',
+      title: 'Hybrid / host login',
+      icon: 'mdi-laptop',
+      badge: 'Recommended',
+      description:
+        "Uses the host machine's claude login session. Best for Claude Pro/Max subscribers — nothing is stored.",
+    },
+    {
+      value: 'api_key',
+      title: 'Cloud API key',
+      icon: 'mdi-cloud-outline',
+      description:
+        'Paste an Anthropic API key. Stored encrypted with Fernet AES-128 and applied to every agent run.',
+    },
+  ]
+})
 
 const headerBadge = computed<{ label: string; color: string; icon: string } | null>(() => {
   if (!deploymentLoaded.value) return null
@@ -333,15 +406,17 @@ const headerBadge = computed<{ label: string; color: string; icon: string } | nu
 
 const testDisabled = computed<boolean>(() => {
   if (!deploymentLoaded.value) return true
-  return authMode.value === 'api_key' && apiKey.value.trim().length === 0
+  if (authMode.value === 'api_key') return apiKey.value.trim().length === 0
+  if (authMode.value === 'subscription') return oauthToken.value.trim().length === 0
+  return false
 })
 
 const buttonLabel = computed<string>(() => {
   if (testStatus.value === 'passed') return 'Connected'
   if (testStatus.value === 'failed') return 'Retry connection test'
-  return authMode.value === 'api_key'
-    ? 'Test key & connect'
-    : 'Test host connection'
+  if (authMode.value === 'api_key') return 'Test key & connect'
+  if (authMode.value === 'subscription') return 'Test token & connect'
+  return 'Test host connection'
 })
 
 // In host-login mode, surface the "install CLI on host" hint only when the
@@ -359,6 +434,10 @@ const failureMessage = computed<string>(() => {
       return 'The backend doesn\'t see the API key yet. Paste one above and retry.'
     }
     return testError.value || 'The key was rejected. Double-check it and retry.'
+  }
+  if (authMode.value === 'subscription') {
+    return testError.value
+      || 'The token was rejected. Run `claude setup-token` again and paste a fresh one.'
   }
   // host login mode
   if (testError.value.toLowerCase().includes('not logged in')) {
@@ -406,6 +485,7 @@ async function testConnection(): Promise<void> {
       {
         authMode: authMode.value,
         apiKey: authMode.value === 'api_key' ? apiKey.value : null,
+        oauthToken: authMode.value === 'subscription' ? oauthToken.value : null,
       },
       { timeout: 120_000 },
     )

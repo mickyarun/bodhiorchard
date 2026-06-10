@@ -173,3 +173,38 @@ class SkillProfileRead(BaseModel):
     modules: list[ModuleSkill] = []
 
     model_config = {"populate_by_name": True}
+
+
+# Typed by the admin to acknowledge the wipe is irreversible. Kept as a
+# fixed phrase (not derived from the org name) so the gate is identical
+# across orgs and trivial to share between the UI and the handler.
+SKILL_RERUN_CONFIRMATION = "WIPE AND RECOMPUTE SKILLS"
+
+
+class SkillRerunRequest(BaseModel):
+    """Request body for ``POST /v1/skills/profiles/rerun``."""
+
+    confirmation: str = Field(
+        description=(
+            "Must equal SKILL_RERUN_CONFIRMATION exactly. Type-to-confirm "
+            "gate on a destructive operation."
+        ),
+    )
+    wipe: bool = Field(
+        default=True,
+        description=(
+            "Delete every existing skill_profile for the org before "
+            "recomputing. Required to clear orphan rows under "
+            "previously-deactivated users."
+        ),
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+# Final terminal payload published via ``update_job(..., result=...)``
+# by ``handle_skill_rerun_job``. The frontend reads this off the job
+# status when ``state == "completed"``. Kept as a TypedDict-style shape
+# in code (not a Pydantic model) because ``update_job`` stores ``Any``
+# and the worker emits it as a plain dict — declaring a class here
+# would imply a serialization step that doesn't happen.

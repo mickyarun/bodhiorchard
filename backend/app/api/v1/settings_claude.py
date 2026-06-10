@@ -30,11 +30,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.core.encryption import encrypt_secret
+from app.models.organization import Organization
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.services.claude_env import (
     AUTH_MODE_API_KEY,
     AUTH_MODE_HOST,
+    AUTH_MODE_SUBSCRIPTION,
     VALID_AUTH_MODES,
     apply_claude_auth_to_env,
 )
@@ -53,15 +55,43 @@ class ClaudeSettingsRead(BaseModel):
 
 
 class ClaudeSettingsUpdate(BaseModel):
-    """Update the org's Claude auth mode and (optionally) its API key.
+    """Update the org's Claude auth mode and (optionally) its credential.
 
-    ``api_key`` is only consumed when ``auth_mode`` is ``api_key``. Sending
-    ``null`` or omitting it while in ``api_key`` mode keeps the stored key.
-    Switching to ``host`` mode clears the stored key.
+    ``api_key`` is consumed in ``api_key`` mode, ``oauth_token`` in
+    ``subscription`` mode. Omitting the credential while staying in the same
+    mode keeps the stored one; switching modes requires the new credential.
+    Switching to ``host`` mode clears the stored credential.
     """
 
-    auth_mode: str = Field(..., description="Either 'host' or 'api_key'.")
+    auth_mode: str = Field(..., description="One of 'host', 'api_key', 'subscription'.")
     api_key: str | None = None
+    oauth_token: str | None = None
+
+
+def _apply_credential(
+    org: Organization, *, supplied: str | None, field: str, mode_unchanged: bool
+) -> None:
+    """Store a freshly supplied credential, or keep the existing one only when
+    staying in the same mode.
+
+    Switching modes requires a new credential, so an old API key is never
+    reinterpreted as an OAuth token (or vice versa) — both live in the same
+    encrypted column.
+    """
+    if supplied is not None:
+        trimmed = supplied.strip()
+        if not trimmed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{field} cannot be blank for this auth mode",
+            )
+        org.claude_api_key_encrypted = encrypt_secret(trimmed)
+        return
+    if not (mode_unchanged and org.claude_api_key_encrypted):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field} is required when switching to this auth mode",
+        )
 
 
 @router.get("/claude", response_model=ClaudeSettingsRead)
@@ -99,17 +129,23 @@ async def update_claude_settings(
         )
 
     org = await OrganizationRepository(db).get_for_user(current_user)
+    previous_mode = org.claude_auth_mode
     org.claude_auth_mode = body.auth_mode
 
     if body.auth_mode == AUTH_MODE_API_KEY:
-        if body.api_key is not None:
-            trimmed = body.api_key.strip()
-            if not trimmed:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="api_key cannot be blank when auth_mode is 'api_key'",
-                )
-            org.claude_api_key_encrypted = encrypt_secret(trimmed)
+        _apply_credential(
+            org,
+            supplied=body.api_key,
+            field="api_key",
+            mode_unchanged=previous_mode == AUTH_MODE_API_KEY,
+        )
+    elif body.auth_mode == AUTH_MODE_SUBSCRIPTION:
+        _apply_credential(
+            org,
+            supplied=body.oauth_token,
+            field="oauth_token",
+            mode_unchanged=previous_mode == AUTH_MODE_SUBSCRIPTION,
+        )
     elif body.auth_mode == AUTH_MODE_HOST:
         org.claude_api_key_encrypted = None
 

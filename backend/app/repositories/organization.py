@@ -15,6 +15,7 @@
 """Organization data access repository."""
 
 import uuid
+from collections.abc import Collection
 from typing import Any
 
 from sqlalchemy import select, update
@@ -74,11 +75,17 @@ class OrganizationRepository(BaseRepository[Organization]):
         result = await self._db.execute(select(Organization).where(Organization.id == user.org_id))
         return result.scalar_one()
 
-    async def get_first_with_claude_api_key(self, auth_mode: str) -> Organization | None:
-        """First org configured for ``auth_mode`` with a stored Claude API key."""
+    async def get_first_with_stored_claude_credential(
+        self, auth_modes: Collection[str]
+    ) -> Organization | None:
+        """First org in one of ``auth_modes`` with a stored Claude credential.
+
+        The credential lives in ``claude_api_key_encrypted`` regardless of mode
+        (an API key for ``api_key`` mode, an OAuth token for ``subscription``).
+        """
         result = await self._db.execute(
             select(Organization)
-            .where(Organization.claude_auth_mode == auth_mode)
+            .where(Organization.claude_auth_mode.in_(auth_modes))
             .where(Organization.claude_api_key_encrypted.is_not(None))
             .limit(1)
         )

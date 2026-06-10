@@ -14,12 +14,22 @@
 
 """Slack feature Q&A service.
 
-Handles @mention and ❓-reaction events: runs the slack-feature-qa agent,
-interprets its JSON response, and posts formatted replies back to the thread.
+Handles @mention and ❓-reaction events, classifies the user's intent
+with a cheap Haiku router, and dispatches to the matching specialist
+skill (bud-fact / explain / disambiguate). Acknowledgement replies
+("thanks", "ok") short-circuit before any subprocess spawns.
+
+Why intent routing instead of one mega-skill: the previous
+``slack-feature-qa`` skill bundled nine distinct intent branches into
+~12 KB of prompt; the model deliberated across all branches every
+turn and stalled cold-cache runs at the 90 s timeout. Each specialist
+prompt is < 2 KB and only loads the rules and MCP tools its intent
+needs, dropping cold-cache p99 from > 89 s to ~7 s end-to-end.
 """
 
 import re
 import uuid
+from functools import lru_cache
 from typing import Any
 
 import structlog
@@ -34,25 +44,121 @@ from app.repositories.feature import FeatureRepository
 from app.repositories.feature_qa_session import FeatureQASessionRepository
 from app.repositories.user import UserRepository
 from app.services import slack_client
+from app.services.claude_errors import ClaudeErrorCode
 from app.services.claude_runner import (
     NO_REPO_CONTEXT,
     ClaudeRunnerConfig,
+    ClaudeRunResult,
     MCPServerConfig,
     run_claude_code,
 )
 from app.services.json_parser import parse_json_response
-from app.services.skill_loader import resolve_skill_for_org
+from app.services.skill_loader import Skill, load_skill
 from app.services.slack_feature_qa_reply import (
     format_bud_answer,
     format_clarify_reply,
     format_feature_answer,
 )
+from app.services.slack_qa_router import QaIntent, classify_qa_intent, is_acknowledgement
 
 logger = structlog.get_logger(__name__)
 
 _BOT_MENTION_RE = re.compile(r"<@[A-Z0-9]+>")
-_AGENT_NAME = "slackFeatureQa"
-_SKILL_SLUG = "slack-feature-qa"
+
+# Per-intent skill slug + MCP tool whitelist. Loaded once from file
+# (specialists deliberately bypass the per-org ``agent_skills`` override
+# path while the intent split rolls out — a follow-up wires Settings →
+# Agent Prompts customisation back in via either four ``AgentType``
+# values or per-slug overrides).
+_SKILL_BY_INTENT: dict[QaIntent, str] = {
+    QaIntent.TIMELINE: "slack-qa-bud-fact",
+    QaIntent.OWNERSHIP: "slack-qa-bud-fact",
+    QaIntent.STATUS: "slack-qa-bud-fact",
+    QaIntent.EXPLAIN: "slack-qa-explain",
+    QaIntent.DISAMBIGUATE: "slack-qa-disambiguate",
+    # UNKNOWN falls through to EXPLAIN — broadest tool set, safest
+    # default for any classifier miss.
+    QaIntent.UNKNOWN: "slack-qa-explain",
+}
+
+_TOOLS_BY_INTENT: dict[QaIntent, list[str]] = {
+    QaIntent.TIMELINE: ["get_bud_context", "get_features"],
+    QaIntent.OWNERSHIP: ["get_bud_context", "get_features"],
+    QaIntent.STATUS: ["get_bud_context", "get_features"],
+    QaIntent.EXPLAIN: ["get_bud_context", "get_features", "check_feature_exists"],
+    QaIntent.DISAMBIGUATE: ["get_bud_context", "get_features"],
+    QaIntent.UNKNOWN: ["get_bud_context", "get_features", "check_feature_exists"],
+}
+
+# Tool whitelist for a *resumed* turn. The first turn already picked a
+# specialist; on resume we don't re-route, so the agent keeps whatever
+# skill is in its resumed context and may call any QA tool. Derived as
+# the union of every intent's whitelist (not a hand-kept copy) so adding
+# a tool to any intent automatically widens the resume allow-list —
+# passing the union costs nothing, ``tool_names`` is only an allow-list.
+_ALL_QA_TOOLS = sorted({tool for tools in _TOOLS_BY_INTENT.values() for tool in tools})
+
+
+@lru_cache(maxsize=1)
+def _default_resume_model() -> str | None:
+    """Fallback model for a resume whose session never recorded its own.
+
+    The normal path reads ``session.cli_model`` (the model the first turn
+    minted the session with), so a resume stays on that model even if a
+    per-org Agent-Prompt override moves a specialist off its file default.
+    This fallback only applies to legacy rows (created before ``cli_model``
+    existed) and triage-seeded sessions that never ran a claiming turn.
+
+    Derived from the QA specialists' own declared model rather than a
+    hardcoded literal — when they all agree (the normal case) that's the
+    fallback; if they ever diverge we return ``None`` and let the CLI pick
+    its default rather than guess one specialist's model over another's.
+    """
+    try:
+        models = {load_skill(slug).model or None for slug in set(_SKILL_BY_INTENT.values())}
+    except (FileNotFoundError, ValueError):
+        return None
+    return next(iter(models)) if len(models) == 1 else None
+
+
+# Hard ceiling on specialist agent loops. The mega-skill carried
+# ``max_turns: 10`` from when it had to fan out across nine branches;
+# the specialists complete a normal answer in 2-4 turns. Six gives
+# headroom for one retry on a parse error without letting a runaway
+# loop chew through 90 seconds.
+_SPECIALIST_MAX_TURNS_CEILING = 6
+
+# Floor on the same loop. Bud-fact needs at least one tool turn plus
+# one answer-JSON turn; explain may issue up to three tool calls. Two
+# is the smallest value that keeps any specialist functional, even if
+# a future admin Settings edit tries to set ``max_turns: 1``.
+_SPECIALIST_MAX_TURNS_FLOOR = 2
+
+# Wall-clock cap on the specialist Claude subprocess. Down from the
+# old 90 s — a healthy cold-cache run with a < 2 KB prompt completes
+# in ~6 s, warm in ~3 s. 60 s catches genuine hangs without papering
+# over them.
+_SPECIALIST_TIMEOUT_SECONDS = 60
+
+_ACK_REPLY = "Happy to help — ask anything else about this feature."
+
+# Reply copy. Extracted as module constants so the tests can assert by
+# identity rather than substring — copy edits don't break behaviour
+# pins, and behaviour regressions don't hide behind copy churn.
+_GENERIC_FAILURE_REPLY = "⚠️ Couldn't look that up right now. Please try again shortly."
+_PARSE_FAILURE_REPLY = "⚠️ Couldn't parse that. Try rephrasing your question."
+_BUD_NOT_FOUND_REPLY = (
+    "I couldn't find a BUD matching that. React 🧠 on the original"
+    " message to start intake, or reply with a BUD number / title."
+)
+
+# Soft-fallback error codes for specialist runs. ``MAX_TURNS`` and
+# ``TIMEOUT`` both mean "the model couldn't commit within its budget"
+# from the user's perspective on a fact-lookup specialist — neither
+# is a server crash. Surface them as ``not_found`` and keep the
+# session ``AWAITING_USER`` so the next reply re-enters cleanly.
+# ``BINARY_MISSING`` / ``UNKNOWN`` stay on the hard-error path.
+_SOFT_FALLBACK_ERROR_CODES = frozenset({ClaudeErrorCode.MAX_TURNS, ClaudeErrorCode.TIMEOUT})
 
 
 async def start_feature_qa(
@@ -110,7 +216,13 @@ async def start_feature_qa(
         thread_ts=thread_ts,
     )
 
-    await _run_qa_agent(db, org, bot_token, session, thread_messages=None)
+    # Claim the CLI session namespace with this thread's row UUID
+    # (``--session-id``) so every follow-up reply can ``--resume`` it and
+    # answer from the agent's own working memory instead of re-deriving
+    # the BUD from a thread snapshot every turn.
+    await _run_qa_agent(
+        db, org, bot_token, session, thread_messages=None, cli_session_id=str(session.id)
+    )
 
 
 async def continue_feature_qa(
@@ -140,6 +252,15 @@ async def continue_feature_qa(
     if session.status != FeatureQAStatus.AWAITING_USER:
         return  # Session already resolved or errored
 
+    # Pure acks ("thanks", "ok") never need the agent — post a canned
+    # reply without spawning a subprocess or resuming the session. This
+    # is the only request parsing a continuation turn does: routing,
+    # skill selection and prompt rebuilding all belong to the first turn;
+    # follow-ups just resume the thread's existing CLI session.
+    if is_acknowledgement(user_reply):
+        await slack_client.chat_post_message(bot_token, channel, _ACK_REPLY, thread_ts=thread_ts)
+        return
+
     logger.info("feature_qa_continue", session_id=str(session.id))
 
     # Ack so the thread shows activity while the agent runs (~5s of silence
@@ -152,8 +273,7 @@ async def continue_feature_qa(
         thread_ts=thread_ts,
     )
 
-    thread_messages = await slack_client.conversations_replies(bot_token, channel, thread_ts)
-    await _run_qa_agent(db, org, bot_token, session, thread_messages=thread_messages)
+    await _resume_qa_turn(db, org, bot_token, session, user_reply)
 
 
 # ── Private helpers ────────────────────────────────────────────────
@@ -165,33 +285,147 @@ async def _run_qa_agent(
     bot_token: str,
     session: FeatureQASession,
     thread_messages: list[dict[str, Any]] | None,
+    *,
+    cli_session_id: str | None = None,
 ) -> None:
-    """Run the Q&A agent and post its response to the Slack thread."""
-    # Pull the live skill row so admin edits in Settings → Agent Prompts
-    # (prompt body, max_turns, model, etc.) take effect at runtime. Falls
-    # back to the file-based template when no DB row exists yet.
-    skill = await resolve_skill_for_org(_AGENT_NAME, org.id, db, fallback_slug=_SKILL_SLUG)
+    """Classify the Slack Q&A turn, dispatch to the matching specialist.
 
-    prompt = _build_qa_prompt(skill.prompt, session, thread_messages)
+    This is the full-parse path: router → specialist skill → built
+    prompt. It runs on the first turn of a thread (``start_feature_qa``,
+    passing ``cli_session_id`` to claim the namespace with
+    ``--session-id``) and as the resume fallback (``cli_session_id=None``
+    — no affinity, mirroring the design-chat fallback). Follow-up turns
+    take the cheaper ``_resume_qa_turn`` path instead.
+    """
+    question_text = _latest_question_text(session, thread_messages)
+    intent = await classify_qa_intent(
+        question_text=question_text,
+        thread_messages=thread_messages,
+        session_context=session.context,
+    )
+    logger.info(
+        "feature_qa_intent_routed",
+        session_id=str(session.id),
+        intent=intent.value,
+    )
+
+    # ACK short-circuits the LLM specialist entirely — post a canned
+    # reply and leave the session open for the next real question.
+    if intent == QaIntent.ACK:
+        await slack_client.chat_post_message(
+            bot_token, session.channel, _ACK_REPLY, thread_ts=session.thread_ts
+        )
+        return
+
+    try:
+        skill = load_skill(_SKILL_BY_INTENT[intent])
+    except (FileNotFoundError, ValueError):
+        logger.exception(
+            "feature_qa_specialist_skill_load_failed",
+            session_id=str(session.id),
+            slug=_SKILL_BY_INTENT[intent],
+        )
+        await slack_client.chat_post_message(
+            bot_token,
+            session.channel,
+            _GENERIC_FAILURE_REPLY,
+            thread_ts=session.thread_ts,
+        )
+        session.status = FeatureQAStatus.ERRORED
+        return
+
+    bud_hint = _drill_down_bud_number(session.context)
+    prompt = _build_qa_prompt(skill.prompt, session, thread_messages, bud_hint=bud_hint)
 
     token = create_internal_mcp_token(org.id)
     mcp = MCPServerConfig(
         backend_url=app_settings.mcp_backend_url,
         mcp_token=token,
-        tool_names=["get_bud_context", "check_feature_exists", "get_features"],
+        tool_names=_TOOLS_BY_INTENT[intent],
     )
 
-    result = await run_claude_code(
-        prompt=prompt,
-        working_dir=NO_REPO_CONTEXT,
-        config=ClaudeRunnerConfig(max_turns=skill.max_turns, timeout_seconds=90, mcp=mcp),
-    )
+    model = skill.model or None
+    if cli_session_id is not None:
+        # Claiming the session — remember the model it was minted with so
+        # follow-up resume turns continue on the same model rather than a
+        # hardcoded one (survives per-org model overrides on the skill).
+        session.cli_model = model
 
-    if not result.success:
+    try:
+        result = await run_claude_code(
+            prompt=prompt,
+            working_dir=NO_REPO_CONTEXT,
+            config=ClaudeRunnerConfig(
+                max_turns=_clamp_specialist_max_turns(skill),
+                timeout_seconds=skill.timeout_or_default(_SPECIALIST_TIMEOUT_SECONDS),
+                model=model,
+                mcp=mcp,
+                cli_session_id=cli_session_id,
+                is_resume=False,
+            ),
+        )
+    except Exception:
+        # The subprocess layer can raise on asyncio cancellation, OS
+        # fork failures, or runaway resource limits — none of those
+        # should silently drop the user's thread reply. Surface a
+        # consistent "try again" message and mark the session errored
+        # so the next reply re-enters cleanly via ``continue_feature_qa``.
+        logger.exception("feature_qa_specialist_raised", session_id=str(session.id))
         await slack_client.chat_post_message(
             bot_token,
             session.channel,
-            "⚠️ Couldn't look that up right now. Please try again shortly.",
+            _GENERIC_FAILURE_REPLY,
+            thread_ts=session.thread_ts,
+        )
+        session.status = FeatureQAStatus.ERRORED
+        return
+
+    await _dispatch_qa_result(db, org, bot_token, session, result, intent_label=intent.value)
+
+
+async def _dispatch_qa_result(
+    db: AsyncSession,
+    org: Organization,
+    bot_token: str,
+    session: FeatureQASession,
+    result: ClaudeRunResult,
+    *,
+    intent_label: str,
+) -> None:
+    """Render a specialist run's result into the thread.
+
+    Shared by the full-parse path (``_run_qa_agent``) and the resume
+    path (``_resume_qa_turn``) so answer / summary / clarify / not_found
+    are handled identically regardless of how the turn was produced.
+    ``intent_label`` is for logging only (the resume path has no
+    per-turn intent, so it passes ``"resume"``).
+    """
+    if not result.success:
+        # MAX_TURNS / TIMEOUT mean "the model couldn't commit within its
+        # budget" — for a fact-lookup specialist that's equivalent to
+        # "no clear BUD found", not a server crash. Surface not_found
+        # and keep the session AWAITING_USER so the next reply re-enters
+        # cleanly. Hard errors (binary missing, unknown returncode) keep
+        # the ERRORED path so they show up loudly in logs and metrics.
+        if result.error_code in _SOFT_FALLBACK_ERROR_CODES:
+            logger.info(
+                "feature_qa_specialist_soft_fallback",
+                session_id=str(session.id),
+                intent=intent_label,
+                error_code=result.error_code.value if result.error_code else None,
+            )
+            await slack_client.chat_post_message(
+                bot_token,
+                session.channel,
+                _BUD_NOT_FOUND_REPLY,
+                thread_ts=session.thread_ts,
+            )
+            return
+
+        await slack_client.chat_post_message(
+            bot_token,
+            session.channel,
+            _GENERIC_FAILURE_REPLY,
             thread_ts=session.thread_ts,
         )
         session.status = FeatureQAStatus.ERRORED
@@ -203,7 +437,7 @@ async def _run_qa_agent(
         await slack_client.chat_post_message(
             bot_token,
             session.channel,
-            "⚠️ Couldn't parse that. Try rephrasing your question.",
+            _PARSE_FAILURE_REPLY,
             thread_ts=session.thread_ts,
         )
         session.status = FeatureQAStatus.ERRORED
@@ -267,6 +501,94 @@ async def _run_qa_agent(
     logger.info("feature_qa_agent_completed", session_id=str(session.id), action=action)
 
 
+async def _resume_qa_turn(
+    db: AsyncSession,
+    org: Organization,
+    bot_token: str,
+    session: FeatureQASession,
+    user_reply: str,
+) -> None:
+    """Answer a follow-up by resuming the thread's existing CLI session.
+
+    The first turn claimed a CLI session keyed on the row UUID, so this
+    sends only the new reply and ``--resume``\\s the prior conversation.
+    The agent answers from its own working memory — the BUD it already
+    resolved, with its ``get_bud_context`` result, is still in context —
+    so there is no router, no skill reload, no re-search, and the flaky
+    "couldn't find a BUD" on contentless follow-ups ("delivery date?")
+    goes away.
+
+    On a resume failure (the session file is gone after a backend
+    restart, or no turn ever ran on a triage-seeded session) we fall
+    back once to the full-parse pipeline with no session affinity —
+    mirroring the design-chat fallback (``job_chat``). The full-parse
+    path still reads ``session.context`` candidates and builds
+    ``[HINT_BUD_NUMBER]``, so the triage→Q&A handover stays correct.
+    """
+    prompt = (
+        f"[REPLY] {session.requester_slack_user_id}: {_strip_bot_mention(user_reply)}\n\n"
+        "Respond with a single JSON object."
+    )
+    token = create_internal_mcp_token(org.id)
+    mcp = MCPServerConfig(
+        backend_url=app_settings.mcp_backend_url,
+        mcp_token=token,
+        tool_names=_ALL_QA_TOOLS,
+    )
+
+    # Continue on the exact model the session was minted with; only fall
+    # back to the specialists' declared default for legacy / triage-seeded
+    # rows that never recorded one. Passing the model is required — the CLI
+    # does not reliably inherit the resumed session's original model from
+    # ``None``.
+    model = session.cli_model or _default_resume_model()
+
+    logger.info("feature_qa_resume", session_id=str(session.id), model=model)
+    result: ClaudeRunResult | None = None
+    try:
+        result = await run_claude_code(
+            prompt=prompt,
+            working_dir=NO_REPO_CONTEXT,
+            config=ClaudeRunnerConfig(
+                max_turns=_SPECIALIST_MAX_TURNS_CEILING,
+                timeout_seconds=_SPECIALIST_TIMEOUT_SECONDS,
+                model=model,
+                mcp=mcp,
+                cli_session_id=str(session.id),
+                is_resume=True,
+            ),
+        )
+    except Exception:
+        logger.exception("feature_qa_resume_raised", session_id=str(session.id))
+
+    if result is None or not result.success:
+        # Resume couldn't produce an answer. Re-run the full pipeline
+        # once, fresh and without session affinity, so the reply still
+        # lands (the next turn re-warms a fresh session). The thread
+        # snapshot is only fetched here, on the cold path.
+        logger.info(
+            "feature_qa_resume_fallback",
+            session_id=str(session.id),
+            error_code=(result.error_code.value if result and result.error_code else None),
+        )
+        # The cold path runs a second subprocess; keep the thread alive
+        # so the user isn't staring at the single "Still looking" ack
+        # through another run.
+        await slack_client.chat_post_message(
+            bot_token,
+            session.channel,
+            "🔍 One more moment...",
+            thread_ts=session.thread_ts,
+        )
+        thread_messages = await slack_client.conversations_replies(
+            bot_token, session.channel, session.thread_ts
+        )
+        await _run_qa_agent(db, org, bot_token, session, thread_messages=thread_messages)
+        return
+
+    await _dispatch_qa_result(db, org, bot_token, session, result, intent_label="resume")
+
+
 def _parse_uuid(raw: str | None) -> uuid.UUID | None:
     """Best-effort UUID coercion — returns None for hallucinated agent IDs."""
     if not raw:
@@ -317,8 +639,17 @@ def _build_qa_prompt(
     skill_prompt: str,
     session: FeatureQASession,
     thread_messages: list[dict[str, Any]] | None,
+    *,
+    bud_hint: int | None = None,
 ) -> str:
-    """Build the agent prompt from the skill instructions and conversation context."""
+    """Build the agent prompt from the skill instructions and conversation context.
+
+    When ``bud_hint`` is set, the specialist sees a ``[HINT_BUD_NUMBER]``
+    marker referencing the prior turn's matched BUD. The bud-fact
+    specialist uses this to skip its initial keyword search and go
+    straight to a targeted ``get_bud_context`` call — saves an LLM
+    turn on every drill-down ("timeline give me", "who?").
+    """
     sections = [skill_prompt, "---\n\n## Conversation\n"]
 
     if thread_messages:
@@ -333,13 +664,121 @@ def _build_qa_prompt(
         question = _strip_bot_mention(session.original_question or "")
         sections.append(f"[QUESTION] {session.requester_slack_user_id}: {question}")
 
-    if session.context:
-        sections.append(f"\n## Prior candidates\n{session.context}")
+    if bud_hint is not None:
+        sections.append(f"\n[HINT_BUD_NUMBER] BUD-{bud_hint:03d}")
+
+    candidates_block = _format_prior_candidates_block(session.context, bud_hint)
+    if candidates_block:
+        sections.append(candidates_block)
 
     sections.append("\n---\n\nRespond with a single JSON object.")
     return "\n".join(sections)
 
 
+def _format_prior_candidates_block(
+    session_context: dict[str, Any] | None,
+    bud_hint: int | None,
+) -> str:
+    """Render prior candidates as a typed list, not a raw Python dict repr.
+
+    The previous code dumped ``session.context`` directly via f-string,
+    which produced Python single-quoted dict syntax inside the prompt.
+    That bloated cold-cache cost and the model would occasionally
+    treat the repr as code. Two more fixes baked in here:
+
+    * When ``bud_hint`` is set the bud-fact specialist already has the
+      drill-down marker — repeating every candidate is noise, so we
+      skip the block entirely.
+    * Feature-only candidates render as titles; BUD candidates render
+      as ``BUD-NNN — title``. Both shapes are what the specialists'
+      examples already document.
+    """
+    if bud_hint is not None:
+        return ""
+    if not session_context:
+        return ""
+    candidates = session_context.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return ""
+    lines: list[str] = ["\n## Prior candidates"]
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        if cand.get("kind") == "bud":
+            bud_number = cand.get("bud_number")
+            title = cand.get("title", "")
+            if isinstance(bud_number, int):
+                lines.append(f"- BUD-{bud_number:03d} — {title}".rstrip(" —"))
+        elif cand.get("kind") == "feature":
+            title = cand.get("title", "")
+            if isinstance(title, str) and title:
+                lines.append(f"- {title}")
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
 def _strip_bot_mention(text: str) -> str:
     """Remove Slack bot mention tokens from text."""
     return _BOT_MENTION_RE.sub("", text).strip()
+
+
+def _latest_question_text(
+    session: FeatureQASession,
+    thread_messages: list[dict[str, Any]] | None,
+) -> str:
+    """Pick the text the router should classify.
+
+    On a fresh session the original question lives on the row; on
+    continuation turns the last non-bot thread message is what matters.
+    Falls through to the row's ``original_question`` if no human reply
+    is in the tail (defensive — shouldn't happen because
+    ``continue_feature_qa`` always re-fetches the thread first).
+    """
+    if thread_messages:
+        for msg in reversed(thread_messages):
+            if msg.get("bot_id"):
+                continue
+            text = (msg.get("text") or "").strip()
+            if text:
+                return _strip_bot_mention(text)
+    return _strip_bot_mention(session.original_question or "")
+
+
+def _drill_down_bud_number(session_context: dict[str, Any] | None) -> int | None:
+    """Extract the BUD number to focus on from prior-turn candidates.
+
+    Populated when a prior ``clarify`` turn stored its candidates in
+    ``session.context['candidates']`` (a separate follow-up PR also
+    seeds the same key when triage finds a duplicate, so the drill-down
+    fast path fires there too). Prefer the first BUD candidate over
+    feature-only candidates — BUDs carry the date / status / assignee
+    fields the bud-fact specialist returns.
+    """
+    if not session_context:
+        return None
+    candidates = session_context.get("candidates")
+    if not isinstance(candidates, list):
+        return None
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        if cand.get("kind") != "bud":
+            continue
+        bud_number = cand.get("bud_number")
+        if isinstance(bud_number, int):
+            return bud_number
+    return None
+
+
+def _clamp_specialist_max_turns(skill: Skill) -> int:
+    """Specialist agent loop ceiling.
+
+    The .md frontmatter may carry ``max_turns: 4``; the ceiling caps
+    any admin tuning at ``_SPECIALIST_MAX_TURNS_CEILING`` so a future
+    Settings UI change can't accidentally restore the 10-turn loop
+    behaviour that gave the mega-skill room to time out. The floor
+    (``_SPECIALIST_MAX_TURNS_FLOOR``) guards the opposite extreme:
+    a stray ``max_turns: 1`` would prevent the bud-fact specialist
+    from emitting BOTH a tool call AND its answer JSON.
+    """
+    base = skill.max_turns if skill.max_turns > 0 else _SPECIALIST_MAX_TURNS_CEILING
+    return min(max(_SPECIALIST_MAX_TURNS_FLOOR, base), _SPECIALIST_MAX_TURNS_CEILING)

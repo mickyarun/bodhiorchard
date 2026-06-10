@@ -63,6 +63,9 @@ _CLAUDE_ENV_WHITELIST: frozenset[str] = frozenset(
         "SHELL",
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
+        # Subscription auth: long-lived OAuth token from `claude setup-token`,
+        # injected for `subscription` auth mode (see claude_env.py).
+        "CLAUDE_CODE_OAUTH_TOKEN",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
         "DISABLE_AUTOUPDATER",
         "DISABLE_TELEMETRY",
@@ -76,8 +79,12 @@ def build_claude_env(env_extra: Mapping[str, str] | None) -> dict[str, str]:
     Only variables in ``_CLAUDE_ENV_WHITELIST`` are inherited from the
     parent process. ``env_extra`` (caller-supplied per-call additions, e.g.
     agent context) is then merged on top — callers are trusted to vet what
-    they add. Hard-coded knobs that minimize the subprocess's telemetry /
-    update chatter are set unless already provided.
+    they add. An ``env_extra`` value of ``""`` *removes* that variable from the
+    result rather than setting it empty: this lets a caller drop an inherited
+    var (e.g. clear a compose-level ``ANTHROPIC_API_KEY`` when testing a
+    subscription token) so the subprocess never sees it at all. Hard-coded
+    knobs that minimize the subprocess's telemetry / update chatter are set
+    unless already provided.
 
     Returns a fresh ``dict`` (never ``None``) so callers can hand it
     directly to ``asyncio.create_subprocess_exec``. Note that passing
@@ -88,5 +95,9 @@ def build_claude_env(env_extra: Mapping[str, str] | None) -> dict[str, str]:
     base.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
     base.setdefault("DISABLE_AUTOUPDATER", "1")
     if env_extra:
-        base.update(env_extra)
+        for key, value in env_extra.items():
+            if value == "":
+                base.pop(key, None)
+            else:
+                base[key] = value
     return base

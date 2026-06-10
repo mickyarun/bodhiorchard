@@ -16,6 +16,28 @@
 
 <template>
   <div class="pa-6">
+    <!-- Two-tab layout: "People" (members + roles, the original page)
+         and "Teams" (the new tab). The Members route stays at /members;
+         a ``?tab=`` query param deep-links into a tab so reload
+         preserves the user's view. CLAUDE.md gotcha: ``v-tab`` and
+         ``v-tabs-window-item`` values must match exactly. -->
+    <v-tabs
+      v-model="tab"
+      color="primary"
+      density="compact"
+      slider-color="primary"
+      class="mb-6"
+    >
+      <v-tab value="people">
+        <v-icon start size="18">mdi-account-multiple-outline</v-icon>People
+      </v-tab>
+      <v-tab value="teams">
+        <v-icon start size="18">mdi-account-group-outline</v-icon>Teams
+      </v-tab>
+    </v-tabs>
+
+    <v-tabs-window v-model="tab">
+      <v-tabs-window-item value="people">
     <!-- Header -->
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
@@ -127,8 +149,24 @@
             </td>
             <td class="text-medium-emphasis">
               <div>{{ member.email }}</div>
-              <div v-if="member.emailAliases?.length" class="text-caption" style="opacity: 0.6;">
-                +{{ member.emailAliases.length }} alias{{ member.emailAliases.length !== 1 ? 'es' : '' }}
+              <div
+                v-if="member.emailAliases?.length"
+                class="d-flex flex-wrap ga-1 mt-1"
+                data-test="member-aliases"
+              >
+                <v-chip
+                  v-for="alias in member.emailAliases"
+                  :key="alias"
+                  size="x-small"
+                  variant="tonal"
+                  closable
+                  close-icon="mdi-link-variant-off"
+                  :close-label="`Unlink alias ${alias}`"
+                  :data-test-alias="alias"
+                  @click:close="confirmUnlinkAlias(member, alias)"
+                >
+                  {{ alias }}
+                </v-chip>
               </div>
             </td>
             <td>
@@ -663,6 +701,25 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="unlinkAliasDialog" max-width="440">
+      <v-card>
+        <v-card-title>Unlink alias</v-card-title>
+        <v-card-text>
+          Remove <strong>{{ aliasToUnlink?.email }}</strong> from
+          <strong>{{ aliasToUnlink?.member.name }}</strong>?
+          The next scan will treat commits authored with this email as a
+          separate identity unless you merge them again.
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="unlinkAliasDialog = false">Cancel</v-btn>
+          <v-btn color="warning" :loading="unlinkingAlias" @click="submitUnlinkAlias">
+            Unlink
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- ─── MERGE MEMBERS DIALOG ──────────────────────────── -->
     <v-dialog v-model="mergeDialog" max-width="520" persistent>
       <v-card>
@@ -824,14 +881,36 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+      </v-tabs-window-item>
+
+      <v-tabs-window-item value="teams">
+        <MembersTeamsTab />
+      </v-tabs-window-item>
+    </v-tabs-window>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useMembersStore, type Member, type RoleOption } from '@/stores/members'
 import { useSettingsStore } from '@/stores/settings'
+import MembersTeamsTab from '@/components/members/MembersTeamsTab.vue'
 import api from '@/services/api'
+
+// Tab is kept in the URL (``?tab=teams``) so a refresh / share keeps
+// the user where they were. Default is "people" — the original
+// Members + Roles content.
+type MembersTab = 'people' | 'teams'
+const route = useRoute()
+const router = useRouter()
+const _initialTab: MembersTab = route.query.tab === 'teams' ? 'teams' : 'people'
+const tab = ref<MembersTab>(_initialTab)
+watch(tab, (next) => {
+  // Use ``replace`` to avoid polluting browser history on every tab click.
+  const target = next === 'people' ? undefined : next
+  router.replace({ query: { ...route.query, tab: target } })
+})
 import { ROLE_LABELS } from '@/types'
 import type { UserRoleName } from '@/types'
 
@@ -1240,6 +1319,24 @@ async function submitDeleteRole() {
   const ok = await store.deleteRole(roleToDelete.value.id)
   deletingRole.value = false
   if (ok) deleteRoleDialog.value = false
+}
+
+// ─── Unlink Alias ─────────────────────────────
+const unlinkAliasDialog = ref(false)
+const unlinkingAlias = ref(false)
+const aliasToUnlink = ref<{ member: Member; email: string } | null>(null)
+
+function confirmUnlinkAlias(member: Member, email: string) {
+  aliasToUnlink.value = { member, email }
+  unlinkAliasDialog.value = true
+}
+
+async function submitUnlinkAlias() {
+  if (!aliasToUnlink.value) return
+  unlinkingAlias.value = true
+  const ok = await store.unlinkAlias(aliasToUnlink.value.member.id, aliasToUnlink.value.email)
+  unlinkingAlias.value = false
+  if (ok) unlinkAliasDialog.value = false
 }
 
 // ─── Helpers ──────────────────────────────────

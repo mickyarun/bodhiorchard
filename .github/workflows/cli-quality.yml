@@ -1,0 +1,42 @@
+name: CLI quality
+
+# Type-checks and tests the standalone installer CLI (cli/). It is not part of
+# the npm workspaces, so it installs and runs on its own.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  cli-checks:
+    name: tsc + vitest (CLI)
+    # Run on all three host OSes so platform-specific Node behaviour (path
+    # handling, the port bind-test, child_process) is exercised everywhere
+    # the CLI will run.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check (incl. tests)
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test

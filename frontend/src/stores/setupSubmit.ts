@@ -84,6 +84,10 @@ export async function submitOrgInit(ctx: SubmitContext): Promise<OrgInitResult |
           s.claude.authMode === 'api_key' && s.claude.apiKey
             ? s.claude.apiKey
             : null,
+        oauthToken:
+          s.claude.authMode === 'subscription' && s.claude.oauthToken
+            ? s.claude.oauthToken
+            : null,
       },
     }
     const { data } = await api.post(ENDPOINT_INIT_ORG, payload)
