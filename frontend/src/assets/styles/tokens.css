@@ -25,7 +25,11 @@
  * harvest-gold. Display Bricolage Grotesque · body Geist · mono JetBrains Mono.
  */
 
-:root {
+/* Dark applies to :root (default) AND the explicit dark theme class, so a
+   nested <v-theme-provider theme="bodhiorchardDark"> inside a light app
+   (e.g. the character creator) still resolves these tokens to dark. */
+:root,
+.v-theme--bodhiorchardDark {
   /* ── Colour · dark (primary identity) ─────────────────────────────── */
   --color-paper:        oklch(17% 0.025 152);   /* deep forest canvas      */
   --color-paper-2:      oklch(21% 0.026 152);   /* card surface  (+1)      */
@@ -91,14 +95,14 @@
 
 /* ── Colour · light (derived — hue 150° held, lightness/chroma flipped) ─ */
 .v-theme--bodhiorchardLight {
-  --color-paper:        oklch(97% 0.012 150);
+  --color-paper:        oklch(94.5% 0.020 150);
   --color-paper-2:      oklch(99.3% 0.004 150);
-  --color-paper-3:      oklch(95% 0.014 150);
+  --color-paper-3:      oklch(91.5% 0.020 150);
   --color-ink:          oklch(22% 0.02 150);
   --color-ink-2:        oklch(40% 0.018 150);
   --color-muted:        oklch(54% 0.014 150);
-  --color-rule:         oklch(86% 0.014 150);
-  --color-rule-2:       oklch(90% 0.012 150);
+  --color-rule:         oklch(80% 0.022 150);
+  --color-rule-2:       oklch(87% 0.018 150);
 
   --color-accent:       oklch(50% 0.14 150);
   --color-accent-ink:   oklch(98% 0.01 150);

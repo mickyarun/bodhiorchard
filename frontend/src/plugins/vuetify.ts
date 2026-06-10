@@ -64,11 +64,11 @@ const bodhiorchardDark: ThemeDefinition = {
 const bodhiorchardLight: ThemeDefinition = {
   dark: false,
   colors: {
-    background: '#F0F8F1', // paper
+    background: '#E4F1E6', // paper — deeper sage so white cards clearly float
     surface: '#FBFEFB', // paper-2 (whiter card)
     'surface-bright': '#FFFFFF',
-    'surface-light': '#E8F1EA', // paper-3
-    'surface-variant': '#E8F1EA',
+    'surface-light': '#DAE7DC', // paper-3
+    'surface-variant': '#DAE7DC',
     primary: '#007834', // deep leaf-green
     secondary: '#C28E24', // harvest gold
     error: '#C53732',
@@ -84,11 +84,11 @@ const bodhiorchardLight: ThemeDefinition = {
     'on-gold': '#211909',
     'ink-2': '#414B43',
     muted: '#69716A',
-    rule: '#CBD4CC',
+    rule: '#B4C2B6',
   },
   variables: {
     'border-color': '#141D16',
-    'border-opacity': 0.12,
+    'border-opacity': 0.16,
     'high-emphasis-opacity': 0.95,
     'medium-emphasis-opacity': 0.66,
   },
