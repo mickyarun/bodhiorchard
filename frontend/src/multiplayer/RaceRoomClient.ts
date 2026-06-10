@@ -51,7 +51,7 @@ export interface RacerSnapshot {
   staminaPct: number
   boostUntilMs: number
   jumpUntilMs: number
-  stumbleUntilMs: number
+  knockdownUntilMs: number
   connected: boolean
 }
 
@@ -83,7 +83,7 @@ interface RawRacer {
   staminaPct?: number
   boostUntilMs?: number
   jumpUntilMs?: number
-  stumbleUntilMs?: number
+  knockdownUntilMs?: number
   connected?: boolean
 }
 
@@ -348,7 +348,7 @@ function racerSnapshot(r: RawRacer): RacerSnapshot {
     staminaPct: r.staminaPct ?? 1,
     boostUntilMs: r.boostUntilMs ?? 0,
     jumpUntilMs: r.jumpUntilMs ?? 0,
-    stumbleUntilMs: r.stumbleUntilMs ?? 0,
+    knockdownUntilMs: r.knockdownUntilMs ?? 0,
     connected: r.connected ?? false,
   }
 }

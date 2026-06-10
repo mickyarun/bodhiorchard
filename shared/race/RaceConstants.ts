@@ -155,10 +155,12 @@ export const BOOST_DURATION_MS = 800
 //
 // Crossbars at fixed fractions of the race distance. Tapping the jump key
 // opens a short airborne window; crossing a hurdle inside the window is
-// free, crossing outside it costs an immediate velocity cut plus a stumble
-// during which the racer is capped at walk speed and loses any banked
-// sprint or boost. A cooldown between jumps stops "hold Space" from
-// trivially clearing everything — timing the jump is the mechanic.
+// free, crossing outside it knocks the racer down: velocity drops to
+// zero, they spend HURDLE_KNOCKDOWN_MS on the ground (no sprinting or
+// jumping while down), lose any banked sprint or boost, and then have to
+// accelerate back up from rest. A cooldown between jumps stops "hold
+// Space" from trivially clearing everything — timing the jump is the
+// mechanic.
 
 /** Hurdle centres as fractions of the race distance. */
 export const HURDLE_FRACTIONS = [0.35, 0.65] as const
@@ -173,22 +175,14 @@ export const HURDLE_JUMP_WINDOW_MS = 400
  */
 export const HURDLE_JUMP_COOLDOWN_MS = 1000
 
-/** Multiplier applied to velocity the instant a hurdle is clipped. */
-export const HURDLE_HIT_VELOCITY_FACTOR = 0.5
-
 /**
- * Speed target while stumbling — a stagger, deliberately *below*
- * WALK_TARGET_MPS so clipping a hurdle is felt even by a racer who was
- * only walking. Capping at walk made a walked-into hurdle imperceptible.
+ * Time spent on the ground after hitting a hurdle — covers the fall and
+ * the get-up before the racer can accelerate again from rest. Sized so a
+ * missed hurdle costs ~2s versus a clean crossing at sprint speed: a
+ * mistake that visibly reorders the field but never feels race-ending
+ * with two hurdles per race.
  */
-export const HURDLE_STUMBLE_TARGET_MPS = 1.2
-
-/**
- * Stumble duration after clipping a hurdle. At sprint speed the cut +
- * stagger costs ~3m versus a clean crossing — enough to reorder a close
- * field across two hurdles; at walk it still reads as a visible trip.
- */
-export const HURDLE_STUMBLE_MS = 600
+export const HURDLE_KNOCKDOWN_MS = 1500
 
 /**
  * Server / live-mode sim tick period. Matches Colyseus 20Hz.

@@ -41,7 +41,7 @@ export class RacerState extends Schema {
   @type("uint32") boostUntilMs = 0
   /** Round-ms when the jump's airborne window ends; drives the jump arc. */
   @type("uint32") jumpUntilMs = 0
-  /** Round-ms when the hurdle-clip stumble ends; drives the stumble cue. */
-  @type("uint32") stumbleUntilMs = 0
+  /** Round-ms when the racer gets up from a hurdle knockdown; drives the fall anim. */
+  @type("uint32") knockdownUntilMs = 0
   @type("boolean") connected = false
 }

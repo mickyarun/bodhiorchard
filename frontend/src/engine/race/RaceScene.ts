@@ -26,8 +26,8 @@
  *
  * The scene owns track / ground / finish arch / decor / pads / hurdles /
  * avatars / camera and tears them down in reverse order. It does NOT own
- * physics — `RaceRoomClient` calls `setRacerKinematics(id, x, v, sprinting,
- * airborne)` each frame based on the authoritative `RaceRoom` schema.
+ * physics — the live panel calls `setRacerKinematics(id, kinematics)` each
+ * frame with state derived from the authoritative `RaceRoom` schema.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
@@ -44,6 +44,7 @@ import { HurdleBuilder } from './HurdleBuilder'
 import { RacerAvatar } from './RacerAvatar'
 import { RaceCamera } from './RaceCamera'
 import { RaceCameraOverhead } from './RaceCameraOverhead'
+import type { RacerKinematics } from './types'
 
 export type RaceCameraMode = 'participant' | 'spectator'
 
@@ -151,16 +152,10 @@ export class RaceScene {
    * Drive a racer's avatar from external physics state (step 5's
    * `RaceRoomClient`). No-op if the id isn't in the scene.
    */
-  setRacerKinematics(
-    racerId: string,
-    positionM: number,
-    velocityMps: number,
-    isSprinting: boolean,
-    isAirborne: boolean,
-  ): void {
+  setRacerKinematics(racerId: string, kinematics: RacerKinematics): void {
     for (const a of this.avatars) {
       if (a.racerId === racerId) {
-        a.setKinematics(positionM, velocityMps, isSprinting, isAirborne)
+        a.setKinematics(kinematics)
         return
       }
     }

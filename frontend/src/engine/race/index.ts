@@ -24,7 +24,7 @@
 import { Application } from '../core/Application'
 import { RaceScene, type RaceSceneBuildOptions } from './RaceScene'
 import { PerfStats, shouldEnableStats } from './PerfStats'
-import type { RaceHudState } from './types'
+import type { RaceHudState, RacerKinematics } from './types'
 
 export interface RaceEngineInitOptions {
   width: number
@@ -61,14 +61,8 @@ export class RaceEngine {
   }
 
   /** Drive a racer's avatar from client-side physics state. */
-  setRacerKinematics(
-    racerId: string,
-    positionM: number,
-    velocityMps: number,
-    isSprinting: boolean,
-    isAirborne: boolean,
-  ): void {
-    this.scene?.setRacerKinematics(racerId, positionM, velocityMps, isSprinting, isAirborne)
+  setRacerKinematics(racerId: string, kinematics: RacerKinematics): void {
+    this.scene?.setRacerKinematics(racerId, kinematics)
   }
 
   /** Flip a racer's finished flag — plays the Cheer emote on entry. */
@@ -114,4 +108,5 @@ export type {
   Placing,
   RaceHudState,
   RaceHudSlot,
+  RacerKinematics,
 } from './types'

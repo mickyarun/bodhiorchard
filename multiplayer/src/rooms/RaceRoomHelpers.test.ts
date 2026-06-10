@@ -323,7 +323,7 @@ describe("copyRacerToSchema", () => {
       boostUntilMs: 14_000,
       jumpUntilMs: 12_900,
       lastJumpMs: 12_500,
-      stumbleUntilMs: 13_400,
+      knockdownUntilMs: 13_400,
       boostPadsHit: 0b101,
     }
 
@@ -340,6 +340,6 @@ describe("copyRacerToSchema", () => {
     expect(schema.staminaPct).toBeCloseTo(0.42, 5)
     expect(schema.boostUntilMs).toBe(14_000)
     expect(schema.jumpUntilMs).toBe(12_900)
-    expect(schema.stumbleUntilMs).toBe(13_400)
+    expect(schema.knockdownUntilMs).toBe(13_400)
   })
 })

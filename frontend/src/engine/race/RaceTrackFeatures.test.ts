@@ -24,7 +24,7 @@ import {
   boostPadPositionsM,
   hurdlePositionsM,
   isBoosted,
-  isStumbling,
+  isKnockedDown,
   triggerJump,
 } from '@shared/race/RaceTrackFeatures'
 import {
@@ -34,8 +34,7 @@ import {
   HURDLE_FRACTIONS,
   HURDLE_JUMP_WINDOW_MS,
   HURDLE_JUMP_COOLDOWN_MS,
-  HURDLE_STUMBLE_MS,
-  HURDLE_STUMBLE_TARGET_MPS,
+  HURDLE_KNOCKDOWN_MS,
   RUN_TARGET_MPS,
   WALK_TARGET_MPS,
   STAMINA_INITIAL,
@@ -137,44 +136,52 @@ describe('hurdles', () => {
     return r
   }
 
-  it('clipping a hurdle cuts velocity and opens a stumble window', () => {
+  it('hitting a hurdle knocks the racer down: velocity zeroed, window opened', () => {
     const r = racerJustBeforeHurdle()
     tick([r], TICK_MS, TICK_MS, TRACK_M)
-    expect(r.velocityMps).toBeLessThan(RUN_TARGET_MPS / 2 + 0.5)
-    expect(isStumbling(r, TICK_MS)).toBe(true)
-    expect(r.stumbleUntilMs).toBe(TICK_MS + HURDLE_STUMBLE_MS)
+    expect(r.velocityMps).toBe(0)
+    expect(isKnockedDown(r, TICK_MS)).toBe(true)
+    expect(r.knockdownUntilMs).toBe(TICK_MS + HURDLE_KNOCKDOWN_MS)
   })
 
-  it('clipping forfeits a banked sprint window', () => {
+  it('hitting forfeits a banked sprint window', () => {
     const r = racerJustBeforeHurdle()
     triggerSprintTap(r, 0)
     tick([r], TICK_MS, TICK_MS, TRACK_M)
     expect(r.sprintUntilMs).toBeLessThanOrEqual(TICK_MS)
   })
 
-  it('stumbling drops speed to the stagger target even with fresh sprint taps', () => {
+  it('a downed racer stays on the ground — sprint taps are refused', () => {
     const r = racerJustBeforeHurdle()
     tick([r], TICK_MS, TICK_MS, TRACK_M)
     triggerSprintTap(r, TICK_MS)
-    advance(r, TICK_MS, 8) // still inside HURDLE_STUMBLE_MS; long past decel time
-    expect(r.velocityMps).toBeCloseTo(HURDLE_STUMBLE_TARGET_MPS, 5)
+    expect(r.sprintUntilMs).toBeLessThanOrEqual(TICK_MS)
+    advance(r, TICK_MS, 8) // still inside HURDLE_KNOCKDOWN_MS
+    expect(r.velocityMps).toBe(0)
   })
 
-  it('a walking racer visibly slows when clipping a hurdle', () => {
+  it('a downed racer cannot jump', () => {
+    const r = racerJustBeforeHurdle()
+    tick([r], TICK_MS, TICK_MS, TRACK_M)
+    triggerJump(r, TICK_MS + TICK_MS)
+    expect(r.jumpUntilMs).toBe(0)
+  })
+
+  it('a walking racer falls too — knockdown is felt at any speed', () => {
     const r = makeRacer('a')
     setMoving(r, true)
     r.velocityMps = WALK_TARGET_MPS
     r.positionM = hurdlePositionsM(TRACK_M)[0] - 0.01
     tick([r], TICK_MS, TICK_MS, TRACK_M)
-    advance(r, TICK_MS, 8)
-    expect(r.velocityMps).toBeLessThan(WALK_TARGET_MPS / 2)
+    expect(r.velocityMps).toBe(0)
+    expect(isKnockedDown(r, TICK_MS)).toBe(true)
   })
 
-  it('sprint speed is reachable again once the stumble expires', () => {
+  it('speed is rebuilt from rest after the get-up', () => {
     const r = racerJustBeforeHurdle()
     let now = TICK_MS
     tick([r], TICK_MS, now, TRACK_M)
-    now = advance(r, now, Math.ceil(HURDLE_STUMBLE_MS / TICK_MS))
+    now = advance(r, now, Math.ceil(HURDLE_KNOCKDOWN_MS / TICK_MS))
     for (let i = 0; i < 10; i++) {
       triggerSprintTap(r, now)
       now = advance(r, now, 1)
@@ -186,7 +193,7 @@ describe('hurdles', () => {
     const r = racerJustBeforeHurdle()
     triggerJump(r, 0)
     tick([r], TICK_MS, TICK_MS, TRACK_M)
-    expect(isStumbling(r, TICK_MS)).toBe(false)
+    expect(isKnockedDown(r, TICK_MS)).toBe(false)
     expect(r.velocityMps).toBeGreaterThan(WALK_TARGET_MPS)
   })
 })

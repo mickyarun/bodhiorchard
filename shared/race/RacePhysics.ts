@@ -25,7 +25,7 @@
  *     capped at SPRINT_MAX_WINDOW_MS above now. The racer is "sprinting"
  *     while `nowMs < sprintUntilMs`.
  *   - Each tick velocity accelerates toward:
- *       HURDLE_STUMBLE_TARGET_MPS  if isMoving && stumbling (hurdle clip)
+ *       0                if knocked down (hurdle hit — on the ground)
  *       BOOST_TARGET_MPS if isMoving && boosted (pad window)
  *       RUN_TARGET_MPS   if isMoving && sprinting
  *       WALK_TARGET_MPS  if isMoving
@@ -40,7 +40,6 @@ import {
   WALK_TARGET_MPS,
   RUN_TARGET_MPS,
   BOOST_TARGET_MPS,
-  HURDLE_STUMBLE_TARGET_MPS,
   MOVE_ACCEL_MPSS,
   MOVE_DECEL_MPSS,
   SPRINT_TAP_DURATION_MS,
@@ -54,7 +53,7 @@ import {
   WALK_REGEN_PER_S,
   IDLE_REGEN_PER_S,
 } from './RaceConstants'
-import { isBoosted, isStumbling, stepTrackFeatures } from './RaceTrackFeatures'
+import { isBoosted, isKnockedDown, stepTrackFeatures } from './RaceTrackFeatures'
 import type { Placing } from './types'
 
 /**
@@ -96,10 +95,10 @@ export interface Racer {
   /** Round-ms at which the last jump started — drives the jump cooldown. */
   lastJumpMs: number
   /**
-   * Round-ms at which the active hurdle-clip stumble ends. While
-   * stumbling the speed target is capped at walk.
+   * Round-ms at which the racer gets back up after a hurdle knockdown.
+   * While down the racer is stationary and can't sprint or jump.
    */
-  stumbleUntilMs: number
+  knockdownUntilMs: number
   /** Bitmask of boost-pad indices already consumed (one fire per pad per race). */
   boostPadsHit: number
 }
@@ -119,7 +118,7 @@ export function makeRacer(id: string): Racer {
     // Backdated one full cooldown so the first jump tap of a race is
     // honoured even at nowMs = 0.
     lastJumpMs: -HURDLE_JUMP_COOLDOWN_MS,
-    stumbleUntilMs: 0,
+    knockdownUntilMs: 0,
     boostPadsHit: 0,
   }
 }
@@ -135,11 +134,13 @@ export function setMoving(racer: Racer, isMoving: boolean): void {
  * SPRINT_TAP_DURATION_MS but never past SPRINT_MAX_WINDOW_MS above now.
  *
  * No-op when stamina is depleted — a tired racer can't sprint until
- * walking / standing has regenerated some stamina.
+ * walking / standing has regenerated some stamina — and while knocked
+ * down, so taps banked on the ground can't fire on the get-up frame.
  */
 export function triggerSprintTap(racer: Racer, nowMs: number): void {
   if (racer.finished) return
   if (racer.staminaPct <= 0) return
+  if (isKnockedDown(racer, nowMs)) return
   const currentEnd = Math.max(nowMs, racer.sprintUntilMs)
   const newEnd = currentEnd + SPRINT_TAP_DURATION_MS
   const hardCap = nowMs + SPRINT_MAX_WINDOW_MS
@@ -180,7 +181,7 @@ export function tick(
     }
 
     // Pads / hurdles crossed in (prevPositionM, positionM] this tick.
-    // Effects (boost window, stumble) land on the next velocity step.
+    // Effects (boost window, knockdown) land on the next velocity step.
     stepTrackFeatures(r, prevPositionM, nowMs, trackLengthM)
   }
 }
@@ -232,12 +233,12 @@ function stepVelocity(racer: Racer, sprinting: boolean, nowMs: number, dtSec: nu
 }
 
 /**
- * Speed target while the move key is held. Precedence: a hurdle stumble
- * drops everything to a stagger; otherwise a boost-pad window beats a
- * sprint window beats plain walking.
+ * Speed target while the move key is held. Precedence: a knockdown pins
+ * the racer to the ground (target 0); otherwise a boost-pad window beats
+ * a sprint window beats plain walking.
  */
 function movingTargetSpeed(racer: Racer, sprinting: boolean, nowMs: number): number {
-  if (isStumbling(racer, nowMs)) return HURDLE_STUMBLE_TARGET_MPS
+  if (isKnockedDown(racer, nowMs)) return 0
   if (isBoosted(racer, nowMs)) return BOOST_TARGET_MPS
   return sprinting ? RUN_TARGET_MPS : WALK_TARGET_MPS
 }

@@ -36,7 +36,7 @@
             'race-hud__racer--finished': r.finished,
             'race-hud__racer--sprinting': isSprinting(r),
             'race-hud__racer--boosted': isBoosted(r),
-            'race-hud__racer--stumbling': isStumbling(r),
+            'race-hud__racer--down': isKnockedDown(r),
           }"
         >
           <span class="race-hud__rank">{{ r.finished ? placeFor(r.userId) : '·' }}</span>
@@ -131,8 +131,8 @@ function isBoosted(r: { boostUntilMs: number }): boolean {
   return props.snapshot.runningElapsedMs < r.boostUntilMs
 }
 
-function isStumbling(r: { stumbleUntilMs: number }): boolean {
-  return props.snapshot.runningElapsedMs < r.stumbleUntilMs
+function isKnockedDown(r: { knockdownUntilMs: number }): boolean {
+  return props.snapshot.runningElapsedMs < r.knockdownUntilMs
 }
 
 function placeFor(userId: string): string {
@@ -169,14 +169,17 @@ watch(
   (racers) => {
     const eng = engine.value
     if (!eng) return
+    const now = props.snapshot.runningElapsedMs
     for (const r of racers) {
-      // A boost window drives the run animation just like a sprint —
-      // the avatar is moving faster than walk either way.
-      const sprinting =
-        props.snapshot.runningElapsedMs < r.sprintUntilMs ||
-        props.snapshot.runningElapsedMs < r.boostUntilMs
-      const airborne = props.snapshot.runningElapsedMs < r.jumpUntilMs
-      eng.setRacerKinematics(r.userId, r.positionM, r.velocityMps, sprinting, airborne)
+      eng.setRacerKinematics(r.userId, {
+        positionM: r.positionM,
+        velocityMps: r.velocityMps,
+        // A boost window drives the run animation just like a sprint —
+        // the avatar is moving faster than walk either way.
+        isSprinting: now < r.sprintUntilMs || now < r.boostUntilMs,
+        isAirborne: now < r.jumpUntilMs,
+        isKnockedDown: now < r.knockdownUntilMs,
+      })
       if (r.finished && !finishedSeen.has(r.userId)) {
         finishedSeen.add(r.userId)
         eng.setRacerFinished(r.userId, true)
@@ -370,10 +373,10 @@ function removeKeyHandlers(): void {
   background: linear-gradient(90deg, #5ef2ff, #2bb8ff);
   box-shadow: 0 0 8px rgba(94, 242, 255, 0.7);
 }
-.race-hud__racers li.race-hud__racer--stumbling .race-hud__bar-fill {
+.race-hud__racers li.race-hud__racer--down .race-hud__bar-fill {
   background: linear-gradient(90deg, #ff8d7a, #d84444);
 }
-.race-hud__racers li.race-hud__racer--stumbling .race-hud__name {
+.race-hud__racers li.race-hud__racer--down .race-hud__name {
   color: #ff9d8a;
 }
 .race-hud__racers li.race-hud__racer--finished {

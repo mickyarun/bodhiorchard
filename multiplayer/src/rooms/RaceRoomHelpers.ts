@@ -108,7 +108,7 @@ export function copyRacerToSchema(phys: Racer, schema: RacerState): void {
   schema.staminaPct = phys.staminaPct
   schema.boostUntilMs = phys.boostUntilMs
   schema.jumpUntilMs = phys.jumpUntilMs
-  schema.stumbleUntilMs = phys.stumbleUntilMs
+  schema.knockdownUntilMs = phys.knockdownUntilMs
 }
 
 function asString(v: unknown, name: string): string {
