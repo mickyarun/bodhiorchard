@@ -164,7 +164,8 @@ async def test_chat_bud_design_section_without_design_id_rejects_with_409() -> N
         patch(
             "app.api.v1.bud_chat.BUDSectionSessionRepository",
             patches["BUDSectionSessionRepository"],
-        ),pytest.raises(HTTPException) as exc
+        ),
+        pytest.raises(HTTPException) as exc,
     ):
         await chat_bud(
             bud_id=bud.id,

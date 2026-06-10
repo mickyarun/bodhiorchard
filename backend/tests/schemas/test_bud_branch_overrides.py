@@ -71,9 +71,7 @@ def test_branch_overrides_rejects_unknown_stage_keys(overrides: dict[str, str]) 
         ("uat", "\t"),
     ],
 )
-def test_branch_overrides_rejects_empty_or_whitespace_patterns(
-    stage: str, pattern: str
-) -> None:
+def test_branch_overrides_rejects_empty_or_whitespace_patterns(stage: str, pattern: str) -> None:
     """Empty / whitespace strings fnmatch nothing — surface at the edge."""
     with pytest.raises(ValidationError) as excinfo:
         BUDUpdate(branch_overrides={stage: pattern})

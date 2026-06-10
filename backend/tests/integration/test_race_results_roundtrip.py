@@ -160,9 +160,7 @@ async def test_four_finishers_all_appear_on_leaderboard(
         assert {r.user_id for r in stored} == set(user_ids)
 
     async with pg_session_factory() as db:
-        leaderboard = await get_leaderboard(
-            db, org_id=org_id, distance_m=100, limit=50
-        )
+        leaderboard = await get_leaderboard(db, org_id=org_id, distance_m=100, limit=50)
 
     leaderboard_user_ids = [row.user_id for row in leaderboard]
     assert leaderboard_user_ids == user_ids, (
@@ -244,9 +242,7 @@ async def test_dnfs_persist_but_are_excluded_from_leaderboard(
         assert len(stored) == 4, "All 4 racers (finishers + DNFs) must be persisted"
 
     async with pg_session_factory() as db:
-        leaderboard = await get_leaderboard(
-            db, org_id=org_id, distance_m=100, limit=50
-        )
+        leaderboard = await get_leaderboard(db, org_id=org_id, distance_m=100, limit=50)
 
     finisher_ids = [user_ids[0], user_ids[1]]
     assert [row.user_id for row in leaderboard] == finisher_ids
@@ -361,9 +357,7 @@ async def test_leaderboard_keeps_every_race_entry_not_just_personal_best(
             await db.commit()
 
     async with pg_session_factory() as db:
-        leaderboard = await get_leaderboard(
-            db, org_id=org_id, distance_m=100, limit=10
-        )
+        leaderboard = await get_leaderboard(db, org_id=org_id, distance_m=100, limit=10)
 
     times = [row.finish_time_ms for row in leaderboard]
     assert times == [14_900, 15_360, 15_400, 16_290, 17_200, 32_120], (

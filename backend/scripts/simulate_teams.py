@@ -155,7 +155,9 @@ async def run_positive(
         json={"name": primary_name, "description": "Initial description"},
     )
     suite.record(
-        "create team (201)", "positive", r.status_code == 201,
+        "create team (201)",
+        "positive",
+        r.status_code == 201,
         f"status={r.status_code}",
     )
     primary = r.json()
@@ -202,7 +204,10 @@ async def run_positive(
         )
         if r.status_code != 201:
             suite.record(
-                f"add member {m['email']}", "positive", False, f"status={r.status_code} body={r.text[:120]}"
+                f"add member {m['email']}",
+                "positive",
+                False,
+                f"status={r.status_code} body={r.text[:120]}",
             )
             break
     detail = (await client.get(f"/api/v1/teams/{primary_id}", headers=admin)).json()
@@ -222,7 +227,9 @@ async def run_positive(
         )
         if r.status_code != 201:
             suite.record(
-                f"add repo {repo['name']}", "positive", False,
+                f"add repo {repo['name']}",
+                "positive",
+                False,
                 f"status={r.status_code} body={r.text[:120]}",
             )
             break
@@ -260,9 +267,7 @@ async def run_positive(
     )
 
     # P9: create a second team (used by many-to-many tests + assignment integration)
-    r = await client.post(
-        "/api/v1/teams", headers=admin, json={"name": secondary_name}
-    )
+    r = await client.post("/api/v1/teams", headers=admin, json={"name": secondary_name})
     secondary_id = r.json()["id"]
     suite.record("create second team", "positive", r.status_code == 201)
 
@@ -287,7 +292,9 @@ async def run_validation_and_404(
     dup_name = (await client.get(f"/api/v1/teams/{primary_id}", headers=admin)).json()["name"]
     r = await client.post("/api/v1/teams", headers=admin, json={"name": dup_name})
     suite.record(
-        "duplicate name → 409", "negative", r.status_code == 409,
+        "duplicate name → 409",
+        "negative",
+        r.status_code == 409,
         f"got {r.status_code} body={r.text[:120]}",
     )
 
@@ -304,7 +311,9 @@ async def run_validation_and_404(
     # N5: DELETE (archive) unknown team → 404
     r = await client.delete(f"/api/v1/teams/{uuid.uuid4()}", headers=admin)
     suite.record(
-        "archive unknown team → 404", "negative", r.status_code == 404,
+        "archive unknown team → 404",
+        "negative",
+        r.status_code == 404,
         f"got {r.status_code}",
     )
 
@@ -343,7 +352,9 @@ async def run_validation_and_404(
             json={"user_id": existing_user},
         )
         suite.record(
-            "add same member twice → 400", "negative", r.status_code == 400,
+            "add same member twice → 400",
+            "negative",
+            r.status_code == 400,
             f"got {r.status_code}",
         )
 
@@ -356,7 +367,9 @@ async def run_validation_and_404(
             json={"repo_id": existing_repo},
         )
         suite.record(
-            "add same repo twice → 400", "negative", r.status_code == 400,
+            "add same repo twice → 400",
+            "negative",
+            r.status_code == 400,
             f"got {r.status_code}",
         )
 
@@ -459,7 +472,8 @@ async def run_corner_cases(
         f"description={detail['description']!r}",
     )
 
-    # C4: description preservation — PATCH another field WITHOUT description should keep prior value
+    # C4: description preservation — PATCH another field WITHOUT description
+    # should keep the prior value
     await client.patch(
         f"/api/v1/teams/{primary_id}",
         headers=admin,
@@ -468,7 +482,9 @@ async def run_corner_cases(
     r = await client.patch(
         f"/api/v1/teams/{primary_id}",
         headers=admin,
-        json={"name": (await client.get(f"/api/v1/teams/{primary_id}", headers=admin)).json()["name"]},
+        json={
+            "name": (await client.get(f"/api/v1/teams/{primary_id}", headers=admin)).json()["name"]
+        },
     )
     detail = (await client.get(f"/api/v1/teams/{primary_id}", headers=admin)).json()
     suite.record(
@@ -488,9 +504,7 @@ async def run_corner_cases(
     )
 
     # C6: include_archived=true shows it again with status=archived
-    all_teams = (
-        await client.get("/api/v1/teams?include_archived=true", headers=admin)
-    ).json()
+    all_teams = (await client.get("/api/v1/teams?include_archived=true", headers=admin)).json()
     archived_entry = next((t for t in all_teams if t["id"] == secondary_id), None)
     suite.record(
         "include_archived=true surfaces archived team with status=archived",
@@ -519,9 +533,7 @@ async def run_corner_cases(
     # confirm the team's repos still appear on the archived team's
     # detail (data integrity) but the team is excluded from active list.
     await client.delete(f"/api/v1/teams/{secondary_id}", headers=admin)
-    archived_detail = (
-        await client.get(f"/api/v1/teams/{secondary_id}", headers=admin)
-    ).json()
+    archived_detail = (await client.get(f"/api/v1/teams/{secondary_id}", headers=admin)).json()
     suite.record(
         "archived team retains its members + repos rows (no cascade delete)",
         "corner",
@@ -638,19 +650,25 @@ async def run_assignment_integration(
     )
     if dev_role is None:
         suite.record(
-            "developer role lookup", "positive", False,
+            "developer role lookup",
+            "positive",
+            False,
             "no role named 'developer' in /v1/roles",
         )
         return []
     dev_a = await _ensure_fresh_dev(
-        client, admin, suite,
+        client,
+        admin,
+        suite,
         email=f"sim-dev-a-{seed_suffix}@taskflow.dev",
         name=f"Sim Dev A {seed_suffix}",
         developer_role_id=dev_role["id"],
         suffix=seed_suffix,
     )
     dev_b = await _ensure_fresh_dev(
-        client, admin, suite,
+        client,
+        admin,
+        suite,
         email=f"sim-dev-b-{seed_suffix}@taskflow.dev",
         name=f"Sim Dev B {seed_suffix}",
         developer_role_id=dev_role["id"],
@@ -714,9 +732,7 @@ async def run_assignment_integration(
             f"/api/v1/buds/{bud['id']}",
             headers=admin,
             json={
-                "impacted_repos": [
-                    {"repo_id": repo["id"], "repo_name": repo["name"]}
-                ],
+                "impacted_repos": [{"repo_id": repo["id"], "repo_name": repo["name"]}],
             },
         )
         # Walk to DEVELOPMENT so the dev-role chain fires.
@@ -816,9 +832,7 @@ async def main(base_url: str, password: str) -> int:
         qa = auth(qa_token) if qa_token else {}
 
         active_members, active_repos = await get_seed_data(client, admin)
-        print(
-            f"Seed: {len(active_members)} active members, {len(active_repos)} active repos."
-        )
+        print(f"Seed: {len(active_members)} active members, {len(active_repos)} active repos.")
         if len(active_members) < 4 or len(active_repos) < 2:
             print(
                 "FATAL: need >=4 active members and >=2 active repos in the org. "
@@ -831,9 +845,7 @@ async def main(base_url: str, password: str) -> int:
             client, admin, suite, seed_suffix, active_members, active_repos
         )
 
-        await run_validation_and_404(
-            client, admin, suite, primary_id, pickable, active_repos
-        )
+        await run_validation_and_404(client, admin, suite, primary_id, pickable, active_repos)
 
         if qa:
             await run_permission_checks(client, admin, qa, suite, seed_suffix)
@@ -853,9 +865,7 @@ async def main(base_url: str, password: str) -> int:
             client, admin, suite, seed_suffix, active_members, active_repos
         )
 
-        await cleanup(
-            client, admin, suite, [primary_id, secondary_id, *integration_team_ids]
-        )
+        await cleanup(client, admin, suite, [primary_id, secondary_id, *integration_team_ids])
 
     return suite.summary()
 

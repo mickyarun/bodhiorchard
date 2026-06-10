@@ -282,9 +282,7 @@ async def main() -> None:
             if winner == light["name"]:
                 ok("LIGHT wins — priority-weighted scoring is biasing assignment correctly.")
             else:
-                print(
-                    "  ! Unexpected: incoming P2 did NOT go to the lower-effective-load dev."
-                )
+                print("  ! Unexpected: incoming P2 did NOT go to the lower-effective-load dev.")
 
         # ── Test 6 — reject yield offer ───────────────────────────
         log("Test 6 — reject yield offer (as targeted developer)")

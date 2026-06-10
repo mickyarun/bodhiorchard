@@ -228,9 +228,7 @@ def test_velocity_aggregate_pinned_constraints() -> None:
     assert id_col.nullable is False
     assert table.c.org_id.nullable is False
 
-    unique_names = {
-        c.name for c in table.constraints if isinstance(c, UniqueConstraint)
-    }
+    unique_names = {c.name for c in table.constraints if isinstance(c, UniqueConstraint)}
     assert "uq_velocity_agg_bucket" in unique_names
 
 

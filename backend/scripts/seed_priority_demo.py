@@ -91,8 +91,13 @@ async def main() -> None:
         # in the development column. Created in an order that does NOT
         # match priority so the toggle visibly reorders them.
         print("\n[2] Creating development-phase BUDs (mixed priority order):")
-        dev_set = [("P2", "demo p2-a"), ("P0", "demo p0-hot"), ("P3", "demo p3-low"),
-                   ("P1", "demo p1-high"), ("P2", "demo p2-b")]
+        dev_set = [
+            ("P2", "demo p2-a"),
+            ("P0", "demo p0-hot"),
+            ("P3", "demo p3-low"),
+            ("P1", "demo p1-high"),
+            ("P2", "demo p2-b"),
+        ]
         for prio, label in dev_set:
             b = await create_bud(client, f"[DEMO] {label}", prio)
             patched = await patch_bud(client, b["id"], status="development")

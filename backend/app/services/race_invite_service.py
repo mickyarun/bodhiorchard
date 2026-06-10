@@ -250,10 +250,7 @@ async def _send_race_invite_slack(
             return
 
         deep_link = f"{settings.frontend_url.rstrip('/')}/raceview/{room_id}"
-        message = (
-            f"🏁 *{host_name}* invited you to a *{distance_m}m race*.\n"
-            f"Join: {deep_link}"
-        )
+        message = f"🏁 *{host_name}* invited you to a *{distance_m}m race*.\nJoin: {deep_link}"
 
         result = await chat_post_message(bot_token, dm_channel, message)
         if result is None:

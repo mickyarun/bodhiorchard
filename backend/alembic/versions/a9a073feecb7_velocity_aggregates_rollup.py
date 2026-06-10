@@ -5,6 +5,7 @@ Revises: af5af83d4327
 Create Date: 2026-05-30 21:54:26.636330
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -13,8 +14,8 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'a9a073feecb7'
-down_revision: str | None = 'af5af83d4327'
+revision: str = "a9a073feecb7"
+down_revision: str | None = "af5af83d4327"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -25,74 +26,74 @@ def upgrade() -> None:
     # earlier migration). Use postgresql.ENUM with create_type=False so
     # we reuse the existing type rather than re-CREATE-ing it — per the
     # alembic_enum_create_table gotcha documented in project memory.
-    bud_status = postgresql.ENUM(name='bud_status', create_type=False)
+    bud_status = postgresql.ENUM(name="bud_status", create_type=False)
     jsonb_empty_list = sa.text("'[]'::jsonb")
-    now_sql = sa.text('now()')
+    now_sql = sa.text("now()")
     op.create_table(
-        'velocity_aggregates',
-        sa.Column('org_id', sa.UUID(), nullable=False),
-        sa.Column('complexity', sa.Integer(), nullable=False),
-        sa.Column('phase', bud_status, nullable=False),
-        sa.Column('n_samples', sa.Integer(), server_default='0', nullable=False),
+        "velocity_aggregates",
+        sa.Column("org_id", sa.UUID(), nullable=False),
+        sa.Column("complexity", sa.Integer(), nullable=False),
+        sa.Column("phase", bud_status, nullable=False),
+        sa.Column("n_samples", sa.Integer(), server_default="0", nullable=False),
         sa.Column(
-            'sample_window',
+            "sample_window",
             postgresql.JSONB(astext_type=sa.Text()),
             server_default=jsonb_empty_list,
             nullable=False,
         ),
         sa.Column(
-            'contributing_bud_ids',
+            "contributing_bud_ids",
             postgresql.JSONB(astext_type=sa.Text()),
             server_default=jsonb_empty_list,
             nullable=False,
         ),
-        sa.Column('p50_days', sa.Numeric(precision=8, scale=2), nullable=True),
-        sa.Column('p70_days', sa.Numeric(precision=8, scale=2), nullable=True),
-        sa.Column('p85_days', sa.Numeric(precision=8, scale=2), nullable=True),
-        sa.Column('pert_optimistic', sa.Numeric(precision=8, scale=2), nullable=True),
-        sa.Column('pert_most_likely', sa.Numeric(precision=8, scale=2), nullable=True),
-        sa.Column('pert_pessimistic', sa.Numeric(precision=8, scale=2), nullable=True),
+        sa.Column("p50_days", sa.Numeric(precision=8, scale=2), nullable=True),
+        sa.Column("p70_days", sa.Numeric(precision=8, scale=2), nullable=True),
+        sa.Column("p85_days", sa.Numeric(precision=8, scale=2), nullable=True),
+        sa.Column("pert_optimistic", sa.Numeric(precision=8, scale=2), nullable=True),
+        sa.Column("pert_most_likely", sa.Numeric(precision=8, scale=2), nullable=True),
+        sa.Column("pert_pessimistic", sa.Numeric(precision=8, scale=2), nullable=True),
         sa.Column(
-            'running_mean',
+            "running_mean",
             sa.Numeric(precision=10, scale=4),
-            server_default='0',
+            server_default="0",
             nullable=False,
         ),
         sa.Column(
-            'running_m2',
+            "running_m2",
             sa.Numeric(precision=12, scale=4),
-            server_default='0',
+            server_default="0",
             nullable=False,
         ),
-        sa.Column('running_mean_30d_ago', sa.Numeric(precision=10, scale=4), nullable=True),
-        sa.Column('snapshot_taken_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('id', sa.UUID(), nullable=False),
+        sa.Column("running_mean_30d_ago", sa.Numeric(precision=10, scale=4), nullable=True),
+        sa.Column("snapshot_taken_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("id", sa.UUID(), nullable=False),
         sa.Column(
-            'created_at',
+            "created_at",
             sa.DateTime(timezone=True),
             server_default=now_sql,
             nullable=False,
         ),
         sa.Column(
-            'updated_at',
+            "updated_at",
             sa.DateTime(timezone=True),
             server_default=now_sql,
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(['org_id'], ['organizations.id']),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('org_id', 'complexity', 'phase', name='uq_velocity_agg_bucket'),
+        sa.ForeignKeyConstraint(["org_id"], ["organizations.id"]),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("org_id", "complexity", "phase", name="uq_velocity_agg_bucket"),
     )
     op.create_index(
-        'ix_velocity_agg_lookup',
-        'velocity_aggregates',
-        ['org_id', 'complexity'],
+        "ix_velocity_agg_lookup",
+        "velocity_aggregates",
+        ["org_id", "complexity"],
         unique=False,
     )
     op.create_index(
-        op.f('ix_velocity_aggregates_org_id'),
-        'velocity_aggregates',
-        ['org_id'],
+        op.f("ix_velocity_aggregates_org_id"),
+        "velocity_aggregates",
+        ["org_id"],
         unique=False,
     )
     # ### end Alembic commands ###
@@ -100,7 +101,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_index(op.f('ix_velocity_aggregates_org_id'), table_name='velocity_aggregates')
-    op.drop_index('ix_velocity_agg_lookup', table_name='velocity_aggregates')
-    op.drop_table('velocity_aggregates')
+    op.drop_index(op.f("ix_velocity_aggregates_org_id"), table_name="velocity_aggregates")
+    op.drop_index("ix_velocity_agg_lookup", table_name="velocity_aggregates")
+    op.drop_table("velocity_aggregates")
     # ### end Alembic commands ###
