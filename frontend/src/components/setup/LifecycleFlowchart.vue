@@ -33,7 +33,7 @@
 
         <!-- Circle track -->
         <circle cx="250" cy="250" r="180"
-          fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2" />
+          fill="none" stroke-width="2" style="stroke: rgb(var(--v-theme-rule))" />
 
         <!-- Dashed ring -->
         <circle cx="250" cy="250" r="180"
@@ -386,7 +386,7 @@ onUnmounted(() => {
 
 .cycle-center__desc {
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgb(var(--v-theme-on-surface-variant));
   line-height: 1.3;
   margin-top: 4px;
 }

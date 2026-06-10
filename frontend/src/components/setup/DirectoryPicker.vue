@@ -309,19 +309,19 @@ defineExpose({ open })
 
 <style scoped>
 .path-bar {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgb(var(--v-theme-surface-bright));
+  border: 1px solid rgb(var(--v-theme-rule));
   overflow-x: auto;
   white-space: nowrap;
 }
 
 .dir-item {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
   cursor: pointer;
 }
 
 .dir-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--v-theme-surface-bright));
 }
 
 .invisible {
@@ -340,6 +340,6 @@ defineExpose({ open })
 
 .browse-icon:hover {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgb(var(--v-theme-surface-bright));
 }
 </style>

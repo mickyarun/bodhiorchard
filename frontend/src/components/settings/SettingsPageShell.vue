@@ -96,6 +96,6 @@ defineEmits<{
 
 .settings-header {
   flex-shrink: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
 }
 </style>

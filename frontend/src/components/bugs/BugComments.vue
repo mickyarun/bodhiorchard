@@ -213,10 +213,10 @@ async function onPost(): Promise<void> {
 <style scoped>
 .comment-row {
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--v-theme-surface-bright));
 }
 .comment-tombstone {
-  background: rgba(255, 255, 255, 0.01);
+  background: rgb(var(--v-theme-surface-bright));
   opacity: 0.7;
 }
 .fst-italic { font-style: italic; }

@@ -485,17 +485,17 @@ async function copyLocations(): Promise<void> {
   gap: 10px;
   padding: 16px 18px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgb(var(--v-theme-surface-bright));
+  border: 1px solid rgb(var(--v-theme-rule));
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 .feature-card:hover {
   border-color: rgba(var(--v-theme-primary), 0.45);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--v-theme-surface-bright));
 }
 .feature-card--expanded {
   border-color: rgba(var(--v-theme-primary), 0.6);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--v-theme-surface-bright));
 }
 .feature-card--deactivated {
   /* Soft-deleted rows render with reduced contrast so the eye drops
@@ -503,16 +503,16 @@ async function copyLocations(): Promise<void> {
      "this no longer exists" marker that survives the dim. */
   opacity: 0.72;
   border-style: dashed;
-  border-left: 3px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.012);
+  border-left: 3px solid rgb(var(--v-theme-rule));
+  background: rgb(var(--v-theme-surface-bright));
 }
 .feature-card--deactivated:hover {
   opacity: 0.95;
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.025);
+  border-color: rgb(var(--v-theme-rule));
+  background: rgb(var(--v-theme-surface-bright));
 }
 .feature-card--deactivated .feature-card__title {
-  color: rgba(255, 255, 255, 0.75);
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 
 .feature-card__deactivated-banner {
@@ -523,8 +523,8 @@ async function copyLocations(): Promise<void> {
   margin-top: 4px;
   padding: 4px 8px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.65);
+  background: rgb(var(--v-theme-surface-bright));
+  color: rgb(var(--v-theme-on-surface-variant));
   font-size: 0.74rem;
   line-height: 1.3;
 }
@@ -546,8 +546,8 @@ async function copyLocations(): Promise<void> {
   font-family: ui-monospace, SFMono-Regular, monospace;
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.78);
+  background: rgb(var(--v-theme-surface-bright));
+  color: rgb(var(--v-theme-on-surface));
   font-size: 0.72rem;
 }
 
@@ -567,7 +567,7 @@ async function copyLocations(): Promise<void> {
   font-size: 1rem;
   font-weight: 600;
   line-height: 1.35;
-  color: rgba(255, 255, 255, 0.95);
+  color: rgb(var(--v-theme-on-surface));
   letter-spacing: 0.005em;
 }
 .feature-card__badges {
@@ -616,7 +616,7 @@ async function copyLocations(): Promise<void> {
 
 .feature-card__description {
   margin: 0;
-  color: rgba(255, 255, 255, 0.72);
+  color: rgb(var(--v-theme-on-surface-variant));
   font-size: 0.875rem;
   line-height: 1.5;
   display: -webkit-box;
@@ -634,9 +634,9 @@ async function copyLocations(): Promise<void> {
   font-size: 0.7rem;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgb(var(--v-theme-surface-bright));
+  color: rgb(var(--v-theme-on-surface-variant));
+  border: 1px solid rgb(var(--v-theme-rule));
   letter-spacing: 0.02em;
 }
 
@@ -646,7 +646,7 @@ async function copyLocations(): Promise<void> {
   gap: 8px 14px;
   align-items: center;
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.48);
+  color: rgb(var(--v-theme-on-surface-variant));
   line-height: 1.3;
 }
 .lineage-item {
@@ -657,11 +657,11 @@ async function copyLocations(): Promise<void> {
 .lineage-item--separated {
   /* Vertical bar between created/last-touched so the two halves read
      as a single timeline rather than two unrelated chips. */
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid rgb(var(--v-theme-rule));
   padding-left: 14px;
 }
 .lineage-item__by {
-  color: rgba(255, 255, 255, 0.62);
+  color: rgb(var(--v-theme-on-surface-variant));
   text-decoration: none;
   margin-left: 2px;
   font-weight: 500;
@@ -683,7 +683,7 @@ async function copyLocations(): Promise<void> {
   justify-content: space-between;
   gap: 12px;
   padding-top: 8px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+  border-top: 1px dashed rgb(var(--v-theme-rule));
 }
 .feature-card__meta {
   display: flex;
@@ -747,14 +747,14 @@ async function copyLocations(): Promise<void> {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 
 .detail-description {
   margin: 0;
   font-size: 0.875rem;
   line-height: 1.55;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgb(var(--v-theme-on-surface));
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -772,7 +772,7 @@ async function copyLocations(): Promise<void> {
   align-items: flex-start;
   gap: 8px;
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgb(var(--v-theme-on-surface));
   line-height: 1.5;
 }
 .capability-row > .v-icon {
@@ -790,7 +790,7 @@ async function copyLocations(): Promise<void> {
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgb(var(--v-theme-on-surface));
   font-size: 0.85rem;
   font-weight: 500;
 }
@@ -808,9 +808,9 @@ async function copyLocations(): Promise<void> {
   font-size: 0.72rem;
   padding: 2px 6px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgb(var(--v-theme-surface-bright));
+  color: rgb(var(--v-theme-on-surface));
+  border: 1px solid rgb(var(--v-theme-rule));
 }
 
 .copy-btn {
@@ -819,9 +819,9 @@ async function copyLocations(): Promise<void> {
   gap: 4px;
   padding: 3px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgb(var(--v-theme-rule));
+  background: rgb(var(--v-theme-surface-bright));
+  color: rgb(var(--v-theme-on-surface-variant));
   font-size: 0.7rem;
   font-weight: 500;
   cursor: pointer;
@@ -842,12 +842,12 @@ async function copyLocations(): Promise<void> {
   margin: 0;
   padding: 10px 12px;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgb(var(--v-theme-background));
+  border: 1px solid rgb(var(--v-theme-rule));
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 0.72rem;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgb(var(--v-theme-on-surface));
   max-height: 220px;
   overflow: auto;
   white-space: pre;

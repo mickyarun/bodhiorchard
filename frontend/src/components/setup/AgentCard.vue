@@ -58,7 +58,7 @@
       </div>
 
       <!-- Connects to -->
-      <div v-if="agent.interactsWith.length" class="mt-auto pt-2" style="border-top: 1px solid rgba(255,255,255,0.04);">
+      <div v-if="agent.interactsWith.length" class="mt-auto pt-2" style="border-top: 1px solid rgb(var(--v-theme-rule));">
         <div class="d-flex flex-wrap align-center ga-1">
           <v-icon icon="mdi-link-variant" size="12" class="text-medium-emphasis" />
           <span

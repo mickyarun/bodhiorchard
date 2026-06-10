@@ -45,7 +45,7 @@
       <v-divider
         v-if="index < steps.length - 1"
         class="align-self-start mt-5 mx-1"
-        :color="index < currentStep ? 'primary' : 'rgba(255,255,255,0.1)'"
+        :color="index < currentStep ? 'primary' : 'rule'"
         :thickness="2"
         style="max-width: 32px; min-width: 16px; flex: 1;"
       />
