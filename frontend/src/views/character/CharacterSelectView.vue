@@ -19,7 +19,7 @@
        Force the dark theme regardless of the app's light/dark setting so its
        hard-coded dark panels and the Vuetify emphasis text stay consistent
        (in light mode the medium-emphasis labels were dark-on-dark = invisible). -->
-  <v-theme-provider theme="bodhiorchardDark" class="char-select">
+  <v-theme-provider theme="bodhiorchardDark" with-background class="char-select">
     <!-- Ambient gradient backdrop -->
     <div class="char-select__backdrop" />
 
