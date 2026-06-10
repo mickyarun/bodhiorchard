@@ -284,6 +284,14 @@
          CTA closes that class of complaint. Reads the existing
          notifications store, no extra socket subscriptions. -->
     <ChatCompletionToast v-if="authStore.user?.id" />
+
+    <!-- Yield-offer reject / reassign confirmation dialogs. Lifted out
+         of NotificationBell so the bell stays single-root and v-show
+         on it doesn't trip Vue's "runtime directive on fragment" warn.
+         The shared composable wires the bell-row triggers to these
+         modals; v-dialog teleports to body so co-location doesn't
+         matter for the rendered DOM. -->
+    <YieldOfferDialogs v-if="authStore.user?.id" />
   </v-app>
 </template>
 
@@ -293,6 +301,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
+import YieldOfferDialogs from '@/components/common/YieldOfferDialogs.vue'
 import XPToast from '@/components/common/XPToast.vue'
 import ChatCompletionToast from '@/components/common/ChatCompletionToast.vue'
 import RaceInviteToast from '@/components/race/RaceInviteToast.vue'
