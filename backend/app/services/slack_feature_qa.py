@@ -29,6 +29,7 @@ needs, dropping cold-cache p99 from > 89 s to ~7 s end-to-end.
 
 import re
 import uuid
+from functools import lru_cache
 from typing import Any
 
 import structlog
@@ -97,15 +98,28 @@ _TOOLS_BY_INTENT: dict[QaIntent, list[str]] = {
 # passing the union costs nothing, ``tool_names`` is only an allow-list.
 _ALL_QA_TOOLS = sorted({tool for tools in _TOOLS_BY_INTENT.values() for tool in tools})
 
-# Default model for resumed turns — used only when a session never
-# recorded the model it was minted with (legacy rows from before
-# ``cli_model`` existed, or triage-seeded sessions that never ran a
-# claiming turn). The normal path reads ``session.cli_model`` so a
-# resume stays on whatever model the first turn used, even if a per-org
-# Agent-Prompt override changes a specialist off Sonnet. The specialists
-# all declare ``model: sonnet``; ``test_slack_qa_intent_dispatch`` pins
-# this default against that declared model so the fallback can't drift.
-_RESUME_MODEL = "sonnet"
+
+@lru_cache(maxsize=1)
+def _default_resume_model() -> str | None:
+    """Fallback model for a resume whose session never recorded its own.
+
+    The normal path reads ``session.cli_model`` (the model the first turn
+    minted the session with), so a resume stays on that model even if a
+    per-org Agent-Prompt override moves a specialist off its file default.
+    This fallback only applies to legacy rows (created before ``cli_model``
+    existed) and triage-seeded sessions that never ran a claiming turn.
+
+    Derived from the QA specialists' own declared model rather than a
+    hardcoded literal — when they all agree (the normal case) that's the
+    fallback; if they ever diverge we return ``None`` and let the CLI pick
+    its default rather than guess one specialist's model over another's.
+    """
+    try:
+        models = {load_skill(slug).model or None for slug in set(_SKILL_BY_INTENT.values())}
+    except (FileNotFoundError, ValueError):
+        return None
+    return next(iter(models)) if len(models) == 1 else None
+
 
 # Hard ceiling on specialist agent loops. The mega-skill carried
 # ``max_turns: 10`` from when it had to fan out across nine branches;
@@ -523,10 +537,11 @@ async def _resume_qa_turn(
     )
 
     # Continue on the exact model the session was minted with; only fall
-    # back to the module default for legacy / triage-seeded rows that never
-    # recorded one. Passing the model is required — the CLI does not
-    # reliably inherit the resumed session's original model from ``None``.
-    model = session.cli_model or _RESUME_MODEL
+    # back to the specialists' declared default for legacy / triage-seeded
+    # rows that never recorded one. Passing the model is required — the CLI
+    # does not reliably inherit the resumed session's original model from
+    # ``None``.
+    model = session.cli_model or _default_resume_model()
 
     logger.info("feature_qa_resume", session_id=str(session.id), model=model)
     result: ClaudeRunResult | None = None

@@ -25,8 +25,9 @@ Behaviours we guarantee won't regress:
    with ``--session-id``; follow-ups resume it (no router, reply-only
    prompt, full tool union); a resume that can't answer falls back
    once to the full-parse pipeline with no session affinity; pure-ack
-   follow-ups short-circuit before resuming; and ``_RESUME_MODEL`` must
-   match the specialists' declared model.
+   follow-ups short-circuit before resuming; a resume continues on the
+   model the session was minted with (falling back to the specialists'
+   derived default); and that default tracks the declared model.
 
 All Claude calls and Slack posts are stubbed — these tests are
 hermetic and cheap.
@@ -502,7 +503,7 @@ async def test_resume_falls_back_to_default_model_when_unrecorded(monkeypatch: A
         MagicMock(), MagicMock(id=uuid.uuid4()), "bot-token", session, "delivery date?"
     )
 
-    assert runs[0]["config"].model == slack_feature_qa._RESUME_MODEL
+    assert runs[0]["config"].model == slack_feature_qa._default_resume_model()
 
 
 @pytest.mark.asyncio
@@ -682,14 +683,11 @@ async def test_resume_subprocess_raises_falls_back(monkeypatch: Any) -> None:
     assert runs[1]["config"].is_resume is False
 
 
-def test_resume_model_matches_specialist_declared_model() -> None:
-    """``_RESUME_MODEL`` must equal the model the QA specialists declare,
-    or a resumed turn would switch models mid-conversation. Loads the real
-    specialist skills so a frontmatter edit that moves a specialist off
-    Sonnet fails here loudly instead of silently drifting."""
-    for slug in set(_SKILL_BY_INTENT.values()):
-        skill = load_skill(slug)
-        assert skill.model == slack_feature_qa._RESUME_MODEL, (
-            f"specialist {slug!r} declares model {skill.model!r}, "
-            f"but _RESUME_MODEL is {slack_feature_qa._RESUME_MODEL!r} — they must match"
-        )
+def test_default_resume_model_tracks_specialist_declared_model() -> None:
+    """The resume fallback model is *derived* from the specialists' own
+    declared model — not a hardcoded literal — so it follows a frontmatter
+    edit instead of drifting. Pins that the derived default equals what the
+    specialists declare while they all agree (the normal case)."""
+    declared = {load_skill(slug).model for slug in set(_SKILL_BY_INTENT.values())}
+    assert len(declared) == 1, f"specialists disagree on model: {declared!r}"
+    assert slack_feature_qa._default_resume_model() == next(iter(declared))
