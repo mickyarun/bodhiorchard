@@ -42,58 +42,40 @@
         </p>
       </header>
 
-      <v-alert v-if="error" type="error" class="mx-6 mb-4" density="compact">
+      <AppCallout
+        v-if="error"
+        variant="warning"
+        eyebrow="Couldn't load"
+        class="mx-6 mb-3"
+      >
         {{ error }}
-      </v-alert>
+      </AppCallout>
 
       <section class="invite-more__section">
-        <div v-if="loading" class="d-flex justify-center pa-6">
-          <v-progress-circular indeterminate size="28" color="primary" />
-        </div>
-
-        <div v-else-if="invitable.length === 0" class="invite-more__empty">
-          No more members available — everyone in your org is already invited.
-        </div>
-
-        <ul v-else class="invite-more__list">
-          <li v-for="m in invitable" :key="m.id">
-            <button
-              type="button"
-              class="invite-more__member"
-              :class="{
-                'invite-more__member--selected': selectedIds.includes(m.id),
-                'invite-more__member--disabled': atCap && !selectedIds.includes(m.id),
-              }"
-              :disabled="atCap && !selectedIds.includes(m.id)"
-              @click="toggle(m.id)"
-            >
-              <span class="invite-more__avatar">{{ initials(m.name) }}</span>
-              <span class="invite-more__text">
-                <span class="invite-more__name">{{ m.name }}</span>
-                <span class="invite-more__email">{{ m.email }}</span>
-              </span>
-              <span
-                class="invite-more__check"
-                :class="{ 'invite-more__check--on': selectedIds.includes(m.id) }"
-              >
-                <v-icon v-if="selectedIds.includes(m.id)" icon="mdi-check" size="14" />
-              </span>
-            </button>
-          </li>
-        </ul>
+        <MemberPicker
+          v-model="selectedIds"
+          :members="invitable"
+          :max-selection="remainingSlots"
+          :loading="loading"
+          empty-message="No more members available — everyone in your org is already invited."
+        />
       </section>
 
       <footer class="invite-more__footer">
-        <v-btn variant="text" size="large" @click="$emit('update:modelValue', false)">
-          Cancel
-        </v-btn>
         <button
-          class="invite-more__send"
-          :class="{ 'invite-more__send--disabled': !canSubmit }"
+          type="button"
+          class="cta__pill cta__pill--ghost"
+          @click="$emit('update:modelValue', false)"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="cta__pill cta__pill--host"
           :disabled="!canSubmit"
           @click="onSend"
         >
-          <v-icon icon="mdi-send" size="18" class="mr-2" />
+          <v-icon icon="mdi-send" size="14" />
           Send invites
         </button>
       </footer>
@@ -107,13 +89,10 @@ import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import RaceThemeBackdrop from './RaceThemeBackdrop.vue'
 import CheckerFlagIcon from './CheckerFlagIcon.vue'
-import { initials } from './initials'
+import MemberPicker, { type MemberPickerEntry } from './MemberPicker.vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 
-interface DirectoryEntry {
-  id: string
-  name: string
-  email: string
-}
+type DirectoryEntry = MemberPickerEntry
 
 const props = defineProps<{
   modelValue: boolean
@@ -155,7 +134,6 @@ const invitable = computed(() => {
   })
 })
 
-const atCap = computed(() => selectedIds.value.length >= props.remainingSlots)
 const canSubmit = computed(() => selectedIds.value.length > 0 && !loading.value)
 
 watch(
@@ -174,19 +152,11 @@ async function loadDirectory(): Promise<void> {
   try {
     const { data } = await api.get<DirectoryEntry[]>('/v1/members/directory')
     directory.value = data
-  } catch {
+  } catch (err) {
+    console.error('[RaceInviteMoreDialog] member directory fetch failed:', err)
     error.value = 'Could not load org members. Try again in a moment.'
   } finally {
     loading.value = false
-  }
-}
-
-function toggle(id: string): void {
-  const i = selectedIds.value.indexOf(id)
-  if (i >= 0) {
-    selectedIds.value.splice(i, 1)
-  } else if (!atCap.value) {
-    selectedIds.value.push(id)
   }
 }
 
@@ -246,99 +216,6 @@ function onSend(): void {
   max-height: 360px;
   overflow-y: auto;
 }
-.invite-more__empty {
-  text-align: center;
-  padding: 24px;
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 13px;
-}
-.invite-more__list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.invite-more__member {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 32px 1fr 24px;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
-}
-.invite-more__member:hover:not(.invite-more__member--disabled) {
-  background: rgba(255, 255, 255, 0.05);
-}
-.invite-more__member--selected {
-  background: rgba(125, 213, 125, 0.08);
-  border-color: rgba(125, 213, 125, 0.3);
-}
-.invite-more__member--disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-.invite-more__avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #4b7bb0, #2d5680);
-  color: #fff;
-  letter-spacing: 0.02em;
-}
-.invite-more__member--selected .invite-more__avatar {
-  background: linear-gradient(135deg, #7dd57d, #5bae5b);
-  color: #06130b;
-}
-.invite-more__text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.invite-more__name {
-  font-size: 14px;
-  font-weight: 600;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.invite-more__email {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  margin-top: 1px;
-}
-.invite-more__check {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  border: 1.5px solid rgba(255, 255, 255, 0.2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, border-color 0.15s;
-}
-.invite-more__check--on {
-  background: linear-gradient(135deg, #30d66d, #19a34f);
-  border-color: transparent;
-  color: #fff;
-}
 
 .invite-more__footer {
   display: flex;
@@ -348,24 +225,9 @@ function onSend(): void {
   padding: 12px 16px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
-.invite-more__send {
-  display: inline-flex;
-  align-items: center;
-  padding: 10px 22px;
-  border: none;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #30d66d, #19a34f);
-  color: #06130b;
-  font-family: inherit;
-  font-weight: 800;
-  font-size: 14px;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  box-shadow: 0 6px 16px rgba(47, 216, 107, 0.3);
-}
-.invite-more__send--disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  box-shadow: none;
-}
+
+/* Pill visuals (.cta__pill, --host, --ghost, --danger) live in
+   assets/styles/race-pills.scss — imported globally via main.scss so
+   the silhouette stays consistent across lobby, cancel dialog, and
+   this invite-more dialog. */
 </style>

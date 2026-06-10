@@ -67,42 +67,15 @@
           </span>
         </div>
 
-        <div v-if="loadingMembers" class="d-flex justify-center pa-6">
-          <v-progress-circular indeterminate size="28" color="primary" />
+        <div class="setup__members-container">
+          <MemberPicker
+            v-model="selectedIds"
+            :members="invitableMembers"
+            :max-selection="MAX_RACERS - 1"
+            :loading="loadingMembers"
+            empty-message="No other members available in your org yet."
+          />
         </div>
-
-        <div v-else-if="invitableMembers.length === 0" class="setup__empty">
-          No other members available in your org yet.
-        </div>
-
-        <ul v-else class="setup__members">
-          <li
-            v-for="m in invitableMembers"
-            :key="m.id"
-          >
-            <button
-              type="button"
-              class="setup__member"
-              :class="{
-                'setup__member--selected': selectedIds.includes(m.id),
-                'setup__member--disabled': atCap && !selectedIds.includes(m.id),
-              }"
-              :disabled="atCap && !selectedIds.includes(m.id)"
-              @click="toggle(m.id)"
-            >
-              <span class="setup__avatar">{{ initials(m.name) }}</span>
-              <span class="setup__member-text">
-                <span class="setup__member-name">{{ m.name }}</span>
-                <!-- Email disambiguates same-name members ("Arun" × 3); muted
-                     so the primary visual hierarchy is still the name. -->
-                <span class="setup__member-email">{{ m.email }}</span>
-              </span>
-              <span class="setup__check" :class="{ 'setup__check--on': selectedIds.includes(m.id) }">
-                <v-icon v-if="selectedIds.includes(m.id)" icon="mdi-check" size="14" />
-              </span>
-            </button>
-          </li>
-        </ul>
       </section>
 
       <footer class="setup__footer">
@@ -133,13 +106,9 @@ import { OrgRoomClient } from '@/multiplayer/OrgRoomClient'
 import { ALLOWED_DISTANCES_M, MAX_RACERS } from '@shared/race/RaceConstants'
 import RaceThemeBackdrop from './RaceThemeBackdrop.vue'
 import CheckerFlagIcon from './CheckerFlagIcon.vue'
-import { initials } from './initials'
+import MemberPicker, { type MemberPickerEntry } from './MemberPicker.vue'
 
-interface DirectoryEntry {
-  id: string
-  name: string
-  email: string
-}
+type DirectoryEntry = MemberPickerEntry
 
 const props = defineProps<{
   modelValue: boolean
@@ -173,8 +142,6 @@ const invitableMembers = computed(() => {
   })
 })
 
-const atCap = computed(() => selectedIds.value.length >= MAX_RACERS - 1)
-
 const canSubmit = computed(() =>
   selectedIds.value.length >= 1
   && selectedIds.value.length <= MAX_RACERS - 1
@@ -203,15 +170,6 @@ async function loadDirectory(): Promise<void> {
     error.value = 'Could not load org members. Try again in a moment.'
   } finally {
     loadingMembers.value = false
-  }
-}
-
-function toggle(id: string): void {
-  const i = selectedIds.value.indexOf(id)
-  if (i >= 0) {
-    selectedIds.value.splice(i, 1)
-  } else if (!atCap.value) {
-    selectedIds.value.push(id)
   }
 }
 
@@ -358,113 +316,19 @@ async function onSend(): Promise<void> {
   opacity: 0.7;
 }
 
-/* Members list */
-.setup__members {
-  list-style: none;
-  margin: 0;
+/* Scrollable container around the shared MemberPicker. */
+.setup__members-container {
   padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
   max-height: 260px;
   overflow-y: auto;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(0, 0, 0, 0.25);
 }
-.setup__members::-webkit-scrollbar { width: 6px; }
-.setup__members::-webkit-scrollbar-thumb {
+.setup__members-container::-webkit-scrollbar { width: 6px; }
+.setup__members-container::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
   border-radius: 3px;
-}
-.setup__member {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 32px 1fr 24px;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
-}
-.setup__member:hover:not(.setup__member--disabled) {
-  background: rgba(255, 255, 255, 0.05);
-}
-.setup__member--selected {
-  background: rgba(125, 213, 125, 0.08);
-  border-color: rgba(125, 213, 125, 0.3);
-}
-.setup__member--disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-.setup__avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #4b7bb0, #2d5680);
-  color: #fff;
-  letter-spacing: 0.02em;
-}
-.setup__member--selected .setup__avatar {
-  background: linear-gradient(135deg, #7dd57d, #5bae5b);
-  color: #06130b;
-}
-.setup__member-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.setup__member-name {
-  font-size: 14px;
-  font-weight: 600;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.setup__member-email {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  margin-top: 1px;
-}
-.setup__check {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  border: 1.5px solid rgba(255, 255, 255, 0.2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, border-color 0.15s;
-}
-.setup__check--on {
-  background: linear-gradient(135deg, #30d66d, #19a34f);
-  border-color: transparent;
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(47, 216, 107, 0.3);
-}
-
-.setup__empty {
-  padding: 24px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 13px;
-  border-radius: 12px;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
 }
 
 /* ── Footer ─────────────────────────────── */
