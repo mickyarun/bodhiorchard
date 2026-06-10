@@ -15,7 +15,12 @@
  -->
 
 <template>
-  <v-app>
+  <!-- The public methodology page is a cinematic, dark landing. Its rich
+       sections (the circular lifecycle flow, the VS-Agile comparison table,
+       the manifesto and agent cards) are all designed light-on-dark, so the
+       whole page renders in the dark theme regardless of the app's setting —
+       on a light app these sections were white-on-white and unreadable. -->
+  <v-app theme="bodhiorchardDark">
     <!-- Top header bar -->
     <v-app-bar flat color="surface" density="compact" class="methodology-appbar">
       <div class="d-flex align-center justify-space-between w-100 px-4">
