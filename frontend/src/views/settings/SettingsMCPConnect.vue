@@ -43,7 +43,7 @@
       </p>
     </header>
 
-    <v-card variant="outlined" class="mcp-card mb-6">
+    <v-card color="surface" class="mcp-card mb-6">
       <div class="mcp-card__header">
         <v-icon icon="mdi-link-variant" size="18" color="primary" />
         <div class="text-subtitle-2 font-weight-medium">Endpoint</div>
@@ -68,7 +68,7 @@
       </div>
     </v-card>
 
-    <v-card variant="outlined" class="mcp-card mb-6">
+    <v-card color="surface" class="mcp-card mb-6">
       <div class="mcp-card__header">
         <v-icon icon="mdi-key-variant" size="18" color="primary" />
         <div class="text-subtitle-2 font-weight-medium">Your tokens</div>
@@ -120,7 +120,7 @@
       </v-list>
     </v-card>
 
-    <v-card variant="outlined" class="mcp-card mb-6">
+    <v-card color="surface" class="mcp-card mb-6">
       <div class="mcp-card__header">
         <v-icon icon="mdi-toolbox-outline" size="18" color="primary" />
         <div class="text-subtitle-2 font-weight-medium">Available tools</div>
@@ -167,7 +167,7 @@
       </AppCallout>
     </v-card>
 
-    <v-card variant="outlined" class="mcp-card mb-6">
+    <v-card color="surface" class="mcp-card mb-6">
       <div class="mcp-card__header">
         <v-icon icon="mdi-code-braces" size="18" color="primary" />
         <div class="text-subtitle-2 font-weight-medium">Client config snippets</div>
@@ -206,7 +206,7 @@
          our agents use. These snippets give the local LLM the verbs it
          needs (which tools to call, in what order) so the output lands
          in the shape the BUD section editors expect. -->
-    <v-card variant="outlined" class="mcp-card mb-6">
+    <v-card color="surface" class="mcp-card mb-6">
       <div class="mcp-card__header">
         <v-icon icon="mdi-text-box-edit-outline" size="18" color="primary" />
         <div class="text-subtitle-2 font-weight-medium">Example prompts to start work</div>
@@ -833,6 +833,7 @@ onMounted(refresh)
 }
 .mcp-card {
   overflow: hidden;
+  border: 1px solid rgb(var(--v-theme-rule));
 }
 .mcp-card__header {
   display: flex;
@@ -840,7 +841,7 @@ onMounted(refresh)
   gap: 10px;
   padding: 14px 18px;
   background: rgba(var(--v-theme-on-surface), 0.025);
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
 }
 .mcp-card__body {
   padding: 18px;
@@ -859,7 +860,7 @@ onMounted(refresh)
   background: rgba(var(--v-theme-on-surface), 0.07);
   padding: 8px 14px;
   border-radius: 6px;
-  font-family: var(--v-font-family-monospace, 'Menlo', monospace);
+  font-family: var(--font-mono, 'Menlo', monospace);
   font-size: 13px;
   min-width: 0;
   word-break: break-all;
@@ -869,7 +870,7 @@ onMounted(refresh)
   padding: 1px 6px;
   border-radius: 3px;
   font-size: 0.85em;
-  font-family: var(--v-font-family-monospace, 'Menlo', monospace);
+  font-family: var(--font-mono, 'Menlo', monospace);
 }
 .tool-group + .tool-group {
   margin-top: 18px;
@@ -893,7 +894,7 @@ onMounted(refresh)
   background: rgba(var(--v-theme-on-surface), 0.07);
   padding: 2px 8px;
   border-radius: 4px;
-  font-family: var(--v-font-family-monospace, 'Menlo', monospace);
+  font-family: var(--font-mono, 'Menlo', monospace);
   font-size: 12px;
   font-weight: 600;
   color: rgb(var(--v-theme-primary));
@@ -919,7 +920,7 @@ onMounted(refresh)
   overflow-x: auto;
   font-size: 12px;
   line-height: 1.5;
-  font-family: var(--v-font-family-monospace, 'Menlo', monospace);
+  font-family: var(--font-mono, 'Menlo', monospace);
   white-space: pre;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.06);
 }
