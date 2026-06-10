@@ -28,6 +28,7 @@
  */
 import { Room, Client } from "colyseus"
 import {
+  CANCEL_FLUSH_GRACE_MS,
   COUNTDOWN_MS,
   LOBBY_MAX_MS,
   MAX_RACERS,
@@ -194,7 +195,12 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     // client, the room sees `clients=0`, and the timeout we set in
     // onCreate (or the 15s default after start) takes care of disposal.
     this.autoDispose = true
-    this.disconnect()
+    // Defer the disconnect by one patch cycle so the `race_cancelled`
+    // broadcast above actually flushes to clients first. Disconnecting in
+    // the same tick closes the sockets before Colyseus sends the frame, so
+    // the host's `onRaceCancelled` handler — which drives the toast and the
+    // navigation back to the garden — would never fire.
+    this.clock.setTimeout(() => this.disconnect(), CANCEL_FLUSH_GRACE_MS)
   }
 
   /**

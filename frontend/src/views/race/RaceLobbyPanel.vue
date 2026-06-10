@@ -166,6 +166,7 @@ import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
 import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
 import RaceInviteMoreDialog from '@/components/race/RaceInviteMoreDialog.vue'
+import { useMemberDirectory } from '@/composables/useMemberDirectory'
 
 const props = defineProps<{
   snapshot: RaceStateSnapshot
@@ -219,11 +220,17 @@ function onAddInvitees(userIds: string[]): void {
 const orgMemberTick = ref(0)
 let unsubscribeMemberListener: (() => void) | null = null
 
+// Directory is the only name source for invitees who aren't currently
+// connected to the org room (OrgRoom presence only carries online members,
+// so an offline invitee would otherwise render as a truncated user id).
+const directory = useMemberDirectory()
+
 onMounted(() => {
   const org = OrgRoomClient.getInstance()
   unsubscribeMemberListener = org.addMemberChangeListener(() => {
     orgMemberTick.value++
   })
+  void directory.ensureLoaded()
 })
 onBeforeUnmount(() => {
   unsubscribeMemberListener?.()
@@ -232,9 +239,11 @@ onBeforeUnmount(() => {
 
 function nameFor(userId: string): string {
   void orgMemberTick.value
+  // Prefer live OrgRoom presence (freshest), then the org directory
+  // (covers offline invitees), then a shortened id as a last resort.
   const member = OrgRoomClient.getInstance().getMember(userId)
   if (member?.name) return member.name
-  return userId.length > 12 ? `${userId.slice(0, 8)}…` : userId
+  return directory.nameFor(userId)
 }
 
 /**

@@ -72,12 +72,15 @@
          AppCallout warning body, pill action row echoing the lobby's
          "Invite more" / "Back to garden" pair. -->
     <v-dialog v-model="cancelDialogOpen" max-width="440">
-      <v-card class="cancel-race-card" color="surface">
-        <div class="cancel-race-card__eyebrow">
-          <CheckerFlagIcon :size="12" />
-          Confirm cancellation
-        </div>
-        <h2 class="cancel-race-card__title">Cancel this race?</h2>
+      <!-- Background, text colour, and gold left rule pinned by
+           `.cancel-race-card.v-card` in the scoped style block so the
+           dialog stays cinematic-dark under the forest design system's
+           auto theme. The eyebrow is dropped — title is the headline,
+           no redundant kicker. -->
+      <v-card class="cancel-race-card">
+        <h2 class="cancel-race-card__title">
+          Cancel this race<span class="cancel-race-card__dot">?</span>
+        </h2>
         <AppCallout
           variant="warning"
           eyebrow="Affects everyone invited"
@@ -90,10 +93,9 @@
         <div class="cancel-race-card__actions">
           <button
             type="button"
-            class="cta__pill cta__pill--ghost"
+            class="cancel-race-card__back"
             @click="cancelDialogOpen = false"
           >
-            <v-icon icon="mdi-arrow-left" size="16" />
             Keep racing
           </button>
           <button
@@ -101,7 +103,7 @@
             class="cta__pill cta__pill--danger"
             @click="confirmCancelAndLeave"
           >
-            <v-icon icon="mdi-close-circle-outline" size="16" />
+            <v-icon icon="mdi-close-circle-outline" size="14" />
             Cancel race
           </button>
         </div>
@@ -141,6 +143,13 @@ import RaceStaminaIntroDialog from '@/components/race/RaceStaminaIntroDialog.vue
 const props = defineProps<{
   roomId: string
 }>()
+
+/**
+ * Delay between firing `race_cancel` and navigating away. Long enough for
+ * the send to flush over the WebSocket before this view unmounts and
+ * closes the socket; short enough to feel instant.
+ */
+const CANCEL_NAV_DELAY_MS = 250
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -254,13 +263,19 @@ const shouldConfirmCancel = computed<boolean>(() => {
 
 function confirmCancelAndLeave(): void {
   cancelDialogOpen.value = false
-  // Fire-and-let-the-echo-drive-us: the server broadcasts `race_cancelled`
-  // back to the sender alongside the invitees, so the host's own
-  // `onRaceCancelled` handler will surface the toast and schedule the
-  // navigation. Avoids a race where `router.push` unmounts the
-  // component (closing the WS) before `room.send` has actually flushed
-  // the cancel frame.
+  // Send the cancel, then drive our OWN navigation rather than waiting on
+  // the server's `race_cancelled` echo. The echo can never be relied on
+  // here: the server broadcasts it and disconnects the room in the same
+  // breath, so the frame routinely loses the race to the socket close and
+  // the host is left stranded in the lobby. The invitees still get the
+  // broadcast (the server defers its disconnect a tick for them); the host
+  // doesn't need it — it knows it just cancelled.
+  //
+  // The short delay before navigating lets the `race_cancel` frame flush
+  // over the WS before `router.push` unmounts this view and closes the
+  // socket mid-send.
   client.value?.sendRaceCancel()
+  window.setTimeout(() => leaveImmediate(), CANCEL_NAV_DELAY_MS)
 }
 
 function leaveImmediate(): void {
@@ -270,11 +285,18 @@ function leaveImmediate(): void {
 
 <style scoped>
 .race-room-view {
+  /* Race surfaces are deliberately cinematic-dark — pinned regardless
+     of the global forest design system theme so the gold/italic chrome
+     and white text on lobby + live + results all read against a single
+     consistent backdrop. Without this, the forest light theme bleeds
+     pale-mint through the page and white/gold elements disappear. */
   width: 100%;
   height: 100%;
   min-height: calc(100vh - 64px);
   display: flex;
   flex-direction: column;
+  background: linear-gradient(180deg, #0f1726 0%, #0a0f1a 100%);
+  color: #fff;
 }
 .race-room-view > * {
   flex: 1;
@@ -332,44 +354,83 @@ function leaveImmediate(): void {
 }
 
 /* ── Cancel-race dialog ─────────────────────
-   Reuses the race-error rhythm (eyebrow → italic display title) but
-   compressed for a modal. Dark surface lets the AppCallout warning
-   tint read as the focal point; the pill actions echo the lobby's
-   CTA row so the two surfaces feel like a continuous flow. */
-.cancel-race-card {
-  padding: 26px 26px 22px;
+   Cinematic-dark surface pinned (vs. inheriting ``v-card
+   color="surface"``) so the modal reads correctly under the forest
+   design system's auto light/dark theme. 3px gold left rule is the
+   structural anchor — replaces the redundant "Confirm cancellation"
+   eyebrow with a single asymmetric mark. Hanging two-line title with
+   an accent gold "?" picks up the lobby's question-as-headline voice;
+   action row is asymmetric — quiet text "Keep racing" against a red
+   danger pill so the destructive default never reads as the safe
+   default of a binary choice. */
+.cancel-race-card.v-card {
+  background: linear-gradient(180deg, #0f1726 0%, #0a0f1a 100%);
+  color: #fff;
+  border: 1px solid rgba(255, 215, 94, 0.18);
+  border-left: 3px solid rgba(255, 215, 94, 0.65);
   border-radius: 14px;
-}
-.cancel-race-card__eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  margin-bottom: 14px;
+  padding: 26px 28px 22px;
 }
 .cancel-race-card__title {
-  font-size: clamp(22px, 3vw, 28px);
+  font-size: clamp(28px, 3.6vw, 34px);
   font-weight: 900;
   font-style: italic;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  margin: 0 0 14px;
+  letter-spacing: -0.025em;
+  line-height: 0.98;
+  margin: 0 0 18px;
+}
+.cancel-race-card__dot {
+  color: rgba(255, 215, 94, 0.95);
 }
 .cancel-race-card__callout {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
+}
+/* AppCallout colours its body with `--v-theme-on-surface`, which follows
+   the active forest theme. The card is pinned dark regardless of theme, so
+   under light mode that token resolves near-black and the body text reads
+   dark-on-dark (invisible). Pin the callout's surface, border, and text to
+   the same dark-mode palette the card uses; the gold eyebrow already uses
+   the theme-independent warning token, so it's left alone. */
+.cancel-race-card__callout {
+  /* Root element carries both `.app-callout` and this class, so it keeps
+     the parent scope — style it directly (no :deep). */
+  border-color: rgba(255, 215, 94, 0.16);
+  background: rgba(255, 215, 94, 0.06);
+}
+/* Inner nodes belong to AppCallout's own scope — reach them with :deep. */
+.cancel-race-card__callout :deep(.app-callout__text) {
+  color: rgba(255, 255, 255, 0.78);
+}
+.cancel-race-card__callout :deep(.app-callout__icon) {
+  background: rgba(255, 215, 94, 0.14);
 }
 .cancel-race-card__actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.cancel-race-card__back {
+  background: transparent;
+  border: none;
+  padding: 8px 0;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.2);
+  text-underline-offset: 4px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+.cancel-race-card__back:hover {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration-color: rgba(255, 215, 94, 0.5);
+}
+.cancel-race-card__back:focus-visible {
+  outline: 2px solid rgba(255, 215, 94, 0.7);
+  outline-offset: 4px;
+  border-radius: 3px;
 }
 </style>

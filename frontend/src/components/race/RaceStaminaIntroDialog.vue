@@ -17,40 +17,47 @@
 <!-- One-shot onboarding popup for the stamina mechanic. Surfaces in the
      lobby (when there's time to read) the first time a player joins a
      race; "Got it" stores the dismissal in localStorage. Skip closes
-     for the current session only. Visual rhythm matches the rest of the
-     race chrome: eyebrow → italic title → AppCallout body → pill row. -->
+     for the current session only. Visual rhythm: gold left-rule as the
+     structural anchor (race-chrome continuity), hanging italic title
+     with an accent period, verb-led key rows, a literal drain demo
+     instead of an abstract 3-zone band, asymmetric action row. -->
 <template>
-  <v-dialog v-model="open" max-width="500">
-    <v-card class="stamina-intro" color="surface">
-      <div class="stamina-intro__eyebrow">
-        <CheckerFlagIcon :size="12" />
-        Race brief
-      </div>
-      <h2 class="stamina-intro__title">Pace your stamina</h2>
+  <v-dialog v-model="open" max-width="480">
+    <v-card class="stamina-intro">
+      <header class="stamina-intro__head">
+        <span class="stamina-intro__tag">
+          <CheckerFlagIcon :size="11" />
+          Race brief · 01
+        </span>
+        <h2 class="stamina-intro__title">
+          Pace your<br>stamina<span class="stamina-intro__dot">.</span>
+        </h2>
+      </header>
 
-      <div class="stamina-intro__keys">
-        <div class="stamina-intro__key-row">
-          <v-icon icon="mdi-arrow-right-bold-outline" size="18" />
-          <span class="stamina-intro__key-label">Hold to move</span>
-          <span class="stamina-intro__key-binding"><kbd>W</kbd> or <kbd>↑</kbd></span>
-        </div>
-        <div class="stamina-intro__key-row">
-          <v-icon icon="mdi-flash-outline" size="18" />
-          <span class="stamina-intro__key-label">Tap to sprint</span>
-          <span class="stamina-intro__key-binding"><kbd>Shift</kbd></span>
-        </div>
-      </div>
+      <ol class="stamina-intro__binds">
+        <li>
+          <span class="stamina-intro__verb">Hold</span>
+          <span class="stamina-intro__keys">
+            <kbd>W</kbd><span class="stamina-intro__or">or</span><kbd>↑</kbd>
+          </span>
+          <span class="stamina-intro__outcome">to run</span>
+        </li>
+        <li>
+          <span class="stamina-intro__verb">Tap</span>
+          <span class="stamina-intro__keys"><kbd>Shift</kbd></span>
+          <span class="stamina-intro__outcome">to sprint</span>
+        </li>
+      </ol>
 
-      <div class="stamina-intro__bar-demo">
-        <div class="stamina-intro__bar-track">
+      <figure class="stamina-intro__meter" aria-label="Stamina meter sample">
+        <div class="stamina-intro__bar">
           <div class="stamina-intro__bar-fill" />
         </div>
-        <div class="stamina-intro__bar-zones">
-          <span class="stamina-intro__zone stamina-intro__zone--ok">Safe to sprint</span>
-          <span class="stamina-intro__zone stamina-intro__zone--warn">Pace yourself</span>
-          <span class="stamina-intro__zone stamina-intro__zone--low">Rest now</span>
-        </div>
-      </div>
+        <figcaption class="stamina-intro__legend">
+          <span class="stamina-intro__legend-full">Full</span>
+          <span class="stamina-intro__legend-empty">Empty</span>
+        </figcaption>
+      </figure>
 
       <AppCallout
         variant="warning"
@@ -63,15 +70,15 @@
         for the rest of the race.
       </AppCallout>
 
-      <div class="stamina-intro__actions">
-        <button type="button" class="cta__pill cta__pill--ghost" @click="dismissOnce">
-          Skip
+      <footer class="stamina-intro__actions">
+        <button type="button" class="stamina-intro__skip" @click="dismissOnce">
+          Skip for now
         </button>
         <button type="button" class="cta__pill cta__pill--host" @click="dismissForever">
-          <v-icon icon="mdi-check" size="16" />
+          <v-icon icon="mdi-check" size="14" />
           Got it
         </button>
-      </div>
+      </footer>
     </v-card>
   </v-dialog>
 </template>
@@ -119,123 +126,178 @@ function dismissForever(): void {
 </script>
 
 <style scoped>
-.stamina-intro {
-  padding: 26px 26px 22px;
+/* The dark backdrop is pinned here so the dialog reads correctly under
+   the forest design system's auto light/dark theme — race surfaces are
+   deliberately cinematic-dark everywhere, matching .race-room-view.
+   3px gold left rule is the single asymmetric anchor; the eye lands
+   there before reading the title. */
+.stamina-intro.v-card {
+  background: linear-gradient(180deg, #0f1726 0%, #0a0f1a 100%);
+  color: #fff;
+  border: 1px solid rgba(255, 215, 94, 0.18);
+  border-left: 3px solid rgba(255, 215, 94, 0.65);
   border-radius: 14px;
+  padding: 26px 28px 22px;
 }
-.stamina-intro__eyebrow {
+
+.stamina-intro__head {
+  margin-bottom: 22px;
+}
+.stamina-intro__tag {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   text-transform: uppercase;
-  letter-spacing: 0.2em;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  margin-bottom: 14px;
+  letter-spacing: 0.22em;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 215, 94, 0.85);
+  margin-bottom: 12px;
 }
 .stamina-intro__title {
-  font-size: clamp(22px, 3vw, 28px);
+  font-size: clamp(28px, 4vw, 36px);
   font-weight: 900;
   font-style: italic;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  margin: 0 0 18px;
+  letter-spacing: -0.025em;
+  line-height: 0.98;
+  margin: 0;
+}
+/* Gold period as a tiny accent — mirrors the left rule. */
+.stamina-intro__dot {
+  color: rgba(255, 215, 94, 0.95);
 }
 
-/* Key-binding rows. Tiny mini-table so the input vocabulary is visible
-   before the player reads the prose explanation. */
-.stamina-intro__keys {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 18px;
-}
-.stamina-intro__key-row {
+/* Verb-led mini-table: HOLD · [W][↑] · to run. Reads in the order the
+   player will use the keys, not in default visual hierarchy. */
+.stamina-intro__binds {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 14px 0;
   display: grid;
-  grid-template-columns: 24px 1fr auto;
+  gap: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.stamina-intro__binds li {
+  display: grid;
+  grid-template-columns: 48px auto 1fr;
   align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.85);
+  gap: 14px;
 }
-.stamina-intro__key-label {
-  font-weight: 500;
+.stamina-intro__verb {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(255, 215, 94, 0.8);
 }
-.stamina-intro__key-binding {
+.stamina-intro__keys {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.65);
 }
-.stamina-intro__key-binding kbd {
-  padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
-  font-family: inherit;
+.stamina-intro__or {
   font-size: 11px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.45);
+}
+.stamina-intro__keys kbd {
+  padding: 3px 9px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom-color: rgba(255, 255, 255, 0.3);
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  min-width: 24px;
+  text-align: center;
+}
+.stamina-intro__outcome {
+  font-style: italic;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
 }
 
-/* Visual demo of the stamina bar — same green/amber/red palette as the
-   live HUD's RacerStaminaBar so what they see here matches in-race. */
-.stamina-intro__bar-demo {
-  margin-bottom: 18px;
+/* Literal drain visualization — full on the left, empty on the right,
+   fill at 65% to show what a mid-race stamina state actually looks
+   like. Matches the live HUD's RacerStaminaBar palette so seeing this
+   here primes the player to recognise it in-race. */
+.stamina-intro__meter {
+  margin: 0 0 18px;
 }
-.stamina-intro__bar-track {
+.stamina-intro__bar {
   position: relative;
   height: 8px;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .stamina-intro__bar-fill {
   height: 100%;
-  width: 100%;
-  background: linear-gradient(
-    90deg,
-    rgb(232, 96, 88) 0%,
-    rgb(232, 96, 88) 25%,
-    rgb(240, 196, 76) 25%,
-    rgb(240, 196, 76) 60%,
-    rgb(80, 200, 120) 60%,
-    rgb(80, 200, 120) 100%
-  );
+  width: 65%;
+  background: linear-gradient(90deg, rgb(80, 200, 120) 0%, rgb(240, 196, 76) 100%);
 }
-.stamina-intro__bar-zones {
+.stamina-intro__legend {
   display: flex;
   justify-content: space-between;
   font-size: 10px;
-  font-weight: 600;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  font-weight: 700;
 }
-.stamina-intro__zone--ok {
-  color: rgb(80, 200, 120);
-}
-.stamina-intro__zone--warn {
-  color: rgb(240, 196, 76);
-}
-.stamina-intro__zone--low {
-  color: rgb(232, 96, 88);
-}
+.stamina-intro__legend-full { color: rgba(80, 200, 120, 0.9); }
+.stamina-intro__legend-empty { color: rgba(232, 96, 88, 0.9); }
 
+/* AppCallout colours its body with `--v-theme-on-surface`, which tracks
+   the active forest theme. This card is pinned dark regardless of theme,
+   so under light mode that token resolves near-black and the body reads
+   invisible dark-on-dark. Pin the callout surface, border, and text to
+   the same dark palette the card uses; the gold eyebrow already uses the
+   theme-independent warning token, so it's left alone. */
 .stamina-intro__callout {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
+  border-color: rgba(255, 215, 94, 0.16);
+  background: rgba(255, 215, 94, 0.06);
+}
+.stamina-intro__callout :deep(.app-callout__text) {
+  color: rgba(255, 255, 255, 0.78);
+}
+.stamina-intro__callout :deep(.app-callout__icon) {
+  background: rgba(255, 215, 94, 0.14);
 }
 
+/* Asymmetric action row: ghost is a quiet text link, gold pill is the
+   visual anchor. The eye reads "skip for now … GOT IT" as a sentence,
+   not a binary choice between equals. */
 .stamina-intro__actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.stamina-intro__skip {
+  background: transparent;
+  border: none;
+  padding: 8px 0;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.2);
+  text-underline-offset: 4px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+.stamina-intro__skip:hover {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration-color: rgba(255, 215, 94, 0.5);
+}
+.stamina-intro__skip:focus-visible {
+  outline: 2px solid rgba(255, 215, 94, 0.7);
+  outline-offset: 4px;
+  border-radius: 3px;
 }
 </style>

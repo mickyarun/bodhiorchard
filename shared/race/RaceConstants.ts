@@ -169,3 +169,17 @@ export const FINISHED_DISPLAY_MS = 10000
  * after the finish card is dismissed.
  */
 export const LOBBY_MAX_MS = 10 * 60 * 1000
+
+/**
+ * Grace period between broadcasting `race_cancelled` and disconnecting
+ * every client when the host cancels a lobby.
+ *
+ * Colyseus flushes `broadcast` frames on the next patch tick, but
+ * `room.disconnect()` closes sockets synchronously — calling them back to
+ * back tears the connection down before the cancel frame is delivered, so
+ * the host (and invitees) never receive the message that drives their
+ * "back to the garden" navigation. One tick (TICK_MS) plus headroom
+ * guarantees the patch goes out first; imperceptible next to the client's
+ * own 1.2s toast-then-navigate delay.
+ */
+export const CANCEL_FLUSH_GRACE_MS = 250
