@@ -49,6 +49,9 @@ export interface RacerSnapshot {
   isMoving: boolean
   sprintUntilMs: number
   staminaPct: number
+  boostUntilMs: number
+  jumpUntilMs: number
+  stumbleUntilMs: number
   connected: boolean
 }
 
@@ -78,6 +81,9 @@ interface RawRacer {
   isMoving?: boolean
   sprintUntilMs?: number
   staminaPct?: number
+  boostUntilMs?: number
+  jumpUntilMs?: number
+  stumbleUntilMs?: number
   connected?: boolean
 }
 
@@ -132,6 +138,7 @@ export interface RaceRoomClientLike {
   sendAddInvitees(userIds: string[]): void
   sendMove(isMoving: boolean): void
   sendSprintTap(): void
+  sendJump(): void
 }
 
 export class RaceRoomClient {
@@ -240,6 +247,10 @@ export class RaceRoomClient {
     this.room?.send("race_sprint_tap", { userId: this.userId })
   }
 
+  sendJump(): void {
+    this.room?.send("race_jump", { userId: this.userId })
+  }
+
   destroy(): void {
     void this.leave()
     this.onStateChange = null
@@ -335,6 +346,9 @@ function racerSnapshot(r: RawRacer): RacerSnapshot {
     isMoving: r.isMoving ?? false,
     sprintUntilMs: r.sprintUntilMs ?? 0,
     staminaPct: r.staminaPct ?? 1,
+    boostUntilMs: r.boostUntilMs ?? 0,
+    jumpUntilMs: r.jumpUntilMs ?? 0,
+    stumbleUntilMs: r.stumbleUntilMs ?? 0,
     connected: r.connected ?? false,
   }
 }

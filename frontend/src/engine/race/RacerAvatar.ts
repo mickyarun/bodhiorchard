@@ -41,6 +41,7 @@ import { KayKitCharacterFactory, getClonedMaterials } from '../characters/KayKit
 import { findAnimTrack, type ContainerWithAnims } from '../characters/AnimUtils'
 import { getAnimationGLB } from '../characters/KayKitManifest'
 import type { CharacterConfig } from '../characters/CharacterConfig'
+import { HURDLE_JUMP_WINDOW_MS } from '@shared/race/RaceConstants'
 import { disposeEntity, safeDestroyMaterial } from './dispose'
 
 /**
@@ -76,6 +77,12 @@ const IDLE_SWAP_THRESHOLD_MPS = 0.5
 /** Above this velocity, assume the player is sprinting (swap Walk → Running_A). */
 const SPRINT_SWAP_THRESHOLD_MPS = 4.0
 
+/** Peak of the hurdle-jump hop arc. */
+const JUMP_ARC_HEIGHT_M = 0.55
+
+/** Arc duration mirrors the server's airborne window so landing lines up. */
+const JUMP_ARC_DURATION_S = HURDLE_JUMP_WINDOW_MS / 1000
+
 export class RacerAvatar {
   readonly racerId: string
   readonly laneZ: number
@@ -97,6 +104,14 @@ export class RacerAvatar {
   private displayX = 0
   private lastServerVelocity = 0
   private initialized = false
+
+  /**
+   * Hurdle-jump hop: the server flags the racer airborne while its jump
+   * window is open; we animate a sine arc on Y over the same duration so
+   * the landing visually matches the physics window closing.
+   */
+  private airborne = false
+  private jumpElapsedSec = 0
 
   /**
    * When the server marks this racer as finished, we force the anim graph
@@ -151,11 +166,13 @@ export class RacerAvatar {
    * the target; the per-frame `update` lerps toward it so motion stays
    * smooth between server ticks.
    */
-  setKinematics(x: number, velocityMps: number, isSprinting: boolean): void {
+  setKinematics(x: number, velocityMps: number, isSprinting: boolean, isAirborne: boolean): void {
     if (!this.wrapper) return
 
     this.targetX = x
     this.lastServerVelocity = velocityMps
+    if (isAirborne && !this.airborne) this.jumpElapsedSec = 0
+    this.airborne = isAirborne
     if (!this.initialized) {
       // First patch: snap so the avatar isn't stuck at x=0 while lerping.
       this.displayX = x
@@ -220,7 +237,19 @@ export class RacerAvatar {
     const alpha = 1 - Math.exp(-CATCHUP_PER_SEC * dtSec)
     this.displayX += (this.targetX - this.displayX) * alpha
 
-    this.wrapper.setPosition(this.displayX, 0, this.laneZ)
+    this.wrapper.setPosition(this.displayX, this.jumpArcY(dtSec), this.laneZ)
+  }
+
+  /**
+   * Advance the hop arc while airborne. sin(π·t) starts and ends at 0,
+   * and t clamps at 1, so a late "landed" patch from the server can never
+   * leave the avatar hanging above the track.
+   */
+  private jumpArcY(dtSec: number): number {
+    if (!this.airborne) return 0
+    this.jumpElapsedSec += dtSec
+    const t = Math.min(1, this.jumpElapsedSec / JUMP_ARC_DURATION_S)
+    return JUMP_ARC_HEIGHT_M * Math.sin(Math.PI * t)
   }
 
   /** Read-only access to the current display X — used by the camera. */
@@ -241,6 +270,8 @@ export class RacerAvatar {
     this.currentAnimState = 'idle'
     this.initialized = false
     this.finished = false
+    this.airborne = false
+    this.jumpElapsedSec = 0
   }
 
   private pickAnimState(velocityMps: number, isSprinting: boolean): 'idle' | 'walk' | 'run' {

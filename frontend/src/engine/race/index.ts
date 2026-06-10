@@ -61,8 +61,14 @@ export class RaceEngine {
   }
 
   /** Drive a racer's avatar from client-side physics state. */
-  setRacerKinematics(racerId: string, positionM: number, velocityMps: number, isSprinting: boolean): void {
-    this.scene?.setRacerKinematics(racerId, positionM, velocityMps, isSprinting)
+  setRacerKinematics(
+    racerId: string,
+    positionM: number,
+    velocityMps: number,
+    isSprinting: boolean,
+    isAirborne: boolean,
+  ): void {
+    this.scene?.setRacerKinematics(racerId, positionM, velocityMps, isSprinting, isAirborne)
   }
 
   /** Flip a racer's finished flag — plays the Cheer emote on entry. */

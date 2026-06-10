@@ -35,6 +35,8 @@
             'race-hud__racer--self': r.userId === selfUserId,
             'race-hud__racer--finished': r.finished,
             'race-hud__racer--sprinting': isSprinting(r),
+            'race-hud__racer--boosted': isBoosted(r),
+            'race-hud__racer--stumbling': isStumbling(r),
           }"
         >
           <span class="race-hud__rank">{{ r.finished ? placeFor(r.userId) : '·' }}</span>
@@ -56,7 +58,8 @@
     </div>
 
     <div v-if="isParticipant" class="controls-hint">
-      Hold <kbd>W</kbd> or <kbd>↑</kbd> to move · tap <kbd>Shift</kbd> to sprint
+      Hold <kbd>W</kbd> or <kbd>↑</kbd> to move · tap <kbd>Shift</kbd> to sprint ·
+      <kbd>Space</kbd> to jump hurdles
     </div>
 
     <TouchControls
@@ -124,6 +127,14 @@ function isSprinting(r: { sprintUntilMs: number }): boolean {
   return props.snapshot.runningElapsedMs < r.sprintUntilMs
 }
 
+function isBoosted(r: { boostUntilMs: number }): boolean {
+  return props.snapshot.runningElapsedMs < r.boostUntilMs
+}
+
+function isStumbling(r: { stumbleUntilMs: number }): boolean {
+  return props.snapshot.runningElapsedMs < r.stumbleUntilMs
+}
+
 function placeFor(userId: string): string {
   const p = props.snapshot.placings.find(x => x.racerId === userId)
   return p ? `#${p.place}` : '·'
@@ -159,8 +170,13 @@ watch(
     const eng = engine.value
     if (!eng) return
     for (const r of racers) {
-      const sprinting = props.snapshot.runningElapsedMs < r.sprintUntilMs
-      eng.setRacerKinematics(r.userId, r.positionM, r.velocityMps, sprinting)
+      // A boost window drives the run animation just like a sprint —
+      // the avatar is moving faster than walk either way.
+      const sprinting =
+        props.snapshot.runningElapsedMs < r.sprintUntilMs ||
+        props.snapshot.runningElapsedMs < r.boostUntilMs
+      const airborne = props.snapshot.runningElapsedMs < r.jumpUntilMs
+      eng.setRacerKinematics(r.userId, r.positionM, r.velocityMps, sprinting, airborne)
       if (r.finished && !finishedSeen.has(r.userId)) {
         finishedSeen.add(r.userId)
         eng.setRacerFinished(r.userId, true)
@@ -234,6 +250,11 @@ function onKeyDown(ev: KeyboardEvent): void {
   } else if (isSprintKey(ev)) {
     // Tap-to-sprint — each keydown counts as a tap, including auto-repeat.
     props.client.sendSprintTap()
+  } else if (isJumpKey(ev)) {
+    // Block page scroll; ignore auto-repeat so holding Space is one jump
+    // (the server's jump cooldown is the authoritative limiter anyway).
+    ev.preventDefault()
+    if (!ev.repeat) props.client.sendJump()
   }
 }
 
@@ -253,6 +274,10 @@ function isMoveKey(ev: KeyboardEvent): boolean {
 
 function isSprintKey(ev: KeyboardEvent): boolean {
   return ev.key === 'Shift' || ev.code === 'ShiftLeft' || ev.code === 'ShiftRight'
+}
+
+function isJumpKey(ev: KeyboardEvent): boolean {
+  return ev.code === 'Space'
 }
 
 function installKeyHandlers(): void {
@@ -340,6 +365,16 @@ function removeKeyHandlers(): void {
 }
 .race-hud__racers li.race-hud__racer--sprinting .race-hud__bar-fill {
   background: linear-gradient(90deg, #ffd75e, #ff6b4a);
+}
+.race-hud__racers li.race-hud__racer--boosted .race-hud__bar-fill {
+  background: linear-gradient(90deg, #5ef2ff, #2bb8ff);
+  box-shadow: 0 0 8px rgba(94, 242, 255, 0.7);
+}
+.race-hud__racers li.race-hud__racer--stumbling .race-hud__bar-fill {
+  background: linear-gradient(90deg, #ff8d7a, #d84444);
+}
+.race-hud__racers li.race-hud__racer--stumbling .race-hud__name {
+  color: #ff9d8a;
 }
 .race-hud__racers li.race-hud__racer--finished {
   background: rgba(80, 200, 120, 0.12);

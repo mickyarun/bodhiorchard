@@ -24,10 +24,10 @@
  *     leaderProvider,   // returns leader's current X in metres, driven by the client
  *   })
  *
- * The scene owns track / ground / finish arch / decor / avatars / camera and
- * tears them down in reverse order. It does NOT own physics — step 5's
- * `RaceRoomClient` calls `setRacerKinematics(id, x, v, sprinting)` each frame
- * based on the authoritative `RaceRoom` schema.
+ * The scene owns track / ground / finish arch / decor / pads / hurdles /
+ * avatars / camera and tears them down in reverse order. It does NOT own
+ * physics — `RaceRoomClient` calls `setRacerKinematics(id, x, v, sprinting,
+ * airborne)` each frame based on the authoritative `RaceRoom` schema.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
@@ -39,6 +39,8 @@ import { TrackBuilder } from './TrackBuilder'
 import { FinishArch } from './FinishArch'
 import { Ground } from './Ground'
 import { DecorBuilder } from './DecorBuilder'
+import { BoostPadBuilder } from './BoostPadBuilder'
+import { HurdleBuilder } from './HurdleBuilder'
 import { RacerAvatar } from './RacerAvatar'
 import { RaceCamera } from './RaceCamera'
 import { RaceCameraOverhead } from './RaceCameraOverhead'
@@ -77,6 +79,8 @@ export class RaceScene {
   private arch: FinishArch | null = null
   private ground: Ground | null = null
   private decor: DecorBuilder | null = null
+  private boostPads: BoostPadBuilder | null = null
+  private hurdles: HurdleBuilder | null = null
   private avatars: RacerAvatar[] = []
   private chaseCamera: RaceCamera | null = null
   private overheadCamera: RaceCameraOverhead | null = null
@@ -115,6 +119,19 @@ export class RaceScene {
     this.decor = new DecorBuilder(this.loader)
     await this.decor.build(this.root, { trackLengthM: trackResult.trackLengthM })
 
+    // Pads + hurdles derive their x-positions from the same shared module
+    // the server physics uses, so visuals and mechanics can't drift.
+    this.boostPads = new BoostPadBuilder()
+    this.boostPads.build(this.root, {
+      distanceM: opts.distanceM,
+      trackWidthM: trackResult.tileWidthM,
+    })
+    this.hurdles = new HurdleBuilder()
+    this.hurdles.build(this.root, {
+      distanceM: opts.distanceM,
+      trackWidthM: trackResult.tileWidthM,
+    })
+
     await this.buildAvatars(opts.racers, trackResult.laneCenterZs)
 
     this.activateCamera(application, opts)
@@ -125,6 +142,7 @@ export class RaceScene {
     this.app = application
     this.updateHandler = (dt: number) => {
       for (const a of this.avatars) a.update(dt)
+      this.boostPads?.update(dt)
     }
     application.app.on('update', this.updateHandler)
   }
@@ -133,10 +151,16 @@ export class RaceScene {
    * Drive a racer's avatar from external physics state (step 5's
    * `RaceRoomClient`). No-op if the id isn't in the scene.
    */
-  setRacerKinematics(racerId: string, positionM: number, velocityMps: number, isSprinting: boolean): void {
+  setRacerKinematics(
+    racerId: string,
+    positionM: number,
+    velocityMps: number,
+    isSprinting: boolean,
+    isAirborne: boolean,
+  ): void {
     for (const a of this.avatars) {
       if (a.racerId === racerId) {
-        a.setKinematics(positionM, velocityMps, isSprinting)
+        a.setKinematics(positionM, velocityMps, isSprinting, isAirborne)
         return
       }
     }
@@ -179,6 +203,10 @@ export class RaceScene {
     for (const a of this.avatars) a.destroy()
     this.avatars = []
 
+    this.hurdles?.destroy()
+    this.hurdles = null
+    this.boostPads?.destroy()
+    this.boostPads = null
     this.decor?.destroy()
     this.decor = null
     this.arch?.destroy()
