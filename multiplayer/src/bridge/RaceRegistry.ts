@@ -28,6 +28,16 @@
 
 type DisposeCallback = () => void
 type PhaseCallback = (phase: string) => void
+
+/**
+ * Strip CR/LF from values before they reach a log line. `roomId` and
+ * `userId` arrive from network payloads, so a malicious sender could
+ * forge log entries by embedding newlines. Used at every console.* site
+ * in this module so the format-string arg stays a static literal.
+ */
+function sanitizeForLog(value: string): string {
+  return value.replace(/[\r\n]/g, "")
+}
 type InviteeDeclinedCallback = (userId: string) => void
 
 interface RoomHooks {
@@ -65,7 +75,11 @@ export function fireRaceDispose(roomId: string): void {
   try {
     pair.onDispose()
   } catch (err) {
-    console.error(`[RaceRegistry] dispose callback for room ${roomId} threw:`, err)
+    console.error(
+      "[RaceRegistry] dispose callback for room %s threw:",
+      sanitizeForLog(roomId),
+      err,
+    )
   }
 }
 
@@ -80,7 +94,11 @@ export function fireRacePhase(roomId: string, phase: string): void {
   try {
     pair.onPhase(phase)
   } catch (err) {
-    console.error(`[RaceRegistry] phase callback for room ${roomId} threw:`, err)
+    console.error(
+      "[RaceRegistry] phase callback for room %s threw:",
+      sanitizeForLog(roomId),
+      err,
+    )
   }
 }
 
@@ -97,7 +115,8 @@ export function fireRaceInviteDeclined(roomId: string, userId: string): void {
     pair.onInviteeDeclined(userId)
   } catch (err) {
     console.error(
-      `[RaceRegistry] inviteeDeclined callback for room ${roomId} threw:`,
+      "[RaceRegistry] inviteeDeclined callback for room %s threw:",
+      sanitizeForLog(roomId),
       err,
     )
   }
