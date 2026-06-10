@@ -59,6 +59,17 @@ describe("RaceRoomClient — message shapes", () => {
     expect(room.calls).toEqual([{ type: "race_sprint_tap", payload: { userId: "user-9" } }])
   })
 
+  it("sendJump carries just the userId", () => {
+    const client = new RaceRoomClient("ws://test")
+    const room = fakeRoom()
+    ;(client as unknown as { room: typeof room; userId: string }).room = room
+    ;(client as unknown as { userId: string }).userId = "user-9"
+
+    client.sendJump()
+
+    expect(room.calls).toEqual([{ type: "race_jump", payload: { userId: "user-9" } }])
+  })
+
   it("sendRaceStart is a UX-only guard — no send when user isn't host", () => {
     const client = new RaceRoomClient("ws://test")
     const room = fakeRoom()
