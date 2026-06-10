@@ -13,24 +13,34 @@
 // limitations under the License.
 
 import { defineConfig } from 'vitest/config'
+import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
 /**
- * Vitest config — minimal setup for utility/unit tests.
+ * Vitest config — dual-environment.
  *
- * Uses the Node environment (no jsdom) because the existing tests target
- * pure-logic modules like SerializedExecutor that don't touch the DOM.
- * Vue component tests would need `environment: 'jsdom'` and the @vitejs/plugin-vue
- * pipeline — those can be added later if needed.
+ * Pure-logic modules live in ``*.test.ts`` and run under the lightweight
+ * node environment. Vue single-file-component tests live in ``*.spec.ts``
+ * and run under jsdom with the @vitejs/plugin-vue pipeline so SFCs
+ * compile and DOM APIs (``mount``, ``getByText``) work.
  *
  * Path alias `@/` is mirrored from vite.config.ts so test imports match
  * production imports.
+ *
+ * ``jsdom`` is declared in the repo-root ``package.json`` (not just here):
+ * vitest resolves ``jsdom`` from the nearest ``node_modules`` ancestor of
+ * its own install path, which under npm workspaces is the root. Frontend
+ * declares it locally too for IDE type resolution.
  */
 export default defineConfig({
+  plugins: [vue()],
   test: {
     environment: 'node',
     globals: false,
     include: ['src/**/*.{test,spec}.ts'],
+    environmentMatchGlobs: [
+      ['src/**/*.spec.ts', 'jsdom'],
+    ],
   },
   resolve: {
     alias: {

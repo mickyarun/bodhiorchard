@@ -21,7 +21,8 @@
     "stop:all": "docker compose down && docker compose -f docker-compose.infra.yml down"
   },
   "devDependencies": {
-    "concurrently": "^9.0.0"
+    "concurrently": "^9.0.0",
+    "jsdom": "^25.0.1"
   },
   "engines": {
     "node": ">=18",
