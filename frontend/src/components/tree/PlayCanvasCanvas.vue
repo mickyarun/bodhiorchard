@@ -806,14 +806,14 @@ if (import.meta.hot) {
   background: rgba(15, 23, 42, 0.92);
   color: #fff;
   font-size: 13px;
-  border-radius: 6px;
-  border: 1px solid rgba(250, 204, 21, 0.5);
+  border-radius: 8px;
+  border: 1px solid rgba(var(--v-theme-warning), 0.55);
   z-index: 20;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
 .playcanvas-canvas__reconnect--failed {
-  border-color: rgba(248, 113, 113, 0.65);
+  border-color: rgba(var(--v-theme-error), 0.65);
 }
 
 .playcanvas-canvas__reconnect-text {
