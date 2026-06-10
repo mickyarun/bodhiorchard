@@ -25,8 +25,8 @@
  *   - Boost pad: crossing one (first time only) opens `boostUntilMs` —
  *     a free speed window faster than a sprint, with no stamina drain.
  *   - Hurdle: crossing one outside an active jump window cuts velocity
- *     and opens `stumbleUntilMs`, during which the speed target is capped
- *     at walk and any banked sprint/boost window is forfeited.
+ *     and opens `stumbleUntilMs`, during which the speed target drops to
+ *     a stagger and any banked sprint/boost window is forfeited.
  *   - Jump: `triggerJump` opens `jumpUntilMs` for HURDLE_JUMP_WINDOW_MS,
  *     rate-limited by HURDLE_JUMP_COOLDOWN_MS between jump starts.
  */
@@ -114,8 +114,8 @@ function crossed(prevM: number, nextM: number, featureM: number): boolean {
 
 /**
  * Penalty for clipping a hurdle: immediate velocity cut, a stumble window
- * capping the speed target at walk, and forfeiture of any banked sprint
- * or boost window (clamped to now, never extended).
+ * dropping the speed target to a stagger, and forfeiture of any banked
+ * sprint or boost window (clamped to now, never extended).
  */
 function applyHurdleClip(racer: Racer, nowMs: number): void {
   racer.velocityMps *= HURDLE_HIT_VELOCITY_FACTOR

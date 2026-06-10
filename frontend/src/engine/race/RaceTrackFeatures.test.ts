@@ -35,6 +35,7 @@ import {
   HURDLE_JUMP_WINDOW_MS,
   HURDLE_JUMP_COOLDOWN_MS,
   HURDLE_STUMBLE_MS,
+  HURDLE_STUMBLE_TARGET_MPS,
   RUN_TARGET_MPS,
   WALK_TARGET_MPS,
   STAMINA_INITIAL,
@@ -151,12 +152,22 @@ describe('hurdles', () => {
     expect(r.sprintUntilMs).toBeLessThanOrEqual(TICK_MS)
   })
 
-  it('stumbling caps speed at walk even with fresh sprint taps', () => {
+  it('stumbling drops speed to the stagger target even with fresh sprint taps', () => {
     const r = racerJustBeforeHurdle()
     tick([r], TICK_MS, TICK_MS, TRACK_M)
     triggerSprintTap(r, TICK_MS)
-    advance(r, TICK_MS, 4) // still inside HURDLE_STUMBLE_MS
-    expect(r.velocityMps).toBeLessThanOrEqual(WALK_TARGET_MPS)
+    advance(r, TICK_MS, 8) // still inside HURDLE_STUMBLE_MS; long past decel time
+    expect(r.velocityMps).toBeCloseTo(HURDLE_STUMBLE_TARGET_MPS, 5)
+  })
+
+  it('a walking racer visibly slows when clipping a hurdle', () => {
+    const r = makeRacer('a')
+    setMoving(r, true)
+    r.velocityMps = WALK_TARGET_MPS
+    r.positionM = hurdlePositionsM(TRACK_M)[0] - 0.01
+    tick([r], TICK_MS, TICK_MS, TRACK_M)
+    advance(r, TICK_MS, 8)
+    expect(r.velocityMps).toBeLessThan(WALK_TARGET_MPS / 2)
   })
 
   it('sprint speed is reachable again once the stumble expires', () => {

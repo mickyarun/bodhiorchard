@@ -25,7 +25,7 @@
  *     capped at SPRINT_MAX_WINDOW_MS above now. The racer is "sprinting"
  *     while `nowMs < sprintUntilMs`.
  *   - Each tick velocity accelerates toward:
- *       WALK_TARGET_MPS  if isMoving && stumbling (hurdle clip cap)
+ *       HURDLE_STUMBLE_TARGET_MPS  if isMoving && stumbling (hurdle clip)
  *       BOOST_TARGET_MPS if isMoving && boosted (pad window)
  *       RUN_TARGET_MPS   if isMoving && sprinting
  *       WALK_TARGET_MPS  if isMoving
@@ -40,6 +40,7 @@ import {
   WALK_TARGET_MPS,
   RUN_TARGET_MPS,
   BOOST_TARGET_MPS,
+  HURDLE_STUMBLE_TARGET_MPS,
   MOVE_ACCEL_MPSS,
   MOVE_DECEL_MPSS,
   SPRINT_TAP_DURATION_MS,
@@ -232,11 +233,11 @@ function stepVelocity(racer: Racer, sprinting: boolean, nowMs: number, dtSec: nu
 
 /**
  * Speed target while the move key is held. Precedence: a hurdle stumble
- * caps everything at walk; otherwise a boost-pad window beats a sprint
- * window beats plain walking.
+ * drops everything to a stagger; otherwise a boost-pad window beats a
+ * sprint window beats plain walking.
  */
 function movingTargetSpeed(racer: Racer, sprinting: boolean, nowMs: number): number {
-  if (isStumbling(racer, nowMs)) return WALK_TARGET_MPS
+  if (isStumbling(racer, nowMs)) return HURDLE_STUMBLE_TARGET_MPS
   if (isBoosted(racer, nowMs)) return BOOST_TARGET_MPS
   return sprinting ? RUN_TARGET_MPS : WALK_TARGET_MPS
 }

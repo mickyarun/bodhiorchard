@@ -177,10 +177,16 @@ export const HURDLE_JUMP_COOLDOWN_MS = 1000
 export const HURDLE_HIT_VELOCITY_FACTOR = 0.5
 
 /**
- * Stumble duration after clipping a hurdle. While stumbling the speed
- * target is capped at WALK_TARGET_MPS — at sprint speed that costs
- * ~2.4m versus a clean crossing, roughly 0.5s of race time per miss,
- * which is enough to reorder a close field across two hurdles.
+ * Speed target while stumbling — a stagger, deliberately *below*
+ * WALK_TARGET_MPS so clipping a hurdle is felt even by a racer who was
+ * only walking. Capping at walk made a walked-into hurdle imperceptible.
+ */
+export const HURDLE_STUMBLE_TARGET_MPS = 1.2
+
+/**
+ * Stumble duration after clipping a hurdle. At sprint speed the cut +
+ * stagger costs ~3m versus a clean crossing — enough to reorder a close
+ * field across two hurdles; at walk it still reads as a visible trip.
  */
 export const HURDLE_STUMBLE_MS = 600
 
