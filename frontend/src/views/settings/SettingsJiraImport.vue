@@ -55,29 +55,29 @@
             </div>
           </div>
           <v-chip
-            :color="store.isConnected ? 'success' : 'grey'"
-            size="x-small"
+            :color="store.isConnected ? 'success' : 'muted'"
+            size="small"
             variant="tonal"
+            :prepend-icon="store.isConnected ? 'mdi-check-circle' : 'mdi-circle-outline'"
           >
             {{ store.isConnected ? 'Connected' : 'Not connected' }}
           </v-chip>
         </div>
 
-        <!-- Setup instructions -->
-        <v-alert
+        <!-- Setup instructions — on-brand callout, not a saturated blue alert -->
+        <AppCallout
           v-if="!store.isConnected"
-          type="info"
-          variant="tonal"
-          density="compact"
-          class="mb-4"
+          variant="info"
+          eyebrow="How to get your API token"
+          icon="mdi-key-outline"
+          class="mb-5"
         >
-          <div class="text-body-2 font-weight-medium mb-1">How to get your API token:</div>
-          <ol class="text-caption pl-4" style="line-height: 1.6">
-            <li>Go to <strong>id.atlassian.com/manage-profile/security/api-tokens</strong></li>
-            <li>Click <strong>Create API token</strong> and give it a label (e.g. "Bodhiorchard")</li>
+          <ol class="jira-steps">
+            <li>Open <code>id.atlassian.com/manage-profile/security/api-tokens</code></li>
+            <li>Click <strong>Create API token</strong> and label it (e.g. "Bodhiorchard")</li>
             <li>Copy the generated token and paste it below</li>
           </ol>
-        </v-alert>
+        </AppCallout>
 
         <v-text-field
           v-model="store.siteUrl"
@@ -199,7 +199,7 @@
             <div
               v-if="session.result"
               class="mt-3 pt-3 d-flex ga-4"
-              style="border-top: 1px solid rgba(255,255,255,0.08)"
+              style="border-top: 1px solid rgb(var(--v-theme-rule))"
             >
               <div class="text-caption">
                 <span class="text-success font-weight-medium">
@@ -233,6 +233,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useJiraImportStore } from '@/stores/jiraImport'
 import JiraImportWizard from '@/components/jira/JiraImportWizard.vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 
 const store = useJiraImportStore()
 
@@ -293,10 +294,10 @@ function sessionColor(status: string): string {
     completed: 'success',
     failed: 'error',
     running: 'info',
-    pending: 'grey',
+    pending: 'muted',
     ready: 'warning',
   }
-  return map[status] || 'grey'
+  return map[status] || 'muted'
 }
 
 function formatDate(iso: string): string {
@@ -317,5 +318,23 @@ function formatDate(iso: string): string {
 }
 .settings-header {
   flex-shrink: 0;
+}
+
+.jira-steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.jira-steps strong {
+  color: rgb(var(--v-theme-on-surface));
+}
+.jira-steps code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.92em;
+  background: rgb(var(--v-theme-background));
+  padding: 1px 5px;
+  border-radius: 4px;
 }
 </style>
