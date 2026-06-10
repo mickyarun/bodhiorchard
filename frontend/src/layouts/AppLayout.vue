@@ -220,6 +220,11 @@
                 title="MCP Token"
                 to="/profile/mcp-token"
               />
+              <v-list-item
+                :prepend-icon="isDark ? 'mdi-weather-sunny' : 'mdi-weather-night'"
+                :title="isDark ? 'Light mode' : 'Dark mode'"
+                @click="toggleTheme"
+              />
               <v-divider class="my-1" />
               <v-list-item
                 prepend-icon="mdi-logout"
@@ -288,9 +293,13 @@ import RaceInviteToast from '@/components/race/RaceInviteToast.vue'
 import RaceWatchBanner from '@/components/race/RaceWatchBanner.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useXPSocket } from '@/composables/useXPSocket'
+import { useThemePreference } from '@/composables/useThemePreference'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+// Light/dark toggle (persisted to localStorage by the composable).
+const { isDark, toggle: toggleTheme } = useThemePreference()
 
 // Real-time XP notifications — runs for all authenticated pages
 const { toasts: xpToasts, dismissToast: xpDismiss } = useXPSocket()

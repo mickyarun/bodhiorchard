@@ -21,6 +21,7 @@
 import 'vuetify/styles'
 import { createVuetify, type ThemeDefinition } from 'vuetify'
 import { aliases, mdi } from 'vuetify/iconsets/mdi'
+import { resolveInitialThemeName } from '@/composables/useThemePreference'
 
 const bodhiorchardDark: ThemeDefinition = {
   dark: true,
@@ -100,7 +101,9 @@ export default createVuetify({
     sets: { mdi },
   },
   theme: {
-    defaultTheme: 'bodhiorchardDark',
+    // Resolved synchronously from the saved preference / OS colour-scheme
+    // so the first paint is already the right theme (no flash).
+    defaultTheme: resolveInitialThemeName(),
     themes: {
       bodhiorchardDark,
       bodhiorchardLight,
