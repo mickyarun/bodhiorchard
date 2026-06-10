@@ -857,8 +857,8 @@ export const BUG_STATUS_COLORS: Record<BugStatusValue, string> = {
   open: 'error',
   'in-progress': 'warning',
   resolved: 'success',
-  closed: 'grey',
-  blocked: 'purple',
+  closed: 'muted', // theme token, not raw Material grey
+  blocked: 'info', // theme token, not raw Material purple
 }
 
 // Lifecycle colours grouped by stage-type rather than ten clashing Material
