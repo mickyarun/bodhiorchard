@@ -48,21 +48,8 @@
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
 
     <div class="lb-content">
-    <!-- Podium — top 3 with staggered height -->
-    <div v-if="entries.length >= 3" class="podium mb-8">
-      <!-- 2nd place (left, shorter) -->
-      <div class="podium__slot podium__slot--silver">
-        <PodiumCard :entry="entries[1]" :rank="2" :is-me="entries[1].user_id === currentUserId" />
-      </div>
-      <!-- 1st place (center, tallest) -->
-      <div class="podium__slot podium__slot--gold">
-        <PodiumCard :entry="entries[0]" :rank="1" :is-me="entries[0].user_id === currentUserId" />
-      </div>
-      <!-- 3rd place (right, shortest) -->
-      <div class="podium__slot podium__slot--bronze">
-        <PodiumCard :entry="entries[2]" :rank="3" :is-me="entries[2].user_id === currentUserId" />
-      </div>
-    </div>
+    <!-- Podium — top 3, shared with the race tabs. -->
+    <LeaderboardPodium v-if="entries.length >= 3" :entries="podiumEntries" class="mb-8" />
 
     <!-- Full ranked list (all members) -->
     <v-card color="surface">
@@ -124,11 +111,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref } from 'vue'
-import type { LeaderboardEntry } from '@/types'
+import { computed, onMounted, ref } from 'vue'
 import { useXPStore } from '@/stores/xp'
 import { useAuthStore } from '@/stores/auth'
 import RaceLeaderboardTab from './RaceLeaderboardTab.vue'
+import LeaderboardPodium, { type PodiumEntry } from '@/components/leaderboard/LeaderboardPodium.vue'
 
 const activeTab = ref<'xp' | 'race-100' | 'race-200'>('xp')
 
@@ -163,32 +150,21 @@ function initials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?'
 }
 
+// Top-3 mapped to the shared podium's shape. XP is the reward figure (gold);
+// the level line is the meta.
+const podiumEntries = computed<PodiumEntry[]>(() =>
+  entries.value.slice(0, 3).map(e => ({
+    name: e.name,
+    figure: `${e.total_xp.toLocaleString()} XP`,
+    figureKind: 'gold',
+    meta: `${LEVEL_ICONS[e.level_name] || '🌱'} Lv.${e.level}`,
+    isMe: e.user_id === currentUserId.value,
+  })),
+)
+
 onMounted(async () => {
   await xpStore.fetchLeaderboard()
   loading.value = false
-})
-
-// Inline PodiumCard component (small, only used here)
-const PodiumCard = defineComponent({
-  props: {
-    entry: { type: Object as () => LeaderboardEntry, required: true },
-    rank: { type: Number, required: true },
-    isMe: { type: Boolean, default: false },
-  },
-  setup(props) {
-    return () => h('div', {
-      class: ['podium-card', props.isMe && 'podium-card--me'],
-    }, [
-      h('div', { class: 'podium-card__medal' }, MEDALS[props.rank - 1]),
-      h('div', { class: 'podium-card__name text-body-2 font-weight-bold' }, props.entry.name),
-      h('div', { class: 'podium-card__level text-caption' },
-        `${LEVEL_ICONS[props.entry.level_name] || '🌱'} Lv.${props.entry.level}`),
-      h('div', {
-        class: 'podium-card__xp bo-display text-h6 font-weight-bold',
-        style: 'color: rgb(var(--v-theme-gold))',
-      }, `${props.entry.total_xp.toLocaleString()} XP`),
-    ])
-  },
 })
 </script>
 
@@ -200,55 +176,8 @@ const PodiumCard = defineComponent({
   margin: 0 auto;
 }
 
-/* ─── Podium ──────────────────────────── */
-.podium {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-.podium__slot { display: flex; justify-content: center; }
-.podium__slot--gold { align-self: flex-start; }
-.podium__slot--silver { align-self: center; }
-.podium__slot--bronze { align-self: flex-end; }
-
-.podium-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px 28px;
-  border-radius: 16px;
-  background: rgb(var(--v-theme-surface-bright));
-  border: 1px solid rgb(var(--v-theme-rule));
-  min-width: 160px;
-  gap: 6px;
-}
-
-.podium-card--me {
-  box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.4);
-}
-
-/* 1st place is the harvest moment — the reserved gold signal, with a soft
-   glow. Silver/bronze keep their universally-read medal tints. */
-.podium__slot--gold .podium-card {
-  border-color: rgba(var(--v-theme-gold), 0.5);
-  background: rgba(var(--v-theme-gold), 0.08);
-  box-shadow: 0 0 24px rgba(var(--v-theme-gold), 0.18);
-  padding: 24px 32px;
-  min-width: 180px;
-}
-.podium__slot--silver .podium-card {
-  border-color: rgba(192, 192, 192, 0.3);
-  background: rgba(192, 192, 192, 0.05);
-}
-.podium__slot--bronze .podium-card {
-  border-color: rgba(205, 127, 50, 0.3);
-  background: rgba(205, 127, 50, 0.05);
-}
-
-.podium-card__medal { font-size: 36px; line-height: 1; }
-.podium-card__level { color: rgb(var(--v-theme-on-surface-variant)); }
+/* Podium markup + styles now live in components/leaderboard/LeaderboardPodium.vue
+   (shared with the race tabs). */
 
 /* ─── List Rows ───────────────────────── */
 .lb-row__rank {

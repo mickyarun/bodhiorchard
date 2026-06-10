@@ -27,18 +27,8 @@
 
     <template v-else>
       <div class="lb-content">
-      <!-- Podium -->
-      <div v-if="entries.length >= 3" class="podium mb-6">
-        <div class="podium__slot podium__slot--silver">
-          <PodiumCard :row="entries[1]" :rank="2" />
-        </div>
-        <div class="podium__slot podium__slot--gold">
-          <PodiumCard :row="entries[0]" :rank="1" />
-        </div>
-        <div class="podium__slot podium__slot--bronze">
-          <PodiumCard :row="entries[2]" :rank="3" />
-        </div>
-      </div>
+      <!-- Podium — shared with the XP tab. -->
+      <LeaderboardPodium v-if="entries.length >= 3" :entries="podiumEntries" class="mb-6" />
 
       <!-- Full ranked list -->
       <v-card color="surface">
@@ -76,9 +66,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, watch } from 'vue'
-import { useRaceLeaderboardStore, type RaceLeaderboardRow } from '@/stores/raceLeaderboard'
+import { computed, onMounted, watch } from 'vue'
+import { useRaceLeaderboardStore } from '@/stores/raceLeaderboard'
 import { formatRaceTime } from '@/engine/race/formatTime'
+import LeaderboardPodium, { type PodiumEntry } from '@/components/leaderboard/LeaderboardPodium.vue'
 
 const props = defineProps<{
   distance: 100 | 200
@@ -122,22 +113,16 @@ function relativeDate(iso: string): string {
   return days === 1 ? 'yesterday' : `${days} days ago`
 }
 
-const PodiumCard = defineComponent({
-  props: {
-    row: { type: Object as () => RaceLeaderboardRow, required: true },
-    rank: { type: Number, required: true },
-  },
-  setup(props) {
-    return () => h('div', { class: 'podium-card' }, [
-      h('div', { class: 'podium-card__medal' }, MEDALS[props.rank - 1]),
-      h('div', { class: 'podium-card__name text-body-2 font-weight-bold' }, props.row.userName),
-      h('div', { class: 'podium-card__time bo-display text-h6 font-weight-bold' },
-        formatRaceTime(props.row.finishTimeMs ?? 0)),
-      h('div', { class: 'podium-card__distance text-caption text-medium-emphasis' },
-        `${props.row.distanceM} m`),
-    ])
-  },
-})
+// Top-3 mapped to the shared podium. The finish time is a neutral metric
+// (not a reward), so it uses the 'ink' figure kind; distance is the meta.
+const podiumEntries = computed<PodiumEntry[]>(() =>
+  entries.value.slice(0, 3).map(row => ({
+    name: row.userName,
+    figure: formatRaceTime(row.finishTimeMs ?? 0),
+    figureKind: 'ink',
+    meta: `${row.distanceM} m`,
+  })),
+)
 </script>
 
 <style scoped>
@@ -154,35 +139,7 @@ const PodiumCard = defineComponent({
   font-variant-numeric: tabular-nums;
 }
 
-.podium {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 12px;
-}
-.podium__slot { display: flex; justify-content: center; }
-.podium__slot--gold { align-self: flex-start; }
-.podium__slot--silver { align-self: center; }
-.podium__slot--bronze { align-self: flex-end; }
-
-.podium-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px 28px;
-  border-radius: 16px;
-  background: rgb(var(--v-theme-surface-bright));
-  border: 1px solid rgb(var(--v-theme-rule));
-  min-width: 160px;
-  gap: 6px;
-}
-.podium__slot--gold .podium-card {
-  border-color: rgba(var(--v-theme-gold), 0.5);
-  background: rgba(var(--v-theme-gold), 0.08);
-  box-shadow: 0 0 24px rgba(var(--v-theme-gold), 0.18);
-  min-width: 180px;
-}
-.podium-card__medal { font-size: 36px; line-height: 1; }
+/* Podium markup + styles live in components/leaderboard/LeaderboardPodium.vue. */
 
 .lb-row__rank { min-width: 36px; text-align: center; margin-right: 8px; }
 .lb-row__medal { font-size: 20px; }
