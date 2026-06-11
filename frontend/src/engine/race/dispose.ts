@@ -39,6 +39,7 @@ import type * as pc from 'playcanvas'
 /** Tracks already-destroyed textures to guard against the double-destroy bug. */
 const _destroyedTextures = new WeakSet<pc.Texture>()
 const _destroyedMaterials = new WeakSet<pc.StandardMaterial>()
+const _destroyedMeshes = new WeakSet<pc.Mesh>()
 
 /**
  * Destroy a pc.Texture safely.
@@ -72,6 +73,21 @@ export function safeDestroyMaterial(mat: pc.StandardMaterial | null | undefined)
   mat.opacityMap = null
   mat.update()
   mat.destroy()
+}
+
+/**
+ * Destroy a pc.Mesh safely (custom geometry like the circuit annuli).
+ *
+ * `entity.destroy()` tears down render components but the mesh's vertex /
+ * index buffers are reference-counted GPU resources the creator owns —
+ * builders that call pc.createMesh must release them explicitly. Same
+ * double-destroy guard as textures.
+ */
+export function safeDestroyMesh(mesh: pc.Mesh | null | undefined): void {
+  if (!mesh) return
+  if (_destroyedMeshes.has(mesh)) return
+  _destroyedMeshes.add(mesh)
+  mesh.destroy()
 }
 
 /**

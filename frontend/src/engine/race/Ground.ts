@@ -66,11 +66,19 @@ export class Ground {
   }
 
   /**
-   * @param opts.trackLengthM Race distance in metres along +X; drives ground plane length.
-   * @param opts.trackWidthM  Road width in metres; ground plane widens beyond this by MARGIN_M on each side.
+   * @param opts.trackLengthM Track footprint extent along X; drives ground plane length.
+   * @param opts.trackWidthM  Track footprint extent along Z; ground plane widens beyond this by MARGIN_M on each side.
+   * @param opts.center       Optional footprint centre. Defaults to the straight
+   *                          track's (length / 2, 0); the circuit passes its
+   *                          circle centre (0, radius) so the grass square
+   *                          covers the whole ring.
    */
-  build(parent: pc.Entity, opts: { trackLengthM: number; trackWidthM: number }): void {
+  build(
+    parent: pc.Entity,
+    opts: { trackLengthM: number; trackWidthM: number; center?: { x: number; z: number } },
+  ): void {
     const { trackLengthM, trackWidthM } = opts
+    const center = opts.center ?? { x: trackLengthM / 2, z: 0 }
     const length = trackLengthM + MARGIN_M * 2
     const width = trackWidthM + MARGIN_M * 2
 
@@ -86,9 +94,11 @@ export class Ground {
     entity.render!.meshInstances[0].material = material
 
     // pc.Plane is 1×1 in local X/Z — scale to desired footprint.
-    // Center along the track so x spans [-MARGIN, trackLength + MARGIN].
+    // Default centring along the straight track makes x span
+    // [-MARGIN, trackLength + MARGIN]; a custom centre re-anchors the
+    // same footprint (used by the circuit's ring coverage).
     entity.setLocalScale(length, 1, width)
-    entity.setLocalPosition(trackLengthM / 2, -Z_FIGHT_OFFSET_M, 0)
+    entity.setLocalPosition(center.x, -Z_FIGHT_OFFSET_M, center.z)
 
     parent.addChild(entity)
     this.entity = entity

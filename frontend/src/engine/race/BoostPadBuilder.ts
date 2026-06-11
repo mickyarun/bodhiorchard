@@ -23,9 +23,17 @@
  *
  * All geometry is procedural planes, consistent with TrackBuilder. The
  * builder owns its two emissive materials and destroys them on teardown.
+ *
+ * Every element is placed through a TrackProjection: position AND yaw
+ * come from the pose at (featureArc, lateralOffset). Strips/chevrons are
+ * flat planes set at their centre pose — they're small relative to the
+ * circuit's curvature, so the chord approximation is invisible. On the
+ * straight track heading is 0 everywhere and output is identical to the
+ * pre-projection builder.
  */
 import * as pc from 'playcanvas'
 import { boostPadPositionsM } from '@shared/race/RaceTrackFeatures'
+import { entityYawDeg, type TrackProjection } from './TrackProjection'
 import { disposeEntity, safeDestroyMaterial } from './dispose'
 
 /** Strip footprint along the running direction. */
@@ -53,27 +61,31 @@ const PULSE_SWING = 0.7
 const PULSE_HZ = 0.9
 
 export interface BoostPadBuildOptions {
-  /** Race distance — pad x-positions derive from this via shared fractions. */
+  /** Race distance — pad arc positions derive from this via shared fractions. */
   distanceM: number
   /** Full track width — pads span every lane (auto-trigger on cross). */
   trackWidthM: number
+  /** Shape-specific arc → world mapping; positions AND yaws every element. */
+  projection: TrackProjection
 }
 
 export class BoostPadBuilder {
   private root: pc.Entity | null = null
   private baseMat: pc.StandardMaterial | null = null
   private chevronMat: pc.StandardMaterial | null = null
+  private projection: TrackProjection | null = null
   private pulseT = 0
 
   build(parent: pc.Entity, opts: BoostPadBuildOptions): void {
     this.root = new pc.Entity('BoostPads')
     parent.addChild(this.root)
+    this.projection = opts.projection
 
     this.baseMat = this.makeEmissiveMaterial(0.55)
     this.chevronMat = this.makeEmissiveMaterial(1.0)
 
-    for (const padX of boostPadPositionsM(opts.distanceM)) {
-      this.addPad(padX, opts.trackWidthM)
+    for (const padArcM of boostPadPositionsM(opts.distanceM)) {
+      this.addPad(padArcM, opts.trackWidthM)
     }
   }
 
@@ -96,38 +108,46 @@ export class BoostPadBuilder {
     safeDestroyMaterial(this.chevronMat)
     this.baseMat = null
     this.chevronMat = null
+    this.projection = null
   }
 
-  private addPad(padX: number, trackWidthM: number): void {
-    this.addPlane(this.baseMat!, 'BoostPadStrip', padX, PAD_Y_OFFSET, 0, 0, PAD_DEPTH_M, trackWidthM)
+  private addPad(padArcM: number, trackWidthM: number): void {
+    this.addPlane(this.baseMat!, 'BoostPadStrip', padArcM, PAD_Y_OFFSET, 0, 0, PAD_DEPTH_M, trackWidthM)
 
-    // Chevrons point in the running direction (+X): each is two arms
-    // angled toward the centreline, staggered along the strip.
-    const firstX = padX - ((CHEVRON_COUNT - 1) / 2) * CHEVRON_SPACING_M
+    // Chevrons point in the running direction: each is two arms angled
+    // toward the centreline, staggered along the strip arc.
+    const firstArcM = padArcM - ((CHEVRON_COUNT - 1) / 2) * CHEVRON_SPACING_M
     for (let i = 0; i < CHEVRON_COUNT; i++) {
-      const cx = firstX + i * CHEVRON_SPACING_M
-      const armZ = CHEVRON_ARM_LENGTH_M / 2 - CHEVRON_ARM_WIDTH_M / 2
-      this.addPlane(this.chevronMat!, 'BoostChevron', cx, CHEVRON_Y_OFFSET, -armZ, CHEVRON_ANGLE_DEG, CHEVRON_ARM_LENGTH_M, CHEVRON_ARM_WIDTH_M)
-      this.addPlane(this.chevronMat!, 'BoostChevron', cx, CHEVRON_Y_OFFSET, armZ, -CHEVRON_ANGLE_DEG, CHEVRON_ARM_LENGTH_M, CHEVRON_ARM_WIDTH_M)
+      const arcM = firstArcM + i * CHEVRON_SPACING_M
+      const armOffsetM = CHEVRON_ARM_LENGTH_M / 2 - CHEVRON_ARM_WIDTH_M / 2
+      this.addPlane(this.chevronMat!, 'BoostChevron', arcM, CHEVRON_Y_OFFSET, -armOffsetM, CHEVRON_ANGLE_DEG, CHEVRON_ARM_LENGTH_M, CHEVRON_ARM_WIDTH_M)
+      this.addPlane(this.chevronMat!, 'BoostChevron', arcM, CHEVRON_Y_OFFSET, armOffsetM, -CHEVRON_ANGLE_DEG, CHEVRON_ARM_LENGTH_M, CHEVRON_ARM_WIDTH_M)
     }
   }
 
+  /**
+   * Place one flat plane at (arc, lateral) on the track. The entity's
+   * final yaw composes the local tangent (entityYawDeg) with the
+   * element's own angle (chevron arms); on the straight track the
+   * tangent term is 0 and the result matches the original builder.
+   */
   private addPlane(
     material: pc.StandardMaterial,
     name: string,
-    x: number,
+    arcM: number,
     y: number,
-    z: number,
-    yawDeg: number,
+    lateralM: number,
+    extraYawDeg: number,
     lengthX: number,
     widthZ: number,
   ): void {
+    const pose = this.projection!.pose(arcM, lateralM)
     const entity = new pc.Entity(name)
     entity.addComponent('render', { type: 'plane' })
     entity.render!.meshInstances[0].material = material
     entity.setLocalScale(lengthX, 1, widthZ)
-    entity.setLocalPosition(x, y, z)
-    entity.setLocalEulerAngles(0, yawDeg, 0)
+    entity.setLocalPosition(pose.x, y, pose.z)
+    entity.setLocalEulerAngles(0, entityYawDeg(pose.headingDeg) + extraYawDeg, 0)
     this.root!.addChild(entity)
   }
 

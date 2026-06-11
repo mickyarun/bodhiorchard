@@ -19,28 +19,33 @@
  *   scene.build(application, {
  *     distanceM,        // 100 or 200 (RaceRoom picks)
  *     racerCount,       // 2..10 (RaceRoom enforces bounds)
+ *     trackShape,       // 'straight' (default) or 'circuit' (one lap)
  *     cameraMode,       // 'participant' (rear chase) or 'spectator' (fixed overhead)
  *     racers: [{ id, name, config, laneIndex }...],
- *     leaderProvider,   // returns leader's current X in metres, driven by the client
+ *     leaderProvider,   // returns the tracked racer's arc length in metres
  *   })
  *
- * The scene owns track / ground / finish arch / decor / pads / hurdles /
- * avatars / camera and tears them down in reverse order. It does NOT own
- * physics — the live panel calls `setRacerKinematics(id, kinematics)` each
- * frame with state derived from the authoritative `RaceRoom` schema.
+ * Track / ground / arch / decor / pads / hurdles live in the
+ * TrackAssembly (RaceSceneTrack.ts) — this file owns avatars, cameras
+ * and the kinematics bridge, and tears everything down in reverse
+ * order. It does NOT own physics — the live panel calls
+ * `setRacerKinematics(id, kinematics)` each frame with state derived
+ * from the authoritative `RaceRoom` schema; positionM stays a 1-D arc
+ * scalar that the assembly's TrackProjection maps to world space.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { KayKitCharacterFactory } from '../characters/KayKitCharacterFactory'
 import type { CharacterConfig } from '../characters/CharacterConfig'
-import { MIN_RACERS, MAX_RACERS, ALLOWED_DISTANCES_M, LANE_WIDTH_M } from '@shared/race/RaceConstants'
-import { TrackBuilder } from './TrackBuilder'
-import { FinishArch } from './FinishArch'
-import { Ground } from './Ground'
-import { DecorBuilder } from './DecorBuilder'
-import { BoostPadBuilder } from './BoostPadBuilder'
-import { HurdleBuilder } from './HurdleBuilder'
+import {
+  MIN_RACERS,
+  MAX_RACERS,
+  ALLOWED_DISTANCES_M,
+  ALLOWED_TRACK_SHAPES,
+} from '@shared/race/RaceConstants'
+import type { TrackShape } from '@shared/race/types'
+import { buildTrackAssembly, type TrackAssembly } from './RaceSceneTrack'
 import { RacerAvatar } from './RacerAvatar'
 import { RaceCamera } from './RaceCamera'
 import { RaceCameraOverhead } from './RaceCameraOverhead'
@@ -55,19 +60,25 @@ export interface RaceSceneRacerSpec {
   name: string
   /** Visual config (legacy or KayKit) for the avatar. */
   config: CharacterConfig
-  /** 0-based lane index within `racerCount` — picks the avatar's Z position. */
+  /** 0-based lane index within `racerCount` — picks the avatar's lane offset. */
   laneIndex: number
 }
 
 export interface RaceSceneBuildOptions {
   distanceM: number
   racerCount: number
+  /**
+   * Track layout. Optional with a 'straight' default so pre-circuit
+   * callers (and rooms created by older servers) keep working unchanged.
+   */
+  trackShape?: TrackShape
   cameraMode: RaceCameraMode
   racers: readonly RaceSceneRacerSpec[]
   /**
    * Called every frame by the participant camera to decide where to sit.
-   * Return the leader's current X (metres). Safe to return 0 pre-countdown.
-   * Ignored when `cameraMode === 'spectator'`.
+   * Return the tracked racer's current arc length (metres) — world X on
+   * the straight track. Safe to return 0 pre-countdown. Ignored when
+   * `cameraMode === 'spectator'`.
    */
   leaderProvider: () => number
 }
@@ -76,12 +87,7 @@ export class RaceScene {
   private loader: AssetLoader | null = null
   private factory: KayKitCharacterFactory | null = null
   private root: pc.Entity | null = null
-  private track: TrackBuilder | null = null
-  private arch: FinishArch | null = null
-  private ground: Ground | null = null
-  private decor: DecorBuilder | null = null
-  private boostPads: BoostPadBuilder | null = null
-  private hurdles: HurdleBuilder | null = null
+  private assembly: TrackAssembly | null = null
   private avatars: RacerAvatar[] = []
   private chaseCamera: RaceCamera | null = null
   private overheadCamera: RaceCameraOverhead | null = null
@@ -90,6 +96,7 @@ export class RaceScene {
 
   async build(application: Application, opts: RaceSceneBuildOptions): Promise<void> {
     validateOptions(opts)
+    const trackShape: TrackShape = opts.trackShape ?? 'straight'
 
     const app = application.app
     this.loader = new AssetLoader(app)
@@ -98,44 +105,17 @@ export class RaceScene {
     this.root = new pc.Entity('RaceSceneRoot')
     application.root.addChild(this.root)
 
-    // Track first — it reports lane-centre Zs that avatars rely on.
-    this.track = new TrackBuilder(this.loader)
-    const trackResult = await this.track.build(this.root, {
+    // Track first — it reports the lane offsets avatars rely on, and the
+    // projection every placement site shares.
+    this.assembly = await buildTrackAssembly(this.root, app, this.loader, {
       distanceM: opts.distanceM,
-      laneCount: opts.racerCount,
+      racerCount: opts.racerCount,
+      trackShape,
     })
 
-    this.ground = new Ground(app)
-    this.ground.build(this.root, {
-      trackLengthM: trackResult.trackLengthM,
-      trackWidthM: trackResult.tileWidthM,
-    })
+    await this.buildAvatars(opts.racers, this.assembly)
 
-    this.arch = new FinishArch()
-    this.arch.build(this.root, app.graphicsDevice, {
-      xAtFinish: opts.distanceM,
-      trackWidthM: trackResult.tileWidthM,
-    })
-
-    this.decor = new DecorBuilder(this.loader)
-    await this.decor.build(this.root, { trackLengthM: trackResult.trackLengthM })
-
-    // Pads + hurdles derive their x-positions from the same shared module
-    // the server physics uses, so visuals and mechanics can't drift.
-    this.boostPads = new BoostPadBuilder()
-    this.boostPads.build(this.root, {
-      distanceM: opts.distanceM,
-      trackWidthM: trackResult.tileWidthM,
-    })
-    this.hurdles = new HurdleBuilder()
-    this.hurdles.build(this.root, {
-      distanceM: opts.distanceM,
-      trackWidthM: trackResult.tileWidthM,
-    })
-
-    await this.buildAvatars(opts.racers, trackResult.laneCenterZs)
-
-    this.activateCamera(application, opts)
+    this.activateCamera(application, opts, trackShape)
 
     // Drive per-frame avatar smoothing. Server patches set kinematic
     // targets at 20 Hz; the render loop interpolates between them so
@@ -143,7 +123,7 @@ export class RaceScene {
     this.app = application
     this.updateHandler = (dt: number) => {
       for (const a of this.avatars) a.update(dt)
-      this.boostPads?.update(dt)
+      this.assembly?.update(dt)
     }
     application.app.on('update', this.updateHandler)
   }
@@ -175,7 +155,7 @@ export class RaceScene {
     return this.avatars
   }
 
-  /** Look up a racer's smoothed display x by racer id. Returns 0 if unknown. */
+  /** Look up a racer's smoothed display arc length by racer id. Returns 0 if unknown. */
   getRacerDisplayX(racerId: string): number {
     for (const a of this.avatars) if (a.racerId === racerId) return a.getDisplayX()
     return 0
@@ -198,18 +178,8 @@ export class RaceScene {
     for (const a of this.avatars) a.destroy()
     this.avatars = []
 
-    this.hurdles?.destroy()
-    this.hurdles = null
-    this.boostPads?.destroy()
-    this.boostPads = null
-    this.decor?.destroy()
-    this.decor = null
-    this.arch?.destroy()
-    this.arch = null
-    this.ground?.destroy()
-    this.ground = null
-    this.track?.destroy()
-    this.track = null
+    this.assembly?.destroy()
+    this.assembly = null
 
     if (this.root) {
       this.root.destroy()
@@ -220,17 +190,21 @@ export class RaceScene {
     this.loader = null
   }
 
-  private async buildAvatars(racers: readonly RaceSceneRacerSpec[], laneCenterZs: readonly number[]): Promise<void> {
+  private async buildAvatars(
+    racers: readonly RaceSceneRacerSpec[],
+    assembly: TrackAssembly,
+  ): Promise<void> {
     if (!this.loader || !this.factory || !this.root) return
 
+    const laneOffsets = assembly.laneOffsetsM
     for (const r of racers) {
-      if (r.laneIndex < 0 || r.laneIndex >= laneCenterZs.length) {
-        throw new Error(`RaceScene: laneIndex=${r.laneIndex} out of range for ${laneCenterZs.length} lanes`)
+      if (r.laneIndex < 0 || r.laneIndex >= laneOffsets.length) {
+        throw new Error(`RaceScene: laneIndex=${r.laneIndex} out of range for ${laneOffsets.length} lanes`)
       }
       const avatar = new RacerAvatar(
         r.id,
         { name: r.name, config: r.config },
-        laneCenterZs[r.laneIndex],
+        { laneOffsetM: laneOffsets[r.laneIndex], projection: assembly.projection },
         { loader: this.loader, characters: this.factory },
       )
       try {
@@ -245,17 +219,27 @@ export class RaceScene {
     }
   }
 
-  private activateCamera(application: Application, opts: RaceSceneBuildOptions): void {
+  private activateCamera(
+    application: Application,
+    opts: RaceSceneBuildOptions,
+    trackShape: TrackShape,
+  ): void {
     if (opts.cameraMode === 'spectator') {
       this.overheadCamera = new RaceCameraOverhead(application.camera, {
         distanceM: opts.distanceM,
-        trackWidthM: opts.racerCount * LANE_WIDTH_M,
+        trackWidthM: this.assembly?.trackWidthM ?? 0,
+        trackShape,
       })
       this.overheadCamera.activate()
       return
     }
 
-    this.chaseCamera = new RaceCamera(application.camera, application.app, opts.leaderProvider)
+    // The chase camera consumes centreline poses (position + travel
+    // heading): the panel's leaderProvider keeps returning the 1-D arc
+    // scalar and the shape's projection turns it into world space here.
+    this.chaseCamera = new RaceCamera(application.camera, application.app, () =>
+      this.assembly!.projection.pose(opts.leaderProvider(), 0),
+    )
     this.chaseCamera.activate()
   }
 }
@@ -263,6 +247,14 @@ export class RaceScene {
 function validateOptions(opts: RaceSceneBuildOptions): void {
   if (!ALLOWED_DISTANCES_M.includes(opts.distanceM as typeof ALLOWED_DISTANCES_M[number])) {
     throw new Error(`RaceScene: distanceM=${opts.distanceM} not in ${ALLOWED_DISTANCES_M.join('/')}`)
+  }
+  if (
+    opts.trackShape !== undefined &&
+    !(ALLOWED_TRACK_SHAPES as readonly string[]).includes(opts.trackShape)
+  ) {
+    throw new Error(
+      `RaceScene: trackShape=${opts.trackShape} not in ${ALLOWED_TRACK_SHAPES.join('/')}`,
+    )
   }
   if (opts.racerCount < MIN_RACERS || opts.racerCount > MAX_RACERS) {
     throw new Error(`RaceScene: racerCount=${opts.racerCount} outside [${MIN_RACERS}..${MAX_RACERS}]`)

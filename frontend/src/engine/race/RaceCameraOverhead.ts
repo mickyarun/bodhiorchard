@@ -26,6 +26,8 @@
  * symmetry with `RaceCamera` so the scene's teardown code is uniform.
  */
 import * as pc from 'playcanvas'
+import { circuitRadiusM } from '@shared/race/CircuitGeometry'
+import type { TrackShape } from '@shared/race/types'
 
 /**
  * Pitch (degrees) — straight down is -90, horizon is 0. At -80 the ground
@@ -56,11 +58,19 @@ const CAM_FOV_DEG = 40
 /** Ground Y the camera is pointed at. Zero puts the focus on the track surface. */
 const CAM_TARGET_Y_M = 0
 
+/**
+ * Extra metres of grass kept visible beyond the circuit's outer edge so
+ * the ring never kisses the viewport border.
+ */
+const CIRCUIT_FIT_MARGIN_M = 8
+
 export interface RaceCameraOverheadOptions {
-  /** Race distance in metres — sets midpoint along X. */
+  /** Race distance in metres — straight midpoint X, or circuit circumference. */
   distanceM: number
-  /** Road width in metres — unused today; retained so callers can tune height later if they widen lanes dramatically. */
+  /** Road width in metres — sizes the circuit fit; unused for straight. */
   trackWidthM: number
+  /** Track layout — picks the straight-midpoint or circuit-centre framing. */
+  trackShape: TrackShape
 }
 
 export class RaceCameraOverhead {
@@ -81,6 +91,11 @@ export class RaceCameraOverhead {
     const cam = this.camera.camera
     if (cam) cam.fov = CAM_FOV_DEG
 
+    if (this.opts.trackShape === 'circuit') {
+      this.activateCircuit()
+      return
+    }
+
     const midpointX = this.opts.distanceM / 2
     this.camera.setPosition(midpointX - CAM_BEHIND_MIDPOINT_M, CAM_HEIGHT_M, 0)
     this.camera.setLocalEulerAngles(CAM_PITCH_DEG, 0, 0)
@@ -88,6 +103,24 @@ export class RaceCameraOverhead {
     // facing toward +X (finish direction). Re-orient by looking at a point
     // a bit past the midpoint at ground level.
     this.camera.lookAt(midpointX, CAM_TARGET_Y_M, 0)
+  }
+
+  /**
+   * Circuit framing: hover over the circle's centre — world (0, radius),
+   * per CircuitGeometry's anchoring — at a height where the full ring
+   * diameter (plus road width and a grass margin) fits the vertical FOV:
+   * height = halfExtent / tan(fov / 2). The same small -X pull-back as
+   * the straight path keeps the view obliquely angled (and keeps lookAt
+   * away from the degenerate straight-down up-vector case).
+   */
+  private activateCircuit(): void {
+    const radiusM = circuitRadiusM(this.opts.distanceM)
+    const halfExtentM = radiusM + this.opts.trackWidthM / 2 + CIRCUIT_FIT_MARGIN_M
+    const halfFovRad = (CAM_FOV_DEG / 2) * (Math.PI / 180)
+    const heightM = halfExtentM / Math.tan(halfFovRad)
+
+    this.camera.setPosition(-CAM_BEHIND_MIDPOINT_M, heightM, radiusM)
+    this.camera.lookAt(0, CAM_TARGET_Y_M, radiusM)
   }
 
   destroy(): void {

@@ -23,9 +23,17 @@
  *
  * Procedural boxes/planes, consistent with TrackBuilder. The builder owns
  * its materials and destroys them on teardown.
+ *
+ * Every element is placed through a TrackProjection: position AND yaw
+ * come from the pose at (hurdleArc, lateralOffset). Posts and bar
+ * segments are rigid boxes set at their centre pose — each segment is
+ * short relative to the circuit's curvature, so the chord approximation
+ * is invisible. On the straight track heading is 0 everywhere and the
+ * output is identical to the pre-projection builder.
  */
 import * as pc from 'playcanvas'
 import { hurdlePositionsM } from '@shared/race/RaceTrackFeatures'
+import { entityYawDeg, type TrackProjection } from './TrackProjection'
 import { disposeEntity, safeDestroyMaterial } from './dispose'
 
 /** Crossbar height — proportioned to the ~0.9m race avatars. */
@@ -55,27 +63,31 @@ const SHADOW_GRAY = 0.05
 const SHADOW_OPACITY = 0.28
 
 export interface HurdleBuildOptions {
-  /** Race distance — hurdle x-positions derive from this via shared fractions. */
+  /** Race distance — hurdle arc positions derive from this via shared fractions. */
   distanceM: number
   /** Full track width — hurdles span every lane. */
   trackWidthM: number
+  /** Shape-specific arc → world mapping; positions AND yaws every element. */
+  projection: TrackProjection
 }
 
 export class HurdleBuilder {
   private root: pc.Entity | null = null
   private materials: pc.StandardMaterial[] = []
+  private projection: TrackProjection | null = null
 
   build(parent: pc.Entity, opts: HurdleBuildOptions): void {
     this.root = new pc.Entity('Hurdles')
     parent.addChild(this.root)
+    this.projection = opts.projection
 
     const whiteMat = this.makeMaterial(1, 1, 1)
     const redMat = this.makeMaterial(STRIPE_RED_R, STRIPE_RED_G, STRIPE_RED_B)
     const postMat = this.makeMaterial(POST_GRAY, POST_GRAY, POST_GRAY)
     const shadowMat = this.makeMaterial(SHADOW_GRAY, SHADOW_GRAY, SHADOW_GRAY, SHADOW_OPACITY)
 
-    for (const hurdleX of hurdlePositionsM(opts.distanceM)) {
-      this.addHurdle(hurdleX, opts.trackWidthM, { whiteMat, redMat, postMat, shadowMat })
+    for (const hurdleArcM of hurdlePositionsM(opts.distanceM)) {
+      this.addHurdle(hurdleArcM, opts.trackWidthM, { whiteMat, redMat, postMat, shadowMat })
     }
   }
 
@@ -84,10 +96,35 @@ export class HurdleBuilder {
     this.root = null
     for (const mat of this.materials) safeDestroyMaterial(mat)
     this.materials = []
+    this.projection = null
+  }
+
+  /**
+   * Place one render-component entity at (arc, lateral), yawed to the
+   * local travel tangent. Straight track: heading 0 → yaw 0, matching
+   * the original unrotated boxes/planes byte-for-byte.
+   */
+  private addPiece(
+    name: string,
+    renderType: 'box' | 'plane',
+    material: pc.StandardMaterial,
+    arcM: number,
+    lateralM: number,
+    y: number,
+    scale: { x: number; y: number; z: number },
+  ): void {
+    const pose = this.projection!.pose(arcM, lateralM)
+    const entity = new pc.Entity(name)
+    entity.addComponent('render', { type: renderType })
+    entity.render!.meshInstances[0].material = material
+    entity.setLocalScale(scale.x, scale.y, scale.z)
+    entity.setLocalPosition(pose.x, y, pose.z)
+    entity.setLocalEulerAngles(0, entityYawDeg(pose.headingDeg), 0)
+    this.root!.addChild(entity)
   }
 
   private addHurdle(
-    x: number,
+    arcM: number,
     trackWidthM: number,
     mats: {
       whiteMat: pc.StandardMaterial
@@ -97,38 +134,31 @@ export class HurdleBuilder {
     },
   ): void {
     // Shadow strip first — sells the bar's position on the ground plane.
-    const shadow = new pc.Entity('HurdleShadow')
-    shadow.addComponent('render', { type: 'plane' })
-    shadow.render!.meshInstances[0].material = mats.shadowMat
-    shadow.setLocalScale(SHADOW_DEPTH_M, 1, trackWidthM)
-    shadow.setLocalPosition(x, SHADOW_Y_OFFSET, 0)
-    this.root!.addChild(shadow)
+    this.addPiece('HurdleShadow', 'plane', mats.shadowMat, arcM, 0, SHADOW_Y_OFFSET, {
+      x: SHADOW_DEPTH_M, y: 1, z: trackWidthM,
+    })
 
     // Side posts at both track edges.
-    const postZ = trackWidthM / 2 - POST_WIDTH_M / 2 - POST_INSET_M
-    for (const z of [-postZ, postZ]) {
-      const post = new pc.Entity('HurdlePost')
-      post.addComponent('render', { type: 'box' })
-      post.render!.meshInstances[0].material = mats.postMat
-      post.setLocalScale(POST_WIDTH_M, BAR_HEIGHT_M + BAR_SECTION_M, POST_WIDTH_M)
-      post.setLocalPosition(x, (BAR_HEIGHT_M + BAR_SECTION_M) / 2, z)
-      this.root!.addChild(post)
+    const postOffsetM = trackWidthM / 2 - POST_WIDTH_M / 2 - POST_INSET_M
+    for (const lateralM of [-postOffsetM, postOffsetM]) {
+      this.addPiece('HurdlePost', 'box', mats.postMat, arcM, lateralM,
+        (BAR_HEIGHT_M + BAR_SECTION_M) / 2,
+        { x: POST_WIDTH_M, y: BAR_HEIGHT_M + BAR_SECTION_M, z: POST_WIDTH_M })
     }
 
-    // Striped crossbar: alternating red/white segments along Z. The last
-    // segment is clipped to the remaining width so the bar always ends
-    // flush with the post, whatever the lane count.
+    // Striped crossbar: alternating red/white segments across the track
+    // (local Z = lateral direction once yawed). The last segment is
+    // clipped to the remaining width so the bar always ends flush with
+    // the post, whatever the lane count.
     let remaining = trackWidthM
     let segIndex = 0
     while (remaining > 0) {
       const segLen = Math.min(BAR_STRIPE_LENGTH_M, remaining)
-      const zStart = trackWidthM / 2 - (trackWidthM - remaining)
-      const segment = new pc.Entity('HurdleBar')
-      segment.addComponent('render', { type: 'box' })
-      segment.render!.meshInstances[0].material = segIndex % 2 === 0 ? mats.redMat : mats.whiteMat
-      segment.setLocalScale(BAR_SECTION_M, BAR_SECTION_M, segLen)
-      segment.setLocalPosition(x, BAR_HEIGHT_M, zStart - segLen / 2)
-      this.root!.addChild(segment)
+      const lateralStart = trackWidthM / 2 - (trackWidthM - remaining)
+      this.addPiece('HurdleBar', 'box',
+        segIndex % 2 === 0 ? mats.redMat : mats.whiteMat,
+        arcM, lateralStart - segLen / 2, BAR_HEIGHT_M,
+        { x: BAR_SECTION_M, y: BAR_SECTION_M, z: segLen })
       remaining -= segLen
       segIndex++
     }

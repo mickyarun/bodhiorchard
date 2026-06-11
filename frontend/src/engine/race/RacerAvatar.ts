@@ -16,18 +16,14 @@
  * RacerAvatar — one racer's avatar in the race scene.
  *
  * Reuses the shared KayKitCharacterFactory so we never re-implement glTF
- * loading or tinting. The KayKit locomotion state graph's Walk state
- * defaults to the Walking_A track; we swap its track to Running_A at
- * runtime when the racer is sprinting, so sprint reads as a proper run
- * while a casual move reads as a walk.
+ * loading or tinting. Owns the entity transform: the server's 1-D
+ * `positionM` arc scalar is smoothed into `displayX` each frame, then a
+ * TrackProjection maps (arc, lane offset) to world position + travel
+ * heading — straight tracks reproduce the historical constant-lane-Z /
+ * constant-yaw-90 behaviour exactly; circuits curve around the ring.
  *
- * Track lookup goes through findAnimTrack against the container's loaded
- * animations — no hard-coded string outside the animation manifest.
- *
- * Animation driving matches the dashboard's `CharacterSystem` pattern:
- * setPosition each frame + setInteger('speed', 0|1) to switch Idle ↔ Walk.
- * Never touches anim.speed (varying the playback multiplier caused visible
- * "jumping" because the step cycle re-keyed mid-stride).
+ * The animation state machine (Idle/Walk/Run picking, knockdown,
+ * finish-Cheer latch) lives in RacerAvatarAnim.
  *
  * Ownership:
  *   - Owns the wrapper entity returned by the factory → destroys it.
@@ -38,11 +34,11 @@
 import * as pc from 'playcanvas'
 import type { AssetLoader } from '../assets/AssetLoader'
 import { KayKitCharacterFactory, getClonedMaterials } from '../characters/KayKitCharacterFactory'
-import { findAnimTrack, type ContainerWithAnims } from '../characters/AnimUtils'
-import { getAnimationGLB } from '../characters/KayKitManifest'
 import type { CharacterConfig } from '../characters/CharacterConfig'
 import { HURDLE_JUMP_WINDOW_MS } from '@shared/race/RaceConstants'
 import type { RacerKinematics } from './types'
+import { entityYawDeg, type TrackProjection } from './TrackProjection'
+import { RacerAvatarAnim } from './RacerAvatarAnim'
 import { disposeEntity, safeDestroyMaterial } from './dispose'
 
 /**
@@ -54,9 +50,13 @@ export interface RacerPreset {
   config: CharacterConfig
 }
 
-/** Animation track names used by the race scene — all resolved via findAnimTrack. */
-const WALK_TRACK_NAME = 'Walking_A'
-const RUN_TRACK_NAME = 'Running_A'
+/** Where this avatar runs: a lane offset projected onto the track shape. */
+export interface RacerPlacement {
+  /** Signed lateral offset of the lane centre from the track centreline. */
+  laneOffsetM: number
+  /** Shape-specific arc-length → world-pose mapping (straight or circuit). */
+  projection: TrackProjection
+}
 
 /**
  * Scale multiplier applied on top of KayKit's built-in KAYKIT_TARGET_HEIGHT.
@@ -69,14 +69,13 @@ const RACE_AVATAR_SCALE = 1.3
 const AABB_CENTER = new pc.Vec3(0, 0.45, 0)
 const AABB_HALF_EXTENTS = new pc.Vec3(0.3, 0.5, 0.3)
 
-/** KayKit characters default-face -Z; rotate 90° so they face +X (track direction). */
+/**
+ * Yaw that points a KayKit model along travel heading 0 (+X). Verified
+ * against pc.Quat: a +90° Y rotation maps local +Z → world +X, so this
+ * is the yaw for a +Z-fronted model to face +X — the value the straight
+ * track has always used.
+ */
 const AVATAR_YAW_DEG = 90
-
-/** Below this velocity, swap back to the Idle state. Avoids swap-thrash at rest. */
-const IDLE_SWAP_THRESHOLD_MPS = 0.5
-
-/** Above this velocity, assume the player is sprinting (swap Walk → Running_A). */
-const SPRINT_SWAP_THRESHOLD_MPS = 4.0
 
 /**
  * Hurdle-jump hop arc scales with the racer's speed at takeoff: a
@@ -92,20 +91,19 @@ const JUMP_ARC_DURATION_S = HURDLE_JUMP_WINDOW_MS / 1000
 
 export class RacerAvatar {
   readonly racerId: string
-  readonly laneZ: number
 
+  private readonly laneOffsetM: number
+  private readonly projection: TrackProjection
   private factory: AssetFactoryBundle
   private preset: RacerPreset
   private wrapper: pc.Entity | null = null
-  private walkTrack: pc.AnimTrack | null = null
-  private runTrack: pc.AnimTrack | null = null
-  private currentAnimState: 'idle' | 'walk' | 'run' = 'idle'
+  private anim = new RacerAvatarAnim()
 
   /**
    * Server updates land at 20 Hz. To avoid visibly jerky motion we lerp
    * toward the server-supplied target each render frame. `targetX` is
-   * set by `setKinematics`; `displayX` is what we actually write to the
-   * entity transform.
+   * the latest server arc length; `displayX` is the smoothed arc we
+   * actually project onto the entity transform.
    */
   private targetX = 0
   private displayX = 0
@@ -122,52 +120,43 @@ export class RacerAvatar {
   private jumpElapsedSec = 0
   private jumpPeakM = JUMP_ARC_MIN_HEIGHT_M
 
-  /**
-   * Hurdle knockdown: while the server reports the racer down we hold the
-   * Defeat state (Death_A — a fall-to-ground track) and ignore
-   * velocity-driven anim picking; on get-up the emote clears and the
-   * locomotion graph blends back through Idle into Walk.
-   */
-  private knockedDown = false
-
-  /**
-   * When the server marks this racer as finished, we force the anim graph
-   * through Idle → Cheer (emote=2) regardless of incoming kinematics. The
-   * flag also makes setKinematics a no-op for anim-state picking so a
-   * late-arriving velocity patch doesn't yank the avatar back into Walk
-   * between the finish-line crossing and the UI phase change.
-   */
-  private finished = false
-
   /** Display name pulled from the preset — consumed by the HUD. */
   get displayName(): string {
     return this.preset.name
   }
 
-  constructor(racerId: string, preset: RacerPreset, laneZ: number, factory: AssetFactoryBundle) {
+  constructor(
+    racerId: string,
+    preset: RacerPreset,
+    placement: RacerPlacement,
+    factory: AssetFactoryBundle,
+  ) {
     this.racerId = racerId
     this.preset = preset
-    this.laneZ = laneZ
+    this.laneOffsetM = placement.laneOffsetM
+    this.projection = placement.projection
     this.factory = factory
   }
 
   async build(parent: pc.Entity): Promise<void> {
+    const start = this.projection.pose(0, this.laneOffsetM)
     const wrapper = await this.factory.characters.create(
       this.racerId,
       this.preset.name,
       this.preset.config,
-      0, 0, this.laneZ,
-      AVATAR_YAW_DEG,
+      start.x, 0, start.z,
+      this.modelYawFor(start.headingDeg),
       false, false,
     )
     parent.addChild(wrapper.entity)
     this.wrapper = wrapper.entity
 
     wrapper.entity.setLocalScale(RACE_AVATAR_SCALE, RACE_AVATAR_SCALE, RACE_AVATAR_SCALE)
-    wrapper.entity.setLocalPosition(0, 0, this.laneZ)
+    wrapper.entity.setLocalPosition(start.x, 0, start.z)
 
     try {
-      await this.loadLocomotionTracks()
+      this.anim.attach(wrapper.entity)
+      await this.anim.load(this.factory.loader)
       this.applyCustomAabb(wrapper.entity)
     } catch (err) {
       // If animation track loading fails we must tear down the partially
@@ -197,70 +186,22 @@ export class RacerAvatar {
     }
     this.airborne = k.isAirborne
     if (!this.initialized) {
-      // First patch: snap so the avatar isn't stuck at x=0 while lerping.
+      // First patch: snap so the avatar isn't stuck at arc 0 while lerping.
       this.displayX = k.positionM
-      this.wrapper.setPosition(k.positionM, 0, this.laneZ)
+      this.applyPose(0)
       this.initialized = true
     }
 
-    // After the finish line we hold the Cheer state — see `finished`.
-    if (this.finished) return
-
-    if (k.isKnockedDown !== this.knockedDown) {
-      this.knockedDown = k.isKnockedDown
-      this.applyKnockdownState(k.isKnockedDown)
-    }
-    // While on the ground the Defeat state owns the rig — velocity-driven
-    // state picking resumes on the get-up edge above.
-    if (this.knockedDown) return
-
-    const nextState = this.pickAnimState(k.velocityMps, k.isSprinting)
-    if (nextState === this.currentAnimState) return
-
-    this.applyAnimState(nextState)
-    this.currentAnimState = nextState
-  }
-
-  /**
-   * Enter / leave the fall animation. Entering pushes the graph through
-   * Idle (speed=0) so the Idle → Defeat edge can fire — same trick as
-   * `setFinished` uses for Cheer; Defeat's track is Death_A, a fall to
-   * the ground. Leaving clears the emote, blending back up through Idle.
-   */
-  private applyKnockdownState(down: boolean): void {
-    const anim = this.wrapper?.anim
-    if (!anim) return
-    if (down) {
-      anim.setInteger('speed', 0)
-      anim.setInteger('emote', 3)
-      this.currentAnimState = 'idle'
-    } else {
-      anim.setInteger('emote', 0)
-    }
+    this.anim.onKinematics(k.velocityMps, k.isSprinting, k.isKnockedDown)
   }
 
   /**
    * Mark this racer as finished — switches the anim graph to the Cheer
-   * state (emote=2) and latches out of the velocity-driven state machine.
+   * state and latches out of the velocity-driven state machine.
    * Idempotent; calling with the current value is a no-op.
    */
   setFinished(finished: boolean): void {
-    if (this.finished === finished) return
-    this.finished = finished
-
-    const anim = this.wrapper?.anim
-    if (!anim) return
-
-    if (finished) {
-      // Push the graph through Walk → Idle (speed=0) so the Idle → Cheer
-      // edge can fire on the next tick. Cheer has no direct transition
-      // from Walk in LOCOMOTION_STATE_GRAPH.
-      anim.setInteger('speed', 0)
-      anim.setInteger('emote', 2)
-      this.currentAnimState = 'idle'
-    } else {
-      anim.setInteger('emote', 0)
-    }
+    this.anim.setFinished(finished)
   }
 
   /**
@@ -286,7 +227,31 @@ export class RacerAvatar {
     const alpha = 1 - Math.exp(-CATCHUP_PER_SEC * dtSec)
     this.displayX += (this.targetX - this.displayX) * alpha
 
-    this.wrapper.setPosition(this.displayX, this.jumpArcY(dtSec), this.laneZ)
+    this.applyPose(this.jumpArcY(dtSec))
+  }
+
+  /**
+   * Write the world transform for the current smoothed arc (`displayX`).
+   * The projection turns arc + lane offset into position and travel
+   * heading; on the straight track this reproduces the historical
+   * behaviour exactly (constant lane Z, constant yaw 90).
+   */
+  private applyPose(jumpY: number): void {
+    if (!this.wrapper) return
+    const pose = this.projection.pose(this.displayX, this.laneOffsetM)
+    this.wrapper.setPosition(pose.x, jumpY, pose.z)
+    this.wrapper.setLocalEulerAngles(0, this.modelYawFor(pose.headingDeg), 0)
+  }
+
+  /**
+   * Face the avatar along its direction of travel. Two pieces compose:
+   * AVATAR_YAW_DEG (90) turns the +Z-fronted KayKit model onto heading 0
+   * (+X), and entityYawDeg(-heading) rotates that frame onto the actual
+   * travel tangent. Heading 0 therefore yields the straight track's
+   * historical constant yaw of 90.
+   */
+  private modelYawFor(headingDeg: number): number {
+    return AVATAR_YAW_DEG + entityYawDeg(headingDeg)
   }
 
   /**
@@ -301,7 +266,7 @@ export class RacerAvatar {
     return this.jumpPeakM * Math.sin(Math.PI * t)
   }
 
-  /** Read-only access to the current display X — used by the camera. */
+  /** Read-only access to the current display arc length — used by the camera. */
   getDisplayX(): number {
     return this.displayX
   }
@@ -314,49 +279,11 @@ export class RacerAvatar {
 
     disposeEntity(this.wrapper)
     this.wrapper = null
-    this.walkTrack = null
-    this.runTrack = null
-    this.currentAnimState = 'idle'
+    this.anim.reset()
     this.initialized = false
-    this.finished = false
     this.airborne = false
     this.jumpElapsedSec = 0
     this.jumpPeakM = JUMP_ARC_MIN_HEIGHT_M
-    this.knockedDown = false
-  }
-
-  private pickAnimState(velocityMps: number, isSprinting: boolean): 'idle' | 'walk' | 'run' {
-    if (velocityMps < IDLE_SWAP_THRESHOLD_MPS) return 'idle'
-    if (isSprinting && velocityMps >= SPRINT_SWAP_THRESHOLD_MPS) return 'run'
-    return 'walk'
-  }
-
-  private applyAnimState(state: 'idle' | 'walk' | 'run'): void {
-    const anim = this.wrapper?.anim
-    if (!anim) return
-    const layer = anim.baseLayer
-    if (!layer) return
-
-    if (state === 'idle') {
-      anim.setInteger('speed', 0)
-      return
-    }
-
-    // Swap the Walk state's track to the appropriate variant.
-    const track = state === 'run' ? this.runTrack : this.walkTrack
-    if (track) layer.assignAnimation('Walk', track)
-    anim.setInteger('speed', 1)
-  }
-
-  private async loadLocomotionTracks(): Promise<void> {
-    const movementBasicPath = getAnimationGLB('movement_basic')
-    const asset = await this.factory.loader.load(movementBasicPath)
-    const container = asset.resource as ContainerWithAnims
-
-    this.walkTrack = findAnimTrack(container, WALK_TRACK_NAME)
-    this.runTrack = findAnimTrack(container, RUN_TRACK_NAME)
-    if (!this.walkTrack) throw new Error(`RacerAvatar: missing ${WALK_TRACK_NAME} in ${movementBasicPath}`)
-    if (!this.runTrack) throw new Error(`RacerAvatar: missing ${RUN_TRACK_NAME} in ${movementBasicPath}`)
   }
 
   private applyCustomAabb(wrapper: pc.Entity): void {
