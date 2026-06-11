@@ -41,6 +41,7 @@ import {
 import type { TrackShape } from "../../../shared/race/types"
 import { postRaceInvite } from "../bridge/BackendClient"
 import { registerRaceHooks } from "../bridge/RaceRegistry"
+import { isProductionServer, resolveBotCount } from "./RaceRoomHelpers"
 import { RaceRoom } from "./RaceRoom"
 
 export interface RaceCreateMessage {
@@ -85,10 +86,13 @@ async function handleRaceCreate(
     return
   }
 
-  // Host must include themselves in the racer count; total racers is
-  // invitees + host. Cap at MAX_RACERS so a host can't spin up an 11-person
-  // race that RaceRoom would reject anyway.
-  const racerCount = parsed.invitedUserIds.length + 1
+  // Total racers = host + invitees + dev-mode bots. Resolve the bot count
+  // through the same prod-gate + clamp the room applies, so the cap is
+  // honest (a 7-bot dev race with invitees can't silently overflow the
+  // room's MAX_RACERS join cap and drop seats). In production the gate
+  // forces bots to 0, so this reduces to host + invitees.
+  const botCount = resolveBotCount(parsed.botCount, isProductionServer())
+  const racerCount = parsed.invitedUserIds.length + 1 + botCount
   if (racerCount > MAX_RACERS) {
     client.send("race_create_failed", { reason: "too_many_invitees" })
     return
