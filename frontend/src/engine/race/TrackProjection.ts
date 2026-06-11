@@ -22,13 +22,15 @@
  *
  *   - StraightProjection: the original track — arc is world X, lateral
  *     offset is world Z, travel heading is constant +X.
- *   - CircuitProjection: wraps shared/race CircuitGeometry — arc curves
- *     around a circle whose circumference is the race distance.
+ *   - CircuitProjection: wraps shared/race LoopPath — arc curves around
+ *     an organic closed loop whose total length is the race distance.
+ *     (CircuitGeometry's perfect circle remains as the convention
+ *     reference; LoopPath shares its anchoring and lateral sign.)
  *
  * Keeping the mapping behind this interface means every placement site
  * is shape-agnostic; only RaceScene picks the implementation.
  */
-import { circuitPose } from '@shared/race/CircuitGeometry'
+import { loopPose } from '@shared/race/LoopPath'
 
 /** Degrees per radian — CircuitGeometry speaks radians, PlayCanvas degrees. */
 const DEG_PER_RAD = 180 / Math.PI
@@ -55,12 +57,12 @@ export class StraightProjection implements TrackProjection {
   }
 }
 
-/** One-lap circular track — race distance is the circumference. */
+/** One-lap closed loop — race distance is the loop's total length. */
 export class CircuitProjection implements TrackProjection {
   constructor(private readonly circumferenceM: number) {}
 
   pose(arcLengthM: number, lateralOffsetM: number): TrackPose {
-    const p = circuitPose(arcLengthM, this.circumferenceM, lateralOffsetM)
+    const p = loopPose(arcLengthM, this.circumferenceM, lateralOffsetM)
     return { x: p.x, z: p.z, headingDeg: p.headingRad * DEG_PER_RAD }
   }
 }

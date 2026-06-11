@@ -22,11 +22,12 @@
  *
  *   - straight: the original TrackBuilder / Ground / FinishArch /
  *     DecorBuilder path, untouched, with a StraightProjection.
- *   - circuit:  CircuitTrackBuilder ring + Ground sized to cover the
- *     full ring + FinishArch at arc = circumference (which is the start
- *     line's world pose, tangent +X, so the x-only FinishArch API needs
- *     no rotation) + a CircuitProjection. DecorBuilder is skipped for
- *     circuit v1 — its prop scattering assumes a straight road edge.
+ *   - circuit:  CircuitTrackBuilder loop + Ground sized to the loop's
+ *     bounding box + FinishArch at arc = circumference (which is the
+ *     start line's world pose, tangent +X, so the x-only FinishArch API
+ *     needs no rotation) + a CircuitProjection. DecorBuilder is skipped
+ *     on circuit — its prop scattering assumes a straight road edge —
+ *     in favour of CircuitDecorBuilder's trackside village.
  *
  * Ownership: `destroy()` tears the pieces down in reverse build order,
  * mirroring RaceScene's convention. A failure mid-build cleans up the
@@ -34,7 +35,7 @@
  * materials or meshes it has no handle to.
  */
 import type * as pc from 'playcanvas'
-import { circuitRadiusM } from '@shared/race/CircuitGeometry'
+import { loopBounds } from '@shared/race/LoopPath'
 import type { TrackShape } from '@shared/race/types'
 import type { AssetLoader } from '../assets/AssetLoader'
 import { TrackBuilder } from './TrackBuilder'
@@ -201,14 +202,17 @@ class TrackAssemblyImpl implements TrackAssembly {
   ): void {
     this.ground = new Ground(app)
     if (opts.trackShape === 'circuit') {
-      // Square footprint covering the ring's outer edge, centred on the
-      // circle centre (0, radius) per CircuitGeometry's anchoring.
-      const radiusM = circuitRadiusM(opts.distanceM)
-      const ringExtentM = 2 * radiusM + trackWidthM
+      // Footprint covering the loop's bounding box plus the road width,
+      // centred on the box — the organic loop isn't symmetric about any
+      // axis, so the old circle-radius framing no longer fits.
+      const bounds = loopBounds(opts.distanceM)
       this.ground.build(root, {
-        trackLengthM: ringExtentM,
-        trackWidthM: ringExtentM,
-        center: { x: 0, z: radiusM },
+        trackLengthM: bounds.maxX - bounds.minX + trackWidthM,
+        trackWidthM: bounds.maxZ - bounds.minZ + trackWidthM,
+        center: {
+          x: (bounds.minX + bounds.maxX) / 2,
+          z: (bounds.minZ + bounds.maxZ) / 2,
+        },
       })
       return
     }

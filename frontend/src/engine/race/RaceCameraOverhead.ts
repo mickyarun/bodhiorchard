@@ -26,7 +26,7 @@
  * symmetry with `RaceCamera` so the scene's teardown code is uniform.
  */
 import * as pc from 'playcanvas'
-import { circuitRadiusM } from '@shared/race/CircuitGeometry'
+import { loopBounds } from '@shared/race/LoopPath'
 import type { TrackShape } from '@shared/race/types'
 
 /**
@@ -106,21 +106,27 @@ export class RaceCameraOverhead {
   }
 
   /**
-   * Circuit framing: hover over the circle's centre — world (0, radius),
-   * per CircuitGeometry's anchoring — at a height where the full ring
-   * diameter (plus road width and a grass margin) fits the vertical FOV:
-   * height = halfExtent / tan(fov / 2). The same small -X pull-back as
-   * the straight path keeps the view obliquely angled (and keeps lookAt
-   * away from the degenerate straight-down up-vector case).
+   * Circuit framing: hover over the centre of the loop's bounding box —
+   * the organic loop isn't symmetric, so the centre comes from LoopPath's
+   * bounds rather than a circle radius — at a height where the larger
+   * box half-extent (plus road width and a grass margin) fits the
+   * vertical FOV: height = halfExtent / tan(fov / 2). Sizing to the
+   * larger axis keeps the whole course on screen even in a square
+   * viewport. The same small -X pull-back as the straight path keeps the
+   * view obliquely angled (and keeps lookAt away from the degenerate
+   * straight-down up-vector case).
    */
   private activateCircuit(): void {
-    const radiusM = circuitRadiusM(this.opts.distanceM)
-    const halfExtentM = radiusM + this.opts.trackWidthM / 2 + CIRCUIT_FIT_MARGIN_M
+    const bounds = loopBounds(this.opts.distanceM)
+    const centerX = (bounds.minX + bounds.maxX) / 2
+    const centerZ = (bounds.minZ + bounds.maxZ) / 2
+    const halfSpanM = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) / 2
+    const halfExtentM = halfSpanM + this.opts.trackWidthM / 2 + CIRCUIT_FIT_MARGIN_M
     const halfFovRad = (CAM_FOV_DEG / 2) * (Math.PI / 180)
     const heightM = halfExtentM / Math.tan(halfFovRad)
 
-    this.camera.setPosition(-CAM_BEHIND_MIDPOINT_M, heightM, radiusM)
-    this.camera.lookAt(0, CAM_TARGET_Y_M, radiusM)
+    this.camera.setPosition(centerX - CAM_BEHIND_MIDPOINT_M, heightM, centerZ)
+    this.camera.lookAt(centerX, CAM_TARGET_Y_M, centerZ)
   }
 
   destroy(): void {

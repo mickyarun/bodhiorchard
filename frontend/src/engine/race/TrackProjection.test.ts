@@ -18,7 +18,8 @@ import {
   CircuitProjection,
   entityYawDeg,
 } from './TrackProjection'
-import { circuitPose, laneCenterOffsetM } from '@shared/race/CircuitGeometry'
+import { laneCenterOffsetM } from '@shared/race/CircuitGeometry'
+import { loopPose } from '@shared/race/LoopPath'
 import { LANE_WIDTH_M } from '@shared/race/RaceConstants'
 
 const CIRCUMFERENCE_M = 200
@@ -53,11 +54,11 @@ describe('StraightProjection', () => {
 })
 
 describe('CircuitProjection', () => {
-  it('matches circuitPose, with heading converted to degrees', () => {
+  it('matches loopPose, with heading converted to degrees', () => {
     const proj = new CircuitProjection(CIRCUMFERENCE_M)
     for (const arc of [0, 13, CIRCUMFERENCE_M / 4, CIRCUMFERENCE_M / 2, CIRCUMFERENCE_M]) {
       for (const lateral of [0, laneCenterOffsetM(0, 6), laneCenterOffsetM(5, 6)]) {
-        const expected = circuitPose(arc, CIRCUMFERENCE_M, lateral)
+        const expected = loopPose(arc, CIRCUMFERENCE_M, lateral)
         const p = proj.pose(arc, lateral)
         expect(p.x).toBeCloseTo(expected.x, 10)
         expect(p.z).toBeCloseTo(expected.z, 10)

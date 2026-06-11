@@ -13,30 +13,31 @@
 // limitations under the License.
 
 /**
- * CircuitTrackBuilder — procedural circular race track (one lap).
+ * CircuitTrackBuilder — procedural organic-loop race track (one lap).
  *
- * The race distance is the circumference; geometry mirrors TrackBuilder's
- * visual language by importing its paint metrics + sand palette:
- *   - One sand annulus spanning the full track width.
- *   - `laneCount − 1` thin white lane-divider rings.
+ * The race distance is the loop's total length; geometry mirrors
+ * TrackBuilder's visual language by importing its paint metrics + sand
+ * palette:
+ *   - One sand ribbon (RibbonMesh over LoopPath) spanning the full width.
+ *   - `laneCount − 1` thin white lane-divider ribbons.
  *   - A solid white start line across the road at arc 0 (the world
  *     origin, tangent +X — same spot the straight track starts).
  *   - A checkered finish band placed just past arc = circumference via
  *     CircuitProjection poses, which wraps back to just past the start
  *     line — start and finish share the line, as on a real circuit.
  *
- * Deliberately omitted for circuit v1 (vs TrackBuilder): the red/white
- * outer kerbs, the per-lane starting blocks, and DecorBuilder props —
- * they all assume straight-edge geometry and earn their own curved
- * treatment in a follow-up rather than a quick distortion here.
+ * Deliberately omitted (vs TrackBuilder): the red/white outer kerbs and
+ * the per-lane starting blocks — they assume straight-edge geometry and
+ * earn their own curved treatment in a follow-up rather than a quick
+ * distortion here. Trackside life lives in CircuitDecorBuilder.
  *
  * Ownership mirrors TrackBuilder: one root entity parents everything
  * (destroy() cascades), and the builder owns its materials plus the
- * custom annulus meshes (entity teardown does not free mesh buffers).
+ * custom ribbon meshes (entity teardown does not free mesh buffers).
  */
 import * as pc from 'playcanvas'
 import { LANE_WIDTH_M, MIN_RACERS, MAX_RACERS } from '@shared/race/RaceConstants'
-import { circuitRadiusM, laneCenterOffsetM } from '@shared/race/CircuitGeometry'
+import { laneCenterOffsetM } from '@shared/race/CircuitGeometry'
 import {
   CHECKER_COLUMNS,
   CHECKER_ROWS,
@@ -48,23 +49,24 @@ import {
   START_LINE_DEPTH_M,
   type TrackBuildResult,
 } from './TrackBuilder'
-import { buildAnnulusMesh } from './AnnulusMesh'
+import { buildRibbonMesh } from './RibbonMesh'
 import { CircuitProjection, entityYawDeg } from './TrackProjection'
 import { disposeEntity, safeDestroyMaterial, safeDestroyMesh } from './dispose'
 
 /**
- * Target chord length per annulus segment. 0.75 m keeps the worst-case
- * chord-vs-arc error under ~5 mm at the 100 m circuit's inner edge —
- * invisible at avatar scale — while a 200 m ring stays under 300 quads.
+ * Target chord length per ribbon segment. 0.75 m keeps the worst-case
+ * chord-vs-arc error invisible at avatar scale even at the loop's
+ * tightest curvature (~10.7 m radius), while a 200 m loop stays under
+ * 300 quads per ribbon.
  */
 const SEGMENT_ARC_M = 0.75
 
-/** Floor on segment count so tiny rings never read as polygons. */
+/** Floor on segment count so tiny loops never read as polygons. */
 const MIN_SEGMENTS = 64
 
 /**
  * The finish checker band wraps to just past arc 0, directly over the
- * full-circumference lane-divider rings — unlike the straight track,
+ * full-circumference lane-divider ribbons — unlike the straight track,
  * where the band sits beyond the dividers' extent. A dedicated layer
  * above PAINT_Y_OFFSET (and below the boost pads at 0.02) stops the
  * band z-fighting the dividers running underneath it.
@@ -72,7 +74,7 @@ const MIN_SEGMENTS = 64
 const CHECKER_Y_OFFSET = 0.014
 
 export interface CircuitTrackBuildOptions {
-  /** Lap length in metres — the race distance IS the circumference. */
+  /** Lap length in metres — the race distance IS the loop length. */
   circumferenceM: number
   /** Number of lanes — one per racer. Must be in [MIN_RACERS..MAX_RACERS]. */
   laneCount: number
@@ -87,7 +89,7 @@ export class CircuitTrackBuilder {
    * Returns the same result contract as TrackBuilder so RaceScene's
    * consumers stay shape-agnostic: `laneCenterZs` are lane lateral
    * offsets from the centreline — numerically identical to the straight
-   * track's lane-centre Zs (see CircuitGeometry's anchoring note).
+   * track's lane-centre Zs (see LoopPath's anchoring note).
    */
   build(
     parent: pc.Entity,
@@ -107,7 +109,6 @@ export class CircuitTrackBuilder {
 
     const { circumferenceM, laneCount } = opts
     const trackWidthM = laneCount * LANE_WIDTH_M
-    const radiusM = circuitRadiusM(circumferenceM)
     const segments = Math.max(MIN_SEGMENTS, Math.ceil(circumferenceM / SEGMENT_ARC_M))
     const projection = new CircuitProjection(circumferenceM)
 
@@ -119,8 +120,8 @@ export class CircuitTrackBuilder {
     const whiteMat = this.makeMaterial(1, 1, 1, 0.1)
     const darkMat = this.makeMaterial(0.08, 0.08, 0.08, 0.1)
 
-    this.addSandRing(device, sandMat, radiusM, trackWidthM, segments)
-    this.addLaneDividerRings(device, whiteMat, radiusM, trackWidthM, laneCount, segments)
+    this.addSandRibbon(device, sandMat, circumferenceM, trackWidthM, segments)
+    this.addLaneDividerRibbons(device, whiteMat, circumferenceM, trackWidthM, laneCount, segments)
     this.addStartLine(whiteMat, trackWidthM)
     this.addFinishChecker(whiteMat, darkMat, projection, circumferenceM, trackWidthM)
 
@@ -150,64 +151,63 @@ export class CircuitTrackBuilder {
   }
 
   /**
-   * One ring entity: annulus mesh centred on the circle's centre, which
-   * sits at world (0, radius) — see CircuitGeometry's anchoring (arc 0
-   * is the world origin, circle curving toward +Z).
+   * One ribbon entity between two lateral edges. RibbonMesh vertices are
+   * already in world space (LoopPath is anchored at the world origin),
+   * so the entity sits at the origin — no centre offset like the old
+   * annulus rings needed.
    */
-  private addRing(
+  private addRibbon(
     device: pc.GraphicsDevice,
     material: pc.StandardMaterial,
     name: string,
-    innerRadiusM: number,
-    outerRadiusM: number,
+    circumferenceM: number,
+    lateralAM: number,
+    lateralBM: number,
     segments: number,
     y: number,
-    centreRadiusM: number,
   ): void {
-    const mesh = buildAnnulusMesh(device, innerRadiusM, outerRadiusM, segments, y)
+    const mesh = buildRibbonMesh(device, { circumferenceM, lateralAM, lateralBM, segments, y })
     this.meshes.push(mesh)
     const meshInstance = new pc.MeshInstance(mesh, material)
     const entity = new pc.Entity(name)
     entity.addComponent('render', { meshInstances: [meshInstance] })
-    entity.setLocalPosition(0, 0, centreRadiusM)
     this.trackRoot!.addChild(entity)
   }
 
-  private addSandRing(
+  private addSandRibbon(
     device: pc.GraphicsDevice,
     mat: pc.StandardMaterial,
-    radiusM: number,
+    circumferenceM: number,
     trackWidthM: number,
     segments: number,
   ): void {
-    this.addRing(
-      device, mat, 'RoadSandRing',
-      radiusM - trackWidthM / 2, radiusM + trackWidthM / 2,
-      segments, 0, radiusM,
+    this.addRibbon(
+      device, mat, 'RoadSandRibbon',
+      circumferenceM, -trackWidthM / 2, trackWidthM / 2,
+      segments, 0,
     )
   }
 
   /**
-   * Divider ring i sits at lateral offset (i / laneCount − 0.5) · width —
-   * the same between-lane positions TrackBuilder paints. A positive
-   * lateral offset is toward the circle centre, so its ring radius is
-   * `radius − offset` (matches circuitPose's lane radius).
+   * Divider i sits at lateral offset (i / laneCount − 0.5) · width — the
+   * same between-lane positions TrackBuilder paints — as a thin ribbon
+   * hugging the loop.
    */
-  private addLaneDividerRings(
+  private addLaneDividerRibbons(
     device: pc.GraphicsDevice,
     mat: pc.StandardMaterial,
-    radiusM: number,
+    circumferenceM: number,
     trackWidthM: number,
     laneCount: number,
     segments: number,
   ): void {
     for (let i = 1; i < laneCount; i++) {
       const lateralM = (i / laneCount - 0.5) * trackWidthM
-      const ringRadiusM = radiusM - lateralM
-      this.addRing(
-        device, mat, 'LaneDividerRing',
-        ringRadiusM - LANE_DIVIDER_WIDTH_M / 2, ringRadiusM + LANE_DIVIDER_WIDTH_M / 2,
-        segments, PAINT_Y_OFFSET, radiusM,
+      this.addRibbon(
+        device, mat, 'LaneDividerRibbon',
+        circumferenceM,
+        lateralM - LANE_DIVIDER_WIDTH_M / 2, lateralM + LANE_DIVIDER_WIDTH_M / 2,
+        segments, PAINT_Y_OFFSET,
       )
     }
   }
@@ -227,7 +227,7 @@ export class CircuitTrackBuilder {
    * curvature, so the chord approximation is invisible. The band starts
    * half a start-line depth after the line so the two read as distinct
    * markings, and sits on its own CHECKER_Y_OFFSET layer so it can't
-   * z-fight the start line or the divider rings running beneath it.
+   * z-fight the start line or the divider ribbons running beneath it.
    */
   private addFinishChecker(
     whiteMat: pc.StandardMaterial,
