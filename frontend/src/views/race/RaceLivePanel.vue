@@ -25,7 +25,7 @@
     <div class="race-hud">
       <div class="race-hud__timer">
         <div class="race-hud__timer-value">{{ timerLabel }}</div>
-        <div class="race-hud__timer-unit">s · {{ snapshot.distanceM }}m</div>
+        <div class="race-hud__timer-unit">s · {{ lapLabel(snapshot.distanceM) }}</div>
       </div>
       <ol class="race-hud__racers">
         <li
@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { COUNTDOWN_MS } from '@shared/race/RaceConstants'
+import { COUNTDOWN_MS, lapLabel } from '@shared/race/RaceConstants'
 import { parseCharacterModel } from '@/engine/characters/CharacterConfig'
 import { useAuthStore } from '@/stores/auth'
 import { RaceEngine } from '@/engine/race'

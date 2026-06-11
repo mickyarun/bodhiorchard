@@ -22,7 +22,7 @@
     <header class="race-lobby__header">
       <div class="race-lobby__eyebrow">
         <CheckerFlagIcon />
-        {{ snapshot.distanceM }} m sprint
+        {{ lapLabel(snapshot.distanceM) }} circuit
         <span class="race-lobby__dot-sep">·</span>
         <span class="race-lobby__status" :class="{ 'race-lobby__status--ready': canStart }">
           {{ canStart ? 'Ready to race' : 'Waiting for racers' }}
@@ -158,7 +158,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { RaceStateSnapshot } from '@/multiplayer/RaceRoomClient'
-import { MAX_RACERS, MIN_RACERS } from '@shared/race/RaceConstants'
+import { MAX_RACERS, MIN_RACERS, lapLabel } from '@shared/race/RaceConstants'
 import { OrgRoomClient } from '@/multiplayer/OrgRoomClient'
 import { useAuthStore } from '@/stores/auth'
 import { parseCharacterModel, type CharacterConfig } from '@/engine/characters/CharacterConfig'

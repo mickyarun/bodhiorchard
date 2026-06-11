@@ -18,7 +18,7 @@
   <section class="lb" aria-label="Org top times">
     <header class="lb__header">
       <span class="lb__eyebrow">org top times</span>
-      <h2 class="lb__title">Best {{ distanceM }} m runs</h2>
+      <h2 class="lb__title">Best {{ lapLabel(distanceM) }} runs</h2>
     </header>
 
     <div v-if="loading" class="lb__state">
@@ -49,6 +49,7 @@ import { storeToRefs } from 'pinia'
 import { useRaceLeaderboardStore } from '@/stores/raceLeaderboard'
 import { useAuthStore } from '@/stores/auth'
 import { formatRaceTime } from '@/engine/race/formatTime'
+import { lapLabel } from '@shared/race/RaceConstants'
 
 const props = withDefaults(
   defineProps<{

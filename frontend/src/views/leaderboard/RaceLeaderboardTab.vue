@@ -22,7 +22,7 @@
     />
 
     <div v-else-if="entries.length === 0" class="pa-6 text-center text-medium-emphasis">
-      No race results yet at {{ distance }} m. Invite a colleague from the garden to start one!
+      No circuit results yet at {{ lapLabel(distance) }}. Invite a colleague from the garden to start one!
     </div>
 
     <template v-else>
@@ -50,7 +50,7 @@
               {{ row.userName }}
             </v-list-item-title>
             <v-list-item-subtitle class="text-caption">
-              {{ row.distanceM }} m · {{ relativeDate(row.finishedAt) }}
+              {{ lapLabel(row.distanceM) }} · {{ relativeDate(row.finishedAt) }}
             </v-list-item-subtitle>
             <template #append>
               <span class="bo-display font-weight-bold race-time">
@@ -69,6 +69,7 @@
 import { computed, onMounted, watch } from 'vue'
 import { useRaceLeaderboardStore } from '@/stores/raceLeaderboard'
 import { formatRaceTime } from '@/engine/race/formatTime'
+import { lapLabel } from '@shared/race/RaceConstants'
 import LeaderboardPodium, { type PodiumEntry } from '@/components/leaderboard/LeaderboardPodium.vue'
 
 const props = defineProps<{

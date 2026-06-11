@@ -32,8 +32,8 @@
 
     <v-tabs v-model="activeTab" color="primary" density="comfortable" class="mb-4">
       <v-tab value="xp">XP</v-tab>
-      <v-tab value="race-100">Race 100 m</v-tab>
-      <v-tab value="race-200">Race 200 m</v-tab>
+      <v-tab value="race-100">Circuit · 1 lap</v-tab>
+      <v-tab value="race-200">Circuit · 2 laps</v-tab>
     </v-tabs>
 
     <v-window v-model="activeTab">

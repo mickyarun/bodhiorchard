@@ -70,6 +70,16 @@ export function distanceMToLapCount(distanceM: number): number {
 }
 
 /**
+ * Human label for a race distance in laps — the single source of truth
+ * for the lap wording the dialog, leaderboard tabs, and race results all
+ * show, so "1 lap" / "2 laps" can never drift between surfaces.
+ */
+export function lapLabel(distanceM: number): string {
+  const laps = distanceMToLapCount(distanceM)
+  return `${laps} lap${laps === 1 ? '' : 's'}`
+}
+
+/**
  * Track shapes the host may choose when creating a race. Shared between
  * the frontend setup dialog and the multiplayer server validators for the
  * same lock-step reason as ALLOWED_DISTANCES_M. On `circuit` the chosen

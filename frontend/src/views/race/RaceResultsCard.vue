@@ -24,7 +24,7 @@
     <header class="results__header">
       <div class="results__eyebrow">
         <CheckerFlagIcon />
-        {{ snapshot.distanceM }} m sprint · final standings
+        {{ lapLabel(snapshot.distanceM) }} circuit · final standings
       </div>
       <h1 class="results__title">Race complete</h1>
     </header>
@@ -90,6 +90,7 @@
 import { computed } from 'vue'
 import type { RaceStateSnapshot } from '@/multiplayer/RaceRoomClient'
 import { formatRaceTime } from '@/engine/race/formatTime'
+import { lapLabel } from '@shared/race/RaceConstants'
 import { parseCharacterModel, type CharacterConfig } from '@/engine/characters/CharacterConfig'
 import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
