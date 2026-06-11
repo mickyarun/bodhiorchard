@@ -43,6 +43,7 @@ import { CircuitTrackBuilder } from './CircuitTrackBuilder'
 import { FinishArch } from './FinishArch'
 import { Ground } from './Ground'
 import { DecorBuilder } from './DecorBuilder'
+import { CircuitDecorBuilder } from './CircuitDecorBuilder'
 import { BoostPadBuilder } from './BoostPadBuilder'
 import { HurdleBuilder } from './HurdleBuilder'
 import {
@@ -103,6 +104,7 @@ class TrackAssemblyImpl implements TrackAssembly {
   private ground: Ground | null = null
   private arch: FinishArch | null = null
   private decor: DecorBuilder | null = null
+  private circuitDecor: CircuitDecorBuilder | null = null
   private boostPads: BoostPadBuilder | null = null
   private hurdles: HurdleBuilder | null = null
 
@@ -125,9 +127,17 @@ class TrackAssemblyImpl implements TrackAssembly {
 
     if (opts.trackShape === 'straight') {
       // Decor assumes a straight road edge (props scattered along ±Z of
-      // the X axis) — skipped on circuit until it learns the ring.
+      // the X axis) — the circuit gets its own loop-aware treatment.
       this.decor = new DecorBuilder(loader)
       await this.decor.build(root, { trackLengthM: result.trackLengthM })
+    } else {
+      // Trackside village + cheering spectators, placed along the loop's
+      // outer edge through loopPose.
+      this.circuitDecor = new CircuitDecorBuilder(loader)
+      await this.circuitDecor.build(root, {
+        circumferenceM: opts.distanceM,
+        trackWidthM: result.tileWidthM,
+      })
     }
 
     // Pads + hurdles derive their arc positions from the same shared
@@ -156,6 +166,8 @@ class TrackAssemblyImpl implements TrackAssembly {
     this.hurdles = null
     this.boostPads?.destroy()
     this.boostPads = null
+    this.circuitDecor?.destroy()
+    this.circuitDecor = null
     this.decor?.destroy()
     this.decor = null
     this.arch?.destroy()
