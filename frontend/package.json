@@ -39,7 +39,7 @@
     "@vue/test-utils": "^2.4.11",
     "jsdom": "^25.0.1",
     "sass": "^1.99.0",
-    "typescript": "^5.3.3",
+    "typescript": "^6.0.3",
     "vite": "^5.1.0",
     "vite-plugin-vuetify": "^2.0.0",
     "vite-ssg": "^0.23.8",
