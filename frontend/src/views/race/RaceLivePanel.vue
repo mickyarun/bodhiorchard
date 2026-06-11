@@ -205,6 +205,7 @@ async function buildEngine(): Promise<boolean> {
       scene: {
         distanceM: props.snapshot.distanceM,
         racerCount: racers.length,
+        trackShape: props.snapshot.trackShape,
         cameraMode: props.isParticipant ? 'participant' : 'spectator',
         racers,
         // Participants see their own avatar — camera sticks to the current

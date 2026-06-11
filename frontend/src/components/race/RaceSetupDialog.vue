@@ -56,6 +56,15 @@
         </div>
       </section>
 
+      <!-- Track shape -->
+      <section class="setup__section">
+        <div class="setup__section-label setup__section-label--spaced">Track</div>
+        <AppPillToggle
+          v-model="trackShape"
+          :options="TRACK_SHAPE_OPTIONS"
+        />
+      </section>
+
       <!-- Invitees list -->
       <section class="setup__section">
         <div class="setup__section-head">
@@ -104,9 +113,20 @@ import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { OrgRoomClient } from '@/multiplayer/OrgRoomClient'
 import { ALLOWED_DISTANCES_M, MAX_RACERS } from '@shared/race/RaceConstants'
+import type { TrackShape } from '@shared/race/types'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import RaceThemeBackdrop from './RaceThemeBackdrop.vue'
 import CheckerFlagIcon from './CheckerFlagIcon.vue'
 import MemberPicker, { type MemberPickerEntry } from './MemberPicker.vue'
+
+/**
+ * Pill options for the track-shape picker. On 'circuit' the chosen
+ * distance becomes the lap circumference — hence the "(1 lap)" hint.
+ */
+const TRACK_SHAPE_OPTIONS: Array<{ label: string; value: TrackShape }> = [
+  { label: 'Straight', value: 'straight' },
+  { label: 'Circuit (1 lap)', value: 'circuit' },
+]
 
 type DirectoryEntry = MemberPickerEntry
 
@@ -123,6 +143,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const distanceM = ref<number>(ALLOWED_DISTANCES_M[0])
+const trackShape = ref<TrackShape>('straight')
 const selectedIds = ref<string[]>([])
 const sending = ref(false)
 const error = ref<string>('')
@@ -155,6 +176,7 @@ watch(
     error.value = ''
     selectedIds.value = preId ? [preId] : []
     distanceM.value = ALLOWED_DISTANCES_M[0]
+    trackShape.value = 'straight'
     if (directory.value.length === 0) void loadDirectory()
   },
   { immediate: true },
@@ -182,6 +204,7 @@ async function onSend(): Promise<void> {
     const { roomId } = await client.sendRaceCreate({
       invitedUserIds: [...selectedIds.value],
       distanceM: distanceM.value,
+      trackShape: trackShape.value,
     })
     emit('update:modelValue', false)
     await router.push(`/raceview/${roomId}`)
@@ -273,6 +296,12 @@ async function onSend(): Promise<void> {
   border: 1px solid rgba(125, 213, 125, 0.25);
 }
 .setup__count-sep { opacity: 0.4; margin: 0 2px; }
+
+/* Track-shape picker label sits above the pill toggle. */
+.setup__section-label--spaced {
+  display: block;
+  margin-bottom: 10px;
+}
 
 /* Distance pills */
 .setup__pills {

@@ -29,6 +29,7 @@
  *   client.onMemberRemove = (id) => characterSystem.removeCharacter(id)
  */
 import { Client, getStateCallbacks, Room } from "@colyseus/sdk"
+import type { TrackShape } from "@shared/race/types"
 import { resolveColyseusUrl } from "./colyseusUrl"
 
 /** Read-only snapshot of a member's state (mirrors server MemberState schema). */
@@ -469,6 +470,7 @@ export class OrgRoomClient {
   async sendRaceCreate(body: {
     invitedUserIds: string[]
     distanceM: number
+    trackShape: TrackShape
   }): Promise<{ roomId: string }> {
     if (!this.room) throw new Error("OrgRoomClient: not connected")
     const room = this.room
