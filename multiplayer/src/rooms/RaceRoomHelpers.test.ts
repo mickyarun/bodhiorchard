@@ -44,8 +44,47 @@ describe("assertRaceCreateOptions", () => {
       hostUserId: "user-1",
       hostName: "Alice",
       distanceM: 100,
+      trackShape: "straight",
       invitedUserIds: ["user-2", "user-3"],
     })
+  })
+
+  it("accepts an explicit circuit trackShape", () => {
+    const opts = assertRaceCreateOptions(
+      {
+        orgId: "o",
+        hostUserId: "h",
+        hostName: "n",
+        distanceM: 200,
+        trackShape: "circuit",
+        invitedUserIds: [],
+      },
+      ALLOWED,
+    )
+    expect(opts.trackShape).toBe("circuit")
+  })
+
+  it("defaults a missing trackShape to straight (pre-circuit clients)", () => {
+    const opts = assertRaceCreateOptions(
+      { orgId: "o", hostUserId: "h", hostName: "n", distanceM: 100 },
+      ALLOWED,
+    )
+    expect(opts.trackShape).toBe("straight")
+  })
+
+  it("throws on a trackShape outside the allowed set", () => {
+    expect(() =>
+      assertRaceCreateOptions(
+        { orgId: "o", hostUserId: "h", hostName: "n", distanceM: 100, trackShape: "oval" },
+        ALLOWED,
+      ),
+    ).toThrow(/trackShape/)
+    expect(() =>
+      assertRaceCreateOptions(
+        { orgId: "o", hostUserId: "h", hostName: "n", distanceM: 100, trackShape: 7 },
+        ALLOWED,
+      ),
+    ).toThrow(/trackShape/)
   })
 
   it("filters invalid entries out of invitedUserIds", () => {

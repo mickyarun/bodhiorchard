@@ -36,6 +36,14 @@ export const TRACK_LENGTH_M = 60
 export const ALLOWED_DISTANCES_M = [100, 200] as const
 export type AllowedDistanceM = typeof ALLOWED_DISTANCES_M[number]
 
+/**
+ * Track shapes the host may choose when creating a race. Shared between
+ * the frontend setup dialog and the multiplayer server validators for the
+ * same lock-step reason as ALLOWED_DISTANCES_M. On `circuit` the chosen
+ * distance becomes the lap circumference; physics is shape-agnostic.
+ */
+export const ALLOWED_TRACK_SHAPES = ['straight', 'circuit'] as const
+
 /** Inclusive bounds on participant count per race-v2 room. */
 export const MIN_RACERS = 2
 export const MAX_RACERS = 10

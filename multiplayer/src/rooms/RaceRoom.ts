@@ -144,6 +144,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     state.hostUserId = opts.hostUserId
     state.hostName = opts.hostName
     state.distanceM = opts.distanceM
+    state.trackShape = opts.trackShape
     state.phase = "lobby"
     state.phaseStartMs = Date.now()
     for (const id of opts.invitedUserIds) state.invitedUserIds.push(id)

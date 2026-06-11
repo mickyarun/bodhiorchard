@@ -33,7 +33,12 @@ import type { Client, Room } from "colyseus"
 import type { OrgRoomState } from "../schema/OrgRoomState"
 import { ArraySchema } from "@colyseus/schema"
 import { ActiveRaceSummary } from "../schema/ActiveRaceSummary"
-import { ALLOWED_DISTANCES_M, MAX_RACERS } from "../../../shared/race/RaceConstants"
+import {
+  ALLOWED_DISTANCES_M,
+  ALLOWED_TRACK_SHAPES,
+  MAX_RACERS,
+} from "../../../shared/race/RaceConstants"
+import type { TrackShape } from "../../../shared/race/types"
 import { postRaceInvite } from "../bridge/BackendClient"
 import { registerRaceHooks } from "../bridge/RaceRegistry"
 import { RaceRoom } from "./RaceRoom"
@@ -41,6 +46,7 @@ import { RaceRoom } from "./RaceRoom"
 export interface RaceCreateMessage {
   invitedUserIds: string[]
   distanceM: number
+  trackShape: TrackShape
 }
 
 /**
@@ -90,6 +96,7 @@ async function handleRaceCreate(
       hostUserId,
       hostName,
       distanceM: parsed.distanceM,
+      trackShape: parsed.trackShape,
       invitedUserIds: parsed.invitedUserIds,
     })
 
@@ -180,5 +187,17 @@ export function parseRaceCreateMessage(raw: unknown): RaceCreateMessage | null {
   }
   if (typeof o.distanceM !== "number") return null
   if (!(ALLOWED_DISTANCES_M as readonly number[]).includes(o.distanceM)) return null
-  return { invitedUserIds: invited, distanceM: o.distanceM }
+  // Optional for pre-circuit clients: absent → 'straight'. A present but
+  // unrecognised value is rejected outright, like a bad distance.
+  let trackShape: TrackShape = "straight"
+  if (o.trackShape !== undefined) {
+    if (
+      typeof o.trackShape !== "string" ||
+      !(ALLOWED_TRACK_SHAPES as readonly string[]).includes(o.trackShape)
+    ) {
+      return null
+    }
+    trackShape = o.trackShape as TrackShape
+  }
+  return { invitedUserIds: invited, distanceM: o.distanceM, trackShape }
 }

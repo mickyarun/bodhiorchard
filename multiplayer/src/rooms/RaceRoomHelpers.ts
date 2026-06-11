@@ -19,7 +19,8 @@
  * so the parsers can be unit-tested without spinning up Colyseus.
  */
 import type { Racer } from "../../../shared/race/RacePhysics"
-import type { Placing } from "../../../shared/race/types"
+import type { Placing, TrackShape } from "../../../shared/race/types"
+import { ALLOWED_TRACK_SHAPES } from "../../../shared/race/RaceConstants"
 import { PlacingState } from "../schema/PlacingState"
 import { RacerState } from "../schema/RacerState"
 import type { RaceResultsPayload, RaceResultsPlacing } from "../bridge/BackendClient"
@@ -29,6 +30,7 @@ export interface RaceCreateOptions {
   hostUserId: string
   hostName: string
   distanceM: number
+  trackShape: TrackShape
   invitedUserIds: string[]
 }
 
@@ -65,12 +67,28 @@ export function assertRaceCreateOptions(
       `RaceRoom.onCreate: distanceM=${distanceM} not in ${allowedDistances.join("/")}`,
     )
   }
+  const trackShape = asTrackShape(o.trackShape)
   const invited = Array.isArray(o.invitedUserIds) ? o.invitedUserIds : []
   const invitedUserIds: string[] = []
   for (const v of invited) {
     if (typeof v === "string" && v.length > 0) invitedUserIds.push(v)
   }
-  return { orgId, hostUserId, hostName, distanceM, invitedUserIds }
+  return { orgId, hostUserId, hostName, distanceM, trackShape, invitedUserIds }
+}
+
+/**
+ * `trackShape` is optional for backward compatibility with pre-circuit
+ * clients — absent means 'straight'. A *present* but unknown value is a
+ * hard error, same defence-in-depth stance as the distance check above.
+ */
+function asTrackShape(v: unknown): TrackShape {
+  if (v === undefined || v === null) return "straight"
+  if (typeof v === "string" && (ALLOWED_TRACK_SHAPES as readonly string[]).includes(v)) {
+    return v as TrackShape
+  }
+  throw new Error(
+    `RaceRoom.onCreate: trackShape=${String(v)} not in ${ALLOWED_TRACK_SHAPES.join("/")}`,
+  )
 }
 
 /**

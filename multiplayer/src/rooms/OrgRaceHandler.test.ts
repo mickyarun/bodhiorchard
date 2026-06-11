@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest"
 import { parseRaceCreateMessage } from "./OrgRaceHandler"
 
 describe("parseRaceCreateMessage", () => {
-  it("accepts a valid 100m invite", () => {
+  it("accepts a valid 100m invite (trackShape defaults to straight)", () => {
     const msg = parseRaceCreateMessage({
       invitedUserIds: ["user-a", "user-b"],
       distanceM: 100,
@@ -24,7 +24,26 @@ describe("parseRaceCreateMessage", () => {
     expect(msg).toEqual({
       invitedUserIds: ["user-a", "user-b"],
       distanceM: 100,
+      trackShape: "straight",
     })
+  })
+
+  it("accepts an explicit circuit trackShape", () => {
+    const msg = parseRaceCreateMessage({
+      invitedUserIds: ["user-a"],
+      distanceM: 200,
+      trackShape: "circuit",
+    })
+    expect(msg?.trackShape).toBe("circuit")
+  })
+
+  it("rejects trackShapes outside the allowed set", () => {
+    expect(
+      parseRaceCreateMessage({ invitedUserIds: ["a"], distanceM: 100, trackShape: "oval" }),
+    ).toBeNull()
+    expect(
+      parseRaceCreateMessage({ invitedUserIds: ["a"], distanceM: 100, trackShape: 1 }),
+    ).toBeNull()
   })
 
   it("accepts a valid 200m invite", () => {

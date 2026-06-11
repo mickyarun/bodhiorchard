@@ -33,7 +33,7 @@
  */
 import { Client, getStateCallbacks, Room } from "@colyseus/sdk"
 import type { ArraySchema } from "@colyseus/schema"
-import type { RacePhase, Placing } from "@shared/race/types"
+import type { RacePhase, Placing, TrackShape } from "@shared/race/types"
 import { resolveColyseusUrl } from "./colyseusUrl"
 
 export interface RacerSnapshot {
@@ -60,6 +60,7 @@ export interface RaceStateSnapshot {
   hostUserId: string
   hostName: string
   distanceM: number
+  trackShape: TrackShape
   phase: RacePhase
   phaseStartMs: number
   runningElapsedMs: number
@@ -100,6 +101,7 @@ interface RaceStateShape {
   hostUserId: string
   hostName: string
   distanceM: number
+  trackShape: string
   phase: RacePhase
   phaseStartMs: number
   runningElapsedMs: number
@@ -323,6 +325,9 @@ function snapshotFromState(s: RaceStateShape): RaceStateSnapshot {
     hostUserId: s.hostUserId ?? "",
     hostName: s.hostName ?? "",
     distanceM: s.distanceM ?? 0,
+    // Rooms created by pre-circuit servers won't carry the field — treat
+    // them as the original straight track.
+    trackShape: (s.trackShape as TrackShape) ?? "straight",
     phase: (s.phase as RacePhase) ?? "lobby",
     phaseStartMs: s.phaseStartMs ?? 0,
     runningElapsedMs: s.runningElapsedMs ?? 0,
@@ -359,6 +364,7 @@ function emptySnapshot(): RaceStateSnapshot {
     hostUserId: "",
     hostName: "",
     distanceM: 0,
+    trackShape: "straight",
     phase: "lobby",
     phaseStartMs: 0,
     runningElapsedMs: 0,
