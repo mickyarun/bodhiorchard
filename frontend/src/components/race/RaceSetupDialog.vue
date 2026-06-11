@@ -32,6 +32,11 @@
         <p class="setup__sub">Pick a distance and up to {{ MAX_RACERS - 1 }} rivals to challenge.</p>
       </header>
 
+      <!-- Everything between the pinned header and footer scrolls when the
+           dialog is taller than the viewport (small laptop / split screen),
+           so the send button can never be pushed off-screen. -->
+      <div class="setup__body">
+
       <v-alert v-if="error" type="error" class="mx-6 mb-4" density="compact">
         {{ error }}
       </v-alert>
@@ -96,6 +101,8 @@
           />
         </div>
       </section>
+
+      </div>
 
       <footer class="setup__footer">
         <v-btn variant="text" size="large" @click="$emit('update:modelValue', false)">
@@ -249,6 +256,12 @@ async function onSend(): Promise<void> {
 .setup {
   position: relative;
   overflow: hidden;
+  /* Cap to the viewport (dvh tracks mobile browser chrome) and lay out as a
+     column so the header and footer pin while the body scrolls between them —
+     the send button can never be pushed off a short screen. */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 48px);
   border-radius: 18px;
   background: linear-gradient(180deg, #0d1422 0%, #0a0f1a 100%);
   color: #fff;
@@ -267,6 +280,16 @@ async function onSend(): Promise<void> {
 /* ── Header ───────────────────────────────── */
 .setup__header {
   padding: 28px 28px 16px;
+  flex-shrink: 0;
+}
+
+/* Scroll region between the pinned header and footer. min-height: 0 lets
+   this flex item shrink below its content height so overflow engages;
+   without it the body grows unbounded and the footer clips off-screen. */
+.setup__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .setup__eyebrow {
   display: inline-flex;
@@ -373,10 +396,12 @@ async function onSend(): Promise<void> {
   opacity: 0.7;
 }
 
-/* Scrollable container around the shared MemberPicker. */
+/* Member list. On a tall screen it caps at 260px and scrolls internally;
+   on a short screen the whole dialog body scrolls instead, so the cap
+   relaxes (min of the two) to avoid a cramped scrollbox inside a scrollbox. */
 .setup__members-container {
   padding: 4px;
-  max-height: 260px;
+  max-height: min(260px, 40dvh);
   overflow-y: auto;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -397,6 +422,7 @@ async function onSend(): Promise<void> {
   padding: 16px 20px 20px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   margin-top: 6px;
+  flex-shrink: 0;
 }
 .setup__send {
   display: inline-flex;

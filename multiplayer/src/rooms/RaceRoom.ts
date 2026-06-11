@@ -23,8 +23,10 @@
  *             finish conditions, fires the `finished` transition.
  *   onDispose: POSTs final placings to the backend via `BackendClient`.
  *
- * Size budget: this file must stay under 300 lines (hard cap). Input
- * validation and FSM wiring moved to `RaceRoomHelpers.ts` to keep that.
+ * Size budget: room orchestration only — parsing, validation, and schema
+ * adapters live in `RaceRoomHelpers.ts`, bot driving in `RaceBotDriver.ts`.
+ * The lobby/invite flows have pushed it past its original 300-line cap;
+ * extracting them into a lobby handler is the tracked follow-up refactor.
  */
 import { Room, Client } from "colyseus"
 import {

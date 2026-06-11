@@ -42,7 +42,7 @@ engine.destroy()
   chase camera all place themselves through it.
 - `RaceSceneTrack.buildTrackAssembly` owns the per-shape surface stack:
   straight → `TrackBuilder` / `Ground` / `FinishArch` / `DecorBuilder`;
-  circuit → `CircuitTrackBuilder` (annulus meshes via `AnnulusMesh`) +
+  circuit → `CircuitTrackBuilder` (loop ribbons via `RibbonMesh` over `LoopPath`) +
   ring-sized ground + arch at arc = circumference. Track width scales
   with `racerCount × LANE_WIDTH_M` so a 2-racer sprint and a 10-racer
   dash share the same code path.
